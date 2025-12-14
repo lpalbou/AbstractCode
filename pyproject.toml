@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "abstractcode"
+version = "0.1.0"
+description = "A clean terminal CLI for multi-agent agentic coding"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Laurent-Philippe Albou", email = "contact@abstractcore.ai"}
+]
+maintainers = [
+    {name = "Laurent-Philippe Albou", email = "contact@abstractcore.ai"}
+]
+keywords = [
+    "ai",
+    "llm",
+    "cli",
+    "coding",
+    "agent",
+    "multi-agent",
+    "agentic",
+    "terminal",
+    "abstractcore",
+    "abstractruntime",
+    "abstractagent"
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://abstractcore.ai"
+Documentation = "https://abstractcore.ai"
+Repository = "https://github.com/lpalbou/abstractcode"
+"Bug Tracker" = "https://github.com/lpalbou/abstractcode/issues"
+
+[project.scripts]
+abstractcode = "abstractcode:main"
+
+[tool.setuptools]
+packages = ["abstractcode"]
+
+[tool.setuptools.package-data]
+abstractcode = ["py.typed"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38']
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
