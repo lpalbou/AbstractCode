@@ -16,6 +16,19 @@ def _default_state_file() -> str:
     return str(Path.home() / ".abstractcode" / "state.json")
 
 
+def _default_max_iterations() -> int:
+    env = os.getenv("ABSTRACTCODE_MAX_ITERATIONS")
+    if env:
+        try:
+            value = int(env)
+        except ValueError:
+            raise SystemExit("ABSTRACTCODE_MAX_ITERATIONS must be an integer.")
+        if value < 1:
+            raise SystemExit("ABSTRACTCODE_MAX_ITERATIONS must be >= 1.")
+        return value
+    return 10
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="abstractcode",
@@ -35,8 +48,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--auto-approve",
+        "--auto-accept",
         action="store_true",
+        dest="auto_approve",
         help="Automatically approve tool calls (unsafe; disables interactive approvals).",
+    )
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=_default_max_iterations(),
+        help="Maximum ReAct reasoning iterations per task (default: 10).",
     )
     parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
     return parser
@@ -51,6 +72,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         model=args.model,
         state_file=state_file,
         auto_approve=bool(args.auto_approve),
+        max_iterations=int(args.max_iterations),
         color=not bool(args.no_color),
     )
     shell.run()

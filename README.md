@@ -55,11 +55,14 @@ abstractcode --no-state
 
 # Auto-approve tool calls (unsafe; bypasses interactive approvals)
 abstractcode --auto-approve
+
+# Limit agent iterations per task (default: 20)
+abstractcode --max-iterations 25
 ```
 
 Notes:
 - Run resume state is stored next to the state file in `*.d/`.
-- Conversation history is stored in the run state (`RunState.vars["messages"]`) inside `*.d/`, and AbstractCode keeps the state file pointing at the most recent run so restarts can reload context.
+- Conversation history is stored in the run state (`RunState.vars["context"]["messages"]`) inside `*.d/`, and AbstractCode keeps the state file pointing at the most recent run so restarts can reload context.
 - In the interactive shell, commands are slash-prefixed (e.g. `/help`, `/status`, `/history`, `/task ...`).
 
 ## Development (Monorepo)

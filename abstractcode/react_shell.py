@@ -46,12 +46,16 @@ class ReactShell:
         model: str,
         state_file: Optional[str],
         auto_approve: bool,
+        max_iterations: int,
         color: bool,
     ):
         self._provider = provider
         self._model = model
         self._state_file = state_file or None
         self._auto_approve = auto_approve
+        self._max_iterations = int(max_iterations)
+        if self._max_iterations < 1:
+            raise ValueError("max_iterations must be >= 1")
         self._color = bool(color and _supports_color())
 
         # Lazy imports so `abstractcode --help` works even if deps aren't installed.
@@ -100,11 +104,7 @@ class ReactShell:
             ledger_store = InMemoryLedgerStore()
 
         # Tool execution: passthrough by default so we can gate by approval in the CLI.
-        if self._auto_approve:
-            tool_executor = MappingToolExecutor.from_tools(self._tools)
-        else:
-            tool_executor = PassthroughToolExecutor(mode="approval_required")
-
+        tool_executor = PassthroughToolExecutor(mode="approval_required")
         self._tool_runner = MappingToolExecutor.from_tools(self._tools)
         self._runtime = create_local_runtime(
             provider=self._provider,
@@ -118,6 +118,7 @@ class ReactShell:
             runtime=self._runtime,
             tools=self._tools,
             on_step=self._on_step,
+            max_iterations=self._max_iterations,
         )
 
         self._store_dir = store_dir
@@ -226,6 +227,9 @@ class ReactShell:
         if command == "status":
             self._show_status()
             return False
+        if command in ("auto-accept", "auto_accept"):
+            self._set_auto_accept(arg)
+            return False
         if command == "resume":
             self._resume()
             return False
@@ -251,18 +255,34 @@ class ReactShell:
         self._print(_style("Type /help for commands.", _C.DIM, enabled=self._color))
         return False
 
+    def _set_auto_accept(self, raw: str) -> None:
+        value = raw.strip().lower()
+        if not value:
+            self._auto_approve = not self._auto_approve
+        elif value in ("on", "true", "1", "yes", "y"):
+            self._auto_approve = True
+        elif value in ("off", "false", "0", "no", "n"):
+            self._auto_approve = False
+        else:
+            self._print(_style("Usage: /auto-accept [on|off]", _C.DIM, enabled=self._color))
+            return
+
+        status = "ON (no approval prompts)" if self._auto_approve else "OFF (approval-gated)"
+        self._print(_style(f"Auto-accept is now {status}.", _C.DIM, enabled=self._color))
+
     def _show_help(self) -> None:
         self._print(
             "\nCommands:\n"
             "  /help           Show this message\n"
             "  /tools          List available tools\n"
             "  /status         Show current run status\n"
+            "  /auto-accept    Toggle auto-accept for tools (or: /auto-accept on|off)\n"
             "  /history [N]    Show recent conversation history\n"
             "  /resume         Resume the saved/attached run\n"
             "  /quit           Exit\n"
             "\nTasks:\n"
             "  /task <text>    Start a new task\n"
-            "  <text>          Start a new task (shorthand)\n"
+            "  <text>          Start a new task (any line not starting with '/')\n"
         )
 
     def _show_tools(self) -> None:
@@ -292,14 +312,22 @@ class ReactShell:
                 self._print(f"Prompt:    {state.waiting.prompt}")
         self._print(_style("─" * 40, _C.DIM, enabled=self._color))
 
+    def _messages_from_state(self, state: Any) -> List[Dict[str, Any]]:
+        context = state.vars.get("context") if hasattr(state, "vars") else None
+        if isinstance(context, dict) and isinstance(context.get("messages"), list):
+            return list(context["messages"])
+        if hasattr(state, "vars") and isinstance(state.vars.get("messages"), list):
+            return list(state.vars["messages"])
+        if getattr(state, "output", None) and isinstance(state.output.get("messages"), list):
+            return list(state.output["messages"])
+        return []
+
     def _show_history(self, *, limit: int = 12) -> None:
         state = self._agent.get_state()
         if state is None:
             messages = list(self._agent.session_messages or [])
         else:
-            messages = list(state.vars.get("messages") or [])
-            if not messages and state.output and isinstance(state.output.get("messages"), list):
-                messages = list(state.output["messages"])
+            messages = self._messages_from_state(state)
         if not messages:
             self._print("No history yet.")
             return
@@ -344,10 +372,9 @@ class ReactShell:
             return
         if state is not None:
             messages: Optional[List[Dict[str, Any]]] = None
-            if isinstance(state.vars.get("messages"), list):
-                messages = list(state.vars["messages"])
-            elif state.output and isinstance(state.output.get("messages"), list):
-                messages = list(state.output["messages"])
+            loaded = self._messages_from_state(state)
+            if loaded:
+                messages = loaded
 
             if messages is not None:
                 self._agent.session_messages = messages
@@ -364,8 +391,10 @@ class ReactShell:
                 state = self._agent.step()
             except KeyboardInterrupt:
                 state = self._agent.get_state()
-                if state is not None and isinstance(state.vars.get("messages"), list):
-                    self._agent.session_messages = list(state.vars["messages"])
+                if state is not None:
+                    loaded = self._messages_from_state(state)
+                    if loaded:
+                        self._agent.session_messages = loaded
                 self._print(_style("\nInterrupted. Run state preserved.", _C.YELLOW, enabled=self._color))
                 return
 
@@ -376,8 +405,9 @@ class ReactShell:
 
             if state.status == self._RunStatus.FAILED:
                 self._print(_style("\nRun failed:", _C.RED, enabled=self._color) + f" {state.error}")
-                if isinstance(state.vars.get("messages"), list):
-                    self._agent.session_messages = list(state.vars["messages"])
+                loaded = self._messages_from_state(state)
+                if loaded:
+                    self._agent.session_messages = loaded
                 return
 
             if state.status != self._RunStatus.WAITING or not state.waiting:
