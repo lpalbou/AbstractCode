@@ -34,6 +34,12 @@ def build_parser() -> argparse.ArgumentParser:
         prog="abstractcode",
         description="AbstractCode: an interactive terminal shell for AbstractFramework agents (MVP).",
     )
+    parser.add_argument(
+        "--agent",
+        choices=("react", "codeact"),
+        default=os.getenv("ABSTRACTCODE_AGENT", "react"),
+        help="Agent type to run (react|codeact).",
+    )
     parser.add_argument("--provider", default="ollama", help="LLM provider (e.g. ollama, openai)")
     parser.add_argument("--model", default="qwen3:1.7b-q4_K_M", help="Model name")
     parser.add_argument(
@@ -68,6 +74,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     state_file = None if args.no_state else args.state_file
 
     shell = ReactShell(
+        agent=str(args.agent),
         provider=args.provider,
         model=args.model,
         state_file=state_file,

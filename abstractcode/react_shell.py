@@ -42,6 +42,7 @@ class ReactShell:
     def __init__(
         self,
         *,
+        agent: str,
         provider: str,
         model: str,
         state_file: Optional[str],
@@ -49,6 +50,9 @@ class ReactShell:
         max_iterations: int,
         color: bool,
     ):
+        self._agent_kind = str(agent or "react").strip().lower()
+        if self._agent_kind not in ("react", "codeact"):
+            raise ValueError("agent must be 'react' or 'codeact'")
         self._provider = provider
         self._model = model
         self._state_file = state_file or None
@@ -60,8 +64,9 @@ class ReactShell:
 
         # Lazy imports so `abstractcode --help` works even if deps aren't installed.
         try:
+            from abstractagent.agents.codeact import CodeActAgent
             from abstractagent.agents.react import ReactAgent
-            from abstractagent.tools import ALL_TOOLS
+            from abstractagent.tools import ALL_TOOLS, execute_python
             from abstractcore.tools import ToolDefinition
             from abstractruntime import InMemoryLedgerStore, InMemoryRunStore, JsonFileRunStore, JsonlLedgerStore
             from abstractruntime.core.models import RunStatus, WaitReason
@@ -81,7 +86,13 @@ class ReactShell:
         self._RunStatus = RunStatus
         self._WaitReason = WaitReason
 
-        self._tools: List[Callable[..., Any]] = list(ALL_TOOLS)
+        if self._agent_kind == "react":
+            self._tools = list(ALL_TOOLS)
+            agent_cls = ReactAgent
+        else:
+            self._tools = [execute_python]
+            agent_cls = CodeActAgent
+
         self._tool_specs: Dict[str, _ToolSpec] = {}
         for t in self._tools:
             tool_def = getattr(t, "_tool_definition", None) or ToolDefinition.from_function(t)
@@ -114,7 +125,7 @@ class ReactShell:
             tool_executor=tool_executor,
         )
 
-        self._agent = ReactAgent(
+        self._agent = agent_cls(
             runtime=self._runtime,
             tools=self._tools,
             on_step=self._on_step,
