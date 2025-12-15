@@ -118,6 +118,8 @@ class ReactShell:
             on_step=self._on_step,
         )
 
+        self._approve_all_for_run = False
+
     # ---------------------------------------------------------------------
     # UI helpers
     # ---------------------------------------------------------------------
@@ -270,6 +272,7 @@ class ReactShell:
     # ---------------------------------------------------------------------
 
     def _start(self, task: str) -> None:
+        self._approve_all_for_run = False
         run_id = self._agent.start(task)
         if self._state_file:
             self._agent.save_state(self._state_file)
@@ -304,12 +307,16 @@ class ReactShell:
                 return
 
             if state.status == self._RunStatus.COMPLETED:
+                if state.output and isinstance(state.output.get("messages"), list):
+                    self._agent.session_messages = list(state.output["messages"])
                 if self._state_file:
                     self._agent.clear_state(self._state_file)
                 return
 
             if state.status == self._RunStatus.FAILED:
                 self._print(_style("\nRun failed:", _C.RED, enabled=self._color) + f" {state.error}")
+                if isinstance(state.vars.get("messages"), list):
+                    self._agent.session_messages = list(state.vars["messages"])
                 if self._state_file:
                     self._agent.clear_state(self._state_file)
                 return
@@ -370,7 +377,7 @@ class ReactShell:
         self._print(_style("\nTool approval required", _C.CYAN, _C.BOLD, enabled=self._color))
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
 
-        approve_all = False
+        approve_all = bool(self._approve_all_for_run)
         results: List[Dict[str, Any]] = []
 
         for tc in tool_calls:
@@ -393,6 +400,7 @@ class ReactShell:
                         break
                     if choice in ("a", "all"):
                         approve_all = True
+                        self._approve_all_for_run = True
                         break
                     if choice in ("n", "no"):
                         results.append(
