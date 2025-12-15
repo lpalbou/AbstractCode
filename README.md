@@ -46,12 +46,21 @@ pip install abstractcode
 # Show options
 abstractcode --help
 
-# Run with durable resume (stores RunState/ledger next to the state file)
-abstractcode --state-file .abstractcode.state.json
+# Durable resume is enabled by default (state file: ~/.abstractcode/state.json)
+# Override with:
+ABSTRACTCODE_STATE_FILE=.abstractcode.state.json abstractcode
+
+# Or disable persistence (in-memory only; cannot resume after quitting)
+abstractcode --no-state
 
 # Auto-approve tool calls (unsafe; bypasses interactive approvals)
 abstractcode --auto-approve
 ```
+
+Notes:
+- Run resume state is stored next to the state file in `*.d/`.
+- Conversation history is stored in the run state (`RunState.vars["messages"]`) inside `*.d/`, and AbstractCode keeps the state file pointing at the most recent run so restarts can reload context.
+- In the interactive shell, commands are slash-prefixed (e.g. `/help`, `/status`, `/history`, `/task ...`).
 
 ## Development (Monorepo)
 

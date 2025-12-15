@@ -50,7 +50,7 @@ class ReactShell:
     ):
         self._provider = provider
         self._model = model
-        self._state_file = state_file
+        self._state_file = state_file or None
         self._auto_approve = auto_approve
         self._color = bool(color and _supports_color())
 
@@ -87,10 +87,12 @@ class ReactShell:
                 parameters=dict(tool_def.parameters or {}),
             )
 
+        store_dir: Optional[Path] = None
         # Stores: file-backed only when state_file is provided.
         if self._state_file:
             base = Path(self._state_file).expanduser().resolve()
-            store_dir = base.with_name(base.name + ".d")
+            base.parent.mkdir(parents=True, exist_ok=True)
+            store_dir = base.with_name(base.stem + ".d")
             run_store = JsonFileRunStore(store_dir)
             ledger_store = JsonlLedgerStore(store_dir)
         else:
@@ -118,6 +120,7 @@ class ReactShell:
             on_step=self._on_step,
         )
 
+        self._store_dir = store_dir
         self._approve_all_for_run = False
 
     # ---------------------------------------------------------------------
@@ -132,10 +135,13 @@ class ReactShell:
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
         self._print(f"Provider: {self._provider}   Model: {self._model}")
         if self._state_file:
-            self._print(f"State:    {self._state_file} (store: {self._state_file}.d/)")
+            store = str(self._store_dir) + "/" if self._store_dir else "(unknown)"
+            self._print(f"State:    {self._state_file} (store: {store})")
+        else:
+            self._print("State:    (in-memory; cannot resume after quitting)")
         mode = "auto-approve" if self._auto_approve else "approval-gated"
         self._print(f"Tools:    {len(self._tools)} ({mode})")
-        self._print(_style("Type 'help' for commands.", _C.DIM, enabled=self._color))
+        self._print(_style("Type '/help' for commands.", _C.DIM, enabled=self._color))
 
     def _on_step(self, step: str, data: Dict[str, Any]) -> None:
         if step == "init":
@@ -184,39 +190,79 @@ class ReactShell:
                 continue
 
             cmd = user_input.strip()
-            lower = cmd.lower()
 
-            if lower in ("quit", "exit", "q"):
-                break
-            if lower == "help":
-                self._show_help()
+            if cmd.startswith("/"):
+                should_exit = self._dispatch_command(cmd[1:].strip())
+                if should_exit:
+                    break
                 continue
-            if lower == "tools":
-                self._show_tools()
-                continue
-            if lower == "status":
-                self._show_status()
-                continue
-            if lower == "history":
-                self._show_history()
-                continue
-            if lower == "resume":
-                self._resume()
+
+            # Reserved words are commands (but require a leading slash).
+            lower = cmd.lower()
+            if lower in ("help", "tools", "status", "history", "resume", "quit", "exit", "q", "task"):
+                self._print(_style("Commands must start with '/'.", _C.DIM, enabled=self._color))
+                self._print(_style(f"Try: /{lower}", _C.DIM, enabled=self._color))
                 continue
 
             # Otherwise treat as a task.
             self._start(cmd)
 
+    def _dispatch_command(self, raw: str) -> bool:
+        if not raw:
+            return False
+
+        parts = raw.split(None, 1)
+        command = parts[0].lower()
+        arg = parts[1] if len(parts) > 1 else ""
+
+        if command in ("quit", "exit", "q"):
+            return True
+        if command in ("help", "h", "?"):
+            self._show_help()
+            return False
+        if command == "tools":
+            self._show_tools()
+            return False
+        if command == "status":
+            self._show_status()
+            return False
+        if command == "resume":
+            self._resume()
+            return False
+        if command == "history":
+            limit = 12
+            if arg:
+                try:
+                    limit = int(arg)
+                except ValueError:
+                    self._print(_style("Usage: /history [N]", _C.DIM, enabled=self._color))
+                    return False
+            self._show_history(limit=limit)
+            return False
+        if command == "task":
+            task = arg.strip()
+            if not task:
+                self._print(_style("Usage: /task <your task>", _C.DIM, enabled=self._color))
+                return False
+            self._start(task)
+            return False
+
+        self._print(_style(f"Unknown command: /{command}", _C.YELLOW, enabled=self._color))
+        self._print(_style("Type /help for commands.", _C.DIM, enabled=self._color))
+        return False
+
     def _show_help(self) -> None:
         self._print(
             "\nCommands:\n"
-            "  <task>    Start a new task\n"
-            "  resume    Resume the saved/attached run\n"
-            "  status    Show current run status\n"
-            "  history   Show recent conversation history\n"
-            "  tools     List available tools\n"
-            "  help      Show this message\n"
-            "  quit      Exit\n"
+            "  /help           Show this message\n"
+            "  /tools          List available tools\n"
+            "  /status         Show current run status\n"
+            "  /history [N]    Show recent conversation history\n"
+            "  /resume         Resume the saved/attached run\n"
+            "  /quit           Exit\n"
+            "\nTasks:\n"
+            "  /task <text>    Start a new task\n"
+            "  <text>          Start a new task (shorthand)\n"
         )
 
     def _show_tools(self) -> None:
@@ -249,10 +295,11 @@ class ReactShell:
     def _show_history(self, *, limit: int = 12) -> None:
         state = self._agent.get_state()
         if state is None:
-            self._print("No active run.")
-            return
-
-        messages = list(state.vars.get("messages") or [])
+            messages = list(self._agent.session_messages or [])
+        else:
+            messages = list(state.vars.get("messages") or [])
+            if not messages and state.output and isinstance(state.output.get("messages"), list):
+                messages = list(state.output["messages"])
         if not messages:
             self._print("No history yet.")
             return
@@ -296,29 +343,41 @@ class ReactShell:
             self._print(_style("State load failed:", _C.YELLOW, enabled=self._color) + f" {e}")
             return
         if state is not None:
-            self._print(_style("Loaded saved run. Type 'resume' to continue.", _C.DIM, enabled=self._color))
+            messages: Optional[List[Dict[str, Any]]] = None
+            if isinstance(state.vars.get("messages"), list):
+                messages = list(state.vars["messages"])
+            elif state.output and isinstance(state.output.get("messages"), list):
+                messages = list(state.output["messages"])
+
+            if messages is not None:
+                self._agent.session_messages = messages
+
+            if state.status == self._RunStatus.WAITING:
+                msg = "Loaded saved run. Type '/resume' to continue."
+            else:
+                msg = "Loaded history from last run."
+            self._print(_style(msg, _C.DIM, enabled=self._color))
 
     def _run_loop(self, run_id: str) -> None:
         while True:
             try:
                 state = self._agent.step()
             except KeyboardInterrupt:
+                state = self._agent.get_state()
+                if state is not None and isinstance(state.vars.get("messages"), list):
+                    self._agent.session_messages = list(state.vars["messages"])
                 self._print(_style("\nInterrupted. Run state preserved.", _C.YELLOW, enabled=self._color))
                 return
 
             if state.status == self._RunStatus.COMPLETED:
                 if state.output and isinstance(state.output.get("messages"), list):
                     self._agent.session_messages = list(state.output["messages"])
-                if self._state_file:
-                    self._agent.clear_state(self._state_file)
                 return
 
             if state.status == self._RunStatus.FAILED:
                 self._print(_style("\nRun failed:", _C.RED, enabled=self._color) + f" {state.error}")
                 if isinstance(state.vars.get("messages"), list):
                     self._agent.session_messages = list(state.vars["messages"])
-                if self._state_file:
-                    self._agent.clear_state(self._state_file)
                 return
 
             if state.status != self._RunStatus.WAITING or not state.waiting:
@@ -391,7 +450,11 @@ class ReactShell:
             self._print(_style(f"\n{name}", _C.GREEN, _C.BOLD, enabled=self._color))
             if descr:
                 self._print(_style(descr, _C.DIM, enabled=self._color))
-            self._print(_style("args:", _C.DIM, enabled=self._color) + " " + json.dumps(args, indent=2, ensure_ascii=False))
+            self._print(
+                _style("args:", _C.DIM, enabled=self._color)
+                + " "
+                + json.dumps(_truncate_json(args), indent=2, ensure_ascii=False)
+            )
 
             if not approve_all:
                 while True:
@@ -457,3 +520,31 @@ class ReactShell:
             results.extend(out.get("results") or [])
 
         return {"mode": "executed", "results": results}
+
+
+def _truncate_json(value: Any, *, max_str: int = 800, max_list: int = 50, max_dict: int = 50) -> Any:
+    if isinstance(value, str):
+        if len(value) <= max_str:
+            return value
+        head = value[:400]
+        tail = value[-200:] if len(value) > 600 else ""
+        suffix = f"... ({len(value)} chars total)"
+        return head + (("\n" + suffix + "\n" + tail) if tail else ("\n" + suffix))
+
+    if isinstance(value, list):
+        trimmed = value[:max_list]
+        out = [_truncate_json(v, max_str=max_str, max_list=max_list, max_dict=max_dict) for v in trimmed]
+        if len(value) > max_list:
+            out.append(f"... ({len(value)} items total)")
+        return out
+
+    if isinstance(value, dict):
+        items = list(value.items())[:max_dict]
+        out_dict: Dict[str, Any] = {}
+        for k, v in items:
+            out_dict[str(k)] = _truncate_json(v, max_str=max_str, max_list=max_list, max_dict=max_dict)
+        if len(value) > max_dict:
+            out_dict["..."] = f"({len(value)} keys total)"
+        return out_dict
+
+    return value
