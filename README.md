@@ -7,9 +7,11 @@
 
 ---
 
-## 🚧 Under Development
+## Status
 
-AbstractCode is currently under active development. This is a placeholder release to reserve the package name on PyPI.
+AbstractCode is under active development. A minimal interactive shell exists to support manual testing of AbstractAgent workflows.
+
+Note: the PyPI release may lag behind the monorepo. For the latest development version, install from source.
 
 ## What is AbstractCode?
 
@@ -41,7 +43,22 @@ pip install abstractcode
 ## Quick Start
 
 ```bash
-# Coming soon!
+# Show options
+abstractcode --help
+
+# Run with durable resume (stores RunState/ledger next to the state file)
+abstractcode --state-file .abstractcode.state.json
+
+# Auto-approve tool calls (unsafe; bypasses interactive approvals)
+abstractcode --auto-approve
+```
+
+## Development (Monorepo)
+
+From the monorepo root:
+
+```bash
+pip install -e ./abstractcore -e ./abstractruntime -e ./abstractagent -e ./abstractcode
 abstractcode --help
 ```
 
@@ -77,4 +94,3 @@ MIT License - see LICENSE file for details.
 ---
 
 **AbstractCode** - Multi-agent agentic coding in your terminal, powered by the Abstract Framework.
-
