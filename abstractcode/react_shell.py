@@ -79,6 +79,7 @@ class ReactShell:
             )
             from abstractruntime import InMemoryLedgerStore, InMemoryRunStore, JsonFileRunStore, JsonlLedgerStore
             from abstractruntime.core.models import RunStatus, WaitReason
+            from abstractruntime.storage.snapshots import Snapshot, JsonSnapshotStore, InMemorySnapshotStore
             from abstractruntime.integrations.abstractcore import (
                 MappingToolExecutor,
                 PassthroughToolExecutor,
@@ -94,6 +95,9 @@ class ReactShell:
 
         self._RunStatus = RunStatus
         self._WaitReason = WaitReason
+        self._Snapshot = Snapshot
+        self._JsonSnapshotStore = JsonSnapshotStore
+        self._InMemorySnapshotStore = InMemorySnapshotStore
 
         # Default tools for AbstractCode (curated subset for coding tasks)
         DEFAULT_TOOLS = [
@@ -131,9 +135,11 @@ class ReactShell:
             store_dir = base.with_name(base.stem + ".d")
             run_store = JsonFileRunStore(store_dir)
             ledger_store = JsonlLedgerStore(store_dir)
+            self._snapshot_store = JsonSnapshotStore(store_dir / "snapshots")
         else:
             run_store = InMemoryRunStore()
             ledger_store = InMemoryLedgerStore()
+            self._snapshot_store = InMemorySnapshotStore()
 
         # Tool execution: passthrough by default so we can gate by approval in the CLI.
         tool_executor = PassthroughToolExecutor(mode="approval_required")
@@ -232,7 +238,7 @@ class ReactShell:
 
             # Reserved words are commands (but require a leading slash).
             lower = cmd.lower()
-            if lower in ("help", "tools", "status", "history", "resume", "quit", "exit", "q", "task"):
+            if lower in ("help", "tools", "status", "history", "resume", "quit", "exit", "q", "task", "clear", "reset", "new", "snapshot"):
                 self._print(_style("Commands must start with '/'.", _C.DIM, enabled=self._color))
                 self._print(_style(f"Try: /{lower}", _C.DIM, enabled=self._color))
                 continue
@@ -282,6 +288,12 @@ class ReactShell:
                 return False
             self._start(task)
             return False
+        if command in ("clear", "reset", "new"):
+            self._clear_memory()
+            return False
+        if command == "snapshot":
+            self._handle_snapshot(arg)
+            return False
 
         self._print(_style(f"Unknown command: /{command}", _C.YELLOW, enabled=self._color))
         self._print(_style("Type /help for commands.", _C.DIM, enabled=self._color))
@@ -305,16 +317,20 @@ class ReactShell:
     def _show_help(self) -> None:
         self._print(
             "\nCommands:\n"
-            "  /help           Show this message\n"
-            "  /tools          List available tools\n"
-            "  /status         Show current run status\n"
-            "  /auto-accept    Toggle auto-accept for tools (or: /auto-accept on|off)\n"
-            "  /history [N]    Show recent conversation history\n"
-            "  /resume         Resume the saved/attached run\n"
-            "  /quit           Exit\n"
+            "  /help               Show this message\n"
+            "  /tools              List available tools\n"
+            "  /status             Show current run status\n"
+            "  /auto-accept        Toggle auto-accept for tools (or: /auto-accept on|off)\n"
+            "  /history [N]        Show recent conversation history\n"
+            "  /resume             Resume the saved/attached run\n"
+            "  /clear              Clear memory and start fresh (aliases: /reset, /new)\n"
+            "  /snapshot save <n>  Save current state as named snapshot\n"
+            "  /snapshot load <n>  Load snapshot by name\n"
+            "  /snapshot list      List available snapshots\n"
+            "  /quit               Exit\n"
             "\nTasks:\n"
-            "  /task <text>    Start a new task\n"
-            "  <text>          Start a new task (any line not starting with '/')\n"
+            "  /task <text>        Start a new task\n"
+            "  <text>              Start a new task (any line not starting with '/')\n"
         )
 
     def _show_tools(self) -> None:
@@ -372,6 +388,102 @@ class ReactShell:
             if len(content) > 240:
                 content = content[:237] + "..."
             self._print(f"{role}: {content}")
+        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+
+    def _clear_memory(self) -> None:
+        """Clear all memory and reset to fresh state."""
+        # Clear session messages
+        self._agent.session_messages = []
+
+        # Clear run ID so next task starts fresh
+        self._agent._run_id = None
+
+        # Reset approval state
+        self._approve_all_for_run = False
+
+        self._print(_style("Memory cleared. Ready for a fresh start.", _C.GREEN, enabled=self._color))
+
+    def _handle_snapshot(self, arg: str) -> None:
+        """Handle /snapshot save|load|list commands."""
+        parts = arg.split(None, 1)
+        if not parts:
+            self._print(_style("Usage: /snapshot save <name>  |  /snapshot load <name>  |  /snapshot list", _C.DIM, enabled=self._color))
+            return
+
+        subcommand = parts[0].lower()
+        name = parts[1].strip() if len(parts) > 1 else ""
+
+        if subcommand == "save":
+            self._snapshot_save(name)
+        elif subcommand == "load":
+            self._snapshot_load(name)
+        elif subcommand == "list":
+            self._snapshot_list()
+        else:
+            self._print(_style(f"Unknown snapshot command: {subcommand}", _C.YELLOW, enabled=self._color))
+            self._print(_style("Usage: /snapshot save <name>  |  /snapshot load <name>  |  /snapshot list", _C.DIM, enabled=self._color))
+
+    def _snapshot_save(self, name: str) -> None:
+        """Save current state as a named snapshot."""
+        if not name:
+            self._print(_style("Usage: /snapshot save <name>", _C.DIM, enabled=self._color))
+            return
+
+        state = self._agent.get_state()
+        if state is None:
+            self._print(_style("No active run to snapshot.", _C.YELLOW, enabled=self._color))
+            return
+
+        snapshot = self._Snapshot.from_run(run=state, name=name)
+        self._snapshot_store.save(snapshot)
+
+        self._print(_style(f"Snapshot saved: {name}", _C.GREEN, enabled=self._color))
+        self._print(_style(f"ID: {snapshot.snapshot_id}", _C.DIM, enabled=self._color))
+
+    def _snapshot_load(self, name: str) -> None:
+        """Load a snapshot by name."""
+        if not name:
+            self._print(_style("Usage: /snapshot load <name>", _C.DIM, enabled=self._color))
+            return
+
+        # Find snapshot by name
+        snapshots = self._snapshot_store.list(query=name)
+        if not snapshots:
+            self._print(_style(f"No snapshot found matching: {name}", _C.YELLOW, enabled=self._color))
+            return
+
+        # Prefer exact match, otherwise use first result
+        snapshot = next((s for s in snapshots if s.name.lower() == name.lower()), snapshots[0])
+
+        # Restore run state
+        run_state_dict = snapshot.run_state
+        if not run_state_dict:
+            self._print(_style("Snapshot has no run state.", _C.YELLOW, enabled=self._color))
+            return
+
+        # Restore messages to agent
+        messages = run_state_dict.get("vars", {}).get("context", {}).get("messages", [])
+        if messages:
+            self._agent.session_messages = list(messages)
+
+        self._print(_style(f"Snapshot loaded: {snapshot.name}", _C.GREEN, enabled=self._color))
+        self._print(_style(f"ID: {snapshot.snapshot_id}", _C.DIM, enabled=self._color))
+        if messages:
+            self._print(_style(f"Restored {len(messages)} messages.", _C.DIM, enabled=self._color))
+
+    def _snapshot_list(self) -> None:
+        """List available snapshots."""
+        snapshots = self._snapshot_store.list(limit=20)
+        if not snapshots:
+            self._print("No snapshots saved.")
+            return
+
+        self._print(_style("\nSnapshots", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+        for snap in snapshots:
+            created = snap.created_at[:19] if snap.created_at else "unknown"
+            self._print(f"  {snap.name}")
+            self._print(_style(f"    ID: {snap.snapshot_id[:8]}...  Created: {created}", _C.DIM, enabled=self._color))
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
 
     # ---------------------------------------------------------------------
