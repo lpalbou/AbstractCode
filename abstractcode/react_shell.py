@@ -48,6 +48,7 @@ class ReactShell:
         state_file: Optional[str],
         auto_approve: bool,
         max_iterations: int,
+        max_tokens: Optional[int] = 32768,
         color: bool,
     ):
         self._agent_kind = str(agent or "react").strip().lower()
@@ -60,6 +61,7 @@ class ReactShell:
         self._max_iterations = int(max_iterations)
         if self._max_iterations < 1:
             raise ValueError("max_iterations must be >= 1")
+        self._max_tokens = max_tokens
         self._color = bool(color and _supports_color())
 
         # Lazy imports so `abstractcode --help` works even if deps aren't installed.
@@ -81,6 +83,7 @@ class ReactShell:
             from abstractruntime.core.models import RunStatus, WaitReason
             from abstractruntime.storage.snapshots import Snapshot, JsonSnapshotStore, InMemorySnapshotStore
             from abstractruntime.integrations.abstractcore import (
+                LocalAbstractCoreLLMClient,
                 MappingToolExecutor,
                 PassthroughToolExecutor,
                 create_local_runtime,
@@ -144,6 +147,10 @@ class ReactShell:
         # Tool execution: passthrough by default so we can gate by approval in the CLI.
         tool_executor = PassthroughToolExecutor(mode="approval_required")
         self._tool_runner = MappingToolExecutor.from_tools(self._tools)
+
+        # Create LLM client for capability queries (used by /max-tokens -1)
+        self._llm_client = LocalAbstractCoreLLMClient(provider=self._provider, model=self._model)
+
         self._runtime = create_local_runtime(
             provider=self._provider,
             model=self._model,
@@ -157,6 +164,7 @@ class ReactShell:
             tools=self._tools,
             on_step=self._on_step,
             max_iterations=self._max_iterations,
+            max_tokens=self._max_tokens,
         )
 
         self._store_dir = store_dir
@@ -294,6 +302,15 @@ class ReactShell:
         if command == "snapshot":
             self._handle_snapshot(arg)
             return False
+        if command == "max-tokens":
+            self._handle_max_tokens(arg)
+            return False
+        if command in ("max-messages", "max_messages"):
+            self._handle_max_messages(arg)
+            return False
+        if command == "memory":
+            self._handle_memory()
+            return False
 
         self._print(_style(f"Unknown command: /{command}", _C.YELLOW, enabled=self._color))
         self._print(_style("Type /help for commands.", _C.DIM, enabled=self._color))
@@ -314,6 +331,131 @@ class ReactShell:
         status = "ON (no approval prompts)" if self._auto_approve else "OFF (approval-gated)"
         self._print(_style(f"Auto-accept is now {status}.", _C.DIM, enabled=self._color))
 
+    def _handle_max_tokens(self, raw: str) -> None:
+        """Show or set max tokens for context."""
+        value = raw.strip()
+        if not value:
+            # Show current
+            if self._max_tokens is None:
+                self._print("Max tokens: (auto)")
+            else:
+                self._print(f"Max tokens: {self._max_tokens:,}")
+            return
+
+        try:
+            tokens = int(value)
+            if tokens == -1:
+                # Auto-detect from model capabilities via abstractruntime's LLM client
+                try:
+                    capabilities = self._llm_client.get_model_capabilities()
+                    detected = capabilities.get("max_tokens", 32768)
+                    self._max_tokens = detected
+                    self._reconfigure_agent()
+                    self._print(_style(f"Max tokens auto-detected: {detected:,} (from model capabilities)", _C.GREEN, enabled=self._color))
+                except Exception as e:
+                    self._print(_style(f"Auto-detection failed: {e}. Using default 32768.", _C.YELLOW, enabled=self._color))
+                    self._max_tokens = 32768
+                    self._reconfigure_agent()
+                return
+            if tokens < 1024:
+                self._print(_style("Max tokens must be -1 (auto) or >= 1024", _C.YELLOW, enabled=self._color))
+                return
+        except ValueError:
+            self._print(_style("Usage: /max-tokens [number or -1 for auto]", _C.DIM, enabled=self._color))
+            return
+
+        self._max_tokens = tokens
+        # Immediately reconfigure the agent's logic with new max_tokens
+        self._reconfigure_agent()
+        self._print(_style(f"Max tokens set to {tokens:,} (immediate effect)", _C.GREEN, enabled=self._color))
+
+    def _reconfigure_agent(self) -> None:
+        """Reconfigure the agent with updated settings (max_tokens, max_history_messages, etc.)."""
+        # Update the logic layer's max_tokens if the agent has a logic attribute
+        if hasattr(self._agent, "logic") and self._agent.logic is not None:
+            self._agent.logic._max_tokens = self._max_tokens
+            # Also update max_history_messages on the logic layer
+            if hasattr(self, "_max_history_messages"):
+                self._agent.logic._max_history_messages = self._max_history_messages
+        # Also update the agent's stored max_tokens
+        if hasattr(self._agent, "_max_tokens"):
+            self._agent._max_tokens = self._max_tokens
+        # Also update the agent's stored max_history_messages
+        if hasattr(self._agent, "_max_history_messages") and hasattr(self, "_max_history_messages"):
+            self._agent._max_history_messages = self._max_history_messages
+
+    def _handle_max_messages(self, raw: str) -> None:
+        """Show or set max history messages."""
+        value = raw.strip()
+        if not value:
+            # Show current
+            if hasattr(self._agent, "_max_history_messages"):
+                current = self._agent._max_history_messages
+            elif hasattr(self._agent, "logic") and self._agent.logic is not None:
+                current = self._agent.logic._max_history_messages
+            else:
+                current = -1
+            if current == -1:
+                self._print("Max history messages: -1 (unlimited, uses full history)")
+            else:
+                self._print(f"Max history messages: {current}")
+            return
+
+        try:
+            num = int(value)
+            if num < -1 or num == 0:
+                self._print(_style("Must be -1 (unlimited) or >= 1", _C.YELLOW, enabled=self._color))
+                return
+        except ValueError:
+            self._print(_style("Usage: /max-messages [number]", _C.DIM, enabled=self._color))
+            return
+
+        self._max_history_messages = num
+        self._reconfigure_agent()
+        label = "unlimited" if num == -1 else str(num)
+        self._print(_style(f"Max history messages set to {label} (immediate effect)", _C.GREEN, enabled=self._color))
+
+    def _handle_memory(self) -> None:
+        """Show memory/token usage breakdown."""
+        # Get current state and messages
+        state = self._agent.get_state()
+        if state is not None:
+            messages = self._messages_from_state(state)
+        else:
+            messages = list(self._agent.session_messages or [])
+
+        # Token estimation function (rough: 1 token ≈ 4 characters)
+        def estimate_tokens(text: str) -> int:
+            return len(text) // 4
+
+        # System prompt estimation (agent builds inline, estimate ~500 tokens)
+        system_tokens = 500
+
+        # History messages
+        history_text = ""
+        for m in messages:
+            history_text += f"{m.get('role', '')}: {m.get('content', '')}\n"
+        history_tokens = estimate_tokens(history_text)
+
+        # Tool definitions (schemas are verbose, multiply by ~10)
+        tool_names_text = json.dumps([name for name in self._tool_specs.keys()])
+        tool_tokens = estimate_tokens(tool_names_text) * 10
+
+        total_used = system_tokens + history_tokens + tool_tokens
+        max_tokens = self._max_tokens or 32768
+
+        self._print(_style("\nMemory Usage", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 40, _C.DIM, enabled=self._color))
+        self._print(f"Max tokens:        {max_tokens:,}")
+        self._print(f"Estimated used:    ~{total_used:,}")
+        self._print(f"Available:         ~{max(0, max_tokens - total_used):,}")
+        self._print()
+        self._print("Breakdown (estimated):")
+        self._print(f"  System/prompt:   ~{system_tokens:,}")
+        self._print(f"  Tool schemas:    ~{tool_tokens:,}")
+        self._print(f"  History ({len(messages)} msgs): ~{history_tokens:,}")
+        self._print(_style("─" * 40, _C.DIM, enabled=self._color))
+
     def _show_help(self) -> None:
         self._print(
             "\nCommands:\n"
@@ -321,6 +463,9 @@ class ReactShell:
             "  /tools              List available tools\n"
             "  /status             Show current run status\n"
             "  /auto-accept        Toggle auto-accept for tools (or: /auto-accept on|off)\n"
+            "  /max-tokens [N]     Show or set max tokens (-1 = auto-detect from model)\n"
+            "  /max-messages [N]   Show or set max history messages (-1 = unlimited)\n"
+            "  /memory             Show current token usage breakdown\n"
             "  /history [N]        Show recent conversation history\n"
             "  /resume             Resume the saved/attached run\n"
             "  /clear              Clear memory and start fresh (aliases: /reset, /new)\n"

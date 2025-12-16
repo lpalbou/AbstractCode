@@ -26,7 +26,20 @@ def _default_max_iterations() -> int:
         if value < 1:
             raise SystemExit("ABSTRACTCODE_MAX_ITERATIONS must be >= 1.")
         return value
-    return 10
+    return 25
+
+
+def _default_max_tokens() -> Optional[int]:
+    env = os.getenv("ABSTRACTCODE_MAX_TOKENS")
+    if env:
+        try:
+            value = int(env)
+        except ValueError:
+            raise SystemExit("ABSTRACTCODE_MAX_TOKENS must be an integer.")
+        if value < 1024:
+            raise SystemExit("ABSTRACTCODE_MAX_TOKENS must be >= 1024.")
+        return value
+    return 32768  # Default 32k context
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -63,7 +76,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-iterations",
         type=int,
         default=_default_max_iterations(),
-        help="Maximum ReAct reasoning iterations per task (default: 10).",
+        help="Maximum ReAct reasoning iterations per task (default: 25).",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=_default_max_tokens(),
+        help="Maximum context tokens for LLM calls (default: 32768).",
     )
     parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
     return parser
@@ -80,6 +99,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         state_file=state_file,
         auto_approve=bool(args.auto_approve),
         max_iterations=int(args.max_iterations),
+        max_tokens=args.max_tokens,
         color=not bool(args.no_color),
     )
     shell.run()
