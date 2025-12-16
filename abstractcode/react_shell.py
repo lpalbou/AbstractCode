@@ -541,7 +541,7 @@ class ReactShell:
         self._agent.session_messages = []
 
         # Clear run ID so next task starts fresh
-        self._agent._run_id = None
+        self._agent._current_run_id = None
 
         # Reset approval state
         self._approve_all_for_run = False
