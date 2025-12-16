@@ -66,8 +66,17 @@ class ReactShell:
         try:
             from abstractagent.agents.codeact import CodeActAgent
             from abstractagent.agents.react import ReactAgent
-            from abstractagent.tools import ALL_TOOLS, execute_python
+            from abstractagent.tools import execute_python, self_improve
             from abstractcore.tools import ToolDefinition
+            from abstractcore.tools.common_tools import (
+                list_files,
+                search_files,
+                read_file,
+                write_file,
+                edit_file,
+                execute_command,
+                web_search,
+            )
             from abstractruntime import InMemoryLedgerStore, InMemoryRunStore, JsonFileRunStore, JsonlLedgerStore
             from abstractruntime.core.models import RunStatus, WaitReason
             from abstractruntime.integrations.abstractcore import (
@@ -86,8 +95,20 @@ class ReactShell:
         self._RunStatus = RunStatus
         self._WaitReason = WaitReason
 
+        # Default tools for AbstractCode (curated subset for coding tasks)
+        DEFAULT_TOOLS = [
+            list_files,
+            search_files,
+            read_file,
+            write_file,
+            edit_file,
+            execute_command,
+            web_search,
+            self_improve,
+        ]
+
         if self._agent_kind == "react":
-            self._tools = list(ALL_TOOLS)
+            self._tools = list(DEFAULT_TOOLS)
             agent_cls = ReactAgent
         else:
             self._tools = [execute_python]

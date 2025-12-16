@@ -106,3 +106,20 @@ MIT License - see LICENSE file for details.
 ---
 
 **AbstractCode** - Multi-agent agentic coding in your terminal, powered by the Abstract Framework.
+
+## Default Tools
+
+AbstractCode provides a curated set of 8 tools for coding tasks:
+
+| Tool | Description |
+|------|-------------|
+| `list_files` | Find and list files using glob patterns (case-insensitive) |
+| `search_files` | Search for text patterns inside files using regex |
+| `read_file` | Read file contents with optional line range |
+| `write_file` | Write content to files, creating directories as needed |
+| `edit_file` | Apply unified diff patches (3X more accurate than pattern replacement) |
+| `execute_command` | Execute shell commands with security controls |
+| `web_search` | Search the web via DuckDuckGo (no API key required) |
+| `self_improve` | Log improvement suggestions for later review |
+
+Additional tools are available via AbstractAgent for specialized use cases (execute_python, fetch_url, replace_in_file).
