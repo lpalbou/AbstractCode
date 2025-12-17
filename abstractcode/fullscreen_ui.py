@@ -9,7 +9,9 @@ Uses prompt_toolkit's Application with HSplit layout to provide:
 
 from __future__ import annotations
 
+import queue
 import re
+import threading
 from typing import Callable, List, Optional, Tuple
 
 from prompt_toolkit.application import Application
@@ -101,6 +103,19 @@ class FullScreenUI:
         # Scroll position (line offset from top)
         self._scroll_offset: int = 0
 
+        # Thread safety for output
+        self._output_lock = threading.Lock()
+
+        # Command queue for background processing
+        self._command_queue: queue.Queue[Optional[str]] = queue.Queue()
+
+        # Blocking prompt support (for tool approvals)
+        self._pending_blocking_prompt: Optional[queue.Queue[str]] = None
+
+        # Worker thread
+        self._worker_thread: Optional[threading.Thread] = None
+        self._shutdown = False
+
         # Prompt history (persists across prompts in this session)
         self._history = InMemoryHistory()
 
@@ -129,11 +144,13 @@ class FullScreenUI:
         )
 
     def _get_output_formatted(self) -> FormattedText:
-        """Get formatted output text with ANSI color support."""
-        if not self._output_text:
+        """Get formatted output text with ANSI color support (thread-safe)."""
+        with self._output_lock:
+            text = self._output_text
+        if not text:
             return FormattedText([])
         # Use ANSI class to parse escape codes into styled tuples
-        return ANSI(self._output_text)
+        return ANSI(text)
 
     def _get_cursor_position(self) -> Point:
         """Get cursor position for scrolling."""
@@ -236,9 +253,16 @@ class FullScreenUI:
                 self._history.append_string(text)
                 # Clear input
                 self._input_buffer.reset()
-                # Process input (this will be handled async)
-                self._pending_input = text
-                event.app.exit(result=text)
+
+                # If there's a pending blocking prompt, respond to it
+                if self._pending_blocking_prompt is not None:
+                    self._pending_blocking_prompt.put(text)
+                else:
+                    # Queue for background processing (don't exit app!)
+                    self._command_queue.put(text)
+
+                # Trigger UI refresh
+                event.app.invalidate()
 
         # Enter with completions = accept completion (don't submit)
         @self._kb.add("enter", filter=has_completions)
@@ -284,13 +308,15 @@ class FullScreenUI:
         # Ctrl+C = exit
         @self._kb.add("c-c")
         def handle_ctrl_c(event):
-            self._pending_input = None
+            self._shutdown = True
+            self._command_queue.put(None)  # Signal worker to stop
             event.app.exit(result=None)
 
         # Ctrl+D = exit (EOF)
         @self._kb.add("c-d")
         def handle_ctrl_d(event):
-            self._pending_input = None
+            self._shutdown = True
+            self._command_queue.put(None)  # Signal worker to stop
             event.app.exit(result=None)
 
         # Ctrl+L = clear output
@@ -361,55 +387,123 @@ class FullScreenUI:
             self._style = Style.from_dict({})
 
     def append_output(self, text: str) -> None:
-        """Append text to the output area."""
-        if self._output_text:
-            self._output_text += "\n" + text
-        else:
-            self._output_text = text
-        # Auto-scroll to bottom when new content added
-        total_lines = self._output_text.count('\n')
-        self._scroll_offset = max(0, total_lines - 5)  # Keep some context visible
+        """Append text to the output area (thread-safe)."""
+        with self._output_lock:
+            if self._output_text:
+                self._output_text += "\n" + text
+            else:
+                self._output_text = text
+            # Auto-scroll to bottom when new content added
+            total_lines = self._output_text.count('\n')
+            self._scroll_offset = max(0, total_lines - 5)  # Keep some context visible
+
+        # Trigger UI refresh (thread-safe call)
+        if self._app and self._app.is_running:
+            self._app.invalidate()
 
     def clear_output(self) -> None:
-        """Clear the output area."""
-        self._output_text = ""
-        self._scroll_offset = 0
+        """Clear the output area (thread-safe)."""
+        with self._output_lock:
+            self._output_text = ""
+            self._scroll_offset = 0
+
+        if self._app and self._app.is_running:
+            self._app.invalidate()
 
     def set_output(self, text: str) -> None:
-        """Replace all output with new text."""
-        self._output_text = text
-        self._scroll_offset = 0
+        """Replace all output with new text (thread-safe)."""
+        with self._output_lock:
+            self._output_text = text
+            self._scroll_offset = 0
 
-    def prompt(self) -> Optional[str]:
-        """Show prompt and wait for input. Returns None on Ctrl+C/Ctrl+D."""
-        try:
-            result = self._app.run()
-            return result
-        except (EOFError, KeyboardInterrupt):
-            return None
+        if self._app and self._app.is_running:
+            self._app.invalidate()
+
+    def _worker_loop(self) -> None:
+        """Background thread that processes commands from the queue."""
+        while not self._shutdown:
+            try:
+                cmd = self._command_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            if cmd is None:  # Shutdown signal
+                break
+
+            try:
+                self._on_input(cmd)
+            except KeyboardInterrupt:
+                self.append_output("Interrupted.")
+            except Exception as e:
+                self.append_output(f"Error: {e}")
+            finally:
+                # Trigger UI refresh from worker thread (thread-safe)
+                if self._app and self._app.is_running:
+                    self._app.invalidate()
 
     def run_loop(self, banner: str = "") -> None:
-        """Run the main input loop.
+        """Run the main input loop with single Application lifecycle.
+
+        The Application stays in full-screen mode continuously. Commands are
+        processed by a background worker thread while the UI remains responsive.
 
         Args:
             banner: Initial text to show in output
         """
         if banner:
-            self.append_output(banner)
+            self.set_output(banner)
 
+        # Start worker thread
+        self._shutdown = False
         self._running = True
-        while self._running:
-            user_input = self.prompt()
-            if user_input is None:
-                break
-            self._on_input(user_input)
+        self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self._worker_thread.start()
+
+        try:
+            # Run the app ONCE - stays in full-screen until explicit exit
+            self._app.run()
+        except (EOFError, KeyboardInterrupt):
+            pass
+        finally:
+            # Clean shutdown
+            self._running = False
+            self._shutdown = True
+            self._command_queue.put(None)
+            if self._worker_thread:
+                self._worker_thread.join(timeout=2.0)
+
+    def blocking_prompt(self, message: str) -> str:
+        """Block worker thread until user provides input (for tool approvals).
+
+        This method is called from the worker thread when tool approval is needed.
+        It shows the message in output and waits for the user to respond.
+
+        Args:
+            message: The prompt message to show
+
+        Returns:
+            The user's response, or empty string on timeout
+        """
+        self.append_output(message)
+
+        response_queue: queue.Queue[str] = queue.Queue()
+        self._pending_blocking_prompt = response_queue
+
+        try:
+            return response_queue.get(timeout=300)  # 5 minute timeout
+        except queue.Empty:
+            return ""
+        finally:
+            self._pending_blocking_prompt = None
 
     def stop(self) -> None:
-        """Stop the run loop."""
+        """Stop the run loop and exit the application."""
         self._running = False
+        self._shutdown = True
+        self._command_queue.put(None)
+        if self._app and self._app.is_running:
+            self._app.exit()
 
     def exit(self) -> None:
-        """Exit the application."""
-        self._running = False
-        if self._app.is_running:
-            self._app.exit()
+        """Exit the application (alias for stop)."""
+        self.stop()

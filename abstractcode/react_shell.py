@@ -240,24 +240,41 @@ class ReactShell:
         self._ui.append_output(text)
 
     def _handle_input(self, text: str) -> None:
-        """Handle user input from the UI."""
-        self._pending_input = text
+        """Handle user input from the UI (called from worker thread)."""
+        text = text.strip()
+        if not text:
+            return
+
+        # Echo user input
+        self._print(f"\n> {text}")
+
+        cmd = text.strip()
+
+        if cmd.startswith("/"):
+            should_exit = self._dispatch_command(cmd[1:].strip())
+            if should_exit:
+                self._ui.stop()
+            return
+
+        # Reserved words check
+        lower = cmd.lower()
+        if lower in ("help", "tools", "status", "history", "resume", "quit", "exit", "q", "task", "clear", "reset", "new", "snapshot"):
+            self._print(_style("Commands must start with '/'.", _C.DIM, enabled=self._color))
+            self._print(_style(f"Try: /{lower}", _C.DIM, enabled=self._color))
+            return
+
+        # Otherwise treat as a task
+        self._start(cmd)
 
     def _simple_prompt(self, message: str) -> str:
-        """Single-line prompt for quick responses (tool approvals, choices, etc.).
+        """Single-line prompt for tool approvals (blocks worker thread).
 
-        In full-screen mode, shows the message in output and waits for input.
+        This uses blocking_prompt which queues a response and waits for user input.
         """
-        # Show the prompt message in output
-        self._print(message)
-        try:
-            result = self._ui.prompt()
-            if result:
-                # Echo the response
-                self._print(f"  → {result}")
-            return (result or "").strip()
-        except (EOFError, KeyboardInterrupt):
-            return ""
+        result = self._ui.blocking_prompt(message)
+        if result:
+            self._print(f"  → {result}")
+        return result.strip()
 
     def _banner(self) -> None:
         self._print(_style("AbstractCode (MVP)", _C.CYAN, _C.BOLD, enabled=self._color))
@@ -325,46 +342,12 @@ class ReactShell:
             banner_lines.append(f"- {name}({params})")
         banner_lines.append(_style("─" * 60, _C.DIM, enabled=self._color))
 
-        # Set initial output
-        self._ui.set_output("\n".join(banner_lines))
-
         if self._state_file:
             self._try_load_state()
 
-        # Main loop using full-screen UI
-        while True:
-            try:
-                user_input = self._ui.prompt()
-            except (EOFError, KeyboardInterrupt):
-                break
-
-            if user_input is None:
-                break
-
-            user_input = user_input.strip()
-            if not user_input:
-                continue
-
-            # Echo user input to output
-            self._print(f"\n> {user_input}")
-
-            cmd = user_input.strip()
-
-            if cmd.startswith("/"):
-                should_exit = self._dispatch_command(cmd[1:].strip())
-                if should_exit:
-                    break
-                continue
-
-            # Reserved words are commands (but require a leading slash).
-            lower = cmd.lower()
-            if lower in ("help", "tools", "status", "history", "resume", "quit", "exit", "q", "task", "clear", "reset", "new", "snapshot"):
-                self._print(_style("Commands must start with '/'.", _C.DIM, enabled=self._color))
-                self._print(_style(f"Try: /{lower}", _C.DIM, enabled=self._color))
-                continue
-
-            # Otherwise treat as a task.
-            self._start(cmd)
+        # Run the UI loop - this stays in full-screen mode continuously.
+        # All input is handled by _handle_input() via the worker thread.
+        self._ui.run_loop(banner="\n".join(banner_lines))
 
     def _dispatch_command(self, raw: str) -> bool:
         if not raw:
