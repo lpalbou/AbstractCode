@@ -35,6 +35,18 @@ def _style(text: str, *codes: str, enabled: bool) -> str:
     return "".join(codes) + text + _C.RESET
 
 
+def _xml_safe(text: str) -> str:
+    """Escape text for safe inclusion in prompt_toolkit HTML.
+
+    Removes XML-invalid control characters and then escapes HTML entities.
+    """
+    import html as html_lib
+    import re
+    # Remove control characters except tab (\x09), newline (\x0a), carriage return (\x0d)
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', str(text))
+    return html_lib.escape(text)
+
+
 @dataclass
 class _ToolSpec:
     name: str
@@ -188,8 +200,6 @@ class ReactShell:
 
     def _get_toolbar(self) -> HTML:
         """Generate status footer content for the bottom toolbar."""
-        import html as html_lib  # For escaping special characters
-
         # Get current context usage
         state = self._agent.get_state()
         if state:
@@ -202,9 +212,9 @@ class ReactShell:
         max_tokens = self._max_tokens or 32768
         pct = (tokens_used / max_tokens) * 100 if max_tokens > 0 else 0
 
-        # Escape provider and model names to prevent HTML injection
-        provider_safe = html_lib.escape(str(self._provider))
-        model_safe = html_lib.escape(str(self._model))
+        # Escape provider and model names for safe XML inclusion
+        provider_safe = _xml_safe(self._provider)
+        model_safe = _xml_safe(self._model)
 
         # Color the percentage based on usage
         if pct >= 80:
