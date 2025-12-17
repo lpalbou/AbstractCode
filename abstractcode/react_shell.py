@@ -188,6 +188,8 @@ class ReactShell:
 
     def _get_toolbar(self) -> HTML:
         """Generate status footer content for the bottom toolbar."""
+        import html as html_lib  # For escaping special characters
+
         # Get current context usage
         state = self._agent.get_state()
         if state:
@@ -200,19 +202,23 @@ class ReactShell:
         max_tokens = self._max_tokens or 32768
         pct = (tokens_used / max_tokens) * 100 if max_tokens > 0 else 0
 
+        # Escape provider and model names to prevent HTML injection
+        provider_safe = html_lib.escape(str(self._provider))
+        model_safe = html_lib.escape(str(self._model))
+
         # Color the percentage based on usage
         if pct >= 80:
-            pct_style = "fg:ansired"
+            pct_part = f'<style fg="ansired">({pct:.0f}%)</style>'
         elif pct >= 50:
-            pct_style = "fg:ansiyellow"
+            pct_part = f'<style fg="ansiyellow">({pct:.0f}%)</style>'
         else:
-            pct_style = ""
+            pct_part = f"({pct:.0f}%)"
 
         return HTML(
-            f" <b>{self._provider}</b> │ "
-            f"<b>{self._model}</b> │ "
+            f" <b>{provider_safe}</b> | "
+            f"<b>{model_safe}</b> | "
             f"Context: <b>{tokens_used:,}</b>/<b>{max_tokens:,}</b> "
-            f"<{pct_style}>({pct:.0f}%)</{pct_style}> │ "
+            f"{pct_part} | "
             f"<i>Enter=submit, Alt+Enter=newline</i>"
         )
 
