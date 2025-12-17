@@ -15,6 +15,7 @@ from typing import Callable, List, Optional, Tuple
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.filters import has_completions
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.formatted_text import FormattedText, ANSI
@@ -183,7 +184,7 @@ class FullScreenUI:
         # Help hint bar
         help_bar = Window(
             content=FormattedTextControl(
-                lambda: [("class:help", " Enter=submit | Ctrl+Up/Down=scroll | Ctrl+L=clear | Ctrl+C=exit")]
+                lambda: [("class:help", " Enter=submit | ↑/↓=history | Ctrl+↑/↓=scroll | Ctrl+C=exit")]
             ),
             height=1,
             style="class:help-bar",
@@ -226,8 +227,8 @@ class FullScreenUI:
         """Build key bindings."""
         self._kb = KeyBindings()
 
-        # Enter = submit input
-        @self._kb.add("enter")
+        # Enter = submit input (but not if completion menu is showing)
+        @self._kb.add("enter", filter=~has_completions)
         def handle_enter(event):
             text = self._input_buffer.text.strip()
             if text:
@@ -238,6 +239,47 @@ class FullScreenUI:
                 # Process input (this will be handled async)
                 self._pending_input = text
                 event.app.exit(result=text)
+
+        # Enter with completions = accept completion (don't submit)
+        @self._kb.add("enter", filter=has_completions)
+        def handle_enter_completion(event):
+            # Accept the current completion
+            buff = event.app.current_buffer
+            if buff.complete_state:
+                buff.complete_state = None
+            # Apply the completion but don't submit
+            event.current_buffer.complete_state = None
+
+        # Tab = accept completion
+        @self._kb.add("tab", filter=has_completions)
+        def handle_tab_completion(event):
+            buff = event.app.current_buffer
+            if buff.complete_state:
+                buff.complete_state = None
+
+        # Up arrow = history previous (when no completions showing)
+        @self._kb.add("up", filter=~has_completions)
+        def history_prev(event):
+            event.current_buffer.history_backward()
+
+        # Down arrow = history next (when no completions showing)
+        @self._kb.add("down", filter=~has_completions)
+        def history_next(event):
+            event.current_buffer.history_forward()
+
+        # Up arrow with completions = navigate completions
+        @self._kb.add("up", filter=has_completions)
+        def completion_prev(event):
+            buff = event.app.current_buffer
+            if buff.complete_state:
+                buff.complete_previous()
+
+        # Down arrow with completions = navigate completions
+        @self._kb.add("down", filter=has_completions)
+        def completion_next(event):
+            buff = event.app.current_buffer
+            if buff.complete_state:
+                buff.complete_next()
 
         # Ctrl+C = exit
         @self._kb.add("c-c")
@@ -257,13 +299,13 @@ class FullScreenUI:
             self.clear_output()
             event.app.invalidate()
 
-        # Ctrl+Up = scroll up
+        # Ctrl+Up = scroll output up
         @self._kb.add("c-up")
         def scroll_up(event):
             self._scroll(-3)
             event.app.invalidate()
 
-        # Ctrl+Down = scroll down
+        # Ctrl+Down = scroll output down
         @self._kb.add("c-down")
         def scroll_down(event):
             self._scroll(3)
