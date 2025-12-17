@@ -919,10 +919,14 @@ class ReactShell:
         if self._auto_approve:
             return self._tool_runner.execute(tool_calls=tool_calls)
 
+        # If user already said "all" for this run, just execute without UI clutter
+        if self._approve_all_for_run:
+            return self._tool_runner.execute(tool_calls=tool_calls)
+
         self._print(_style("\nTool approval required", _C.CYAN, _C.BOLD, enabled=self._color))
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
 
-        approve_all = bool(self._approve_all_for_run)
+        approve_all = False
         results: List[Dict[str, Any]] = []
 
         for tc in tool_calls:

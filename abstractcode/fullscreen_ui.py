@@ -293,6 +293,11 @@ class FullScreenUI:
 
                 # Trigger UI refresh
                 event.app.invalidate()
+            else:
+                # Empty input - if blocking prompt is waiting, show guidance
+                if self._pending_blocking_prompt is not None:
+                    self.append_output("  (Please type a response and press Enter)")
+                    event.app.invalidate()
 
         # Enter with completions = accept completion (don't submit)
         @self._kb.add("enter", filter=has_completions)
