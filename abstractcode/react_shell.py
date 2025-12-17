@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from prompt_toolkit.formatted_text import HTML
 
 from .input_handler import create_prompt_session, create_simple_session
+from .fullscreen_ui import FullScreenUI
 
 
 def _supports_color() -> bool:
@@ -186,20 +187,28 @@ class ReactShell:
         self._store_dir = store_dir
         self._approve_all_for_run = False
 
-        # Initialize prompt sessions for multi-line input with status footer
-        self._prompt_session = create_prompt_session(
-            get_toolbar_text=self._get_toolbar,
-            multiline=True,
+        # Output buffer for full-screen mode
+        self._output_lines: List[str] = []
+
+        # Initialize full-screen UI with scrollable history
+        self._ui = FullScreenUI(
+            get_status_text=self._get_status_text,
+            on_input=self._handle_input,
             color=self._color,
         )
+
+        # Keep simple session for tool approvals (runs within full-screen)
         self._simple_session = create_simple_session(color=self._color)
+
+        # Pending input for the run loop
+        self._pending_input: Optional[str] = None
 
     # ---------------------------------------------------------------------
     # UI helpers
     # ---------------------------------------------------------------------
 
-    def _get_toolbar(self) -> HTML:
-        """Generate status footer content for the bottom toolbar."""
+    def _get_status_text(self) -> str:
+        """Generate status text for the status bar."""
         # Get current context usage
         state = self._agent.get_state()
         if state:
@@ -212,33 +221,33 @@ class ReactShell:
         max_tokens = self._max_tokens or 32768
         pct = (tokens_used / max_tokens) * 100 if max_tokens > 0 else 0
 
-        # Escape provider and model names for safe XML inclusion
-        provider_safe = _xml_safe(self._provider)
-        model_safe = _xml_safe(self._model)
-
-        # Color the percentage based on usage
-        if pct >= 80:
-            pct_part = f'<style fg="ansired">({pct:.0f}%)</style>'
-        elif pct >= 50:
-            pct_part = f'<style fg="ansiyellow">({pct:.0f}%)</style>'
-        else:
-            pct_part = f"({pct:.0f}%)"
-
-        return HTML(
-            f" <b>{provider_safe}</b> | "
-            f"<b>{model_safe}</b> | "
-            f"Context: <b>{tokens_used:,}</b>/<b>{max_tokens:,}</b> "
-            f"{pct_part} | "
-            f"<i>Enter=submit, Alt+Enter=newline</i>"
+        return (
+            f"{self._provider} | {self._model} | "
+            f"Context: {tokens_used:,}/{max_tokens:,} ({pct:.0f}%)"
         )
 
     def _print(self, text: str = "") -> None:
-        print(text)
+        """Append text to the UI output area."""
+        self._output_lines.append(text)
+        self._ui.append_output(text)
+
+    def _handle_input(self, text: str) -> None:
+        """Handle user input from the UI."""
+        self._pending_input = text
 
     def _simple_prompt(self, message: str) -> str:
-        """Single-line prompt for quick responses (tool approvals, choices, etc.)."""
+        """Single-line prompt for quick responses (tool approvals, choices, etc.).
+
+        In full-screen mode, shows the message in output and waits for input.
+        """
+        # Show the prompt message in output
+        self._print(message)
         try:
-            return self._simple_session.prompt(message).strip()
+            result = self._ui.prompt()
+            if result:
+                # Echo the response
+                self._print(f"  → {result}")
+            return (result or "").strip()
         except (EOFError, KeyboardInterrupt):
             return ""
 
@@ -285,22 +294,51 @@ class ReactShell:
     # ---------------------------------------------------------------------
 
     def run(self) -> None:
-        self._banner()
-        self._show_tools()
+        # Build initial banner text
+        banner_lines = []
+        banner_lines.append(_style("AbstractCode (MVP)", _C.CYAN, _C.BOLD, enabled=self._color))
+        banner_lines.append(_style("─" * 60, _C.DIM, enabled=self._color))
+        banner_lines.append(f"Provider: {self._provider}   Model: {self._model}")
+        if self._state_file:
+            store = str(self._store_dir) + "/" if self._store_dir else "(unknown)"
+            banner_lines.append(f"State:    {self._state_file} (store: {store})")
+        else:
+            banner_lines.append("State:    (in-memory; cannot resume after quitting)")
+        mode = "auto-approve" if self._auto_approve else "approval-gated"
+        banner_lines.append(f"Tools:    {len(self._tools)} ({mode})")
+        banner_lines.append(_style("Type '/help' for commands.", _C.DIM, enabled=self._color))
+        banner_lines.append("")
+
+        # Add tools list to banner
+        banner_lines.append(_style("Available tools", _C.CYAN, _C.BOLD, enabled=self._color))
+        banner_lines.append(_style("─" * 60, _C.DIM, enabled=self._color))
+        for name, spec in sorted(self._tool_specs.items()):
+            params = ", ".join(sorted((spec.parameters or {}).keys()))
+            banner_lines.append(f"- {name}({params})")
+        banner_lines.append(_style("─" * 60, _C.DIM, enabled=self._color))
+
+        # Set initial output
+        self._ui.set_output("\n".join(banner_lines))
 
         if self._state_file:
             self._try_load_state()
 
+        # Main loop using full-screen UI
         while True:
             try:
-                # Use prompt_toolkit for multi-line input with status footer
-                user_input = self._prompt_session.prompt("> ").strip()
+                user_input = self._ui.prompt()
             except (EOFError, KeyboardInterrupt):
-                self._print()
                 break
 
+            if user_input is None:
+                break
+
+            user_input = user_input.strip()
             if not user_input:
                 continue
+
+            # Echo user input to output
+            self._print(f"\n> {user_input}")
 
             cmd = user_input.strip()
 
