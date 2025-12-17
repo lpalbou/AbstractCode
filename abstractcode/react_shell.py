@@ -162,6 +162,14 @@ class ReactShell:
             ledger_store = InMemoryLedgerStore()
             self._snapshot_store = InMemorySnapshotStore()
 
+        self._store_dir = store_dir
+
+        # Load saved config BEFORE creating agent (so agent gets correct values)
+        self._config_file: Optional[Path] = None
+        if self._state_file:
+            self._config_file = Path(self._state_file).with_suffix(".config.json")
+            self._load_config()
+
         # Tool execution: passthrough by default so we can gate by approval in the CLI.
         tool_executor = PassthroughToolExecutor(mode="approval_required")
         self._tool_runner = MappingToolExecutor.from_tools(self._tools)
@@ -185,7 +193,6 @@ class ReactShell:
             max_tokens=self._max_tokens,
         )
 
-        self._store_dir = store_dir
         self._approve_all_for_run = False
 
         # Output buffer for full-screen mode
@@ -435,6 +442,7 @@ class ReactShell:
 
         status = "ON (no approval prompts)" if self._auto_approve else "OFF (approval-gated)"
         self._print(_style(f"Auto-accept is now {status}.", _C.DIM, enabled=self._color))
+        self._save_config()
 
     def _handle_max_tokens(self, raw: str) -> None:
         """Show or set max tokens for context."""
@@ -488,6 +496,45 @@ class ReactShell:
         # Also update the agent's stored max_history_messages
         if hasattr(self._agent, "_max_history_messages") and hasattr(self, "_max_history_messages"):
             self._agent._max_history_messages = self._max_history_messages
+        # Save configuration to persist across restarts
+        self._save_config()
+
+    def _load_config(self) -> None:
+        """Load configuration from file.
+
+        Called during __init__ before agent is created, so it just sets
+        instance variables. The agent will be created with these values.
+        """
+        if not self._config_file or not self._config_file.exists():
+            return
+        try:
+            config = json.loads(self._config_file.read_text())
+            # Apply saved settings to instance variables
+            if "max_tokens" in config and config["max_tokens"] is not None:
+                self._max_tokens = config["max_tokens"]
+            if "max_history_messages" in config:
+                self._max_history_messages = config["max_history_messages"]
+            if "max_iterations" in config:
+                self._max_iterations = config["max_iterations"]
+            if "auto_approve" in config:
+                self._auto_approve = config["auto_approve"]
+        except Exception:
+            pass  # Ignore corrupt config files
+
+    def _save_config(self) -> None:
+        """Save configuration to file."""
+        if not self._config_file:
+            return
+        try:
+            config = {
+                "max_tokens": self._max_tokens,
+                "max_history_messages": getattr(self, "_max_history_messages", -1),
+                "max_iterations": self._max_iterations,
+                "auto_approve": self._auto_approve,
+            }
+            self._config_file.write_text(json.dumps(config, indent=2))
+        except Exception:
+            pass  # Silently fail if we can't write
 
     def _handle_max_messages(self, raw: str) -> None:
         """Show or set max history messages."""
@@ -567,9 +614,9 @@ class ReactShell:
             "  /help               Show this message\n"
             "  /tools              List available tools\n"
             "  /status             Show current run status\n"
-            "  /auto-accept        Toggle auto-accept for tools (or: /auto-accept on|off)\n"
-            "  /max-tokens [N]     Show or set max tokens (-1 = auto-detect from model)\n"
-            "  /max-messages [N]   Show or set max history messages (-1 = unlimited)\n"
+            "  /auto-accept        Toggle auto-accept for tools [saved]\n"
+            "  /max-tokens [N]     Show or set max tokens (-1 = auto) [saved]\n"
+            "  /max-messages [N]   Show or set max history messages (-1 = unlimited) [saved]\n"
             "  /memory             Show current token usage breakdown\n"
             "  /history [N]        Show recent conversation history\n"
             "  /resume             Resume the saved/attached run\n"
