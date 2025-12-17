@@ -43,7 +43,9 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-dependencies = []
+dependencies = [
+    "prompt_toolkit>=3.0.0",
+]
 
 [project.optional-dependencies]
 dev = [

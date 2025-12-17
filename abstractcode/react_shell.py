@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from prompt_toolkit.formatted_text import HTML
+
+from .input_handler import create_prompt_session, create_simple_session
+
 
 def _supports_color() -> bool:
     if os.environ.get("NO_COLOR"):
@@ -170,12 +174,57 @@ class ReactShell:
         self._store_dir = store_dir
         self._approve_all_for_run = False
 
+        # Initialize prompt sessions for multi-line input with status footer
+        self._prompt_session = create_prompt_session(
+            get_toolbar_text=self._get_toolbar,
+            multiline=True,
+            color=self._color,
+        )
+        self._simple_session = create_simple_session(color=self._color)
+
     # ---------------------------------------------------------------------
     # UI helpers
     # ---------------------------------------------------------------------
 
+    def _get_toolbar(self) -> HTML:
+        """Generate status footer content for the bottom toolbar."""
+        # Get current context usage
+        state = self._agent.get_state()
+        if state:
+            messages = self._messages_from_state(state)
+            tokens_used = sum(len(str(m.get("content", ""))) // 4 for m in messages)
+        else:
+            messages = list(self._agent.session_messages or [])
+            tokens_used = sum(len(str(m.get("content", ""))) // 4 for m in messages)
+
+        max_tokens = self._max_tokens or 32768
+        pct = (tokens_used / max_tokens) * 100 if max_tokens > 0 else 0
+
+        # Color the percentage based on usage
+        if pct >= 80:
+            pct_style = "fg:ansired"
+        elif pct >= 50:
+            pct_style = "fg:ansiyellow"
+        else:
+            pct_style = ""
+
+        return HTML(
+            f" <b>{self._provider}</b> │ "
+            f"<b>{self._model}</b> │ "
+            f"Context: <b>{tokens_used:,}</b>/<b>{max_tokens:,}</b> "
+            f"<{pct_style}>({pct:.0f}%)</{pct_style}> │ "
+            f"<i>Enter=submit, Alt+Enter=newline</i>"
+        )
+
     def _print(self, text: str = "") -> None:
         print(text)
+
+    def _simple_prompt(self, message: str) -> str:
+        """Single-line prompt for quick responses (tool approvals, choices, etc.)."""
+        try:
+            return self._simple_session.prompt(message).strip()
+        except (EOFError, KeyboardInterrupt):
+            return ""
 
     def _banner(self) -> None:
         self._print(_style("AbstractCode (MVP)", _C.CYAN, _C.BOLD, enabled=self._color))
@@ -228,7 +277,8 @@ class ReactShell:
 
         while True:
             try:
-                user_input = input(_style("\n> ", _C.CYAN, _C.BOLD, enabled=self._color)).strip()
+                # Use prompt_toolkit for multi-line input with status footer
+                user_input = self._prompt_session.prompt("> ").strip()
             except (EOFError, KeyboardInterrupt):
                 self._print()
                 break
@@ -738,7 +788,7 @@ class ReactShell:
             for i, c in enumerate(choices):
                 self._print(f"  [{i+1}] {c}")
             while True:
-                raw = input("Choice (number or text): ").strip()
+                raw = self._simple_prompt("Choice (number or text): ")
                 if not raw:
                     continue
                 if raw.isdigit():
@@ -746,7 +796,7 @@ class ReactShell:
                     if 0 <= idx < len(choices):
                         return str(choices[idx])
                 return raw
-        return input(prompt + " ").strip()
+        return self._simple_prompt(prompt + " ")
 
     def _approve_and_execute(self, tool_calls: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         if self._auto_approve:
@@ -777,7 +827,7 @@ class ReactShell:
 
             if not approve_all:
                 while True:
-                    choice = input("Approve? [y]es/[n]o/[a]ll/[e]dit/[q]uit: ").strip().lower()
+                    choice = self._simple_prompt("Approve? [y]es/[n]o/[a]ll/[e]dit/[q]uit: ").lower()
                     if choice in ("y", "yes"):
                         break
                     if choice in ("a", "all"):
@@ -799,7 +849,7 @@ class ReactShell:
                     if choice in ("q", "quit"):
                         return None
                     if choice in ("e", "edit"):
-                        edited = input("New arguments (JSON): ").strip()
+                        edited = self._simple_prompt("New arguments (JSON): ")
                         if edited:
                             try:
                                 new_args = json.loads(edited)
@@ -821,7 +871,7 @@ class ReactShell:
 
             # Additional confirmation for shell execution.
             if name == "execute_command":
-                confirm = input("Type 'run' to execute this command: ").strip().lower()
+                confirm = self._simple_prompt("Type 'run' to execute this command: ").lower()
                 if confirm != "run":
                     results.append(
                         {
