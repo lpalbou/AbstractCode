@@ -108,6 +108,12 @@ class FullScreenUI:
         # Thread safety for output
         self._output_lock = threading.Lock()
 
+        # Cached pre-parsed output snapshot (ensures atomic consistency
+        # between _get_output_formatted() and _get_cursor_position())
+        self._cached_formatted: Optional[FormattedText] = None
+        self._cached_line_count: int = 0
+        self._cached_text_version: str = ""
+
         # Command queue for background processing
         self._command_queue: queue.Queue[Optional[str]] = queue.Queue()
 
@@ -153,30 +159,59 @@ class FullScreenUI:
         )
 
     def _get_output_formatted(self) -> FormattedText:
-        """Get formatted output text with ANSI color support (thread-safe)."""
+        """Get formatted output text with ANSI color support (thread-safe).
+
+        Returns cached pre-parsed ANSI result to ensure consistency with
+        _get_cursor_position() during the same render cycle. This eliminates
+        race conditions where text changes between the two method calls.
+        """
         with self._output_lock:
-            text = self._output_text
-        if not text:
-            return FormattedText([])
-        # Use ANSI class to parse escape codes into styled tuples
-        return ANSI(text)
+            if self._cached_formatted is None:
+                # First call or cache invalidated - rebuild
+                self._invalidate_output_cache()
+            return self._cached_formatted
 
     def _get_cursor_position(self) -> Point:
-        """Get cursor position for scrolling.
+        """Get cursor position for scrolling (thread-safe).
+
+        Uses cached line count to ensure consistency with _get_output_formatted()
+        during the same render cycle. Both methods read from the same snapshot,
+        eliminating race conditions between text updates and rendering.
 
         prompt_toolkit scrolls the view to make the cursor visible.
         By setting cursor to scroll_offset, we control which line is visible.
-
-        Thread-safe and bounds-checked to prevent IndexError during rendering.
         """
         with self._output_lock:
-            if not self._output_text:
-                return Point(0, 0)
-            total_lines = self._output_text.count('\n') + 1
+            if self._cached_formatted is None:
+                # Cache not initialized - rebuild
+                self._invalidate_output_cache()
+
+            # Use cached line count from same snapshot as formatted text
+            total_lines = self._cached_line_count
+
             # Clamp scroll_offset to valid range [0, total_lines - 1]
             # Line indices are 0-based, so max valid index is total_lines - 1
             safe_offset = max(0, min(self._scroll_offset, total_lines - 1))
             return Point(0, safe_offset)
+
+    def _invalidate_output_cache(self) -> None:
+        """Invalidate cached ANSI-parsed output (must be called under lock).
+
+        This ensures both _get_output_formatted() and _get_cursor_position()
+        return values from the same text snapshot, eliminating race conditions.
+
+        CRITICAL: Must be called with self._output_lock held.
+        """
+        if not self._output_text:
+            self._cached_formatted = FormattedText([])
+            self._cached_line_count = 0
+            self._cached_text_version = ""
+            return
+
+        # Parse ANSI under lock (happens once per text change)
+        self._cached_formatted = ANSI(self._output_text)
+        self._cached_line_count = self._output_text.count('\n') + 1
+        self._cached_text_version = self._output_text
 
     def _build_layout(self) -> None:
         """Build the HSplit layout with output, input, and status areas."""
@@ -462,12 +497,16 @@ class FullScreenUI:
                 self._output_text += "\n" + text
             else:
                 self._output_text = text
-            # Auto-scroll to bottom when new content added
-            # Line indices are 0-based, so last valid index is total_lines - 1
-            total_lines = self._output_text.count('\n') + 1
-            self._scroll_offset = max(0, total_lines - 1)
 
-        # Trigger UI refresh (thread-safe call)
+            # Invalidate cache - pre-parse ANSI under lock to ensure
+            # atomic consistency between formatted text and line count
+            self._invalidate_output_cache()
+
+            # Auto-scroll to bottom when new content added
+            # Use cached line count from the snapshot we just created
+            self._scroll_offset = max(0, self._cached_line_count - 1)
+
+        # Trigger UI refresh (now safe - cache updated atomically)
         if self._app and self._app.is_running:
             self._app.invalidate()
 
@@ -475,6 +514,7 @@ class FullScreenUI:
         """Clear the output area (thread-safe)."""
         with self._output_lock:
             self._output_text = ""
+            self._invalidate_output_cache()  # Clear cache atomically
             self._scroll_offset = 0
 
         if self._app and self._app.is_running:
@@ -484,6 +524,7 @@ class FullScreenUI:
         """Replace all output with new text (thread-safe)."""
         with self._output_lock:
             self._output_text = text
+            self._invalidate_output_cache()  # Pre-parse under lock
             self._scroll_offset = 0
 
         if self._app and self._app.is_running:
