@@ -79,6 +79,7 @@ class ReactShell:
         if self._max_iterations < 1:
             raise ValueError("max_iterations must be >= 1")
         self._max_tokens = max_tokens
+        # Enable ANSI colors - fullscreen_ui uses ANSI class to parse escape codes
         self._color = bool(color and _supports_color())
 
         # Lazy imports so `abstractcode --help` works even if deps aren't installed.
