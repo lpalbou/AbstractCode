@@ -165,8 +165,17 @@ class FullScreenUI:
 
         prompt_toolkit scrolls the view to make the cursor visible.
         By setting cursor to scroll_offset, we control which line is visible.
+
+        Thread-safe and bounds-checked to prevent IndexError during rendering.
         """
-        return Point(0, self._scroll_offset)
+        with self._output_lock:
+            if not self._output_text:
+                return Point(0, 0)
+            total_lines = self._output_text.count('\n') + 1
+            # Clamp scroll_offset to valid range [0, total_lines - 1]
+            # Line indices are 0-based, so max valid index is total_lines - 1
+            safe_offset = max(0, min(self._scroll_offset, total_lines - 1))
+            return Point(0, safe_offset)
 
     def _build_layout(self) -> None:
         """Build the HSplit layout with output, input, and status areas."""
@@ -379,7 +388,8 @@ class FullScreenUI:
         # End = scroll to bottom
         @self._kb.add("end")
         def scroll_to_end(event):
-            self._scroll_offset = self._get_total_lines()
+            total_lines = self._get_total_lines()
+            self._scroll_offset = max(0, total_lines - 1)
             event.app.invalidate()
 
         # Alt+Enter = insert newline in input
@@ -404,15 +414,15 @@ class FullScreenUI:
         total_lines = self._get_total_lines()
         if total_lines == 0:
             return
-        # Allow scrolling from 0 (top) to total_lines (bottom)
-        # At scroll_offset = total_lines, the last line is visible
-        self._scroll_offset = max(0, min(total_lines, self._scroll_offset + lines))
+        # Line indices are 0-based, so valid range is [0, total_lines - 1]
+        max_offset = max(0, total_lines - 1)
+        self._scroll_offset = max(0, min(max_offset, self._scroll_offset + lines))
 
     def scroll_to_bottom(self) -> None:
         """Scroll to show the latest content at the bottom."""
         total_lines = self._get_total_lines()
-        # Set cursor to last line to ensure it's visible
-        self._scroll_offset = max(0, total_lines)
+        # Set cursor to last valid line index (0-based)
+        self._scroll_offset = max(0, total_lines - 1)
         if self._app and self._app.is_running:
             self._app.invalidate()
 
@@ -447,8 +457,9 @@ class FullScreenUI:
             else:
                 self._output_text = text
             # Auto-scroll to bottom when new content added
+            # Line indices are 0-based, so last valid index is total_lines - 1
             total_lines = self._output_text.count('\n') + 1
-            self._scroll_offset = total_lines  # Scroll to show last line
+            self._scroll_offset = max(0, total_lines - 1)
 
         # Trigger UI refresh (thread-safe call)
         if self._app and self._app.is_running:
