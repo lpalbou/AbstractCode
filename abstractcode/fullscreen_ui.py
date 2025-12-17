@@ -4,6 +4,7 @@ Uses prompt_toolkit's Application with HSplit layout to provide:
 - Scrollable output/history area (mouse wheel + keyboard) with ANSI color support
 - Fixed input area at bottom
 - Fixed status bar showing provider/model/context info
+- Command autocomplete when typing /
 """
 
 from __future__ import annotations
@@ -13,13 +14,63 @@ from typing import Callable, List, Optional, Tuple
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.formatted_text import FormattedText, ANSI
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout.containers import HSplit, VSplit, Window
+from prompt_toolkit.layout.containers import Float, FloatContainer, HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
+from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.styles import Style
+
+
+# Command definitions: (command, description)
+COMMANDS = [
+    ("help", "Show available commands"),
+    ("tools", "List available tools"),
+    ("status", "Show current run status"),
+    ("history", "Show recent conversation history"),
+    ("resume", "Resume the saved/attached run"),
+    ("clear", "Clear memory and start fresh"),
+    ("new", "Start fresh (alias for /clear)"),
+    ("reset", "Reset session (alias for /clear)"),
+    ("task", "Start a new task"),
+    ("auto-accept", "Toggle auto-accept for tools"),
+    ("max-tokens", "Show or set max tokens"),
+    ("max-messages", "Show or set max history messages"),
+    ("memory", "Show current token usage breakdown"),
+    ("snapshot save", "Save current state as named snapshot"),
+    ("snapshot load", "Load snapshot by name"),
+    ("snapshot list", "List available snapshots"),
+    ("quit", "Exit"),
+    ("exit", "Exit"),
+    ("q", "Exit"),
+]
+
+
+class CommandCompleter(Completer):
+    """Completer for / commands."""
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+
+        # Only complete if starts with /
+        if not text.startswith("/"):
+            return
+
+        # Get the text after /
+        cmd_text = text[1:].lower()
+
+        for cmd, description in COMMANDS:
+            if cmd.startswith(cmd_text):
+                # Yield completion (what to insert, how far back to go)
+                yield Completion(
+                    cmd,
+                    start_position=-len(cmd_text),
+                    display=f"/{cmd}",
+                    display_meta=description,
+                )
 
 
 class FullScreenUI:
@@ -48,8 +99,13 @@ class FullScreenUI:
         # Scroll position (line offset from top)
         self._scroll_offset: int = 0
 
-        # Input buffer
-        self._input_buffer = Buffer(name="input", multiline=False)
+        # Input buffer with command completer
+        self._input_buffer = Buffer(
+            name="input",
+            multiline=False,
+            completer=CommandCompleter(),
+            complete_while_typing=True,
+        )
 
         # Build the layout
         self._build_layout()
@@ -129,13 +185,25 @@ class FullScreenUI:
         )
 
         # Stack everything vertically
-        root = HSplit([
+        body = HSplit([
             output_window,    # Scrollable output (takes remaining space)
             separator,        # Visual separator
             input_row,        # Input area with prompt
             status_bar,       # Status info
             help_bar,         # Help hints
         ])
+
+        # Wrap in FloatContainer to show completion menu
+        root = FloatContainer(
+            content=body,
+            floats=[
+                Float(
+                    xcursor=True,
+                    ycursor=True,
+                    content=CompletionsMenu(max_height=10, scroll_offset=1),
+                ),
+            ],
+        )
 
         self._layout = Layout(root)
         # Focus starts on input
@@ -233,6 +301,12 @@ class FullScreenUI:
                 "help-bar": "bg:#1a1a2e #666666",
                 "help": "#666666 italic",
                 "prompt": "#00aa00 bold",
+                # Completion menu styling
+                "completion-menu": "bg:#1a1a2e #cccccc",
+                "completion-menu.completion": "bg:#1a1a2e #cccccc",
+                "completion-menu.completion.current": "bg:#444444 #ffffff bold",
+                "completion-menu.meta.completion": "bg:#1a1a2e #888888 italic",
+                "completion-menu.meta.completion.current": "bg:#444444 #aaaaaa italic",
             })
         else:
             self._style = Style.from_dict({})
