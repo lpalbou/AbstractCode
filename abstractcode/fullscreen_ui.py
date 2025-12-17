@@ -15,6 +15,7 @@ from typing import Callable, List, Optional, Tuple
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.formatted_text import FormattedText, ANSI
 from prompt_toolkit.key_binding import KeyBindings
@@ -99,12 +100,16 @@ class FullScreenUI:
         # Scroll position (line offset from top)
         self._scroll_offset: int = 0
 
-        # Input buffer with command completer
+        # Prompt history (persists across prompts in this session)
+        self._history = InMemoryHistory()
+
+        # Input buffer with command completer and history
         self._input_buffer = Buffer(
             name="input",
             multiline=False,
             completer=CommandCompleter(),
             complete_while_typing=True,
+            history=self._history,
         )
 
         # Build the layout
@@ -226,6 +231,8 @@ class FullScreenUI:
         def handle_enter(event):
             text = self._input_buffer.text.strip()
             if text:
+                # Add to history before clearing
+                self._history.append_string(text)
                 # Clear input
                 self._input_buffer.reset()
                 # Process input (this will be handled async)
