@@ -38,6 +38,7 @@ COMMANDS = [
     ("history", "Show recent conversation history"),
     ("resume", "Resume the saved/attached run"),
     ("clear", "Clear memory and start fresh"),
+    ("compact", "Compress conversation [light|standard|heavy] [--preserve N] [focus...]"),
     ("new", "Start fresh (alias for /clear)"),
     ("reset", "Reset session (alias for /clear)"),
     ("task", "Start a new task"),

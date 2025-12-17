@@ -433,6 +433,9 @@ class ReactShell:
         if command == "memory":
             self._handle_memory()
             return False
+        if command == "compact":
+            self._handle_compact(arg)
+            return False
 
         self._print(_style(f"Unknown command: /{command}", _C.YELLOW, enabled=self._color))
         self._print(_style("Type /help for commands.", _C.DIM, enabled=self._color))
@@ -618,6 +621,165 @@ class ReactShell:
         self._print(f"  History ({len(messages)} msgs): ~{history_tokens:,}")
         self._print(_style("─" * 40, _C.DIM, enabled=self._color))
 
+    def _handle_compact(self, raw: str) -> None:
+        """Handle /compact command for conversation compression.
+
+        Syntax: /compact [light|standard|heavy] [--preserve N] [focus topics...]
+
+        Examples:
+            /compact                     # Standard mode, 6 preserved, auto-focus
+            /compact light               # Light compression
+            /compact heavy --preserve 4  # Heavy compression, keep 4 messages
+            /compact standard API design # Focus on "API design" topics
+        """
+        import shlex
+
+        # Parse arguments
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split()
+
+        # Defaults
+        compression_mode = "standard"
+        preserve_recent = 6
+        focus_topics = []
+
+        # Parse arguments
+        i = 0
+        while i < len(parts):
+            part = parts[i].lower()
+            if part == "--preserve":
+                if i + 1 < len(parts):
+                    try:
+                        preserve_recent = int(parts[i + 1])
+                        if preserve_recent < 0:
+                            self._print(_style("--preserve must be >= 0", _C.YELLOW, enabled=self._color))
+                            return
+                        i += 2
+                        continue
+                    except ValueError:
+                        self._print(_style("--preserve requires a number", _C.YELLOW, enabled=self._color))
+                        return
+                else:
+                    self._print(_style("--preserve requires a number", _C.YELLOW, enabled=self._color))
+                    return
+            elif part in ("light", "standard", "heavy"):
+                compression_mode = part
+                i += 1
+            else:
+                # Remaining args are focus topics
+                focus_topics.extend(parts[i:])
+                break
+            i += 1
+
+        # Build focus string
+        focus = " ".join(focus_topics) if focus_topics else None
+
+        # Get current messages
+        messages = list(self._agent.session_messages or [])
+        if not messages:
+            self._print(_style("No messages to compact.", _C.YELLOW, enabled=self._color))
+            return
+
+        # Check if we have enough messages to warrant compaction
+        non_system = [m for m in messages if m.get("role") != "system"]
+        if len(non_system) <= preserve_recent:
+            self._print(_style(
+                f"Only {len(non_system)} non-system messages - nothing to compact (preserving {preserve_recent}).",
+                _C.DIM, enabled=self._color
+            ))
+            return
+
+        # Show what we're doing
+        self._print(_style("\nCompacting conversation...", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 40, _C.DIM, enabled=self._color))
+        self._print(f"Mode:           {compression_mode}")
+        self._print(f"Preserve:       {preserve_recent} recent messages")
+        self._print(f"Focus:          {focus or '(auto-detect)'}")
+        self._print(f"Total messages: {len(messages)}")
+        self._print(_style("─" * 40, _C.DIM, enabled=self._color))
+
+        self._ui.set_spinner("Compacting...")
+
+        try:
+            # Lazy import to avoid startup overhead
+            from abstractcore import create_llm
+            from abstractcore.processing import BasicSummarizer, CompressionMode
+
+            # Map string to enum
+            mode_map = {
+                "light": CompressionMode.LIGHT,
+                "standard": CompressionMode.STANDARD,
+                "heavy": CompressionMode.HEAVY,
+            }
+            mode_enum = mode_map[compression_mode]
+
+            # Create summarizer using the current provider
+            llm = create_llm(self._provider, model=self._model)
+            summarizer = BasicSummarizer(llm)
+
+            # Separate system messages from conversation
+            system_messages = [m for m in messages if m.get("role") == "system"]
+            conversation_messages = [m for m in messages if m.get("role") != "system"]
+
+            # Summarize
+            summary_result = summarizer.summarize_chat_history(
+                messages=conversation_messages,
+                preserve_recent=preserve_recent,
+                focus=focus,
+                compression_mode=mode_enum
+            )
+
+            # Build new message list
+            new_messages = []
+
+            # Preserve system messages
+            new_messages.extend(system_messages)
+
+            # Add summary as system message
+            if len(conversation_messages) > preserve_recent:
+                new_messages.append({
+                    "role": "system",
+                    "content": f"[CONVERSATION HISTORY SUMMARY]: {summary_result.summary}"
+                })
+
+            # Add preserved recent messages
+            recent = conversation_messages[-preserve_recent:] if preserve_recent > 0 else []
+            new_messages.extend(recent)
+
+            # Replace session_messages in-place
+            self._agent.session_messages = new_messages
+
+            # Calculate stats
+            old_tokens = sum(len(str(m.get("content", ""))) // 4 for m in messages)
+            new_tokens = sum(len(str(m.get("content", ""))) // 4 for m in new_messages)
+            reduction = ((old_tokens - new_tokens) / old_tokens * 100) if old_tokens > 0 else 0
+
+            self._ui.clear_spinner()
+
+            self._print(_style("\n✅ Compaction complete!", _C.GREEN, _C.BOLD, enabled=self._color))
+            self._print(_style("─" * 40, _C.DIM, enabled=self._color))
+            self._print(f"Messages:   {len(messages)} → {len(new_messages)}")
+            self._print(f"Tokens:     ~{old_tokens:,} → ~{new_tokens:,} ({reduction:.0f}% reduction)")
+            self._print(f"Confidence: {summary_result.confidence:.0%}")
+            self._print(_style("─" * 40, _C.DIM, enabled=self._color))
+
+            # Show key points
+            if summary_result.key_points:
+                self._print(_style("\nKey points preserved:", _C.CYAN, enabled=self._color))
+                for point in summary_result.key_points[:5]:
+                    truncated = point[:80] + "..." if len(point) > 80 else point
+                    self._print(f"  • {truncated}")
+
+        except ImportError as e:
+            self._ui.clear_spinner()
+            self._print(_style(f"Import error: {e}", _C.RED, enabled=self._color))
+            self._print(_style("Ensure abstractcore is properly installed.", _C.DIM, enabled=self._color))
+        except Exception as e:
+            self._ui.clear_spinner()
+            self._print(_style(f"Compaction failed: {e}", _C.RED, enabled=self._color))
+
     def _show_help(self) -> None:
         self._print(
             "\nCommands:\n"
@@ -628,6 +790,7 @@ class ReactShell:
             "  /max-tokens [N]     Show or set max tokens (-1 = auto) [saved]\n"
             "  /max-messages [N]   Show or set max history messages (-1 = unlimited) [saved]\n"
             "  /memory             Show current token usage breakdown\n"
+            "  /compact [mode]     Compress conversation context [light|standard|heavy]\n"
             "  /history [N]        Show recent conversation history\n"
             "  /resume             Resume the saved/attached run\n"
             "  /clear              Clear memory and start fresh (aliases: /reset, /new)\n"
