@@ -195,7 +195,8 @@ class ReactShell:
             max_tokens=self._max_tokens,
         )
 
-        self._approve_all_for_run = False
+        # Session-level tool approval (persists across all requests)
+        self._approve_all_session = False
 
         # Output buffer for full-screen mode
         self._output_lines: List[str] = []
@@ -704,8 +705,8 @@ class ReactShell:
         # Clear run ID so next task starts fresh
         self._agent._current_run_id = None
 
-        # Reset approval state
-        self._approve_all_for_run = False
+        # Reset approval state (clear = full reset)
+        self._approve_all_session = False
 
         self._print(_style("Memory cleared. Ready for a fresh start.", _C.GREEN, enabled=self._color))
 
@@ -797,7 +798,7 @@ class ReactShell:
     # ---------------------------------------------------------------------
 
     def _start(self, task: str) -> None:
-        self._approve_all_for_run = False
+        # Note: _approve_all_session is NOT reset here - it persists for the entire session
         run_id = self._agent.start(task)
         if self._state_file:
             self._agent.save_state(self._state_file)
@@ -919,8 +920,8 @@ class ReactShell:
         if self._auto_approve:
             return self._tool_runner.execute(tool_calls=tool_calls)
 
-        # If user already said "all" for this run, just execute without UI clutter
-        if self._approve_all_for_run:
+        # If user already said "all" for this session, just execute without UI clutter
+        if self._approve_all_session:
             return self._tool_runner.execute(tool_calls=tool_calls)
 
         self._print(_style("\nTool approval required", _C.CYAN, _C.BOLD, enabled=self._color))
@@ -953,7 +954,7 @@ class ReactShell:
                         break
                     if choice in ("a", "all"):
                         approve_all = True
-                        self._approve_all_for_run = True
+                        self._approve_all_session = True
                         break
                     if choice in ("n", "no"):
                         results.append(
