@@ -228,34 +228,31 @@ class FullScreenUI:
         else:
             new_text = text
 
-        # Update buffer (need to temporarily make it writable)
-        self._output_buffer.read_only = False
+        # Update buffer using bypass_readonly to avoid callable check
         self._output_buffer.set_document(
             self._output_buffer.document.__class__(
                 text=new_text,
                 cursor_position=len(new_text)
-            )
+            ),
+            bypass_readonly=True
         )
-        self._output_buffer.read_only = True
 
     def clear_output(self) -> None:
         """Clear the output area."""
-        self._output_buffer.read_only = False
         self._output_buffer.set_document(
-            self._output_buffer.document.__class__(text="", cursor_position=0)
+            self._output_buffer.document.__class__(text="", cursor_position=0),
+            bypass_readonly=True
         )
-        self._output_buffer.read_only = True
 
     def set_output(self, text: str) -> None:
         """Replace all output with new text."""
-        self._output_buffer.read_only = False
         self._output_buffer.set_document(
             self._output_buffer.document.__class__(
                 text=text,
                 cursor_position=len(text)
-            )
+            ),
+            bypass_readonly=True
         )
-        self._output_buffer.read_only = True
 
     def prompt(self) -> Optional[str]:
         """Show prompt and wait for input. Returns None on Ctrl+C/Ctrl+D."""
