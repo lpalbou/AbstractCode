@@ -96,6 +96,7 @@ class ReactShell:
                 edit_file,
                 execute_command,
                 web_search,
+                fetch_url,
             )
             from abstractruntime import InMemoryLedgerStore, InMemoryRunStore, JsonFileRunStore, JsonlLedgerStore
             from abstractruntime.core.models import RunStatus, WaitReason
@@ -129,6 +130,7 @@ class ReactShell:
             edit_file,
             execute_command,
             web_search,
+            fetch_url,
             self_improve,
         ]
 
@@ -215,10 +217,23 @@ class ReactShell:
     # UI helpers
     # ---------------------------------------------------------------------
 
+    def _safe_get_state(self):
+        """Safely get agent state, returning None if unavailable.
+
+        This handles the race condition where the render thread calls get_state()
+        while the worker thread has completed/cleaned up a run. The runtime raises
+        KeyError for unknown run_ids, which would crash the render loop.
+        """
+        try:
+            return self._agent.get_state()
+        except (KeyError, Exception):
+            # Run doesn't exist (completed/cleaned up) or other error
+            return None
+
     def _get_status_text(self) -> str:
         """Generate status text for the status bar."""
-        # Get current context usage
-        state = self._agent.get_state()
+        # Get current context usage (safe for render thread)
+        state = self._safe_get_state()
         if state:
             messages = self._messages_from_state(state)
             tokens_used = sum(len(str(m.get("content", ""))) // 4 for m in messages)
@@ -293,9 +308,12 @@ class ReactShell:
         if step == "init":
             task = (data.get("task") or "")[:80]
             self._print(_style("\nStarting:", _C.CYAN, _C.BOLD, enabled=self._color) + f" {task}")
+            self._ui.set_spinner("Initializing...")
         elif step == "reason":
             it = data.get("iteration", "?")
-            self._print(_style(f"Thinking (step {it})...", _C.YELLOW, enabled=self._color))
+            max_it = data.get("max_iterations", "?")
+            self._print(_style(f"Thinking (step {it}/{max_it})...", _C.YELLOW, enabled=self._color))
+            self._ui.set_spinner(f"Thinking (step {it}/{max_it})...")
         elif step == "act":
             tool = data.get("tool", "unknown")
             args = data.get("args") or {}
@@ -303,16 +321,24 @@ class ReactShell:
             if len(args_str) > 100:
                 args_str = args_str[:97] + "..."
             self._print(_style("Tool:", _C.GREEN, enabled=self._color) + f" {tool}({args_str})")
+            self._ui.set_spinner(f"Running {tool}...")
         elif step == "observe":
             res = str(data.get("result", ""))[:120]
             self._print(_style("Result:", _C.DIM, enabled=self._color) + f" {res}")
+            self._ui.set_spinner("Processing result...")
         elif step == "ask_user":
+            self._ui.clear_spinner()
             self._print(_style("Agent question:", _C.MAGENTA, _C.BOLD, enabled=self._color))
         elif step == "done":
+            self._ui.clear_spinner()
             self._print(_style("\nANSWER", _C.GREEN, _C.BOLD, enabled=self._color))
             self._print(_style("─" * 60, _C.DIM, enabled=self._color))
             self._print(str(data.get("answer", "")))
             self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+        elif step == "error" or step == "failed":
+            self._ui.clear_spinner()
+        elif step == "max_iterations":
+            self._ui.clear_spinner()
 
     # ---------------------------------------------------------------------
     # Commands
@@ -553,7 +579,7 @@ class ReactShell:
     def _handle_memory(self) -> None:
         """Show memory/token usage breakdown."""
         # Get current state and messages
-        state = self._agent.get_state()
+        state = self._safe_get_state()
         if state is not None:
             messages = self._messages_from_state(state)
         else:
@@ -623,7 +649,7 @@ class ReactShell:
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
 
     def _show_status(self) -> None:
-        state = self._agent.get_state()
+        state = self._safe_get_state()
         if state is None:
             self._print("No active run.")
             return
@@ -651,7 +677,7 @@ class ReactShell:
         return []
 
     def _show_history(self, *, limit: int = 12) -> None:
-        state = self._agent.get_state()
+        state = self._safe_get_state()
         if state is None:
             messages = list(self._agent.session_messages or [])
         else:
@@ -709,7 +735,7 @@ class ReactShell:
             self._print(_style("Usage: /snapshot save <name>", _C.DIM, enabled=self._color))
             return
 
-        state = self._agent.get_state()
+        state = self._safe_get_state()
         if state is None:
             self._print(_style("No active run to snapshot.", _C.YELLOW, enabled=self._color))
             return
@@ -814,7 +840,8 @@ class ReactShell:
             try:
                 state = self._agent.step()
             except KeyboardInterrupt:
-                state = self._agent.get_state()
+                self._ui.clear_spinner()
+                state = self._safe_get_state()
                 if state is not None:
                     loaded = self._messages_from_state(state)
                     if loaded:
@@ -823,11 +850,13 @@ class ReactShell:
                 return
 
             if state.status == self._RunStatus.COMPLETED:
+                self._ui.clear_spinner()
                 if state.output and isinstance(state.output.get("messages"), list):
                     self._agent.session_messages = list(state.output["messages"])
                 return
 
             if state.status == self._RunStatus.FAILED:
+                self._ui.clear_spinner()
                 self._print(_style("\nRun failed:", _C.RED, enabled=self._color) + f" {state.error}")
                 loaded = self._messages_from_state(state)
                 if loaded:
@@ -848,6 +877,7 @@ class ReactShell:
             details = wait.details or {}
             tool_calls = details.get("tool_calls")
             if isinstance(tool_calls, list):
+                self._ui.clear_spinner()  # Clear spinner during approval prompt
                 payload = self._approve_and_execute(tool_calls)
                 if payload is None:
                     self._print(_style("\nLeft run waiting (not resumed).", _C.DIM, enabled=self._color))
@@ -861,6 +891,7 @@ class ReactShell:
                 )
                 continue
 
+            self._ui.clear_spinner()
             self._print(
                 _style("\nWaiting:", _C.YELLOW, enabled=self._color)
                 + f" {wait.reason.value} ({wait.wait_key})"
@@ -868,6 +899,7 @@ class ReactShell:
             return
 
     def _prompt_user(self, prompt: str, choices: Optional[Sequence[str]]) -> str:
+        self._ui.clear_spinner()  # Clear spinner when prompting user
         if choices:
             self._print(_style(prompt, _C.MAGENTA, _C.BOLD, enabled=self._color))
             for i, c in enumerate(choices):
@@ -954,8 +986,8 @@ class ReactShell:
             if not name:
                 continue
 
-            # Additional confirmation for shell execution.
-            if name == "execute_command":
+            # Additional confirmation for shell execution (skip if approve_all is set)
+            if name == "execute_command" and not approve_all:
                 confirm = self._simple_prompt("Type 'run' to execute this command: ").lower()
                 if confirm != "run":
                     results.append(

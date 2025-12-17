@@ -12,6 +12,7 @@ from __future__ import annotations
 import queue
 import re
 import threading
+import time
 from typing import Callable, List, Optional, Tuple
 
 from prompt_toolkit.application import Application
@@ -116,6 +117,13 @@ class FullScreenUI:
         self._worker_thread: Optional[threading.Thread] = None
         self._shutdown = False
 
+        # Spinner state for visual feedback during processing
+        self._spinner_text: str = ""
+        self._spinner_active = False
+        self._spinner_frame = 0
+        self._spinner_thread: Optional[threading.Thread] = None
+        self._spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
         # Prompt history (persists across prompts in this session)
         self._history = InMemoryHistory()
 
@@ -153,8 +161,11 @@ class FullScreenUI:
         return ANSI(text)
 
     def _get_cursor_position(self) -> Point:
-        """Get cursor position for scrolling."""
-        # Return position based on scroll offset
+        """Get cursor position for scrolling.
+
+        prompt_toolkit scrolls the view to make the cursor visible.
+        By setting cursor to scroll_offset, we control which line is visible.
+        """
         return Point(0, self._scroll_offset)
 
     def _build_layout(self) -> None:
@@ -201,7 +212,7 @@ class FullScreenUI:
         # Help hint bar
         help_bar = Window(
             content=FormattedTextControl(
-                lambda: [("class:help", " Enter=submit | ↑/↓=history | Ctrl+↑/↓=scroll | Ctrl+C=exit")]
+                lambda: [("class:help", " Enter=submit | ↑/↓=history | PgUp/PgDn=scroll | Home/End=top/bottom | Ctrl+C=exit")]
             ),
             height=1,
             style="class:help-bar",
@@ -236,8 +247,18 @@ class FullScreenUI:
         self._output_window = output_window
 
     def _get_status_formatted(self) -> FormattedText:
-        """Get formatted status text."""
+        """Get formatted status text with optional spinner."""
         text = self._get_status_text()
+
+        # If spinner is active, show it prominently
+        if self._spinner_active and self._spinner_text:
+            spinner_char = self._spinner_frames[self._spinner_frame % len(self._spinner_frames)]
+            return [
+                ("class:spinner", f" {spinner_char} "),
+                ("class:spinner-text", f"{self._spinner_text}"),
+                ("class:status-text", f"  │  {text}"),
+            ]
+
         return [("class:status-text", f" {text}")]
 
     def _build_keybindings(self) -> None:
@@ -349,6 +370,18 @@ class FullScreenUI:
             self._scroll(10)
             event.app.invalidate()
 
+        # Home = scroll to top
+        @self._kb.add("home")
+        def scroll_to_top(event):
+            self._scroll_offset = 0
+            event.app.invalidate()
+
+        # End = scroll to bottom
+        @self._kb.add("end")
+        def scroll_to_end(event):
+            self._scroll_offset = self._get_total_lines()
+            event.app.invalidate()
+
         # Alt+Enter = insert newline in input
         @self._kb.add("escape", "enter")
         def handle_alt_enter(event):
@@ -359,12 +392,29 @@ class FullScreenUI:
         def handle_ctrl_j(event):
             self._input_buffer.insert_text("\n")
 
+    def _get_total_lines(self) -> int:
+        """Get total number of lines in output (thread-safe)."""
+        with self._output_lock:
+            if not self._output_text:
+                return 0
+            return self._output_text.count('\n') + 1
+
     def _scroll(self, lines: int) -> None:
         """Scroll the output by N lines."""
-        # Count total lines in output
-        total_lines = self._output_text.count('\n') + 1 if self._output_text else 0
-        # Update scroll offset with bounds checking
-        self._scroll_offset = max(0, min(total_lines - 1, self._scroll_offset + lines))
+        total_lines = self._get_total_lines()
+        if total_lines == 0:
+            return
+        # Allow scrolling from 0 (top) to total_lines (bottom)
+        # At scroll_offset = total_lines, the last line is visible
+        self._scroll_offset = max(0, min(total_lines, self._scroll_offset + lines))
+
+    def scroll_to_bottom(self) -> None:
+        """Scroll to show the latest content at the bottom."""
+        total_lines = self._get_total_lines()
+        # Set cursor to last line to ensure it's visible
+        self._scroll_offset = max(0, total_lines)
+        if self._app and self._app.is_running:
+            self._app.invalidate()
 
     def _build_style(self) -> None:
         """Build the style."""
@@ -376,6 +426,9 @@ class FullScreenUI:
                 "help-bar": "bg:#1a1a2e #666666",
                 "help": "#666666 italic",
                 "prompt": "#00aa00 bold",
+                # Spinner styling
+                "spinner": "#00aaff bold",
+                "spinner-text": "#ffaa00",
                 # Completion menu styling
                 "completion-menu": "bg:#1a1a2e #cccccc",
                 "completion-menu.completion": "bg:#1a1a2e #cccccc",
@@ -394,8 +447,8 @@ class FullScreenUI:
             else:
                 self._output_text = text
             # Auto-scroll to bottom when new content added
-            total_lines = self._output_text.count('\n')
-            self._scroll_offset = max(0, total_lines - 5)  # Keep some context visible
+            total_lines = self._output_text.count('\n') + 1
+            self._scroll_offset = total_lines  # Scroll to show last line
 
         # Trigger UI refresh (thread-safe call)
         if self._app and self._app.is_running:
@@ -415,6 +468,42 @@ class FullScreenUI:
         with self._output_lock:
             self._output_text = text
             self._scroll_offset = 0
+
+        if self._app and self._app.is_running:
+            self._app.invalidate()
+
+    def _spinner_loop(self) -> None:
+        """Background thread that animates the spinner."""
+        while self._spinner_active and not self._shutdown:
+            self._spinner_frame = (self._spinner_frame + 1) % len(self._spinner_frames)
+            if self._app and self._app.is_running:
+                self._app.invalidate()
+            time.sleep(0.1)  # 10 FPS animation
+
+    def set_spinner(self, text: str) -> None:
+        """Start the spinner with the given text (thread-safe).
+
+        Args:
+            text: Status text to show next to the spinner (e.g., "Generating...")
+        """
+        self._spinner_text = text
+        self._spinner_frame = 0
+
+        if not self._spinner_active:
+            self._spinner_active = True
+            self._spinner_thread = threading.Thread(target=self._spinner_loop, daemon=True)
+            self._spinner_thread.start()
+        elif self._app and self._app.is_running:
+            self._app.invalidate()
+
+    def clear_spinner(self) -> None:
+        """Stop and hide the spinner (thread-safe)."""
+        self._spinner_active = False
+        self._spinner_text = ""
+
+        if self._spinner_thread:
+            self._spinner_thread.join(timeout=0.5)
+            self._spinner_thread = None
 
         if self._app and self._app.is_running:
             self._app.invalidate()
