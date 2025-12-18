@@ -414,8 +414,6 @@ class ReactShell:
 
     def _on_step(self, step: str, data: Dict[str, Any]) -> None:
         if step == "init":
-            task = (data.get("task") or "")[:80]
-            self._print(_style("\nStarting:", _C.CYAN, _C.BOLD, enabled=self._color) + f" {task}")
             self._ui.set_spinner("Initializing...")
         elif step == "reason":
             it = data.get("iteration", "?")
@@ -436,17 +434,21 @@ class ReactShell:
             self._ui.set_spinner("Processing result...")
         elif step == "ask_user":
             self._ui.clear_spinner()
+            self._ui.scroll_to_bottom()
             self._print(_style("Agent question:", _C.MAGENTA, _C.BOLD, enabled=self._color))
         elif step == "done":
             self._ui.clear_spinner()
+            self._ui.scroll_to_bottom()
             self._print(_style("\nANSWER", _C.GREEN, _C.BOLD, enabled=self._color))
             self._print(_style("─" * 60, _C.DIM, enabled=self._color))
             self._print(str(data.get("answer", "")))
             self._print(_style("─" * 60, _C.DIM, enabled=self._color))
         elif step == "error" or step == "failed":
             self._ui.clear_spinner()
+            self._ui.scroll_to_bottom()
         elif step == "max_iterations":
             self._ui.clear_spinner()
+            self._ui.scroll_to_bottom()
 
     # ---------------------------------------------------------------------
     # Commands
@@ -640,8 +642,6 @@ class ReactShell:
                 self._max_tokens = config["max_tokens"]
             if "max_history_messages" in config:
                 self._max_history_messages = config["max_history_messages"]
-            if "max_iterations" in config:
-                self._max_iterations = config["max_iterations"]
             if "auto_approve" in config:
                 self._auto_approve = config["auto_approve"]
         except Exception:
@@ -655,7 +655,6 @@ class ReactShell:
             config = {
                 "max_tokens": self._max_tokens,
                 "max_history_messages": getattr(self, "_max_history_messages", -1),
-                "max_iterations": self._max_iterations,
                 "auto_approve": self._auto_approve,
             }
             self._config_file.write_text(json.dumps(config, indent=2))

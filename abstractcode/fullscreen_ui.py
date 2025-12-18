@@ -16,6 +16,7 @@ import time
 from typing import Callable, List, Optional, Tuple
 
 from prompt_toolkit.application import Application
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.filters import has_completions
@@ -27,6 +28,7 @@ from prompt_toolkit.layout.containers import Float, FloatContainer, HSplit, VSpl
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.layout.menus import CompletionsMenu
+from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 from prompt_toolkit.styles import Style
 
 
@@ -82,6 +84,30 @@ class CommandCompleter(Completer):
 class FullScreenUI:
     """Full-screen chat interface with scrollable history and ANSI color support."""
 
+    class _ScrollAwareFormattedTextControl(FormattedTextControl):
+        def __init__(
+            self,
+            *,
+            text: Callable[[], FormattedText],
+            get_cursor_position: Callable[[], Point],
+            on_scroll: Callable[[int], None],
+        ):
+            super().__init__(
+                text=text,
+                focusable=True,
+                get_cursor_position=get_cursor_position,
+            )
+            self._on_scroll = on_scroll
+
+        def mouse_handler(self, mouse_event: MouseEvent):  # type: ignore[override]
+            if mouse_event.event_type == MouseEventType.SCROLL_UP:
+                self._on_scroll(-3)
+                return None
+            if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
+                self._on_scroll(3)
+                return None
+            return NotImplemented
+
     def __init__(
         self,
         get_status_text: Callable[[], str],
@@ -102,17 +128,22 @@ class FullScreenUI:
 
         # Output content storage (raw text with ANSI codes)
         self._output_text: str = ""
+        # Always track at least 1 line (even when output is empty).
+        self._output_line_count: int = 1
         # Scroll position (line offset from top)
         self._scroll_offset: int = 0
+        # When True, keep the view pinned to the latest output.
+        # When the user scrolls up, this is disabled until they scroll back to bottom.
+        self._follow_output: bool = True
 
         # Thread safety for output
         self._output_lock = threading.Lock()
 
-        # Cached pre-parsed output snapshot (ensures atomic consistency
-        # between _get_output_formatted() and _get_cursor_position())
-        self._cached_formatted: Optional[FormattedText] = None
-        self._cached_line_count: int = 0
-        self._cached_text_version: str = ""
+        # Render-cycle cache: keep output stable during a single render pass.
+        # This prevents prompt_toolkit from seeing text/cursor from different snapshots.
+        self._render_cache_counter: Optional[int] = None
+        self._render_cache_formatted: FormattedText = ANSI("")
+        self._render_cache_line_count: int = 1
 
         # Command queue for background processing
         self._command_queue: queue.Queue[Optional[str]] = queue.Queue()
@@ -158,68 +189,57 @@ class FullScreenUI:
             erase_when_done=False,
         )
 
-    def _get_output_formatted(self) -> FormattedText:
-        """Get formatted output text with ANSI color support (thread-safe).
+    def _ensure_render_cache(self) -> None:
+        """Freeze a per-render snapshot for prompt_toolkit.
 
-        Returns cached pre-parsed ANSI result to ensure consistency with
-        _get_cursor_position() during the same render cycle. This eliminates
-        race conditions where text changes between the two method calls.
+        prompt_toolkit may call our text provider and cursor provider multiple times
+        in one render pass. If output changes between those calls, prompt_toolkit can
+        crash (e.g. while wrapping/scrolling). We avoid that by caching a snapshot
+        keyed by `Application.render_counter`.
         """
+        try:
+            render_counter = get_app().render_counter
+        except Exception:
+            render_counter = None
+
         with self._output_lock:
-            if self._cached_formatted is None:
-                # First call or cache invalidated - rebuild
-                self._invalidate_output_cache()
-            return self._cached_formatted
+            if self._render_cache_counter == render_counter:
+                return
+            text_snapshot = self._output_text
+            line_count_snapshot = self._output_line_count
+
+        formatted = ANSI(text_snapshot) if text_snapshot else ANSI("")
+        line_count = max(1, int(line_count_snapshot or 1))
+
+        with self._output_lock:
+            # Don't overwrite a cache that was already created for this render.
+            if self._render_cache_counter == render_counter:
+                return
+            self._render_cache_counter = render_counter
+            self._render_cache_formatted = formatted
+            self._render_cache_line_count = line_count
+
+    def _get_output_formatted(self) -> FormattedText:
+        """Get formatted output text with ANSI color support (render-stable)."""
+        self._ensure_render_cache()
+        with self._output_lock:
+            return self._render_cache_formatted
 
     def _get_cursor_position(self) -> Point:
-        """Get cursor position for scrolling (thread-safe).
-
-        Uses cached line count to ensure consistency with _get_output_formatted()
-        during the same render cycle. Both methods read from the same snapshot,
-        eliminating race conditions between text updates and rendering.
-
-        prompt_toolkit scrolls the view to make the cursor visible.
-        By setting cursor to scroll_offset, we control which line is visible.
-        """
+        """Get cursor position for scrolling (render-stable)."""
+        self._ensure_render_cache()
         with self._output_lock:
-            if self._cached_formatted is None:
-                # Cache not initialized - rebuild
-                self._invalidate_output_cache()
-
-            # Use cached line count from same snapshot as formatted text
-            total_lines = self._cached_line_count
-
-            # Clamp scroll_offset to valid range [0, total_lines - 1]
-            # Line indices are 0-based, so max valid index is total_lines - 1
+            total_lines = self._render_cache_line_count
             safe_offset = max(0, min(self._scroll_offset, total_lines - 1))
             return Point(0, safe_offset)
-
-    def _invalidate_output_cache(self) -> None:
-        """Invalidate cached ANSI-parsed output (must be called under lock).
-
-        This ensures both _get_output_formatted() and _get_cursor_position()
-        return values from the same text snapshot, eliminating race conditions.
-
-        CRITICAL: Must be called with self._output_lock held.
-        """
-        if not self._output_text:
-            self._cached_formatted = FormattedText([])
-            self._cached_line_count = 0
-            self._cached_text_version = ""
-            return
-
-        # Parse ANSI under lock (happens once per text change)
-        self._cached_formatted = ANSI(self._output_text)
-        self._cached_line_count = self._output_text.count('\n') + 1
-        self._cached_text_version = self._output_text
 
     def _build_layout(self) -> None:
         """Build the HSplit layout with output, input, and status areas."""
         # Output area using FormattedTextControl for ANSI color support
-        self._output_control = FormattedTextControl(
+        self._output_control = self._ScrollAwareFormattedTextControl(
             text=self._get_output_formatted,
-            focusable=True,
             get_cursor_position=self._get_cursor_position,
+            on_scroll=self._scroll,
         )
 
         output_window = Window(
@@ -257,7 +277,7 @@ class FullScreenUI:
         # Help hint bar
         help_bar = Window(
             content=FormattedTextControl(
-                lambda: [("class:help", " Enter=submit | ↑/↓=history | PgUp/PgDn=scroll | Home/End=top/bottom | Ctrl+C=exit")]
+                lambda: [("class:help", " Enter=submit | ↑/↓=history | Ctrl+↑/↓ or Wheel=scroll | Home=top | End=follow | Ctrl+C=exit")]
             ),
             height=1,
             style="class:help-bar",
@@ -326,6 +346,9 @@ class FullScreenUI:
                 else:
                     # Queue for background processing (don't exit app!)
                     self._command_queue.put(text)
+
+                # After submitting, jump back to the latest output.
+                self.scroll_to_bottom()
 
                 # Trigger UI refresh
                 event.app.invalidate()
@@ -420,17 +443,39 @@ class FullScreenUI:
             self._scroll(10)
             event.app.invalidate()
 
+        # Shift+PageUp/PageDown (some terminals send these for paging)
+        @self._kb.add("s-pageup")
+        def shift_page_up(event):
+            self._scroll(-10)
+            event.app.invalidate()
+
+        @self._kb.add("s-pagedown")
+        def shift_page_down(event):
+            self._scroll(10)
+            event.app.invalidate()
+
+        # Mouse wheel scroll (trackpad / wheel)
+        @self._kb.add("<scroll-up>")
+        def mouse_scroll_up(event):
+            self._scroll(-3)
+            event.app.invalidate()
+
+        @self._kb.add("<scroll-down>")
+        def mouse_scroll_down(event):
+            self._scroll(3)
+            event.app.invalidate()
+
         # Home = scroll to top
         @self._kb.add("home")
         def scroll_to_top(event):
             self._scroll_offset = 0
+            self._follow_output = False
             event.app.invalidate()
 
         # End = scroll to bottom
         @self._kb.add("end")
         def scroll_to_end(event):
-            total_lines = self._get_total_lines()
-            self._scroll_offset = max(0, total_lines - 1)
+            self.scroll_to_bottom()
             event.app.invalidate()
 
         # Alt+Enter = insert newline in input
@@ -446,24 +491,30 @@ class FullScreenUI:
     def _get_total_lines(self) -> int:
         """Get total number of lines in output (thread-safe)."""
         with self._output_lock:
-            if not self._output_text:
-                return 0
-            return self._output_text.count('\n') + 1
+            return self._output_line_count
 
     def _scroll(self, lines: int) -> None:
         """Scroll the output by N lines."""
-        total_lines = self._get_total_lines()
-        if total_lines == 0:
-            return
-        # Line indices are 0-based, so valid range is [0, total_lines - 1]
-        max_offset = max(0, total_lines - 1)
-        self._scroll_offset = max(0, min(max_offset, self._scroll_offset + lines))
+        with self._output_lock:
+            total_lines = self._output_line_count
+            # Line indices are 0-based, so valid range is [0, total_lines - 1]
+            max_offset = max(0, total_lines - 1)
+            self._scroll_offset = max(0, min(max_offset, self._scroll_offset + lines))
+
+            # User-initiated scroll disables follow mode until we return to bottom.
+            if lines < 0:
+                self._follow_output = False
+            elif lines > 0 and self._scroll_offset >= max_offset:
+                self._follow_output = True
+        if self._app and self._app.is_running:
+            self._app.invalidate()
 
     def scroll_to_bottom(self) -> None:
         """Scroll to show the latest content at the bottom."""
-        total_lines = self._get_total_lines()
-        # Set cursor to last valid line index (0-based)
-        self._scroll_offset = max(0, total_lines - 1)
+        with self._output_lock:
+            total_lines = self._output_line_count
+            self._scroll_offset = max(0, total_lines - 1)
+            self._follow_output = True
         if self._app and self._app.is_running:
             self._app.invalidate()
 
@@ -495,16 +546,17 @@ class FullScreenUI:
         with self._output_lock:
             if self._output_text:
                 self._output_text += "\n" + text
+                self._output_line_count += 1 + text.count("\n")
             else:
                 self._output_text = text
+                self._output_line_count = max(1, text.count("\n") + 1)
 
-            # Invalidate cache - pre-parse ANSI under lock to ensure
-            # atomic consistency between formatted text and line count
-            self._invalidate_output_cache()
-
-            # Auto-scroll to bottom when new content added
-            # Use cached line count from the snapshot we just created
-            self._scroll_offset = max(0, self._cached_line_count - 1)
+            # Auto-scroll to bottom only when following output.
+            if self._follow_output:
+                self._scroll_offset = max(0, self._output_line_count - 1)
+            else:
+                # Keep current view, but make sure it's still a valid offset.
+                self._scroll_offset = max(0, min(self._scroll_offset, self._output_line_count - 1))
 
         # Trigger UI refresh (now safe - cache updated atomically)
         if self._app and self._app.is_running:
@@ -514,8 +566,9 @@ class FullScreenUI:
         """Clear the output area (thread-safe)."""
         with self._output_lock:
             self._output_text = ""
-            self._invalidate_output_cache()  # Clear cache atomically
+            self._output_line_count = 1
             self._scroll_offset = 0
+            self._follow_output = True
 
         if self._app and self._app.is_running:
             self._app.invalidate()
@@ -524,8 +577,9 @@ class FullScreenUI:
         """Replace all output with new text (thread-safe)."""
         with self._output_lock:
             self._output_text = text
-            self._invalidate_output_cache()  # Pre-parse under lock
+            self._output_line_count = max(1, text.count("\n") + 1) if text else 1
             self._scroll_offset = 0
+            self._follow_output = True
 
         if self._app and self._app.is_running:
             self._app.invalidate()
@@ -631,6 +685,8 @@ class FullScreenUI:
         Returns:
             The user's response, or empty string on timeout
         """
+        # Tool approvals must be visible even if the user scrolled up.
+        self.scroll_to_bottom()
         self.append_output(message)
 
         response_queue: queue.Queue[str] = queue.Queue()
