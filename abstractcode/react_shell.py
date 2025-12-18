@@ -371,6 +371,7 @@ class ReactShell:
             "compact",
             "spans",
             "expand",
+            "recall",
             "history",
             "resume",
             "quit",
@@ -550,6 +551,9 @@ class ReactShell:
             return False
         if command == "expand":
             self._handle_expand(arg)
+            return False
+        if command == "recall":
+            self._handle_recall(arg)
             return False
 
         self._print(_style(f"Unknown command: /{command}", _C.YELLOW, enabled=self._color))
@@ -1118,6 +1122,123 @@ class ReactShell:
         self._print(_style("\n✅ Span expanded into active context.", _C.GREEN, enabled=self._color))
         self._print(_style(f"Inserted: {inserted} messages (skipped {skipped} duplicates).", _C.DIM, enabled=self._color))
 
+    def _handle_recall(self, raw: str) -> None:
+        """Recall archived memory by time range / tags / keyword.
+
+        Usage:
+          /recall [--since ISO] [--until ISO] [--tag k=v] [--q text] [--limit N] [--show] [--into-context]
+                 [--placement after_summary|after_system|end]
+        """
+        from .recall import execute_recall, parse_recall_args
+
+        state = self._safe_get_state()
+        if state is None or not hasattr(state, "run_id"):
+            self._print(_style("No run loaded. Use /resume or start a task first.", _C.DIM, enabled=self._color))
+            return
+
+        try:
+            req = parse_recall_args(raw)
+        except Exception as e:
+            self._print(_style(f"Recall parse error: {e}", _C.YELLOW, enabled=self._color))
+            self._print(
+                _style(
+                    "Usage: /recall [--since ISO] [--until ISO] [--tag k=v] [--q text] [--limit N] [--show] [--into-context]",
+                    _C.DIM,
+                    enabled=self._color,
+                )
+            )
+            return
+
+        try:
+            res = execute_recall(
+                run_id=str(state.run_id),
+                run_store=self._runtime.run_store,
+                artifact_store=self._artifact_store,
+                request=req,
+            )
+        except Exception as e:
+            self._print(_style(f"Recall failed: {e}", _C.YELLOW, enabled=self._color))
+            return
+
+        matches = res.get("matches") if isinstance(res, dict) else None
+        matches = matches if isinstance(matches, list) else []
+        if not matches:
+            self._print(_style("No matching memories.", _C.DIM, enabled=self._color))
+            return
+
+        self._print(_style("\nRecall matches", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+        self._print(
+            _style(
+                f"Filters: since={req.since or '-'} until={req.until or '-'} tags={len(req.tags)} query={req.query or '-'}",
+                _C.DIM,
+                enabled=self._color,
+            )
+        )
+        self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+
+        for i, s in enumerate(matches, start=1):
+            if not isinstance(s, dict):
+                continue
+            kind = str(s.get("kind") or "span")
+            artifact_id = str(s.get("artifact_id") or "")
+            created = str(s.get("created_at") or "")
+            count = s.get("message_count")
+            tags = s.get("tags") if isinstance(s.get("tags"), dict) else {}
+            tags_txt = ", ".join([f"{k}={v}" for k, v in sorted(tags.items()) if isinstance(v, str) and v])
+
+            extra = ""
+            if kind == "conversation_span":
+                mode = str(s.get("compression_mode") or "")
+                focus = s.get("focus")
+                focus_txt = f" focus={focus}" if isinstance(focus, str) and focus else ""
+                extra = f" msgs={count or 0} mode={mode}{focus_txt}"
+            elif kind == "memory_note":
+                preview = str(s.get("note_preview") or "")
+                if preview:
+                    extra = f" note={preview}"
+
+            line = f"[{i}] {artifact_id} kind={kind} created_at={created}{extra}"
+            self._print(line)
+            if tags_txt:
+                self._print(_style(f"     tags: {tags_txt}", _C.DIM, enabled=self._color))
+
+        self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+
+        if req.show:
+            for s in matches:
+                if not isinstance(s, dict):
+                    continue
+                if str(s.get("kind") or "") != "memory_note":
+                    continue
+                artifact_id = str(s.get("artifact_id") or "")
+                if not artifact_id:
+                    continue
+                payload = self._artifact_store.load_json(artifact_id)
+                if not isinstance(payload, dict):
+                    continue
+                note = str(payload.get("note") or "").strip()
+                sources = payload.get("sources")
+                self._print(_style("\nNote", _C.MAGENTA, _C.BOLD, enabled=self._color))
+                self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+                self._print(f"span_id={artifact_id}")
+                if note:
+                    self._print(note)
+                if isinstance(sources, dict):
+                    self._print(_style("Sources:", _C.DIM, enabled=self._color))
+                    self._print(_style(json.dumps(sources, ensure_ascii=False, indent=2), _C.DIM, enabled=self._color))
+
+        rehydration = res.get("rehydration") if isinstance(res, dict) else None
+        if isinstance(rehydration, dict) and req.into_context:
+            inserted = int(rehydration.get("inserted") or 0)
+            skipped = int(rehydration.get("skipped") or 0)
+            self._print(_style("\n✅ Rehydrated into active context.", _C.GREEN, enabled=self._color))
+            self._print(_style(f"Inserted: {inserted} messages (skipped {skipped} duplicates).", _C.DIM, enabled=self._color))
+
+            updated = self._runtime.run_store.load(str(state.run_id))
+            if updated is not None:
+                self._agent.session_messages = self._messages_from_state(updated)
+
     def _show_help(self) -> None:
         self._print(
             "\nCommands:\n"
@@ -1131,6 +1252,7 @@ class ReactShell:
             "  /compact [mode]     Compress conversation context [light|standard|heavy]\n"
             "  /spans              List archived conversation spans (from /compact)\n"
             "  /expand <span>      Expand an archived span (--show, --into-context)\n"
+            "  /recall [opts]      Recall spans by time/tags/query (--into-context)\n"
             "  /history [N]        Show recent conversation history\n"
             "  /resume             Resume the saved/attached run\n"
             "  /clear              Clear memory and start fresh (aliases: /reset, /new)\n"
