@@ -753,7 +753,7 @@ class ReactShell:
             self._print(f"  Stored total:    {len(messages) + archived_msgs} msgs (active + archived)")
         self._print(_style("─" * 40, _C.DIM, enabled=self._color))
 
-    def _handle_compact(self, raw: str) -> None:
+    def _handle_compact(self, raw: str) -> Optional[Dict[str, Any]]:
         """Handle /compact command for conversation compression.
 
         Syntax: /compact [light|standard|heavy] [--preserve N] [focus topics...]
@@ -861,135 +861,78 @@ class ReactShell:
         self._ui.set_spinner("Compacting...")
 
         try:
-            # Lazy import to avoid startup overhead
-            from abstractcore import create_llm
-            from abstractcore.processing import BasicSummarizer, CompressionMode
+            # Runtime-owned compaction (ledgered + provenance-preserving).
+            from abstractruntime import Effect, EffectType, StepPlan, WorkflowSpec
+            from abstractruntime.core.models import RunStatus
 
-            # Map string to enum
-            mode_map = {
-                "light": CompressionMode.LIGHT,
-                "standard": CompressionMode.STANDARD,
-                "heavy": CompressionMode.HEAVY,
-            }
-            mode_enum = mode_map[compression_mode]
+            if state is None:
+                raise RuntimeError("No run loaded. Start a task or /resume before /compact.")
 
-            # Create summarizer using the current provider
-            llm_kwargs: Dict[str, Any] = {}
-            if self._max_tokens is not None:
-                llm_kwargs["max_tokens"] = int(self._max_tokens)
-            llm = create_llm(self._provider, model=self._model, **llm_kwargs)
-            summarizer = BasicSummarizer(llm, max_tokens=int(self._max_tokens or 32000))
+            target_run_id = getattr(state, "run_id", None)
+            if not isinstance(target_run_id, str) or not target_run_id:
+                raise RuntimeError("No run_id available for compaction.")
 
-            # Separate system messages from conversation
-            system_messages = [m for m in messages if m.get("role") == "system"]
-            conversation_messages = [m for m in messages if m.get("role") != "system"]
-            older_messages = conversation_messages[:-preserve_recent] if preserve_recent > 0 else conversation_messages
-            recent = conversation_messages[-preserve_recent:] if preserve_recent > 0 else []
-
-            # Summarize
-            summary_result = summarizer.summarize_chat_history(
-                messages=conversation_messages,
-                preserve_recent=preserve_recent,
-                focus=focus,
-                compression_mode=mode_enum
-            )
-
-            # Archive the summarized span as an artifact (durable, provenance-preserving).
-            archived_ref: Optional[str] = None
-            if older_messages and getattr(self, "_artifact_store", None) is not None:
-                run_id = state.run_id if state is not None else None
-                span_from = older_messages[0].get("timestamp")
-                span_to = older_messages[-1].get("timestamp")
-                from_id = (older_messages[0].get("metadata") or {}).get("message_id")
-                to_id = (older_messages[-1].get("metadata") or {}).get("message_id")
-                payload = {
-                    "messages": older_messages,
-                    "span": {
-                        "from_timestamp": span_from,
-                        "to_timestamp": span_to,
-                        "from_message_id": from_id,
-                        "to_message_id": to_id,
-                        "message_count": len(older_messages),
-                    },
-                    "created_at": now_iso(),
-                }
-                meta = self._artifact_store.store_json(
-                    payload,
-                    run_id=run_id,
-                    tags={
-                        "kind": "conversation_span",
-                        "mode": compression_mode,
-                        "preserve_recent": str(preserve_recent),
-                    },
-                )
-                archived_ref = meta.artifact_id
-
-            # Build new message list
-            new_messages = []
-
-            # Preserve system messages
-            new_messages.extend(system_messages)
-
-            # Add summary as system message
-            summary_metadata: Dict[str, Any] = {
-                "kind": "memory_summary",
+            payload: Dict[str, Any] = {
+                "target_run_id": target_run_id,
+                "preserve_recent": int(preserve_recent),
                 "compression_mode": compression_mode,
-                "preserve_recent": preserve_recent,
+                "tool_name": "compact_memory",
+                "call_id": "compact",
             }
             if focus:
-                summary_metadata["focus"] = focus
-            if archived_ref:
-                summary_metadata["source_artifact_id"] = archived_ref
-                summary_metadata["source_message_count"] = len(older_messages)
-                summary_metadata["source_from_timestamp"] = older_messages[0].get("timestamp")
-                summary_metadata["source_to_timestamp"] = older_messages[-1].get("timestamp")
-                summary_metadata["source_from_message_id"] = (
-                    (older_messages[0].get("metadata") or {}).get("message_id")
-                )
-                summary_metadata["source_to_message_id"] = (
-                    (older_messages[-1].get("metadata") or {}).get("message_id")
+                payload["focus"] = focus
+
+            def compact_node(run, ctx) -> StepPlan:
+                return StepPlan(
+                    node_id="compact",
+                    effect=Effect(
+                        type=EffectType.MEMORY_COMPACT,
+                        payload=payload,
+                        result_key="_temp.compact",
+                    ),
+                    next_node="done",
                 )
 
-            new_messages.append(
-                {
-                    "role": "system",
-                    "content": f"[CONVERSATION HISTORY SUMMARY]: {summary_result.summary}",
-                    "timestamp": now_iso(),
-                    "metadata": {"message_id": f"msg_{uuid.uuid4().hex}", **summary_metadata},
-                }
+            def done_node(run, ctx) -> StepPlan:
+                temp = run.vars.get("_temp")
+                if not isinstance(temp, dict):
+                    temp = {}
+                return StepPlan(node_id="done", complete_output={"result": temp.get("compact")})
+
+            wf = WorkflowSpec(
+                workflow_id="abstractcode_compact_command",
+                entry_node="compact",
+                nodes={"compact": compact_node, "done": done_node},
             )
 
-            new_messages.extend(recent)
+            comp_run_id = self._runtime.start(
+                workflow=wf,
+                vars={"context": {}, "scratchpad": {}, "_runtime": {}, "_temp": {}, "_limits": {}},
+                actor_id=getattr(state, "actor_id", None),
+                session_id=getattr(state, "session_id", None),
+                parent_run_id=target_run_id,
+            )
 
-            # Replace active context (and persist if run-backed).
-            self._agent.session_messages = new_messages
-            if state is not None:
-                ctx = state.vars.get("context")
-                if isinstance(ctx, dict):
-                    ctx["messages"] = new_messages
-                if isinstance(getattr(state, "output", None), dict):
-                    state.output["messages"] = new_messages
-                runtime_ns = state.vars.get("_runtime")
-                if isinstance(runtime_ns, dict) and archived_ref:
-                    spans = runtime_ns.get("memory_spans")
-                    if not isinstance(spans, list):
-                        spans = []
-                        runtime_ns["memory_spans"] = spans
-                    spans.append(
-                        {
-                            "kind": "conversation_span",
-                            "artifact_id": archived_ref,
-                            "created_at": now_iso(),
-                            "from_timestamp": summary_metadata.get("source_from_timestamp"),
-                            "to_timestamp": summary_metadata.get("source_to_timestamp"),
-                            "from_message_id": summary_metadata.get("source_from_message_id"),
-                            "to_message_id": summary_metadata.get("source_to_message_id"),
-                            "message_count": int(summary_metadata.get("source_message_count") or 0),
-                            "compression_mode": compression_mode,
-                            "focus": focus or None,
-                        }
-                    )
-                self._runtime.run_store.save(state)
+            comp_state = self._runtime.tick(workflow=wf, run_id=comp_run_id)
+            if comp_state.status != RunStatus.COMPLETED:
+                raise RuntimeError(comp_state.error or "Compaction failed")
+
+            compact_result = (comp_state.output or {}).get("result") or {}
+            result_list = compact_result.get("results") if isinstance(compact_result, dict) else None
+            first = result_list[0] if isinstance(result_list, list) and result_list else {}
+            meta_out = first.get("meta") if isinstance(first, dict) else None
+            meta_out = dict(meta_out) if isinstance(meta_out, dict) else {}
+
+            # Reload the target run to get the updated active context.
+            updated = self._runtime.run_store.load(target_run_id)
+            if updated is None:
+                raise RuntimeError("Could not reload run after compaction")
+
+            new_messages = self._messages_from_state(updated)
+
+            # Replace active context view in the agent (host-side mirror).
+            self._agent.session_messages = list(new_messages)
+            state = updated
 
             # Calculate stats
             old_tokens = sum(len(str(m.get("content", ""))) // 4 for m in messages)
@@ -1002,23 +945,23 @@ class ReactShell:
             self._print(_style("─" * 40, _C.DIM, enabled=self._color))
             self._print(f"Messages:   {len(messages)} → {len(new_messages)}")
             self._print(f"Tokens:     ~{old_tokens:,} → ~{new_tokens:,} ({reduction:.0f}% reduction)")
-            self._print(f"Confidence: {summary_result.confidence:.0%}")
+            conf = meta_out.get("confidence")
+            if isinstance(conf, (int, float)):
+                self._print(f"Confidence: {float(conf):.0%}")
             self._print(_style("─" * 40, _C.DIM, enabled=self._color))
 
             # Show key points
-            if summary_result.key_points:
+            key_points = meta_out.get("key_points") if isinstance(meta_out, dict) else None
+            if isinstance(key_points, list) and key_points:
                 self._print(_style("\nKey points preserved:", _C.CYAN, enabled=self._color))
-                for point in summary_result.key_points[:5]:
+                for point in [str(p) for p in key_points[:5]]:
                     truncated = point[:80] + "..." if len(point) > 80 else point
                     self._print(f"  • {truncated}")
-
-        except ImportError as e:
-            self._ui.clear_spinner()
-            self._print(_style(f"Import error: {e}", _C.RED, enabled=self._color))
-            self._print(_style("Ensure abstractcore is properly installed.", _C.DIM, enabled=self._color))
+            return {"ok": True, "comp_run_id": comp_run_id, "target_run_id": target_run_id, "meta": meta_out}
         except Exception as e:
             self._ui.clear_spinner()
             self._print(_style(f"Compaction failed: {e}", _C.RED, enabled=self._color))
+            return {"ok": False, "error": str(e)}
 
     def _handle_spans(self) -> None:
         """List archived conversation spans (stored in ArtifactStore)."""

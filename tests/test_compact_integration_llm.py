@@ -140,11 +140,21 @@ def test_compact_updates_active_context_and_archives_span() -> None:
     expected_active_len = system_count + 1 + preserve_recent
     expected_archived = max(0, conversation_count - preserve_recent)
 
-    try:
-        shell._handle_compact(f"standard --preserve {preserve_recent}")
-    except Exception as e:
-        _skip_if_llm_unavailable(e)
-        raise
+    result = shell._handle_compact(f"standard --preserve {preserve_recent}")
+    if isinstance(result, dict) and not result.get("ok", True):
+        _skip_if_llm_unavailable(RuntimeError(str(result.get("error") or "unknown error")))
+    if isinstance(result, dict):
+        comp_run_id = result.get("comp_run_id")
+        meta_out = result.get("meta") if isinstance(result.get("meta"), dict) else {}
+        llm_run_id = meta_out.get("llm_run_id") if isinstance(meta_out, dict) else None
+
+        if isinstance(comp_run_id, str) and comp_run_id:
+            ledger = shell._runtime.get_ledger(comp_run_id)
+            assert any((r.get("effect") or {}).get("type") == "memory_compact" for r in ledger)
+
+        if isinstance(llm_run_id, str) and llm_run_id:
+            llm_ledger = shell._runtime.get_ledger(llm_run_id)
+            assert any((r.get("effect") or {}).get("type") == "llm_call" for r in llm_ledger)
 
     updated = shell._runtime.run_store.load(run_id)
     assert updated is not None
@@ -174,12 +184,15 @@ def test_compact_updates_active_context_and_archives_span() -> None:
     assert isinstance(artifact_id, str) and artifact_id
     assert isinstance(meta.get("source_from_message_id"), str)
     assert isinstance(meta.get("source_to_message_id"), str)
+    assert f"span_id={artifact_id}" in str(summary_msg.get("content") or "")
 
     runtime_ns = updated.vars.get("_runtime") or {}
     assert isinstance(runtime_ns, dict)
     spans = runtime_ns.get("memory_spans") or []
     assert isinstance(spans, list) and spans
-    assert any(isinstance(s, dict) and s.get("artifact_id") == artifact_id for s in spans)
+    match = next((s for s in spans if isinstance(s, dict) and s.get("artifact_id") == artifact_id), None)
+    assert match is not None
+    assert match.get("summary_message_id") == meta.get("message_id")
 
     archived = shell._artifact_store.load_json(artifact_id)
     assert isinstance(archived, dict)
