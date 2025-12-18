@@ -3,13 +3,15 @@
 **A clean terminal CLI for multi-agent agentic coding**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 ---
 
-## 🚧 Under Development
+## Status
 
-AbstractCode is currently under active development. This is a placeholder release to reserve the package name on PyPI.
+AbstractCode is under active development. A minimal interactive shell exists to support manual testing of AbstractAgent workflows.
+
+Note: the PyPI release may lag behind the monorepo. For the latest development version, install from source.
 
 ## What is AbstractCode?
 
@@ -41,13 +43,43 @@ pip install abstractcode
 ## Quick Start
 
 ```bash
-# Coming soon!
+# Show options
+abstractcode --help
+
+# Durable resume is enabled by default (state file: ~/.abstractcode/state.json)
+# Override with:
+ABSTRACTCODE_STATE_FILE=.abstractcode.state.json abstractcode
+
+# Or disable persistence (in-memory only; cannot resume after quitting)
+abstractcode --no-state
+
+# Auto-approve tool calls (unsafe; bypasses interactive approvals)
+abstractcode --auto-approve
+
+# Limit agent iterations per task (default: 25)
+abstractcode --max-iterations 25
+
+# Run CodeAct instead of ReAct
+abstractcode --agent codeact
+```
+
+Notes:
+- Run resume state is stored next to the state file in `*.d/`.
+- Conversation history is stored in the run state (`RunState.vars["context"]["messages"]`) inside `*.d/`, and AbstractCode keeps the state file pointing at the most recent run so restarts can reload context.
+- In the interactive shell, commands are slash-prefixed (e.g. `/help`, `/status`, `/history`, `/task ...`).
+
+## Development (Monorepo)
+
+From the monorepo root:
+
+```bash
+pip install -e ./abstractcore -e ./abstractruntime -e ./abstractagent -e ./abstractcode
 abstractcode --help
 ```
 
 ## Requirements
 
-- Python 3.8 or higher
+- Python 3.10 or higher
 - AbstractCore
 - AbstractRuntime
 - AbstractAgent
@@ -78,3 +110,20 @@ MIT License - see LICENSE file for details.
 
 **AbstractCode** - Multi-agent agentic coding in your terminal, powered by the Abstract Framework.
 
+## Default Tools
+
+AbstractCode provides a curated set of 9 tools for coding tasks (ReAct agent):
+
+| Tool | Description |
+|------|-------------|
+| `list_files` | Find and list files using glob patterns (case-insensitive) |
+| `search_files` | Search for text patterns inside files using regex |
+| `read_file` | Read file contents with optional line range |
+| `write_file` | Write content to files, creating directories as needed |
+| `edit_file` | Edit files by replacing text patterns (supports regex, line ranges, preview mode) |
+| `execute_command` | Execute shell commands with security controls |
+| `web_search` | Search the web via DuckDuckGo (no API key required) |
+| `fetch_url` | Fetch a URL and return text/metadata (best-effort parsing) |
+| `self_improve` | Log improvement suggestions for later review |
+
+When running `--agent codeact`, AbstractCode exposes `execute_python` instead of the ReAct toolset.
