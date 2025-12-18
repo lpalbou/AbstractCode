@@ -41,7 +41,7 @@ COMMANDS = [
     ("compact", "Compress conversation [light|standard|heavy] [--preserve N] [focus...]"),
     ("new", "Start fresh (alias for /clear)"),
     ("reset", "Reset session (alias for /clear)"),
-    ("task", "Start a new task"),
+    ("task", "Start a new task (/task <text>)"),
     ("auto-accept", "Toggle auto-accept for tools [saved]"),
     ("max-tokens", "Show or set max tokens (-1 = auto) [saved]"),
     ("max-messages", "Show or set max history messages (-1 = unlimited) [saved]"),

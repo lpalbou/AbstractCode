@@ -55,6 +55,82 @@ class _ToolSpec:
     parameters: Dict[str, Any]
 
 
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _get_message_id(message: Dict[str, Any]) -> Optional[str]:
+    meta = message.get("metadata")
+    if not isinstance(meta, dict):
+        return None
+    msg_id = meta.get("message_id")
+    if isinstance(msg_id, str) and msg_id:
+        return msg_id
+    return None
+
+
+def _insert_archived_span(
+    *,
+    active_messages: List[Dict[str, Any]],
+    archived_messages: List[Dict[str, Any]],
+    artifact_id: str,
+) -> Tuple[List[Dict[str, Any]], int, int]:
+    """Insert archived messages into an active context view.
+
+    Insertion rule:
+    - If a `memory_summary` system message references `artifact_id`, insert immediately after it.
+    - Otherwise, insert after the last system message.
+
+    Deduplication:
+    - Skip archived messages whose `metadata.message_id` already exists in active context.
+    """
+    import uuid
+
+    insert_at = 0
+    for i, m in enumerate(active_messages):
+        if m.get("role") == "system":
+            insert_at = i + 1
+
+    for i, m in enumerate(active_messages):
+        if m.get("role") != "system":
+            continue
+        meta = m.get("metadata")
+        if not isinstance(meta, dict):
+            continue
+        if meta.get("kind") == "memory_summary" and meta.get("source_artifact_id") == artifact_id:
+            insert_at = i + 1
+            break
+
+    existing_ids = {mid for m in active_messages for mid in [_get_message_id(m)] if mid}
+    to_insert: List[Dict[str, Any]] = []
+    skipped = 0
+
+    for m in archived_messages:
+        if not isinstance(m, dict):
+            continue
+        m_copy = dict(m)
+        meta = m_copy.get("metadata")
+        if not isinstance(meta, dict):
+            meta = {}
+            m_copy["metadata"] = meta
+        mid = meta.get("message_id")
+        if not isinstance(mid, str) or not mid:
+            mid = f"msg_{uuid.uuid4().hex}"
+            meta["message_id"] = mid
+        if mid in existing_ids:
+            skipped += 1
+            continue
+        existing_ids.add(mid)
+        if not m_copy.get("timestamp"):
+            m_copy["timestamp"] = _now_iso()
+        to_insert.append(m_copy)
+
+    new_messages = list(active_messages[:insert_at]) + to_insert + list(active_messages[insert_at:])
+    return new_messages, len(to_insert), skipped
+
+
 class ReactShell:
     def __init__(
         self,
@@ -101,6 +177,7 @@ class ReactShell:
             from abstractruntime import InMemoryLedgerStore, InMemoryRunStore, JsonFileRunStore, JsonlLedgerStore
             from abstractruntime.core.models import RunStatus, WaitReason
             from abstractruntime.storage.snapshots import Snapshot, JsonSnapshotStore, InMemorySnapshotStore
+            from abstractruntime.storage.artifacts import FileArtifactStore, InMemoryArtifactStore
             from abstractruntime.integrations.abstractcore import (
                 LocalAbstractCoreLLMClient,
                 MappingToolExecutor,
@@ -186,6 +263,12 @@ class ReactShell:
             ledger_store=ledger_store,
             tool_executor=tool_executor,
         )
+        # Artifact storage is the durability-safe place for large payloads (including archived memory spans).
+        if self._store_dir is not None:
+            self._artifact_store = FileArtifactStore(self._store_dir)
+        else:
+            self._artifact_store = InMemoryArtifactStore()
+        self._runtime.set_artifact_store(self._artifact_store)
 
         self._agent = agent_cls(
             runtime=self._runtime,
@@ -272,9 +355,33 @@ class ReactShell:
                 self._ui.stop()
             return
 
-        # Reserved words check
+        # Reserved words check (commands must be slash-prefixed)
         lower = cmd.lower()
-        if lower in ("help", "tools", "status", "history", "resume", "quit", "exit", "q", "task", "clear", "reset", "new", "snapshot"):
+        if lower in (
+            "help",
+            "tools",
+            "status",
+            "auto-accept",
+            "auto_accept",
+            "max-tokens",
+            "max_tokens",
+            "max-messages",
+            "max_messages",
+            "memory",
+            "compact",
+            "spans",
+            "expand",
+            "history",
+            "resume",
+            "quit",
+            "exit",
+            "q",
+            "task",
+            "clear",
+            "reset",
+            "new",
+            "snapshot",
+        ):
             self._print(_style("Commands must start with '/'.", _C.DIM, enabled=self._color))
             self._print(_style(f"Try: /{lower}", _C.DIM, enabled=self._color))
             return
@@ -435,6 +542,12 @@ class ReactShell:
             return False
         if command == "compact":
             self._handle_compact(arg)
+            return False
+        if command == "spans":
+            self._handle_spans()
+            return False
+        if command == "expand":
+            self._handle_expand(arg)
             return False
 
         self._print(_style(f"Unknown command: /{command}", _C.YELLOW, enabled=self._color))
@@ -619,6 +732,26 @@ class ReactShell:
         self._print(f"  System/prompt:   ~{system_tokens:,}")
         self._print(f"  Tool schemas:    ~{tool_tokens:,}")
         self._print(f"  History ({len(messages)} msgs): ~{history_tokens:,}")
+
+        # Archived spans (stored, not in active context)
+        archived_spans = 0
+        archived_msgs = 0
+        if state is not None and hasattr(state, "vars"):
+            runtime_ns = state.vars.get("_runtime")
+            spans = runtime_ns.get("memory_spans") if isinstance(runtime_ns, dict) else None
+            if isinstance(spans, list):
+                archived_spans = len(spans)
+                for s in spans:
+                    if not isinstance(s, dict):
+                        continue
+                    try:
+                        archived_msgs += int(s.get("message_count") or 0)
+                    except Exception:
+                        continue
+
+        if archived_spans:
+            self._print(f"  Archived spans:  {archived_spans} ({archived_msgs} msgs)  [stored in ArtifactStore]")
+            self._print(f"  Stored total:    {len(messages) + archived_msgs} msgs (active + archived)")
         self._print(_style("─" * 40, _C.DIM, enabled=self._color))
 
     def _handle_compact(self, raw: str) -> None:
@@ -664,23 +797,49 @@ class ReactShell:
                 else:
                     self._print(_style("--preserve requires a number", _C.YELLOW, enabled=self._color))
                     return
-            elif part in ("light", "standard", "heavy"):
+
+            if part in ("light", "standard", "heavy"):
                 compression_mode = part
                 i += 1
-            else:
-                # Remaining args are focus topics
-                focus_topics.extend(parts[i:])
-                break
-            i += 1
+                continue
+
+            # Remaining args are focus topics
+            focus_topics.extend(parts[i:])
+            break
 
         # Build focus string
         focus = " ".join(focus_topics) if focus_topics else None
 
-        # Get current messages
-        messages = list(self._agent.session_messages or [])
+        state = self._safe_get_state()
+        if state is not None and state.status == self._RunStatus.RUNNING:
+            self._print(_style("Cannot compact while a run is actively running.", _C.YELLOW, enabled=self._color))
+            self._print(_style("Interrupt first, or compact between tasks.", _C.DIM, enabled=self._color))
+            return
+
+        # Get current messages (active context view)
+        if state is not None:
+            messages = self._messages_from_state(state)
+        else:
+            messages = list(self._agent.session_messages or [])
         if not messages:
             self._print(_style("No messages to compact.", _C.YELLOW, enabled=self._color))
             return
+
+        # Ensure message metadata has stable IDs for provenance.
+        import uuid
+        def now_iso() -> str:
+            return _now_iso()
+
+        for m in messages:
+            if not isinstance(m, dict):
+                continue
+            meta = m.get("metadata")
+            if not isinstance(meta, dict):
+                meta = {}
+                m["metadata"] = meta
+            meta.setdefault("message_id", f"msg_{uuid.uuid4().hex}")
+            if "timestamp" not in m or not m.get("timestamp"):
+                m["timestamp"] = now_iso()
 
         # Check if we have enough messages to warrant compaction
         non_system = [m for m in messages if m.get("role") != "system"]
@@ -716,12 +875,17 @@ class ReactShell:
             mode_enum = mode_map[compression_mode]
 
             # Create summarizer using the current provider
-            llm = create_llm(self._provider, model=self._model)
-            summarizer = BasicSummarizer(llm)
+            llm_kwargs: Dict[str, Any] = {}
+            if self._max_tokens is not None:
+                llm_kwargs["max_tokens"] = int(self._max_tokens)
+            llm = create_llm(self._provider, model=self._model, **llm_kwargs)
+            summarizer = BasicSummarizer(llm, max_tokens=int(self._max_tokens or 32000))
 
             # Separate system messages from conversation
             system_messages = [m for m in messages if m.get("role") == "system"]
             conversation_messages = [m for m in messages if m.get("role") != "system"]
+            older_messages = conversation_messages[:-preserve_recent] if preserve_recent > 0 else conversation_messages
+            recent = conversation_messages[-preserve_recent:] if preserve_recent > 0 else []
 
             # Summarize
             summary_result = summarizer.summarize_chat_history(
@@ -731,6 +895,36 @@ class ReactShell:
                 compression_mode=mode_enum
             )
 
+            # Archive the summarized span as an artifact (durable, provenance-preserving).
+            archived_ref: Optional[str] = None
+            if older_messages and getattr(self, "_artifact_store", None) is not None:
+                run_id = state.run_id if state is not None else None
+                span_from = older_messages[0].get("timestamp")
+                span_to = older_messages[-1].get("timestamp")
+                from_id = (older_messages[0].get("metadata") or {}).get("message_id")
+                to_id = (older_messages[-1].get("metadata") or {}).get("message_id")
+                payload = {
+                    "messages": older_messages,
+                    "span": {
+                        "from_timestamp": span_from,
+                        "to_timestamp": span_to,
+                        "from_message_id": from_id,
+                        "to_message_id": to_id,
+                        "message_count": len(older_messages),
+                    },
+                    "created_at": now_iso(),
+                }
+                meta = self._artifact_store.store_json(
+                    payload,
+                    run_id=run_id,
+                    tags={
+                        "kind": "conversation_span",
+                        "mode": compression_mode,
+                        "preserve_recent": str(preserve_recent),
+                    },
+                )
+                archived_ref = meta.artifact_id
+
             # Build new message list
             new_messages = []
 
@@ -738,18 +932,65 @@ class ReactShell:
             new_messages.extend(system_messages)
 
             # Add summary as system message
-            if len(conversation_messages) > preserve_recent:
-                new_messages.append({
-                    "role": "system",
-                    "content": f"[CONVERSATION HISTORY SUMMARY]: {summary_result.summary}"
-                })
+            summary_metadata: Dict[str, Any] = {
+                "kind": "memory_summary",
+                "compression_mode": compression_mode,
+                "preserve_recent": preserve_recent,
+            }
+            if focus:
+                summary_metadata["focus"] = focus
+            if archived_ref:
+                summary_metadata["source_artifact_id"] = archived_ref
+                summary_metadata["source_message_count"] = len(older_messages)
+                summary_metadata["source_from_timestamp"] = older_messages[0].get("timestamp")
+                summary_metadata["source_to_timestamp"] = older_messages[-1].get("timestamp")
+                summary_metadata["source_from_message_id"] = (
+                    (older_messages[0].get("metadata") or {}).get("message_id")
+                )
+                summary_metadata["source_to_message_id"] = (
+                    (older_messages[-1].get("metadata") or {}).get("message_id")
+                )
 
-            # Add preserved recent messages
-            recent = conversation_messages[-preserve_recent:] if preserve_recent > 0 else []
+            new_messages.append(
+                {
+                    "role": "system",
+                    "content": f"[CONVERSATION HISTORY SUMMARY]: {summary_result.summary}",
+                    "timestamp": now_iso(),
+                    "metadata": {"message_id": f"msg_{uuid.uuid4().hex}", **summary_metadata},
+                }
+            )
+
             new_messages.extend(recent)
 
-            # Replace session_messages in-place
+            # Replace active context (and persist if run-backed).
             self._agent.session_messages = new_messages
+            if state is not None:
+                ctx = state.vars.get("context")
+                if isinstance(ctx, dict):
+                    ctx["messages"] = new_messages
+                if isinstance(getattr(state, "output", None), dict):
+                    state.output["messages"] = new_messages
+                runtime_ns = state.vars.get("_runtime")
+                if isinstance(runtime_ns, dict) and archived_ref:
+                    spans = runtime_ns.get("memory_spans")
+                    if not isinstance(spans, list):
+                        spans = []
+                        runtime_ns["memory_spans"] = spans
+                    spans.append(
+                        {
+                            "kind": "conversation_span",
+                            "artifact_id": archived_ref,
+                            "created_at": now_iso(),
+                            "from_timestamp": summary_metadata.get("source_from_timestamp"),
+                            "to_timestamp": summary_metadata.get("source_to_timestamp"),
+                            "from_message_id": summary_metadata.get("source_from_message_id"),
+                            "to_message_id": summary_metadata.get("source_to_message_id"),
+                            "message_count": int(summary_metadata.get("source_message_count") or 0),
+                            "compression_mode": compression_mode,
+                            "focus": focus or None,
+                        }
+                    )
+                self._runtime.run_store.save(state)
 
             # Calculate stats
             old_tokens = sum(len(str(m.get("content", ""))) // 4 for m in messages)
@@ -780,6 +1021,161 @@ class ReactShell:
             self._ui.clear_spinner()
             self._print(_style(f"Compaction failed: {e}", _C.RED, enabled=self._color))
 
+    def _handle_spans(self) -> None:
+        """List archived conversation spans (stored in ArtifactStore)."""
+        state = self._safe_get_state()
+        if state is None or not hasattr(state, "vars"):
+            self._print(_style("No run loaded. Use /resume or start a task first.", _C.DIM, enabled=self._color))
+            return
+
+        runtime_ns = state.vars.get("_runtime")
+        spans = runtime_ns.get("memory_spans") if isinstance(runtime_ns, dict) else None
+        if not isinstance(spans, list) or not spans:
+            self._print(_style("No archived spans. Use /compact first.", _C.DIM, enabled=self._color))
+            return
+
+        self._print(_style("\nArchived spans", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+        for i, s in enumerate(spans, start=1):
+            if not isinstance(s, dict):
+                continue
+            artifact_id = str(s.get("artifact_id") or "")
+            count = s.get("message_count") or 0
+            created = str(s.get("created_at") or "")
+            mode = str(s.get("compression_mode") or "")
+            focus = s.get("focus")
+            focus_text = f" | focus={focus}" if focus else ""
+            self._print(f"[{i}] {artifact_id} | msgs={count} | {created} | mode={mode}{focus_text}")
+        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+
+    def _handle_expand(self, raw: str) -> None:
+        """Expand (rehydrate) an archived span.
+
+        Usage:
+          /expand <index|artifact_id> [--show] [--into-context]
+        """
+        import shlex
+
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split() if raw else []
+
+        if not parts:
+            self._print(_style("Usage: /expand <index|artifact_id> [--show] [--into-context]", _C.DIM, enabled=self._color))
+            self._print(_style("Tip: use /spans to list archived spans.", _C.DIM, enabled=self._color))
+            return
+
+        selector: Optional[str] = None
+        show = True
+        into_context = False
+        full = False
+
+        for p in parts:
+            if p == "--show":
+                show = True
+                continue
+            if p == "--into-context":
+                into_context = True
+                continue
+            if p == "--full":
+                full = True
+                continue
+            if p.startswith("--"):
+                continue
+            if selector is None:
+                selector = p
+
+        if selector is None:
+            self._print(_style("Usage: /expand <index|artifact_id> [--show] [--into-context]", _C.DIM, enabled=self._color))
+            return
+
+        state = self._safe_get_state()
+        if state is None or not hasattr(state, "vars"):
+            self._print(_style("No run loaded. Use /resume or start a task first.", _C.DIM, enabled=self._color))
+            return
+
+        runtime_ns = state.vars.get("_runtime")
+        spans = runtime_ns.get("memory_spans") if isinstance(runtime_ns, dict) else None
+        if not isinstance(spans, list) or not spans:
+            self._print(_style("No archived spans. Use /compact first.", _C.DIM, enabled=self._color))
+            return
+
+        span: Optional[Dict[str, Any]] = None
+        if selector.isdigit():
+            idx = int(selector) - 1
+            if 0 <= idx < len(spans) and isinstance(spans[idx], dict):
+                span = spans[idx]
+        else:
+            for s in spans:
+                if isinstance(s, dict) and s.get("artifact_id") == selector:
+                    span = s
+                    break
+
+        if not span:
+            self._print(_style(f"Span not found: {selector}", _C.YELLOW, enabled=self._color))
+            self._print(_style("Tip: use /spans to list archived spans.", _C.DIM, enabled=self._color))
+            return
+
+        artifact_id = str(span.get("artifact_id") or "")
+        if not artifact_id:
+            self._print(_style("Span is missing artifact_id.", _C.YELLOW, enabled=self._color))
+            return
+
+        payload = self._artifact_store.load_json(artifact_id)
+        if not isinstance(payload, dict):
+            self._print(_style(f"Artifact not found or invalid JSON: {artifact_id}", _C.YELLOW, enabled=self._color))
+            return
+
+        archived = payload.get("messages")
+        if not isinstance(archived, list):
+            self._print(_style(f"Artifact payload missing messages list: {artifact_id}", _C.YELLOW, enabled=self._color))
+            return
+
+        archived_messages = [m for m in archived if isinstance(m, dict)]
+
+        if show:
+            self._print(_style("\nExpanded span (read-only)", _C.CYAN, _C.BOLD, enabled=self._color))
+            self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+            self._print(f"Artifact:  {artifact_id}")
+            self._print(f"Messages:  {len(archived_messages)}")
+            self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+
+            shown = archived_messages
+            if not full and len(archived_messages) > 40:
+                shown = archived_messages[:20] + [{"role": "system", "content": "..."}] + archived_messages[-20:]
+
+            for m in shown:
+                role = str(m.get("role") or "unknown")
+                content = str(m.get("content") or "").strip()
+                if len(content) > 240:
+                    content = content[:237] + "..."
+                self._print(f"{role}: {content}")
+
+            if not full and len(archived_messages) > 40:
+                self._print(_style("\nTip: /expand <span> --show --full to print the entire span.", _C.DIM, enabled=self._color))
+
+        if not into_context:
+            return
+
+        active = self._messages_from_state(state)
+        new_messages, inserted, skipped = _insert_archived_span(
+            active_messages=active,
+            archived_messages=archived_messages,
+            artifact_id=artifact_id,
+        )
+
+        self._agent.session_messages = new_messages
+        ctx = state.vars.get("context")
+        if isinstance(ctx, dict):
+            ctx["messages"] = new_messages
+        if isinstance(getattr(state, "output", None), dict):
+            state.output["messages"] = new_messages
+        self._runtime.run_store.save(state)
+
+        self._print(_style("\n✅ Span expanded into active context.", _C.GREEN, enabled=self._color))
+        self._print(_style(f"Inserted: {inserted} messages (skipped {skipped} duplicates).", _C.DIM, enabled=self._color))
+
     def _show_help(self) -> None:
         self._print(
             "\nCommands:\n"
@@ -791,6 +1187,8 @@ class ReactShell:
             "  /max-messages [N]   Show or set max history messages (-1 = unlimited) [saved]\n"
             "  /memory             Show current token usage breakdown\n"
             "  /compact [mode]     Compress conversation context [light|standard|heavy]\n"
+            "  /spans              List archived conversation spans (from /compact)\n"
+            "  /expand <span>      Expand an archived span (--show, --into-context)\n"
             "  /history [N]        Show recent conversation history\n"
             "  /resume             Resume the saved/attached run\n"
             "  /clear              Clear memory and start fresh (aliases: /reset, /new)\n"
@@ -800,7 +1198,6 @@ class ReactShell:
             "  /quit               Exit\n"
             "\nTasks:\n"
             "  /task <text>        Start a new task\n"
-            "  <text>              Start a new task (any line not starting with '/')\n"
         )
 
     def _show_tools(self) -> None:

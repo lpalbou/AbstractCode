@@ -3,7 +3,7 @@
 **A clean terminal CLI for multi-agent agentic coding**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 ---
 
@@ -56,8 +56,11 @@ abstractcode --no-state
 # Auto-approve tool calls (unsafe; bypasses interactive approvals)
 abstractcode --auto-approve
 
-# Limit agent iterations per task (default: 20)
+# Limit agent iterations per task (default: 25)
 abstractcode --max-iterations 25
+
+# Run CodeAct instead of ReAct
+abstractcode --agent codeact
 ```
 
 Notes:
@@ -76,7 +79,7 @@ abstractcode --help
 
 ## Requirements
 
-- Python 3.8 or higher
+- Python 3.10 or higher
 - AbstractCore
 - AbstractRuntime
 - AbstractAgent
@@ -109,7 +112,7 @@ MIT License - see LICENSE file for details.
 
 ## Default Tools
 
-AbstractCode provides a curated set of 8 tools for coding tasks:
+AbstractCode provides a curated set of 9 tools for coding tasks (ReAct agent):
 
 | Tool | Description |
 |------|-------------|
@@ -120,6 +123,7 @@ AbstractCode provides a curated set of 8 tools for coding tasks:
 | `edit_file` | Edit files by replacing text patterns (supports regex, line ranges, preview mode) |
 | `execute_command` | Execute shell commands with security controls |
 | `web_search` | Search the web via DuckDuckGo (no API key required) |
+| `fetch_url` | Fetch a URL and return text/metadata (best-effort parsing) |
 | `self_improve` | Log improvement suggestions for later review |
 
-Additional tools are available via AbstractAgent for specialized use cases (execute_python, fetch_url).
+When running `--agent codeact`, AbstractCode exposes `execute_python` instead of the ReAct toolset.
