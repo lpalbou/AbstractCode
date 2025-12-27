@@ -1,6 +1,6 @@
 # AbstractCode
 
-**A clean terminal CLI for multi-agent agentic coding**
+**A clean terminal host for AbstractFramework agents and workflows**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -15,7 +15,9 @@ Note: the PyPI release may lag behind the monorepo. For the latest development v
 
 ## What is AbstractCode?
 
-AbstractCode is a clean terminal CLI for multi-agent agentic coding, similar to Claude Code, Codex, and Gemini CLI. It leverages the powerful Abstract Framework ecosystem to provide seamless AI-powered coding assistance directly in your terminal.
+AbstractCode is a terminal host for:
+- **Agents** (ReAct / CodeAct) built on AbstractAgent + AbstractRuntime
+- **Workflows** authored in AbstractFlow (VisualFlow JSON) and executed durably by AbstractRuntime
 
 ## The Abstract Framework
 
@@ -24,20 +26,18 @@ AbstractCode is built on top of the Abstract Framework, a comprehensive suite of
 - **[AbstractCore](https://github.com/lpalbou/abstractcore)** - Unified interface for multiple LLM providers
 - **[AbstractRuntime](https://github.com/lpalbou/abstractruntime)** - Runtime environment for AI agents
 - **[AbstractAgent](https://github.com/lpalbou/abstractagent)** - Multi-agent orchestration and coordination
-
-## Features (Coming Soon)
-
-- 🤖 **Multi-Agent Coding** - Coordinate multiple AI agents for complex coding tasks
-- 🔌 **Provider Agnostic** - Works with OpenAI, Anthropic, Ollama, and more
-- 💻 **Terminal Native** - Clean CLI interface for seamless workflow integration
-- 🎯 **Context Aware** - Understands your codebase and project structure
-- 🔄 **Iterative Development** - Collaborative coding with AI assistance
-- 🌐 **Offline Capable** - Works with local models via Ollama
+- **[AbstractFlow](https://github.com/lpalbou/AbstractFlow)** - Visual workflow authoring (VisualFlow JSON)
 
 ## Installation
 
 ```bash
 pip install abstractcode
+```
+
+To run AbstractFlow workflows from AbstractCode:
+
+```bash
+pip install "abstractcode[flow]"
 ```
 
 ## Quick Start
@@ -68,6 +68,80 @@ Notes:
 - Conversation history is stored in the run state (`RunState.vars["context"]["messages"]`) inside `*.d/`, and AbstractCode keeps the state file pointing at the most recent run so restarts can reload context.
 - In the interactive shell, commands are slash-prefixed (e.g. `/help`, `/status`, `/history`, `/task ...`).
 
+## Run AbstractFlow Workflows (CLI)
+
+Visual workflows authored in AbstractFlow are portable `VisualFlow` JSON files. AbstractCode can run them via:
+
+```bash
+abstractcode flow run <flow_id_or_path> [inputs...]
+```
+
+### Passing inputs (no JSON typing required)
+
+Any unknown flags are treated as input variables, with basic type coercion:
+- `true`/`false` → booleans
+- numbers → ints/floats
+- `{...}` / `[...]` → parsed JSON
+
+Examples:
+
+```bash
+# Run by path, pass inputs as flags
+abstractcode flow run abstractflow/web/flows/4e2f2329.json --query "who are you?"
+
+# Deep research example
+abstractcode flow run abstractflow/web/flows/b3a9d7c1.json \\
+  --query "who are you?" \\
+  --max_web_search 15 \\
+  --max_fetch_url 50 \\
+  --follow_up_questions true
+```
+
+Other input options:
+
+```bash
+# Provide inputs from a JSON file
+abstractcode flow run deep-research-pro --input-json-file params.json
+
+# Or repeatable key=value
+abstractcode flow run deep-research-pro --param query="who are you?" --param max_web_search=15
+```
+
+### Tool approvals
+
+By default, tool calls are approval-gated:
+- choose `a` to approve all remaining tool calls for that run
+- use `--accept-tools` (alias: `--auto-approve`) to auto-execute tools without prompts (unsafe)
+
+### Resume / pause / cancel
+
+```bash
+abstractcode flow resume
+abstractcode flow pause
+abstractcode flow resume-run
+abstractcode flow cancel
+```
+
+### State locations
+
+- Agent shell state: `~/.abstractcode/state.json` (stores in `~/.abstractcode/state.d/`)
+- Flow runner state: `~/.abstractcode/flow_state.json` (stores in `~/.abstractcode/flow_state.d/`)
+
+Environment variables:
+- `ABSTRACTCODE_STATE_FILE`
+- `ABSTRACTCODE_FLOW_STATE_FILE`
+- `ABSTRACTFLOW_FLOWS_DIR`
+
+## Run Workflows Inside the REPL
+
+In the interactive shell you can run flows without leaving the session:
+
+```text
+/flow run deep-research-pro --query "..." --max_web_search 10 --follow_up_questions true
+```
+
+`ANSWER_USER` outputs from the workflow are appended to the current conversation’s active context (durably when a run is loaded), so you can continue the dialogue naturally.
+
 ## Development (Monorepo)
 
 From the monorepo root:
@@ -83,6 +157,7 @@ abstractcode --help
 - AbstractCore
 - AbstractRuntime
 - AbstractAgent
+  - (Optional) AbstractFlow for `abstractcode flow ...`
 
 ## Documentation
 

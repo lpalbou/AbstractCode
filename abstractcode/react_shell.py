@@ -555,10 +555,219 @@ class ReactShell:
         if command == "recall":
             self._handle_recall(arg)
             return False
+        if command == "flow":
+            self._handle_flow(arg)
+            return False
 
         self._print(_style(f"Unknown command: /{command}", _C.YELLOW, enabled=self._color))
         self._print(_style("Type /help for commands.", _C.DIM, enabled=self._color))
         return False
+
+    def _append_to_active_context(self, *, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+        """Append a message to the active context view (durably when a run is loaded)."""
+        import uuid
+
+        msg: Dict[str, Any] = {
+            "role": str(role or "assistant"),
+            "content": str(content or ""),
+            "timestamp": _now_iso(),
+        }
+        meta = dict(metadata or {})
+        if "message_id" not in meta:
+            meta["message_id"] = f"msg_{uuid.uuid4().hex}"
+        msg["metadata"] = meta
+
+        state = self._safe_get_state()
+        if state is None or not hasattr(state, "vars"):
+            self._agent.session_messages = list(self._agent.session_messages or []) + [msg]
+            return
+
+        messages = self._messages_from_state(state)
+        messages.append(msg)
+
+        self._agent.session_messages = list(messages)
+        ctx = state.vars.get("context")
+        if isinstance(ctx, dict):
+            ctx["messages"] = messages
+        if isinstance(getattr(state, "output", None), dict):
+            state.output["messages"] = messages
+        self._runtime.run_store.save(state)
+
+    def _handle_flow(self, raw: str) -> None:
+        """Run/resume/pause/cancel an AbstractFlow VisualFlow from inside the REPL.
+
+        Examples:
+          /flow run deep-research-pro --query "who are you?" --max_web_search 10 --follow_up_questions true
+          /flow resume
+          /flow pause
+          /flow resume-run
+          /flow cancel
+        """
+        import shlex
+
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split() if raw else []
+
+        if not parts:
+            self._print(_style("Usage:", _C.DIM, enabled=self._color))
+            self._print(_style("  /flow run <flow_id_or_path> [--key value ...]", _C.DIM, enabled=self._color))
+            self._print(_style("  /flow resume|pause|resume-run|cancel", _C.DIM, enabled=self._color))
+            return
+
+        action = parts[0].strip().lower()
+
+        from .flow_cli import control_flow_command, resume_flow_command, run_flow_command
+
+        def _emit_answer_user(message: str) -> None:
+            self._print(message)
+            self._append_to_active_context(
+                role="assistant",
+                content=message,
+                metadata={"kind": "flow_output"},
+            )
+
+        if action == "run":
+            if len(parts) < 2:
+                self._print(_style("Usage: /flow run <flow_id_or_path> [--key value ...]", _C.DIM, enabled=self._color))
+                return
+
+            flow_ref = parts[1]
+            rest = parts[2:]
+
+            flows_dir: Optional[str] = None
+            input_json: Optional[str] = None
+            input_file: Optional[str] = None
+            params: List[str] = []
+            extra_args: List[str] = []
+            wait_until = False
+            auto_approve = bool(self._auto_approve)
+            no_state = self._state_file is None
+            flow_state_file: Optional[str] = None
+
+            i = 0
+            while i < len(rest):
+                token = rest[i]
+
+                def _opt_value() -> Optional[str]:
+                    if "=" in token:
+                        return token.split("=", 1)[1]
+                    if i + 1 < len(rest):
+                        return rest[i + 1]
+                    return None
+
+                if token.startswith("--flows-dir"):
+                    val = _opt_value()
+                    if val is None:
+                        self._print(_style("Missing value for --flows-dir", _C.YELLOW, enabled=self._color))
+                        return
+                    flows_dir = val
+                    i += 2 if "=" not in token else 1
+                    continue
+
+                if token.startswith("--input-json"):
+                    val = _opt_value()
+                    if val is None:
+                        self._print(_style("Missing value for --input-json", _C.YELLOW, enabled=self._color))
+                        return
+                    input_json = val
+                    i += 2 if "=" not in token else 1
+                    continue
+
+                if token.startswith("--input-file") or token.startswith("--input-json-file"):
+                    val = _opt_value()
+                    if val is None:
+                        self._print(_style("Missing value for --input-file", _C.YELLOW, enabled=self._color))
+                        return
+                    input_file = val
+                    i += 2 if "=" not in token else 1
+                    continue
+
+                if token == "--param" or token.startswith("--param="):
+                    val = _opt_value()
+                    if val is None:
+                        self._print(_style("Missing value for --param (expected key=value)", _C.YELLOW, enabled=self._color))
+                        return
+                    params.append(val)
+                    i += 2 if "=" not in token else 1
+                    continue
+
+                if token == "--wait-until":
+                    wait_until = True
+                    i += 1
+                    continue
+
+                if token in ("--auto-approve", "--auto-accept", "--accept-tools"):
+                    auto_approve = True
+                    i += 1
+                    continue
+
+                if token == "--no-state":
+                    no_state = True
+                    i += 1
+                    continue
+
+                if token.startswith("--flow-state-file"):
+                    val = _opt_value()
+                    if val is None:
+                        self._print(_style("Missing value for --flow-state-file", _C.YELLOW, enabled=self._color))
+                        return
+                    flow_state_file = val
+                    i += 2 if "=" not in token else 1
+                    continue
+
+                # Unrecognized: treat as dynamic input param (e.g. --query "..." or key=value).
+                extra_args.append(token)
+                i += 1
+
+            try:
+                run_flow_command(
+                    flow_ref=str(flow_ref),
+                    flows_dir=flows_dir,
+                    input_json=input_json,
+                    input_file=input_file,
+                    params=params,
+                    extra_args=extra_args,
+                    flow_state_file=flow_state_file,
+                    no_state=bool(no_state),
+                    auto_approve=bool(auto_approve),
+                    wait_until=bool(wait_until),
+                    print_fn=self._print,
+                    prompt_fn=self._simple_prompt,
+                    ask_user_fn=self._prompt_user,
+                    on_answer_user=_emit_answer_user,
+                )
+            except Exception as e:
+                self._print(_style(f"Flow run failed: {e}", _C.YELLOW, enabled=self._color))
+            return
+
+        if action == "resume":
+            try:
+                resume_flow_command(
+                    flow_state_file=None,
+                    no_state=False,
+                    auto_approve=bool(self._auto_approve),
+                    wait_until=False,
+                    print_fn=self._print,
+                    prompt_fn=self._simple_prompt,
+                    ask_user_fn=self._prompt_user,
+                    on_answer_user=_emit_answer_user,
+                )
+            except Exception as e:
+                self._print(_style(f"Flow resume failed: {e}", _C.YELLOW, enabled=self._color))
+            return
+
+        if action in ("pause", "resume-run", "cancel"):
+            mapping = {"pause": "pause", "resume-run": "resume", "cancel": "cancel"}
+            try:
+                control_flow_command(action=mapping[action], flow_state_file=None)
+            except Exception as e:
+                self._print(_style(f"Flow control failed: {e}", _C.YELLOW, enabled=self._color))
+            return
+
+        self._print(_style(f"Unknown /flow action: {action}", _C.YELLOW, enabled=self._color))
+        self._print(_style("Usage: /flow run|resume|pause|resume-run|cancel ...", _C.DIM, enabled=self._color))
 
     def _set_auto_accept(self, raw: str) -> None:
         value = raw.strip().lower()
@@ -1253,6 +1462,7 @@ class ReactShell:
             "  /spans              List archived conversation spans (from /compact)\n"
             "  /expand <span>      Expand an archived span (--show, --into-context)\n"
             "  /recall [opts]      Recall spans by time/tags/query (--into-context)\n"
+            "  /flow ...           Run AbstractFlow workflows (run/resume/pause/cancel)\n"
             "  /history [N]        Show recent conversation history\n"
             "  /resume             Resume the saved/attached run\n"
             "  /clear              Clear memory and start fresh (aliases: /reset, /new)\n"
