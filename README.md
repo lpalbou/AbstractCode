@@ -1,34 +1,11 @@
 # AbstractCode
 
-**A clean terminal host for AbstractFramework agents and workflows**
+Terminal TUI for the AbstractFramework:
+- run **agents** (ReAct / CodeAct)
+- run **workflows** authored in AbstractFlow (VisualFlow JSON)
+- keep everything **durable** via AbstractRuntime (runs, ledger, artifacts)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-
----
-
-## Status
-
-AbstractCode is under active development. A minimal interactive shell exists to support manual testing of AbstractAgent workflows.
-
-Note: the PyPI release may lag behind the monorepo. For the latest development version, install from source.
-
-## What is AbstractCode?
-
-AbstractCode is a terminal host for:
-- **Agents** (ReAct / CodeAct) built on AbstractAgent + AbstractRuntime
-- **Workflows** authored in AbstractFlow (VisualFlow JSON) and executed durably by AbstractRuntime
-
-## The Abstract Framework
-
-AbstractCode is built on top of the Abstract Framework, a comprehensive suite of tools for AI-powered development:
-
-- **[AbstractCore](https://github.com/lpalbou/abstractcore)** - Unified interface for multiple LLM providers
-- **[AbstractRuntime](https://github.com/lpalbou/abstractruntime)** - Runtime environment for AI agents
-- **[AbstractAgent](https://github.com/lpalbou/abstractagent)** - Multi-agent orchestration and coordination
-- **[AbstractFlow](https://github.com/lpalbou/AbstractFlow)** - Visual workflow authoring (VisualFlow JSON)
-
-## Installation
+## Install
 
 ```bash
 pip install abstractcode
@@ -40,80 +17,62 @@ To run AbstractFlow workflows from AbstractCode:
 pip install "abstractcode[flow]"
 ```
 
-## Quick Start
+## Start the TUI (Agents)
 
 ```bash
-# Show options
-abstractcode --help
-
-# Durable resume is enabled by default (state file: ~/.abstractcode/state.json)
-# Override with:
-ABSTRACTCODE_STATE_FILE=.abstractcode.state.json abstractcode
-
-# Or disable persistence (in-memory only; cannot resume after quitting)
-abstractcode --no-state
-
-# Auto-approve tool calls (unsafe; bypasses interactive approvals)
-abstractcode --auto-approve
-
-# Limit agent iterations per task (default: 25)
-abstractcode --max-iterations 25
-
-# Run CodeAct instead of ReAct
-abstractcode --agent codeact
+abstractcode --provider lmstudio --model qwen/qwen3-next-80b
 ```
 
-Notes:
-- Run resume state is stored next to the state file in `*.d/`.
-- Conversation history is stored in the run state (`RunState.vars["context"]["messages"]`) inside `*.d/`, and AbstractCode keeps the state file pointing at the most recent run so restarts can reload context.
-- In the interactive shell, commands are slash-prefixed (e.g. `/help`, `/status`, `/history`, `/task ...`).
+Interaction model:
+- commands are slash-prefixed (`/help`)
+- any non-command line starts a task (same as `/task ...`)
 
-## Run AbstractFlow Workflows (CLI)
+### Useful commands
+- `/status` (run status)
+- `/auto-accept on|off` (tool approvals)
+- `/max-tokens N` (or `-1` auto-detect)
+- `/compact [light|standard|heavy] [--preserve N] [focus...]` (durable compaction)
+- `/spans`, `/expand <span> [--show] [--into-context]` (provenance recall)
+- `/recall [--since ISO] [--until ISO] [--tag k=v] [--q text] [--into-context]`
+- `/snapshot save|load|list`
 
-Visual workflows authored in AbstractFlow are portable `VisualFlow` JSON files. AbstractCode can run them via:
+### Persistence
+By default, AbstractCode uses `~/.abstractcode/state.json` and stores the durable data in `~/.abstractcode/state.d/`.
+- disable persistence: `abstractcode --no-state`
+- override path: `ABSTRACTCODE_STATE_FILE=... abstractcode`
+
+## Run Workflows (AbstractFlow VisualFlow)
+
+### From the CLI
 
 ```bash
 abstractcode flow run <flow_id_or_path> [inputs...]
 ```
 
-### Passing inputs (no JSON typing required)
-
-Any unknown flags are treated as input variables, with basic type coercion:
-- `true`/`false` → booleans
-- numbers → ints/floats
-- `{...}` / `[...]` → parsed JSON
-
-Examples:
+Inputs can be passed as flags (no JSON typing required):
 
 ```bash
-# Run by path, pass inputs as flags
 abstractcode flow run abstractflow/web/flows/4e2f2329.json --query "who are you?"
 
-# Deep research example
-abstractcode flow run abstractflow/web/flows/b3a9d7c1.json \\
-  --query "who are you?" \\
-  --max_web_search 15 \\
-  --max_fetch_url 50 \\
+abstractcode flow run abstractflow/web/flows/b3a9d7c1.json \
+  --query "who are you?" \
+  --max_web_search 15 \
+  --max_fetch_url 50 \
   --follow_up_questions true
 ```
 
 Other input options:
 
 ```bash
-# Provide inputs from a JSON file
 abstractcode flow run deep-research-pro --input-json-file params.json
-
-# Or repeatable key=value
-abstractcode flow run deep-research-pro --param query="who are you?" --param max_web_search=15
+abstractcode flow run deep-research-pro --param max_web_search=15 --param follow_up_questions=true
 ```
 
-### Tool approvals
+Tool approvals:
+- approval-gated by default (type `a` once to approve all remaining calls for that run)
+- auto-approve (unsafe): `--accept-tools` (alias `--auto-approve`)
 
-By default, tool calls are approval-gated:
-- choose `a` to approve all remaining tool calls for that run
-- use `--accept-tools` (alias: `--auto-approve`) to auto-execute tools without prompts (unsafe)
-
-### Resume / pause / cancel
+Controls:
 
 ```bash
 abstractcode flow resume
@@ -122,68 +81,38 @@ abstractcode flow resume-run
 abstractcode flow cancel
 ```
 
-### State locations
+Run discovery and event injection:
 
-- Agent shell state: `~/.abstractcode/state.json` (stores in `~/.abstractcode/state.d/`)
-- Flow runner state: `~/.abstractcode/flow_state.json` (stores in `~/.abstractcode/flow_state.d/`)
+```bash
+abstractcode flow runs
+abstractcode flow attach <run_id>
+abstractcode flow emit --name my_event --scope session --payload-json '{"k":"v"}'
+```
 
-Environment variables:
-- `ABSTRACTCODE_STATE_FILE`
-- `ABSTRACTCODE_FLOW_STATE_FILE`
-- `ABSTRACTFLOW_FLOWS_DIR`
+Flow state:
+- default: `~/.abstractcode/flow_state.json` (stores in `~/.abstractcode/flow_state.d/`)
+- override with `ABSTRACTCODE_FLOW_STATE_FILE=...`
+- flow discovery default dir: `ABSTRACTFLOW_FLOWS_DIR=...`
 
-## Run Workflows Inside the REPL
-
-In the interactive shell you can run flows without leaving the session:
+### From inside the TUI (keeps outputs in context)
 
 ```text
 /flow run deep-research-pro --query "..." --max_web_search 10 --follow_up_questions true
 ```
 
-`ANSWER_USER` outputs from the workflow are appended to the current conversation’s active context (durably when a run is loaded), so you can continue the dialogue naturally.
+`ANSWER_USER` outputs from the workflow are appended into the current conversation’s active context so you can continue the dialogue naturally.
 
 ## Development (Monorepo)
 
-From the monorepo root:
-
 ```bash
-pip install -e ./abstractcore -e ./abstractruntime -e ./abstractagent -e ./abstractcode
+pip install -e ./abstractcore -e ./abstractruntime -e ./abstractagent -e ./abstractflow -e ./abstractcode
 abstractcode --help
 ```
 
-## Requirements
-
-- Python 3.10 or higher
-- AbstractCore
-- AbstractRuntime
-- AbstractAgent
-  - (Optional) AbstractFlow for `abstractcode flow ...`
-
-## Documentation
-
-Full documentation will be available at [abstractcore.ai](https://abstractcore.ai)
-
-## Development Status
-
-This project is in early development. Stay tuned for updates!
-
-## Contributing
-
-Contributions are welcome! Please check back soon for contribution guidelines.
-
-## Contact
-
-**Maintainer:** Laurent-Philippe Albou  
-📧 Email: contact@abstractcore.ai  
-🌐 Website: [abstractcore.ai](https://abstractcore.ai)
-
-## License
-
-MIT License - see LICENSE file for details.
-
----
-
-**AbstractCode** - Multi-agent agentic coding in your terminal, powered by the Abstract Framework.
+## Environment variables
+- `ABSTRACTCODE_STATE_FILE`
+- `ABSTRACTCODE_FLOW_STATE_FILE`
+- `ABSTRACTFLOW_FLOWS_DIR`
 
 ## Default Tools
 

@@ -88,10 +88,14 @@ The full-screen UI (`abstractcode/abstractcode/fullscreen_ui.py`) is responsible
 ## Running AbstractFlow Workflows (Current)
 
 AbstractCode also includes a small “host loop” for running `abstractflow` VisualFlow JSON outside the web UI:
-- Entry: `abstractcode flow ...` in `abstractcode/abstractcode/cli.py`
-- Driver: `abstractcode/abstractcode/flow_cli.py`
+- Entry (CLI): `abstractcode flow ...` in `abstractcode/abstractcode/cli.py`
+- Entry (REPL): `/flow ...` in `abstractcode/abstractcode/react_shell.py`
+- Driver: `abstractcode/abstractcode/flow_cli.py` (shared host loop)
 
 Current behavior:
 - Uses `abstractflow.visual.executor.create_visual_runner(...)` to compile and run the flow.
 - Persists runs/ledger/artifacts to a **separate** state file (`~/.abstractcode/flow_state.json` by default) so it doesn’t interfere with agent session resume (`~/.abstractcode/state.json`).
-- Handles `ASK_USER` via `input()`, prints `ANSWER_USER` outputs, and gates tool calls via runtime `PassthroughToolExecutor(mode="approval_required")`.
+- Handles `ASK_USER` via the host (CLI: `input()`, REPL: prompt_toolkit), renders `ANSWER_USER` output, and gates tool calls via runtime `PassthroughToolExecutor(mode="approval_required")`.
+- REPL integration appends `ANSWER_USER` outputs into the active conversation context so users can keep iterating with the agent after a workflow step completes.
+- For flow entry vars, the CLI accepts either JSON input (`--input-json`/`--input-json-file`) or ergonomic flags (`--query "..." --max_web_search 10`) which are coerced into a JSON-safe input dict.
+- The CLI also includes lightweight run ops for portability: `flow runs`, `flow attach <run_id>`, and `flow emit ...` to inject custom events / resume event waits.

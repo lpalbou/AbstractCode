@@ -78,6 +78,9 @@ def _save_flow_ref(path: Path, ref: FlowRunRef) -> None:
         },
     )
 
+def _flow_store_dir(state_path: Path) -> Path:
+    return state_path.with_name(state_path.stem + ".d")
+
 
 def _parse_input_json(*, raw_json: Optional[str], json_path: Optional[str]) -> Dict[str, Any]:
     if raw_json and json_path:
@@ -186,7 +189,14 @@ def _parse_unknown_params(argv: List[str]) -> Dict[str, Any]:
             if not key:
                 raise ValueError(f"Invalid parameter flag: {token}")
             if i + 1 < len(argv) and not str(argv[i + 1]).startswith("--"):
-                out[key] = _coerce_value(str(argv[i + 1]))
+                nxt = str(argv[i + 1])
+                # Heuristic: if the next token looks like a standalone `key=value`,
+                # treat this flag as boolean and let the next token be parsed normally.
+                if "=" in nxt:
+                    out[key] = True
+                    i += 1
+                    continue
+                out[key] = _coerce_value(nxt)
                 i += 2
                 continue
             out[key] = True
@@ -733,7 +743,7 @@ def run_flow_command(
         artifact_store = InMemoryArtifactStore()
     else:
         state_path.parent.mkdir(parents=True, exist_ok=True)
-        store_dir = state_path.with_name(state_path.stem + ".d")
+        store_dir = _flow_store_dir(state_path)
         run_store = JsonFileRunStore(store_dir)
         ledger_store = JsonlLedgerStore(store_dir)
         artifact_store = FileArtifactStore(store_dir)
@@ -815,7 +825,7 @@ def resume_flow_command(
     from abstractruntime.storage.artifacts import FileArtifactStore
     from abstractruntime.storage.json_files import JsonFileRunStore, JsonlLedgerStore
 
-    store_dir = state_path.with_name(state_path.stem + ".d")
+    store_dir = _flow_store_dir(state_path)
     run_store = JsonFileRunStore(store_dir)
     ledger_store = JsonlLedgerStore(store_dir)
     artifact_store = FileArtifactStore(store_dir)
@@ -867,7 +877,7 @@ def control_flow_command(
     if ref is None:
         raise ValueError(f"No saved flow run found at {state_path}")
 
-    store_dir = state_path.with_name(state_path.stem + ".d")
+    store_dir = _flow_store_dir(state_path)
     from abstractruntime.storage.json_files import JsonFileRunStore, JsonlLedgerStore
     from abstractruntime.storage.artifacts import FileArtifactStore
     from abstractruntime import Runtime
@@ -897,3 +907,211 @@ def control_flow_command(
         return
 
     raise ValueError(f"Unknown control action: {action2}")
+
+
+def list_flow_runs_command(
+    *,
+    flow_state_file: Optional[str],
+    limit: int = 20,
+) -> None:
+    """List recent flow runs from the configured flow store directory."""
+    state_path = Path(flow_state_file or default_flow_state_file()).expanduser().resolve()
+    store_dir = _flow_store_dir(state_path)
+
+    if not store_dir.exists():
+        print(f"No flow run store found at {store_dir}")
+        return
+
+    from abstractruntime.core.models import RunStatus, WaitReason
+    from abstractruntime.storage.json_files import JsonFileRunStore
+
+    current = _load_flow_ref(state_path)
+    current_run_id = current.run_id if current else None
+
+    run_store = JsonFileRunStore(store_dir)
+    runs = run_store.list_runs(limit=int(limit or 20))
+    if not runs:
+        print("No runs found.")
+        return
+
+    print(f"Store: {store_dir}")
+    print("Most recent runs:")
+    for r in runs:
+        marker = "*" if current_run_id and r.run_id == current_run_id else " "
+        wait = r.waiting
+        wait_txt = ""
+        if r.status == RunStatus.WAITING and wait is not None:
+            reason = wait.reason.value if isinstance(wait.reason, WaitReason) else str(wait.reason)
+            wait_txt = f" waiting={reason} key={wait.wait_key}"
+        updated = r.updated_at or r.created_at or ""
+        print(f"{marker} {r.run_id}  wf={r.workflow_id}  {r.status.value}  {updated}{wait_txt}")
+
+
+def attach_flow_run_command(
+    *,
+    run_id: str,
+    flows_dir: Optional[str],
+    flow_state_file: Optional[str],
+) -> None:
+    """Set the current flow run reference to an existing run_id."""
+    run_id2 = str(run_id or "").strip()
+    if not run_id2:
+        raise ValueError("run_id is required")
+
+    state_path = Path(flow_state_file or default_flow_state_file()).expanduser().resolve()
+    store_dir = _flow_store_dir(state_path)
+    if not store_dir.exists():
+        raise ValueError(f"No flow run store found at {store_dir}")
+
+    from abstractruntime.storage.json_files import JsonFileRunStore
+
+    run_store = JsonFileRunStore(store_dir)
+    run = run_store.load(run_id2)
+    if run is None:
+        raise ValueError(f"Run not found: {run_id2}")
+
+    flows_dir_path = Path(flows_dir).expanduser().resolve() if flows_dir else None
+    current = _load_flow_ref(state_path)
+    if flows_dir_path is None:
+        if current and current.flows_dir:
+            flows_dir_path = Path(current.flows_dir).expanduser().resolve()
+        else:
+            flows_dir_path = default_flows_dir().resolve()
+
+    flows = _load_visual_flows(flows_dir_path)
+
+    flow_id = None
+    if isinstance(run.workflow_id, str) and run.workflow_id in flows:
+        flow_id = run.workflow_id
+    elif current and current.flow_id in flows:
+        flow_id = current.flow_id
+
+    if not flow_id:
+        raise ValueError(
+            f"Cannot infer flow id for run '{run_id2}' (workflow_id='{run.workflow_id}'). "
+            "Provide --flows-dir pointing at the VisualFlow JSON directory."
+        )
+
+    _save_flow_ref(state_path, FlowRunRef(flow_id=str(flow_id), flows_dir=str(flows_dir_path), run_id=run_id2))
+    print(f"Attached flow run: {run_id2} (flow={flow_id})")
+
+
+def emit_flow_event_command(
+    *,
+    name: Optional[str],
+    wait_key: Optional[str],
+    scope: str,
+    payload_json: Optional[str],
+    payload_file: Optional[str],
+    session_id: Optional[str],
+    max_steps: int,
+    flows_dir: Optional[str],
+    flow_state_file: Optional[str],
+    auto_approve: bool,
+) -> None:
+    """Emit a custom event (name/scope) or resume a raw wait_key."""
+    if bool(name) == bool(wait_key):
+        raise ValueError("Provide exactly one of --name or --wait-key")
+
+    state_path = Path(flow_state_file or default_flow_state_file()).expanduser().resolve()
+    ref = _load_flow_ref(state_path)
+    if ref is None:
+        raise ValueError(f"No saved flow run found at {state_path}")
+
+    flows_dir_path = Path(flows_dir).expanduser().resolve() if flows_dir else Path(ref.flows_dir).expanduser().resolve()
+    flows = _load_visual_flows(flows_dir_path)
+    if ref.flow_id not in flows:
+        raise ValueError(f"Flow '{ref.flow_id}' not found in {flows_dir_path}")
+    vf = flows[ref.flow_id]
+
+    def _load_payload() -> Dict[str, Any]:
+        if payload_json and payload_file:
+            raise ValueError("Provide either --payload-json or --payload-file, not both.")
+        if payload_file:
+            raw = _read_json(Path(payload_file).expanduser().resolve())
+            if isinstance(raw, dict):
+                return dict(raw)
+            return {"value": raw}
+        if payload_json:
+            raw = json.loads(payload_json)
+            if isinstance(raw, dict):
+                return dict(raw)
+            return {"value": raw}
+        return {}
+
+    payload = _load_payload()
+
+    from abstractruntime.integrations.abstractcore import MappingToolExecutor, PassthroughToolExecutor
+    from abstractruntime.integrations.abstractcore.default_tools import get_default_tools
+    from abstractruntime.storage.artifacts import FileArtifactStore
+    from abstractruntime.storage.json_files import JsonFileRunStore, JsonlLedgerStore
+
+    store_dir = _flow_store_dir(state_path)
+    run_store = JsonFileRunStore(store_dir)
+    ledger_store = JsonlLedgerStore(store_dir)
+    artifact_store = FileArtifactStore(store_dir)
+
+    tool_executor = PassthroughToolExecutor(mode="approval_required")
+    tool_runner = MappingToolExecutor.from_tools(get_default_tools())
+
+    from abstractflow.visual.executor import create_visual_runner
+
+    runner = create_visual_runner(
+        vf,
+        flows=flows,
+        run_store=run_store,
+        ledger_store=ledger_store,
+        artifact_store=artifact_store,
+        tool_executor=tool_executor,
+    )
+    runner._current_run_id = ref.run_id  # type: ignore[attr-defined]
+
+    runtime = runner.runtime
+    reg = getattr(runtime, "workflow_registry", None)
+    if reg is None and hasattr(runtime, "set_workflow_registry"):
+        try:
+            from abstractruntime.scheduler.registry import WorkflowRegistry
+        except Exception:
+            WorkflowRegistry = None  # type: ignore[assignment]
+        if WorkflowRegistry is not None:
+            registry = WorkflowRegistry()
+            registry.register(runner.workflow)
+            runtime.set_workflow_registry(registry)
+
+    if name:
+        from abstractruntime.scheduler.scheduler import Scheduler
+
+        scope2 = str(scope or "session").strip().lower() or "session"
+        sess = session_id
+        if sess is None and scope2 == "session":
+            sess = ref.run_id
+
+        scheduler = Scheduler(runtime=runtime, registry=runtime.workflow_registry)  # type: ignore[arg-type]
+        resumed = scheduler.emit_event(
+            name=str(name),
+            payload=payload,
+            scope=scope2,
+            session_id=sess,
+            max_steps=int(max_steps or 0),
+        )
+        print(f"Emitted event '{name}' scope={scope2} resumed={len(resumed)}")
+    else:
+        # Raw wait_key resumption: resume all WAITING EVENT runs that match this key.
+        wk = str(wait_key or "").strip()
+        if not wk:
+            raise ValueError("--wait-key must be non-empty")
+
+        from abstractruntime.core.models import RunStatus, WaitReason
+
+        candidates = runtime.run_store.list_runs(status=RunStatus.WAITING, wait_reason=WaitReason.EVENT, limit=10_000)
+        resumed_count = 0
+        for r in candidates:
+            if r.waiting is None or r.waiting.wait_key != wk:
+                continue
+            wf = _workflow_for(runtime, runner.workflow, r.workflow_id)
+            runtime.resume(workflow=wf, run_id=r.run_id, wait_key=wk, payload=payload, max_steps=int(max_steps or 0))
+            resumed_count += 1
+        print(f"Resumed wait_key '{wk}' runs={resumed_count}")
+
+    # Drive the session until it blocks again.
+    _drive_until_blocked(runner=runner, tool_runner=tool_runner, auto_approve=bool(auto_approve), wait_until=False)

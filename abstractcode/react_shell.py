@@ -344,8 +344,16 @@ class ReactShell:
         if not text:
             return
 
-        # Echo user input
-        self._print(f"\n> {text}")
+        # Echo user input (styled so user prompts are easy to spot).
+        if self._color:
+            bg = "\033[48;5;238m"
+            fg = "\033[38;5;255m"
+            reset = "\033[0m"
+            lines = text.splitlines() or [""]
+            block = "\n".join([f"{bg}{fg}> {line}{reset}" for line in lines])
+            self._print("\n" + block)
+        else:
+            self._print(f"\n> {text}")
 
         cmd = text.strip()
 
@@ -552,8 +560,14 @@ class ReactShell:
         if command == "expand":
             self._handle_expand(arg)
             return False
+        if command == "remember":
+            self._handle_remember(arg)
+            return False
         if command == "recall":
             self._handle_recall(arg)
+            return False
+        if command in ("vars", "var"):
+            self._handle_vars(arg)
             return False
         if command == "flow":
             self._handle_flow(arg)
@@ -1224,7 +1238,6 @@ class ReactShell:
         selector: Optional[str] = None
         show = True
         into_context = False
-        full = False
 
         for p in parts:
             if p == "--show":
@@ -1232,9 +1245,6 @@ class ReactShell:
                 continue
             if p == "--into-context":
                 into_context = True
-                continue
-            if p == "--full":
-                full = True
                 continue
             if p.startswith("--"):
                 continue
@@ -1296,19 +1306,11 @@ class ReactShell:
             self._print(f"Messages:  {len(archived_messages)}")
             self._print(_style("─" * 60, _C.DIM, enabled=self._color))
 
-            shown = archived_messages
-            if not full and len(archived_messages) > 40:
-                shown = archived_messages[:20] + [{"role": "system", "content": "..."}] + archived_messages[-20:]
-
-            for m in shown:
+            for m in archived_messages:
                 role = str(m.get("role") or "unknown")
-                content = str(m.get("content") or "").strip()
-                if len(content) > 240:
-                    content = content[:237] + "..."
-                self._print(f"{role}: {content}")
-
-            if not full and len(archived_messages) > 40:
-                self._print(_style("\nTip: /expand <span> --show --full to print the entire span.", _C.DIM, enabled=self._color))
+                content = str(m.get("content") or "")
+                self._print(_style(f"{role}:", _C.BOLD, enabled=self._color))
+                self._print(content)
 
         if not into_context:
             return
@@ -1448,6 +1450,178 @@ class ReactShell:
             if updated is not None:
                 self._agent.session_messages = self._messages_from_state(updated)
 
+    def _handle_vars(self, raw: str) -> None:
+        """Inspect durable run variables (especially scratchpad).
+
+        Usage:
+          /vars [path] [--keys]
+
+        Examples:
+          /vars
+          /vars scratchpad
+          /vars scratchpad --keys
+          /vars scratchpad.some_list[0]
+        """
+        import json
+        import shlex
+
+        from abstractruntime.core.vars import ensure_namespaces, parse_vars_path, resolve_vars_path
+
+        state = self._safe_get_state()
+        if state is None or not hasattr(state, "vars"):
+            self._print(_style("No run loaded. Use /resume or start a task first.", _C.DIM, enabled=self._color))
+            return
+
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split() if raw else []
+
+        path: Optional[str] = None
+        keys_only = False
+
+        for p in parts:
+            if p in ("--keys", "--ls", "--keysonly", "--keys-only"):
+                keys_only = True
+                continue
+            if p.startswith("--"):
+                self._print(_style(f"Unknown flag: {p}", _C.YELLOW, enabled=self._color))
+                self._print(_style("Usage: /vars [path] [--keys]", _C.DIM, enabled=self._color))
+                return
+            path = (p if path is None else f"{path} {p}").strip()
+
+        ensure_namespaces(state.vars)
+
+        if not path:
+            canonical = ["context", "scratchpad", "_runtime", "_temp", "_limits"]
+            keys = [k for k in canonical if k in state.vars]
+            keys += sorted([k for k in state.vars.keys() if isinstance(k, str) and k not in set(keys)])
+            self._print(_style("\nVars roots", _C.CYAN, _C.BOLD, enabled=self._color))
+            self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+            self._print(json.dumps({"keys": keys}, ensure_ascii=False, indent=2, sort_keys=True))
+            return
+
+        try:
+            tokens = parse_vars_path(path)
+            value = resolve_vars_path(state.vars, tokens)
+        except Exception as e:
+            self._print(_style(f"Vars error: {e}", _C.YELLOW, enabled=self._color))
+            return
+
+        out: Dict[str, Any] = {"path": path, "type": type(value).__name__}
+        if keys_only:
+            if isinstance(value, dict):
+                out["keys"] = sorted([str(k) for k in value.keys()])
+            elif isinstance(value, list):
+                out["length"] = len(value)
+            else:
+                out["value"] = value
+        else:
+            out["value"] = value
+
+        self._print(_style("\nVars", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+        self._print(json.dumps(out, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+
+    def _handle_remember(self, raw: str) -> None:
+        """Store a durable memory note (runtime MEMORY_NOTE) with optional tags and provenance.
+
+        Usage:
+          /remember <note text> [--tag k=v ...] [--span <span_id>] [--last-span] [--last N]
+        """
+        from .remember import parse_remember_args, store_memory_note
+
+        state = self._safe_get_state()
+        if state is None or not hasattr(state, "run_id") or not hasattr(state, "vars"):
+            self._print(_style("No run loaded. Use /resume or start a task first.", _C.DIM, enabled=self._color))
+            return
+
+        try:
+            req = parse_remember_args(raw)
+        except Exception as e:
+            self._print(_style(f"Remember parse error: {e}", _C.YELLOW, enabled=self._color))
+            self._print(
+                _style(
+                    "Usage: /remember <note text> [--tag k=v ...] [--span <span_id>] [--last-span] [--last N]",
+                    _C.DIM,
+                    enabled=self._color,
+                )
+            )
+            return
+
+        # Resolve provenance sources (best-effort).
+        sources: Dict[str, Any] = {"run_id": str(state.run_id), "span_ids": [], "message_ids": []}
+
+        if req.span_id:
+            sources["span_ids"] = [req.span_id]
+        elif req.last_span:
+            runtime_ns = state.vars.get("_runtime") if isinstance(state.vars, dict) else None
+            spans = runtime_ns.get("memory_spans") if isinstance(runtime_ns, dict) else None
+            last: Optional[str] = None
+            if isinstance(spans, list):
+                for s in reversed(spans):
+                    if not isinstance(s, dict):
+                        continue
+                    if str(s.get("kind") or "") != "conversation_span":
+                        continue
+                    aid = s.get("artifact_id")
+                    if isinstance(aid, str) and aid:
+                        last = aid
+                        break
+            if last:
+                sources["span_ids"] = [last]
+            else:
+                self._print(_style("No conversation spans found (use /compact first or omit --last-span).", _C.DIM, enabled=self._color))
+        else:
+            # Attach the last N non-system message ids.
+            last_n = int(req.last_messages or 0)
+            if last_n > 0:
+                messages = self._messages_from_state(state)
+                ids: list[str] = []
+                for m in reversed(messages):
+                    if not isinstance(m, dict):
+                        continue
+                    if m.get("role") == "system":
+                        continue
+                    mid = _get_message_id(m)
+                    if isinstance(mid, str) and mid:
+                        ids.append(mid)
+                    if len(ids) >= last_n:
+                        break
+                ids.reverse()
+                sources["message_ids"] = ids
+
+        try:
+            result = store_memory_note(
+                runtime=self._runtime,
+                target_run_id=str(state.run_id),
+                note=req.note,
+                tags=req.tags,
+                sources=sources,
+                actor_id=getattr(state, "actor_id", None),
+                session_id=getattr(state, "session_id", None),
+                call_id="remember",
+            )
+        except Exception as e:
+            self._print(_style(f"Remember failed: {e}", _C.YELLOW, enabled=self._color))
+            return
+
+        # Extract span_id if present.
+        span_id = None
+        meta = result.get("results") if isinstance(result, dict) else None
+        if isinstance(meta, list) and meta:
+            first = meta[0] if isinstance(meta[0], dict) else {}
+            first_meta = first.get("meta") if isinstance(first, dict) else None
+            if isinstance(first_meta, dict):
+                span_id = first_meta.get("span_id")
+
+        self._print(_style("\n✅ Remembered.", _C.GREEN, enabled=self._color))
+        if isinstance(span_id, str) and span_id:
+            self._print(_style(f"span_id={span_id}", _C.DIM, enabled=self._color))
+        if req.tags:
+            tags_txt = ", ".join([f"{k}={v}" for k, v in sorted(req.tags.items())])
+            self._print(_style(f"tags: {tags_txt}", _C.DIM, enabled=self._color))
+
     def _show_help(self) -> None:
         self._print(
             "\nCommands:\n"
@@ -1462,6 +1636,8 @@ class ReactShell:
             "  /spans              List archived conversation spans (from /compact)\n"
             "  /expand <span>      Expand an archived span (--show, --into-context)\n"
             "  /recall [opts]      Recall spans by time/tags/query (--into-context)\n"
+            "  /vars [path]        Inspect run vars (scratchpad, _runtime, ...)\n"
+            "  /remember <note>    Store a durable memory note (tags + provenance)\n"
             "  /flow ...           Run AbstractFlow workflows (run/resume/pause/cancel)\n"
             "  /history [N]        Show recent conversation history\n"
             "  /resume             Resume the saved/attached run\n"
@@ -1521,15 +1697,66 @@ class ReactShell:
             self._print("No history yet.")
             return
 
-        self._print(_style("\nHistory", _C.CYAN, _C.BOLD, enabled=self._color))
-        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
-        for m in messages[-limit:]:
-            role = m.get("role", "unknown")
-            content = (m.get("content") or "").strip()
-            if len(content) > 240:
-                content = content[:237] + "..."
-            self._print(f"{role}: {content}")
-        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+        # Interpret `limit` as number of user turns (prompt + subsequent messages), not raw messages.
+        try:
+            limit_int = int(limit)
+        except Exception:
+            limit_int = 12
+        if limit_int < 1:
+            limit_int = 1
+
+        # Group messages into "turns" starting at each user message.
+        turns: list[list[Dict[str, Any]]] = []
+        current: list[Dict[str, Any]] = []
+        prelude: list[Dict[str, Any]] = []
+        for m in messages:
+            if not isinstance(m, dict):
+                continue
+            role = m.get("role")
+            if role == "user":
+                if current:
+                    turns.append(current)
+                # Include leading system messages before the first user prompt.
+                if not turns and prelude:
+                    current = [*prelude, m]
+                    prelude = []
+                else:
+                    current = [m]
+                continue
+            if not current:
+                # Preserve only system messages before the first user message.
+                if role == "system":
+                    prelude.append(m)
+                continue
+            current.append(m)
+        if current:
+            turns.append(current)
+
+        if not turns:
+            self._print("No history yet.")
+            return
+
+        selected = turns[-limit_int:]
+
+        self._print(_style(f"\nHistory (last {len(selected)} interaction(s))", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+
+        for idx, turn in enumerate(selected, start=max(1, len(turns) - len(selected) + 1)):
+            self._print(_style(f"\n# Turn {idx}", _C.DIM, enabled=self._color))
+            self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+            for msg in turn:
+                role = str(msg.get("role") or "unknown")
+                content = "" if msg.get("content") is None else str(msg.get("content"))
+                if role == "tool":
+                    meta = msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {}
+                    name = meta.get("name") if isinstance(meta, dict) else None
+                    label = f"tool[{name}]" if isinstance(name, str) and name else "tool"
+                else:
+                    label = role
+                self._print(_style(f"{label}:", _C.BOLD, enabled=self._color))
+                self._print(content)
+
+        self._print(_style("\n" + "─" * 80, _C.DIM, enabled=self._color))
 
     def _clear_memory(self) -> None:
         """Clear all memory and reset to fresh state."""

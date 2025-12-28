@@ -101,10 +101,10 @@ class FullScreenUI:
 
         def mouse_handler(self, mouse_event: MouseEvent):  # type: ignore[override]
             if mouse_event.event_type == MouseEventType.SCROLL_UP:
-                self._on_scroll(-3)
+                self._on_scroll(-1)
                 return None
             if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
-                self._on_scroll(3)
+                self._on_scroll(1)
                 return None
             return NotImplemented
 
@@ -423,47 +423,39 @@ class FullScreenUI:
         @self._kb.add("c-up")
         def scroll_up(event):
             self._scroll(-3)
-            event.app.invalidate()
 
         # Ctrl+Down = scroll output down
         @self._kb.add("c-down")
         def scroll_down(event):
             self._scroll(3)
-            event.app.invalidate()
 
         # Page Up = scroll up more
         @self._kb.add("pageup")
         def page_up(event):
             self._scroll(-10)
-            event.app.invalidate()
 
         # Page Down = scroll down more
         @self._kb.add("pagedown")
         def page_down(event):
             self._scroll(10)
-            event.app.invalidate()
 
         # Shift+PageUp/PageDown (some terminals send these for paging)
         @self._kb.add("s-pageup")
         def shift_page_up(event):
             self._scroll(-10)
-            event.app.invalidate()
 
         @self._kb.add("s-pagedown")
         def shift_page_down(event):
             self._scroll(10)
-            event.app.invalidate()
 
         # Mouse wheel scroll (trackpad / wheel)
         @self._kb.add("<scroll-up>")
         def mouse_scroll_up(event):
-            self._scroll(-3)
-            event.app.invalidate()
+            self._scroll(-1)
 
         @self._kb.add("<scroll-down>")
         def mouse_scroll_down(event):
-            self._scroll(3)
-            event.app.invalidate()
+            self._scroll(1)
 
         # Home = scroll to top
         @self._kb.add("home")
@@ -476,7 +468,6 @@ class FullScreenUI:
         @self._kb.add("end")
         def scroll_to_end(event):
             self.scroll_to_bottom()
-            event.app.invalidate()
 
         # Alt+Enter = insert newline in input
         @self._kb.add("escape", "enter")

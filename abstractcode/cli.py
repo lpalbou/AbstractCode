@@ -177,6 +177,59 @@ def build_flow_parser() -> argparse.ArgumentParser:
         help="Path to the saved run reference (default: ~/.abstractcode/flow_state.json).",
     )
 
+    runs = sub.add_parser("runs", help="List recent flow runs from the flow store")
+    runs.add_argument(
+        "--flow-state-file",
+        default=None,
+        help="Path to the saved run reference (default: ~/.abstractcode/flow_state.json).",
+    )
+    runs.add_argument("--limit", type=int, default=20, help="Maximum runs to show (default: 20)")
+
+    attach = sub.add_parser("attach", help="Attach to an existing flow run_id (sets the current flow_state.json ref)")
+    attach.add_argument("run_id", help="Existing run_id to attach to")
+    attach.add_argument("--flows-dir", default=None, help="Directory containing VisualFlow JSON files")
+    attach.add_argument(
+        "--flow-state-file",
+        default=None,
+        help="Path to the saved run reference (default: ~/.abstractcode/flow_state.json).",
+    )
+
+    emit = sub.add_parser("emit", help="Emit a custom event (or resume a raw wait_key) for the current flow session")
+    emit.add_argument("--name", default=None, help="Custom event name to emit")
+    emit.add_argument("--wait-key", default=None, help="Raw wait_key to resume (advanced)")
+    emit.add_argument("--scope", default="session", help="Event scope: session|workflow|run|global (default: session)")
+    emit.add_argument("--payload-json", default=None, help="Event payload as JSON (object preferred)")
+    emit.add_argument(
+        "--payload-file",
+        default=None,
+        help="Path to a JSON file containing the event payload",
+    )
+    emit.add_argument(
+        "--session-id",
+        default=None,
+        help="Target session id (defaults to current root run_id for session scope)",
+    )
+    emit.add_argument(
+        "--max-steps",
+        type=int,
+        default=0,
+        help="Tick budget per resumed run (default: 0; host drives execution)",
+    )
+    emit.add_argument("--flows-dir", default=None, help="Directory containing VisualFlow JSON files")
+    emit.add_argument(
+        "--flow-state-file",
+        default=None,
+        help="Path to the saved run reference (default: ~/.abstractcode/flow_state.json).",
+    )
+    emit.add_argument(
+        "--auto-approve",
+        "--accept-tools",
+        "--auto-accept",
+        action="store_true",
+        dest="auto_approve",
+        help="Automatically approve tool calls (unsafe; disables interactive approvals).",
+    )
+
     return parser
 
 
@@ -186,7 +239,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if argv_list and argv_list[0] == "flow":
         parser = build_flow_parser()
         args, unknown = parser.parse_known_args(argv_list[1:])
-        from .flow_cli import control_flow_command, resume_flow_command, run_flow_command
+        from .flow_cli import (
+            attach_flow_run_command,
+            control_flow_command,
+            emit_flow_event_command,
+            list_flow_runs_command,
+            resume_flow_command,
+            run_flow_command,
+        )
 
         cmd = getattr(args, "command", None)
         if cmd == "run":
@@ -227,6 +287,36 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if unknown:
                 parser.error(f"Unknown arguments: {' '.join(unknown)}")
             control_flow_command(action="cancel", flow_state_file=args.flow_state_file)
+            return 0
+        if cmd == "runs":
+            if unknown:
+                parser.error(f"Unknown arguments: {' '.join(unknown)}")
+            list_flow_runs_command(flow_state_file=args.flow_state_file, limit=int(args.limit or 20))
+            return 0
+        if cmd == "attach":
+            if unknown:
+                parser.error(f"Unknown arguments: {' '.join(unknown)}")
+            attach_flow_run_command(
+                run_id=str(args.run_id),
+                flows_dir=args.flows_dir,
+                flow_state_file=args.flow_state_file,
+            )
+            return 0
+        if cmd == "emit":
+            if unknown:
+                parser.error(f"Unknown arguments: {' '.join(unknown)}")
+            emit_flow_event_command(
+                name=args.name,
+                wait_key=args.wait_key,
+                scope=args.scope,
+                payload_json=args.payload_json,
+                payload_file=args.payload_file,
+                session_id=args.session_id,
+                max_steps=int(args.max_steps or 0),
+                flows_dir=args.flows_dir,
+                flow_state_file=args.flow_state_file,
+                auto_approve=bool(args.auto_approve),
+            )
             return 0
 
         build_flow_parser().print_help()
