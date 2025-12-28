@@ -338,6 +338,63 @@ class ReactShell:
         self._output_lines.append(text)
         self._ui.append_output(text)
 
+    def _terminal_width(self) -> int:
+        """Best-effort current terminal width (for full-line ANSI background blocks)."""
+        try:
+            import shutil
+
+            width = int(shutil.get_terminal_size(fallback=(120, 40)).columns)
+        except Exception:
+            width = 120
+        return max(40, width)
+
+    def _format_user_prompt_block(self, text: str) -> str:
+        """Render a user prompt as a padded, full-line background block (no truncation)."""
+        lines = text.splitlines() or [""]
+
+        prefix_first = "> "
+        prefix_next = "  "
+        prefix_len = len(prefix_first)
+        width = self._terminal_width()
+        avail = max(1, width - prefix_len)
+
+        def chunk_line(s: str) -> List[str]:
+            if s == "":
+                return [""]
+            return [s[i : i + avail] for i in range(0, len(s), avail)]
+
+        if not self._color:
+            out: List[str] = [""]
+            first_visual = True
+            for line in lines:
+                for chunk in chunk_line(line):
+                    prefix = prefix_first if first_visual else prefix_next
+                    out.append(prefix + chunk)
+                    first_visual = False
+            out.append("")
+            return "\n".join(out)
+
+        bg = "\033[48;5;238m"
+        fg = "\033[38;5;255m"
+        reset = _C.RESET
+
+        def style_full(line_text: str) -> str:
+            padded = line_text + (" " * max(0, width - len(line_text)))
+            return f"{bg}{fg}{padded}{reset}"
+
+        blank = f"{bg}{' ' * width}{reset}"
+        out_lines: List[str] = [blank]
+
+        first_visual = True
+        for line in lines:
+            for chunk in chunk_line(line):
+                prefix = prefix_first if first_visual else prefix_next
+                out_lines.append(style_full(prefix + chunk))
+                first_visual = False
+
+        out_lines.append(blank)
+        return "\n".join(out_lines)
+
     def _handle_input(self, text: str) -> None:
         """Handle user input from the UI (called from worker thread)."""
         text = text.strip()
@@ -345,15 +402,7 @@ class ReactShell:
             return
 
         # Echo user input (styled so user prompts are easy to spot).
-        if self._color:
-            bg = "\033[48;5;238m"
-            fg = "\033[38;5;255m"
-            reset = "\033[0m"
-            lines = text.splitlines() or [""]
-            block = "\n".join([f"{bg}{fg}> {line}{reset}" for line in lines])
-            self._print("\n" + block)
-        else:
-            self._print(f"\n> {text}")
+        self._print(self._format_user_prompt_block(text))
 
         cmd = text.strip()
 
@@ -1747,13 +1796,24 @@ class ReactShell:
             for msg in turn:
                 role = str(msg.get("role") or "unknown")
                 content = "" if msg.get("content") is None else str(msg.get("content"))
+                if role == "user":
+                    self._print(self._format_user_prompt_block(content))
+                    continue
+
                 if role == "tool":
                     meta = msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {}
                     name = meta.get("name") if isinstance(meta, dict) else None
-                    label = f"tool[{name}]" if isinstance(name, str) and name else "tool"
-                else:
-                    label = role
-                self._print(_style(f"{label}:", _C.BOLD, enabled=self._color))
+                    label = f"[tool:{name}]" if isinstance(name, str) and name else "[tool]"
+                    self._print(_style(label, _C.DIM, enabled=self._color))
+                    self._print(content)
+                    continue
+
+                if role == "system":
+                    self._print(_style("[system]", _C.DIM, enabled=self._color))
+                    self._print(content)
+                    continue
+
+                # Default: assistant/other roles (no role prefix; rely on styling/structure).
                 self._print(content)
 
         self._print(_style("\n" + "─" * 80, _C.DIM, enabled=self._color))
