@@ -40,6 +40,8 @@ COMMANDS = [
     ("status", "Show current run status"),
     ("history", "Show recent conversation history"),
     ("copy", "Copy messages to clipboard (/copy user|assistant [turn])"),
+    ("plan", "Toggle Plan mode (TODO list first) [saved]"),
+    ("review", "Toggle Review mode (self-check) [saved]"),
     ("resume", "Resume the saved/attached run"),
     ("clear", "Clear memory and start fresh"),
     ("compact", "Compress conversation [light|standard|heavy] [--preserve N] [focus...]"),
@@ -93,7 +95,7 @@ class CommandCompleter(Completer):
 class FullScreenUI:
     """Full-screen chat interface with scrollable history and ANSI color support."""
 
-    _COPY_MARKER_RE = re.compile(r"\[\[COPY:([^\]]+)\]\]")
+    _MARKER_RE = re.compile(r"\[\[(COPY|SPINNER):([^\]]+)\]\]")
 
     class _ScrollAwareFormattedTextControl(FormattedTextControl):
         def __init__(
@@ -214,6 +216,25 @@ class FullScreenUI:
         with self._output_lock:
             self._copy_payloads[cid] = str(payload or "")
 
+    def replace_output_marker(self, marker: str, replacement: str) -> bool:
+        """Replace the first occurrence of `marker` in the output with `replacement`.
+
+        This is used for lightweight in-place updates (e.g., tool-line spinners → ✅/❌)
+        without requiring a full structured output model.
+        """
+        needle = str(marker or "")
+        if not needle:
+            return False
+        repl = str(replacement or "")
+        with self._output_lock:
+            if needle not in self._output_text:
+                return False
+            self._output_text = self._output_text.replace(needle, repl, 1)
+            # Line count unchanged (marker + replacement should not contain newlines).
+        if self._app and self._app.is_running:
+            self._app.invalidate()
+        return True
+
     def toggle_mouse_support(self) -> bool:
         """Toggle mouse reporting (wheel scroll) vs terminal selection mode."""
         self._mouse_support_enabled = not self._mouse_support_enabled
@@ -259,18 +280,28 @@ class FullScreenUI:
         if not text:
             return to_formatted_text(ANSI(""))
 
-        if "[[COPY:" not in text:
+        if "[[" not in text:
             return to_formatted_text(ANSI(text))
 
         out: List[Tuple[Any, ...]] = []
         pos = 0
-        for m in self._COPY_MARKER_RE.finditer(text):
+        for m in self._MARKER_RE.finditer(text):
             before = text[pos : m.start()]
             if before:
                 out.extend(to_formatted_text(ANSI(before)))
-            copy_id = str(m.group(1) or "").strip()
-            if copy_id:
-                out.append(("class:copy-button", "[ copy ]", self._copy_handler(copy_id)))
+            kind = str(m.group(1) or "").strip().upper()
+            payload = str(m.group(2) or "").strip()
+            if kind == "COPY":
+                if payload:
+                    out.append(("class:copy-button", "[ copy ]", self._copy_handler(payload)))
+                else:
+                    out.extend(to_formatted_text(ANSI(m.group(0))))
+            elif kind == "SPINNER":
+                if payload:
+                    spinner_char = self._spinner_frames[self._spinner_frame % len(self._spinner_frames)]
+                    out.append(("class:inline-spinner", spinner_char))
+                else:
+                    out.extend(to_formatted_text(ANSI(m.group(0))))
             else:
                 out.extend(to_formatted_text(ANSI(m.group(0))))
             pos = m.end()
@@ -619,6 +650,7 @@ class FullScreenUI:
                 "completion-menu.meta.completion": "bg:#1a1a2e #888888 italic",
                 "completion-menu.meta.completion.current": "bg:#444444 #aaaaaa italic",
                 "copy-button": "bg:#333333 #ffffff",
+                "inline-spinner": "#ffaa00 bold",
             })
         else:
             self._style = Style.from_dict({})

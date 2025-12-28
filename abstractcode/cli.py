@@ -80,6 +80,22 @@ def build_agent_parser() -> argparse.ArgumentParser:
         help="Automatically approve tool calls (unsafe; disables interactive approvals).",
     )
     parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="Enable Plan mode (agent generates a TODO plan before acting).",
+    )
+    parser.add_argument(
+        "--review",
+        action="store_true",
+        help="Enable Review mode (agent self-checks completion after answering).",
+    )
+    parser.add_argument(
+        "--review-max-rounds",
+        type=int,
+        default=1,
+        help="Max Review rounds per task when --review is enabled (default: 1).",
+    )
+    parser.add_argument(
         "--max-iterations",
         type=int,
         default=_default_max_iterations(),
@@ -352,6 +368,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         model=args.model,
         state_file=state_file,
         auto_approve=bool(args.auto_approve),
+        plan_mode=bool(args.plan),
+        review_mode=bool(args.review),
+        review_max_rounds=int(args.review_max_rounds or 1),
         max_iterations=int(args.max_iterations),
         max_tokens=args.max_tokens,
         color=not bool(args.no_color),

@@ -28,6 +28,7 @@ class _C:
     YELLOW = "\033[33m"
     MAGENTA = "\033[35m"
     RED = "\033[31m"
+    ORANGE = "\033[38;5;214m"
 
 
 def _style(text: str, *codes: str, enabled: bool) -> str:
@@ -140,6 +141,9 @@ class ReactShell:
         model: str,
         state_file: Optional[str],
         auto_approve: bool,
+        plan_mode: bool = False,
+        review_mode: bool = False,
+        review_max_rounds: int = 1,
         max_iterations: int,
         max_tokens: Optional[int] = 32768,
         color: bool,
@@ -151,6 +155,11 @@ class ReactShell:
         self._model = model
         self._state_file = state_file or None
         self._auto_approve = auto_approve
+        self._plan_mode = bool(plan_mode)
+        self._review_mode = bool(review_mode)
+        self._review_max_rounds = int(review_max_rounds)
+        if self._review_max_rounds < 0:
+            self._review_max_rounds = 0
         self._max_iterations = int(max_iterations)
         if self._max_iterations < 1:
             raise ValueError("max_iterations must be >= 1")
@@ -276,6 +285,9 @@ class ReactShell:
             on_step=self._on_step,
             max_iterations=self._max_iterations,
             max_tokens=self._max_tokens,
+            plan_mode=self._plan_mode,
+            review_mode=self._review_mode,
+            review_max_rounds=self._review_max_rounds,
         )
 
         # Session-level tool approval (persists across all requests)
@@ -304,6 +316,8 @@ class ReactShell:
         # Simple in-session dedup for obviously repeated shell commands.
         self._last_execute_command: Optional[str] = None
         self._last_execute_command_result: Optional[Dict[str, Any]] = None
+        # Pending tool-line spinner markers (one per emitted act event).
+        self._pending_tool_markers: List[str] = []
 
     # ---------------------------------------------------------------------
     # UI helpers
@@ -441,6 +455,8 @@ class ReactShell:
             "max-messages",
             "max_messages",
             "memory",
+            "plan",
+            "review",
             "compact",
             "spans",
             "expand",
@@ -507,16 +523,24 @@ class ReactShell:
             if has_tool_calls and content.strip():
                 text = content.strip()
                 self._turn_trace.append("Thought:\n" + text)
-                self._print(_style("Thought", _C.DIM, enabled=self._color))
-                self._print(text)
+                self._print("")
+                self._print(_style("Thought", _C.ORANGE, _C.BOLD, enabled=self._color))
+                self._print(_style(text, _C.ORANGE, enabled=self._color))
+                self._print("")
         elif step == "act":
+            import uuid
+
             tool = data.get("tool", "unknown")
             args = data.get("args") or {}
             call_id_raw = data.get("call_id")
             call_id = str(call_id_raw).strip() if call_id_raw is not None else ""
             args_str = json.dumps(args, ensure_ascii=False, sort_keys=True)
             call_suffix = f" [{call_id}]" if call_id else ""
-            self._print(_style("Tool:", _C.GREEN, enabled=self._color) + f" {tool}{call_suffix}({args_str})")
+            marker_id = f"tool_{uuid.uuid4().hex}"
+            marker = f"[[SPINNER:{marker_id}]]"
+            self._pending_tool_markers.append(marker)
+            header = f"Tool: {tool}{call_suffix}({args_str})"
+            self._print(_style(header, _C.GREEN, _C.BOLD, enabled=self._color) + f" {marker}")
             # Track full arguments for copy payloads (no truncation).
             try:
                 args_full = json.dumps(args, ensure_ascii=False, sort_keys=True)
@@ -526,7 +550,18 @@ class ReactShell:
             self._ui.set_spinner(f"Running {tool}...")
         elif step == "observe":
             raw = str(data.get("result", "") or "")
-            self._print(_style("Result:", _C.DIM, enabled=self._color) + f" {raw}")
+            success = data.get("success")
+            ok = bool(success) if success is not None else True
+            if self._pending_tool_markers:
+                marker = self._pending_tool_markers.pop(0)
+                icon = "✅" if ok else "❌"
+                # Best-effort in-place update; if not found, fall back silently.
+                self._ui.replace_output_marker(marker, icon)
+
+            # Keep observability, but more compact than "Result: ..." spam:
+            # indent and dim the tool outputs.
+            for line in (raw.splitlines() or [""]):
+                self._print(_style(f"  {line}", _C.DIM, enabled=self._color))
             tool_name = str(data.get("tool", "") or "tool")
             self._turn_trace.append(f"Result ({tool_name}):\n{raw}".rstrip())
             self._ui.set_spinner("Processing result...")
@@ -617,6 +652,12 @@ class ReactShell:
             return False
         if command in ("auto-accept", "auto_accept"):
             self._set_auto_accept(arg)
+            return False
+        if command == "plan":
+            self._handle_plan(arg)
+            return False
+        if command == "review":
+            self._handle_review(arg)
             return False
         if command == "resume":
             self._resume()
@@ -1021,6 +1062,75 @@ class ReactShell:
         self._print(_style(f"Auto-accept is now {status}.", _C.DIM, enabled=self._color))
         self._save_config()
 
+    def _handle_plan(self, raw: str) -> None:
+        value = raw.strip().lower()
+        if not value:
+            status = "ON" if self._plan_mode else "OFF"
+            self._print(_style(f"Plan mode: {status}", _C.DIM, enabled=self._color))
+            return
+
+        if value in ("toggle",):
+            self._plan_mode = not self._plan_mode
+        elif value in ("on", "true", "1", "yes", "y", "enabled"):
+            self._plan_mode = True
+        elif value in ("off", "false", "0", "no", "n", "disabled"):
+            self._plan_mode = False
+        else:
+            self._print(_style("Usage: /plan [on|off]", _C.DIM, enabled=self._color))
+            return
+
+        if hasattr(self._agent, "_plan_mode"):
+            self._agent._plan_mode = self._plan_mode  # type: ignore[attr-defined]
+        status = "ON" if self._plan_mode else "OFF"
+        self._print(_style(f"Plan mode set to {status}.", _C.DIM, enabled=self._color))
+        self._save_config()
+
+    def _handle_review(self, raw: str) -> None:
+        value = raw.strip()
+        if not value:
+            status = "ON" if self._review_mode else "OFF"
+            self._print(_style(f"Review mode: {status} (max_rounds={self._review_max_rounds})", _C.DIM, enabled=self._color))
+            return
+
+        parts = value.split()
+        head = parts[0].lower()
+
+        if head in ("toggle",):
+            self._review_mode = not self._review_mode
+        elif head in ("on", "true", "1", "yes", "y", "enabled"):
+            self._review_mode = True
+        elif head in ("off", "false", "0", "no", "n", "disabled"):
+            self._review_mode = False
+        elif head in ("rounds", "max-rounds", "max_rounds"):
+            # Just set rounds, keep review mode as-is.
+            if len(parts) < 2:
+                self._print(_style("Usage: /review rounds <N>", _C.DIM, enabled=self._color))
+                return
+            head = "rounds"
+        else:
+            self._print(_style("Usage: /review [on|off] [max_rounds]  OR  /review rounds <N>", _C.DIM, enabled=self._color))
+            return
+
+        if head == "rounds" or (self._review_mode and len(parts) >= 2):
+            raw_rounds = parts[1] if len(parts) >= 2 else ""
+            try:
+                rounds = int(raw_rounds)
+            except ValueError:
+                self._print(_style("review max_rounds must be an integer >= 0", _C.DIM, enabled=self._color))
+                return
+            if rounds < 0:
+                rounds = 0
+            self._review_max_rounds = rounds
+
+        if hasattr(self._agent, "_review_mode"):
+            self._agent._review_mode = self._review_mode  # type: ignore[attr-defined]
+        if hasattr(self._agent, "_review_max_rounds"):
+            self._agent._review_max_rounds = self._review_max_rounds  # type: ignore[attr-defined]
+
+        status = "ON" if self._review_mode else "OFF"
+        self._print(_style(f"Review mode set to {status} (max_rounds={self._review_max_rounds}).", _C.DIM, enabled=self._color))
+        self._save_config()
+
     def _handle_max_tokens(self, raw: str) -> None:
         """Show or set max tokens for context."""
         value = raw.strip()
@@ -1073,6 +1183,13 @@ class ReactShell:
         # Also update the agent's stored max_history_messages
         if hasattr(self._agent, "_max_history_messages") and hasattr(self, "_max_history_messages"):
             self._agent._max_history_messages = self._max_history_messages
+        # Also update plan/review toggles (applies to the next started run).
+        if hasattr(self._agent, "_plan_mode"):
+            self._agent._plan_mode = self._plan_mode  # type: ignore[attr-defined]
+        if hasattr(self._agent, "_review_mode"):
+            self._agent._review_mode = self._review_mode  # type: ignore[attr-defined]
+        if hasattr(self._agent, "_review_max_rounds"):
+            self._agent._review_max_rounds = self._review_max_rounds  # type: ignore[attr-defined]
         # Save configuration to persist across restarts
         self._save_config()
 
@@ -1093,6 +1210,17 @@ class ReactShell:
                 self._max_history_messages = config["max_history_messages"]
             if "auto_approve" in config:
                 self._auto_approve = config["auto_approve"]
+            if "plan_mode" in config:
+                self._plan_mode = bool(config["plan_mode"])
+            if "review_mode" in config:
+                self._review_mode = bool(config["review_mode"])
+            if "review_max_rounds" in config:
+                try:
+                    self._review_max_rounds = int(config["review_max_rounds"])
+                except Exception:
+                    self._review_max_rounds = 1
+                if self._review_max_rounds < 0:
+                    self._review_max_rounds = 0
         except Exception:
             pass  # Ignore corrupt config files
 
@@ -1105,6 +1233,9 @@ class ReactShell:
                 "max_tokens": self._max_tokens,
                 "max_history_messages": getattr(self, "_max_history_messages", -1),
                 "auto_approve": self._auto_approve,
+                "plan_mode": self._plan_mode,
+                "review_mode": self._review_mode,
+                "review_max_rounds": self._review_max_rounds,
             }
             self._config_file.write_text(json.dumps(config, indent=2))
         except Exception:
@@ -1851,6 +1982,10 @@ class ReactShell:
             "  /tools              List available tools\n"
             "  /status             Show current run status\n"
             "  /auto-accept        Toggle auto-accept for tools [saved]\n"
+            "  /plan [on|off]      Toggle Plan mode (TODO list first) [saved]\n"
+            "  /review ...         Toggle Review mode (self-check) [saved]\n"
+            "                     - /review [on|off] [max_rounds]\n"
+            "                     - /review rounds <N>\n"
             "  /max-tokens [N]     Show or set max tokens (-1 = auto) [saved]\n"
             "  /max-messages [N]   Show or set max history messages (-1 = unlimited) [saved]\n"
             "  /memory             Show current token usage breakdown\n"
