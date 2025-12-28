@@ -288,6 +288,7 @@ class ReactShell:
         self._ui = FullScreenUI(
             get_status_text=self._get_status_text,
             on_input=self._handle_input,
+            on_copy_payload=self._copy_to_clipboard,
             color=self._color,
         )
 
@@ -296,6 +297,13 @@ class ReactShell:
 
         # Pending input for the run loop
         self._pending_input: Optional[str] = None
+
+        # Per-turn observability (for copy + traceability)
+        self._turn_task: Optional[str] = None
+        self._turn_trace: List[str] = []
+        # Simple in-session dedup for obviously repeated shell commands.
+        self._last_execute_command: Optional[str] = None
+        self._last_execute_command_result: Optional[Dict[str, Any]] = None
 
     # ---------------------------------------------------------------------
     # UI helpers
@@ -348,9 +356,10 @@ class ReactShell:
             width = 120
         return max(40, width)
 
-    def _format_user_prompt_block(self, text: str) -> str:
+    def _format_user_prompt_block(self, text: str, *, copy_id: Optional[str] = None) -> str:
         """Render a user prompt as a padded, full-line background block (no truncation)."""
         lines = text.splitlines() or [""]
+        copy_marker = f"[[COPY:{copy_id}]]" if isinstance(copy_id, str) and copy_id else ""
 
         prefix_first = "> "
         prefix_next = "  "
@@ -364,7 +373,7 @@ class ReactShell:
             return [s[i : i + avail] for i in range(0, len(s), avail)]
 
         if not self._color:
-            out: List[str] = [""]
+            out: List[str] = [copy_marker or ""]
             first_visual = True
             for line in lines:
                 for chunk in chunk_line(line):
@@ -383,7 +392,9 @@ class ReactShell:
             return f"{bg}{fg}{padded}{reset}"
 
         blank = f"{bg}{' ' * width}{reset}"
-        out_lines: List[str] = [blank]
+        # Add black spacer lines above/below the grey block for readability.
+        out_lines: List[str] = [copy_marker or ""]
+        out_lines.append(blank)
 
         first_visual = True
         for line in lines:
@@ -393,16 +404,21 @@ class ReactShell:
                 first_visual = False
 
         out_lines.append(blank)
+        out_lines.append("")
         return "\n".join(out_lines)
 
     def _handle_input(self, text: str) -> None:
         """Handle user input from the UI (called from worker thread)."""
+        import uuid
+
         text = text.strip()
         if not text:
             return
 
         # Echo user input (styled so user prompts are easy to spot).
-        self._print(self._format_user_prompt_block(text))
+        copy_id = f"user_{uuid.uuid4().hex}"
+        self._ui.register_copy_payload(copy_id, text)
+        self._print(self._format_user_prompt_block(text, copy_id=copy_id))
 
         cmd = text.strip()
 
@@ -428,7 +444,13 @@ class ReactShell:
             "compact",
             "spans",
             "expand",
+            "vars",
+            "var",
+            "remember",
             "recall",
+            "copy",
+            "mouse",
+            "flow",
             "history",
             "resume",
             "quit",
@@ -476,30 +498,61 @@ class ReactShell:
         elif step == "reason":
             it = data.get("iteration", "?")
             max_it = data.get("max_iterations", "?")
-            self._print(_style(f"Thinking (step {it}/{max_it})...", _C.YELLOW, enabled=self._color))
             self._ui.set_spinner(f"Thinking (step {it}/{max_it})...")
+        elif step == "parse":
+            # Show the agent's actual "thinking" (rationale) when it is about to act.
+            # We only print this for tool-using iterations to avoid duplicating final answers.
+            has_tool_calls = bool(data.get("has_tool_calls"))
+            content = str(data.get("content", "") or "")
+            if has_tool_calls and content.strip():
+                text = content.strip()
+                self._turn_trace.append("Thought:\n" + text)
+                self._print(_style("Thought", _C.DIM, enabled=self._color))
+                self._print(text)
         elif step == "act":
             tool = data.get("tool", "unknown")
             args = data.get("args") or {}
-            args_str = json.dumps(args, ensure_ascii=False)
-            if len(args_str) > 100:
-                args_str = args_str[:97] + "..."
-            self._print(_style("Tool:", _C.GREEN, enabled=self._color) + f" {tool}({args_str})")
+            call_id_raw = data.get("call_id")
+            call_id = str(call_id_raw).strip() if call_id_raw is not None else ""
+            args_str = json.dumps(args, ensure_ascii=False, sort_keys=True)
+            call_suffix = f" [{call_id}]" if call_id else ""
+            self._print(_style("Tool:", _C.GREEN, enabled=self._color) + f" {tool}{call_suffix}({args_str})")
+            # Track full arguments for copy payloads (no truncation).
+            try:
+                args_full = json.dumps(args, ensure_ascii=False, sort_keys=True)
+            except Exception:
+                args_full = str(args)
+            self._turn_trace.append(f"Tool: {tool}{call_suffix}({args_full})")
             self._ui.set_spinner(f"Running {tool}...")
         elif step == "observe":
-            res = str(data.get("result", ""))[:120]
-            self._print(_style("Result:", _C.DIM, enabled=self._color) + f" {res}")
+            raw = str(data.get("result", "") or "")
+            self._print(_style("Result:", _C.DIM, enabled=self._color) + f" {raw}")
+            tool_name = str(data.get("tool", "") or "tool")
+            self._turn_trace.append(f"Result ({tool_name}):\n{raw}".rstrip())
             self._ui.set_spinner("Processing result...")
         elif step == "ask_user":
             self._ui.clear_spinner()
             self._ui.scroll_to_bottom()
             self._print(_style("Agent question:", _C.MAGENTA, _C.BOLD, enabled=self._color))
         elif step == "done":
+            import uuid
+
             self._ui.clear_spinner()
             self._ui.scroll_to_bottom()
+            answer_text = str(data.get("answer", "") or "")
+            copy_id = f"assistant_{uuid.uuid4().hex}"
+            # Copy includes the system/tool trace for this turn so debugging is lossless.
+            blocks: List[str] = []
+            if self._turn_task:
+                blocks.append("User:\n" + str(self._turn_task).strip())
+            if self._turn_trace:
+                blocks.append("Trace:\n" + "\n\n".join([t for t in self._turn_trace if t.strip()]).strip())
+            blocks.append("Answer:\n" + answer_text.strip())
+            self._ui.register_copy_payload(copy_id, "\n\n".join([b for b in blocks if b.strip()]).strip())
             self._print(_style("\nANSWER", _C.GREEN, _C.BOLD, enabled=self._color))
+            self._print(f"[[COPY:{copy_id}]]")
             self._print(_style("─" * 60, _C.DIM, enabled=self._color))
-            self._print(str(data.get("answer", "")))
+            self._print(answer_text)
             self._print(_style("─" * 60, _C.DIM, enabled=self._color))
         elif step == "error" or step == "failed":
             self._ui.clear_spinner()
@@ -618,6 +671,12 @@ class ReactShell:
         if command in ("vars", "var"):
             self._handle_vars(arg)
             return False
+        if command == "mouse":
+            self._handle_mouse_toggle()
+            return False
+        if command == "copy":
+            self._handle_copy(arg)
+            return False
         if command == "flow":
             self._handle_flow(arg)
             return False
@@ -675,8 +734,9 @@ class ReactShell:
 
         if not parts:
             self._print(_style("Usage:", _C.DIM, enabled=self._color))
-            self._print(_style("  /flow run <flow_id_or_path> [--key value ...]", _C.DIM, enabled=self._color))
-            self._print(_style("  /flow resume|pause|resume-run|cancel", _C.DIM, enabled=self._color))
+            self._print(_style("  /flow run <flow_id_or_path> [--verbosity none|default|full] [--key value ...]", _C.DIM, enabled=self._color))
+            self._print(_style("  /flow resume [--verbosity none|default|full] [--wait-until]", _C.DIM, enabled=self._color))
+            self._print(_style("  /flow pause|resume-run|cancel", _C.DIM, enabled=self._color))
             return
 
         action = parts[0].strip().lower()
@@ -684,6 +744,11 @@ class ReactShell:
         from .flow_cli import control_flow_command, resume_flow_command, run_flow_command
 
         def _emit_answer_user(message: str) -> None:
+            import uuid
+
+            copy_id = f"assistant_{uuid.uuid4().hex}"
+            self._ui.register_copy_payload(copy_id, message)
+            self._print(f"[[COPY:{copy_id}]]")
             self._print(message)
             self._append_to_active_context(
                 role="assistant",
@@ -691,9 +756,65 @@ class ReactShell:
                 metadata={"kind": "flow_output"},
             )
 
+        def _emit_flow_trace(trace: Any) -> None:
+            """Add a durable tool-like trace so follow-up questions can reference what happened."""
+            try:
+                flow_name = str(getattr(trace, "flow_name", "") or "")
+                flow_id = str(getattr(trace, "flow_id", "") or "")
+                run_id = str(getattr(trace, "run_id", "") or "")
+                status = str(getattr(trace, "status", "") or "")
+                tool_calls = getattr(trace, "tool_calls", None)
+                if not isinstance(tool_calls, list):
+                    tool_calls = []
+            except Exception:
+                return
+
+            lines: List[str] = []
+            lines.append("Flow trace (AbstractFlow via AbstractCode):")
+            if flow_name or flow_id:
+                lines.append(f"- flow: {flow_name or flow_id} ({flow_id})".rstrip())
+            if run_id:
+                lines.append(f"- run_id: {run_id}")
+            if status:
+                lines.append(f"- status: {status}")
+
+            if tool_calls:
+                lines.append("- tools:")
+                for tc in tool_calls:
+                    if not isinstance(tc, dict):
+                        continue
+                    name = str(tc.get("name") or "")
+                    args = tc.get("arguments") if isinstance(tc.get("arguments"), dict) else {}
+                    if name == "fetch_url":
+                        url = str(args.get("url") or "")
+                        lines.append(f"  - fetch_url: {url}" if url else "  - fetch_url")
+                    elif name == "web_search":
+                        q = str(args.get("query") or "")
+                        lines.append(f"  - web_search: {q}" if q else "  - web_search")
+                    else:
+                        # Keep args compact but untruncated for fidelity.
+                        try:
+                            args_json = json.dumps(args, ensure_ascii=False, sort_keys=True)
+                        except Exception:
+                            args_json = str(args)
+                        lines.append(f"  - {name}: {args_json}" if name else f"  - tool: {args_json}")
+
+            self._append_to_active_context(
+                role="tool",
+                content="\n".join(lines),
+                metadata={
+                    "kind": "flow_trace",
+                    "name": "flow",
+                    "flow_id": flow_id,
+                    "flow_name": flow_name,
+                    "run_id": run_id,
+                    "status": status,
+                },
+            )
+
         if action == "run":
             if len(parts) < 2:
-                self._print(_style("Usage: /flow run <flow_id_or_path> [--key value ...]", _C.DIM, enabled=self._color))
+                self._print(_style("Usage: /flow run <flow_id_or_path> [--verbosity none|default|full] [--key value ...]", _C.DIM, enabled=self._color))
                 return
 
             flow_ref = parts[1]
@@ -705,6 +826,7 @@ class ReactShell:
             params: List[str] = []
             extra_args: List[str] = []
             wait_until = False
+            verbosity = "default"
             auto_approve = bool(self._auto_approve)
             no_state = self._state_file is None
             flow_state_file: Optional[str] = None
@@ -761,6 +883,19 @@ class ReactShell:
                     i += 1
                     continue
 
+                if token.startswith("--verbosity"):
+                    val = _opt_value()
+                    if val is None:
+                        self._print(_style("Missing value for --verbosity", _C.YELLOW, enabled=self._color))
+                        return
+                    v = str(val).strip().lower()
+                    if v not in ("none", "default", "full"):
+                        self._print(_style("Verbosity must be one of: none, default, full", _C.YELLOW, enabled=self._color))
+                        return
+                    verbosity = v
+                    i += 2 if "=" not in token else 1
+                    continue
+
                 if token in ("--auto-approve", "--auto-accept", "--accept-tools"):
                     auto_approve = True
                     i += 1
@@ -785,7 +920,7 @@ class ReactShell:
                 i += 1
 
             try:
-                run_flow_command(
+                trace = run_flow_command(
                     flow_ref=str(flow_ref),
                     flows_dir=flows_dir,
                     input_json=input_json,
@@ -796,27 +931,65 @@ class ReactShell:
                     no_state=bool(no_state),
                     auto_approve=bool(auto_approve),
                     wait_until=bool(wait_until),
+                    verbosity=verbosity,  # type: ignore[arg-type]
                     print_fn=self._print,
                     prompt_fn=self._simple_prompt,
                     ask_user_fn=self._prompt_user,
                     on_answer_user=_emit_answer_user,
                 )
+                _emit_flow_trace(trace)
             except Exception as e:
                 self._print(_style(f"Flow run failed: {e}", _C.YELLOW, enabled=self._color))
             return
 
         if action == "resume":
+            # Allow `--verbosity` and `--wait-until` for resume.
+            rest = parts[1:]
+            wait_until = False
+            verbosity = "default"
+            i = 0
+            while i < len(rest):
+                token = rest[i]
+
+                def _opt_value() -> Optional[str]:
+                    if "=" in token:
+                        return token.split("=", 1)[1]
+                    if i + 1 < len(rest):
+                        return rest[i + 1]
+                    return None
+
+                if token == "--wait-until":
+                    wait_until = True
+                    i += 1
+                    continue
+                if token.startswith("--verbosity"):
+                    val = _opt_value()
+                    if val is None:
+                        self._print(_style("Missing value for --verbosity", _C.YELLOW, enabled=self._color))
+                        return
+                    v = str(val).strip().lower()
+                    if v not in ("none", "default", "full"):
+                        self._print(_style("Verbosity must be one of: none, default, full", _C.YELLOW, enabled=self._color))
+                        return
+                    verbosity = v
+                    i += 2 if "=" not in token else 1
+                    continue
+                # Ignore unknown tokens for forward-compat (treat like `/flow run` extra args)
+                i += 1
+
             try:
-                resume_flow_command(
+                trace = resume_flow_command(
                     flow_state_file=None,
                     no_state=False,
                     auto_approve=bool(self._auto_approve),
-                    wait_until=False,
+                    wait_until=bool(wait_until),
+                    verbosity=verbosity,  # type: ignore[arg-type]
                     print_fn=self._print,
                     prompt_fn=self._simple_prompt,
                     ask_user_fn=self._prompt_user,
                     on_answer_user=_emit_answer_user,
                 )
+                _emit_flow_trace(trace)
             except Exception as e:
                 self._print(_style(f"Flow resume failed: {e}", _C.YELLOW, enabled=self._color))
             return
@@ -1687,7 +1860,14 @@ class ReactShell:
             "  /recall [opts]      Recall spans by time/tags/query (--into-context)\n"
             "  /vars [path]        Inspect run vars (scratchpad, _runtime, ...)\n"
             "  /remember <note>    Store a durable memory note (tags + provenance)\n"
-            "  /flow ...           Run AbstractFlow workflows (run/resume/pause/cancel)\n"
+            "  /mouse              Toggle mouse mode (wheel scroll vs terminal selection)\n"
+            "  /flow ...           Run AbstractFlow workflows inside this REPL\n"
+            "                     - /flow run <flow_id_or_path> [--verbosity none|default|full] [--key value ...]\n"
+            "                     - /flow resume [--verbosity none|default|full] [--wait-until]\n"
+            "                     - /flow pause | resume-run | cancel\n"
+            "                     - Example: /flow run deep-research-pro --query \"who are you?\" --max_web_search 10\n"
+            "  /copy ...           Copy messages to clipboard\n"
+            "                     - /copy user [turn] | assistant [turn] | turn <N>\n"
             "  /history [N]        Show recent conversation history\n"
             "  /resume             Resume the saved/attached run\n"
             "  /clear              Clear memory and start fresh (aliases: /reset, /new)\n"
@@ -1698,6 +1878,13 @@ class ReactShell:
             "\nTasks:\n"
             "  /task <text>        Start a new task\n"
         )
+
+    def _handle_mouse_toggle(self) -> None:
+        enabled = self._ui.toggle_mouse_support()
+        if enabled:
+            self._print(_style("Mouse mode: ON (wheel scroll enabled).", _C.DIM, enabled=self._color))
+        else:
+            self._print(_style("Mouse mode: OFF (terminal selection enabled).", _C.DIM, enabled=self._color))
 
     def _show_tools(self) -> None:
         self._print(_style("\nAvailable tools", _C.CYAN, _C.BOLD, enabled=self._color))
@@ -1736,7 +1923,44 @@ class ReactShell:
             return list(state.output["messages"])
         return []
 
+    def _group_messages_into_turns(self, messages: List[Dict[str, Any]]) -> list[list[Dict[str, Any]]]:
+        """Group messages into turns starting at each user message (prompt + following messages)."""
+        turns: list[list[Dict[str, Any]]] = []
+        current: list[Dict[str, Any]] = []
+        prelude: list[Dict[str, Any]] = []
+
+        for m in messages:
+            if not isinstance(m, dict):
+                continue
+            role = m.get("role")
+
+            if role == "user":
+                if current:
+                    turns.append(current)
+                # Include leading system messages before the first user prompt.
+                if not turns and prelude:
+                    current = [*prelude, m]
+                    prelude = []
+                else:
+                    current = [m]
+                continue
+
+            if not current:
+                # Preserve only system messages before the first user message.
+                if role == "system":
+                    prelude.append(m)
+                continue
+
+            current.append(m)
+
+        if current:
+            turns.append(current)
+
+        return turns
+
     def _show_history(self, *, limit: int = 12) -> None:
+        import uuid
+
         state = self._safe_get_state()
         if state is None:
             messages = list(self._agent.session_messages or [])
@@ -1754,32 +1978,7 @@ class ReactShell:
         if limit_int < 1:
             limit_int = 1
 
-        # Group messages into "turns" starting at each user message.
-        turns: list[list[Dict[str, Any]]] = []
-        current: list[Dict[str, Any]] = []
-        prelude: list[Dict[str, Any]] = []
-        for m in messages:
-            if not isinstance(m, dict):
-                continue
-            role = m.get("role")
-            if role == "user":
-                if current:
-                    turns.append(current)
-                # Include leading system messages before the first user prompt.
-                if not turns and prelude:
-                    current = [*prelude, m]
-                    prelude = []
-                else:
-                    current = [m]
-                continue
-            if not current:
-                # Preserve only system messages before the first user message.
-                if role == "system":
-                    prelude.append(m)
-                continue
-            current.append(m)
-        if current:
-            turns.append(current)
+        turns = self._group_messages_into_turns(messages)
 
         if not turns:
             self._print("No history yet.")
@@ -1797,26 +1996,178 @@ class ReactShell:
                 role = str(msg.get("role") or "unknown")
                 content = "" if msg.get("content") is None else str(msg.get("content"))
                 if role == "user":
-                    self._print(self._format_user_prompt_block(content))
+                    mid = _get_message_id(msg) or f"user_{uuid.uuid4().hex}"
+                    self._ui.register_copy_payload(mid, content)
+                    self._print(self._format_user_prompt_block(content, copy_id=mid))
                     continue
 
                 if role == "tool":
                     meta = msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {}
                     name = meta.get("name") if isinstance(meta, dict) else None
                     label = f"[tool:{name}]" if isinstance(name, str) and name else "[tool]"
+                    mid = _get_message_id(msg) or f"tool_{uuid.uuid4().hex}"
+                    self._ui.register_copy_payload(mid, f"{label}\n{content}".strip())
+                    self._print(f"[[COPY:{mid}]]")
                     self._print(_style(label, _C.DIM, enabled=self._color))
                     self._print(content)
                     continue
 
                 if role == "system":
+                    mid = _get_message_id(msg) or f"system_{uuid.uuid4().hex}"
+                    self._ui.register_copy_payload(mid, content)
+                    self._print(f"[[COPY:{mid}]]")
                     self._print(_style("[system]", _C.DIM, enabled=self._color))
                     self._print(content)
                     continue
 
                 # Default: assistant/other roles (no role prefix; rely on styling/structure).
+                mid = _get_message_id(msg) or f"assistant_{uuid.uuid4().hex}"
+                self._ui.register_copy_payload(mid, content)
+                self._print(f"[[COPY:{mid}]]")
                 self._print(content)
 
         self._print(_style("\n" + "─" * 80, _C.DIM, enabled=self._color))
+
+    def _copy_to_clipboard(self, text: str) -> bool:
+        """Best-effort copy to OS clipboard (no truncation)."""
+        import shutil
+        import subprocess
+
+        value = str(text or "")
+
+        try:
+            import pyperclip  # type: ignore
+
+            pyperclip.copy(value)
+            return True
+        except Exception:
+            pass
+
+        try:
+            if sys.platform == "darwin" and shutil.which("pbcopy"):
+                subprocess.run(["pbcopy"], input=value.encode("utf-8"), check=True)
+                return True
+        except Exception:
+            pass
+
+        try:
+            if shutil.which("wl-copy"):
+                subprocess.run(["wl-copy"], input=value.encode("utf-8"), check=True)
+                return True
+        except Exception:
+            pass
+
+        try:
+            if shutil.which("xclip"):
+                subprocess.run(["xclip", "-selection", "clipboard"], input=value.encode("utf-8"), check=True)
+                return True
+        except Exception:
+            pass
+
+        try:
+            if shutil.which("xsel"):
+                subprocess.run(["xsel", "--clipboard", "--input"], input=value.encode("utf-8"), check=True)
+                return True
+        except Exception:
+            pass
+
+        return False
+
+    def _handle_copy(self, raw: str) -> None:
+        """Copy a user/assistant message (or full turn) to clipboard.
+
+        Usage:
+          /copy user [turn]
+          /copy assistant [turn]
+          /copy turn <N>
+        """
+        import shlex
+
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split() if raw else []
+
+        if not parts:
+            self._print(_style("Usage: /copy user|assistant [turn]  |  /copy turn <N>", _C.DIM, enabled=self._color))
+            return
+
+        state = self._safe_get_state()
+        messages = list(self._agent.session_messages or []) if state is None else self._messages_from_state(state)
+        turns = self._group_messages_into_turns(messages)
+        if not turns:
+            self._print("No history yet.")
+            return
+
+        def _resolve_turn_index(value: str) -> Optional[int]:
+            try:
+                idx = int(value)
+            except Exception:
+                return None
+            if idx < 1 or idx > len(turns):
+                return None
+            return idx - 1  # zero-based
+
+        action = parts[0].strip().lower()
+
+        if action == "turn":
+            if len(parts) < 2:
+                self._print(_style("Usage: /copy turn <N>", _C.DIM, enabled=self._color))
+                return
+            turn_idx = _resolve_turn_index(parts[1])
+            if turn_idx is None:
+                self._print(_style(f"Invalid turn index. Valid range: 1..{len(turns)}", _C.YELLOW, enabled=self._color))
+                return
+
+            turn = turns[turn_idx]
+            blocks: List[str] = []
+            for msg in turn:
+                role = str(msg.get("role") or "unknown")
+                content = "" if msg.get("content") is None else str(msg.get("content"))
+                if role == "tool":
+                    meta = msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {}
+                    name = meta.get("name") if isinstance(meta, dict) else None
+                    label = f"tool[{name}]" if isinstance(name, str) and name else "tool"
+                else:
+                    label = role
+                blocks.append(f"{label}:\n{content}".rstrip())
+
+            payload = "\n\n".join(blocks).strip()
+            ok = self._copy_to_clipboard(payload)
+            self._print(_style("Copied." if ok else "Copy failed (no clipboard helper found).", _C.DIM, enabled=self._color))
+            return
+
+        if action in ("user", "assistant", "ai"):
+            role = "assistant" if action in ("assistant", "ai") else "user"
+            turn_idx = len(turns) - 1
+            if len(parts) >= 2:
+                resolved = _resolve_turn_index(parts[1])
+                if resolved is None:
+                    self._print(_style(f"Invalid turn index. Valid range: 1..{len(turns)}", _C.YELLOW, enabled=self._color))
+                    return
+                turn_idx = resolved
+
+            turn = turns[turn_idx]
+            if role == "user":
+                msg = next((m for m in turn if m.get("role") == "user"), None)
+                content = "" if not isinstance(msg, dict) or msg.get("content") is None else str(msg.get("content"))
+            else:
+                chunks = [
+                    "" if m.get("content") is None else str(m.get("content"))
+                    for m in turn
+                    if isinstance(m, dict) and m.get("role") == "assistant"
+                ]
+                content = "\n\n".join([c for c in chunks if c]).strip()
+
+            if not content.strip():
+                self._print(_style(f"No {role} content found for that turn.", _C.YELLOW, enabled=self._color))
+                return
+
+            ok = self._copy_to_clipboard(content)
+            self._print(_style("Copied." if ok else "Copy failed (no clipboard helper found).", _C.DIM, enabled=self._color))
+            return
+
+        self._print(_style("Usage: /copy user|assistant [turn]  |  /copy turn <N>", _C.DIM, enabled=self._color))
 
     def _clear_memory(self) -> None:
         """Clear all memory and reset to fresh state."""
@@ -1920,6 +2271,8 @@ class ReactShell:
 
     def _start(self, task: str) -> None:
         # Note: _approve_all_session is NOT reset here - it persists for the entire session
+        self._turn_task = str(task or "").strip() or None
+        self._turn_trace = []
         run_id = self._agent.start(task)
         if self._state_file:
             self._agent.save_state(self._state_file)
@@ -2038,15 +2391,11 @@ class ReactShell:
         return self._simple_prompt(prompt + " ")
 
     def _approve_and_execute(self, tool_calls: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        if self._auto_approve:
-            return self._tool_runner.execute(tool_calls=tool_calls)
+        auto = bool(self._auto_approve or self._approve_all_session)
 
-        # If user already said "all" for this session, just execute without UI clutter
-        if self._approve_all_session:
-            return self._tool_runner.execute(tool_calls=tool_calls)
-
-        self._print(_style("\nTool approval required", _C.CYAN, _C.BOLD, enabled=self._color))
-        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+        if not auto:
+            self._print(_style("\nTool approval required", _C.CYAN, _C.BOLD, enabled=self._color))
+            self._print(_style("─" * 60, _C.DIM, enabled=self._color))
 
         approve_all = False
         results: List[Dict[str, Any]] = []
@@ -2065,10 +2414,10 @@ class ReactShell:
             self._print(
                 _style("args:", _C.DIM, enabled=self._color)
                 + " "
-                + json.dumps(_truncate_json(args), indent=2, ensure_ascii=False)
+                + json.dumps(args, indent=2, ensure_ascii=False)
             )
 
-            if not approve_all:
+            if not auto and not approve_all:
                 while True:
                     choice = self._simple_prompt("Approve? [y]es/[n]o/[a]ll/[e]dit/[q]uit: ").lower()
                     if choice in ("y", "yes"):
@@ -2112,8 +2461,8 @@ class ReactShell:
             if not name:
                 continue
 
-            # Additional confirmation for shell execution (skip if approve_all is set)
-            if name == "execute_command" and not approve_all:
+            # Additional confirmation for shell execution (skip if auto/approve_all is set)
+            if name == "execute_command" and not auto and not approve_all:
                 confirm = self._simple_prompt("Type 'run' to execute this command: ").lower()
                 if confirm != "run":
                     results.append(
@@ -2127,36 +2476,35 @@ class ReactShell:
                     )
                     continue
 
+            # Dedup identical execute_command calls that already succeeded (common model glitch).
+            if name == "execute_command":
+                cmd = str(args.get("command") or "")
+                if cmd and cmd == (self._last_execute_command or ""):
+                    prev = self._last_execute_command_result or {}
+                    if isinstance(prev, dict) and prev.get("success") is True:
+                        cached = dict(prev)
+                        cached["call_id"] = call_id
+                        # Preserve fidelity but make it obvious this wasn't re-executed.
+                        cached_output = cached.get("output")
+                        cached["output"] = f"[cached duplicate execute_command]\n{cached_output}"
+                        results.append(cached)
+                        self._print(_style("Reused cached execute_command result (duplicate).", _C.DIM, enabled=self._color))
+                        continue
+
             single = {"name": name, "arguments": args, "call_id": call_id}
             out = self._tool_runner.execute(tool_calls=[single])
-            results.extend(out.get("results") or [])
+            out_results = out.get("results") or []
+            results.extend(out_results)
+            if name == "execute_command" and out_results:
+                try:
+                    self._last_execute_command = str(args.get("command") or "")
+                    first = out_results[0]
+                    if isinstance(first, dict):
+                        self._last_execute_command_result = dict(first)
+                except Exception:
+                    pass
 
         return {"mode": "executed", "results": results}
 
 
-def _truncate_json(value: Any, *, max_str: int = 800, max_list: int = 50, max_dict: int = 50) -> Any:
-    if isinstance(value, str):
-        if len(value) <= max_str:
-            return value
-        head = value[:400]
-        tail = value[-200:] if len(value) > 600 else ""
-        suffix = f"... ({len(value)} chars total)"
-        return head + (("\n" + suffix + "\n" + tail) if tail else ("\n" + suffix))
-
-    if isinstance(value, list):
-        trimmed = value[:max_list]
-        out = [_truncate_json(v, max_str=max_str, max_list=max_list, max_dict=max_dict) for v in trimmed]
-        if len(value) > max_list:
-            out.append(f"... ({len(value)} items total)")
-        return out
-
-    if isinstance(value, dict):
-        items = list(value.items())[:max_dict]
-        out_dict: Dict[str, Any] = {}
-        for k, v in items:
-            out_dict[str(k)] = _truncate_json(v, max_str=max_str, max_list=max_list, max_dict=max_dict)
-        if len(value) > max_dict:
-            out_dict["..."] = f"({len(value)} keys total)"
-        return out_dict
-
-    return value
+ 

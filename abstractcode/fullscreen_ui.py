@@ -13,16 +13,17 @@ import queue
 import re
 import threading
 import time
-from typing import Callable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
-from prompt_toolkit.filters import has_completions
+from prompt_toolkit.filters import Always, Never, has_completions
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.formatted_text import FormattedText, ANSI
+from prompt_toolkit.formatted_text.utils import to_formatted_text
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout.containers import Float, FloatContainer, HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
@@ -38,9 +39,17 @@ COMMANDS = [
     ("tools", "List available tools"),
     ("status", "Show current run status"),
     ("history", "Show recent conversation history"),
+    ("copy", "Copy messages to clipboard (/copy user|assistant [turn])"),
     ("resume", "Resume the saved/attached run"),
     ("clear", "Clear memory and start fresh"),
     ("compact", "Compress conversation [light|standard|heavy] [--preserve N] [focus...]"),
+    ("spans", "List archived conversation spans (from /compact)"),
+    ("expand", "Expand an archived span into view/context"),
+    ("recall", "Recall memory spans by query/time/tags"),
+    ("vars", "Inspect durable run vars (scratchpad, _runtime, ...)"),
+    ("remember", "Store a durable memory note"),
+    ("flow", "Run AbstractFlow workflows (run/resume/pause/cancel)"),
+    ("mouse", "Toggle mouse mode (wheel scroll vs terminal selection)"),
     ("new", "Start fresh (alias for /clear)"),
     ("reset", "Reset session (alias for /clear)"),
     ("task", "Start a new task (/task <text>)"),
@@ -84,6 +93,8 @@ class CommandCompleter(Completer):
 class FullScreenUI:
     """Full-screen chat interface with scrollable history and ANSI color support."""
 
+    _COPY_MARKER_RE = re.compile(r"\[\[COPY:([^\]]+)\]\]")
+
     class _ScrollAwareFormattedTextControl(FormattedTextControl):
         def __init__(
             self,
@@ -106,13 +117,15 @@ class FullScreenUI:
             if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
                 self._on_scroll(1)
                 return None
-            return NotImplemented
+            return super().mouse_handler(mouse_event)
 
     def __init__(
         self,
         get_status_text: Callable[[], str],
         on_input: Callable[[str], None],
+        on_copy_payload: Optional[Callable[[str], bool]] = None,
         color: bool = True,
+        mouse_support: bool = True,
     ):
         """Initialize the full-screen UI.
 
@@ -124,7 +137,11 @@ class FullScreenUI:
         self._get_status_text = get_status_text
         self._on_input = on_input
         self._color = color
+        self._mouse_support_enabled = bool(mouse_support)
         self._running = False
+
+        self._on_copy_payload = on_copy_payload
+        self._copy_payloads: Dict[str, str] = {}
 
         # Output content storage (raw text with ANSI codes)
         self._output_text: str = ""
@@ -185,9 +202,82 @@ class FullScreenUI:
             key_bindings=self._kb,
             style=self._style,
             full_screen=True,
-            mouse_support=True,
+            mouse_support=self._mouse_support_enabled,
             erase_when_done=False,
         )
+
+    def register_copy_payload(self, copy_id: str, payload: str) -> None:
+        """Register a payload for a clickable [[COPY:...]] marker in the output."""
+        cid = str(copy_id or "").strip()
+        if not cid:
+            return
+        with self._output_lock:
+            self._copy_payloads[cid] = str(payload or "")
+
+    def toggle_mouse_support(self) -> bool:
+        """Toggle mouse reporting (wheel scroll) vs terminal selection mode."""
+        self._mouse_support_enabled = not self._mouse_support_enabled
+        try:
+            # prompt_toolkit prefers Filter objects for runtime toggling.
+            self._app.mouse_support = Always() if self._mouse_support_enabled else Never()  # type: ignore[assignment]
+        except Exception:
+            try:
+                self._app.mouse_support = self._mouse_support_enabled  # type: ignore[assignment]
+            except Exception:
+                pass
+        try:
+            if self._mouse_support_enabled:
+                self._app.output.enable_mouse_support()
+            else:
+                self._app.output.disable_mouse_support()
+            self._app.output.flush()
+        except Exception:
+            pass
+        if self._app and self._app.is_running:
+            self._app.invalidate()
+        return self._mouse_support_enabled
+
+    def _copy_handler(self, copy_id: str) -> Callable[[MouseEvent], None]:
+        def _handler(mouse_event: MouseEvent) -> None:
+            if mouse_event.event_type not in (MouseEventType.MOUSE_UP, MouseEventType.MOUSE_DOWN):
+                return
+            if self._on_copy_payload is None:
+                return
+            with self._output_lock:
+                payload = self._copy_payloads.get(copy_id)
+            if payload is None:
+                return
+            try:
+                self._on_copy_payload(payload)
+            except Exception:
+                return
+
+        return _handler
+
+    def _format_output_text(self, text: str) -> FormattedText:
+        """Convert output text into formatted fragments and attach handlers for copy markers."""
+        if not text:
+            return to_formatted_text(ANSI(""))
+
+        if "[[COPY:" not in text:
+            return to_formatted_text(ANSI(text))
+
+        out: List[Tuple[Any, ...]] = []
+        pos = 0
+        for m in self._COPY_MARKER_RE.finditer(text):
+            before = text[pos : m.start()]
+            if before:
+                out.extend(to_formatted_text(ANSI(before)))
+            copy_id = str(m.group(1) or "").strip()
+            if copy_id:
+                out.append(("class:copy-button", "[ copy ]", self._copy_handler(copy_id)))
+            else:
+                out.extend(to_formatted_text(ANSI(m.group(0))))
+            pos = m.end()
+        tail = text[pos:]
+        if tail:
+            out.extend(to_formatted_text(ANSI(tail)))
+        return out
 
     def _ensure_render_cache(self) -> None:
         """Freeze a per-render snapshot for prompt_toolkit.
@@ -208,7 +298,7 @@ class FullScreenUI:
             text_snapshot = self._output_text
             line_count_snapshot = self._output_line_count
 
-        formatted = ANSI(text_snapshot) if text_snapshot else ANSI("")
+        formatted = self._format_output_text(text_snapshot)
         line_count = max(1, int(line_count_snapshot or 1))
 
         with self._output_lock:
@@ -528,6 +618,7 @@ class FullScreenUI:
                 "completion-menu.completion.current": "bg:#444444 #ffffff bold",
                 "completion-menu.meta.completion": "bg:#1a1a2e #888888 italic",
                 "completion-menu.meta.completion.current": "bg:#444444 #aaaaaa italic",
+                "copy-button": "bg:#333333 #ffffff",
             })
         else:
             self._style = Style.from_dict({})
@@ -560,6 +651,7 @@ class FullScreenUI:
             self._output_line_count = 1
             self._scroll_offset = 0
             self._follow_output = True
+            self._copy_payloads.clear()
 
         if self._app and self._app.is_running:
             self._app.invalidate()
@@ -571,6 +663,7 @@ class FullScreenUI:
             self._output_line_count = max(1, text.count("\n") + 1) if text else 1
             self._scroll_offset = 0
             self._follow_output = True
+            self._copy_payloads.clear()
 
         if self._app and self._app.is_running:
             self._app.invalidate()

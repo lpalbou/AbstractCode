@@ -45,7 +45,14 @@ def _default_max_tokens() -> Optional[int]:
 def build_agent_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="abstractcode",
-        description="AbstractCode: an interactive terminal shell for AbstractFramework agents (MVP).",
+        description="AbstractCode: an interactive terminal shell for AbstractFramework (agents + workflows).",
+        epilog=(
+            "Workflows:\n"
+            "  abstractcode flow --help   Run AbstractFlow workflows from the terminal\n"
+            "REPL:\n"
+            "  Use /flow inside the REPL to run workflows while keeping chat context.\n"
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
         "--agent",
@@ -131,6 +138,12 @@ def build_flow_parser() -> argparse.ArgumentParser:
         help="Automatically approve tool calls (unsafe; disables interactive approvals).",
     )
     run.add_argument(
+        "--verbosity",
+        choices=("none", "default", "full"),
+        default="default",
+        help="Observability level: none|default|full (default: default).",
+    )
+    run.add_argument(
         "--wait-until",
         action="store_true",
         help="If waiting on a time-based event (WAIT_UNTIL), keep sleeping and resuming automatically.",
@@ -149,6 +162,12 @@ def build_flow_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="auto_approve",
         help="Automatically approve tool calls (unsafe; disables interactive approvals).",
+    )
+    resume.add_argument(
+        "--verbosity",
+        choices=("none", "default", "full"),
+        default="default",
+        help="Observability level: none|default|full (default: default).",
     )
     resume.add_argument(
         "--wait-until",
@@ -261,6 +280,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 no_state=bool(args.no_state),
                 auto_approve=bool(args.auto_approve),
                 wait_until=bool(args.wait_until),
+                verbosity=str(getattr(args, "verbosity", "default") or "default"),
             )
             return 0
         if cmd == "resume":
@@ -271,6 +291,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 no_state=False,
                 auto_approve=bool(args.auto_approve),
                 wait_until=bool(args.wait_until),
+                verbosity=str(getattr(args, "verbosity", "default") or "default"),
             )
             return 0
         if cmd == "pause":

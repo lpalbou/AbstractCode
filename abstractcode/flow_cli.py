@@ -5,7 +5,22 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Literal
+
+
+FlowVerbosity = Literal["none", "default", "full"]
+
+
+@dataclass
+class FlowRunResult:
+    """Summary of a flow execution for host-side UX and REPL context injection."""
+
+    flow_id: str
+    flow_name: str
+    run_id: str
+    status: str
+    store_dir: Optional[str]
+    tool_calls: List[Dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -396,9 +411,13 @@ def _approve_and_execute(
     approval_state: _ApprovalState,
     prompt_fn: Any,
     print_fn: Any,
+    trace: Optional[FlowRunResult] = None,
 ) -> Optional[Dict[str, Any]]:
     if auto_approve or approval_state.approve_all:
-        return tool_runner.execute(tool_calls=tool_calls)
+        payload = tool_runner.execute(tool_calls=tool_calls)
+        if trace is not None and isinstance(payload, dict):
+            _capture_tool_results(trace=trace, tool_calls=tool_calls, payload=payload)
+        return payload
 
     print_fn("\nTool approval required")
     print_fn("-" * 60)
@@ -439,6 +458,8 @@ def _approve_and_execute(
 
     if approved:
         payload = tool_runner.execute(tool_calls=approved)
+        if trace is not None and isinstance(payload, dict):
+            _capture_tool_results(trace=trace, tool_calls=approved, payload=payload)
         if isinstance(payload, dict):
             exec_results = payload.get("results")
             if isinstance(exec_results, list):
@@ -447,6 +468,137 @@ def _approve_and_execute(
             results.append({"call_id": "", "name": "tools", "success": False, "output": None, "error": "Invalid tool runner output"})
 
     return {"mode": "executed", "results": results}
+
+
+def _capture_tool_results(*, trace: FlowRunResult, tool_calls: List[Dict[str, Any]], payload: Dict[str, Any]) -> None:
+    """Capture executed tool call metadata into the flow result (no truncation)."""
+    results = payload.get("results")
+    results_by_id: Dict[str, Dict[str, Any]] = {}
+    if isinstance(results, list):
+        for r in results:
+            if not isinstance(r, dict):
+                continue
+            cid = str(r.get("call_id") or "")
+            if cid:
+                results_by_id[cid] = r
+
+    for tc in tool_calls:
+        if not isinstance(tc, dict):
+            continue
+        call_id = str(tc.get("call_id") or "")
+        name = str(tc.get("name") or "")
+        args = tc.get("arguments")
+        args_dict = dict(args) if isinstance(args, dict) else {}
+        r = results_by_id.get(call_id, {})
+        trace.tool_calls.append(
+            {
+                "name": name,
+                "arguments": args_dict,
+                "success": bool(r.get("success")) if isinstance(r, dict) and "success" in r else None,
+                "error": r.get("error") if isinstance(r, dict) else None,
+                "output_chars": len(str(r.get("output") or "")) if isinstance(r, dict) else None,
+            }
+        )
+
+
+def _node_meta(vf: Any) -> Dict[str, Dict[str, str]]:
+    meta: Dict[str, Dict[str, str]] = {}
+    nodes = getattr(vf, "nodes", None)
+    if not isinstance(nodes, list):
+        return meta
+    for n in nodes:
+        try:
+            node_id = str(getattr(n, "id", "") or "")
+            if not node_id:
+                continue
+            node_type = getattr(n, "type", None)
+            node_type_val = getattr(node_type, "value", None)
+            ntype = str(node_type_val if node_type_val is not None else node_type or "")
+            label = ""
+            data = getattr(n, "data", None)
+            if isinstance(data, dict):
+                label = str(data.get("label") or "")
+            if not label:
+                label = str(getattr(n, "label", "") or "")
+            if not label:
+                label = ntype or node_id
+            meta[node_id] = {"label": label, "type": ntype}
+        except Exception:
+            continue
+    return meta
+
+
+def _duration_ms(rec: Dict[str, Any]) -> Optional[float]:
+    started = rec.get("started_at")
+    ended = rec.get("ended_at")
+    if not isinstance(started, str) or not isinstance(ended, str) or not started or not ended:
+        return None
+    try:
+        from datetime import datetime
+
+        s = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        e = datetime.fromisoformat(ended.replace("Z", "+00:00"))
+        return float((e - s).total_seconds() * 1000.0)
+    except Exception:
+        return None
+
+
+def _print_step_records(
+    *,
+    runtime: Any,
+    run_ids: Iterable[str],
+    offsets: Dict[str, int],
+    emit: Any,
+    verbosity: FlowVerbosity,
+    node_meta: Dict[str, Dict[str, str]],
+) -> None:
+    """Print new ledger records for observability (like AbstractFlow left panel)."""
+    if verbosity == "none":
+        return
+
+    for rid in run_ids:
+        ledger = runtime.get_ledger(rid)
+        if not isinstance(ledger, list):
+            continue
+        start = int(offsets.get(rid, 0) or 0)
+        if start < 0:
+            start = 0
+
+        for rec in ledger[start:]:
+            if not isinstance(rec, dict):
+                continue
+            status = rec.get("status")
+            eff = rec.get("effect")
+            eff_type = None
+            if isinstance(eff, dict):
+                eff_type = eff.get("type")
+            if verbosity != "full" and eff_type == "answer_user":
+                # answer_user is printed separately (as the user-visible output).
+                continue
+
+            nid = str(rec.get("node_id") or "")
+            meta = node_meta.get(nid, {})
+            label = meta.get("label") or nid
+            ntype = meta.get("type") or ""
+
+            if verbosity == "full":
+                emit(json.dumps(rec, indent=2, ensure_ascii=False))
+                continue
+
+            dur = _duration_ms(rec)
+            dur_txt = f"{dur/1000.0:.2f}s" if isinstance(dur, (int, float)) else ""
+            parts = [f"{label}"]
+            if ntype:
+                parts.append(f"({ntype})")
+            if isinstance(eff_type, str) and eff_type:
+                parts.append(str(eff_type))
+            if isinstance(status, str) and status:
+                parts.append(str(status).upper())
+            if dur_txt:
+                parts.append(dur_txt)
+            emit(" ".join([p for p in parts if p]))
+
+        offsets[rid] = len(ledger)
 
 
 def _resume_and_bubble(
@@ -519,6 +671,9 @@ def _drive_until_blocked(
     tool_runner: Any,
     auto_approve: bool,
     wait_until: bool,
+    verbosity: FlowVerbosity = "default",
+    node_meta: Optional[Dict[str, Dict[str, str]]] = None,
+    trace: Optional[FlowRunResult] = None,
     prompt_fn: Any = None,
     ask_user_fn: Any = None,
     print_fn: Any = None,
@@ -533,8 +688,10 @@ def _drive_until_blocked(
     if not isinstance(top_run_id, str) or not top_run_id:
         raise RuntimeError("Runner has no run_id")
 
-    ledger_offsets: Dict[str, int] = {}
+    answer_offsets: Dict[str, int] = {}
+    step_offsets: Dict[str, int] = {}
     approval = approval_state or _ApprovalState()
+    meta = node_meta or {}
 
     _print = print_fn or print
     _prompt = prompt_fn or (lambda msg: input(msg))
@@ -561,7 +718,8 @@ def _drive_until_blocked(
     while True:
         run_ids = _iter_descendants(runtime, top_run_id)
         _tick_ready_runs(run_ids)
-        _print_answer_user_records(runtime=runtime, run_ids=run_ids, offsets=ledger_offsets, emit=_emit_answer)
+        _print_step_records(runtime=runtime, run_ids=run_ids, offsets=step_offsets, emit=_print, verbosity=verbosity, node_meta=meta)
+        _print_answer_user_records(runtime=runtime, run_ids=run_ids, offsets=answer_offsets, emit=_emit_answer)
 
         top = runtime.get_state(top_run_id)
         if top.status == RunStatus.COMPLETED:
@@ -653,6 +811,7 @@ def _drive_until_blocked(
                     approval_state=approval,
                     prompt_fn=_prompt,
                     print_fn=_print,
+                    trace=trace,
                 )
                 if payload is None:
                     _print("Left run waiting (not resumed).")
@@ -711,11 +870,12 @@ def run_flow_command(
     no_state: bool,
     auto_approve: bool,
     wait_until: bool,
+    verbosity: FlowVerbosity = "default",
     prompt_fn: Any = None,
     ask_user_fn: Any = None,
     print_fn: Any = None,
     on_answer_user: Any = None,
-) -> None:
+) -> FlowRunResult:
     try:
         import abstractflow  # noqa: F401
     except Exception as e:
@@ -763,6 +923,19 @@ def run_flow_command(
     )
 
     run_id = runner.start(input_data)
+    state_path = Path(flow_state_file or default_flow_state_file()).expanduser().resolve()
+    store_dir: Optional[str] = None
+    if not no_state:
+        store_dir = str(_flow_store_dir(state_path))
+    trace = FlowRunResult(
+        flow_id=str(vf.id),
+        flow_name=str(getattr(vf, "name", "") or str(vf.id)),
+        run_id=str(run_id),
+        status="running",
+        store_dir=store_dir,
+        tool_calls=[],
+    )
+
     if not no_state:
         _save_flow_ref(state_path, FlowRunRef(flow_id=str(vf.id), flows_dir=str(flows_dir_path), run_id=run_id))
 
@@ -772,11 +945,19 @@ def run_flow_command(
             tool_runner=tool_runner,
             auto_approve=auto_approve,
             wait_until=wait_until,
+            verbosity=verbosity,
+            node_meta=_node_meta(vf),
+            trace=trace,
             prompt_fn=prompt_fn,
             ask_user_fn=ask_user_fn,
             print_fn=print_fn,
             on_answer_user=on_answer_user,
         )
+        try:
+            trace.status = str(runner.runtime.get_state(run_id).status.value)
+        except Exception:
+            trace.status = "unknown"
+        return trace
     except KeyboardInterrupt:
         # Best-effort: pause the whole run tree so schedulers/event emitters won't advance it.
         try:
@@ -785,6 +966,11 @@ def run_flow_command(
         except Exception:
             pass
         print("\nInterrupted. Run paused (best-effort).")
+        try:
+            trace.status = str(runner.runtime.get_state(run_id).status.value)
+        except Exception:
+            trace.status = "unknown"
+        return trace
 
 
 def resume_flow_command(
@@ -793,11 +979,12 @@ def resume_flow_command(
     no_state: bool,
     auto_approve: bool,
     wait_until: bool,
+    verbosity: FlowVerbosity = "default",
     prompt_fn: Any = None,
     ask_user_fn: Any = None,
     print_fn: Any = None,
     on_answer_user: Any = None,
-) -> None:
+) -> FlowRunResult:
     try:
         import abstractflow  # noqa: F401
     except Exception as e:
@@ -846,6 +1033,14 @@ def resume_flow_command(
 
     # Attach to existing run id.
     runner._current_run_id = ref.run_id  # type: ignore[attr-defined]
+    trace = FlowRunResult(
+        flow_id=str(vf.id),
+        flow_name=str(getattr(vf, "name", "") or str(vf.id)),
+        run_id=str(ref.run_id),
+        status="running",
+        store_dir=str(store_dir),
+        tool_calls=[],
+    )
 
     # Best-effort: if the run was paused, unpause it before continuing.
     try:
@@ -859,11 +1054,19 @@ def resume_flow_command(
         tool_runner=tool_runner,
         auto_approve=auto_approve,
         wait_until=wait_until,
+        verbosity=verbosity,
+        node_meta=_node_meta(vf),
+        trace=trace,
         prompt_fn=prompt_fn,
         ask_user_fn=ask_user_fn,
         print_fn=print_fn,
         on_answer_user=on_answer_user,
     )
+    try:
+        trace.status = str(runner.runtime.get_state(ref.run_id).status.value)
+    except Exception:
+        trace.status = "unknown"
+    return trace
 
 
 def control_flow_command(
