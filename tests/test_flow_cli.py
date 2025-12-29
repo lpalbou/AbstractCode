@@ -64,6 +64,8 @@ def test_flow_cli_entry_inputs_prompting_matches_web_ui_defaults():
 
 
 def test_flow_cli_run_errors_when_required_inputs_missing(tmp_path):
+    from abstractcode.flow_cli import run_flow_command
+
     try:
         import abstractflow  # noqa: F401
         from abstractflow.visual.models import VisualFlow

@@ -149,6 +149,9 @@ class FullScreenUI:
         self._output_text: str = ""
         # Always track at least 1 line (even when output is empty).
         self._output_line_count: int = 1
+        # Monotonic counter incremented whenever output text changes.
+        # Used to cache expensive ANSI/marker parsing across renders.
+        self._output_version: int = 0
         # Scroll position (line offset from top)
         self._scroll_offset: int = 0
         # When True, keep the view pinned to the latest output.
@@ -163,6 +166,9 @@ class FullScreenUI:
         self._render_cache_counter: Optional[int] = None
         self._render_cache_formatted: FormattedText = ANSI("")
         self._render_cache_line_count: int = 1
+        # Cross-render cache: only reformat output when output text changes.
+        self._formatted_cache_version: Optional[int] = None
+        self._formatted_cache_formatted: FormattedText = ANSI("")
 
         # Command queue for background processing
         self._command_queue: queue.Queue[Optional[str]] = queue.Queue()
@@ -231,6 +237,7 @@ class FullScreenUI:
                 return False
             self._output_text = self._output_text.replace(needle, repl, 1)
             # Line count unchanged (marker + replacement should not contain newlines).
+            self._output_version += 1
         if self._app and self._app.is_running:
             self._app.invalidate()
         return True
@@ -298,8 +305,9 @@ class FullScreenUI:
                     out.extend(to_formatted_text(ANSI(m.group(0))))
             elif kind == "SPINNER":
                 if payload:
-                    spinner_char = self._spinner_frames[self._spinner_frame % len(self._spinner_frames)]
-                    out.append(("class:inline-spinner", spinner_char))
+                    # Keep inline spinners static; the status bar already animates.
+                    # This avoids reformatting the whole history on every spinner frame.
+                    out.append(("class:inline-spinner", "…"))
                 else:
                     out.extend(to_formatted_text(ANSI(m.group(0))))
             else:
@@ -324,17 +332,26 @@ class FullScreenUI:
             render_counter = None
 
         with self._output_lock:
-            if self._render_cache_counter == render_counter:
+            if render_counter is not None and self._render_cache_counter == render_counter:
                 return
             text_snapshot = self._output_text
             line_count_snapshot = self._output_line_count
+            version_snapshot = self._output_version
+            cached = (
+                self._formatted_cache_formatted
+                if self._formatted_cache_version == version_snapshot
+                else None
+            )
 
-        formatted = self._format_output_text(text_snapshot)
+        formatted = cached if cached is not None else self._format_output_text(text_snapshot)
         line_count = max(1, int(line_count_snapshot or 1))
 
         with self._output_lock:
+            if self._formatted_cache_version != version_snapshot:
+                self._formatted_cache_version = version_snapshot
+                self._formatted_cache_formatted = formatted
             # Don't overwrite a cache that was already created for this render.
-            if self._render_cache_counter == render_counter:
+            if render_counter is not None and self._render_cache_counter == render_counter:
                 return
             self._render_cache_counter = render_counter
             self._render_cache_formatted = formatted
@@ -664,6 +681,7 @@ class FullScreenUI:
             else:
                 self._output_text = text
                 self._output_line_count = max(1, text.count("\n") + 1)
+            self._output_version += 1
 
             # Auto-scroll to bottom only when following output.
             if self._follow_output:
@@ -681,6 +699,7 @@ class FullScreenUI:
         with self._output_lock:
             self._output_text = ""
             self._output_line_count = 1
+            self._output_version += 1
             self._scroll_offset = 0
             self._follow_output = True
             self._copy_payloads.clear()
@@ -693,6 +712,7 @@ class FullScreenUI:
         with self._output_lock:
             self._output_text = text
             self._output_line_count = max(1, text.count("\n") + 1) if text else 1
+            self._output_version += 1
             self._scroll_offset = 0
             self._follow_output = True
             self._copy_payloads.clear()
