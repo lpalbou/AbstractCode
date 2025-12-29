@@ -624,11 +624,44 @@ class FullScreenUI:
 
     def _scroll(self, lines: int) -> None:
         """Scroll the output by N lines."""
+        # prompt_toolkit scrolls based on the cursor position. If we increment the
+        # cursor by 1 line, the viewport won't move until that cursor hits the edge
+        # of the window (cursor-like scrolling). For chat history, wheel scrolling
+        # should move the viewport immediately in both directions.
+        #
+        # To achieve that, we scroll relative to what's currently visible:
+        # - scroll up: move the cursor above the first visible line
+        # - scroll down: move the cursor below the last visible line
+        #
+        # That forces prompt_toolkit's Window to adjust vertical_scroll each tick.
+        info = getattr(self, "_output_window", None)
+        render_info = getattr(info, "render_info", None) if info is not None else None
+
         with self._output_lock:
             total_lines = self._output_line_count
             # Line indices are 0-based, so valid range is [0, total_lines - 1]
             max_offset = max(0, total_lines - 1)
-            self._scroll_offset = max(0, min(max_offset, self._scroll_offset + lines))
+
+            base = self._scroll_offset
+            if render_info is not None and getattr(render_info, "content_height", 0) > 0:
+                try:
+                    if lines < 0:
+                        # Use the currently visible region as the baseline, but
+                        # allow accumulating scroll ticks before the next render
+                        # updates `render_info`.
+                        visible_first = int(
+                            render_info.first_visible_line(after_scroll_offset=True)
+                        )
+                        base = min(self._scroll_offset, visible_first)
+                    else:
+                        visible_last = int(
+                            render_info.last_visible_line(before_scroll_offset=True)
+                        )
+                        base = max(self._scroll_offset, visible_last)
+                except Exception:
+                    base = self._scroll_offset
+
+            self._scroll_offset = max(0, min(max_offset, base + lines))
 
             # User-initiated scroll disables follow mode until we return to bottom.
             if lines < 0:
