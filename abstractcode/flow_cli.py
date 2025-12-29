@@ -232,6 +232,68 @@ def _parse_unknown_params(argv: List[str]) -> Dict[str, Any]:
     return out
 
 
+def _required_entry_inputs(vf: Any) -> List[str]:
+    """Return required entry-node input keys (entry outputs excluding execution).
+
+    AbstractFlow's web UI uses the entry node's output pins as run inputs. For the
+    CLI, we fail fast if any of these are missing instead of prompting.
+    """
+
+    try:
+        nodes = getattr(vf, "nodes", None)
+    except Exception:
+        nodes = None
+    if not isinstance(nodes, list) or not nodes:
+        return []
+
+    try:
+        entry_id = getattr(vf, "entryNode", None)
+    except Exception:
+        entry_id = None
+
+    ENTRY_TYPES = {"on_flow_start", "on_user_request", "on_agent_message", "on_schedule", "on_event"}
+
+    def _node_type(node: Any) -> str:
+        t = getattr(node, "type", None)
+        return t.value if hasattr(t, "value") else str(t or "")
+
+    entry = None
+    if isinstance(entry_id, str) and entry_id:
+        for n in nodes:
+            if str(getattr(n, "id", "") or "") == entry_id:
+                entry = n
+                break
+    if entry is None:
+        for n in nodes:
+            if _node_type(n) in ENTRY_TYPES:
+                entry = n
+                break
+    if entry is None:
+        entry = nodes[0]
+
+    data = getattr(entry, "data", None)
+    raw_pins = None
+    if isinstance(data, dict):
+        raw_pins = data.get("outputs")
+    if raw_pins is None:
+        raw_pins = getattr(entry, "outputs", None)
+
+    required: List[str] = []
+    if isinstance(raw_pins, list):
+        for p in raw_pins:
+            if isinstance(p, dict):
+                pid = str(p.get("id") or "").strip()
+                ptype = str(p.get("type") or "").strip()
+            else:
+                pid = str(getattr(p, "id", "") or "").strip()
+                ptype = str(getattr(getattr(p, "type", None), "value", None) or getattr(p, "type", "") or "").strip()
+            if not pid or ptype == "execution":
+                continue
+            required.append(pid)
+
+    return required
+
+
 def _render_text(text: str) -> str:
     """Render UI-facing text without showing escaped newlines."""
     s = str(text)
@@ -894,6 +956,16 @@ def run_flow_command(
     input_data = _parse_input_json(raw_json=input_json, json_path=input_file)
     input_data.update(_parse_kv_list(params))
     input_data.update(_parse_unknown_params(extra_args))
+
+    # Fail fast if the flow declares entry inputs and the user didn't provide them.
+    required = _required_entry_inputs(vf)
+    missing = [k for k in required if k not in input_data]
+    if missing:
+        missing_txt = ", ".join(missing)
+        raise ValueError(
+            f"Missing required flow inputs: {missing_txt}. "
+            f"Provide them as flags (e.g. --{missing[0]} ...) or via --input-json/--input-file/--param."
+        )
 
     # Stores: file-backed only when state is enabled.
     state_path = Path(flow_state_file or default_flow_state_file()).expanduser().resolve()
