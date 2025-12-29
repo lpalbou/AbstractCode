@@ -462,6 +462,7 @@ class ReactShell:
             "expand",
             "vars",
             "var",
+            "context",
             "remember",
             "recall",
             "copy",
@@ -711,6 +712,9 @@ class ReactShell:
             return False
         if command in ("vars", "var"):
             self._handle_vars(arg)
+            return False
+        if command == "context":
+            self._handle_context(arg)
             return False
         if command == "mouse":
             self._handle_mouse_toggle()
@@ -1876,6 +1880,316 @@ class ReactShell:
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
         self._print(json.dumps(out, ensure_ascii=False, indent=2, sort_keys=True, default=str))
 
+    def _handle_context(self, raw: str) -> None:
+        """Show the exact context that will be sent with the next LLM call.
+
+        Usage:
+          /context [--json-only]
+        """
+        import copy
+        import shlex
+        import uuid
+
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split() if raw else []
+
+        json_only = False
+        for p in parts:
+            if p in ("--json", "--json-only"):
+                json_only = True
+                continue
+            self._print(_style(f"Unknown flag: {p}", _C.YELLOW, enabled=self._color))
+            self._print(_style("Usage: /context [--json-only]", _C.DIM, enabled=self._color))
+            return
+
+        state = self._safe_get_state()
+
+        # If there's no active run (or the last run already completed), show the session context
+        # that will seed the next /task.
+        if state is None or not hasattr(state, "vars") or getattr(state, "status", None) in (
+            self._RunStatus.COMPLETED,
+            self._RunStatus.FAILED,
+            self._RunStatus.CANCELLED,
+        ):
+            payload: Dict[str, Any] = {
+                "agent_kind": self._agent_kind,
+                "provider": self._provider,
+                "model": self._model,
+                "note": "No active run. This is the current session context that will be included in the next /task.",
+                "session_messages": list(self._agent.session_messages or []),
+            }
+            if state is not None and hasattr(state, "run_id") and hasattr(state, "status"):
+                status_val = getattr(getattr(state, "status", None), "value", None)
+                payload["last_run"] = {"run_id": getattr(state, "run_id", None), "status": status_val or str(state.status)}
+                out = getattr(state, "output", None)
+                if isinstance(out, dict):
+                    last_out: Dict[str, Any] = {}
+                    if "answer" in out:
+                        last_out["answer"] = out.get("answer")
+                    if "iterations" in out:
+                        last_out["iterations"] = out.get("iterations")
+                    if last_out:
+                        payload["last_run_output"] = last_out
+
+                # Small trace summary to help debug repeated tool calls.
+                runtime_ns = state.vars.get("_runtime") if isinstance(state.vars, dict) else None
+                traces = runtime_ns.get("node_traces") if isinstance(runtime_ns, dict) else None
+                if isinstance(traces, dict) and traces:
+                    counts: Dict[str, int] = {}
+                    tool_steps: List[Dict[str, Any]] = []
+                    llm_steps: List[Dict[str, Any]] = []
+                    for node_trace in traces.values():
+                        if not isinstance(node_trace, dict):
+                            continue
+                        steps = node_trace.get("steps")
+                        if not isinstance(steps, list):
+                            continue
+                        for step in steps:
+                            if not isinstance(step, dict):
+                                continue
+                            eff = step.get("effect")
+                            if not isinstance(eff, dict):
+                                continue
+                            etype = str(eff.get("type") or "")
+                            counts[etype] = int(counts.get(etype, 0) or 0) + 1
+
+                            if etype == "llm_call":
+                                result = step.get("result") if isinstance(step.get("result"), dict) else {}
+                                llm_steps.append(
+                                    {
+                                        "ts": step.get("ts"),
+                                        "node_id": step.get("node_id"),
+                                        "status": step.get("status"),
+                                        "finish_reason": result.get("finish_reason"),
+                                        "model": result.get("model"),
+                                        "reasoning": result.get("reasoning"),
+                                        "content": result.get("content"),
+                                        "tool_calls": result.get("tool_calls"),
+                                    }
+                                )
+                                continue
+                            if etype != "tool_calls":
+                                continue
+                            pl = eff.get("payload") if isinstance(eff.get("payload"), dict) else {}
+                            tcs = pl.get("tool_calls") if isinstance(pl, dict) else None
+                            if not isinstance(tcs, list):
+                                tcs = []
+                            tool_steps.append(
+                                {
+                                    "ts": step.get("ts"),
+                                    "node_id": step.get("node_id"),
+                                    "status": step.get("status"),
+                                    "tool_calls": tcs,
+                                }
+                            )
+
+                    payload["last_run_trace_summary"] = {
+                        "counts_by_effect_type": dict(counts),
+                        "tool_calls_steps": tool_steps,
+                        "llm_call_steps": llm_steps,
+                    }
+
+            text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+            copy_id = f"context_{uuid.uuid4().hex}"
+            self._ui.register_copy_payload(copy_id, text)
+            self._print(_style("\nContext (next /task seed)", _C.CYAN, _C.BOLD, enabled=self._color))
+            self._print(f"[[COPY:{copy_id}]]")
+            self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+            self._print(text)
+            return
+
+        sim_run = copy.deepcopy(state)
+
+        start_node = str(getattr(sim_run, "current_node", "") or "")
+
+        # Build a "dry" workflow that doesn't emit UI events (on_step=None).
+        logic = getattr(self._agent, "logic", None)
+        if logic is None:
+            self._print(_style("Context error: agent logic is not available.", _C.YELLOW, enabled=self._color))
+            return
+
+        try:
+            if self._agent_kind == "react":
+                from abstractagent.adapters.react_runtime import create_react_workflow
+
+                workflow = create_react_workflow(logic=logic, on_step=None)
+            else:
+                from abstractagent.adapters.codeact_runtime import create_codeact_workflow
+
+                workflow = create_codeact_workflow(logic=logic, on_step=None)
+        except Exception as e:
+            self._print(_style("Context error: failed to build dry workflow.", _C.YELLOW, enabled=self._color) + f" {e}")
+            return
+
+        class _Ctx:
+            @staticmethod
+            def now_iso() -> str:  # pragma: no cover
+                return _now_iso()
+
+        ctx = _Ctx()
+
+        visited = set()
+        node_id = start_node
+        next_effect: Dict[str, Any] = {}
+
+        for _ in range(100):
+            if not node_id:
+                next_effect = {"kind": "error", "error": "empty start node"}
+                break
+            if node_id in visited:
+                next_effect = {"kind": "error", "error": f"loop detected at node '{node_id}'"}
+                break
+            visited.add(node_id)
+
+            sim_run.current_node = node_id
+            try:
+                handler = workflow.get_node(node_id)
+            except Exception as e:
+                next_effect = {"kind": "error", "error": f"unknown node '{node_id}': {e}"}
+                break
+
+            plan = handler(sim_run, ctx)
+
+            if getattr(plan, "complete_output", None) is not None:
+                next_effect = {"kind": "complete", "node_id": plan.node_id, "complete_output": plan.complete_output}
+                break
+
+            effect = getattr(plan, "effect", None)
+            if effect is None:
+                if not plan.next_node:
+                    next_effect = {"kind": "error", "node_id": plan.node_id, "error": "node returned no effect and no next_node"}
+                    break
+                node_id = str(plan.next_node)
+                continue
+
+            etype = effect.type.value if hasattr(effect.type, "value") else str(effect.type)
+            next_effect = {
+                "kind": "effect",
+                "node_id": plan.node_id,
+                "type": str(etype),
+                "next_node": plan.next_node,
+                "result_key": effect.result_key,
+                "payload": dict(effect.payload or {}),
+            }
+            break
+
+        stored_messages = self._messages_from_state(sim_run)
+        try:
+            from abstractruntime.memory.active_context import ActiveContextPolicy
+
+            active_messages_view = ActiveContextPolicy.select_active_messages_for_llm_from_run(sim_run)
+        except Exception:
+            active_messages_view = []
+
+        waiting_info: Optional[Dict[str, Any]] = None
+        wait_state = getattr(state, "waiting", None)
+        if wait_state is not None:
+            reason = getattr(wait_state, "reason", None)
+            waiting_info = {
+                "reason": reason.value if hasattr(reason, "value") else (str(reason) if reason is not None else None),
+                "wait_key": getattr(wait_state, "wait_key", None),
+                "resume_to_node": getattr(wait_state, "resume_to_node", None),
+            }
+
+        out: Dict[str, Any] = {
+            "agent_kind": self._agent_kind,
+            "provider": self._provider,
+            "model": self._model,
+            "run": {
+                "run_id": getattr(state, "run_id", None),
+                "status": getattr(getattr(state, "status", None), "value", None) or str(getattr(state, "status", "")),
+                "current_node": getattr(state, "current_node", None),
+                "waiting": waiting_info,
+            },
+            "context": {
+                "stored_messages": stored_messages,
+                "active_messages_view": active_messages_view,
+            },
+            "next_effect": next_effect,
+        }
+
+        if next_effect.get("type") == "llm_call":
+            llm_payload_raw = next_effect.get("payload")
+            out["llm_call_payload"] = llm_payload_raw
+
+            if isinstance(llm_payload_raw, dict):
+                # Mirror AbstractRuntime's LLM_CALL handler preprocessing so this reflects
+                # the exact kwargs passed to AbstractCore's `llm.generate(...)`.
+                raw_params = llm_payload_raw.get("params")
+                params = dict(raw_params) if isinstance(raw_params, dict) else {}
+
+                trace_metadata = params.get("trace_metadata")
+                if not isinstance(trace_metadata, dict):
+                    trace_metadata = {}
+                trace_metadata.update(
+                    {
+                        "run_id": getattr(sim_run, "run_id", ""),
+                        "workflow_id": str(getattr(sim_run, "workflow_id", "") or ""),
+                        "node_id": str(getattr(sim_run, "current_node", "") or ""),
+                    }
+                )
+                actor_id = getattr(sim_run, "actor_id", None)
+                if actor_id:
+                    trace_metadata["actor_id"] = str(actor_id)
+                session_id = getattr(sim_run, "session_id", None)
+                if session_id:
+                    trace_metadata["session_id"] = str(session_id)
+                parent_run_id = getattr(sim_run, "parent_run_id", None)
+                if parent_run_id:
+                    trace_metadata["parent_run_id"] = str(parent_run_id)
+                params["trace_metadata"] = trace_metadata
+
+                provider_override = llm_payload_raw.get("provider")
+                model_override = llm_payload_raw.get("model")
+                if isinstance(provider_override, str) and provider_override.strip():
+                    params["_provider"] = provider_override.strip()
+                if isinstance(model_override, str) and model_override.strip():
+                    params["_model"] = model_override.strip()
+
+                out["llm_generate_kwargs"] = {
+                    "prompt": str(llm_payload_raw.get("prompt") or ""),
+                    "messages": llm_payload_raw.get("messages"),
+                    "system_prompt": llm_payload_raw.get("system_prompt"),
+                    "tools": llm_payload_raw.get("tools"),
+                    "params": params,
+                }
+
+        text = json.dumps(out, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        copy_id = f"context_{uuid.uuid4().hex}"
+        self._ui.register_copy_payload(copy_id, text)
+
+        self._print(_style("\nContext (next LLM call)", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(f"[[COPY:{copy_id}]]")
+        self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+        self._print(text)
+
+        if json_only:
+            return
+
+        llm_payload = out.get("llm_call_payload")
+        if not isinstance(llm_payload, dict):
+            return
+
+        sys_prompt = llm_payload.get("system_prompt")
+        if isinstance(sys_prompt, str) and sys_prompt:
+            sid = f"context_system_{uuid.uuid4().hex}"
+            self._ui.register_copy_payload(sid, sys_prompt)
+            self._print(_style("\nSystem prompt", _C.CYAN, _C.BOLD, enabled=self._color))
+            self._print(f"[[COPY:{sid}]]")
+            self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+            self._print(sys_prompt)
+
+        prompt = llm_payload.get("prompt")
+        if isinstance(prompt, str) and prompt:
+            pid = f"context_prompt_{uuid.uuid4().hex}"
+            self._ui.register_copy_payload(pid, prompt)
+            self._print(_style("\nPrompt", _C.CYAN, _C.BOLD, enabled=self._color))
+            self._print(f"[[COPY:{pid}]]")
+            self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+            self._print(prompt)
+
     def _handle_remember(self, raw: str) -> None:
         """Store a durable memory note (runtime MEMORY_NOTE) with optional tags and provenance.
 
@@ -1994,6 +2308,7 @@ class ReactShell:
             "  /expand <span>      Expand an archived span (--show, --into-context)\n"
             "  /recall [opts]      Recall spans by time/tags/query (--into-context)\n"
             "  /vars [path]        Inspect run vars (scratchpad, _runtime, ...)\n"
+            "  /context            Show the exact context for the next LLM call\n"
             "  /remember <note>    Store a durable memory note (tags + provenance)\n"
             "  /mouse              Toggle mouse mode (wheel scroll vs terminal selection)\n"
             "  /flow ...           Run AbstractFlow workflows inside this REPL\n"

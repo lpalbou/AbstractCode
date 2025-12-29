@@ -49,6 +49,7 @@ COMMANDS = [
     ("expand", "Expand an archived span into view/context"),
     ("recall", "Recall memory spans by query/time/tags"),
     ("vars", "Inspect durable run vars (scratchpad, _runtime, ...)"),
+    ("context", "Show the exact context for the next LLM call"),
     ("remember", "Store a durable memory note"),
     ("flow", "Run AbstractFlow workflows (run/resume/pause/cancel)"),
     ("mouse", "Toggle mouse mode (wheel scroll vs terminal selection)"),
@@ -154,9 +155,17 @@ class FullScreenUI:
         self._output_version: int = 0
         # Scroll position (line offset from top)
         self._scroll_offset: int = 0
+        # Cursor column within the current line. This matters for wrapped lines:
+        # prompt_toolkit uses the cursor column to scroll within a long wrapped line.
+        self._scroll_col: int = 0
         # When True, keep the view pinned to the latest output.
         # When the user scrolls up, this is disabled until they scroll back to bottom.
         self._follow_output: bool = True
+        # Mouse wheel events can arrive in rapid bursts (especially on high-resolution wheels).
+        # Reduce perceived scroll speed by dropping ~30% of wheel ticks (Bresenham-style).
+        self._wheel_scroll_skip_accum: int = 0
+        self._wheel_scroll_skip_numerator: int = 3
+        self._wheel_scroll_skip_denominator: int = 10
 
         # Thread safety for output
         self._output_lock = threading.Lock()
@@ -369,7 +378,21 @@ class FullScreenUI:
         with self._output_lock:
             total_lines = self._render_cache_line_count
             safe_offset = max(0, min(self._scroll_offset, total_lines - 1))
-            return Point(0, safe_offset)
+            safe_col = max(0, int(self._scroll_col or 0))
+            return Point(safe_col, safe_offset)
+
+    def _scroll_wheel(self, ticks: int) -> None:
+        """Scroll handler for mouse wheel events (30% slower)."""
+        if not ticks:
+            return
+
+        with self._output_lock:
+            self._wheel_scroll_skip_accum += int(self._wheel_scroll_skip_numerator)
+            if self._wheel_scroll_skip_accum >= int(self._wheel_scroll_skip_denominator):
+                self._wheel_scroll_skip_accum -= int(self._wheel_scroll_skip_denominator)
+                return
+
+        self._scroll(ticks)
 
     def _build_layout(self) -> None:
         """Build the HSplit layout with output, input, and status areas."""
@@ -377,7 +400,7 @@ class FullScreenUI:
         self._output_control = self._ScrollAwareFormattedTextControl(
             text=self._get_output_formatted,
             get_cursor_position=self._get_cursor_position,
-            on_scroll=self._scroll,
+            on_scroll=self._scroll_wheel,
         )
 
         output_window = Window(
@@ -642,6 +665,89 @@ class FullScreenUI:
             # Line indices are 0-based, so valid range is [0, total_lines - 1]
             max_offset = max(0, total_lines - 1)
 
+            # If we're currently on a line that wraps to more rows than the window can show,
+            # scroll *within* that line by shifting the cursor column. prompt_toolkit will
+            # adjust vertical_scroll_2 accordingly. This avoids the "scroll works only one
+            # direction" feeling when a single long line occupies the whole viewport.
+            if (
+                render_info is not None
+                and getattr(render_info, "wrap_lines", False)
+                and getattr(render_info, "window_width", 0) > 0
+                and getattr(render_info, "window_height", 0) > 0
+            ):
+                ui_content = getattr(render_info, "ui_content", None)
+                width = int(getattr(render_info, "window_width", 0) or 0)
+                height = int(getattr(render_info, "window_height", 0) or 0)
+                get_line_prefix = getattr(info, "get_line_prefix", None) if info is not None else None
+
+                if ui_content is not None and width > 0 and height > 0:
+                    try:
+                        line_height = int(
+                            ui_content.get_height_for_line(
+                                int(self._scroll_offset),
+                                width,
+                                get_line_prefix,
+                            )
+                        )
+                    except Exception:
+                        line_height = 0
+
+                    if line_height > height:
+                        step = max(1, width)
+                        for _ in range(abs(int(lines or 0))):
+                            if lines < 0:
+                                if self._scroll_col > 0:
+                                    self._scroll_col = max(0, int(self._scroll_col) - step)
+                                elif self._scroll_offset > 0:
+                                    self._scroll_offset = max(0, int(self._scroll_offset) - 1)
+                                    # Jump to end-of-line for the previous line so the user can
+                                    # scroll upward naturally from the bottom of that line.
+                                    self._scroll_col = 10**9
+                                self._follow_output = False
+                            elif lines > 0:
+                                # If we're already at the end of this wrapped line, move to the next line.
+                                try:
+                                    cursor_row = int(
+                                        ui_content.get_height_for_line(
+                                            int(self._scroll_offset),
+                                            width,
+                                            get_line_prefix,
+                                            slice_stop=int(self._scroll_col),
+                                        )
+                                    )
+                                except Exception:
+                                    cursor_row = 0
+
+                                if cursor_row >= line_height and self._scroll_offset < max_offset:
+                                    self._scroll_offset = min(max_offset, int(self._scroll_offset) + 1)
+                                    self._scroll_col = 0
+                                else:
+                                    self._scroll_col = max(0, int(self._scroll_col) + step)
+
+                        # Clamp and follow-mode update.
+                        self._scroll_offset = max(0, min(max_offset, int(self._scroll_offset)))
+                        if lines > 0 and self._scroll_offset >= max_offset:
+                            try:
+                                last_height = int(
+                                    ui_content.get_height_for_line(
+                                        max_offset,
+                                        width,
+                                        get_line_prefix,
+                                    )
+                                )
+                                last_row = int(
+                                    ui_content.get_height_for_line(
+                                        max_offset,
+                                        width,
+                                        get_line_prefix,
+                                        slice_stop=int(self._scroll_col),
+                                    )
+                                )
+                                self._follow_output = last_row >= last_height
+                            except Exception:
+                                self._follow_output = True
+                        return
+
             base = self._scroll_offset
             if render_info is not None and getattr(render_info, "content_height", 0) > 0:
                 try:
@@ -662,6 +768,8 @@ class FullScreenUI:
                     base = self._scroll_offset
 
             self._scroll_offset = max(0, min(max_offset, base + lines))
+            # When scrolling between lines (not inside a wrapped line), keep the cursor at column 0.
+            self._scroll_col = 0
 
             # User-initiated scroll disables follow mode until we return to bottom.
             if lines < 0:
@@ -676,6 +784,8 @@ class FullScreenUI:
         with self._output_lock:
             total_lines = self._output_line_count
             self._scroll_offset = max(0, total_lines - 1)
+            # Prefer end-of-line so wrapped last lines show their bottom.
+            self._scroll_col = 10**9
             self._follow_output = True
         if self._app and self._app.is_running:
             self._app.invalidate()
@@ -719,6 +829,7 @@ class FullScreenUI:
             # Auto-scroll to bottom only when following output.
             if self._follow_output:
                 self._scroll_offset = max(0, self._output_line_count - 1)
+                self._scroll_col = 10**9
             else:
                 # Keep current view, but make sure it's still a valid offset.
                 self._scroll_offset = max(0, min(self._scroll_offset, self._output_line_count - 1))
@@ -734,6 +845,7 @@ class FullScreenUI:
             self._output_line_count = 1
             self._output_version += 1
             self._scroll_offset = 0
+            self._scroll_col = 0
             self._follow_output = True
             self._copy_payloads.clear()
 
@@ -747,6 +859,7 @@ class FullScreenUI:
             self._output_line_count = max(1, text.count("\n") + 1) if text else 1
             self._output_version += 1
             self._scroll_offset = 0
+            self._scroll_col = 0
             self._follow_output = True
             self._copy_payloads.clear()
 
