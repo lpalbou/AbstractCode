@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Tool result visibility**: increased the default tool observation preview to **1000 characters** (was 120) so small-but-critical outputs (e.g., exit codes, working directories) are not silently truncated in the UI.
+- **Web search reliability**: add `ddgs` as a dependency so the default `web_search` tool works without requiring manual installs.
 
 ## [0.2.0] - 2025-12-17
 
