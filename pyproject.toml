@@ -44,7 +44,7 @@ classifiers = [
 dependencies = [
     "abstractagent>=0.2.0",
     "abstractruntime>=0.2.0",
-    "abstractcore>=2.6.8",
+    "abstractcore[tools]>=2.6.8",
     # Needed for reliable `web_search` (DuckDuckGo search backend) used by the default toolset.
     "ddgs>=9.10.0,<10.0.0",
     "prompt_toolkit>=3.0.0",
