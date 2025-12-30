@@ -24,6 +24,7 @@ class _C:
     DIM = "\033[2m"
     BOLD = "\033[1m"
     CYAN = "\033[36m"
+    BLUE = "\033[34m"
     GREEN = "\033[32m"
     YELLOW = "\033[33m"
     MAGENTA = "\033[35m"
@@ -370,6 +371,28 @@ class ReactShell:
             width = 120
         return max(40, width)
 
+    def _print_tool_observation(self, *, tool_name: str, raw: str, indent: str = "  ") -> None:
+        """Render tool output in a compact, readable way for the UI."""
+        tool_name = str(tool_name or "")
+        raw = "" if raw is None else str(raw)
+
+        for line in (raw.splitlines() or [""]):
+            style_codes: Tuple[str, ...] = (_C.DIM,)
+
+            if tool_name == "edit_file":
+                if line.startswith("Edited ") or line.startswith("Preview "):
+                    style_codes = (_C.BOLD,)
+                elif line.startswith("@@"):
+                    style_codes = (_C.DIM,)
+                elif line.startswith("+") and not line.startswith("+++"):
+                    style_codes = (_C.BLUE,)
+                elif line.startswith("-") and not line.startswith("---"):
+                    style_codes = (_C.RED,)
+                else:
+                    style_codes = (_C.DIM,)
+
+            self._print(_style(f"{indent}{line}", *style_codes, enabled=self._color))
+
     def _format_user_prompt_block(self, text: str, *, copy_id: Optional[str] = None) -> str:
         """Render a user prompt as a padded, full-line background block (no truncation)."""
         lines = text.splitlines() or [""]
@@ -559,11 +582,9 @@ class ReactShell:
                 # Best-effort in-place update; if not found, fall back silently.
                 self._ui.replace_output_marker(marker, icon)
 
-            # Keep observability, but more compact than "Result: ..." spam:
-            # indent and dim the tool outputs.
-            for line in (raw.splitlines() or [""]):
-                self._print(_style(f"  {line}", _C.DIM, enabled=self._color))
             tool_name = str(data.get("tool", "") or "tool")
+            # Keep observability compact, but render diffs with clear colors.
+            self._print_tool_observation(tool_name=tool_name, raw=raw, indent="  ")
             self._turn_trace.append(f"Result ({tool_name}):\n{raw}".rstrip())
             self._ui.set_spinner("Processing result...")
         elif step == "ask_user":
@@ -680,7 +701,7 @@ class ReactShell:
                 return False
             self._start(task)
             return False
-        if command in ("clear", "reset", "new"):
+        if command == "clear":
             self._clear_memory()
             return False
         if command == "snapshot":
@@ -2156,6 +2177,76 @@ class ReactShell:
                     "params": params,
                 }
 
+                # Derive the verbatim OpenAI-compatible messages that will be sent to
+                # OpenAI-compatible providers (LMStudio/vLLM/OpenAICompatible/etc.).
+                # This mirrors the provider-side prompt injection behavior for prompted tools:
+                # we append the formatted tool prompt to the system prompt.
+                try:
+                    from abstractcore.tools.handler import UniversalToolHandler
+
+                    eff_model = params.get("_model") if isinstance(params.get("_model"), str) else self._model
+                    eff_provider = (
+                        params.get("_provider") if isinstance(params.get("_provider"), str) else self._provider
+                    )
+                    handler = UniversalToolHandler(str(eff_model or ""))
+                    tool_prompt = handler.format_tools_prompt(llm_payload_raw.get("tools") or [])
+                    # Decide whether the provider uses prompt-injected tools or native tools.
+                    # We keep this logic explicit and minimal for debugging accuracy.
+                    provider_name = str(eff_provider or "").strip().lower()
+                    if provider_name in {"openai", "anthropic"} and handler.supports_native:
+                        tool_mode = "native"
+                    elif provider_name in {
+                        "lmstudio",
+                        "openai_compatible",
+                        "vllm",
+                        "ollama",
+                        "huggingface",
+                        "mlx",
+                    }:
+                        tool_mode = "prompted"
+                    else:
+                        tool_mode = "prompted" if handler.supports_prompted else "none"
+
+                    native_tools_payload = None
+                    if tool_mode == "native":
+                        try:
+                            native_tools_payload = handler.prepare_tools_for_native(llm_payload_raw.get("tools") or [])
+                        except Exception:
+                            native_tools_payload = None
+                except Exception:
+                    tool_prompt = ""
+                    tool_mode = "unknown"
+                    native_tools_payload = None
+
+                sys_base = llm_payload_raw.get("system_prompt")
+                sys_text = str(sys_base) if isinstance(sys_base, str) else ""
+                if tool_mode == "prompted" and isinstance(tool_prompt, str) and tool_prompt.strip():
+                    sys_effective = (sys_text + ("\n\n" if sys_text else "") + tool_prompt).strip()
+                else:
+                    sys_effective = sys_text
+
+                prompt_text = str(llm_payload_raw.get("prompt") or "")
+                messages_list = llm_payload_raw.get("messages")
+                messages_out: list[dict[str, str]] = []
+                if sys_effective:
+                    messages_out.append({"role": "system", "content": sys_effective})
+                if isinstance(messages_list, list):
+                    for m in messages_list:
+                        if not isinstance(m, dict):
+                            continue
+                        role = m.get("role")
+                        content = m.get("content")
+                        if isinstance(role, str) and isinstance(content, str):
+                            messages_out.append({"role": role, "content": content})
+                if prompt_text.strip():
+                    messages_out.append({"role": "user", "content": prompt_text})
+
+                out["verbatim_openai_messages_next_call"] = messages_out
+                out["verbatim_system_prompt_effective"] = sys_effective
+                out["verbatim_tool_prompt"] = tool_prompt
+                out["verbatim_tool_mode"] = tool_mode
+                out["verbatim_native_tools_payload"] = native_tools_payload
+
         text = json.dumps(out, ensure_ascii=False, indent=2, sort_keys=True, default=str)
         copy_id = f"context_{uuid.uuid4().hex}"
         self._ui.register_copy_payload(copy_id, text)
@@ -2172,11 +2263,11 @@ class ReactShell:
         if not isinstance(llm_payload, dict):
             return
 
-        sys_prompt = llm_payload.get("system_prompt")
+        sys_prompt = out.get("verbatim_system_prompt_effective") or llm_payload.get("system_prompt")
         if isinstance(sys_prompt, str) and sys_prompt:
             sid = f"context_system_{uuid.uuid4().hex}"
             self._ui.register_copy_payload(sid, sys_prompt)
-            self._print(_style("\nSystem prompt", _C.CYAN, _C.BOLD, enabled=self._color))
+            self._print(_style("\nSystem prompt (verbatim)", _C.CYAN, _C.BOLD, enabled=self._color))
             self._print(f"[[COPY:{sid}]]")
             self._print(_style("─" * 80, _C.DIM, enabled=self._color))
             self._print(sys_prompt)
@@ -2185,10 +2276,20 @@ class ReactShell:
         if isinstance(prompt, str) and prompt:
             pid = f"context_prompt_{uuid.uuid4().hex}"
             self._ui.register_copy_payload(pid, prompt)
-            self._print(_style("\nPrompt", _C.CYAN, _C.BOLD, enabled=self._color))
+            self._print(_style("\nPrompt (verbatim)", _C.CYAN, _C.BOLD, enabled=self._color))
             self._print(f"[[COPY:{pid}]]")
             self._print(_style("─" * 80, _C.DIM, enabled=self._color))
             self._print(prompt)
+
+        messages_verbatim = out.get("verbatim_openai_messages_next_call")
+        if isinstance(messages_verbatim, list) and messages_verbatim:
+            mid = f"context_messages_{uuid.uuid4().hex}"
+            messages_text = json.dumps(messages_verbatim, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+            self._ui.register_copy_payload(mid, messages_text)
+            self._print(_style("\nOpenAI-compatible messages (verbatim JSON)", _C.CYAN, _C.BOLD, enabled=self._color))
+            self._print(f"[[COPY:{mid}]]")
+            self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+            self._print(messages_text)
 
     def _handle_remember(self, raw: str) -> None:
         """Store a durable memory note (runtime MEMORY_NOTE) with optional tags and provenance.
@@ -2320,7 +2421,7 @@ class ReactShell:
             "                     - /copy user [turn] | assistant [turn] | turn <N>\n"
             "  /history [N]        Show recent conversation history\n"
             "  /resume             Resume the saved/attached run\n"
-            "  /clear              Clear memory and start fresh (aliases: /reset, /new)\n"
+            "  /clear              Clear memory and clear the screen\n"
             "  /snapshot save <n>  Save current state as named snapshot\n"
             "  /snapshot load <n>  Load snapshot by name\n"
             "  /snapshot list      List available snapshots\n"
@@ -2619,8 +2720,23 @@ class ReactShell:
 
         self._print(_style("Usage: /copy user|assistant [turn]  |  /copy turn <N>", _C.DIM, enabled=self._color))
 
+    def _clear_screen(self) -> None:
+        """Clear the visible UI output area (screen).
+
+        Best-effort: clearing output should never crash the REPL.
+        """
+        try:
+            self._ui.clear_output()
+        except Exception:
+            pass
+        self._output_lines = []
+
     def _clear_memory(self) -> None:
-        """Clear all memory and reset to fresh state."""
+        """Clear in-memory conversation context and reset to a fresh state.
+
+        Also clears the visible UI output so the user gets an actual clean slate.
+        """
+        self._clear_screen()
         # Clear session messages
         self._agent.session_messages = []
 
@@ -2861,11 +2977,49 @@ class ReactShell:
             self._print(_style(f"\n{name}", _C.GREEN, _C.BOLD, enabled=self._color))
             if descr:
                 self._print(_style(descr, _C.DIM, enabled=self._color))
-            self._print(
-                _style("args:", _C.DIM, enabled=self._color)
-                + " "
-                + json.dumps(args, indent=2, ensure_ascii=False)
-            )
+
+            if name == "edit_file":
+                # Avoid dumping huge `pattern`/`replacement` blobs; show a preview diff instead.
+                args_summary = dict(args)
+                for key in ("pattern", "replacement"):
+                    if key in args_summary:
+                        val = args_summary.get(key)
+                        if isinstance(val, str):
+                            args_summary[key] = f"<{len(val):,} chars>"
+                        elif val is None:
+                            args_summary[key] = None
+                        else:
+                            args_summary[key] = f"<{type(val).__name__}>"
+                self._print(
+                    _style("args (summary):", _C.DIM, enabled=self._color)
+                    + " "
+                    + json.dumps(args_summary, indent=2, ensure_ascii=False)
+                )
+
+                # Only run a preview when the user is actively approving.
+                if not auto and not approve_all:
+                    try:
+                        preview_args = dict(args)
+                        preview_args["preview_only"] = True
+                        preview_out = self._tool_runner.execute(
+                            tool_calls=[{"name": name, "arguments": preview_args, "call_id": call_id}]
+                        )
+                        preview_results = preview_out.get("results") or []
+                        if preview_results and isinstance(preview_results[0], dict):
+                            preview_raw = preview_results[0].get("output")
+                            if preview_raw is None:
+                                preview_raw = preview_results[0].get("error")
+                            preview_raw = "" if preview_raw is None else str(preview_raw)
+                            self._print(_style("preview:", _C.DIM, enabled=self._color))
+                            self._print_tool_observation(tool_name=name, raw=preview_raw, indent="  ")
+                    except Exception:
+                        pass
+            else:
+                self._print(
+                    _style("args:", _C.DIM, enabled=self._color)
+                    + " "
+                    + json.dumps(args, indent=2, ensure_ascii=False)
+                )
 
             if not auto and not approve_all:
                 while True:

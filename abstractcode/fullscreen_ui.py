@@ -43,7 +43,7 @@ COMMANDS = [
     ("plan", "Toggle Plan mode (TODO list first) [saved]"),
     ("review", "Toggle Review mode (self-check) [saved]"),
     ("resume", "Resume the saved/attached run"),
-    ("clear", "Clear memory and start fresh"),
+    ("clear", "Clear memory and clear the screen"),
     ("compact", "Compress conversation [light|standard|heavy] [--preserve N] [focus...]"),
     ("spans", "List archived conversation spans (from /compact)"),
     ("expand", "Expand an archived span into view/context"),
@@ -53,8 +53,6 @@ COMMANDS = [
     ("remember", "Store a durable memory note"),
     ("flow", "Run AbstractFlow workflows (run/resume/pause/cancel)"),
     ("mouse", "Toggle mouse mode (wheel scroll vs terminal selection)"),
-    ("new", "Start fresh (alias for /clear)"),
-    ("reset", "Reset session (alias for /clear)"),
     ("task", "Start a new task (/task <text>)"),
     ("auto-accept", "Toggle auto-accept for tools [saved]"),
     ("max-tokens", "Show or set max tokens (-1 = auto) [saved]"),
@@ -146,8 +144,10 @@ class FullScreenUI:
         self._on_copy_payload = on_copy_payload
         self._copy_payloads: Dict[str, str] = {}
 
-        # Output content storage (raw text with ANSI codes)
-        self._output_text: str = ""
+        # Output content storage (raw text lines with ANSI codes).
+        # Keeping a line list lets us render a virtualized view window instead of
+        # re-wrapping the entire history every frame.
+        self._output_lines: List[str] = [""]
         # Always track at least 1 line (even when output is empty).
         self._output_line_count: int = 1
         # Monotonic counter incremented whenever output text changes.
@@ -167,6 +167,12 @@ class FullScreenUI:
         self._wheel_scroll_skip_numerator: int = 3
         self._wheel_scroll_skip_denominator: int = 10
 
+        # Virtualized view window in absolute line indices [start, end).
+        # Only this window is rendered by prompt_toolkit for performance.
+        self._view_start: int = 0
+        self._view_end: int = 1
+        self._last_output_window_height: int = 0
+
         # Thread safety for output
         self._output_lock = threading.Lock()
 
@@ -176,8 +182,11 @@ class FullScreenUI:
         self._render_cache_formatted: FormattedText = ANSI("")
         self._render_cache_line_count: int = 1
         # Cross-render cache: only reformat output when output text changes.
-        self._formatted_cache_version: Optional[int] = None
+        self._formatted_cache_key: Optional[Tuple[int, int, int]] = None
         self._formatted_cache_formatted: FormattedText = ANSI("")
+        self._render_cache_view_start: int = 0
+        self._render_cache_cursor_row: int = 0
+        self._render_cache_cursor_col: int = 0
 
         # Command queue for background processing
         self._command_queue: queue.Queue[Optional[str]] = queue.Queue()
@@ -242,11 +251,17 @@ class FullScreenUI:
             return False
         repl = str(replacement or "")
         with self._output_lock:
-            if needle not in self._output_text:
+            # Search from the end: markers are almost always near the latest output.
+            for i in range(len(self._output_lines) - 1, -1, -1):
+                line = self._output_lines[i]
+                if needle not in line:
+                    continue
+                self._output_lines[i] = line.replace(needle, repl, 1)
+                # Line count unchanged (marker + replacement should not contain newlines).
+                self._output_version += 1
+                break
+            else:
                 return False
-            self._output_text = self._output_text.replace(needle, repl, 1)
-            # Line count unchanged (marker + replacement should not contain newlines).
-            self._output_version += 1
         if self._app and self._app.is_running:
             self._app.invalidate()
         return True
@@ -327,6 +342,56 @@ class FullScreenUI:
             out.extend(to_formatted_text(ANSI(tail)))
         return out
 
+    def _compute_view_params_locked(self) -> Tuple[int, int]:
+        """Compute (view_size_lines, margin_lines) for output virtualization."""
+        height = int(self._last_output_window_height or 0)
+        if height <= 0:
+            height = 40
+
+        # Heuristic: keep a few dozen screens worth of lines around the cursor.
+        # This makes wheel scrolling smooth while avoiding O(total_history) rendering.
+        view_size = max(400, height * 25)
+        margin = max(100, height * 8)
+        margin = min(margin, max(1, view_size // 3))
+        return view_size, margin
+
+    def _ensure_view_window_locked(self) -> None:
+        """Ensure the virtualized view window includes the current cursor line."""
+        if not self._output_lines:
+            self._output_lines = [""]
+            self._output_line_count = 1
+
+        total_lines = len(self._output_lines)
+        self._output_line_count = max(1, total_lines)
+
+        cursor = int(self._scroll_offset or 0)
+        cursor = max(0, min(cursor, total_lines - 1))
+        self._scroll_offset = cursor
+
+        view_size, margin = self._compute_view_params_locked()
+        view_size = max(1, min(int(view_size), total_lines))
+        margin = max(0, min(int(margin), max(0, view_size - 1)))
+
+        max_start = max(0, total_lines - view_size)
+        start = int(self._view_start or 0)
+        end = int(self._view_end or 0)
+
+        window_size_ok = (end - start) == view_size and 0 <= start <= end <= total_lines
+        if not window_size_ok:
+            start = max(0, min(max_start, cursor - margin))
+            end = start + view_size
+        else:
+            if cursor < start + margin:
+                start = max(0, min(max_start, cursor - margin))
+                end = start + view_size
+            elif cursor > end - margin - 1:
+                start = cursor - (view_size - margin - 1)
+                start = max(0, min(max_start, start))
+                end = start + view_size
+
+        self._view_start = int(start)
+        self._view_end = int(min(total_lines, max(start + 1, end)))
+
     def _ensure_render_cache(self) -> None:
         """Freeze a per-render snapshot for prompt_toolkit.
 
@@ -340,31 +405,54 @@ class FullScreenUI:
         except Exception:
             render_counter = None
 
+        # Capture output window height (used for virtualized buffer sizing).
+        window_height = 0
+        try:
+            info = getattr(self, "_output_window", None)
+            render_info = getattr(info, "render_info", None) if info is not None else None
+            window_height = int(getattr(render_info, "window_height", 0) or 0)
+        except Exception:
+            window_height = 0
+
         with self._output_lock:
             if render_counter is not None and self._render_cache_counter == render_counter:
                 return
-            text_snapshot = self._output_text
-            line_count_snapshot = self._output_line_count
             version_snapshot = self._output_version
-            cached = (
-                self._formatted_cache_formatted
-                if self._formatted_cache_version == version_snapshot
-                else None
-            )
+            if window_height > 0:
+                self._last_output_window_height = window_height
 
-        formatted = cached if cached is not None else self._format_output_text(text_snapshot)
-        line_count = max(1, int(line_count_snapshot or 1))
+            self._ensure_view_window_locked()
+            view_start = int(self._view_start)
+            view_end = int(self._view_end)
+
+            view_lines = list(self._output_lines[view_start:view_end])
+            view_line_count = max(1, len(view_lines))
+
+            cursor_row_abs = int(self._scroll_offset or 0)
+            cursor_row = max(0, min(view_line_count - 1, cursor_row_abs - view_start))
+            cursor_col = max(0, int(self._scroll_col or 0))
+
+            cache_key = (int(version_snapshot), int(view_start), int(view_end))
+            cached = self._formatted_cache_formatted if self._formatted_cache_key == cache_key else None
+
+        view_text = "\n".join(view_lines)
+        formatted = cached if cached is not None else self._format_output_text(view_text)
 
         with self._output_lock:
-            if self._formatted_cache_version != version_snapshot:
-                self._formatted_cache_version = version_snapshot
+            if self._formatted_cache_key != cache_key:
+                self._formatted_cache_key = cache_key
                 self._formatted_cache_formatted = formatted
+
             # Don't overwrite a cache that was already created for this render.
             if render_counter is not None and self._render_cache_counter == render_counter:
                 return
+
             self._render_cache_counter = render_counter
             self._render_cache_formatted = formatted
-            self._render_cache_line_count = line_count
+            self._render_cache_line_count = view_line_count
+            self._render_cache_view_start = view_start
+            self._render_cache_cursor_row = cursor_row
+            self._render_cache_cursor_col = cursor_col
 
     def _get_output_formatted(self) -> FormattedText:
         """Get formatted output text with ANSI color support (render-stable)."""
@@ -376,10 +464,9 @@ class FullScreenUI:
         """Get cursor position for scrolling (render-stable)."""
         self._ensure_render_cache()
         with self._output_lock:
-            total_lines = self._render_cache_line_count
-            safe_offset = max(0, min(self._scroll_offset, total_lines - 1))
-            safe_col = max(0, int(self._scroll_col or 0))
-            return Point(safe_col, safe_offset)
+            safe_row = max(0, min(int(self._render_cache_cursor_row), int(self._render_cache_line_count) - 1))
+            safe_col = max(0, int(self._render_cache_cursor_col or 0))
+            return Point(safe_col, safe_row)
 
     def _scroll_wheel(self, ticks: int) -> None:
         """Scroll handler for mouse wheel events (30% slower)."""
@@ -612,11 +699,11 @@ class FullScreenUI:
         # Mouse wheel scroll (trackpad / wheel)
         @self._kb.add("<scroll-up>")
         def mouse_scroll_up(event):
-            self._scroll(-1)
+            self._scroll_wheel(-1)
 
         @self._kb.add("<scroll-down>")
         def mouse_scroll_down(event):
-            self._scroll(1)
+            self._scroll_wheel(1)
 
         # Home = scroll to top
         @self._kb.add("home")
@@ -664,6 +751,9 @@ class FullScreenUI:
             total_lines = self._output_line_count
             # Line indices are 0-based, so valid range is [0, total_lines - 1]
             max_offset = max(0, total_lines - 1)
+            view_start = int(self._view_start)
+            view_end = int(self._view_end)
+            view_line_count = max(1, view_end - view_start)
 
             # If we're currently on a line that wraps to more rows than the window can show,
             # scroll *within* that line by shifting the cursor column. prompt_toolkit will
@@ -681,10 +771,13 @@ class FullScreenUI:
                 get_line_prefix = getattr(info, "get_line_prefix", None) if info is not None else None
 
                 if ui_content is not None and width > 0 and height > 0:
+                    # UIContent line indices are relative to the currently rendered view window.
+                    local_line = int(self._scroll_offset) - view_start
+                    local_line = max(0, min(local_line, view_line_count - 1))
                     try:
                         line_height = int(
                             ui_content.get_height_for_line(
-                                int(self._scroll_offset),
+                                local_line,
                                 width,
                                 get_line_prefix,
                             )
@@ -707,9 +800,11 @@ class FullScreenUI:
                             elif lines > 0:
                                 # If we're already at the end of this wrapped line, move to the next line.
                                 try:
+                                    local_line = int(self._scroll_offset) - view_start
+                                    local_line = max(0, min(local_line, view_line_count - 1))
                                     cursor_row = int(
                                         ui_content.get_height_for_line(
-                                            int(self._scroll_offset),
+                                            local_line,
                                             width,
                                             get_line_prefix,
                                             slice_stop=int(self._scroll_col),
@@ -728,16 +823,18 @@ class FullScreenUI:
                         self._scroll_offset = max(0, min(max_offset, int(self._scroll_offset)))
                         if lines > 0 and self._scroll_offset >= max_offset:
                             try:
+                                local_last = int(max_offset) - view_start
+                                local_last = max(0, min(local_last, view_line_count - 1))
                                 last_height = int(
                                     ui_content.get_height_for_line(
-                                        max_offset,
+                                        local_last,
                                         width,
                                         get_line_prefix,
                                     )
                                 )
                                 last_row = int(
                                     ui_content.get_height_for_line(
-                                        max_offset,
+                                        local_last,
                                         width,
                                         get_line_prefix,
                                         slice_stop=int(self._scroll_col),
@@ -746,6 +843,7 @@ class FullScreenUI:
                                 self._follow_output = last_row >= last_height
                             except Exception:
                                 self._follow_output = True
+                        self._ensure_view_window_locked()
                         return
 
             base = self._scroll_offset
@@ -755,15 +853,13 @@ class FullScreenUI:
                         # Use the currently visible region as the baseline, but
                         # allow accumulating scroll ticks before the next render
                         # updates `render_info`.
-                        visible_first = int(
-                            render_info.first_visible_line(after_scroll_offset=True)
-                        )
-                        base = min(self._scroll_offset, visible_first)
+                        visible_first_local = int(render_info.first_visible_line(after_scroll_offset=True))
+                        visible_first = int(view_start) + max(0, visible_first_local)
+                        base = min(int(self._scroll_offset), visible_first)
                     else:
-                        visible_last = int(
-                            render_info.last_visible_line(before_scroll_offset=True)
-                        )
-                        base = max(self._scroll_offset, visible_last)
+                        visible_last_local = int(render_info.last_visible_line(before_scroll_offset=True))
+                        visible_last = int(view_start) + max(0, visible_last_local)
+                        base = max(int(self._scroll_offset), visible_last)
                 except Exception:
                     base = self._scroll_offset
 
@@ -776,6 +872,7 @@ class FullScreenUI:
                 self._follow_output = False
             elif lines > 0 and self._scroll_offset >= max_offset:
                 self._follow_output = True
+            self._ensure_view_window_locked()
         if self._app and self._app.is_running:
             self._app.invalidate()
 
@@ -787,6 +884,7 @@ class FullScreenUI:
             # Prefer end-of-line so wrapped last lines show their bottom.
             self._scroll_col = 10**9
             self._follow_output = True
+            self._ensure_view_window_locked()
         if self._app and self._app.is_running:
             self._app.invalidate()
 
@@ -818,12 +916,15 @@ class FullScreenUI:
     def append_output(self, text: str) -> None:
         """Append text to the output area (thread-safe)."""
         with self._output_lock:
-            if self._output_text:
-                self._output_text += "\n" + text
-                self._output_line_count += 1 + text.count("\n")
+            text = "" if text is None else str(text)
+            new_lines = text.split("\n")
+            if self._output_lines == [""]:
+                self._output_lines = new_lines
             else:
-                self._output_text = text
-                self._output_line_count = max(1, text.count("\n") + 1)
+                self._output_lines.extend(new_lines)
+            if not self._output_lines:
+                self._output_lines = [""]
+            self._output_line_count = max(1, len(self._output_lines))
             self._output_version += 1
 
             # Auto-scroll to bottom only when following output.
@@ -833,6 +934,8 @@ class FullScreenUI:
             else:
                 # Keep current view, but make sure it's still a valid offset.
                 self._scroll_offset = max(0, min(self._scroll_offset, self._output_line_count - 1))
+                self._scroll_col = max(0, int(self._scroll_col or 0))
+            self._ensure_view_window_locked()
 
         # Trigger UI refresh (now safe - cache updated atomically)
         if self._app and self._app.is_running:
@@ -841,12 +944,14 @@ class FullScreenUI:
     def clear_output(self) -> None:
         """Clear the output area (thread-safe)."""
         with self._output_lock:
-            self._output_text = ""
+            self._output_lines = [""]
             self._output_line_count = 1
             self._output_version += 1
             self._scroll_offset = 0
             self._scroll_col = 0
             self._follow_output = True
+            self._view_start = 0
+            self._view_end = 1
             self._copy_payloads.clear()
 
         if self._app and self._app.is_running:
@@ -855,12 +960,15 @@ class FullScreenUI:
     def set_output(self, text: str) -> None:
         """Replace all output with new text (thread-safe)."""
         with self._output_lock:
-            self._output_text = text
-            self._output_line_count = max(1, text.count("\n") + 1) if text else 1
+            text = "" if text is None else str(text)
+            self._output_lines = text.split("\n") if text else [""]
+            self._output_line_count = max(1, len(self._output_lines))
             self._output_version += 1
             self._scroll_offset = 0
             self._scroll_col = 0
             self._follow_output = True
+            self._view_start = 0
+            self._view_end = min(self._output_line_count, len(self._output_lines)) or 1
             self._copy_payloads.clear()
 
         if self._app and self._app.is_running:
