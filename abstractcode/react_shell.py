@@ -167,6 +167,8 @@ class ReactShell:
         self._max_tokens = max_tokens
         # Enable ANSI colors - fullscreen_ui uses ANSI class to parse escape codes
         self._color = bool(color and _supports_color())
+        # Session-level tool allowlist (None = default/all tools for the agent kind).
+        self._allowed_tools: Optional[List[str]] = None
 
         # Lazy imports so `abstractcode --help` works even if deps aren't installed.
         try:
@@ -319,6 +321,10 @@ class ReactShell:
         self._last_execute_command_result: Optional[Dict[str, Any]] = None
         # Pending tool-line spinner markers (one per emitted act event).
         self._pending_tool_markers: List[str] = []
+        # Pending tool call metadata (aligned with tool markers/results).
+        self._pending_tool_metas: List[Dict[str, Any]] = []
+        # Keep the last started run id so /context can show traces even after completion.
+        self._last_run_id: Optional[str] = None
 
     # ---------------------------------------------------------------------
     # UI helpers
@@ -332,7 +338,13 @@ class ReactShell:
         KeyError for unknown run_ids, which would crash the render loop.
         """
         try:
-            return self._agent.get_state()
+            state = self._agent.get_state()
+            if state is not None:
+                return state
+            # If there's no active run, still allow inspecting the last run (durable via RunStore).
+            if isinstance(self._last_run_id, str) and self._last_run_id:
+                return self._runtime.get_state(self._last_run_id)
+            return None
         except (KeyError, Exception):
             # Run doesn't exist (completed/cleaned up) or other error
             return None
@@ -371,10 +383,102 @@ class ReactShell:
             width = 120
         return max(40, width)
 
-    def _print_tool_observation(self, *, tool_name: str, raw: str, indent: str = "  ") -> None:
+    def _truncate_for_ui(self, value: Any, *, max_chars: int) -> Any:
+        """Truncate long string values for UI display only (agent state is unchanged)."""
+        if isinstance(value, str):
+            if len(value) <= max_chars:
+                return value
+            if max_chars <= 1:
+                return "…"
+            return value[: max_chars - 1] + "…"
+        if isinstance(value, dict):
+            return {k: self._truncate_for_ui(v, max_chars=max_chars) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._truncate_for_ui(v, max_chars=max_chars) for v in value]
+        if isinstance(value, tuple):
+            return tuple(self._truncate_for_ui(v, max_chars=max_chars) for v in value)
+        return value
+
+    def _strip_tool_prefix(self, raw: str, tool_name: str) -> str:
+        raw = "" if raw is None else str(raw)
+        tool_name = str(tool_name or "")
+        if not tool_name:
+            return raw
+        prefix = f"[{tool_name}]:"
+        if raw.startswith(prefix):
+            return raw[len(prefix) :].lstrip()
+        return raw
+
+    def _print_tool_observation(
+        self,
+        *,
+        tool_name: str,
+        raw: str,
+        ok: Optional[bool] = None,
+        indent: str = "  ",
+        tool_args: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Render tool output in a compact, readable way for the UI."""
         tool_name = str(tool_name or "")
         raw = "" if raw is None else str(raw)
+
+        if tool_name in ("write_file", "read_file"):
+            import re
+
+            cwd = os.getcwd()
+            cleaned = self._strip_tool_prefix(raw, tool_name=tool_name).strip()
+
+            if tool_name == "write_file":
+                line = (cleaned.splitlines() or [""])[0].strip()
+                if ok is False and line and not line.startswith("❌"):
+                    line = f"❌ {line}" if line else "❌ Failed"
+                if line and "(" in line and line.endswith(")"):
+                    head, tail = line.rsplit("(", 1)
+                    inner = tail[:-1]
+                    line = f"{head}(current folder: {cwd}, {inner})"
+                elif line:
+                    line = f"{line} (current folder: {cwd})"
+                self._print(_style(f"{indent}{line}", _C.DIM, enabled=self._color))
+                return
+
+            # read_file: avoid dumping full file contents into the chat view.
+            file_path = ""
+            if isinstance(tool_args, dict):
+                file_path = str(tool_args.get("file_path") or "")
+
+            if ok is False or cleaned.startswith("Error:") or cleaned.startswith("❌"):
+                if not cleaned.startswith("❌"):
+                    cleaned = f"❌ {cleaned}".rstrip()
+                self._print(_style(f"{indent}{cleaned}", _C.DIM, enabled=self._color))
+                return
+
+            header = (cleaned.splitlines() or [""])[0].strip()
+            m = re.match(r"^File:\s*(?P<path>.+?)\s*\((?P<lines>[\d,]+)\s+lines\)\s*$", header)
+            if m:
+                file_path = file_path or m.group("path").strip()
+                try:
+                    line_count = int(m.group("lines").replace(",", ""))
+                except Exception:
+                    line_count = None
+
+                split_idx = cleaned.find("\n\n")
+                if split_idx >= 0:
+                    content = cleaned[split_idx + 2 :]
+                else:
+                    content = "\n".join(cleaned.splitlines()[1:])
+
+                bytes_read = len(content.encode("utf-8"))
+                lines_read = line_count if isinstance(line_count, int) else len(content.splitlines())
+                summary = f"✅ Read '{file_path}' (current folder: {cwd}, {bytes_read:,} bytes, {lines_read:,} lines)"
+                self._print(_style(f"{indent}{summary}", _C.DIM, enabled=self._color))
+                return
+
+            bytes_read = len(cleaned.encode("utf-8"))
+            lines_read = len(cleaned.splitlines())
+            path_part = f" '{file_path}'" if file_path else ""
+            summary = f"✅ Read{path_part} (current folder: {cwd}, {bytes_read:,} bytes, {lines_read:,} lines)"
+            self._print(_style(f"{indent}{summary}", _C.DIM, enabled=self._color))
+            return
 
         for line in (raw.splitlines() or [""]):
             style_codes: Tuple[str, ...] = (_C.DIM,)
@@ -558,11 +662,16 @@ class ReactShell:
             args = data.get("args") or {}
             call_id_raw = data.get("call_id")
             call_id = str(call_id_raw).strip() if call_id_raw is not None else ""
-            args_str = json.dumps(args, ensure_ascii=False, sort_keys=True)
+            ui_args = self._truncate_for_ui(args, max_chars=200)
+            try:
+                args_str = json.dumps(ui_args, ensure_ascii=False, sort_keys=True)
+            except Exception:
+                args_str = str(ui_args)
             call_suffix = f" [{call_id}]" if call_id else ""
             marker_id = f"tool_{uuid.uuid4().hex}"
             marker = f"[[SPINNER:{marker_id}]]"
             self._pending_tool_markers.append(marker)
+            self._pending_tool_metas.append({"tool": tool, "args": dict(args), "call_id": call_id})
             header = f"Tool: {tool}{call_suffix}({args_str})"
             self._print(_style(header, _C.GREEN, _C.BOLD, enabled=self._color) + f" {marker}")
             # Track full arguments for copy payloads (no truncation).
@@ -576,15 +685,33 @@ class ReactShell:
             raw = str(data.get("result", "") or "")
             success = data.get("success")
             ok = bool(success) if success is not None else True
+
+            tool_name = str(data.get("tool", "") or "tool")
+            # Some tools return "Error: ..." strings instead of raising exceptions. Treat those
+            # as failures for UI badges (✅/❌) even if the executor reported success.
+            try:
+                cleaned = self._strip_tool_prefix(raw, tool_name=tool_name).lstrip()
+                if cleaned.startswith(("Error:", "❌", "🚫", "⏰")):
+                    ok = False
+            except Exception:
+                pass
             if self._pending_tool_markers:
                 marker = self._pending_tool_markers.pop(0)
                 icon = "✅" if ok else "❌"
                 # Best-effort in-place update; if not found, fall back silently.
                 self._ui.replace_output_marker(marker, icon)
-
-            tool_name = str(data.get("tool", "") or "tool")
+            tool_args = None
+            if self._pending_tool_metas:
+                try:
+                    meta = self._pending_tool_metas.pop(0)
+                    if isinstance(meta, dict):
+                        args_meta = meta.get("args")
+                        if isinstance(args_meta, dict):
+                            tool_args = args_meta
+                except Exception:
+                    tool_args = None
             # Keep observability compact, but render diffs with clear colors.
-            self._print_tool_observation(tool_name=tool_name, raw=raw, indent="  ")
+            self._print_tool_observation(tool_name=tool_name, raw=raw, ok=ok, indent="", tool_args=tool_args)
             self._turn_trace.append(f"Result ({tool_name}):\n{raw}".rstrip())
             self._ui.set_spinner("Processing result...")
         elif step == "ask_user":
@@ -666,7 +793,10 @@ class ReactShell:
         if command in ("help", "h", "?"):
             self._show_help()
             return False
-        if command == "tools":
+        if command in ("tools", "tool", "toolset"):
+            self._handle_tools(arg)
+            return False
+        if command in ("tool-specs", "tool_specs", "toolspecs"):
             self._show_tools()
             return False
         if command == "status":
@@ -736,6 +866,9 @@ class ReactShell:
             return False
         if command == "context":
             self._handle_context(arg)
+            return False
+        if command == "llm":
+            self._handle_llm(arg)
             return False
         if command == "mouse":
             self._handle_mouse_toggle()
@@ -1246,6 +1379,12 @@ class ReactShell:
                     self._review_max_rounds = 1
                 if self._review_max_rounds < 0:
                     self._review_max_rounds = 0
+            if "allowed_tools" in config:
+                raw = config.get("allowed_tools")
+                if raw is None:
+                    self._allowed_tools = None
+                elif isinstance(raw, list):
+                    self._allowed_tools = [str(t).strip() for t in raw if isinstance(t, str) and t.strip()]
         except Exception:
             pass  # Ignore corrupt config files
 
@@ -1261,10 +1400,193 @@ class ReactShell:
                 "plan_mode": self._plan_mode,
                 "review_mode": self._review_mode,
                 "review_max_rounds": self._review_max_rounds,
+                "allowed_tools": self._allowed_tools,
             }
             self._config_file.write_text(json.dumps(config, indent=2))
         except Exception:
             pass  # Silently fail if we can't write
+
+    def _handle_tools(self, raw: str) -> None:
+        """List or configure the session tool allowlist.
+
+        Usage:
+          /tools
+          /tools reset
+          /tools only <name...>
+          /tools enable <name...>
+          /tools disable <name...>
+
+        Notes:
+        - The selection is persisted in the session config (when state_file is set).
+        - If a run is active, changes are applied immediately by updating `run.vars["_runtime"]["allowed_tools"]`.
+        """
+        import shlex
+
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split() if raw else []
+
+        sub = parts[0].lower() if parts else "list"
+        args = parts[1:] if len(parts) > 1 else []
+        if sub not in ("list", "reset", "only", "enable", "disable", "help", "-h", "--help"):
+            self._print(_style("Usage:", _C.DIM, enabled=self._color))
+            self._print(_style("  /tools", _C.DIM, enabled=self._color))
+            self._print(_style("  /tools reset", _C.DIM, enabled=self._color))
+            self._print(_style("  /tools only <name...>", _C.DIM, enabled=self._color))
+            self._print(_style("  /tools enable <name...>", _C.DIM, enabled=self._color))
+            self._print(_style("  /tools disable <name...>", _C.DIM, enabled=self._color))
+            return
+
+        def _split_names(tokens: List[str]) -> List[str]:
+            out: List[str] = []
+            for t in tokens:
+                for part in str(t).split(","):
+                    name = part.strip()
+                    if name:
+                        out.append(name)
+            # de-dup preserving order
+            seen: set[str] = set()
+            deduped: List[str] = []
+            for n in out:
+                if n in seen:
+                    continue
+                seen.add(n)
+                deduped.append(n)
+            return deduped
+
+        def _available_tool_defs() -> Dict[str, Any]:
+            logic = getattr(self._agent, "logic", None)
+            tools = getattr(logic, "tools", None) if logic is not None else None
+            out: Dict[str, Any] = {}
+            if isinstance(tools, list):
+                for t in tools:
+                    name = getattr(t, "name", None)
+                    desc = getattr(t, "description", None)
+                    if isinstance(name, str) and name:
+                        out[name] = {"name": name, "description": str(desc or "")}
+            # Fallback to CLI-known tools (may omit runtime built-ins).
+            if not out:
+                for name, spec in (self._tool_specs or {}).items():
+                    out[name] = {"name": name, "description": str(getattr(spec, "description", "") or "")}
+            return out
+
+        available = _available_tool_defs()
+        available_names = sorted(available.keys())
+
+        def _effective_allowlist_from_state() -> Optional[List[str]]:
+            state = self._safe_get_state()
+            if state is None or not hasattr(state, "vars") or not isinstance(state.vars, dict):
+                return None
+            runtime_ns = state.vars.get("_runtime")
+            if not isinstance(runtime_ns, dict):
+                return None
+            raw_allow = runtime_ns.get("allowed_tools")
+            if raw_allow is None:
+                return None
+            if not isinstance(raw_allow, list):
+                return None
+            return [str(t).strip() for t in raw_allow if isinstance(t, str) and t.strip()]
+
+        def _apply_to_active_run(allow: Optional[List[str]]) -> None:
+            state = self._safe_get_state()
+            if state is None or not hasattr(state, "vars") or not isinstance(state.vars, dict):
+                return
+            runtime_ns = state.vars.get("_runtime")
+            if not isinstance(runtime_ns, dict):
+                runtime_ns = {}
+                state.vars["_runtime"] = runtime_ns
+            if allow is None:
+                runtime_ns.pop("allowed_tools", None)
+            else:
+                runtime_ns["allowed_tools"] = list(allow)
+            try:
+                self._runtime.run_store.save(state)
+            except Exception:
+                pass
+
+        if sub in ("help", "-h", "--help"):
+            self._print(_style("Usage:", _C.DIM, enabled=self._color))
+            self._print(_style("  /tools", _C.DIM, enabled=self._color))
+            self._print(_style("  /tools reset", _C.DIM, enabled=self._color))
+            self._print(_style("  /tools only <name...>", _C.DIM, enabled=self._color))
+            self._print(_style("  /tools enable <name...>", _C.DIM, enabled=self._color))
+            self._print(_style("  /tools disable <name...>", _C.DIM, enabled=self._color))
+            return
+
+        if sub == "reset":
+            self._allowed_tools = None
+            _apply_to_active_run(None)
+            self._save_config()
+            self._print(_style("✅ Tools reset to default (all enabled).", _C.GREEN, enabled=self._color))
+            sub = "list"
+
+        if sub in ("only", "enable", "disable"):
+            names = _split_names(args)
+            if not names:
+                self._print(_style(f"Usage: /tools {sub} <name...>", _C.DIM, enabled=self._color))
+                return
+            unknown = [n for n in names if n not in available]
+            if unknown:
+                self._print(_style("Unknown tool(s): " + ", ".join(unknown), _C.YELLOW, enabled=self._color))
+                self._print(_style("Use /tools to list available tools.", _C.DIM, enabled=self._color))
+                return
+
+            current = _effective_allowlist_from_state()
+            if current is None:
+                # Fall back to persisted selection if no active override.
+                current = list(self._allowed_tools) if isinstance(self._allowed_tools, list) else list(available_names)
+            current_set = set(current)
+
+            if sub == "only":
+                new_allow = names
+            elif sub == "enable":
+                new_allow = list(dict.fromkeys(list(current) + list(names)))
+            else:  # disable
+                new_allow = [n for n in current if n not in set(names)]
+            new_set = set(new_allow)
+            added = [n for n in new_allow if n not in current_set]
+            removed = [n for n in current if n not in new_set]
+
+            self._allowed_tools = list(new_allow)
+            _apply_to_active_run(self._allowed_tools)
+            self._save_config()
+            parts: List[str] = []
+            if added:
+                parts.append("+" + ", ".join(added))
+            if removed:
+                parts.append("-" + ", ".join(removed))
+            delta = f" ({' '.join(parts)})" if parts else ""
+            self._print(
+                _style(
+                    f"✅ Tools updated: {len(self._allowed_tools)}/{len(available_names)} enabled{delta}.",
+                    _C.GREEN,
+                    enabled=self._color,
+                )
+            )
+            sub = "list"
+
+        # Default: list tools with enabled status.
+        effective_from_run = _effective_allowlist_from_state()
+        source = "active run" if isinstance(effective_from_run, list) else ("session config" if isinstance(self._allowed_tools, list) else "default")
+        effective = effective_from_run
+        if effective is None:
+            effective = list(self._allowed_tools) if isinstance(self._allowed_tools, list) else list(available_names)
+
+        enabled_set = set(effective)
+        self._print(_style("\nTools", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+        saved = "yes" if self._config_file else "no"
+        self._print(_style(f"Enabled: {len(effective)}/{len(available_names)}  Saved: {saved}  Source: {source}", _C.DIM, enabled=self._color))
+        for name in available_names:
+            icon = "✅" if name in enabled_set else "❌"
+            desc = available.get(name, {}).get("description") or ""
+            line = f"  {icon} {name}"
+            self._print(line)
+            if isinstance(desc, str) and desc.strip():
+                self._print(_style(f"     {desc.strip()}", _C.DIM, enabled=self._color))
+        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+        self._print(_style("Tip: /tools only list_files read_file write_file", _C.DIM, enabled=self._color))
 
     def _handle_max_messages(self, raw: str) -> None:
         """Show or set max history messages."""
@@ -1905,7 +2227,7 @@ class ReactShell:
         """Show the exact context that will be sent with the next LLM call.
 
         Usage:
-          /context [--json-only]
+          /context [--json-only] [--derived]
         """
         import copy
         import shlex
@@ -1917,12 +2239,16 @@ class ReactShell:
             parts = raw.split() if raw else []
 
         json_only = False
+        derived = False
         for p in parts:
             if p in ("--json", "--json-only"):
                 json_only = True
                 continue
+            if p in ("--derived", "--reconstructed"):
+                derived = True
+                continue
             self._print(_style(f"Unknown flag: {p}", _C.YELLOW, enabled=self._color))
-            self._print(_style("Usage: /context [--json-only]", _C.DIM, enabled=self._color))
+            self._print(_style("Usage: /context [--json-only] [--derived]", _C.DIM, enabled=self._color))
             return
 
         state = self._safe_get_state()
@@ -1939,6 +2265,7 @@ class ReactShell:
                 "provider": self._provider,
                 "model": self._model,
                 "note": "No active run. This is the current session context that will be included in the next /task.",
+                "tip": "Use /llm to inspect verbatim LLM_CALL payloads from the last run (from runtime node_traces).",
                 "session_messages": list(self._agent.session_messages or []),
             }
             if state is not None and hasattr(state, "run_id") and hasattr(state, "status"):
@@ -1961,6 +2288,8 @@ class ReactShell:
                     counts: Dict[str, int] = {}
                     tool_steps: List[Dict[str, Any]] = []
                     llm_steps: List[Dict[str, Any]] = []
+                    llm_steps_verbatim: List[Dict[str, Any]] = []
+                    tool_steps_verbatim: List[Dict[str, Any]] = []
                     for node_trace in traces.values():
                         if not isinstance(node_trace, dict):
                             continue
@@ -1990,6 +2319,24 @@ class ReactShell:
                                         "tool_calls": result.get("tool_calls"),
                                     }
                                 )
+                                meta = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+                                runtime_obs = meta.get("_runtime_observability") if isinstance(meta, dict) else None
+                                captured = (
+                                    runtime_obs.get("llm_generate_kwargs")
+                                    if isinstance(runtime_obs, dict)
+                                    else None
+                                )
+                                llm_steps_verbatim.append(
+                                    {
+                                        "ts": step.get("ts"),
+                                        "node_id": step.get("node_id"),
+                                        "status": step.get("status"),
+                                        "duration_ms": step.get("duration_ms"),
+                                        "llm_call_payload": eff.get("payload") if isinstance(eff.get("payload"), dict) else {},
+                                        "llm_generate_kwargs_captured": captured,
+                                        "result": result,
+                                    }
+                                )
                                 continue
                             if etype != "tool_calls":
                                 continue
@@ -2005,11 +2352,26 @@ class ReactShell:
                                     "tool_calls": tcs,
                                 }
                             )
+                            tool_steps_verbatim.append(
+                                {
+                                    "ts": step.get("ts"),
+                                    "node_id": step.get("node_id"),
+                                    "status": step.get("status"),
+                                    "duration_ms": step.get("duration_ms"),
+                                    "tool_calls_payload": pl,
+                                    "result": step.get("result") if isinstance(step.get("result"), dict) else {},
+                                    "error": step.get("error"),
+                                }
+                            )
 
                     payload["last_run_trace_summary"] = {
                         "counts_by_effect_type": dict(counts),
                         "tool_calls_steps": tool_steps,
                         "llm_call_steps": llm_steps,
+                    }
+                    payload["last_run_traces_verbatim"] = {
+                        "llm_call_steps": llm_steps_verbatim,
+                        "tool_calls_steps": tool_steps_verbatim,
                     }
 
             text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
@@ -2135,117 +2497,17 @@ class ReactShell:
             llm_payload_raw = next_effect.get("payload")
             out["llm_call_payload"] = llm_payload_raw
 
-            if isinstance(llm_payload_raw, dict):
-                # Mirror AbstractRuntime's LLM_CALL handler preprocessing so this reflects
-                # the exact kwargs passed to AbstractCore's `llm.generate(...)`.
-                raw_params = llm_payload_raw.get("params")
-                params = dict(raw_params) if isinstance(raw_params, dict) else {}
-
-                trace_metadata = params.get("trace_metadata")
-                if not isinstance(trace_metadata, dict):
-                    trace_metadata = {}
-                trace_metadata.update(
-                    {
-                        "run_id": getattr(sim_run, "run_id", ""),
-                        "workflow_id": str(getattr(sim_run, "workflow_id", "") or ""),
-                        "node_id": str(getattr(sim_run, "current_node", "") or ""),
-                    }
-                )
-                actor_id = getattr(sim_run, "actor_id", None)
-                if actor_id:
-                    trace_metadata["actor_id"] = str(actor_id)
-                session_id = getattr(sim_run, "session_id", None)
-                if session_id:
-                    trace_metadata["session_id"] = str(session_id)
-                parent_run_id = getattr(sim_run, "parent_run_id", None)
-                if parent_run_id:
-                    trace_metadata["parent_run_id"] = str(parent_run_id)
-                params["trace_metadata"] = trace_metadata
-
-                provider_override = llm_payload_raw.get("provider")
-                model_override = llm_payload_raw.get("model")
-                if isinstance(provider_override, str) and provider_override.strip():
-                    params["_provider"] = provider_override.strip()
-                if isinstance(model_override, str) and model_override.strip():
-                    params["_model"] = model_override.strip()
-
-                out["llm_generate_kwargs"] = {
-                    "prompt": str(llm_payload_raw.get("prompt") or ""),
-                    "messages": llm_payload_raw.get("messages"),
-                    "system_prompt": llm_payload_raw.get("system_prompt"),
-                    "tools": llm_payload_raw.get("tools"),
-                    "params": params,
-                }
-
-                # Derive the verbatim OpenAI-compatible messages that will be sent to
-                # OpenAI-compatible providers (LMStudio/vLLM/OpenAICompatible/etc.).
-                # This mirrors the provider-side prompt injection behavior for prompted tools:
-                # we append the formatted tool prompt to the system prompt.
+            # Anything beyond the durable LLM_CALL payload is *derived* (not yet sent).
+            # Keep derived fields opt-in for debugging to avoid confusing "exact" vs "reconstructed".
+            if derived and isinstance(llm_payload_raw, dict):
                 try:
                     from abstractcore.tools.handler import UniversalToolHandler
 
-                    eff_model = params.get("_model") if isinstance(params.get("_model"), str) else self._model
-                    eff_provider = (
-                        params.get("_provider") if isinstance(params.get("_provider"), str) else self._provider
-                    )
-                    handler = UniversalToolHandler(str(eff_model or ""))
+                    handler = UniversalToolHandler(str(self._model or ""))
                     tool_prompt = handler.format_tools_prompt(llm_payload_raw.get("tools") or [])
-                    # Decide whether the provider uses prompt-injected tools or native tools.
-                    # We keep this logic explicit and minimal for debugging accuracy.
-                    provider_name = str(eff_provider or "").strip().lower()
-                    if provider_name in {"openai", "anthropic"} and handler.supports_native:
-                        tool_mode = "native"
-                    elif provider_name in {
-                        "lmstudio",
-                        "openai_compatible",
-                        "vllm",
-                        "ollama",
-                        "huggingface",
-                        "mlx",
-                    }:
-                        tool_mode = "prompted"
-                    else:
-                        tool_mode = "prompted" if handler.supports_prompted else "none"
-
-                    native_tools_payload = None
-                    if tool_mode == "native":
-                        try:
-                            native_tools_payload = handler.prepare_tools_for_native(llm_payload_raw.get("tools") or [])
-                        except Exception:
-                            native_tools_payload = None
                 except Exception:
                     tool_prompt = ""
-                    tool_mode = "unknown"
-                    native_tools_payload = None
-
-                sys_base = llm_payload_raw.get("system_prompt")
-                sys_text = str(sys_base) if isinstance(sys_base, str) else ""
-                if tool_mode == "prompted" and isinstance(tool_prompt, str) and tool_prompt.strip():
-                    sys_effective = (sys_text + ("\n\n" if sys_text else "") + tool_prompt).strip()
-                else:
-                    sys_effective = sys_text
-
-                prompt_text = str(llm_payload_raw.get("prompt") or "")
-                messages_list = llm_payload_raw.get("messages")
-                messages_out: list[dict[str, str]] = []
-                if sys_effective:
-                    messages_out.append({"role": "system", "content": sys_effective})
-                if isinstance(messages_list, list):
-                    for m in messages_list:
-                        if not isinstance(m, dict):
-                            continue
-                        role = m.get("role")
-                        content = m.get("content")
-                        if isinstance(role, str) and isinstance(content, str):
-                            messages_out.append({"role": role, "content": content})
-                if prompt_text.strip():
-                    messages_out.append({"role": "user", "content": prompt_text})
-
-                out["verbatim_openai_messages_next_call"] = messages_out
-                out["verbatim_system_prompt_effective"] = sys_effective
-                out["verbatim_tool_prompt"] = tool_prompt
-                out["verbatim_tool_mode"] = tool_mode
-                out["verbatim_native_tools_payload"] = native_tools_payload
+                out["derived_tool_prompt"] = tool_prompt
 
         text = json.dumps(out, ensure_ascii=False, indent=2, sort_keys=True, default=str)
         copy_id = f"context_{uuid.uuid4().hex}"
@@ -2263,7 +2525,7 @@ class ReactShell:
         if not isinstance(llm_payload, dict):
             return
 
-        sys_prompt = out.get("verbatim_system_prompt_effective") or llm_payload.get("system_prompt")
+        sys_prompt = llm_payload.get("system_prompt")
         if isinstance(sys_prompt, str) and sys_prompt:
             sid = f"context_system_{uuid.uuid4().hex}"
             self._ui.register_copy_payload(sid, sys_prompt)
@@ -2280,16 +2542,182 @@ class ReactShell:
             self._print(f"[[COPY:{pid}]]")
             self._print(_style("─" * 80, _C.DIM, enabled=self._color))
             self._print(prompt)
+        if derived:
+            tool_prompt = out.get("derived_tool_prompt")
+            if isinstance(tool_prompt, str) and tool_prompt.strip():
+                tid = f"context_tool_prompt_{uuid.uuid4().hex}"
+                self._ui.register_copy_payload(tid, tool_prompt)
+                self._print(_style("\nDerived tool prompt (not yet sent)", _C.CYAN, _C.BOLD, enabled=self._color))
+                self._print(f"[[COPY:{tid}]]")
+                self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+                self._print(tool_prompt)
 
-        messages_verbatim = out.get("verbatim_openai_messages_next_call")
-        if isinstance(messages_verbatim, list) and messages_verbatim:
-            mid = f"context_messages_{uuid.uuid4().hex}"
-            messages_text = json.dumps(messages_verbatim, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-            self._ui.register_copy_payload(mid, messages_text)
-            self._print(_style("\nOpenAI-compatible messages (verbatim JSON)", _C.CYAN, _C.BOLD, enabled=self._color))
-            self._print(f"[[COPY:{mid}]]")
+    def _handle_llm(self, raw: str) -> None:
+        """Show verbatim LLM_CALL payloads captured by AbstractRuntime.
+
+        Source of truth: `RunState.vars["_runtime"]["node_traces"]`.
+
+        Usage:
+          /llm [--json-only] [--save <path>]
+        """
+        import shlex
+        import uuid
+        from pathlib import Path
+
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split() if raw else []
+
+        json_only = False
+        save_path: Optional[str] = None
+        i = 0
+        while i < len(parts):
+            p = parts[i]
+            if p in ("--json", "--json-only"):
+                json_only = True
+                i += 1
+                continue
+            if p in ("--save", "--out", "--output"):
+                if i + 1 >= len(parts):
+                    self._print(_style("Usage: /llm [--json-only] [--save <path>]", _C.DIM, enabled=self._color))
+                    return
+                save_path = parts[i + 1]
+                i += 2
+                continue
+            self._print(_style(f"Unknown flag: {p}", _C.YELLOW, enabled=self._color))
+            self._print(_style("Usage: /llm [--json-only] [--save <path>]", _C.DIM, enabled=self._color))
+            return
+
+        state = self._safe_get_state()
+        if state is None or not hasattr(state, "vars"):
+            self._print(_style("No run loaded. Use /resume or start a task first.", _C.DIM, enabled=self._color))
+            return
+
+        runtime_ns = state.vars.get("_runtime") if isinstance(state.vars, dict) else None
+        traces = runtime_ns.get("node_traces") if isinstance(runtime_ns, dict) else None
+        if not isinstance(traces, dict) or not traces:
+            self._print(_style("No runtime node_traces found for this run.", _C.DIM, enabled=self._color))
+            return
+
+        llm_steps: List[Dict[str, Any]] = []
+        for node_trace in traces.values():
+            if not isinstance(node_trace, dict):
+                continue
+            steps = node_trace.get("steps")
+            if not isinstance(steps, list):
+                continue
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                eff = step.get("effect")
+                if not isinstance(eff, dict):
+                    continue
+                if str(eff.get("type") or "") == "llm_call":
+                    llm_steps.append(step)
+
+        if not llm_steps:
+            self._print(_style("No llm_call steps found in node_traces.", _C.DIM, enabled=self._color))
+            return
+
+        llm_steps.sort(key=lambda d: str(d.get("ts") or ""))
+
+        calls_out: List[Dict[str, Any]] = []
+        for idx, step in enumerate(llm_steps, 1):
+            eff = step.get("effect") if isinstance(step.get("effect"), dict) else {}
+            payload = eff.get("payload") if isinstance(eff.get("payload"), dict) else {}
+            result = step.get("result") if isinstance(step.get("result"), dict) else {}
+
+            captured_kwargs = None
+            meta = result.get("metadata") if isinstance(result.get("metadata"), dict) else None
+            runtime_obs = meta.get("_runtime_observability") if isinstance(meta, dict) else None
+            if isinstance(runtime_obs, dict):
+                captured_kwargs = runtime_obs.get("llm_generate_kwargs")
+
+            calls_out.append(
+                {
+                    "index": idx,
+                    "ts": step.get("ts"),
+                    "node_id": step.get("node_id"),
+                    "status": step.get("status"),
+                    "duration_ms": step.get("duration_ms"),
+                    "llm_call_payload": payload,
+                    "llm_generate_kwargs_captured": captured_kwargs,
+                    "result": result,
+                }
+            )
+
+        out: Dict[str, Any] = {
+            "run_id": getattr(state, "run_id", None),
+            "provider": self._provider,
+            "model": self._model,
+            "llm_calls": calls_out,
+        }
+
+        text = json.dumps(out, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+
+        if save_path:
+            try:
+                path = Path(save_path).expanduser()
+                if not path.is_absolute():
+                    path = Path.cwd() / path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+                self._print(_style(f"✅ Saved verbatim LLM payloads to {path}", _C.DIM, enabled=self._color))
+            except Exception as e:
+                self._print(_style(f"❌ Failed to save: {e}", _C.DIM, enabled=self._color))
+
+        copy_id = f"llm_{uuid.uuid4().hex}"
+        self._ui.register_copy_payload(copy_id, text)
+
+        self._print(_style("\nLLM calls (runtime; verbatim payloads)", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(f"[[COPY:{copy_id}]]")
+        self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+
+        if json_only:
+            self._print(text)
+            return
+
+        # Human-scannable rendering: one block per call with separate copy payloads.
+        for call in calls_out:
+            idx = call.get("index")
+            ts = call.get("ts")
+            node_id = call.get("node_id")
+            status = call.get("status")
+            dur = call.get("duration_ms")
+            header = f"LLM call #{idx} ({status}) node={node_id} ts={ts}"
+            if isinstance(dur, (int, float)):
+                header += f" duration_ms={dur:.1f}"
+            self._print(_style("\n" + header, _C.CYAN, _C.BOLD, enabled=self._color))
             self._print(_style("─" * 80, _C.DIM, enabled=self._color))
-            self._print(messages_text)
+
+            req_payload = call.get("llm_generate_kwargs_captured") or call.get("llm_call_payload") or {}
+            req_text = json.dumps(req_payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+            req_id = f"llm_req_{uuid.uuid4().hex}"
+            self._ui.register_copy_payload(req_id, req_text)
+            self._print(_style("Request (captured)", _C.DIM, enabled=self._color))
+            self._print(f"[[COPY:{req_id}]]")
+            self._print(req_text)
+
+            res_payload = call.get("result") or {}
+            res_text = json.dumps(res_payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+            res_id = f"llm_res_{uuid.uuid4().hex}"
+            self._ui.register_copy_payload(res_id, res_text)
+            self._print(_style("\nResponse (normalized)", _C.DIM, enabled=self._color))
+            self._print(f"[[COPY:{res_id}]]")
+            self._print(res_text)
+
+            # Provider-level observability: some AbstractCore providers attach the exact HTTP/client
+            # request payload they sent under metadata._provider_request.
+            meta = res_payload.get("metadata") if isinstance(res_payload, dict) else None
+            provider_req = meta.get("_provider_request") if isinstance(meta, dict) else None
+            if provider_req is not None:
+                prov_text = json.dumps(provider_req, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+                prov_id = f"llm_provider_{uuid.uuid4().hex}"
+                self._ui.register_copy_payload(prov_id, prov_text)
+                self._print(_style("\nProvider request (verbatim)", _C.DIM, enabled=self._color))
+                self._print(f"[[COPY:{prov_id}]]")
+                self._print(prov_text)
 
     def _handle_remember(self, raw: str) -> None:
         """Store a durable memory note (runtime MEMORY_NOTE) with optional tags and provenance.
@@ -2394,7 +2822,8 @@ class ReactShell:
         self._print(
             "\nCommands:\n"
             "  /help               Show this message\n"
-            "  /tools              List available tools\n"
+            "  /tools              List/configure tool allowlist [saved]\n"
+            "  /tool-specs         Show full tool schemas (params)\n"
             "  /status             Show current run status\n"
             "  /auto-accept        Toggle auto-accept for tools [saved]\n"
             "  /plan [on|off]      Toggle Plan mode (TODO list first) [saved]\n"
@@ -2410,6 +2839,7 @@ class ReactShell:
             "  /recall [opts]      Recall spans by time/tags/query (--into-context)\n"
             "  /vars [path]        Inspect run vars (scratchpad, _runtime, ...)\n"
             "  /context            Show the exact context for the next LLM call\n"
+            "  /llm                Show verbatim LLM_CALL payloads for the run\n"
             "  /remember <note>    Store a durable memory note (tags + provenance)\n"
             "  /mouse              Toggle mouse mode (wheel scroll vs terminal selection)\n"
             "  /flow ...           Run AbstractFlow workflows inside this REPL\n"
@@ -2438,12 +2868,29 @@ class ReactShell:
             self._print(_style("Mouse mode: OFF (terminal selection enabled).", _C.DIM, enabled=self._color))
 
     def _show_tools(self) -> None:
-        self._print(_style("\nAvailable tools", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("\nTool schemas", _C.CYAN, _C.BOLD, enabled=self._color))
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
-        for name, spec in sorted(self._tool_specs.items()):
+        rendered: Dict[str, _ToolSpec] = {}
+        logic = getattr(self._agent, "logic", None)
+        tool_defs = getattr(logic, "tools", None) if logic is not None else None
+        if isinstance(tool_defs, list):
+            for t in tool_defs:
+                name = getattr(t, "name", None)
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                rendered[name.strip()] = _ToolSpec(
+                    name=name.strip(),
+                    description=str(getattr(t, "description", "") or ""),
+                    parameters=dict(getattr(t, "parameters", None) or {}),
+                )
+        if not rendered:
+            rendered = dict(self._tool_specs or {})
+
+        for name, spec in sorted(rendered.items()):
             params = ", ".join(sorted((spec.parameters or {}).keys()))
             self._print(f"- {name}({params})")
-            self._print(_style(f"  {spec.description}", _C.DIM, enabled=self._color))
+            if spec.description:
+                self._print(_style(f"  {spec.description}", _C.DIM, enabled=self._color))
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
 
     def _show_status(self) -> None:
@@ -2839,7 +3286,8 @@ class ReactShell:
         # Note: _approve_all_session is NOT reset here - it persists for the entire session
         self._turn_task = str(task or "").strip() or None
         self._turn_trace = []
-        run_id = self._agent.start(task)
+        run_id = self._agent.start(task, allowed_tools=self._allowed_tools)
+        self._last_run_id = run_id
         if self._state_file:
             self._agent.save_state(self._state_file)
         self._run_loop(run_id)
@@ -2853,6 +3301,7 @@ class ReactShell:
             self._print("No run to resume.")
             return
 
+        self._last_run_id = run_id
         self._run_loop(run_id)
 
     def _try_load_state(self) -> None:
@@ -2971,59 +3420,30 @@ class ReactShell:
             args = dict(tc.get("arguments") or {})
             call_id = str(tc.get("call_id") or "")
 
-            spec = self._tool_specs.get(name)
-            descr = spec.description if spec else ""
-
-            self._print(_style(f"\n{name}", _C.GREEN, _C.BOLD, enabled=self._color))
-            if descr:
-                self._print(_style(descr, _C.DIM, enabled=self._color))
-
-            if name == "edit_file":
-                # Avoid dumping huge `pattern`/`replacement` blobs; show a preview diff instead.
-                args_summary = dict(args)
-                for key in ("pattern", "replacement"):
-                    if key in args_summary:
-                        val = args_summary.get(key)
-                        if isinstance(val, str):
-                            args_summary[key] = f"<{len(val):,} chars>"
-                        elif val is None:
-                            args_summary[key] = None
-                        else:
-                            args_summary[key] = f"<{type(val).__name__}>"
-                self._print(
-                    _style("args (summary):", _C.DIM, enabled=self._color)
-                    + " "
-                    + json.dumps(args_summary, indent=2, ensure_ascii=False)
-                )
-
-                # Only run a preview when the user is actively approving.
-                if not auto and not approve_all:
-                    try:
-                        preview_args = dict(args)
-                        preview_args["preview_only"] = True
-                        preview_out = self._tool_runner.execute(
-                            tool_calls=[{"name": name, "arguments": preview_args, "call_id": call_id}]
-                        )
-                        preview_results = preview_out.get("results") or []
-                        if preview_results and isinstance(preview_results[0], dict):
-                            preview_raw = preview_results[0].get("output")
-                            if preview_raw is None:
-                                preview_raw = preview_results[0].get("error")
-                            preview_raw = "" if preview_raw is None else str(preview_raw)
-                            self._print(_style("preview:", _C.DIM, enabled=self._color))
-                            self._print_tool_observation(tool_name=name, raw=preview_raw, indent="  ")
-                    except Exception:
-                        pass
-            else:
-                self._print(
-                    _style("args:", _C.DIM, enabled=self._color)
-                    + " "
-                    + json.dumps(args, indent=2, ensure_ascii=False)
-                )
+            # Keep approval prompts compact: the agent already printed the tool call itself
+            # in the "act" step. Only show a diff preview for edit_file when explicitly
+            # approving (no argument dumps).
+            if name == "edit_file" and (not auto and not approve_all):
+                try:
+                    preview_args = dict(args)
+                    preview_args["preview_only"] = True
+                    preview_out = self._tool_runner.execute(
+                        tool_calls=[{"name": name, "arguments": preview_args, "call_id": call_id}]
+                    )
+                    preview_results = preview_out.get("results") or []
+                    if preview_results and isinstance(preview_results[0], dict):
+                        preview_raw = preview_results[0].get("output")
+                        if preview_raw is None:
+                            preview_raw = preview_results[0].get("error")
+                        preview_raw = "" if preview_raw is None else str(preview_raw)
+                        self._print(_style("preview:", _C.DIM, enabled=self._color))
+                        self._print_tool_observation(tool_name=name, raw=preview_raw, indent="  ")
+                except Exception:
+                    pass
 
             if not auto and not approve_all:
                 while True:
-                    choice = self._simple_prompt("Approve? [y]es/[n]o/[a]ll/[e]dit/[q]uit: ").lower()
+                    choice = self._simple_prompt(f"Approve {name}? [y]es/[n]o/[a]ll/[e]dit/[q]uit: ").lower()
                     if choice in ("y", "yes"):
                         break
                     if choice in ("a", "all"):
