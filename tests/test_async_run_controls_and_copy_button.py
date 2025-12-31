@@ -74,8 +74,8 @@ def test_user_prompt_copy_marker_is_separated_from_colored_frame() -> None:
     lines = text.split("\n")
 
     assert lines[-1] == ""
-    assert lines[-2].strip() == "[[COPY:cid]]"
-    assert lines[-3] == ""
+    assert lines[-2] == "[[COPY:cid]]"
+    assert lines[-3].startswith("\033[48;5;238m")
 
 
 def test_answer_copy_marker_is_last_in_done_step() -> None:
