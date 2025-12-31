@@ -325,6 +325,9 @@ class ReactShell:
         # Simple in-session dedup for obviously repeated shell commands.
         self._last_execute_command: Optional[str] = None
         self._last_execute_command_result: Optional[Dict[str, Any]] = None
+        # Simple in-session dedup for repeated file mutations (common model glitch).
+        self._last_mutating_tool_call_key: Optional[Tuple[str, str]] = None
+        self._last_mutating_tool_call_result: Optional[Dict[str, Any]] = None
         # Pending tool-line spinner markers (one per emitted act event).
         self._pending_tool_markers: List[str] = []
         # Pending tool call metadata (aligned with tool markers/results).
@@ -408,11 +411,13 @@ class ReactShell:
         if self._status_cache_key == cache_key and self._status_cache_text:
             return self._status_cache_text
 
+        tokens_used_source = "estimate"
         # Token estimation (AbstractCore; uses precise counting when possible, else robust heuristics).
         try:
             from abstractcore.utils.token_utils import TokenUtils
 
             llm_payload: Optional[Dict[str, Any]] = None
+            llm_usage: Optional[Dict[str, Any]] = None
             if state is not None and hasattr(state, "vars") and isinstance(getattr(state, "vars", None), dict):
                 runtime_ns = state.vars.get("_runtime") if isinstance(state.vars.get("_runtime"), dict) else {}
                 traces = runtime_ns.get("node_traces") if isinstance(runtime_ns, dict) else None
@@ -437,14 +442,37 @@ class ReactShell:
                             if ts and payload is not None and ts > latest_ts:
                                 latest_ts = ts
                                 llm_payload = dict(payload)
+                                result = step.get("result")
+                                if isinstance(result, dict):
+                                    usage = result.get("usage")
+                                    llm_usage = dict(usage) if isinstance(usage, dict) else None
+                                else:
+                                    llm_usage = None
 
             effective_model = str((llm_payload or {}).get("model") or self._model or "").strip() or None
 
             def count_tokens(text: str) -> int:
                 return int(TokenUtils.count_tokens(str(text or ""), model=effective_model))
 
-            # Prefer exact last-executed LLM_CALL payload when available.
-            if llm_payload is not None:
+            def _usage_prompt_tokens(usage: Dict[str, Any]) -> Optional[int]:
+                raw = usage.get("prompt_tokens")
+                if raw is None:
+                    raw = usage.get("input_tokens")
+                if raw is None:
+                    return None
+                try:
+                    value = int(raw)
+                except Exception:
+                    return None
+                return value if value >= 0 else None
+
+            provider_prompt_tokens = None
+            if isinstance(llm_usage, dict):
+                provider_prompt_tokens = _usage_prompt_tokens(llm_usage)
+            if isinstance(provider_prompt_tokens, int):
+                tokens_used = provider_prompt_tokens
+                tokens_used_source = "provider"
+            elif llm_payload is not None:
                 sys_prompt = str(llm_payload.get("system_prompt") or "")
                 prompt = str(llm_payload.get("prompt") or "")
                 if not prompt:
@@ -502,7 +530,8 @@ class ReactShell:
             tokens_used = sum(max(1, len(str(m.get("content", ""))) // 4) for m in messages if isinstance(m, dict) and m.get("content")) if messages else 0
 
         pct = (tokens_used / max_tokens) * 100 if max_tokens > 0 else 0.0
-        status = f"{self._provider} | {self._model} | Context: {tokens_used:,}/{max_tokens:,} tk ({pct:.0f}%)"
+        approx = "~" if tokens_used_source != "provider" else ""
+        status = f"{self._provider} | {self._model} | Context: {approx}{tokens_used:,}/{max_tokens:,} tk ({pct:.0f}%)"
         self._status_cache_key = cache_key
         self._status_cache_text = status
         return status
@@ -1947,34 +1976,79 @@ class ReactShell:
                 break
             break
 
+        def _usage_prompt_tokens(usage: Dict[str, Any]) -> Optional[int]:
+            raw = usage.get("prompt_tokens")
+            if raw is None:
+                raw = usage.get("input_tokens")
+            if raw is None:
+                return None
+            try:
+                value = int(raw)
+            except Exception:
+                return None
+            return value if value >= 0 else None
+
+        def _usage_completion_tokens(usage: Dict[str, Any]) -> Optional[int]:
+            raw = usage.get("completion_tokens")
+            if raw is None:
+                raw = usage.get("output_tokens")
+            if raw is None:
+                return None
+            try:
+                value = int(raw)
+            except Exception:
+                return None
+            return value if value >= 0 else None
+
+        def _usage_total_tokens(usage: Dict[str, Any]) -> Optional[int]:
+            raw = usage.get("total_tokens")
+            if raw is None:
+                return None
+            try:
+                value = int(raw)
+            except Exception:
+                return None
+            return value if value >= 0 else None
+
+        # Prefer usage from the last executed LLM_CALL when available (provider-native tokenization).
+        runtime_ns = state.vars.get("_runtime") if isinstance(state.vars.get("_runtime"), dict) else {}
+        traces = runtime_ns.get("node_traces") if isinstance(runtime_ns, dict) else None
+        last_trace_payload: Optional[Dict[str, Any]] = None
+        last_trace_usage: Optional[Dict[str, Any]] = None
+        last_trace_ts = ""
+        if isinstance(traces, dict):
+            for node_trace in traces.values():
+                if not isinstance(node_trace, dict):
+                    continue
+                steps = node_trace.get("steps")
+                if not isinstance(steps, list):
+                    continue
+                for step in steps:
+                    if not isinstance(step, dict):
+                        continue
+                    eff = step.get("effect")
+                    if not isinstance(eff, dict):
+                        continue
+                    if str(eff.get("type") or "") != "llm_call":
+                        continue
+                    ts = str(step.get("ts") or "")
+                    payload = eff.get("payload") if isinstance(eff.get("payload"), dict) else None
+                    if not ts or payload is None:
+                        continue
+                    if ts > last_trace_ts:
+                        last_trace_ts = ts
+                        last_trace_payload = dict(payload)
+                        result = step.get("result")
+                        if isinstance(result, dict) and isinstance(result.get("usage"), dict):
+                            last_trace_usage = dict(result["usage"])
+                        else:
+                            last_trace_usage = None
+
         # Fallback: if we cannot derive the next LLM_CALL (e.g., run is mid-tool),
         # use the most recent executed LLM_CALL from runtime traces.
-        if llm_payload is None:
-            runtime_ns = state.vars.get("_runtime") if isinstance(state.vars.get("_runtime"), dict) else {}
-            traces = runtime_ns.get("node_traces") if isinstance(runtime_ns, dict) else None
-            latest: Tuple[str, Optional[Dict[str, Any]]] = ("", None)
-            if isinstance(traces, dict):
-                for node_trace in traces.values():
-                    if not isinstance(node_trace, dict):
-                        continue
-                    steps = node_trace.get("steps")
-                    if not isinstance(steps, list):
-                        continue
-                    for step in steps:
-                        if not isinstance(step, dict):
-                            continue
-                        eff = step.get("effect")
-                        if not isinstance(eff, dict):
-                            continue
-                        if str(eff.get("type") or "") != "llm_call":
-                            continue
-                        ts = str(step.get("ts") or "")
-                        payload = eff.get("payload") if isinstance(eff.get("payload"), dict) else None
-                        if ts and ts > latest[0] and payload is not None:
-                            latest = (ts, dict(payload))
-            if latest[1] is not None:
-                llm_payload = latest[1]
-                llm_payload_source = "last llm_call (runtime trace)"
+        if llm_payload is None and last_trace_payload is not None:
+            llm_payload = dict(last_trace_payload)
+            llm_payload_source = "last llm_call (runtime trace)"
 
         effective_model = str((llm_payload or {}).get("model") or self._model or "").strip() or None
 
@@ -2040,7 +2114,13 @@ class ReactShell:
                 # Fallback: count raw JSON if formatting is unavailable.
                 tool_prompt_tokens = count_tokens(json.dumps(tools, ensure_ascii=False, sort_keys=True))
 
-        total_used = system_tokens + prompt_tokens + tool_prompt_tokens
+        estimated_total_used = system_tokens + prompt_tokens + tool_prompt_tokens
+
+        provider_prompt_used: Optional[int] = None
+        if isinstance(last_trace_usage, dict):
+            provider_prompt_used = _usage_prompt_tokens(last_trace_usage)
+
+        total_used = provider_prompt_used if isinstance(provider_prompt_used, int) else estimated_total_used
 
         def fmt(n: int) -> str:
             try:
@@ -2095,9 +2175,27 @@ class ReactShell:
         model_text = effective_model or str(self._model or "")
         self._print(_style(f"Model: {model_text}    Max tokens: {fmt(max_tokens)} tk", _C.DIM, enabled=self._color))
         self._print(_style(f"Model capability: {fmt(model_cap_max_tokens)} tk", _C.DIM, enabled=self._color))
-        self._print(_style(f"Total bar source: {llm_payload_source}", _C.DIM, enabled=self._color))
+        if isinstance(provider_prompt_used, int):
+            self._print(_style("Total bar source: last llm_call usage (provider)", _C.DIM, enabled=self._color))
+        else:
+            self._print(_style(f"Total bar source: {llm_payload_source}", _C.DIM, enabled=self._color))
         if active_mem_max > 0:
             self._print(_style(f"Active Memory budget: {fmt(active_mem_max)} tokens", _C.DIM, enabled=self._color))
+        if isinstance(last_trace_usage, dict):
+            p = _usage_prompt_tokens(last_trace_usage)
+            c = _usage_completion_tokens(last_trace_usage)
+            t = _usage_total_tokens(last_trace_usage)
+            parts: list[str] = []
+            if p is not None:
+                parts.append(f"prompt={fmt(p)}")
+            if c is not None:
+                parts.append(f"completion={fmt(c)}")
+            if t is not None:
+                parts.append(f"total={fmt(t)}")
+            if parts:
+                self._print(_style(f"Last LLM usage: {'  '.join(parts)} tk", _C.DIM, enabled=self._color))
+        if isinstance(provider_prompt_used, int):
+            self._print(_style(f"Estimated (for reference): {fmt(estimated_total_used)} tk from {llm_payload_source}", _C.DIM, enabled=self._color))
         self._print("")
 
         # Render component bars.
@@ -4134,6 +4232,27 @@ class ReactShell:
                         self._print(_style("Reused cached execute_command result (duplicate).", _C.DIM, enabled=self._color))
                         continue
 
+            # Dedup identical file-mutation calls that already succeeded (common model glitch).
+            if name in ("edit_file", "write_file"):
+                try:
+                    import hashlib
+
+                    material = json.dumps(args, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+                    key = (name, hashlib.sha256(material.encode("utf-8")).hexdigest())
+                except Exception:
+                    key = (name, str(args))
+
+                if key == self._last_mutating_tool_call_key:
+                    prev = self._last_mutating_tool_call_result or {}
+                    if isinstance(prev, dict) and prev.get("success") is True:
+                        cached = dict(prev)
+                        cached["call_id"] = call_id
+                        cached_output = cached.get("output")
+                        cached["output"] = f"[cached duplicate {name}]\n{cached_output}"
+                        results.append(cached)
+                        self._print(_style(f"Reused cached {name} result (duplicate).", _C.DIM, enabled=self._color))
+                        continue
+
             single = {"name": name, "arguments": args, "call_id": call_id}
             out = self._tool_runner.execute(tool_calls=[single])
             out_results = out.get("results") or []
@@ -4144,6 +4263,17 @@ class ReactShell:
                     first = out_results[0]
                     if isinstance(first, dict):
                         self._last_execute_command_result = dict(first)
+                except Exception:
+                    pass
+            if name in ("edit_file", "write_file") and out_results:
+                try:
+                    import hashlib
+
+                    material = json.dumps(args, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+                    self._last_mutating_tool_call_key = (name, hashlib.sha256(material.encode("utf-8")).hexdigest())
+                    first = out_results[0]
+                    if isinstance(first, dict):
+                        self._last_mutating_tool_call_result = dict(first)
                 except Exception:
                     pass
 
