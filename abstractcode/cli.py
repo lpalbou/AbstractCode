@@ -36,10 +36,10 @@ def _default_max_tokens() -> Optional[int]:
             value = int(env)
         except ValueError:
             raise SystemExit("ABSTRACTCODE_MAX_TOKENS must be an integer.")
-        if value < 1024:
-            raise SystemExit("ABSTRACTCODE_MAX_TOKENS must be >= 1024.")
+        if value != -1 and value < 1024:
+            raise SystemExit("ABSTRACTCODE_MAX_TOKENS must be -1 (auto) or >= 1024.")
         return value
-    return 32768  # Default 32k context
+    return -1  # Auto (use model capabilities)
 
 
 def build_agent_parser() -> argparse.ArgumentParser:
@@ -105,7 +105,7 @@ def build_agent_parser() -> argparse.ArgumentParser:
         "--max-tokens",
         type=int,
         default=_default_max_tokens(),
-        help="Maximum context tokens for LLM calls (default: 32768).",
+        help="Maximum context tokens for LLM calls (-1 = auto from model capabilities).",
     )
     parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
     return parser

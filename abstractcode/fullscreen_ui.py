@@ -43,6 +43,8 @@ COMMANDS = [
     ("plan", "Toggle Plan mode (TODO list first) [saved]"),
     ("review", "Toggle Review mode (self-check) [saved]"),
     ("resume", "Resume the saved/attached run"),
+    ("pause", "Pause the current run (durable)"),
+    ("cancel", "Cancel the current run (durable)"),
     ("clear", "Clear memory and clear the screen"),
     ("compact", "Compress conversation [light|standard|heavy] [--preserve N] [focus...]"),
     ("spans", "List archived conversation spans (from /compact)"),
@@ -907,7 +909,7 @@ class FullScreenUI:
                 "completion-menu.completion.current": "bg:#444444 #ffffff bold",
                 "completion-menu.meta.completion": "bg:#1a1a2e #888888 italic",
                 "completion-menu.meta.completion.current": "bg:#444444 #aaaaaa italic",
-                "copy-button": "bg:#333333 #ffffff",
+                "copy-button": "bg:#444444 #ffffff bold",
                 "inline-spinner": "#ffaa00 bold",
             })
         else:

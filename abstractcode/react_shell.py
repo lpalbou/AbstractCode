@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -24,7 +25,8 @@ class _C:
     DIM = "\033[2m"
     BOLD = "\033[1m"
     CYAN = "\033[36m"
-    BLUE = "\033[34m"
+    # Use an explicit 256-color blue for better contrast/readability on dark terminal themes.
+    BLUE = "\033[38;5;39m"
     GREEN = "\033[32m"
     YELLOW = "\033[33m"
     MAGENTA = "\033[35m"
@@ -146,7 +148,7 @@ class ReactShell:
         review_mode: bool = False,
         review_max_rounds: int = 1,
         max_iterations: int,
-        max_tokens: Optional[int] = 32768,
+        max_tokens: Optional[int] = None,
         color: bool,
     ):
         self._agent_kind = str(agent or "react").strip().lower()
@@ -164,7 +166,11 @@ class ReactShell:
         self._max_iterations = int(max_iterations)
         if self._max_iterations < 1:
             raise ValueError("max_iterations must be >= 1")
-        self._max_tokens = max_tokens
+        # `None` means "auto from model capabilities". CLI may pass `-1` for auto.
+        try:
+            self._max_tokens = None if isinstance(max_tokens, int) and max_tokens <= 0 else max_tokens
+        except Exception:
+            self._max_tokens = None
         # Enable ANSI colors - fullscreen_ui uses ANSI class to parse escape codes
         self._color = bool(color and _supports_color())
         # Session-level tool allowlist (None = default/all tools for the agent kind).
@@ -325,6 +331,13 @@ class ReactShell:
         self._pending_tool_metas: List[Dict[str, Any]] = []
         # Keep the last started run id so /context can show traces even after completion.
         self._last_run_id: Optional[str] = None
+        # Status bar cache (token counting can be expensive; avoid per-frame rescans).
+        self._status_cache_key: Optional[Tuple[Any, ...]] = None
+        self._status_cache_text: str = ""
+        # Run execution happens in a dedicated background thread so the UI worker thread
+        # can keep processing commands (/pause, /cancel, /status, ...).
+        self._run_thread: Optional[threading.Thread] = None
+        self._run_thread_lock = threading.Lock()
 
     # ---------------------------------------------------------------------
     # UI helpers
@@ -351,22 +364,148 @@ class ReactShell:
 
     def _get_status_text(self) -> str:
         """Generate status text for the status bar."""
-        # Get current context usage (safe for render thread)
+        # Keep this fast: the render thread can call this frequently.
         state = self._safe_get_state()
-        if state:
-            messages = self._messages_from_state(state)
-            tokens_used = sum(len(str(m.get("content", ""))) // 4 for m in messages)
+
+        # Prefer the exact LLM-visible message view when a run is attached.
+        if state is not None and hasattr(state, "vars") and isinstance(getattr(state, "vars", None), dict):
+            try:
+                from abstractruntime.memory.active_context import ActiveContextPolicy
+
+                messages = ActiveContextPolicy.select_active_messages_for_llm_from_run(state)
+            except Exception:
+                messages = self._messages_from_state(state)
+
+            limits = state.vars.get("_limits") if isinstance(state.vars.get("_limits"), dict) else {}
+            max_tokens_raw = limits.get("max_tokens")
+            try:
+                max_tokens = int(max_tokens_raw) if max_tokens_raw is not None else int(self._max_tokens or 32768)
+            except Exception:
+                max_tokens = int(self._max_tokens or 32768)
         else:
             messages = list(self._agent.session_messages or [])
-            tokens_used = sum(len(str(m.get("content", ""))) // 4 for m in messages)
+            max_tokens = int(self._max_tokens or 32768)
 
-        max_tokens = self._max_tokens or 32768
-        pct = (tokens_used / max_tokens) * 100 if max_tokens > 0 else 0
+        if max_tokens <= 0:
+            try:
+                caps = self._llm_client.get_model_capabilities()
+                max_tokens = int(caps.get("max_tokens", 32768) or 32768)
+            except Exception:
+                max_tokens = 32768
 
-        return (
-            f"{self._provider} | {self._model} | "
-            f"Context: {tokens_used:,}/{max_tokens:,} ({pct:.0f}%)"
-        )
+        # Cache by a cheap signature to avoid rescanning large contexts every frame.
+        last = messages[-1] if isinstance(messages, list) and messages else {}
+        last_id = ""
+        last_ts = ""
+        last_len = 0
+        if isinstance(last, dict):
+            meta = last.get("metadata")
+            if isinstance(meta, dict):
+                last_id = str(meta.get("message_id") or "")
+            last_ts = str(last.get("timestamp") or "")
+            last_len = len(str(last.get("content") or ""))
+        cache_key = (getattr(state, "run_id", None) if state is not None else None, len(messages), last_id, last_ts, last_len, max_tokens, self._model)
+        if self._status_cache_key == cache_key and self._status_cache_text:
+            return self._status_cache_text
+
+        # Token estimation (AbstractCore; uses precise counting when possible, else robust heuristics).
+        try:
+            from abstractcore.utils.token_utils import TokenUtils
+
+            llm_payload: Optional[Dict[str, Any]] = None
+            if state is not None and hasattr(state, "vars") and isinstance(getattr(state, "vars", None), dict):
+                runtime_ns = state.vars.get("_runtime") if isinstance(state.vars.get("_runtime"), dict) else {}
+                traces = runtime_ns.get("node_traces") if isinstance(runtime_ns, dict) else None
+                latest_ts = ""
+                if isinstance(traces, dict):
+                    for node_trace in traces.values():
+                        if not isinstance(node_trace, dict):
+                            continue
+                        steps = node_trace.get("steps")
+                        if not isinstance(steps, list):
+                            continue
+                        for step in steps:
+                            if not isinstance(step, dict):
+                                continue
+                            eff = step.get("effect")
+                            if not isinstance(eff, dict):
+                                continue
+                            if str(eff.get("type") or "") != "llm_call":
+                                continue
+                            ts = str(step.get("ts") or "")
+                            payload = eff.get("payload") if isinstance(eff.get("payload"), dict) else None
+                            if ts and payload is not None and ts > latest_ts:
+                                latest_ts = ts
+                                llm_payload = dict(payload)
+
+            effective_model = str((llm_payload or {}).get("model") or self._model or "").strip() or None
+
+            def count_tokens(text: str) -> int:
+                return int(TokenUtils.count_tokens(str(text or ""), model=effective_model))
+
+            # Prefer exact last-executed LLM_CALL payload when available.
+            if llm_payload is not None:
+                sys_prompt = str(llm_payload.get("system_prompt") or "")
+                prompt = str(llm_payload.get("prompt") or "")
+                if not prompt:
+                    raw_messages = llm_payload.get("messages")
+                    if isinstance(raw_messages, list) and raw_messages:
+                        text_parts: List[str] = []
+                        for m in raw_messages:
+                            if not isinstance(m, dict):
+                                continue
+                            content = str(m.get("content") or "")
+                            if not content:
+                                continue
+                            role = str(m.get("role") or "").strip()
+                            if role:
+                                text_parts.append(f"{role}:\n{content}")
+                            else:
+                                text_parts.append(content)
+                        prompt = "\n\n".join(text_parts).strip()
+
+                tools = llm_payload.get("tools") or []
+
+                system_tokens = count_tokens(sys_prompt) if sys_prompt else 0
+                prompt_tokens = count_tokens(prompt) if prompt else 0
+
+                tool_prompt_tokens = 0
+                if isinstance(tools, list) and tools:
+                    try:
+                        from abstractcore.tools.handler import UniversalToolHandler
+
+                        handler = UniversalToolHandler(str(effective_model or ""))
+                        tool_prompt = handler.format_tools_prompt(tools)
+                        tool_prompt_tokens = count_tokens(tool_prompt) if tool_prompt else 0
+                    except Exception:
+                        tool_prompt_tokens = count_tokens(json.dumps(tools, ensure_ascii=False, sort_keys=True))
+
+                tokens_used = system_tokens + prompt_tokens + tool_prompt_tokens
+            else:
+                # Fallback: approximate from the active message view.
+                text_parts = []
+                for m in messages:
+                    if not isinstance(m, dict):
+                        continue
+                    content = str(m.get("content") or "")
+                    if not content:
+                        continue
+                    role = str(m.get("role") or "").strip()
+                    if role:
+                        text_parts.append(f"{role}:\n{content}")
+                    else:
+                        text_parts.append(content)
+                joined = "\n\n".join(text_parts).strip()
+                tokens_used = count_tokens(joined) if joined else 0
+        except Exception:
+            # Conservative fallback (≈4 chars/token).
+            tokens_used = sum(max(1, len(str(m.get("content", ""))) // 4) for m in messages if isinstance(m, dict) and m.get("content")) if messages else 0
+
+        pct = (tokens_used / max_tokens) * 100 if max_tokens > 0 else 0.0
+        status = f"{self._provider} | {self._model} | Context: {tokens_used:,}/{max_tokens:,} tk ({pct:.0f}%)"
+        self._status_cache_key = cache_key
+        self._status_cache_text = status
+        return status
 
     def _print(self, text: str = "") -> None:
         """Append text to the UI output area."""
@@ -488,6 +627,10 @@ class ReactShell:
                     style_codes = (_C.BOLD,)
                 elif line.startswith("@@"):
                     style_codes = (_C.DIM,)
+                elif line.startswith(" "):
+                    # Context lines should remain high-contrast (default terminal fg) so it's easy
+                    # to see *where* an edit applied.
+                    style_codes = ()
                 elif line.startswith("+") and not line.startswith("+++"):
                     style_codes = (_C.BLUE,)
                 elif line.startswith("-") and not line.startswith("---"):
@@ -514,13 +657,17 @@ class ReactShell:
             return [s[i : i + avail] for i in range(0, len(s), avail)]
 
         if not self._color:
-            out: List[str] = [copy_marker or ""]
+            out: List[str] = [""]
             first_visual = True
             for line in lines:
                 for chunk in chunk_line(line):
                     prefix = prefix_first if first_visual else prefix_next
                     out.append(prefix + chunk)
                     first_visual = False
+            # Separate the copy button from the prompt content so it reads as a control, not content.
+            if copy_marker:
+                out.append("")
+                out.append(copy_marker)
             out.append("")
             return "\n".join(out)
 
@@ -534,7 +681,7 @@ class ReactShell:
 
         blank = f"{bg}{' ' * width}{reset}"
         # Add black spacer lines above/below the grey block for readability.
-        out_lines: List[str] = [copy_marker or ""]
+        out_lines: List[str] = [""]
         out_lines.append(blank)
 
         first_visual = True
@@ -545,6 +692,11 @@ class ReactShell:
                 first_visual = False
 
         out_lines.append(blank)
+        # Separate the copy button from the framed block for better visual grouping.
+        if copy_marker:
+            out_lines.append("")
+            out_lines.append(prefix_next + copy_marker)
+        # Keep a black spacer line after the copy button for readability.
         out_lines.append("")
         return "\n".join(out_lines)
 
@@ -597,6 +749,8 @@ class ReactShell:
             "flow",
             "history",
             "resume",
+            "pause",
+            "cancel",
             "quit",
             "exit",
             "q",
@@ -612,6 +766,97 @@ class ReactShell:
 
         # Otherwise treat as a task
         self._start(cmd)
+
+    def _build_answer_copy_payload(self, *, answer_text: str, prompt_text: Optional[str] = None) -> str:
+        """Build the payload for the assistant copy button (best-effort, lossless)."""
+        blocks: List[str] = []
+
+        prompt = prompt_text
+        if prompt is None:
+            prompt = getattr(self, "_turn_task", None)
+        if isinstance(prompt, str) and prompt.strip():
+            blocks.append("User:\n" + prompt.strip())
+
+        trace = getattr(self, "_turn_trace", None)
+        if isinstance(trace, list) and trace:
+            trace_text = "\n\n".join([t for t in trace if isinstance(t, str) and t.strip()]).strip()
+            if trace_text:
+                blocks.append("Trace:\n" + trace_text)
+
+        blocks.append("Answer:\n" + str(answer_text or "").strip())
+        return "\n\n".join([b for b in blocks if b.strip()]).strip()
+
+    def _print_answer_block(self, *, title: str, answer_text: str, prompt_text: Optional[str] = None) -> None:
+        import uuid
+
+        answer = "" if answer_text is None else str(answer_text)
+        if not answer.strip():
+            answer = "(no assistant answer produced yet)"
+
+        copy_id = f"assistant_{uuid.uuid4().hex}"
+        payload = self._build_answer_copy_payload(answer_text=answer, prompt_text=prompt_text)
+        self._ui.register_copy_payload(copy_id, payload)
+
+        self._print(_style(f"\n{title}", _C.GREEN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+        self._print(answer)
+        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+        self._print(f"[[COPY:{copy_id}]]")
+        self._print("")
+
+    def _extract_latest_turn_prompt_and_answer(self, state: Any) -> tuple[Optional[str], str]:
+        """Best-effort: return (latest turn prompt, latest assistant answer after that prompt)."""
+        messages = self._messages_from_state(state)
+        if not messages:
+            prompt = getattr(self, "_turn_task", None)
+            return (prompt if isinstance(prompt, str) else None, "")
+
+        turn_task = getattr(self, "_turn_task", None)
+
+        user_idx: Optional[int] = None
+        if isinstance(turn_task, str) and turn_task:
+            for i in range(len(messages) - 1, -1, -1):
+                m = messages[i]
+                if not isinstance(m, dict):
+                    continue
+                if m.get("role") == "user" and str(m.get("content") or "") == turn_task:
+                    user_idx = i
+                    break
+
+        if user_idx is None:
+            for i in range(len(messages) - 1, -1, -1):
+                m = messages[i]
+                if not isinstance(m, dict):
+                    continue
+                if m.get("role") == "user":
+                    user_idx = i
+                    break
+
+        prompt_text: Optional[str] = None
+        if user_idx is not None:
+            m = messages[user_idx]
+            if isinstance(m, dict):
+                prompt_text = str(m.get("content") or "")
+
+        answer_text = ""
+        if user_idx is not None:
+            for j in range(len(messages) - 1, user_idx, -1):
+                m = messages[j]
+                if not isinstance(m, dict):
+                    continue
+                if m.get("role") == "assistant":
+                    answer_text = str(m.get("content") or "")
+                    break
+        else:
+            for j in range(len(messages) - 1, -1, -1):
+                m = messages[j]
+                if not isinstance(m, dict):
+                    continue
+                if m.get("role") == "assistant":
+                    answer_text = str(m.get("content") or "")
+                    break
+
+        return prompt_text, answer_text
 
     def _simple_prompt(self, message: str) -> str:
         """Single-line prompt for tool approvals (blocks worker thread).
@@ -719,25 +964,10 @@ class ReactShell:
             self._ui.scroll_to_bottom()
             self._print(_style("Agent question:", _C.MAGENTA, _C.BOLD, enabled=self._color))
         elif step == "done":
-            import uuid
-
             self._ui.clear_spinner()
             self._ui.scroll_to_bottom()
             answer_text = str(data.get("answer", "") or "")
-            copy_id = f"assistant_{uuid.uuid4().hex}"
-            # Copy includes the system/tool trace for this turn so debugging is lossless.
-            blocks: List[str] = []
-            if self._turn_task:
-                blocks.append("User:\n" + str(self._turn_task).strip())
-            if self._turn_trace:
-                blocks.append("Trace:\n" + "\n\n".join([t for t in self._turn_trace if t.strip()]).strip())
-            blocks.append("Answer:\n" + answer_text.strip())
-            self._ui.register_copy_payload(copy_id, "\n\n".join([b for b in blocks if b.strip()]).strip())
-            self._print(_style("\nANSWER", _C.GREEN, _C.BOLD, enabled=self._color))
-            self._print(f"[[COPY:{copy_id}]]")
-            self._print(_style("─" * 60, _C.DIM, enabled=self._color))
-            self._print(answer_text)
-            self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+            self._print_answer_block(title="ANSWER", answer_text=answer_text)
         elif step == "error" or step == "failed":
             self._ui.clear_spinner()
             self._ui.scroll_to_bottom()
@@ -813,6 +1043,12 @@ class ReactShell:
             return False
         if command == "resume":
             self._resume()
+            return False
+        if command == "pause":
+            self._pause()
+            return False
+        if command == "cancel":
+            self._cancel()
             return False
         if command == "history":
             limit = 12
@@ -947,8 +1183,9 @@ class ReactShell:
 
             copy_id = f"assistant_{uuid.uuid4().hex}"
             self._ui.register_copy_payload(copy_id, message)
-            self._print(f"[[COPY:{copy_id}]]")
             self._print(message)
+            self._print(f"[[COPY:{copy_id}]]")
+            self._print("")
             self._append_to_active_context(
                 role="assistant",
                 content=message,
@@ -1309,11 +1546,19 @@ class ReactShell:
                     detected = capabilities.get("max_tokens", 32768)
                     self._max_tokens = detected
                     self._reconfigure_agent()
+                    try:
+                        self._agent.update_limits(max_tokens=self._max_tokens)
+                    except Exception:
+                        pass
                     self._print(_style(f"Max tokens auto-detected: {detected:,} (from model capabilities)", _C.GREEN, enabled=self._color))
                 except Exception as e:
                     self._print(_style(f"Auto-detection failed: {e}. Using default 32768.", _C.YELLOW, enabled=self._color))
                     self._max_tokens = 32768
                     self._reconfigure_agent()
+                    try:
+                        self._agent.update_limits(max_tokens=self._max_tokens)
+                    except Exception:
+                        pass
                 return
             if tokens < 1024:
                 self._print(_style("Max tokens must be -1 (auto) or >= 1024", _C.YELLOW, enabled=self._color))
@@ -1325,6 +1570,10 @@ class ReactShell:
         self._max_tokens = tokens
         # Immediately reconfigure the agent's logic with new max_tokens
         self._reconfigure_agent()
+        try:
+            self._agent.update_limits(max_tokens=self._max_tokens)
+        except Exception:
+            pass
         self._print(_style(f"Max tokens set to {tokens:,} (immediate effect)", _C.GREEN, enabled=self._color))
 
     def _reconfigure_agent(self) -> None:
@@ -1363,7 +1612,11 @@ class ReactShell:
             config = json.loads(self._config_file.read_text())
             # Apply saved settings to instance variables
             if "max_tokens" in config and config["max_tokens"] is not None:
-                self._max_tokens = config["max_tokens"]
+                try:
+                    val = int(config["max_tokens"])
+                except Exception:
+                    val = None
+                self._max_tokens = None if isinstance(val, int) and val <= 0 else val
             if "max_history_messages" in config:
                 self._max_history_messages = config["max_history_messages"]
             if "auto_approve" in config:
@@ -1620,65 +1873,260 @@ class ReactShell:
         self._print(_style(f"Max history messages set to {label} (immediate effect)", _C.GREEN, enabled=self._color))
 
     def _handle_memory(self) -> None:
-        """Show memory/token usage breakdown."""
-        # Get current state and messages
+        """Show structured Active Memory token usage + total next-LLM prompt usage."""
+        import copy
+
         state = self._safe_get_state()
-        if state is not None:
-            messages = self._messages_from_state(state)
-        else:
-            messages = list(self._agent.session_messages or [])
+        if state is None or not hasattr(state, "vars") or not isinstance(state.vars, dict):
+            self._print(_style("No run loaded. Start a task or /resume first.", _C.DIM, enabled=self._color))
+            return
 
-        # Token estimation function (rough: 1 token ≈ 4 characters)
-        def estimate_tokens(text: str) -> int:
-            return len(text) // 4
+        # Token estimation (AbstractCore; uses precise counting when possible, else robust heuristics).
+        try:
+            from abstractcore.utils.token_utils import TokenUtils
+        except Exception as e:
+            self._print(_style("Token counting unavailable (AbstractCore import failed).", _C.YELLOW, enabled=self._color))
+            self._print(_style(str(e), _C.DIM, enabled=self._color))
+            return
 
-        # System prompt estimation (agent builds inline, estimate ~500 tokens)
-        system_tokens = 500
+        from abstractruntime.memory.active_memory import compute_active_memory_token_breakdown
 
-        # History messages
-        history_text = ""
-        for m in messages:
-            history_text += f"{m.get('role', '')}: {m.get('content', '')}\n"
-        history_tokens = estimate_tokens(history_text)
+        limits = state.vars.get("_limits") if isinstance(state.vars.get("_limits"), dict) else {}
+        max_tokens_raw = limits.get("max_tokens")
 
-        # Tool definitions (schemas are verbose, multiply by ~10)
-        tool_names_text = json.dumps([name for name in self._tool_specs.keys()])
-        tool_tokens = estimate_tokens(tool_names_text) * 10
+        # Derive the next LLM_CALL payload (same approach as /context, but focused on LLM token accounting).
+        sim_run = copy.deepcopy(state)
+        start_node = str(getattr(sim_run, "current_node", "") or "")
 
-        total_used = system_tokens + history_tokens + tool_tokens
-        max_tokens = self._max_tokens or 32768
+        logic = getattr(self._agent, "logic", None)
+        if logic is None:
+            self._print(_style("Memory error: agent logic is not available.", _C.YELLOW, enabled=self._color))
+            return
 
-        self._print(_style("\nMemory Usage", _C.CYAN, _C.BOLD, enabled=self._color))
-        self._print(_style("─" * 40, _C.DIM, enabled=self._color))
-        self._print(f"Max tokens:        {max_tokens:,}")
-        self._print(f"Estimated used:    ~{total_used:,}")
-        self._print(f"Available:         ~{max(0, max_tokens - total_used):,}")
-        self._print()
-        self._print("Breakdown (estimated):")
-        self._print(f"  System/prompt:   ~{system_tokens:,}")
-        self._print(f"  Tool schemas:    ~{tool_tokens:,}")
-        self._print(f"  History ({len(messages)} msgs): ~{history_tokens:,}")
+        try:
+            if self._agent_kind == "react":
+                from abstractagent.adapters.react_runtime import create_react_workflow
 
-        # Archived spans (stored, not in active context)
-        archived_spans = 0
-        archived_msgs = 0
-        if state is not None and hasattr(state, "vars"):
-            runtime_ns = state.vars.get("_runtime")
-            spans = runtime_ns.get("memory_spans") if isinstance(runtime_ns, dict) else None
-            if isinstance(spans, list):
-                archived_spans = len(spans)
-                for s in spans:
-                    if not isinstance(s, dict):
+                workflow = create_react_workflow(logic=logic, on_step=None)
+            else:
+                from abstractagent.adapters.codeact_runtime import create_codeact_workflow
+
+                workflow = create_codeact_workflow(logic=logic, on_step=None)
+        except Exception as e:
+            self._print(_style("Memory error: failed to build dry workflow.", _C.YELLOW, enabled=self._color) + f" {e}")
+            return
+
+        class _Ctx:
+            @staticmethod
+            def now_iso() -> str:  # pragma: no cover
+                return _now_iso()
+
+        ctx = _Ctx()
+
+        visited = set()
+        node_id = start_node
+        llm_payload: Optional[Dict[str, Any]] = None
+        llm_payload_source = "next llm_call (derived)"
+        for _ in range(100):
+            if not node_id or node_id in visited:
+                break
+            visited.add(node_id)
+            sim_run.current_node = node_id
+            try:
+                handler = workflow.get_node(node_id)
+            except Exception:
+                break
+            plan = handler(sim_run, ctx)
+            effect = getattr(plan, "effect", None)
+            if effect is None:
+                node_id = str(plan.next_node or "")
+                continue
+            etype = effect.type.value if hasattr(effect.type, "value") else str(effect.type)
+            if str(etype) == "llm_call" and isinstance(effect.payload, dict):
+                llm_payload = dict(effect.payload)
+                break
+            break
+
+        # Fallback: if we cannot derive the next LLM_CALL (e.g., run is mid-tool),
+        # use the most recent executed LLM_CALL from runtime traces.
+        if llm_payload is None:
+            runtime_ns = state.vars.get("_runtime") if isinstance(state.vars.get("_runtime"), dict) else {}
+            traces = runtime_ns.get("node_traces") if isinstance(runtime_ns, dict) else None
+            latest: Tuple[str, Optional[Dict[str, Any]]] = ("", None)
+            if isinstance(traces, dict):
+                for node_trace in traces.values():
+                    if not isinstance(node_trace, dict):
                         continue
-                    try:
-                        archived_msgs += int(s.get("message_count") or 0)
-                    except Exception:
+                    steps = node_trace.get("steps")
+                    if not isinstance(steps, list):
                         continue
+                    for step in steps:
+                        if not isinstance(step, dict):
+                            continue
+                        eff = step.get("effect")
+                        if not isinstance(eff, dict):
+                            continue
+                        if str(eff.get("type") or "") != "llm_call":
+                            continue
+                        ts = str(step.get("ts") or "")
+                        payload = eff.get("payload") if isinstance(eff.get("payload"), dict) else None
+                        if ts and ts > latest[0] and payload is not None:
+                            latest = (ts, dict(payload))
+            if latest[1] is not None:
+                llm_payload = latest[1]
+                llm_payload_source = "last llm_call (runtime trace)"
 
-        if archived_spans:
-            self._print(f"  Archived spans:  {archived_spans} ({archived_msgs} msgs)  [stored in ArtifactStore]")
-            self._print(f"  Stored total:    {len(messages) + archived_msgs} msgs (active + archived)")
-        self._print(_style("─" * 40, _C.DIM, enabled=self._color))
+        effective_model = str((llm_payload or {}).get("model") or self._model or "").strip() or None
+
+        # Show both (a) the model's capability and (b) the run/session's effective max.
+        model_cap_max_tokens = 32768
+        try:
+            from abstractcore.architectures.detection import get_model_capabilities
+
+            caps = get_model_capabilities(str(effective_model or self._model or ""))
+            model_cap_max_tokens = int(caps.get("max_tokens", 32768) or 32768)
+        except Exception:
+            model_cap_max_tokens = 32768
+
+        max_tokens: int
+        max_tokens = 0
+        try:
+            if max_tokens_raw is not None:
+                max_tokens = int(max_tokens_raw)
+        except Exception:
+            max_tokens = 0
+        if max_tokens <= 0:
+            try:
+                if self._max_tokens is not None:
+                    max_tokens = int(self._max_tokens)
+            except Exception:
+                max_tokens = 0
+        if max_tokens <= 0:
+            max_tokens = model_cap_max_tokens if model_cap_max_tokens > 0 else 32768
+
+        def count_tokens(text: str) -> int:
+            try:
+                return int(TokenUtils.count_tokens(str(text or ""), model=effective_model))
+            except Exception:
+                # Extremely conservative fallback
+                return max(1, len(str(text or "")) // 4) if str(text or "") else 0
+
+        # Per-component Active Memory accounting.
+        breakdown = compute_active_memory_token_breakdown(
+            state.vars,
+            token_counter=count_tokens,
+            include_tools_summary=True,
+        )
+        components = breakdown.get("components") if isinstance(breakdown.get("components"), dict) else {}
+        active_mem_max = int(breakdown.get("active_memory_max_tokens") or 0)
+
+        # Total next-LLM prompt accounting.
+        sys_prompt = str((llm_payload or {}).get("system_prompt") or "")
+        prompt = str((llm_payload or {}).get("prompt") or "")
+        tools = (llm_payload or {}).get("tools") or []
+
+        system_tokens = count_tokens(sys_prompt) if sys_prompt else 0
+        prompt_tokens = count_tokens(prompt) if prompt else 0
+
+        tool_prompt_tokens = 0
+        if isinstance(tools, list) and tools:
+            try:
+                from abstractcore.tools.handler import UniversalToolHandler
+
+                handler = UniversalToolHandler(str(effective_model or ""))
+                tool_prompt = handler.format_tools_prompt(tools)
+                tool_prompt_tokens = count_tokens(tool_prompt) if tool_prompt else 0
+            except Exception:
+                # Fallback: count raw JSON if formatting is unavailable.
+                tool_prompt_tokens = count_tokens(json.dumps(tools, ensure_ascii=False, sort_keys=True))
+
+        total_used = system_tokens + prompt_tokens + tool_prompt_tokens
+
+        def fmt(n: int) -> str:
+            try:
+                return f"{int(n):,}"
+            except Exception:
+                return str(n)
+
+        def bar(*, used: int, cap: int, width: int = 26) -> str:
+            used_i = max(0, int(used))
+            cap_i = max(0, int(cap))
+            if cap_i <= 0:
+                return "[" + (" " * width) + "]"
+            ratio = min(1.0, float(used_i) / float(cap_i))
+            filled = int(round(ratio * width))
+            filled = max(0, min(width, filled))
+            empty = width - filled
+
+            if ratio < 0.70:
+                color = _C.GREEN
+            elif ratio < 0.90:
+                color = _C.YELLOW
+            else:
+                color = _C.RED
+
+            fill = _style("█" * filled, color, enabled=self._color)
+            rest = _style("░" * empty, _C.DIM, enabled=self._color)
+            return "[" + fill + rest + "]"
+
+        label_colors = {
+            "persona": _C.BLUE,
+            "memory_organization": _C.MAGENTA,
+            "tools": _C.GREEN,
+            "current_tasks": _C.CYAN,
+            "current_context": _C.CYAN,
+            "critical_insights": _C.ORANGE,
+            "key_history": _C.YELLOW,
+            "total": _C.CYAN,
+        }
+
+        order = [
+            ("persona", "persona"),
+            ("memory_organization", "memory_organization"),
+            ("tools", "tools"),
+            ("current_tasks", "current_tasks"),
+            ("current_context", "current_context"),
+            ("critical_insights", "critical_insights"),
+            ("key_history", "key_history"),
+        ]
+
+        self._print(_style("\nMemory", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+        model_text = effective_model or str(self._model or "")
+        self._print(_style(f"Model: {model_text}    Max tokens: {fmt(max_tokens)} tk", _C.DIM, enabled=self._color))
+        self._print(_style(f"Model capability: {fmt(model_cap_max_tokens)} tk", _C.DIM, enabled=self._color))
+        self._print(_style(f"Total bar source: {llm_payload_source}", _C.DIM, enabled=self._color))
+        if active_mem_max > 0:
+            self._print(_style(f"Active Memory budget: {fmt(active_mem_max)} tokens", _C.DIM, enabled=self._color))
+        self._print("")
+
+        # Render component bars.
+        label_width = max(len(lbl) for _, lbl in order + [("total", "total")]) + 2
+        for cid, label in order:
+            comp = components.get(cid) if isinstance(components, dict) else None
+            used = int(comp.get("used_tokens") or 0) if isinstance(comp, dict) else 0
+            cap = int(comp.get("max_tokens") or 0) if isinstance(comp, dict) else 0
+            pct_used = (float(used) / float(cap)) if cap > 0 else (1.0 if used > 0 else 0.0)
+            pct_total = (float(used) / float(max_tokens)) if max_tokens > 0 else 0.0
+            label_styled = _style(label.ljust(label_width), label_colors.get(cid, _C.CYAN), enabled=self._color)
+            line = (
+                f"{label_styled} {bar(used=used, cap=cap)}  "
+                f"{fmt(used)}/{fmt(cap)} tk ({pct_used*100:0.0f}% cap, {pct_total*100:0.1f}% total)"
+            )
+            self._print(line)
+
+        # Extra padding before total.
+        self._print("")
+
+        total_pct = (float(total_used) / float(max_tokens)) if max_tokens > 0 else 0.0
+        total_label = _style("total".ljust(label_width), label_colors.get("total", _C.CYAN), _C.BOLD, enabled=self._color)
+        self._print(
+            f"{total_label} {bar(used=total_used, cap=max_tokens)}  {fmt(total_used)}/{fmt(max_tokens)} tk ({total_pct*100:0.0f}%)"
+        )
+
+        details = f"system={fmt(system_tokens)}  prompt={fmt(prompt_tokens)}  tools={fmt(tool_prompt_tokens)}"
+        self._print(_style(details, _C.DIM, enabled=self._color))
+        self._print(_style("Note: token counts are best-effort estimates; exact billing varies by provider/tool-calling mode.", _C.DIM, enabled=self._color))
 
     def _handle_compact(self, raw: str) -> Optional[Dict[str, Any]]:
         """Handle /compact command for conversation compression.
@@ -2374,7 +2822,7 @@ class ReactShell:
                         "tool_calls_steps": tool_steps_verbatim,
                     }
 
-            text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+            text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False, default=str)
             copy_id = f"context_{uuid.uuid4().hex}"
             self._ui.register_copy_payload(copy_id, text)
             self._print(_style("\nContext (next /task seed)", _C.CYAN, _C.BOLD, enabled=self._color))
@@ -2509,7 +2957,7 @@ class ReactShell:
                     tool_prompt = ""
                 out["derived_tool_prompt"] = tool_prompt
 
-        text = json.dumps(out, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        text = json.dumps(out, ensure_ascii=False, indent=2, sort_keys=False, default=str)
         copy_id = f"context_{uuid.uuid4().hex}"
         self._ui.register_copy_payload(copy_id, text)
 
@@ -2558,7 +3006,7 @@ class ReactShell:
         Source of truth: `RunState.vars["_runtime"]["node_traces"]`.
 
         Usage:
-          /llm [--json-only] [--save <path>]
+          /llm [--last] [--verbatim] [--json-only] [--save <path>]
         """
         import shlex
         import uuid
@@ -2570,6 +3018,8 @@ class ReactShell:
             parts = raw.split() if raw else []
 
         json_only = False
+        last_only = False
+        verbatim = False
         save_path: Optional[str] = None
         i = 0
         while i < len(parts):
@@ -2578,15 +3028,23 @@ class ReactShell:
                 json_only = True
                 i += 1
                 continue
+            if p in ("--last", "--latest"):
+                last_only = True
+                i += 1
+                continue
+            if p in ("--verbatim", "--context", "--messages"):
+                verbatim = True
+                i += 1
+                continue
             if p in ("--save", "--out", "--output"):
                 if i + 1 >= len(parts):
-                    self._print(_style("Usage: /llm [--json-only] [--save <path>]", _C.DIM, enabled=self._color))
+                    self._print(_style("Usage: /llm [--last] [--verbatim] [--json-only] [--save <path>]", _C.DIM, enabled=self._color))
                     return
                 save_path = parts[i + 1]
                 i += 2
                 continue
             self._print(_style(f"Unknown flag: {p}", _C.YELLOW, enabled=self._color))
-            self._print(_style("Usage: /llm [--json-only] [--save <path>]", _C.DIM, enabled=self._color))
+            self._print(_style("Usage: /llm [--last] [--verbatim] [--json-only] [--save <path>]", _C.DIM, enabled=self._color))
             return
 
         state = self._safe_get_state()
@@ -2621,6 +3079,8 @@ class ReactShell:
             return
 
         llm_steps.sort(key=lambda d: str(d.get("ts") or ""))
+        if last_only:
+            llm_steps = [llm_steps[-1]]
 
         calls_out: List[Dict[str, Any]] = []
         for idx, step in enumerate(llm_steps, 1):
@@ -2654,7 +3114,7 @@ class ReactShell:
             "llm_calls": calls_out,
         }
 
-        text = json.dumps(out, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        text = json.dumps(out, ensure_ascii=False, indent=2, sort_keys=False, default=str)
 
         if save_path:
             try:
@@ -2669,6 +3129,28 @@ class ReactShell:
 
         copy_id = f"llm_{uuid.uuid4().hex}"
         self._ui.register_copy_payload(copy_id, text)
+
+        def _provider_context_text(provider_req: Any) -> str:
+            if not isinstance(provider_req, dict):
+                return ""
+            payload = provider_req.get("payload") if isinstance(provider_req.get("payload"), dict) else {}
+            messages = payload.get("messages")
+            if not isinstance(messages, list) or not messages:
+                return ""
+
+            blocks: List[str] = []
+            for i_msg, msg in enumerate(messages, 1):
+                if not isinstance(msg, dict):
+                    continue
+                role = str(msg.get("role") or "")
+                content = msg.get("content")
+                if content is None:
+                    content_str = ""
+                else:
+                    content_str = str(content)
+                blocks.append(f"--- message {i_msg} role={role or 'unknown'} ---")
+                blocks.append(content_str)
+            return "\n".join(blocks).rstrip()
 
         self._print(_style("\nLLM calls (runtime; verbatim payloads)", _C.CYAN, _C.BOLD, enabled=self._color))
         self._print(f"[[COPY:{copy_id}]]")
@@ -2691,16 +3173,55 @@ class ReactShell:
             self._print(_style("\n" + header, _C.CYAN, _C.BOLD, enabled=self._color))
             self._print(_style("─" * 80, _C.DIM, enabled=self._color))
 
-            req_payload = call.get("llm_generate_kwargs_captured") or call.get("llm_call_payload") or {}
-            req_text = json.dumps(req_payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-            req_id = f"llm_req_{uuid.uuid4().hex}"
-            self._ui.register_copy_payload(req_id, req_text)
-            self._print(_style("Request (captured)", _C.DIM, enabled=self._color))
-            self._print(f"[[COPY:{req_id}]]")
-            self._print(req_text)
-
             res_payload = call.get("result") or {}
-            res_text = json.dumps(res_payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+            meta = res_payload.get("metadata") if isinstance(res_payload, dict) else None
+            provider_req = meta.get("_provider_request") if isinstance(meta, dict) else None
+
+            if verbatim:
+                verb_text = _provider_context_text(provider_req)
+                if not verb_text:
+                    self._print(_style("Provider request context unavailable for this call.", _C.DIM, enabled=self._color))
+                else:
+                    vid = f"llm_ctx_{uuid.uuid4().hex}"
+                    self._ui.register_copy_payload(vid, verb_text)
+                    self._print(_style("Provider context (verbatim; exact messages sent)", _C.DIM, enabled=self._color))
+                    self._print(f"[[COPY:{vid}]]")
+                    self._print(verb_text)
+                continue
+
+            # 1) Durable runtime payload (what the runtime scheduled)
+            runtime_payload = call.get("llm_call_payload") or {}
+            runtime_text = json.dumps(runtime_payload, ensure_ascii=False, indent=2, sort_keys=False, default=str)
+            rid = f"llm_runtime_{uuid.uuid4().hex}"
+            self._ui.register_copy_payload(rid, runtime_text)
+            self._print(_style("Runtime LLM_CALL payload (durable)", _C.DIM, enabled=self._color))
+            self._print(f"[[COPY:{rid}]]")
+            self._print(runtime_text)
+
+            # 2) Captured generate kwargs (closest view at AbstractCore boundary, if present)
+            captured = call.get("llm_generate_kwargs_captured")
+            if captured is not None:
+                cap_text = json.dumps(captured, ensure_ascii=False, indent=2, sort_keys=False, default=str)
+                cap_id = f"llm_captured_{uuid.uuid4().hex}"
+                self._ui.register_copy_payload(cap_id, cap_text)
+                self._print(_style("\nGenerate kwargs (captured at AbstractCore boundary)", _C.DIM, enabled=self._color))
+                self._print(f"[[COPY:{cap_id}]]")
+                self._print(cap_text)
+
+            # 3) Normalized response (content/tool_calls/metadata).
+            # Remove provider-request echo from this view to avoid confusing "response" with "request".
+            res_view = res_payload
+            if isinstance(res_payload, dict):
+                try:
+                    res_view = dict(res_payload)
+                    meta_view = res_view.get("metadata") if isinstance(res_view.get("metadata"), dict) else None
+                    if isinstance(meta_view, dict) and "_provider_request" in meta_view:
+                        meta_clean = dict(meta_view)
+                        meta_clean.pop("_provider_request", None)
+                        res_view["metadata"] = meta_clean
+                except Exception:
+                    res_view = res_payload
+            res_text = json.dumps(res_view, ensure_ascii=False, indent=2, sort_keys=False, default=str)
             res_id = f"llm_res_{uuid.uuid4().hex}"
             self._ui.register_copy_payload(res_id, res_text)
             self._print(_style("\nResponse (normalized)", _C.DIM, enabled=self._color))
@@ -2709,13 +3230,11 @@ class ReactShell:
 
             # Provider-level observability: some AbstractCore providers attach the exact HTTP/client
             # request payload they sent under metadata._provider_request.
-            meta = res_payload.get("metadata") if isinstance(res_payload, dict) else None
-            provider_req = meta.get("_provider_request") if isinstance(meta, dict) else None
             if provider_req is not None:
-                prov_text = json.dumps(provider_req, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+                prov_text = json.dumps(provider_req, ensure_ascii=False, indent=2, sort_keys=False, default=str)
                 prov_id = f"llm_provider_{uuid.uuid4().hex}"
                 self._ui.register_copy_payload(prov_id, prov_text)
-                self._print(_style("\nProvider request (verbatim)", _C.DIM, enabled=self._color))
+                self._print(_style("\nProvider request (verbatim; as sent)", _C.DIM, enabled=self._color))
                 self._print(f"[[COPY:{prov_id}]]")
                 self._print(prov_text)
 
@@ -2851,6 +3370,8 @@ class ReactShell:
             "                     - /copy user [turn] | assistant [turn] | turn <N>\n"
             "  /history [N]        Show recent conversation history\n"
             "  /resume             Resume the saved/attached run\n"
+            "  /pause              Pause the current run (durable)\n"
+            "  /cancel             Cancel the current run (durable)\n"
             "  /clear              Clear memory and clear the screen\n"
             "  /snapshot save <n>  Save current state as named snapshot\n"
             "  /snapshot load <n>  Load snapshot by name\n"
@@ -3282,7 +3803,47 @@ class ReactShell:
     # Execution
     # ---------------------------------------------------------------------
 
+    def _run_thread_active(self) -> bool:
+        t = self._run_thread
+        return t is not None and t.is_alive()
+
+    def _run_in_background(self, run_id: str) -> None:
+        rid = str(run_id or "").strip()
+        if not rid:
+            return
+
+        def _target() -> None:
+            try:
+                self._run_loop(rid)
+            except Exception as e:
+                self._ui.clear_spinner()
+                self._ui.scroll_to_bottom()
+                self._print(_style("\nRun error:", _C.RED, enabled=self._color) + f" {e}")
+            finally:
+                with self._run_thread_lock:
+                    if self._run_thread is threading.current_thread():
+                        self._run_thread = None
+
+        with self._run_thread_lock:
+            if self._run_thread is not None and self._run_thread.is_alive():
+                self._print(_style("A run is already executing. Use /pause or /cancel first.", _C.DIM, enabled=self._color))
+                return
+            self._run_thread = threading.Thread(target=_target, daemon=True, name="abstractcode-run")
+            self._run_thread.start()
+
+    def _attached_run_id(self) -> Optional[str]:
+        rid = getattr(self._agent, "run_id", None)
+        if isinstance(rid, str) and rid.strip():
+            return rid.strip()
+        rid2 = self._last_run_id
+        if isinstance(rid2, str) and rid2.strip():
+            return rid2.strip()
+        return None
+
     def _start(self, task: str) -> None:
+        if self._run_thread_active():
+            self._print(_style("A run is already executing. Use /pause or /cancel first.", _C.DIM, enabled=self._color))
+            return
         # Note: _approve_all_session is NOT reset here - it persists for the entire session
         self._turn_task = str(task or "").strip() or None
         self._turn_trace = []
@@ -3290,9 +3851,12 @@ class ReactShell:
         self._last_run_id = run_id
         if self._state_file:
             self._agent.save_state(self._state_file)
-        self._run_loop(run_id)
+        self._run_in_background(run_id)
 
     def _resume(self) -> None:
+        if self._run_thread_active():
+            self._print(_style("A run is already executing. Use /pause or /cancel first.", _C.DIM, enabled=self._color))
+            return
         if self._agent.run_id is None and self._state_file:
             self._try_load_state()
 
@@ -3302,7 +3866,36 @@ class ReactShell:
             return
 
         self._last_run_id = run_id
-        self._run_loop(run_id)
+        # If paused, unpause first (ADR-0013) then continue.
+        try:
+            self._runtime.resume_run(run_id)
+        except Exception:
+            pass
+        self._run_in_background(run_id)
+
+    def _pause(self) -> None:
+        run_id = self._attached_run_id()
+        if run_id is None:
+            self._print(_style("No run loaded. Start a task or /resume first.", _C.DIM, enabled=self._color))
+            return
+        try:
+            self._runtime.pause_run(run_id, reason="Paused via AbstractCode")
+        except Exception as e:
+            self._print(_style("Pause failed:", _C.YELLOW, enabled=self._color) + f" {e}")
+            return
+        self._print(_style(f"Pause requested (run_id={run_id}).", _C.DIM, enabled=self._color))
+
+    def _cancel(self) -> None:
+        run_id = self._attached_run_id()
+        if run_id is None:
+            self._print(_style("No run loaded. Start a task or /resume first.", _C.DIM, enabled=self._color))
+            return
+        try:
+            self._runtime.cancel_run(run_id, reason="Cancelled via AbstractCode")
+        except Exception as e:
+            self._print(_style("Cancel failed:", _C.YELLOW, enabled=self._color) + f" {e}")
+            return
+        self._print(_style(f"Cancel requested (run_id={run_id}).", _C.DIM, enabled=self._color))
 
     def _try_load_state(self) -> None:
         try:
@@ -3327,22 +3920,35 @@ class ReactShell:
 
     def _run_loop(self, run_id: str) -> None:
         while True:
-            try:
-                state = self._agent.step()
-            except KeyboardInterrupt:
-                self._ui.clear_spinner()
-                state = self._safe_get_state()
-                if state is not None:
-                    loaded = self._messages_from_state(state)
-                    if loaded:
-                        self._agent.session_messages = loaded
-                self._print(_style("\nInterrupted. Run state preserved.", _C.YELLOW, enabled=self._color))
-                return
+            state = self._agent.step()
 
             if state.status == self._RunStatus.COMPLETED:
                 self._ui.clear_spinner()
+                self._ui.scroll_to_bottom()
                 if state.output and isinstance(state.output.get("messages"), list):
                     self._agent.session_messages = list(state.output["messages"])
+                # When the run stops due to safety limits (e.g. max iterations), still emit an
+                # answer block with a copy button so users can grab partial output + trace.
+                if str(getattr(state, "current_node", "") or "") == "max_iterations":
+                    iterations = "?"
+                    if isinstance(state.output, dict):
+                        iterations = str(state.output.get("iterations") or "?")
+                    self._print(_style(f"\nMax iterations reached ({iterations}).", _C.YELLOW, enabled=self._color))
+                    prompt_text, answer_text = self._extract_latest_turn_prompt_and_answer(state)
+                    if isinstance(state.output, dict) and isinstance(state.output.get("answer"), str):
+                        answer_text = str(state.output.get("answer") or "")
+                    self._print_answer_block(title="ANSWER (partial)", answer_text=answer_text, prompt_text=prompt_text)
+                return
+
+            if state.status == self._RunStatus.CANCELLED:
+                self._ui.clear_spinner()
+                self._ui.scroll_to_bottom()
+                self._print(_style("\nRun cancelled. State preserved.", _C.YELLOW, enabled=self._color))
+                prompt_text, answer_text = self._extract_latest_turn_prompt_and_answer(state)
+                self._print_answer_block(title="ANSWER (partial)", answer_text=answer_text, prompt_text=prompt_text)
+                loaded = self._messages_from_state(state)
+                if loaded:
+                    self._agent.session_messages = loaded
                 return
 
             if state.status == self._RunStatus.FAILED:
@@ -3359,6 +3965,19 @@ class ReactShell:
 
             wait = state.waiting
             if wait.reason == self._WaitReason.USER:
+                details = wait.details or {}
+                if (isinstance(details, dict) and details.get("kind") == "pause") or (
+                    isinstance(getattr(wait, "wait_key", None), str) and getattr(wait, "wait_key", None) == f"pause:{run_id}"
+                ):
+                    self._ui.clear_spinner()
+                    self._ui.scroll_to_bottom()
+                    self._print(_style("\nPaused. Type '/resume' to continue.", _C.YELLOW, enabled=self._color))
+                    prompt_text, answer_text = self._extract_latest_turn_prompt_and_answer(state)
+                    self._print_answer_block(title="ANSWER (partial)", answer_text=answer_text, prompt_text=prompt_text)
+                    loaded = self._messages_from_state(state)
+                    if loaded:
+                        self._agent.session_messages = loaded
+                    return
                 response = self._prompt_user(wait.prompt or "Please respond:", wait.choices)
                 state = self._agent.resume(response)
                 continue
