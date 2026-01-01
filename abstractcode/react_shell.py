@@ -142,6 +142,7 @@ class ReactShell:
         agent: str,
         provider: str,
         model: str,
+        base_url: Optional[str] = None,
         state_file: Optional[str],
         auto_approve: bool,
         plan_mode: bool = False,
@@ -156,6 +157,7 @@ class ReactShell:
             raise ValueError("agent must be 'react' or 'codeact'")
         self._provider = provider
         self._model = model
+        self._base_url = str(base_url).strip() if isinstance(base_url, str) and base_url.strip() else None
         self._state_file = state_file or None
         self._auto_approve = auto_approve
         self._plan_mode = bool(plan_mode)
@@ -271,12 +273,21 @@ class ReactShell:
         tool_executor = PassthroughToolExecutor(mode="approval_required")
         self._tool_runner = MappingToolExecutor.from_tools(self._tools)
 
+        llm_kwargs: Dict[str, Any] = {}
+        if self._base_url:
+            llm_kwargs["base_url"] = self._base_url
+
         # Create LLM client for capability queries (used by /max-tokens -1)
-        self._llm_client = LocalAbstractCoreLLMClient(provider=self._provider, model=self._model)
+        self._llm_client = LocalAbstractCoreLLMClient(
+            provider=self._provider,
+            model=self._model,
+            llm_kwargs=llm_kwargs or None,
+        )
 
         self._runtime = create_local_runtime(
             provider=self._provider,
             model=self._model,
+            llm_kwargs=llm_kwargs or None,
             run_store=run_store,
             ledger_store=ledger_store,
             tool_executor=tool_executor,
@@ -989,6 +1000,8 @@ class ReactShell:
         self._print(_style("AbstractCode (MVP)", _C.CYAN, _C.BOLD, enabled=self._color))
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
         self._print(f"Provider: {self._provider}   Model: {self._model}")
+        if self._base_url:
+            self._print(f"Base URL: {self._base_url}")
         if self._state_file:
             store = str(self._store_dir) + "/" if self._store_dir else "(unknown)"
             self._print(f"State:    {self._state_file} (store: {store})")
@@ -1102,6 +1115,8 @@ class ReactShell:
         banner_lines.append(_style("AbstractCode (MVP)", _C.CYAN, _C.BOLD, enabled=self._color))
         banner_lines.append(_style("─" * 60, _C.DIM, enabled=self._color))
         banner_lines.append(f"Provider: {self._provider}   Model: {self._model}")
+        if self._base_url:
+            banner_lines.append(f"Base URL: {self._base_url}")
         if self._state_file:
             store = str(self._store_dir) + "/" if self._store_dir else "(unknown)"
             banner_lines.append(f"State:    {self._state_file} (store: {store})")
@@ -2934,6 +2949,7 @@ class ReactShell:
 
         Usage:
           /context [--json-only] [--derived]
+          /context last [--last] [--verbatim] [--json-only] [--save <path>]
         """
         import copy
         import shlex
@@ -2943,6 +2959,12 @@ class ReactShell:
             parts = shlex.split(raw) if raw else []
         except ValueError:
             parts = raw.split() if raw else []
+
+        if parts and str(parts[0] or "").strip().lower() in ("last", "prev", "previous"):
+            rest = parts[1:]
+            rest_raw = shlex.join(rest) if hasattr(shlex, "join") else " ".join(rest)
+            self._handle_llm(rest_raw)
+            return
 
         json_only = False
         derived = False
@@ -2971,7 +2993,7 @@ class ReactShell:
                 "provider": self._provider,
                 "model": self._model,
                 "note": "No active run. This is the current session context that will be included in the next /task.",
-                "tip": "Use /llm to inspect verbatim LLM_CALL payloads from the last run (from runtime node_traces).",
+                "tip": "Use /context last (or /llm) to inspect verbatim LLM/tool call payloads from the last run.",
                 "session_messages": list(self._agent.session_messages or []),
             }
             if state is not None and hasattr(state, "run_id") and hasattr(state, "status"):
@@ -3084,9 +3106,9 @@ class ReactShell:
             copy_id = f"context_{uuid.uuid4().hex}"
             self._ui.register_copy_payload(copy_id, text)
             self._print(_style("\nContext (next /task seed)", _C.CYAN, _C.BOLD, enabled=self._color))
-            self._print(f"[[COPY:{copy_id}]]")
             self._print(_style("─" * 80, _C.DIM, enabled=self._color))
             self._print(text)
+            self._print(f"[[COPY:{copy_id}]]")
             return
 
         sim_run = copy.deepcopy(state)
@@ -3220,15 +3242,16 @@ class ReactShell:
         self._ui.register_copy_payload(copy_id, text)
 
         self._print(_style("\nContext (next LLM call)", _C.CYAN, _C.BOLD, enabled=self._color))
-        self._print(f"[[COPY:{copy_id}]]")
         self._print(_style("─" * 80, _C.DIM, enabled=self._color))
         self._print(text)
 
         if json_only:
+            self._print(f"[[COPY:{copy_id}]]")
             return
 
         llm_payload = out.get("llm_call_payload")
         if not isinstance(llm_payload, dict):
+            self._print(f"[[COPY:{copy_id}]]")
             return
 
         sys_prompt = llm_payload.get("system_prompt")
@@ -3258,13 +3281,16 @@ class ReactShell:
                 self._print(_style("─" * 80, _C.DIM, enabled=self._color))
                 self._print(tool_prompt)
 
+        self._print(f"[[COPY:{copy_id}]]")
+
     def _handle_llm(self, raw: str) -> None:
-        """Show verbatim LLM_CALL payloads captured by AbstractRuntime.
+        """Show the last prompt/answer and verbatim LLM/TOOL call payloads captured by AbstractRuntime.
 
         Source of truth: `RunState.vars["_runtime"]["node_traces"]`.
 
         Usage:
-          /llm [--last] [--verbatim] [--json-only] [--save <path>]
+          /context last [--last] [--verbatim] [--json-only] [--save <path>]
+          /llm ...  (alias)
         """
         import shlex
         import uuid
@@ -3279,6 +3305,7 @@ class ReactShell:
         last_only = False
         verbatim = False
         save_path: Optional[str] = None
+        usage = "Usage: /context last [--last] [--verbatim] [--json-only] [--save <path>] (alias: /llm)"
         i = 0
         while i < len(parts):
             p = parts[i]
@@ -3296,13 +3323,13 @@ class ReactShell:
                 continue
             if p in ("--save", "--out", "--output"):
                 if i + 1 >= len(parts):
-                    self._print(_style("Usage: /llm [--last] [--verbatim] [--json-only] [--save <path>]", _C.DIM, enabled=self._color))
+                    self._print(_style(usage, _C.DIM, enabled=self._color))
                     return
                 save_path = parts[i + 1]
                 i += 2
                 continue
             self._print(_style(f"Unknown flag: {p}", _C.YELLOW, enabled=self._color))
-            self._print(_style("Usage: /llm [--last] [--verbatim] [--json-only] [--save <path>]", _C.DIM, enabled=self._color))
+            self._print(_style(usage, _C.DIM, enabled=self._color))
             return
 
         state = self._safe_get_state()
@@ -3316,7 +3343,9 @@ class ReactShell:
             self._print(_style("No runtime node_traces found for this run.", _C.DIM, enabled=self._color))
             return
 
+        counts: Dict[str, int] = {}
         llm_steps: List[Dict[str, Any]] = []
+        tool_steps: List[Dict[str, Any]] = []
         for node_trace in traces.values():
             if not isinstance(node_trace, dict):
                 continue
@@ -3329,16 +3358,27 @@ class ReactShell:
                 eff = step.get("effect")
                 if not isinstance(eff, dict):
                     continue
-                if str(eff.get("type") or "") == "llm_call":
+                etype = str(eff.get("type") or "")
+                counts[etype] = int(counts.get(etype, 0) or 0) + 1
+                if etype == "llm_call":
                     llm_steps.append(step)
+                    continue
+                if etype == "tool_calls":
+                    tool_steps.append(step)
+                    continue
 
-        if not llm_steps:
-            self._print(_style("No llm_call steps found in node_traces.", _C.DIM, enabled=self._color))
+        if not llm_steps and not tool_steps:
+            self._print(
+                _style("No llm_call or tool_calls steps found in node_traces.", _C.DIM, enabled=self._color)
+            )
             return
 
         llm_steps.sort(key=lambda d: str(d.get("ts") or ""))
-        if last_only:
+        tool_steps.sort(key=lambda d: str(d.get("ts") or ""))
+        if last_only and llm_steps:
             llm_steps = [llm_steps[-1]]
+
+        prompt_text, answer_text = self._extract_latest_turn_prompt_and_answer(state)
 
         calls_out: List[Dict[str, Any]] = []
         for idx, step in enumerate(llm_steps, 1):
@@ -3365,11 +3405,33 @@ class ReactShell:
                 }
             )
 
+        tool_calls_out: List[Dict[str, Any]] = []
+        for idx, step in enumerate(tool_steps, 1):
+            eff = step.get("effect") if isinstance(step.get("effect"), dict) else {}
+            payload = eff.get("payload") if isinstance(eff.get("payload"), dict) else {}
+            result = step.get("result") if isinstance(step.get("result"), dict) else step.get("result")
+            tool_calls_out.append(
+                {
+                    "index": idx,
+                    "ts": step.get("ts"),
+                    "node_id": step.get("node_id"),
+                    "status": step.get("status"),
+                    "duration_ms": step.get("duration_ms"),
+                    "tool_calls_payload": payload,
+                    "result": result,
+                    "error": step.get("error"),
+                }
+            )
+
         out: Dict[str, Any] = {
             "run_id": getattr(state, "run_id", None),
+            "run_status": getattr(getattr(state, "status", None), "value", None) or str(getattr(state, "status", "")),
             "provider": self._provider,
             "model": self._model,
+            "last_turn": {"prompt": prompt_text, "answer": answer_text},
+            "counts_by_effect_type": dict(counts),
             "llm_calls": calls_out,
+            "tool_calls": tool_calls_out,
         }
 
         text = json.dumps(out, ensure_ascii=False, indent=2, sort_keys=False, default=str)
@@ -3381,7 +3443,7 @@ class ReactShell:
                     path = Path.cwd() / path
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(text, encoding="utf-8")
-                self._print(_style(f"✅ Saved verbatim LLM payloads to {path}", _C.DIM, enabled=self._color))
+                self._print(_style(f"✅ Saved runtime trace payloads to {path}", _C.DIM, enabled=self._color))
             except Exception as e:
                 self._print(_style(f"❌ Failed to save: {e}", _C.DIM, enabled=self._color))
 
@@ -3410,13 +3472,24 @@ class ReactShell:
                 blocks.append(content_str)
             return "\n".join(blocks).rstrip()
 
-        self._print(_style("\nLLM calls (runtime; verbatim payloads)", _C.CYAN, _C.BOLD, enabled=self._color))
-        self._print(f"[[COPY:{copy_id}]]")
+        self._print(_style("\nContext (last prompt/answer/steps; runtime)", _C.CYAN, _C.BOLD, enabled=self._color))
         self._print(_style("─" * 80, _C.DIM, enabled=self._color))
 
         if json_only:
             self._print(text)
+            self._print(f"[[COPY:{copy_id}]]")
             return
+
+        prompt_view = str(prompt_text or "").rstrip()
+        answer_view = str(answer_text or "").rstrip()
+
+        self._print(_style("\nLast prompt (user)", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+        self._print(prompt_view if prompt_view else "(no user prompt captured)")
+
+        self._print(_style("\nLast answer (assistant)", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+        self._print(answer_view if answer_view else "(no assistant answer produced yet)")
 
         # Human-scannable rendering: one block per call with separate copy payloads.
         for call in calls_out:
@@ -3495,6 +3568,50 @@ class ReactShell:
                 self._print(_style("\nProvider request (verbatim; as sent)", _C.DIM, enabled=self._color))
                 self._print(f"[[COPY:{prov_id}]]")
                 self._print(prov_text)
+
+        # TOOL_CALLS steps are part of the agent "step trace" (what happened between LLM calls).
+        if tool_calls_out:
+            self._print(_style("\nTool calls (runtime; verbatim payloads)", _C.CYAN, _C.BOLD, enabled=self._color))
+            self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+
+            for batch in tool_calls_out:
+                idx = batch.get("index")
+                ts = batch.get("ts")
+                node_id = batch.get("node_id")
+                status = batch.get("status")
+                dur = batch.get("duration_ms")
+                header = f"TOOL_CALLS #{idx} ({status}) node={node_id} ts={ts}"
+                if isinstance(dur, (int, float)):
+                    header += f" duration_ms={dur:.1f}"
+                self._print(_style("\n" + header, _C.CYAN, _C.BOLD, enabled=self._color))
+                self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+
+                runtime_payload = batch.get("tool_calls_payload") or {}
+                runtime_text = json.dumps(runtime_payload, ensure_ascii=False, indent=2, sort_keys=False, default=str)
+                rid = f"tool_runtime_{uuid.uuid4().hex}"
+                self._ui.register_copy_payload(rid, runtime_text)
+                self._print(_style("Runtime TOOL_CALLS payload (durable)", _C.DIM, enabled=self._color))
+                self._print(f"[[COPY:{rid}]]")
+                self._print(runtime_text)
+
+                res_payload = batch.get("result")
+                res_text = json.dumps(res_payload, ensure_ascii=False, indent=2, sort_keys=False, default=str)
+                res_id = f"tool_res_{uuid.uuid4().hex}"
+                self._ui.register_copy_payload(res_id, res_text)
+                self._print(_style("\nTool execution result", _C.DIM, enabled=self._color))
+                self._print(f"[[COPY:{res_id}]]")
+                self._print(res_text)
+
+                err = batch.get("error")
+                if err is not None:
+                    err_text = json.dumps(err, ensure_ascii=False, indent=2, sort_keys=False, default=str)
+                    err_id = f"tool_err_{uuid.uuid4().hex}"
+                    self._ui.register_copy_payload(err_id, err_text)
+                    self._print(_style("\nTool execution error", _C.DIM, enabled=self._color))
+                    self._print(f"[[COPY:{err_id}]]")
+                    self._print(err_text)
+
+        self._print(f"[[COPY:{copy_id}]]")
 
     def _handle_remember(self, raw: str) -> None:
         """Store a durable memory note (runtime MEMORY_NOTE) with optional tags and provenance.
@@ -3616,7 +3733,7 @@ class ReactShell:
             "  /recall [opts]      Recall spans by time/tags/query (--into-context)\n"
             "  /vars [path]        Inspect run vars (scratchpad, _runtime, ...)\n"
             "  /context            Show the exact context for the next LLM call\n"
-            "  /llm                Show verbatim LLM_CALL payloads for the run\n"
+            "  /context last       Show last prompt/answer + LLM/tool steps (alias: /llm)\n"
             "  /remember <note>    Store a durable memory note (tags + provenance)\n"
             "  /mouse              Toggle mouse mode (wheel scroll vs terminal selection)\n"
             "  /flow ...           Run AbstractFlow workflows inside this REPL\n"

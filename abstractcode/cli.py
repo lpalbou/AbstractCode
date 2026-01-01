@@ -63,6 +63,11 @@ def build_agent_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provider", default="ollama", help="LLM provider (e.g. ollama, openai)")
     parser.add_argument("--model", default="qwen3:1.7b-q4_K_M", help="Model name")
     parser.add_argument(
+        "--base-url",
+        default=os.getenv("ABSTRACTCODE_BASE_URL"),
+        help="Provider base URL (e.g. http://localhost:1234/v1). Also supports ABSTRACTCODE_BASE_URL.",
+    )
+    parser.add_argument(
         "--state-file",
         default=_default_state_file(),
         help="Path to save the current run reference (enables durable file-backed stores).",
@@ -366,6 +371,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         agent=str(args.agent),
         provider=args.provider,
         model=args.model,
+        base_url=getattr(args, "base_url", None),
         state_file=state_file,
         auto_approve=bool(args.auto_approve),
         plan_mode=bool(args.plan),
