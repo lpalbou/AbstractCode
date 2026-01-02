@@ -177,6 +177,8 @@ class ReactShell:
         self._color = bool(color and _supports_color())
         # Session-level tool allowlist (None = default/all tools for the agent kind).
         self._allowed_tools: Optional[List[str]] = None
+        # Whether to include tool usage examples in the prompted tool section (token-expensive).
+        self._tool_prompt_examples = True
 
         # Lazy imports so `abstractcode --help` works even if deps aren't installed.
         try:
@@ -1770,6 +1772,8 @@ class ReactShell:
                     self._allowed_tools = None
                 elif isinstance(raw, list):
                     self._allowed_tools = [str(t).strip() for t in raw if isinstance(t, str) and t.strip()]
+            if "tool_prompt_examples" in config:
+                self._tool_prompt_examples = bool(config.get("tool_prompt_examples"))
         except Exception:
             pass  # Ignore corrupt config files
 
@@ -1786,6 +1790,7 @@ class ReactShell:
                 "review_mode": self._review_mode,
                 "review_max_rounds": self._review_max_rounds,
                 "allowed_tools": self._allowed_tools,
+                "tool_prompt_examples": bool(self._tool_prompt_examples),
             }
             self._config_file.write_text(json.dumps(config, indent=2))
         except Exception:
@@ -1797,6 +1802,7 @@ class ReactShell:
         Usage:
           /tools
           /tools reset
+          /tools examples on|off
           /tools only <name...>
           /tools enable <name...>
           /tools disable <name...>
@@ -1814,10 +1820,11 @@ class ReactShell:
 
         sub = parts[0].lower() if parts else "list"
         args = parts[1:] if len(parts) > 1 else []
-        if sub not in ("list", "reset", "only", "enable", "disable", "help", "-h", "--help"):
+        if sub not in ("list", "reset", "examples", "only", "enable", "disable", "help", "-h", "--help"):
             self._print(_style("Usage:", _C.DIM, enabled=self._color))
             self._print(_style("  /tools", _C.DIM, enabled=self._color))
             self._print(_style("  /tools reset", _C.DIM, enabled=self._color))
+            self._print(_style("  /tools examples on|off", _C.DIM, enabled=self._color))
             self._print(_style("  /tools only <name...>", _C.DIM, enabled=self._color))
             self._print(_style("  /tools enable <name...>", _C.DIM, enabled=self._color))
             self._print(_style("  /tools disable <name...>", _C.DIM, enabled=self._color))
@@ -1873,6 +1880,22 @@ class ReactShell:
                 return None
             return [str(t).strip() for t in raw_allow if isinstance(t, str) and t.strip()]
 
+        def _apply_examples_to_active_run(enabled: bool) -> None:
+            state = self._safe_get_state()
+            if state is None or not hasattr(state, "vars") or not isinstance(state.vars, dict):
+                return
+            runtime_ns = state.vars.get("_runtime")
+            if not isinstance(runtime_ns, dict):
+                runtime_ns = {}
+                state.vars["_runtime"] = runtime_ns
+            runtime_ns["tool_prompt_examples"] = bool(enabled)
+            self._status_cache_key = None
+            self._status_cache_text = ""
+            try:
+                self._runtime.run_store.save(state)
+            except Exception:
+                pass
+
         def _apply_to_active_run(allow: Optional[List[str]]) -> None:
             state = self._safe_get_state()
             if state is None or not hasattr(state, "vars") or not isinstance(state.vars, dict):
@@ -1881,6 +1904,7 @@ class ReactShell:
             if not isinstance(runtime_ns, dict):
                 runtime_ns = {}
                 state.vars["_runtime"] = runtime_ns
+            runtime_ns["tool_prompt_examples"] = bool(self._tool_prompt_examples)
             if allow is None:
                 runtime_ns.pop("allowed_tools", None)
             else:
@@ -1928,6 +1952,7 @@ class ReactShell:
             self._print(_style("Usage:", _C.DIM, enabled=self._color))
             self._print(_style("  /tools", _C.DIM, enabled=self._color))
             self._print(_style("  /tools reset", _C.DIM, enabled=self._color))
+            self._print(_style("  /tools examples on|off", _C.DIM, enabled=self._color))
             self._print(_style("  /tools only <name...>", _C.DIM, enabled=self._color))
             self._print(_style("  /tools enable <name...>", _C.DIM, enabled=self._color))
             self._print(_style("  /tools disable <name...>", _C.DIM, enabled=self._color))
@@ -1940,50 +1965,81 @@ class ReactShell:
             self._print(_style("✅ Tools reset to default (all enabled).", _C.GREEN, enabled=self._color))
             sub = "list"
 
+        if sub == "examples":
+            value = args[0].strip().lower() if args else ""
+            if value in ("on", "true", "1", "yes"):
+                self._tool_prompt_examples = True
+                _apply_examples_to_active_run(True)
+                self._save_config()
+                self._print(_style("✅ Tool examples enabled.", _C.GREEN, enabled=self._color))
+                sub = "list"
+            elif value in ("off", "false", "0", "no"):
+                self._tool_prompt_examples = False
+                _apply_examples_to_active_run(False)
+                self._save_config()
+                self._print(_style("✅ Tool examples disabled.", _C.GREEN, enabled=self._color))
+                sub = "list"
+            elif not value:
+                state = "on" if self._tool_prompt_examples else "off"
+                self._print(_style(f"Tool examples: {state}", _C.DIM, enabled=self._color))
+                sub = "list"
+            else:
+                self._print(_style("Usage: /tools examples on|off", _C.DIM, enabled=self._color))
+                return
+
         if sub in ("only", "enable", "disable"):
             names = _split_names(args)
             if not names:
                 self._print(_style(f"Usage: /tools {sub} <name...>", _C.DIM, enabled=self._color))
                 return
-            unknown = [n for n in names if n not in available]
-            if unknown:
-                self._print(_style("Unknown tool(s): " + ", ".join(unknown), _C.YELLOW, enabled=self._color))
-                self._print(_style("Use /tools to list available tools.", _C.DIM, enabled=self._color))
-                return
+            if sub in ("enable", "disable") and len(names) == 1 and names[0].lower() in ("all", "*"):
+                new_allow = list(available_names) if sub == "enable" else []
+                self._allowed_tools = list(new_allow)
+                _apply_to_active_run(self._allowed_tools)
+                self._save_config()
+                mode = "enabled" if sub == "enable" else "disabled"
+                self._print(_style(f"✅ All tools {mode}.", _C.GREEN, enabled=self._color))
+                sub = "list"
+            else:
+                unknown = [n for n in names if n not in available]
+                if unknown:
+                    self._print(_style("Unknown tool(s): " + ", ".join(unknown), _C.YELLOW, enabled=self._color))
+                    self._print(_style("Use /tools to list available tools.", _C.DIM, enabled=self._color))
+                    return
 
-            current = _effective_allowlist_from_state()
-            if current is None:
-                # Fall back to persisted selection if no active override.
-                current = list(self._allowed_tools) if isinstance(self._allowed_tools, list) else list(available_names)
-            current_set = set(current)
+                current = _effective_allowlist_from_state()
+                if current is None:
+                    # Fall back to persisted selection if no active override.
+                    current = list(self._allowed_tools) if isinstance(self._allowed_tools, list) else list(available_names)
+                current_set = set(current)
 
-            if sub == "only":
-                new_allow = names
-            elif sub == "enable":
-                new_allow = list(dict.fromkeys(list(current) + list(names)))
-            else:  # disable
-                new_allow = [n for n in current if n not in set(names)]
-            new_set = set(new_allow)
-            added = [n for n in new_allow if n not in current_set]
-            removed = [n for n in current if n not in new_set]
+                if sub == "only":
+                    new_allow = names
+                elif sub == "enable":
+                    new_allow = list(dict.fromkeys(list(current) + list(names)))
+                else:  # disable
+                    new_allow = [n for n in current if n not in set(names)]
+                new_set = set(new_allow)
+                added = [n for n in new_allow if n not in current_set]
+                removed = [n for n in current if n not in new_set]
 
-            self._allowed_tools = list(new_allow)
-            _apply_to_active_run(self._allowed_tools)
-            self._save_config()
-            parts: List[str] = []
-            if added:
-                parts.append("+" + ", ".join(added))
-            if removed:
-                parts.append("-" + ", ".join(removed))
-            delta = f" ({' '.join(parts)})" if parts else ""
-            self._print(
-                _style(
-                    f"✅ Tools updated: {len(self._allowed_tools)}/{len(available_names)} enabled{delta}.",
-                    _C.GREEN,
-                    enabled=self._color,
+                self._allowed_tools = list(new_allow)
+                _apply_to_active_run(self._allowed_tools)
+                self._save_config()
+                parts: List[str] = []
+                if added:
+                    parts.append("+" + ", ".join(added))
+                if removed:
+                    parts.append("-" + ", ".join(removed))
+                delta = f" ({' '.join(parts)})" if parts else ""
+                self._print(
+                    _style(
+                        f"✅ Tools updated: {len(self._allowed_tools)}/{len(available_names)} enabled{delta}.",
+                        _C.GREEN,
+                        enabled=self._color,
+                    )
                 )
-            )
-            sub = "list"
+                sub = "list"
 
         # Default: list tools with enabled status.
         effective_from_run = _effective_allowlist_from_state()
@@ -1996,7 +2052,14 @@ class ReactShell:
         self._print(_style("\nTools", _C.CYAN, _C.BOLD, enabled=self._color))
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
         saved = "yes" if self._config_file else "no"
-        self._print(_style(f"Enabled: {len(effective)}/{len(available_names)}  Saved: {saved}  Source: {source}", _C.DIM, enabled=self._color))
+        examples_state = "on" if self._tool_prompt_examples else "off"
+        self._print(
+            _style(
+                f"Enabled: {len(effective)}/{len(available_names)}  Examples: {examples_state}  Saved: {saved}  Source: {source}",
+                _C.DIM,
+                enabled=self._color,
+            )
+        )
         for name in available_names:
             icon = "✅" if name in enabled_set else "❌"
             desc = available.get(name, {}).get("description") or ""
@@ -4215,6 +4278,27 @@ class ReactShell:
             return rid2.strip()
         return None
 
+    def _sync_tool_prompt_settings_to_run(self, run_id: str) -> None:
+        """Best-effort: persist session tool-prompt settings into the run vars."""
+        rid = str(run_id or "").strip()
+        if not rid:
+            return
+        try:
+            state = self._runtime.get_state(rid)
+        except Exception:
+            return
+        if state is None or not hasattr(state, "vars") or not isinstance(state.vars, dict):
+            return
+        runtime_ns = state.vars.get("_runtime")
+        if not isinstance(runtime_ns, dict):
+            runtime_ns = {}
+            state.vars["_runtime"] = runtime_ns
+        runtime_ns["tool_prompt_examples"] = bool(self._tool_prompt_examples)
+        try:
+            self._runtime.run_store.save(state)
+        except Exception:
+            pass
+
     def _start(self, task: str) -> None:
         if self._run_thread_active():
             self._print(_style("A run is already executing. Use /pause or /cancel first.", _C.DIM, enabled=self._color))
@@ -4223,6 +4307,7 @@ class ReactShell:
         self._turn_task = str(task or "").strip() or None
         self._turn_trace = []
         run_id = self._agent.start(task, allowed_tools=self._allowed_tools)
+        self._sync_tool_prompt_settings_to_run(run_id)
         self._last_run_id = run_id
         if self._state_file:
             self._agent.save_state(self._state_file)
@@ -4246,6 +4331,7 @@ class ReactShell:
             self._runtime.resume_run(run_id)
         except Exception:
             pass
+        self._sync_tool_prompt_settings_to_run(run_id)
         self._run_in_background(run_id)
 
     def _pause(self) -> None:

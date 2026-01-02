@@ -116,12 +116,13 @@ abstractcode --help
 
 ## Default Tools
 
-AbstractCode provides a curated set of 9 tools for coding tasks (ReAct agent):
+AbstractCode provides a curated set of 10 tools for coding tasks (ReAct agent):
 
 | Tool | Description |
 |------|-------------|
 | `list_files` | Find and list files using glob patterns (case-insensitive) |
 | `search_files` | Search for text patterns inside files using regex |
+| `analyze_code` | Outline a Python/JS file (imports/classes/functions + line ranges) |
 | `read_file` | Read file contents with optional line range |
 | `write_file` | Write content to files, creating directories as needed |
 | `edit_file` | Edit files by replacing text patterns (supports regex, line ranges, preview mode) |
