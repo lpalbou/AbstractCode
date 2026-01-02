@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -337,6 +338,8 @@ class ReactShell:
         # Per-turn observability (for copy + traceability)
         self._turn_task: Optional[str] = None
         self._turn_trace: List[str] = []
+        # Turn-level timing (for per-answer stats).
+        self._turn_started_at: Optional[float] = None
         # Simple in-session dedup for obviously repeated shell commands.
         self._last_execute_command: Optional[str] = None
         self._last_execute_command_result: Optional[Dict[str, Any]] = None
@@ -656,6 +659,218 @@ class ReactShell:
             width = 120
         return max(40, width)
 
+    def _format_timestamp_short(self, ts: Optional[str]) -> str:
+        """Format an ISO timestamp as a compact, stable UTC string."""
+        raw = str(ts or "").strip()
+        if not raw:
+            return ""
+        try:
+            from datetime import datetime, timezone
+
+            # Support both "+00:00" and "Z" suffixes.
+            if raw.endswith("Z"):
+                dt = datetime.fromisoformat(raw[:-1] + "+00:00")
+            else:
+                dt = datetime.fromisoformat(raw)
+            dt = dt.astimezone(timezone.utc)
+            return dt.strftime("%Y-%m-%d %H:%MZ")
+        except Exception:
+            # Best-effort: keep the leading date/time portion.
+            return raw[:16]
+
+    def _aggregate_llm_usage(self, state: Any) -> Optional[Dict[str, Any]]:
+        """Aggregate per-run LLM token usage (usage-first, else estimate from captured payloads)."""
+        if state is None or not hasattr(state, "vars") or not isinstance(getattr(state, "vars", None), dict):
+            return None
+
+        runtime_ns = state.vars.get("_runtime") if isinstance(state.vars.get("_runtime"), dict) else {}
+        traces = runtime_ns.get("node_traces") if isinstance(runtime_ns, dict) else None
+        if not isinstance(traces, dict) or not traces:
+            return None
+
+        try:
+            from abstractcore.utils.token_utils import TokenUtils
+        except Exception:
+            TokenUtils = None  # type: ignore[assignment]
+
+        effective_model = self._get_effective_model(state) or str(self._model or "")
+
+        def estimate_tokens(text: str) -> int:
+            s = str(text or "")
+            if not s:
+                return 0
+            if TokenUtils is None:
+                return max(1, len(s) // 4)
+            try:
+                return max(0, int(TokenUtils.estimate_tokens(s, model=str(effective_model or ""))))
+            except Exception:
+                return max(1, len(s) // 4)
+
+        def usage_int(usage: Dict[str, Any], *keys: str) -> Optional[int]:
+            for k in keys:
+                raw_val = usage.get(k)
+                if raw_val is None:
+                    continue
+                try:
+                    return int(raw_val)
+                except Exception:
+                    continue
+            return None
+
+        def estimate_prompt_tokens(captured: Dict[str, Any]) -> int:
+            prompt = str(captured.get("prompt") or "")
+            system_prompt = str(captured.get("system_prompt") or "")
+            messages = captured.get("messages")
+            tools = captured.get("tools")
+
+            msg_text_parts: List[str] = []
+            if isinstance(messages, list):
+                for m in messages:
+                    if not isinstance(m, dict):
+                        continue
+                    role = str(m.get("role") or "").strip()
+                    content = str(m.get("content") or "")
+                    if not content:
+                        continue
+                    msg_text_parts.append(f"{role}:\n{content}" if role else content)
+            messages_text = "\n\n".join(msg_text_parts).strip()
+
+            tool_prompt = ""
+            if isinstance(tools, list) and tools:
+                try:
+                    from abstractcore.tools.handler import UniversalToolHandler
+
+                    handler = UniversalToolHandler(str(effective_model or ""))
+                    tool_prompt = handler.format_tools_prompt(tools) or ""
+                except Exception:
+                    tool_prompt = json.dumps(tools, ensure_ascii=False, sort_keys=True, default=str)
+
+            return (
+                estimate_tokens(system_prompt)
+                + estimate_tokens(prompt)
+                + (estimate_tokens(messages_text) if messages_text else 0)
+                + (estimate_tokens(tool_prompt) if tool_prompt else 0)
+            )
+
+        def estimate_completion_tokens(result: Dict[str, Any]) -> int:
+            content = str(result.get("content") or "")
+            reasoning = str(result.get("reasoning") or "")
+            tool_calls = result.get("tool_calls")
+            tool_calls_text = ""
+            if tool_calls is not None:
+                try:
+                    tool_calls_text = json.dumps(tool_calls, ensure_ascii=False, sort_keys=True, default=str)
+                except Exception:
+                    tool_calls_text = str(tool_calls)
+            joined = "\n\n".join([p for p in (reasoning, content, tool_calls_text) if isinstance(p, str) and p.strip()]).strip()
+            return estimate_tokens(joined) if joined else 0
+
+        total_in = 0
+        total_out = 0
+        llm_calls = 0
+        used_estimate = False
+
+        for node_trace in traces.values():
+            if not isinstance(node_trace, dict):
+                continue
+            steps = node_trace.get("steps")
+            if not isinstance(steps, list):
+                continue
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                eff = step.get("effect")
+                if not isinstance(eff, dict) or str(eff.get("type") or "") != "llm_call":
+                    continue
+                llm_calls += 1
+                result = step.get("result") if isinstance(step.get("result"), dict) else {}
+
+                usage = result.get("usage") if isinstance(result.get("usage"), dict) else None
+                p = usage_int(usage, "prompt_tokens", "input_tokens") if isinstance(usage, dict) else None
+                c = usage_int(usage, "completion_tokens", "output_tokens") if isinstance(usage, dict) else None
+                if p is not None and c is not None:
+                    total_in += int(p)
+                    total_out += int(c)
+                    continue
+
+                meta = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+                runtime_obs = meta.get("_runtime_observability") if isinstance(meta, dict) else None
+                captured = runtime_obs.get("llm_generate_kwargs") if isinstance(runtime_obs, dict) else None
+                if isinstance(captured, dict):
+                    try:
+                        total_in += int(estimate_prompt_tokens(captured))
+                        total_out += int(estimate_completion_tokens(result))
+                        used_estimate = True
+                        continue
+                    except Exception:
+                        pass
+
+                # If we couldn't estimate, still mark that totals are incomplete/estimated.
+                used_estimate = True
+
+        if llm_calls <= 0:
+            return None
+
+        return {
+            "input_tokens": int(total_in),
+            "output_tokens": int(total_out),
+            "total_tokens": int(total_in) + int(total_out),
+            "calls": int(llm_calls),
+            "estimated": bool(used_estimate),
+        }
+
+    def _build_answer_footer(self, *, state: Any) -> str:
+        """Build a compact footer: timestamp + (best-effort) token/time stats."""
+        ts_iso: Optional[str] = None
+        try:
+            messages = self._messages_from_state(state) if state is not None else []
+            for m in reversed(messages):
+                if isinstance(m, dict) and m.get("role") == "assistant":
+                    ts_iso = str(m.get("timestamp") or "").strip() or None
+                    break
+        except Exception:
+            ts_iso = None
+        if not ts_iso:
+            ts_iso = _now_iso()
+
+        ts_text = self._format_timestamp_short(ts_iso)
+        parts: List[str] = [ts_text] if ts_text else []
+
+        usage = self._aggregate_llm_usage(state)
+        elapsed_s: Optional[float] = None
+        turn_started_at = getattr(self, "_turn_started_at", None)
+        if isinstance(turn_started_at, (int, float)):
+            elapsed_s = max(0.0, float(time.perf_counter() - float(turn_started_at)))
+        else:
+            try:
+                from datetime import datetime, timezone
+
+                created = str(getattr(state, "created_at", "") or "")
+                if created:
+                    if created.endswith("Z"):
+                        dt = datetime.fromisoformat(created[:-1] + "+00:00")
+                    else:
+                        dt = datetime.fromisoformat(created)
+                    elapsed_s = max(0.0, (datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds())
+            except Exception:
+                elapsed_s = None
+
+        if isinstance(usage, dict):
+            in_t = int(usage.get("input_tokens") or 0)
+            out_t = int(usage.get("output_tokens") or 0)
+            est = bool(usage.get("estimated"))
+            est_suffix = " est" if est else ""
+            parts.append(f"in={in_t:,}{est_suffix}")
+            parts.append(f"out={out_t:,}{est_suffix}")
+            if isinstance(elapsed_s, (int, float)) and float(elapsed_s) > 0:
+                tok_s = float(in_t + out_t) / float(elapsed_s)
+                parts.append(f"{tok_s:0.1f} tok/s")
+                parts.append(f"{float(elapsed_s):0.1f}s")
+        elif isinstance(elapsed_s, (int, float)) and float(elapsed_s) > 0:
+            parts.append(f"{float(elapsed_s):0.1f}s")
+
+        return "  ".join([p for p in parts if isinstance(p, str) and p.strip()]).strip()
+
     def _truncate_for_ui(self, value: Any, *, max_chars: int) -> Any:
         """Truncate long string values for UI display only (agent state is unchanged)."""
         if isinstance(value, str):
@@ -767,10 +982,15 @@ class ReactShell:
 
             self._print(_style(f"{indent}{line}", *style_codes, enabled=self._color))
 
-    def _format_user_prompt_block(self, text: str, *, copy_id: Optional[str] = None) -> str:
+    def _format_user_prompt_block(self, text: str, *, copy_id: Optional[str] = None, footer: Optional[str] = None) -> str:
         """Render a user prompt as a padded, full-line background block (no truncation)."""
         lines = text.splitlines() or [""]
-        copy_marker = f"[[COPY:{copy_id}]]" if isinstance(copy_id, str) and copy_id else ""
+        footer_text = str(footer or "").strip()
+        copy_line = ""
+        if isinstance(copy_id, str) and copy_id:
+            copy_line = f"[[COPY:{copy_id}]]"
+            if footer_text:
+                copy_line = f"{copy_line} {footer_text}"
 
         prefix_first = "> "
         prefix_next = "  "
@@ -792,8 +1012,8 @@ class ReactShell:
                     out.append(prefix + chunk)
                     first_visual = False
             # Separate the copy button from the prompt content so it reads as a control, not content.
-            if copy_marker:
-                out.append(copy_marker)
+            if copy_line:
+                out.append(copy_line)
             out.append("")
             return "\n".join(out)
 
@@ -819,8 +1039,8 @@ class ReactShell:
 
         out_lines.append(blank)
         # Separate the copy button from the framed block for better visual grouping.
-        if copy_marker:
-            out_lines.append(copy_marker)
+        if copy_line:
+            out_lines.append(copy_line)
         # Keep a black spacer line after the copy button for readability.
         out_lines.append("")
         return "\n".join(out_lines)
@@ -836,7 +1056,9 @@ class ReactShell:
         # Echo user input (styled so user prompts are easy to spot).
         copy_id = f"user_{uuid.uuid4().hex}"
         self._ui.register_copy_payload(copy_id, text)
-        self._print(self._format_user_prompt_block(text, copy_id=copy_id))
+        ts_text = self._format_timestamp_short(_now_iso())
+        footer = _style(ts_text, _C.DIM, enabled=self._color) if ts_text else ""
+        self._print(self._format_user_prompt_block(text, copy_id=copy_id, footer=footer))
 
         cmd = text.strip()
 
@@ -911,7 +1133,7 @@ class ReactShell:
         blocks.append("Answer:\n" + str(answer_text or "").strip())
         return "\n\n".join([b for b in blocks if b.strip()]).strip()
 
-    def _print_answer_block(self, *, title: str, answer_text: str, prompt_text: Optional[str] = None) -> None:
+    def _print_answer_block(self, *, title: str, answer_text: str, prompt_text: Optional[str] = None, state: Any = None) -> None:
         import uuid
 
         answer = "" if answer_text is None else str(answer_text)
@@ -926,7 +1148,9 @@ class ReactShell:
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
         self._print(answer)
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
-        self._print(f"[[COPY:{copy_id}]]")
+        footer_text = self._build_answer_footer(state=state)
+        footer = _style(footer_text, _C.DIM, enabled=self._color) if footer_text else ""
+        self._print(f"[[COPY:{copy_id}]] {footer}".rstrip())
         self._print("")
 
     def _extract_latest_turn_prompt_and_answer(self, state: Any) -> tuple[Optional[str], str]:
@@ -1094,7 +1318,7 @@ class ReactShell:
             self._ui.clear_spinner()
             self._ui.scroll_to_bottom()
             answer_text = str(data.get("answer", "") or "")
-            self._print_answer_block(title="ANSWER", answer_text=answer_text)
+            self._print_answer_block(title="ANSWER", answer_text=answer_text, state=self._safe_get_state())
         elif step == "error" or step == "failed":
             self._ui.clear_spinner()
             self._ui.scroll_to_bottom()
@@ -3961,10 +4185,12 @@ class ReactShell:
             for msg in turn:
                 role = str(msg.get("role") or "unknown")
                 content = "" if msg.get("content") is None else str(msg.get("content"))
+                ts_text = self._format_timestamp_short(str(msg.get("timestamp") or "")) if isinstance(msg, dict) else ""
+                footer = _style(ts_text, _C.DIM, enabled=self._color) if ts_text else ""
                 if role == "user":
                     mid = _get_message_id(msg) or f"user_{uuid.uuid4().hex}"
                     self._ui.register_copy_payload(mid, content)
-                    self._print(self._format_user_prompt_block(content, copy_id=mid))
+                    self._print(self._format_user_prompt_block(content, copy_id=mid, footer=footer))
                     continue
 
                 if role == "tool":
@@ -3973,24 +4199,24 @@ class ReactShell:
                     label = f"[tool:{name}]" if isinstance(name, str) and name else "[tool]"
                     mid = _get_message_id(msg) or f"tool_{uuid.uuid4().hex}"
                     self._ui.register_copy_payload(mid, f"{label}\n{content}".strip())
-                    self._print(f"[[COPY:{mid}]]")
                     self._print(_style(label, _C.DIM, enabled=self._color))
                     self._print(content)
+                    self._print(f"[[COPY:{mid}]] {footer}".rstrip())
                     continue
 
                 if role == "system":
                     mid = _get_message_id(msg) or f"system_{uuid.uuid4().hex}"
                     self._ui.register_copy_payload(mid, content)
-                    self._print(f"[[COPY:{mid}]]")
                     self._print(_style("[system]", _C.DIM, enabled=self._color))
                     self._print(content)
+                    self._print(f"[[COPY:{mid}]] {footer}".rstrip())
                     continue
 
                 # Default: assistant/other roles (no role prefix; rely on styling/structure).
                 mid = _get_message_id(msg) or f"assistant_{uuid.uuid4().hex}"
                 self._ui.register_copy_payload(mid, content)
-                self._print(f"[[COPY:{mid}]]")
                 self._print(content)
+                self._print(f"[[COPY:{mid}]] {footer}".rstrip())
 
         self._print(_style("\n" + "─" * 80, _C.DIM, enabled=self._color))
 
@@ -4344,6 +4570,7 @@ class ReactShell:
         # Note: _approve_all_session is NOT reset here - it persists for the entire session
         self._turn_task = str(task or "").strip() or None
         self._turn_trace = []
+        self._turn_started_at = time.perf_counter()
         run_id = self._agent.start(task, allowed_tools=self._allowed_tools)
         self._sync_tool_prompt_settings_to_run(run_id)
         self._last_run_id = run_id
@@ -4364,6 +4591,7 @@ class ReactShell:
             return
 
         self._last_run_id = run_id
+        self._turn_started_at = time.perf_counter()
         # If paused, unpause first (ADR-0013) then continue.
         try:
             self._runtime.resume_run(run_id)
@@ -4436,7 +4664,7 @@ class ReactShell:
                     prompt_text, answer_text = self._extract_latest_turn_prompt_and_answer(state)
                     if isinstance(state.output, dict) and isinstance(state.output.get("answer"), str):
                         answer_text = str(state.output.get("answer") or "")
-                    self._print_answer_block(title="ANSWER (partial)", answer_text=answer_text, prompt_text=prompt_text)
+                    self._print_answer_block(title="ANSWER (partial)", answer_text=answer_text, prompt_text=prompt_text, state=state)
                 return
 
             if state.status == self._RunStatus.CANCELLED:
@@ -4444,7 +4672,7 @@ class ReactShell:
                 self._ui.scroll_to_bottom()
                 self._print(_style("\nRun cancelled. State preserved.", _C.YELLOW, enabled=self._color))
                 prompt_text, answer_text = self._extract_latest_turn_prompt_and_answer(state)
-                self._print_answer_block(title="ANSWER (partial)", answer_text=answer_text, prompt_text=prompt_text)
+                self._print_answer_block(title="ANSWER (partial)", answer_text=answer_text, prompt_text=prompt_text, state=state)
                 loaded = self._messages_from_state(state)
                 if loaded:
                     self._agent.session_messages = loaded
@@ -4472,7 +4700,7 @@ class ReactShell:
                     self._ui.scroll_to_bottom()
                     self._print(_style("\nPaused. Type '/resume' to continue.", _C.YELLOW, enabled=self._color))
                     prompt_text, answer_text = self._extract_latest_turn_prompt_and_answer(state)
-                    self._print_answer_block(title="ANSWER (partial)", answer_text=answer_text, prompt_text=prompt_text)
+                    self._print_answer_block(title="ANSWER (partial)", answer_text=answer_text, prompt_text=prompt_text, state=state)
                     loaded = self._messages_from_state(state)
                     if loaded:
                         self._agent.session_messages = loaded

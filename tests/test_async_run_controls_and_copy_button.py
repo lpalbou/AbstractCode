@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 from datetime import datetime, timezone
 from typing import Any, List, Optional
@@ -57,24 +58,36 @@ def _minimal_shell() -> ReactShell:
     return shell
 
 
+_COPY_LINE_RE = re.compile(r"^\[\[COPY:(?P<id>[^\]]+)\]\]")
+
+
+def _copy_id_from_output_line(line: str) -> str:
+    m = _COPY_LINE_RE.match(str(line or ""))
+    assert m is not None, f"expected a COPY marker line, got: {line!r}"
+    cid = str(m.group("id") or "")
+    assert cid, f"empty COPY id in line: {line!r}"
+    return cid
+
+
 def test_user_prompt_copy_marker_is_at_end_with_trailing_blank_line() -> None:
     shell = ReactShell.__new__(ReactShell)
     shell._color = False
-    text = ReactShell._format_user_prompt_block(shell, "hello", copy_id="cid")
+    text = ReactShell._format_user_prompt_block(shell, "hello", copy_id="cid", footer="2026-01-02 12:34Z")
     lines = text.split("\n")
     assert lines[-1] == ""
-    assert lines[-2] == "[[COPY:cid]]"
+    assert lines[-2].startswith("[[COPY:cid]]")
+    assert "2026-01-02" in lines[-2]
 
 def test_user_prompt_copy_marker_is_separated_from_colored_frame() -> None:
     shell = ReactShell.__new__(ReactShell)
     shell._color = True
     shell._terminal_width = lambda: 60  # type: ignore[assignment]
 
-    text = ReactShell._format_user_prompt_block(shell, "hello", copy_id="cid")
+    text = ReactShell._format_user_prompt_block(shell, "hello", copy_id="cid", footer="2026-01-02 12:34Z")
     lines = text.split("\n")
 
     assert lines[-1] == ""
-    assert lines[-2] == "[[COPY:cid]]"
+    assert lines[-2].startswith("[[COPY:cid]]")
     assert lines[-3].startswith("\033[48;5;238m")
 
 
@@ -116,7 +129,7 @@ def test_run_loop_exits_cleanly_on_cancelled() -> None:
     assert any("Run cancelled" in line for line in shell._output_lines)
     assert shell._output_lines[-1] == ""
     assert shell._output_lines[-2].startswith("[[COPY:assistant_")
-    copy_id = shell._output_lines[-2][len("[[COPY:") : -2]
+    copy_id = _copy_id_from_output_line(shell._output_lines[-2])
     assert copy_id in shell._ui.copy_payloads
     assert "partial" in shell._ui.copy_payloads[copy_id]
 
@@ -161,7 +174,7 @@ def test_run_loop_treats_pause_wait_as_terminal_without_prompt() -> None:
     assert any("Paused. Type '/resume' to continue." in line for line in shell._output_lines)
     assert shell._output_lines[-1] == ""
     assert shell._output_lines[-2].startswith("[[COPY:assistant_")
-    copy_id = shell._output_lines[-2][len("[[COPY:") : -2]
+    copy_id = _copy_id_from_output_line(shell._output_lines[-2])
     assert copy_id in shell._ui.copy_payloads
     assert "partial" in shell._ui.copy_payloads[copy_id]
 
@@ -195,7 +208,7 @@ def test_run_loop_emits_copy_button_on_max_iterations_completion() -> None:
     assert any("Max iterations reached" in line for line in shell._output_lines)
     assert shell._output_lines[-1] == ""
     assert shell._output_lines[-2].startswith("[[COPY:assistant_")
-    copy_id = shell._output_lines[-2][len("[[COPY:") : -2]
+    copy_id = _copy_id_from_output_line(shell._output_lines[-2])
     assert copy_id in shell._ui.copy_payloads
     assert "partial" in shell._ui.copy_payloads[copy_id]
 
