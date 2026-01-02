@@ -2798,6 +2798,7 @@ class ReactShell:
                     pass
 
         added = 0
+        new_tool_defs: List[Any] = []
         for spec in tool_specs:
             if not isinstance(spec, dict):
                 continue
@@ -2820,14 +2821,38 @@ class ReactShell:
             except Exception:
                 # Skip malformed tools (keep sync best-effort).
                 continue
+            new_tool_defs.append(tool_def)
 
-            logic = getattr(self._agent, "logic", None)
-            tools_list = getattr(logic, "tools", None) if logic is not None else None
-            if isinstance(tools_list, list):
-                existing_names = {getattr(t, "name", None) for t in tools_list}
-                if name not in existing_names:
-                    tools_list.append(tool_def)
-                    added += 1
+        # Register synced tools with the agent's logic so the model can actually call them.
+        logic = getattr(self._agent, "logic", None)
+        if logic is not None and new_tool_defs:
+            register = getattr(logic, "add_tools", None)
+            if callable(register):
+                try:
+                    added = int(register(list(new_tool_defs)))
+                except Exception:
+                    added = 0
+            else:
+                # Best-effort fallback for older/alternate logic implementations.
+                internal = getattr(logic, "_tools", None)
+                if isinstance(internal, list):
+                    existing = {getattr(t, "name", None) for t in internal}
+                    for td in new_tool_defs:
+                        n = getattr(td, "name", None)
+                        if n not in existing:
+                            internal.append(td)
+                            existing.add(n)
+                            added += 1
+                else:
+                    tools_list = getattr(logic, "tools", None)
+                    if isinstance(tools_list, list):
+                        existing = {getattr(t, "name", None) for t in tools_list}
+                        for td in new_tool_defs:
+                            n = getattr(td, "name", None)
+                            if n not in existing:
+                                tools_list.append(td)
+                                existing.add(n)
+                                added += 1
 
         self._print(_style(f"Synced {len(tool_specs)} tool(s); added {added} new tool(s).", _C.DIM, enabled=self._color))
 
