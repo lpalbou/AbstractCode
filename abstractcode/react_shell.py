@@ -180,6 +180,20 @@ class ReactShell:
         self._allowed_tools: Optional[List[str]] = None
         # Whether to include tool usage examples in the prompted tool section (token-expensive).
         self._tool_prompt_examples = True
+        # Optional MCP server configuration (used for remote tool execution and tool discovery).
+        # Shape:
+        # - HTTP: {server_id: {"transport":"streamable_http", "url":"...", "headers": {...}}}
+        # - stdio: {server_id: {"transport":"stdio", "command":[...], "cwd": "...", "env": {...}}}
+        #
+        # Backwards compatible: {"url": "...", "headers": {...}} implies streamable_http.
+        self._mcp_servers: Dict[str, Dict[str, Any]] = {}
+        # Optional session-wide default tool executor (MCP server_id). When set, the
+        # tool allowlist can be mapped to `mcp::<server_id>::...` names so tools run
+        # on the selected remote machine by default.
+        self._tool_executor_server_id: Optional[str] = None
+        self._executor_synced_server_ids: set[str] = set()
+        # Optional factory for tests to inject a custom McpClient per server_id.
+        self._mcp_client_factory: Optional[Callable[[str, Dict[str, Any]], Any]] = None
 
         # Lazy imports so `abstractcode --help` works even if deps aren't installed.
         try:
@@ -1379,6 +1393,12 @@ class ReactShell:
         if command in ("tools", "tool", "toolset"):
             self._handle_tools(arg)
             return False
+        if command == "mcp":
+            self._handle_mcp(arg)
+            return False
+        if command in ("executor", "target"):
+            self._handle_executor(arg)
+            return False
         if command in ("tool-specs", "tool_specs", "toolspecs"):
             self._show_tools()
             return False
@@ -2000,6 +2020,72 @@ class ReactShell:
                     self._allowed_tools = [str(t).strip() for t in raw if isinstance(t, str) and t.strip()]
             if "tool_prompt_examples" in config:
                 self._tool_prompt_examples = bool(config.get("tool_prompt_examples"))
+            if "tool_executor" in config:
+                raw_exec = config.get("tool_executor")
+                if raw_exec is None:
+                    self._tool_executor_server_id = None
+                elif isinstance(raw_exec, str) and raw_exec.strip():
+                    self._tool_executor_server_id = raw_exec.strip()
+            if "mcp_servers" in config:
+                raw = config.get("mcp_servers")
+                if isinstance(raw, dict):
+                    out: Dict[str, Dict[str, Any]] = {}
+                    for sid, entry in raw.items():
+                        if not isinstance(sid, str) or not sid.strip():
+                            continue
+                        if not isinstance(entry, dict):
+                            continue
+
+                        transport = str(entry.get("transport") or "").strip().lower()
+                        if not transport:
+                            transport = "stdio" if "command" in entry else "streamable_http"
+
+                        if transport in ("stdio",):
+                            cmd_raw = entry.get("command")
+                            if isinstance(cmd_raw, list):
+                                cmd_out = [str(c) for c in cmd_raw if isinstance(c, str) and c.strip()]
+                            elif isinstance(cmd_raw, str) and cmd_raw.strip():
+                                cmd_out = [cmd_raw.strip()]
+                            else:
+                                continue
+
+                            cwd = entry.get("cwd")
+                            cwd_out = str(cwd).strip() if isinstance(cwd, str) and cwd.strip() else None
+
+                            env_raw = entry.get("env")
+                            if isinstance(env_raw, dict):
+                                env_out = {
+                                    str(k): str(v)
+                                    for k, v in env_raw.items()
+                                    if isinstance(k, str) and str(k).strip() and isinstance(v, (str, int, float, bool))
+                                }
+                            else:
+                                env_out = {}
+
+                            cfg: Dict[str, Any] = {"transport": "stdio", "command": cmd_out}
+                            if cwd_out:
+                                cfg["cwd"] = cwd_out
+                            if env_out:
+                                cfg["env"] = env_out
+                            out[sid.strip()] = cfg
+                            continue
+
+                        url = entry.get("url")
+                        if not isinstance(url, str) or not url.strip():
+                            continue
+                        headers = entry.get("headers")
+                        if headers is None:
+                            headers_out = {}
+                        elif isinstance(headers, dict):
+                            headers_out = {
+                                str(k): str(v)
+                                for k, v in headers.items()
+                                if isinstance(k, str) and str(k).strip() and isinstance(v, (str, int, float, bool))
+                            }
+                        else:
+                            headers_out = {}
+                        out[sid.strip()] = {"transport": transport or "streamable_http", "url": url.strip(), "headers": headers_out}
+                    self._mcp_servers = out
         except Exception:
             pass  # Ignore corrupt config files
 
@@ -2008,16 +2094,31 @@ class ReactShell:
         if not self._config_file:
             return
         try:
-            config = {
-                "max_tokens": self._max_tokens,
-                "max_history_messages": getattr(self, "_max_history_messages", -1),
-                "auto_approve": self._auto_approve,
-                "plan_mode": self._plan_mode,
-                "review_mode": self._review_mode,
-                "review_max_rounds": self._review_max_rounds,
-                "allowed_tools": self._allowed_tools,
-                "tool_prompt_examples": bool(self._tool_prompt_examples),
-            }
+            existing: Dict[str, Any] = {}
+            if self._config_file.exists():
+                try:
+                    raw = json.loads(self._config_file.read_text())
+                    if isinstance(raw, dict):
+                        existing = dict(raw)
+                except Exception:
+                    existing = {}
+
+            config = dict(existing)
+            mcp_servers = getattr(self, "_mcp_servers", None)
+            config.update(
+                {
+                    "max_tokens": self._max_tokens,
+                    "max_history_messages": getattr(self, "_max_history_messages", -1),
+                    "auto_approve": self._auto_approve,
+                    "plan_mode": self._plan_mode,
+                    "review_mode": self._review_mode,
+                    "review_max_rounds": self._review_max_rounds,
+                    "allowed_tools": self._allowed_tools,
+                    "tool_prompt_examples": bool(self._tool_prompt_examples),
+                    "tool_executor": getattr(self, "_tool_executor_server_id", None),
+                    "mcp_servers": dict(mcp_servers or {}) if isinstance(mcp_servers, dict) else {},
+                }
+            )
             self._config_file.write_text(json.dumps(config, indent=2))
         except Exception:
             pass  # Silently fail if we can't write
@@ -2056,23 +2157,6 @@ class ReactShell:
             self._print(_style("  /tools disable <name...>", _C.DIM, enabled=self._color))
             return
 
-        def _split_names(tokens: List[str]) -> List[str]:
-            out: List[str] = []
-            for t in tokens:
-                for part in str(t).split(","):
-                    name = part.strip()
-                    if name:
-                        out.append(name)
-            # de-dup preserving order
-            seen: set[str] = set()
-            deduped: List[str] = []
-            for n in out:
-                if n in seen:
-                    continue
-                seen.add(n)
-                deduped.append(n)
-            return deduped
-
         def _available_tool_defs() -> Dict[str, Any]:
             logic = getattr(self._agent, "logic", None)
             tools = getattr(logic, "tools", None) if logic is not None else None
@@ -2089,8 +2173,35 @@ class ReactShell:
                     out[name] = {"name": name, "description": str(getattr(spec, "description", "") or "")}
             return out
 
+        if callable(getattr(self, "_maybe_sync_executor_tools", None)):
+            self._maybe_sync_executor_tools()
+
         available = _available_tool_defs()
         available_names = sorted(available.keys())
+
+        def _split_names(tokens: List[str]) -> List[str]:
+            out: List[str] = []
+            executor_id = str(getattr(self, "_tool_executor_server_id", "") or "").strip()
+            for t in tokens:
+                for part in str(t).split(","):
+                    name = part.strip()
+                    if not name:
+                        continue
+                    if not name.startswith("mcp::") and executor_id:
+                        candidate = f"mcp::{executor_id}::{name}"
+                        if candidate in available:
+                            out.append(candidate)
+                            continue
+                    out.append(name)
+            # de-dup preserving order
+            seen: set[str] = set()
+            deduped: List[str] = []
+            for n in out:
+                if n in seen:
+                    continue
+                seen.add(n)
+                deduped.append(n)
+            return deduped
 
         def _effective_allowlist_from_state() -> Optional[List[str]]:
             state = self._safe_get_state()
@@ -2106,74 +2217,6 @@ class ReactShell:
                 return None
             return [str(t).strip() for t in raw_allow if isinstance(t, str) and t.strip()]
 
-        def _apply_examples_to_active_run(enabled: bool) -> None:
-            state = self._safe_get_state()
-            if state is None or not hasattr(state, "vars") or not isinstance(state.vars, dict):
-                return
-            runtime_ns = state.vars.get("_runtime")
-            if not isinstance(runtime_ns, dict):
-                runtime_ns = {}
-                state.vars["_runtime"] = runtime_ns
-            runtime_ns["tool_prompt_examples"] = bool(enabled)
-            self._status_cache_key = None
-            self._status_cache_text = ""
-            try:
-                self._runtime.run_store.save(state)
-            except Exception:
-                pass
-
-        def _apply_to_active_run(allow: Optional[List[str]]) -> None:
-            state = self._safe_get_state()
-            if state is None or not hasattr(state, "vars") or not isinstance(state.vars, dict):
-                return
-            runtime_ns = state.vars.get("_runtime")
-            if not isinstance(runtime_ns, dict):
-                runtime_ns = {}
-                state.vars["_runtime"] = runtime_ns
-            runtime_ns["tool_prompt_examples"] = bool(self._tool_prompt_examples)
-            if allow is None:
-                runtime_ns.pop("allowed_tools", None)
-            else:
-                runtime_ns["allowed_tools"] = list(allow)
-
-            # Keep tool metadata in sync so /memory + footer reflect the *current* allowlist
-            # without waiting for the next LLM iteration.
-            try:
-                logic = getattr(self._agent, "logic", None)
-                tool_defs = getattr(logic, "tools", None) if logic is not None else None
-                if isinstance(tool_defs, list):
-                    tool_by_name = {t.name: t for t in tool_defs if getattr(t, "name", None)}
-                    if allow is None:
-                        ordered_names = [str(t.name) for t in tool_defs if getattr(t, "name", None)]
-                    else:
-                        ordered_names = [str(n) for n in allow if str(n) in tool_by_name]
-                    tool_specs: List[Dict[str, Any]] = []
-                    for name in ordered_names:
-                        tool = tool_by_name.get(name)
-                        if tool is None:
-                            continue
-                        to_dict = getattr(tool, "to_dict", None)
-                        if callable(to_dict):
-                            spec = to_dict()
-                            if isinstance(spec, dict):
-                                tool_specs.append(spec)
-                    runtime_ns["tool_specs"] = tool_specs
-                    import hashlib
-
-                    normalized = sorted((dict(s) for s in tool_specs), key=lambda s: str(s.get("name", "")))
-                    payload = json.dumps(normalized, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-                    runtime_ns["toolset_id"] = f"ts_{hashlib.sha256(payload).hexdigest()}"
-            except Exception:
-                pass
-
-            # Invalidate footer cache (tools can change token usage materially).
-            self._status_cache_key = None
-            self._status_cache_text = ""
-            try:
-                self._runtime.run_store.save(state)
-            except Exception:
-                pass
-
         if sub in ("help", "-h", "--help"):
             self._print(_style("Usage:", _C.DIM, enabled=self._color))
             self._print(_style("  /tools", _C.DIM, enabled=self._color))
@@ -2186,12 +2229,29 @@ class ReactShell:
 
         if sub == "reset":
             self._allowed_tools = None
-            _apply_to_active_run(None)
+            if callable(getattr(self, "_apply_tool_settings_to_active_run", None)):
+                self._apply_tool_settings_to_active_run(allowed_tools=None)
             self._save_config()
             self._print(_style("✅ Tools reset to default (all enabled).", _C.GREEN, enabled=self._color))
             sub = "list"
 
         if sub == "examples":
+            def _apply_examples_to_active_run(enabled: bool) -> None:
+                state = self._safe_get_state()
+                if state is None or not hasattr(state, "vars") or not isinstance(state.vars, dict):
+                    return
+                runtime_ns = state.vars.get("_runtime")
+                if not isinstance(runtime_ns, dict):
+                    runtime_ns = {}
+                    state.vars["_runtime"] = runtime_ns
+                runtime_ns["tool_prompt_examples"] = bool(enabled)
+                self._status_cache_key = None
+                self._status_cache_text = ""
+                try:
+                    self._runtime.run_store.save(state)
+                except Exception:
+                    pass
+
             value = args[0].strip().lower() if args else ""
             if value in ("on", "true", "1", "yes"):
                 self._tool_prompt_examples = True
@@ -2221,7 +2281,8 @@ class ReactShell:
             if sub in ("enable", "disable") and len(names) == 1 and names[0].lower() in ("all", "*"):
                 new_allow = list(available_names) if sub == "enable" else []
                 self._allowed_tools = list(new_allow)
-                _apply_to_active_run(self._allowed_tools)
+                if callable(getattr(self, "_apply_tool_settings_to_active_run", None)):
+                    self._apply_tool_settings_to_active_run(allowed_tools=self._allowed_tools)
                 self._save_config()
                 mode = "enabled" if sub == "enable" else "disabled"
                 self._print(_style(f"✅ All tools {mode}.", _C.GREEN, enabled=self._color))
@@ -2235,7 +2296,6 @@ class ReactShell:
 
                 current = _effective_allowlist_from_state()
                 if current is None:
-                    # Fall back to persisted selection if no active override.
                     current = list(self._allowed_tools) if isinstance(self._allowed_tools, list) else list(available_names)
                 current_set = set(current)
 
@@ -2243,21 +2303,22 @@ class ReactShell:
                     new_allow = names
                 elif sub == "enable":
                     new_allow = list(dict.fromkeys(list(current) + list(names)))
-                else:  # disable
+                else:
                     new_allow = [n for n in current if n not in set(names)]
                 new_set = set(new_allow)
                 added = [n for n in new_allow if n not in current_set]
                 removed = [n for n in current if n not in new_set]
 
                 self._allowed_tools = list(new_allow)
-                _apply_to_active_run(self._allowed_tools)
+                if callable(getattr(self, "_apply_tool_settings_to_active_run", None)):
+                    self._apply_tool_settings_to_active_run(allowed_tools=self._allowed_tools)
                 self._save_config()
-                parts: List[str] = []
+                parts2: List[str] = []
                 if added:
-                    parts.append("+" + ", ".join(added))
+                    parts2.append("+" + ", ".join(added))
                 if removed:
-                    parts.append("-" + ", ".join(removed))
-                delta = f" ({' '.join(parts)})" if parts else ""
+                    parts2.append("-" + ", ".join(removed))
+                delta = f" ({' '.join(parts2)})" if parts2 else ""
                 self._print(
                     _style(
                         f"✅ Tools updated: {len(self._allowed_tools)}/{len(available_names)} enabled{delta}.",
@@ -2267,9 +2328,12 @@ class ReactShell:
                 )
                 sub = "list"
 
-        # Default: list tools with enabled status.
         effective_from_run = _effective_allowlist_from_state()
-        source = "active run" if isinstance(effective_from_run, list) else ("session config" if isinstance(self._allowed_tools, list) else "default")
+        source = (
+            "active run"
+            if isinstance(effective_from_run, list)
+            else ("session config" if isinstance(self._allowed_tools, list) else "default")
+        )
         effective = effective_from_run
         if effective is None:
             effective = list(self._allowed_tools) if isinstance(self._allowed_tools, list) else list(available_names)
@@ -2289,12 +2353,594 @@ class ReactShell:
         for name in available_names:
             icon = "✅" if name in enabled_set else "❌"
             desc = available.get(name, {}).get("description") or ""
-            line = f"  {icon} {name}"
-            self._print(line)
+            self._print(f"  {icon} {name}")
             if isinstance(desc, str) and desc.strip():
                 self._print(_style(f"     {desc.strip()}", _C.DIM, enabled=self._color))
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
         self._print(_style("Tip: /tools only list_files read_file write_file", _C.DIM, enabled=self._color))
+
+    def _handle_mcp(self, raw: str) -> None:
+        """Configure and sync MCP servers for tool discovery/execution.
+
+        Usage:
+          /mcp
+          /mcp list
+          /mcp add <server_id> <url> [--header K=V ...]
+          /mcp add <server_id> stdio [--cwd PATH] [--env K=V ...] -- <command...>
+          /mcp remove <server_id>
+          /mcp sync [server_id|all]
+        """
+        import shlex
+
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split() if raw else []
+
+        sub = parts[0].lower() if parts else "list"
+        args = parts[1:] if len(parts) > 1 else []
+
+        if sub in ("help", "-h", "--help"):
+            self._print(_style("Usage:", _C.DIM, enabled=self._color))
+            self._print(_style("  /mcp list", _C.DIM, enabled=self._color))
+            self._print(_style("  /mcp add <server_id> <url> [--header K=V ...]", _C.DIM, enabled=self._color))
+            self._print(_style("  /mcp add <server_id> stdio [--cwd PATH] [--env K=V ...] -- <command...>", _C.DIM, enabled=self._color))
+            self._print(_style("  /mcp remove <server_id>", _C.DIM, enabled=self._color))
+            self._print(_style("  /mcp sync [server_id|all]", _C.DIM, enabled=self._color))
+            return
+
+        if sub in ("list",):
+            servers = self._mcp_servers or {}
+            if not servers:
+                self._print(_style("No MCP servers configured.", _C.DIM, enabled=self._color))
+                return
+            self._print(_style("MCP servers:", _C.CYAN, _C.BOLD, enabled=self._color))
+            for sid, entry in sorted(servers.items()):
+                transport = str(entry.get("transport") or "").strip() or ("stdio" if "command" in entry else "streamable_http")
+                if transport == "stdio":
+                    cmd = entry.get("command")
+                    cmd_str = " ".join(str(c) for c in cmd) if isinstance(cmd, list) else str(cmd or "")
+                    self._print(f"- {sid}: stdio -- {cmd_str}")
+                else:
+                    url = entry.get("url")
+                    self._print(f"- {sid}: {url}")
+            return
+
+        if sub in ("add",):
+            if len(args) < 2:
+                self._print(_style("Usage:", _C.DIM, enabled=self._color))
+                self._print(_style("  /mcp add <server_id> <url> [--header K=V ...]", _C.DIM, enabled=self._color))
+                self._print(_style("  /mcp add <server_id> stdio [--cwd PATH] [--env K=V ...] -- <command...>", _C.DIM, enabled=self._color))
+                return
+
+            server_id = str(args[0] or "").strip()
+            if not server_id:
+                self._print(_style("server_id must be non-empty.", _C.DIM, enabled=self._color))
+                return
+
+            mode = str(args[1] or "").strip()
+            if mode.lower() == "stdio":
+                # Expected: /mcp add <server_id> stdio [--cwd PATH] [--env K=V ...] -- <command...>
+                cwd: Optional[str] = None
+                env: Dict[str, str] = {}
+
+                if "--" not in args:
+                    self._print(
+                        _style(
+                            "Usage: /mcp add <server_id> stdio [--cwd PATH] [--env K=V ...] -- <command...>",
+                            _C.DIM,
+                            enabled=self._color,
+                        )
+                    )
+                    return
+
+                idx = args.index("--")
+                flags = args[2:idx]
+                cmd = args[idx + 1 :]
+
+                if not cmd:
+                    self._print(_style("stdio MCP requires a non-empty command after `--`.", _C.DIM, enabled=self._color))
+                    return
+
+                i = 0
+                while i < len(flags):
+                    token = flags[i]
+                    if token == "--cwd" and i + 1 < len(flags):
+                        cwd = str(flags[i + 1] or "").strip() or None
+                        i += 2
+                        continue
+                    if token == "--env" and i + 1 < len(flags):
+                        kv = str(flags[i + 1] or "")
+                        k, sep, v = kv.partition("=")
+                        k = k.strip()
+                        v = v.strip()
+                        if sep == "=" and k:
+                            env[k] = v
+                        i += 2
+                        continue
+                    i += 1
+
+                existing = dict(self._mcp_servers or {})
+                entry: Dict[str, Any] = {"transport": "stdio", "command": cmd}
+                if cwd:
+                    entry["cwd"] = cwd
+                if env:
+                    entry["env"] = env
+                existing[server_id] = entry
+                self._mcp_servers = existing
+                self._save_config()
+                self._print(_style(f"Added MCP server '{server_id}' (stdio).", _C.DIM, enabled=self._color))
+                return
+
+            url = str(args[1] or "").strip()
+            if not url:
+                self._print(_style("url must be non-empty.", _C.DIM, enabled=self._color))
+                return
+
+            headers: Dict[str, str] = {}
+            i = 2
+            while i < len(args):
+                token = args[i]
+                if token == "--header" and i + 1 < len(args):
+                    kv = str(args[i + 1] or "")
+                    k, sep, v = kv.partition("=")
+                    k = k.strip()
+                    v = v.strip()
+                    if sep == "=" and k and v:
+                        headers[k] = v
+                    i += 2
+                    continue
+                i += 1
+
+            existing = dict(self._mcp_servers or {})
+            existing[server_id] = {"transport": "streamable_http", "url": url, "headers": headers}
+            self._mcp_servers = existing
+            self._save_config()
+            self._print(_style(f"Added MCP server '{server_id}'.", _C.DIM, enabled=self._color))
+            return
+
+        if sub in ("remove", "rm", "delete"):
+            if not args:
+                self._print(_style("Usage: /mcp remove <server_id>", _C.DIM, enabled=self._color))
+                return
+            server_id = str(args[0] or "").strip()
+            if not server_id:
+                return
+            existing = dict(self._mcp_servers or {})
+            if server_id not in existing:
+                self._print(_style(f"Unknown MCP server '{server_id}'.", _C.DIM, enabled=self._color))
+                return
+            existing.pop(server_id, None)
+            self._mcp_servers = existing
+            self._save_config()
+            self._print(_style(f"Removed MCP server '{server_id}'.", _C.DIM, enabled=self._color))
+            return
+
+        if sub in ("sync",):
+            target = args[0].strip() if args else "all"
+            servers = self._mcp_servers or {}
+            if not servers:
+                self._print(_style("No MCP servers configured.", _C.DIM, enabled=self._color))
+                return
+            if target == "all":
+                for sid in sorted(servers.keys()):
+                    self._sync_mcp_tools(server_id=sid)
+                return
+            if target not in servers:
+                self._print(_style(f"Unknown MCP server '{target}'.", _C.DIM, enabled=self._color))
+                return
+            self._sync_mcp_tools(server_id=target)
+            return
+
+        self._print(_style("Unknown /mcp command. Try: /mcp help", _C.DIM, enabled=self._color))
+
+    def _get_available_tool_defs(self) -> Dict[str, Any]:
+        """Return {tool_name -> {name, description}} for the agent's current tool catalog."""
+        logic = getattr(self._agent, "logic", None)
+        tools = getattr(logic, "tools", None) if logic is not None else None
+        out: Dict[str, Any] = {}
+        if isinstance(tools, list):
+            for t in tools:
+                name = getattr(t, "name", None)
+                desc = getattr(t, "description", None)
+                if isinstance(name, str) and name:
+                    out[name] = {"name": name, "description": str(desc or "")}
+        # Fallback to CLI-known tools (may omit runtime built-ins).
+        if not out:
+            for name, spec in (self._tool_specs or {}).items():
+                out[name] = {"name": name, "description": str(getattr(spec, "description", "") or "")}
+        return out
+
+    def _apply_tool_settings_to_active_run(
+        self,
+        *,
+        allowed_tools: Optional[List[str]] = None,
+        tool_prompt_examples: Optional[bool] = None,
+    ) -> None:
+        """Best-effort: persist tool allowlist + tool prompt settings into the active run."""
+        state = self._safe_get_state()
+        if state is None or not hasattr(state, "vars") or not isinstance(state.vars, dict):
+            return
+
+        runtime_ns = state.vars.get("_runtime")
+        if not isinstance(runtime_ns, dict):
+            runtime_ns = {}
+            state.vars["_runtime"] = runtime_ns
+
+        runtime_ns["tool_prompt_examples"] = (
+            bool(self._tool_prompt_examples) if tool_prompt_examples is None else bool(tool_prompt_examples)
+        )
+
+        if allowed_tools is None:
+            runtime_ns.pop("allowed_tools", None)
+        else:
+            runtime_ns["allowed_tools"] = list(allowed_tools)
+
+        # Keep tool metadata in sync so /memory + footer reflect the *current* allowlist
+        # without waiting for the next LLM iteration.
+        try:
+            logic = getattr(self._agent, "logic", None)
+            tool_defs = getattr(logic, "tools", None) if logic is not None else None
+            if isinstance(tool_defs, list):
+                tool_by_name = {t.name: t for t in tool_defs if getattr(t, "name", None)}
+                if allowed_tools is None:
+                    ordered_names = [str(t.name) for t in tool_defs if getattr(t, "name", None)]
+                else:
+                    ordered_names = [str(n) for n in allowed_tools if str(n) in tool_by_name]
+                tool_specs: List[Dict[str, Any]] = []
+                for name in ordered_names:
+                    tool = tool_by_name.get(name)
+                    if tool is None:
+                        continue
+                    to_dict = getattr(tool, "to_dict", None)
+                    if callable(to_dict):
+                        spec = to_dict()
+                        if isinstance(spec, dict):
+                            tool_specs.append(spec)
+                runtime_ns["tool_specs"] = tool_specs
+                import hashlib
+
+                normalized = sorted((dict(s) for s in tool_specs), key=lambda s: str(s.get("name", "")))
+                payload = json.dumps(
+                    normalized, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+                ).encode("utf-8")
+                runtime_ns["toolset_id"] = f"ts_{hashlib.sha256(payload).hexdigest()}"
+        except Exception:
+            pass
+
+        # Invalidate footer cache (tools can change token usage materially).
+        self._status_cache_key = None
+        self._status_cache_text = ""
+        try:
+            self._runtime.run_store.save(state)
+        except Exception:
+            pass
+
+    def _maybe_sync_executor_tools(self) -> None:
+        sid = str(getattr(self, "_tool_executor_server_id", "") or "").strip()
+        if not sid:
+            return
+
+        synced = getattr(self, "_executor_synced_server_ids", None)
+        if not isinstance(synced, set):
+            synced = set()
+            self._executor_synced_server_ids = synced
+
+        if sid in synced:
+            return
+
+        servers = getattr(self, "_mcp_servers", None) or {}
+        if not isinstance(servers, dict) or sid not in servers:
+            return
+        try:
+            self._sync_mcp_tools(server_id=sid)
+            synced.add(sid)
+        except Exception:
+            return
+
+    def _handle_executor(self, raw: str) -> None:
+        """Set the default tool executor for this session (local vs remote MCP server).
+
+        Usage:
+          /executor
+          /executor status
+          /executor list
+          /executor use <server_id>
+          /executor off
+        """
+        import shlex
+
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split() if raw else []
+
+        sub = parts[0].lower() if parts else "status"
+        args = parts[1:] if len(parts) > 1 else []
+
+        if sub in ("help", "-h", "--help"):
+            self._print(_style("Usage:", _C.DIM, enabled=self._color))
+            self._print(_style("  /executor status", _C.DIM, enabled=self._color))
+            self._print(_style("  /executor list", _C.DIM, enabled=self._color))
+            self._print(_style("  /executor use <server_id>", _C.DIM, enabled=self._color))
+            self._print(_style("  /executor off", _C.DIM, enabled=self._color))
+            return
+
+        if sub in ("list",):
+            servers = self._mcp_servers or {}
+            if not servers:
+                self._print(_style("No MCP servers configured. Use /mcp add ...", _C.DIM, enabled=self._color))
+                return
+            current = str(self._tool_executor_server_id or "").strip()
+            self._print(_style("Executors (MCP servers):", _C.CYAN, _C.BOLD, enabled=self._color))
+            for sid, entry in sorted(servers.items()):
+                transport = str(entry.get("transport") or "").strip() or (
+                    "stdio" if "command" in entry else "streamable_http"
+                )
+                marker = " *" if sid == current else ""
+                self._print(f"- {sid} ({transport}){marker}")
+            return
+
+        if sub in ("off", "disable", "reset"):
+            prev = str(self._tool_executor_server_id or "").strip()
+            self._tool_executor_server_id = None
+            self._save_config()
+
+            if prev and isinstance(self._allowed_tools, list):
+                prefix = f"mcp::{prev}::"
+                mapped: List[str] = []
+                for name in self._allowed_tools:
+                    if isinstance(name, str) and name.startswith(prefix):
+                        mapped.append(name[len(prefix) :])
+                    else:
+                        mapped.append(name)
+                self._allowed_tools = mapped
+                self._apply_tool_settings_to_active_run(allowed_tools=self._allowed_tools)
+                self._save_config()
+
+            self._print(_style("Executor: local (default).", _C.DIM, enabled=self._color))
+            return
+
+        if sub in ("use",):
+            if not args:
+                self._print(_style("Usage: /executor use <server_id>", _C.DIM, enabled=self._color))
+                return
+            server_id = str(args[0] or "").strip()
+            if not server_id:
+                return
+            if server_id not in (self._mcp_servers or {}):
+                self._print(_style(f"Unknown MCP server '{server_id}'. Use /mcp list.", _C.DIM, enabled=self._color))
+                return
+
+            # Ensure remote tools exist in the agent catalog.
+            self._sync_mcp_tools(server_id=server_id)
+            self._executor_synced_server_ids.add(server_id)
+
+            available = self._get_available_tool_defs()
+            remote_prefix = f"mcp::{server_id}::"
+            remote_names = sorted([n for n in available.keys() if isinstance(n, str) and n.startswith(remote_prefix)])
+            remote_set = set(remote_names)
+            if not remote_names:
+                self._print(_style(f"No remote tools found for '{server_id}' (sync may have failed).", _C.YELLOW, enabled=self._color))
+                return
+
+            missing: List[str] = []
+            if isinstance(self._allowed_tools, list):
+                new_allow: List[str] = []
+                for name in self._allowed_tools:
+                    if not isinstance(name, str) or not name.strip():
+                        continue
+                    if name.startswith("mcp::"):
+                        new_allow.append(name)
+                        continue
+                    candidate = remote_prefix + name
+                    if candidate in remote_set:
+                        new_allow.append(candidate)
+                    else:
+                        missing.append(name)
+                allow = list(dict.fromkeys(new_allow)) if new_allow else list(remote_names)
+            else:
+                allow = list(remote_names)
+
+            self._tool_executor_server_id = server_id
+            self._allowed_tools = allow
+            self._apply_tool_settings_to_active_run(allowed_tools=self._allowed_tools)
+            self._save_config()
+
+            if missing:
+                self._print(
+                    _style(
+                        "Note: local-only tools disabled (not available on executor): " + ", ".join(sorted(set(missing))),
+                        _C.DIM,
+                        enabled=self._color,
+                    )
+                )
+            self._print(_style(f"Executor: {server_id} (remote MCP).", _C.GREEN, enabled=self._color))
+            return
+
+        # Default: status.
+        current = str(self._tool_executor_server_id or "").strip()
+        if current:
+            self._print(_style(f"Executor: {current} (remote MCP).", _C.DIM, enabled=self._color))
+        else:
+            self._print(_style("Executor: local (default).", _C.DIM, enabled=self._color))
+
+    def _sync_mcp_tools(self, *, server_id: str) -> None:
+        server_id = str(server_id or "").strip()
+        if not server_id:
+            return
+
+        try:
+            from abstractcore.mcp import McpToolSource
+            from abstractcore.tools import ToolDefinition
+        except Exception as e:
+            self._print(_style(f"MCP tools unavailable: {e}", _C.YELLOW, enabled=self._color))
+            return
+
+        self._print(_style(f"Syncing MCP tools from '{server_id}'...", _C.DIM, enabled=self._color))
+        cache: Dict[str, Any] = {}
+        try:
+            client = self._get_mcp_client(server_id=server_id, cache=cache)
+            entry = (self._mcp_servers or {}).get(server_id) or {}
+            transport = str(entry.get("transport") or "").strip() or ("stdio" if "command" in entry else "streamable_http")
+            origin_url = entry.get("url") if isinstance(entry, dict) else None
+            tool_specs = McpToolSource(server_id=server_id, client=client, transport=transport, origin_url=origin_url).list_tool_specs()
+        except Exception as e:
+            self._print(_style(f"Failed to sync MCP tools from '{server_id}': {e}", _C.YELLOW, enabled=self._color))
+            return
+        finally:
+            for c in cache.values():
+                try:
+                    close = getattr(c, "close", None)
+                    if callable(close):
+                        close()
+                except Exception:
+                    pass
+
+        added = 0
+        for spec in tool_specs:
+            if not isinstance(spec, dict):
+                continue
+            name = spec.get("name")
+            desc = spec.get("description")
+            params = spec.get("parameters")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            if not isinstance(desc, str) or not desc.strip():
+                continue
+            if not isinstance(params, dict):
+                params = {}
+
+            # Update UI tool catalog.
+            self._tool_specs[name] = _ToolSpec(name=name, description=desc, parameters=dict(params))
+
+            # Update agent tool catalog for prompted tool use.
+            try:
+                tool_def = ToolDefinition(name=name, description=desc, parameters=dict(params))
+            except Exception:
+                # Skip malformed tools (keep sync best-effort).
+                continue
+
+            logic = getattr(self._agent, "logic", None)
+            tools_list = getattr(logic, "tools", None) if logic is not None else None
+            if isinstance(tools_list, list):
+                existing_names = {getattr(t, "name", None) for t in tools_list}
+                if name not in existing_names:
+                    tools_list.append(tool_def)
+                    added += 1
+
+        self._print(_style(f"Synced {len(tool_specs)} tool(s); added {added} new tool(s).", _C.DIM, enabled=self._color))
+
+    def _get_mcp_client(self, *, server_id: str, cache: Dict[str, Any]) -> Any:
+        sid = str(server_id or "").strip()
+        if not sid:
+            raise ValueError("Missing MCP server_id")
+
+        if sid in cache:
+            return cache[sid]
+
+        entry = (self._mcp_servers or {}).get(sid)
+        if not isinstance(entry, dict):
+            raise ValueError(f"Unknown MCP server '{sid}'")
+
+        factory = getattr(self, "_mcp_client_factory", None)
+        if callable(factory):
+            client = factory(sid, entry)
+        else:
+            from abstractcore.mcp import create_mcp_client
+
+            client = create_mcp_client(config=entry)
+
+        cache[sid] = client
+        return client
+
+    def _execute_mcp_tool_call(
+        self,
+        *,
+        name: str,
+        arguments: Dict[str, Any],
+        call_id: str,
+        cache: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        from abstractcore.mcp import parse_namespaced_tool_name
+
+        parsed = parse_namespaced_tool_name(name)
+        if parsed is None:
+            raise ValueError("Not an MCP tool call")
+        server_id, tool_name = parsed
+
+        client = self._get_mcp_client(server_id=server_id, cache=cache)
+        mcp_result = client.call_tool(name=tool_name, arguments=arguments)
+
+        def _result_text(res: Any) -> str:
+            if not isinstance(res, dict):
+                return ""
+            content = res.get("content")
+            if not isinstance(content, list):
+                return ""
+            texts: list[str] = []
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") != "text":
+                    continue
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    texts.append(text.strip())
+            return "\n".join(texts).strip()
+
+        is_error = isinstance(mcp_result, dict) and mcp_result.get("isError") is True
+        text = _result_text(mcp_result)
+
+        if is_error:
+            return {
+                "call_id": call_id,
+                "name": name,
+                "success": False,
+                "output": None,
+                "error": text or "MCP tool call reported error",
+            }
+
+        # Some MCP servers report failures as plain text while leaving `isError=false`.
+        if text:
+            t = text.strip()
+            if t.startswith("Error:"):
+                cleaned = t[len("Error:") :].strip()
+                return {
+                    "call_id": call_id,
+                    "name": name,
+                    "success": False,
+                    "output": None,
+                    "error": cleaned or t,
+                }
+            if t.startswith(("❌", "🚫", "⏰")):
+                cleaned = t.lstrip("❌🚫⏰").strip()
+                if cleaned.startswith("Error:"):
+                    cleaned = cleaned[len("Error:") :].strip()
+                return {
+                    "call_id": call_id,
+                    "name": name,
+                    "success": False,
+                    "output": None,
+                    "error": cleaned or t,
+                }
+
+        output: Any
+        if text:
+            try:
+                output = json.loads(text)
+            except Exception:
+                output = text
+        else:
+            output = mcp_result
+
+        return {
+            "call_id": call_id,
+            "name": name,
+            "success": True,
+            "output": output,
+            "error": None,
+        }
 
     def _handle_max_messages(self, raw: str) -> None:
         """Show or set max history messages."""
@@ -4006,12 +4652,17 @@ class ReactShell:
         self._print(
             "\nCommands:\n"
             "  /help               Show this message\n"
+            "  /mcp                Configure MCP servers [saved]\n"
             "  /tools              List/configure tool allowlist [saved]\n"
             "                     - /tools reset\n"
             "                     - /tools examples on|off\n"
             "                     - /tools only <name...>\n"
             "                     - /tools enable <name...>\n"
             "                     - /tools disable <name...>\n"
+            "  /executor           Set default tool executor [saved]\n"
+            "                     - /executor list\n"
+            "                     - /executor use <server_id>\n"
+            "                     - /executor off\n"
             "  /tool-specs         Show full tool schemas (params)\n"
             "  /status             Show current run status\n"
             "  /auto-accept        Toggle auto-accept for tools [saved]\n"
@@ -4568,6 +5219,7 @@ class ReactShell:
             self._print(_style("A run is already executing. Use /pause or /cancel first.", _C.DIM, enabled=self._color))
             return
         # Note: _approve_all_session is NOT reset here - it persists for the entire session
+        self._maybe_sync_executor_tools()
         self._turn_task = str(task or "").strip() or None
         self._turn_trace = []
         self._turn_started_at = time.perf_counter()
@@ -4590,6 +5242,7 @@ class ReactShell:
             self._print("No run to resume.")
             return
 
+        self._maybe_sync_executor_tools()
         self._last_run_id = run_id
         self._turn_started_at = time.perf_counter()
         # If paused, unpause first (ADR-0013) then continue.
@@ -4760,43 +5413,85 @@ class ReactShell:
 
         approve_all = False
         results: List[Dict[str, Any]] = []
+        mcp_clients: Dict[str, Any] = {}
 
-        for tc in tool_calls:
-            name = str(tc.get("name", "") or "")
-            args = dict(tc.get("arguments") or {})
-            call_id = str(tc.get("call_id") or "")
+        try:
+            for tc in tool_calls:
+                name = str(tc.get("name", "") or "")
+                args = dict(tc.get("arguments") or {})
+                call_id = str(tc.get("call_id") or "")
 
-            # Keep approval prompts compact: the agent already printed the tool call itself
-            # in the "act" step. Only show a diff preview for edit_file when explicitly
-            # approving (no argument dumps).
-            if name == "edit_file" and (not auto and not approve_all):
-                try:
-                    preview_args = dict(args)
-                    preview_args["preview_only"] = True
-                    preview_out = self._tool_runner.execute(
-                        tool_calls=[{"name": name, "arguments": preview_args, "call_id": call_id}]
-                    )
-                    preview_results = preview_out.get("results") or []
-                    if preview_results and isinstance(preview_results[0], dict):
-                        preview_raw = preview_results[0].get("output")
-                        if preview_raw is None:
-                            preview_raw = preview_results[0].get("error")
-                        preview_raw = "" if preview_raw is None else str(preview_raw)
-                        self._print(_style("preview:", _C.DIM, enabled=self._color))
-                        self._print_tool_observation(tool_name=name, raw=preview_raw, indent="  ")
-                except Exception:
-                    pass
+                # Keep approval prompts compact: the agent already printed the tool call itself
+                # in the "act" step. Only show a diff preview for edit_file when explicitly
+                # approving (no argument dumps).
+                if name == "edit_file" and (not auto and not approve_all):
+                    try:
+                        preview_args = dict(args)
+                        preview_args["preview_only"] = True
+                        preview_out = self._tool_runner.execute(
+                            tool_calls=[{"name": name, "arguments": preview_args, "call_id": call_id}]
+                        )
+                        preview_results = preview_out.get("results") or []
+                        if preview_results and isinstance(preview_results[0], dict):
+                            preview_raw = preview_results[0].get("output")
+                            if preview_raw is None:
+                                preview_raw = preview_results[0].get("error")
+                            preview_raw = "" if preview_raw is None else str(preview_raw)
+                            self._print(_style("preview:", _C.DIM, enabled=self._color))
+                            self._print_tool_observation(tool_name=name, raw=preview_raw, indent="  ")
+                    except Exception:
+                        pass
 
-            if not auto and not approve_all:
-                while True:
-                    choice = self._simple_prompt(f"Approve {name}? [y]es/[n]o/[a]ll/[e]dit/[q]uit: ").lower()
-                    if choice in ("y", "yes"):
-                        break
-                    if choice in ("a", "all"):
-                        approve_all = True
-                        self._approve_all_session = True
-                        break
-                    if choice in ("n", "no"):
+                if not auto and not approve_all:
+                    while True:
+                        choice = self._simple_prompt(
+                            f"Approve {name}? [y]es/[n]o/[a]ll/[e]dit/[q]uit: "
+                        ).lower()
+                        if choice in ("y", "yes"):
+                            break
+                        if choice in ("a", "all"):
+                            approve_all = True
+                            self._approve_all_session = True
+                            break
+                        if choice in ("n", "no"):
+                            results.append(
+                                {
+                                    "call_id": call_id,
+                                    "name": name,
+                                    "success": False,
+                                    "output": None,
+                                    "error": "Rejected by user",
+                                }
+                            )
+                            name = ""
+                            break
+                        if choice in ("q", "quit"):
+                            return None
+                        if choice in ("e", "edit"):
+                            edited = self._simple_prompt("New arguments (JSON): ")
+                            if edited:
+                                try:
+                                    new_args = json.loads(edited)
+                                except json.JSONDecodeError as e:
+                                    self._print(_style(f"Invalid JSON: {e}", _C.YELLOW, enabled=self._color))
+                                    continue
+                                if not isinstance(new_args, dict):
+                                    self._print(_style("Arguments must be a JSON object.", _C.YELLOW, enabled=self._color))
+                                    continue
+                                args = new_args
+                                tc["arguments"] = args
+                                self._print(_style("Updated args.", _C.DIM, enabled=self._color))
+                            continue
+
+                        self._print("Enter y/n/a/e/q.")
+
+                if not name:
+                    continue
+
+                # Additional confirmation for shell execution (skip if auto/approve_all is set)
+                if name == "execute_command" and not auto and not approve_all:
+                    confirm = self._simple_prompt("Type 'run' to execute this command: ").lower()
+                    if confirm != "run":
                         results.append(
                             {
                                 "call_id": call_id,
@@ -4806,103 +5501,110 @@ class ReactShell:
                                 "error": "Rejected by user",
                             }
                         )
-                        name = ""
-                        break
-                    if choice in ("q", "quit"):
-                        return None
-                    if choice in ("e", "edit"):
-                        edited = self._simple_prompt("New arguments (JSON): ")
-                        if edited:
-                            try:
-                                new_args = json.loads(edited)
-                            except json.JSONDecodeError as e:
-                                self._print(_style(f"Invalid JSON: {e}", _C.YELLOW, enabled=self._color))
-                                continue
-                            if not isinstance(new_args, dict):
-                                self._print(_style("Arguments must be a JSON object.", _C.YELLOW, enabled=self._color))
-                                continue
-                            args = new_args
-                            tc["arguments"] = args
-                            self._print(_style("Updated args.", _C.DIM, enabled=self._color))
                         continue
 
-                    self._print("Enter y/n/a/e/q.")
+                # Dedup identical execute_command calls that already succeeded (common model glitch).
+                if name == "execute_command":
+                    cmd = str(args.get("command") or "")
+                    if cmd and cmd == (self._last_execute_command or ""):
+                        prev = self._last_execute_command_result or {}
+                        if isinstance(prev, dict) and prev.get("success") is True:
+                            cached = dict(prev)
+                            cached["call_id"] = call_id
+                            cached_output = cached.get("output")
+                            cached["output"] = f"[cached duplicate execute_command]\n{cached_output}"
+                            results.append(cached)
+                            self._print(
+                                _style("Reused cached execute_command result (duplicate).", _C.DIM, enabled=self._color)
+                            )
+                            continue
 
-            if not name:
-                continue
+                # Dedup identical file-mutation calls that already succeeded (common model glitch).
+                if name in ("edit_file", "write_file"):
+                    try:
+                        import hashlib
 
-            # Additional confirmation for shell execution (skip if auto/approve_all is set)
-            if name == "execute_command" and not auto and not approve_all:
-                confirm = self._simple_prompt("Type 'run' to execute this command: ").lower()
-                if confirm != "run":
-                    results.append(
-                        {
-                            "call_id": call_id,
-                            "name": name,
-                            "success": False,
-                            "output": None,
-                            "error": "Rejected by user",
-                        }
-                    )
+                        material = json.dumps(args, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+                        key = (name, hashlib.sha256(material.encode("utf-8")).hexdigest())
+                    except Exception:
+                        key = (name, str(args))
+
+                    if key == self._last_mutating_tool_call_key:
+                        prev = self._last_mutating_tool_call_result or {}
+                        if isinstance(prev, dict) and prev.get("success") is True:
+                            cached = dict(prev)
+                            cached["call_id"] = call_id
+                            cached_output = cached.get("output")
+                            cached["output"] = f"[cached duplicate {name}]\n{cached_output}"
+                            results.append(cached)
+                            self._print(
+                                _style(f"Reused cached {name} result (duplicate).", _C.DIM, enabled=self._color)
+                            )
+                            continue
+
+                # MCP tool execution (remote): mcp::<server_id>::<tool_name>.
+                try:
+                    from abstractcore.mcp import parse_namespaced_tool_name
+
+                    is_mcp = parse_namespaced_tool_name(name) is not None
+                except Exception:
+                    is_mcp = False
+
+                if is_mcp:
+                    try:
+                        results.append(
+                            self._execute_mcp_tool_call(
+                                name=name,
+                                arguments=args,
+                                call_id=call_id,
+                                cache=mcp_clients,
+                            )
+                        )
+                    except Exception as e:
+                        results.append(
+                            {
+                                "call_id": call_id,
+                                "name": name,
+                                "success": False,
+                                "output": None,
+                                "error": str(e),
+                            }
+                        )
                     continue
 
-            # Dedup identical execute_command calls that already succeeded (common model glitch).
-            if name == "execute_command":
-                cmd = str(args.get("command") or "")
-                if cmd and cmd == (self._last_execute_command or ""):
-                    prev = self._last_execute_command_result or {}
-                    if isinstance(prev, dict) and prev.get("success") is True:
-                        cached = dict(prev)
-                        cached["call_id"] = call_id
-                        # Preserve fidelity but make it obvious this wasn't re-executed.
-                        cached_output = cached.get("output")
-                        cached["output"] = f"[cached duplicate execute_command]\n{cached_output}"
-                        results.append(cached)
-                        self._print(_style("Reused cached execute_command result (duplicate).", _C.DIM, enabled=self._color))
-                        continue
+                single = {"name": name, "arguments": args, "call_id": call_id}
+                out = self._tool_runner.execute(tool_calls=[single])
+                out_results = out.get("results") or []
+                results.extend(out_results)
 
-            # Dedup identical file-mutation calls that already succeeded (common model glitch).
-            if name in ("edit_file", "write_file"):
+                if name == "execute_command" and out_results:
+                    try:
+                        self._last_execute_command = str(args.get("command") or "")
+                        first = out_results[0]
+                        if isinstance(first, dict):
+                            self._last_execute_command_result = dict(first)
+                    except Exception:
+                        pass
+                if name in ("edit_file", "write_file") and out_results:
+                    try:
+                        import hashlib
+
+                        material = json.dumps(args, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+                        self._last_mutating_tool_call_key = (
+                            name,
+                            hashlib.sha256(material.encode("utf-8")).hexdigest(),
+                        )
+                        first = out_results[0]
+                        if isinstance(first, dict):
+                            self._last_mutating_tool_call_result = dict(first)
+                    except Exception:
+                        pass
+        finally:
+            for c in mcp_clients.values():
                 try:
-                    import hashlib
-
-                    material = json.dumps(args, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-                    key = (name, hashlib.sha256(material.encode("utf-8")).hexdigest())
-                except Exception:
-                    key = (name, str(args))
-
-                if key == self._last_mutating_tool_call_key:
-                    prev = self._last_mutating_tool_call_result or {}
-                    if isinstance(prev, dict) and prev.get("success") is True:
-                        cached = dict(prev)
-                        cached["call_id"] = call_id
-                        cached_output = cached.get("output")
-                        cached["output"] = f"[cached duplicate {name}]\n{cached_output}"
-                        results.append(cached)
-                        self._print(_style(f"Reused cached {name} result (duplicate).", _C.DIM, enabled=self._color))
-                        continue
-
-            single = {"name": name, "arguments": args, "call_id": call_id}
-            out = self._tool_runner.execute(tool_calls=[single])
-            out_results = out.get("results") or []
-            results.extend(out_results)
-            if name == "execute_command" and out_results:
-                try:
-                    self._last_execute_command = str(args.get("command") or "")
-                    first = out_results[0]
-                    if isinstance(first, dict):
-                        self._last_execute_command_result = dict(first)
-                except Exception:
-                    pass
-            if name in ("edit_file", "write_file") and out_results:
-                try:
-                    import hashlib
-
-                    material = json.dumps(args, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-                    self._last_mutating_tool_call_key = (name, hashlib.sha256(material.encode("utf-8")).hexdigest())
-                    first = out_results[0]
-                    if isinstance(first, dict):
-                        self._last_mutating_tool_call_result = dict(first)
+                    close = getattr(c, "close", None)
+                    if callable(close):
+                        close()
                 except Exception:
                     pass
 
