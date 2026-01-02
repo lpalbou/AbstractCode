@@ -189,6 +189,7 @@ class ReactShell:
             from abstractcore.tools.common_tools import (
                 list_files,
                 search_files,
+                analyze_code,
                 read_file,
                 write_file,
                 edit_file,
@@ -224,6 +225,7 @@ class ReactShell:
         DEFAULT_TOOLS = [
             list_files,
             search_files,
+            analyze_code,
             read_file,
             write_file,
             edit_file,
@@ -3781,6 +3783,11 @@ class ReactShell:
             "\nCommands:\n"
             "  /help               Show this message\n"
             "  /tools              List/configure tool allowlist [saved]\n"
+            "                     - /tools reset\n"
+            "                     - /tools examples on|off\n"
+            "                     - /tools only <name...>\n"
+            "                     - /tools enable <name...>\n"
+            "                     - /tools disable <name...>\n"
             "  /tool-specs         Show full tool schemas (params)\n"
             "  /status             Show current run status\n"
             "  /auto-accept        Toggle auto-accept for tools [saved]\n"
