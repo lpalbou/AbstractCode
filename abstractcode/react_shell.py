@@ -867,7 +867,7 @@ class ReactShell:
             "vars",
             "var",
             "context",
-            "remember",
+            "memorize",
             "recall",
             "copy",
             "mouse",
@@ -1227,7 +1227,7 @@ class ReactShell:
         if command == "expand":
             self._handle_expand(arg)
             return False
-        if command in ("memorize", "remember"):
+        if command == "memorize":
             self._handle_memorize(arg)
             return False
         if command == "recall":
