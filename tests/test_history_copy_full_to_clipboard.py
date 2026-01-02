@@ -98,3 +98,19 @@ def test_help_mentions_history_copy() -> None:
     combined = "\n".join(shell._output_lines)
     assert "/history copy" in combined
 
+
+def test_help_mentions_mcp_and_executor_usage() -> None:
+    shell = ReactShell.__new__(ReactShell)
+    shell._color = False
+    shell._output_lines = []
+    shell._ui = _FakeUI()
+
+    ReactShell._show_help(shell)
+
+    combined = "\n".join(shell._output_lines)
+    assert "/mcp add <id> <url>" in combined
+    assert "/mcp add <id> stdio" in combined
+    assert "/mcp sync" in combined
+    assert "mcp::<id>::<tool_name>" in combined
+    assert "/executor use <server_id>" in combined
+    assert "ABSTRACTCODE_BASE_URL" in combined
