@@ -4,7 +4,7 @@ AbstractCode is a host UX; "remember" should be implemented via runtime-owned
 memory primitives so behavior stays consistent across hosts.
 
 This module provides:
-- lightweight argument parsing for `/remember`
+- lightweight argument parsing for `/memorize`
 - an execution helper that stores a runtime `MEMORY_NOTE` targeting a run
 """
 
@@ -33,10 +33,10 @@ class RememberRequest:
 
 
 def parse_remember_args(raw: str) -> RememberRequest:
-    """Parse `/remember` arguments.
+    """Parse `/memorize` arguments.
 
     Syntax:
-      /remember <note text> [--tag k=v ...] [--span <span_id>] [--last-span] [--last N] [--scope run|session|global]
+      /memorize <note text> [--tag k=v ...] [--span <span_id>] [--last-span] [--last N] [--scope run|session|global]
 
     Notes:
     - Note text may be quoted, but quoting is optional (we treat all non-flag tokens as note text).
@@ -125,7 +125,7 @@ def store_memory_note(
     sources: Dict[str, Any],
     actor_id: Optional[str],
     session_id: Optional[str],
-    call_id: str = "remember",
+    call_id: str = "memorize",
     scope: str = "run",
 ) -> Dict[str, Any]:
     """Store a runtime memory note targeting `target_run_id`.

@@ -698,19 +698,12 @@ class ReactShell:
         if tool_name in ("write_file", "read_file"):
             import re
 
-            cwd = os.getcwd()
             cleaned = self._strip_tool_prefix(raw, tool_name=tool_name).strip()
 
             if tool_name == "write_file":
                 line = (cleaned.splitlines() or [""])[0].strip()
                 if ok is False and line and not line.startswith("❌"):
                     line = f"❌ {line}" if line else "❌ Failed"
-                if line and "(" in line and line.endswith(")"):
-                    head, tail = line.rsplit("(", 1)
-                    inner = tail[:-1]
-                    line = f"{head}(current folder: {cwd}, {inner})"
-                elif line:
-                    line = f"{line} (current folder: {cwd})"
                 self._print(_style(f"{indent}{line}", _C.DIM, enabled=self._color))
                 return
 
@@ -728,7 +721,7 @@ class ReactShell:
             header = (cleaned.splitlines() or [""])[0].strip()
             m = re.match(r"^File:\s*(?P<path>.+?)\s*\((?P<lines>[\d,]+)\s+lines\)\s*$", header)
             if m:
-                file_path = file_path or m.group("path").strip()
+                file_path = m.group("path").strip() or file_path
                 try:
                     line_count = int(m.group("lines").replace(",", ""))
                 except Exception:
@@ -742,14 +735,14 @@ class ReactShell:
 
                 bytes_read = len(content.encode("utf-8"))
                 lines_read = line_count if isinstance(line_count, int) else len(content.splitlines())
-                summary = f"✅ Read '{file_path}' (current folder: {cwd}, {bytes_read:,} bytes, {lines_read:,} lines)"
+                summary = f"✅ Read '{file_path}' ({bytes_read:,} bytes, {lines_read:,} lines)"
                 self._print(_style(f"{indent}{summary}", _C.DIM, enabled=self._color))
                 return
 
             bytes_read = len(cleaned.encode("utf-8"))
             lines_read = len(cleaned.splitlines())
             path_part = f" '{file_path}'" if file_path else ""
-            summary = f"✅ Read{path_part} (current folder: {cwd}, {bytes_read:,} bytes, {lines_read:,} lines)"
+            summary = f"✅ Read{path_part} ({bytes_read:,} bytes, {lines_read:,} lines)"
             self._print(_style(f"{indent}{summary}", _C.DIM, enabled=self._color))
             return
 
@@ -1187,14 +1180,21 @@ class ReactShell:
             self._cancel()
             return False
         if command == "history":
-            limit = 12
-            if arg:
-                try:
-                    limit = int(arg)
-                except ValueError:
-                    self._print(_style("Usage: /history [N]", _C.DIM, enabled=self._color))
+            sub = arg.strip()
+            if sub:
+                head = (sub.split(None, 1) or [""])[0].lower()
+                if head == "copy":
+                    self._copy_full_history_to_clipboard()
                     return False
-            self._show_history(limit=limit)
+                try:
+                    limit = int(sub)
+                except ValueError:
+                    self._print(_style("Usage: /history [N]  |  /history copy", _C.DIM, enabled=self._color))
+                    return False
+                self._show_history(limit=limit)
+                return False
+
+            self._show_history(limit=12)
             return False
         if command == "task":
             task = arg.strip()
@@ -1227,8 +1227,8 @@ class ReactShell:
         if command == "expand":
             self._handle_expand(arg)
             return False
-        if command == "remember":
-            self._handle_remember(arg)
+        if command in ("memorize", "remember"):
+            self._handle_memorize(arg)
             return False
         if command == "recall":
             self._handle_recall(arg)
@@ -3678,11 +3678,11 @@ class ReactShell:
 
         self._print(f"[[COPY:{copy_id}]]")
 
-    def _handle_remember(self, raw: str) -> None:
+    def _handle_memorize(self, raw: str) -> None:
         """Store a durable memory note (runtime MEMORY_NOTE) with optional tags and provenance.
 
         Usage:
-          /remember <note text> [--tag k=v ...] [--span <span_id>] [--last-span] [--last N] [--scope run|session|global]
+          /memorize <note text> [--tag k=v ...] [--span <span_id>] [--last-span] [--last N] [--scope run|session|global]
         """
         from .remember import parse_remember_args, store_memory_note
 
@@ -3694,10 +3694,10 @@ class ReactShell:
         try:
             req = parse_remember_args(raw)
         except Exception as e:
-            self._print(_style(f"Remember parse error: {e}", _C.YELLOW, enabled=self._color))
+            self._print(_style(f"Memorize parse error: {e}", _C.YELLOW, enabled=self._color))
             self._print(
                 _style(
-                    "Usage: /remember <note text> [--tag k=v ...] [--span <span_id>] [--last-span] [--last N] [--scope run|session|global]",
+                    "Usage: /memorize <note text> [--tag k=v ...] [--span <span_id>] [--last-span] [--last N] [--scope run|session|global]",
                     _C.DIM,
                     enabled=self._color,
                 )
@@ -3755,11 +3755,11 @@ class ReactShell:
                 sources=sources,
                 actor_id=getattr(state, "actor_id", None),
                 session_id=getattr(state, "session_id", None),
-                call_id="remember",
+                call_id="memorize",
                 scope=req.scope,
             )
         except Exception as e:
-            self._print(_style(f"Remember failed: {e}", _C.YELLOW, enabled=self._color))
+            self._print(_style(f"Memorize failed: {e}", _C.YELLOW, enabled=self._color))
             return
 
         # Extract span_id if present.
@@ -3771,7 +3771,7 @@ class ReactShell:
             if isinstance(first_meta, dict):
                 span_id = first_meta.get("span_id")
 
-        self._print(_style("\n✅ Remembered.", _C.GREEN, enabled=self._color))
+        self._print(_style("\n✅ Memorized.", _C.GREEN, enabled=self._color))
         if isinstance(span_id, str) and span_id:
             self._print(_style(f"span_id={span_id}", _C.DIM, enabled=self._color))
         if req.tags:
@@ -3805,7 +3805,7 @@ class ReactShell:
             "  /vars [path]        Inspect run vars (scratchpad, _runtime, ...)\n"
             "  /context            Show the exact context for the next LLM call\n"
             "  /context last       Show last prompt/answer + LLM/tool steps (alias: /llm)\n"
-            "  /remember <note>    Store a durable memory note (tags + provenance)\n"
+            "  /memorize <note>    Store a durable memory note (tags + provenance)\n"
             "  /mouse              Toggle mouse mode (wheel scroll vs terminal selection)\n"
             "  /flow ...           Run AbstractFlow workflows inside this REPL\n"
             "                     - /flow run <flow_id_or_path> [--verbosity none|default|full] [--key value ...]\n"
@@ -3815,6 +3815,7 @@ class ReactShell:
             "  /copy ...           Copy messages to clipboard\n"
             "                     - /copy user [turn] | assistant [turn] | turn <N>\n"
             "  /history [N]        Show recent conversation history\n"
+            "  /history copy       Copy full conversation history to clipboard\n"
             "  /resume             Resume the saved/attached run\n"
             "  /pause              Pause the current run (durable)\n"
             "  /cancel             Cancel the current run (durable)\n"
@@ -3992,6 +3993,35 @@ class ReactShell:
                 self._print(content)
 
         self._print(_style("\n" + "─" * 80, _C.DIM, enabled=self._color))
+
+    def _copy_full_history_to_clipboard(self) -> None:
+        """Copy the full conversation transcript to clipboard (best-effort)."""
+        state = self._safe_get_state()
+        messages = list(self._agent.session_messages or []) if state is None else self._messages_from_state(state)
+        turns = self._group_messages_into_turns(messages)
+        if not turns:
+            self._print("No history yet.")
+            return
+
+        blocks: List[str] = []
+        for idx, turn in enumerate(turns, start=1):
+            blocks.append(f"# Turn {idx}")
+            for msg in turn:
+                if not isinstance(msg, dict):
+                    continue
+                role = str(msg.get("role") or "unknown")
+                content = "" if msg.get("content") is None else str(msg.get("content"))
+                if role == "tool":
+                    meta = msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {}
+                    name = meta.get("name") if isinstance(meta, dict) else None
+                    label = f"tool[{name}]" if isinstance(name, str) and name else "tool"
+                else:
+                    label = role
+                blocks.append(f"{label}:\n{content}".rstrip())
+
+        payload = "\n\n".join([b for b in blocks if b]).strip()
+        ok = self._copy_to_clipboard(payload)
+        self._print(_style("Copied." if ok else "Copy failed (no clipboard helper found).", _C.DIM, enabled=self._color))
 
     def _copy_to_clipboard(self, text: str) -> bool:
         """Best-effort copy to OS clipboard (no truncation)."""

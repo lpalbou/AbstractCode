@@ -73,7 +73,7 @@ The run loop in `ReactShell._run_loop()` drives one step at a time (`agent.step(
 AbstractCode’s memory commands are thin UX wrappers over runtime contracts:
 - `/compact` triggers runtime compaction (archives spans in `ArtifactStore` and keeps provenance handles)
 - `/spans`, `/expand`, `/recall` use `abstractruntime.memory.ActiveContextPolicy` via `abstractcode/abstractcode/recall.py`
-- `/remember` stores runtime-owned memory notes (`EffectType.MEMORY_NOTE`) with tags + provenance, and supports scope routing:
+- `/memorize` stores runtime-owned memory notes (`EffectType.MEMORY_NOTE`) with tags + provenance, and supports scope routing:
   - `--scope run|session|global`
 - `/recall` supports scope selection for discovery (while keeping rehydration runtime-consistent):
   - `--scope run|session|global|all`

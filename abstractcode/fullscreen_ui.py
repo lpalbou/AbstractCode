@@ -52,7 +52,7 @@ COMMANDS = [
     ("recall", "Recall memory spans by query/time/tags"),
     ("vars", "Inspect durable run vars (scratchpad, _runtime, ...)"),
     ("context", "Show the exact context for the next LLM call"),
-    ("remember", "Store a durable memory note"),
+    ("memorize", "Store a durable memory note"),
     ("flow", "Run AbstractFlow workflows (run/resume/pause/cancel)"),
     ("mouse", "Toggle mouse mode (wheel scroll vs terminal selection)"),
     ("task", "Start a new task (/task <text>)"),
