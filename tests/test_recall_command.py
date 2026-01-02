@@ -13,7 +13,7 @@ from abstractruntime.storage.in_memory import InMemoryRunStore
 def test_parse_recall_args_supports_time_tags_query_and_into_context() -> None:
     req = parse_recall_args(
         "--since 2025-01-01T00:00:00+00:00 --until 2025-01-02T00:00:00+00:00 "
-        "--tag topic=r-type --tag person=alice --q player dies --limit 3 --into-context --placement end --show"
+        "--tag topic=r-type --tag person=alice --q player dies --limit 3 --into-context --placement end --show --scope all"
     )
 
     assert req.since == "2025-01-01T00:00:00+00:00"
@@ -24,6 +24,7 @@ def test_parse_recall_args_supports_time_tags_query_and_into_context() -> None:
     assert req.into_context is True
     assert req.placement == "end"
     assert req.show is True
+    assert req.scope == "all"
 
 
 def test_parse_recall_args_uses_leftovers_as_query_when_missing_q_flag() -> None:

@@ -26,9 +26,14 @@ class RecallRequest:
     into_context: bool = False
     placement: str = "after_summary"
     show: bool = False
+    scope: str = "run"  # run|session|global|all
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tags", dict(self.tags or {}))
+        raw_scope = str(getattr(self, "scope", "") or "").strip().lower() or "run"
+        if raw_scope not in ("run", "session", "global", "all"):
+            raw_scope = "run"
+        object.__setattr__(self, "scope", raw_scope)
 
 
 def parse_recall_args(raw: str) -> RecallRequest:
@@ -43,6 +48,7 @@ def parse_recall_args(raw: str) -> RecallRequest:
       - `--into-context`
       - `--placement after_summary|after_system|end`
       - `--show` (show full note content for memory_note matches)
+      - `--scope run|session|global|all`
     """
     import shlex
 
@@ -59,6 +65,7 @@ def parse_recall_args(raw: str) -> RecallRequest:
     into_context = False
     placement = "after_summary"
     show = False
+    scope = "run"
 
     leftovers: list[str] = []
     i = 0
@@ -124,6 +131,14 @@ def parse_recall_args(raw: str) -> RecallRequest:
             show = True
             i += 1
             continue
+        if p == "--scope":
+            if i + 1 >= len(parts):
+                raise ValueError("--scope requires a value")
+            scope = str(parts[i + 1]).strip().lower() or "run"
+            if scope not in ("run", "session", "global", "all"):
+                raise ValueError("--scope must be run|session|global|all")
+            i += 2
+            continue
         if p == "--placement":
             if i + 1 >= len(parts):
                 raise ValueError("--placement requires a value")
@@ -168,6 +183,7 @@ def parse_recall_args(raw: str) -> RecallRequest:
         into_context=into_context,
         placement=placement,
         show=show,
+        scope=scope,
     )
 
 
@@ -187,17 +203,75 @@ def execute_recall(
     """
     policy = ActiveContextPolicy(run_store=run_store, artifact_store=artifact_store)
 
+    def _resolve_session_root_id(start_run_id: str) -> str:
+        cur_id = str(start_run_id or "").strip()
+        seen: set[str] = set()
+        while cur_id and cur_id not in seen:
+            seen.add(cur_id)
+            st = run_store.load(cur_id)
+            if st is None:
+                return cur_id
+            parent = getattr(st, "parent_run_id", None)
+            if not isinstance(parent, str) or not parent.strip():
+                return cur_id
+            cur_id = parent.strip()
+        return str(start_run_id or "").strip()
+
+    def _global_memory_run_id() -> str:
+        import os
+        import re
+
+        rid = str(os.environ.get("ABSTRACTRUNTIME_GLOBAL_MEMORY_RUN_ID") or "").strip()
+        if rid and re.match(r"^[a-zA-Z0-9_-]+$", rid):
+            return rid
+        return "global_memory"
+
     time_range: Optional[TimeRange] = None
     if request.since or request.until:
         time_range = TimeRange(start=request.since, end=request.until)
 
-    matches = policy.filter_spans(
-        run_id,
-        time_range=time_range,
-        tags=(request.tags or None),
-        query=request.query,
-        limit=int(request.limit),
-    )
+    scope = str(request.scope or "run").strip().lower() or "run"
+    run_ids: list[str] = []
+    if scope == "run":
+        run_ids = [run_id]
+    elif scope == "session":
+        run_ids = [_resolve_session_root_id(run_id)]
+    elif scope == "global":
+        run_ids = [_global_memory_run_id()]
+    else:  # all
+        root_id = _resolve_session_root_id(run_id)
+        global_id = _global_memory_run_id()
+        # Deterministic order; dedup.
+        seen_ids: set[str] = set()
+        for rid in (run_id, root_id, global_id):
+            if rid and rid not in seen_ids:
+                seen_ids.add(rid)
+                run_ids.append(rid)
+
+    matches: list[dict[str, Any]] = []
+    seen_artifacts: set[str] = set()
+    for rid in run_ids:
+        # Skip missing runs (e.g. global memory not created yet).
+        st = run_store.load(rid)
+        if st is None:
+            continue
+        part = policy.filter_spans(
+            rid,
+            time_range=time_range,
+            tags=(request.tags or None),
+            query=request.query,
+            limit=int(request.limit),
+        )
+        for s in part:
+            if not isinstance(s, dict):
+                continue
+            aid = str(s.get("artifact_id") or "").strip()
+            if not aid or aid in seen_artifacts:
+                continue
+            seen_artifacts.add(aid)
+            annotated = dict(s)
+            annotated["owner_run_id"] = rid
+            matches.append(annotated)
 
     rehydration: Optional[Dict[str, Any]] = None
     if request.into_context:

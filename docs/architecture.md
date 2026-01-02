@@ -1,6 +1,6 @@
 # AbstractCode — Architecture (Current)
 
-> Updated: 2025-12-27  
+> Updated: 2026-01-02  
 > Scope: this describes **what is implemented today** in this monorepo (no “future” design claims).
 
 AbstractCode is a **host UX** (terminal app) for running AbstractFramework agents and (increasingly) workflows.
@@ -73,6 +73,10 @@ The run loop in `ReactShell._run_loop()` drives one step at a time (`agent.step(
 AbstractCode’s memory commands are thin UX wrappers over runtime contracts:
 - `/compact` triggers runtime compaction (archives spans in `ArtifactStore` and keeps provenance handles)
 - `/spans`, `/expand`, `/recall` use `abstractruntime.memory.ActiveContextPolicy` via `abstractcode/abstractcode/recall.py`
+- `/remember` stores runtime-owned memory notes (`EffectType.MEMORY_NOTE`) with tags + provenance, and supports scope routing:
+  - `--scope run|session|global`
+- `/recall` supports scope selection for discovery (while keeping rehydration runtime-consistent):
+  - `--scope run|session|global|all`
 
 This keeps “what memory means” consistent across hosts (CLI, web UI, etc.).
 

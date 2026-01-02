@@ -3680,7 +3680,7 @@ class ReactShell:
         """Store a durable memory note (runtime MEMORY_NOTE) with optional tags and provenance.
 
         Usage:
-          /remember <note text> [--tag k=v ...] [--span <span_id>] [--last-span] [--last N]
+          /remember <note text> [--tag k=v ...] [--span <span_id>] [--last-span] [--last N] [--scope run|session|global]
         """
         from .remember import parse_remember_args, store_memory_note
 
@@ -3695,7 +3695,7 @@ class ReactShell:
             self._print(_style(f"Remember parse error: {e}", _C.YELLOW, enabled=self._color))
             self._print(
                 _style(
-                    "Usage: /remember <note text> [--tag k=v ...] [--span <span_id>] [--last-span] [--last N]",
+                    "Usage: /remember <note text> [--tag k=v ...] [--span <span_id>] [--last-span] [--last N] [--scope run|session|global]",
                     _C.DIM,
                     enabled=self._color,
                 )
@@ -3754,6 +3754,7 @@ class ReactShell:
                 actor_id=getattr(state, "actor_id", None),
                 session_id=getattr(state, "session_id", None),
                 call_id="remember",
+                scope=req.scope,
             )
         except Exception as e:
             self._print(_style(f"Remember failed: {e}", _C.YELLOW, enabled=self._color))

@@ -21,17 +21,22 @@ class RememberRequest:
     span_id: Optional[str] = None
     last_span: bool = False
     last_messages: int = 6
+    scope: str = "run"  # run|session|global
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "note", str(self.note or "").strip())
         object.__setattr__(self, "tags", dict(self.tags or {}))
+        raw_scope = str(getattr(self, "scope", "") or "").strip().lower() or "run"
+        if raw_scope not in ("run", "session", "global"):
+            raw_scope = "run"
+        object.__setattr__(self, "scope", raw_scope)
 
 
 def parse_remember_args(raw: str) -> RememberRequest:
     """Parse `/remember` arguments.
 
     Syntax:
-      /remember <note text> [--tag k=v ...] [--span <span_id>] [--last-span] [--last N]
+      /remember <note text> [--tag k=v ...] [--span <span_id>] [--last-span] [--last N] [--scope run|session|global]
 
     Notes:
     - Note text may be quoted, but quoting is optional (we treat all non-flag tokens as note text).
@@ -48,6 +53,7 @@ def parse_remember_args(raw: str) -> RememberRequest:
     span_id: Optional[str] = None
     last_span = False
     last_messages = 6
+    scope = "run"
     note_parts: list[str] = []
 
     i = 0
@@ -89,6 +95,14 @@ def parse_remember_args(raw: str) -> RememberRequest:
                 last_messages = 0
             i += 2
             continue
+        if p == "--scope":
+            if i + 1 >= len(parts):
+                raise ValueError("--scope requires a value")
+            scope = str(parts[i + 1]).strip().lower() or "run"
+            if scope not in ("run", "session", "global"):
+                raise ValueError("--scope must be run|session|global")
+            i += 2
+            continue
         if p.startswith("--"):
             raise ValueError(f"Unknown flag: {p}")
 
@@ -99,7 +113,7 @@ def parse_remember_args(raw: str) -> RememberRequest:
     if not note:
         raise ValueError("note text is required")
 
-    return RememberRequest(note=note, tags=tags, span_id=span_id, last_span=last_span, last_messages=last_messages)
+    return RememberRequest(note=note, tags=tags, span_id=span_id, last_span=last_span, last_messages=last_messages, scope=scope)
 
 
 def store_memory_note(
@@ -112,6 +126,7 @@ def store_memory_note(
     actor_id: Optional[str],
     session_id: Optional[str],
     call_id: str = "remember",
+    scope: str = "run",
 ) -> Dict[str, Any]:
     """Store a runtime memory note targeting `target_run_id`.
 
@@ -126,6 +141,7 @@ def store_memory_note(
         "note": str(note or ""),
         "tags": dict(tags or {}),
         "sources": dict(sources or {}),
+        "scope": str(scope or "run"),
         "tool_name": "remember_note",
         "call_id": str(call_id or "remember"),
     }
