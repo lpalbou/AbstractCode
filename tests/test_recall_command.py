@@ -157,7 +157,8 @@ def test_execute_recall_filters_spans_and_rehydrates_messages() -> None:
     res2 = execute_recall(run_id=run_id, run_store=run_store, artifact_store=artifact_store, request=req2)
     rehydration = res2.get("rehydration")
     assert isinstance(rehydration, dict)
-    # 2 archived convo messages + 1 synthetic memory_note message
+    # `memory_note` spans include their linked conversation summary text in the query haystack,
+    # so searching for "player dies" surfaces both the archived span and the derived note.
     assert rehydration.get("inserted") == 3
     assert rehydration.get("skipped") == 1
 
@@ -172,4 +173,14 @@ def test_execute_recall_filters_spans_and_rehydrates_messages() -> None:
     assert isinstance(meta, dict)
     assert meta.get("rehydrated") is True
     assert meta.get("source_artifact_id") == span_art.artifact_id
+    # Notes are rehydrated as a synthetic system message (LLM-visible).
+    note_msg = next(
+        (
+            m
+            for m in active
+            if isinstance(m, dict) and (m.get("metadata") or {}).get("message_id") == f"memory_note:{note_art.artifact_id}"
+        ),
+        None,
+    )
+    assert isinstance(note_msg, dict)
 

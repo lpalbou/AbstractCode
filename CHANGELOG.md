@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **`/clear`**: now clears the screen (UI output) in addition to clearing in-memory conversation context.
 - **`/memorize`**: the memory-note command is now **Memorize** (consistent UX term) to avoid ambiguity with span tagging.
+- **`/recall`**: richer filtering and rehydration controls:
+  - Added `--tags-mode all|any`, repeatable `--user NAME`, and repeatable `--location LOC`.
+  - Repeating `--tag k=v` now builds multi-value tags (e.g. `--tag person=alice --tag person=bob`).
+  - `--into-context` now also rehydrates matching `memory_note` spans as a synthetic system message (`[MEMORY NOTE] ...`).
 
 ### Removed
 - **`/new`, `/reset`**: removed alias commands (they were identical to `/clear`). Use `/clear`.
