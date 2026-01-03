@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -31,6 +32,10 @@ def _minimal_shell(*, state: RunState) -> ReactShell:
     shell._output_lines = []
     shell._ui = _FakeUI()
     shell._agent = _FakeAgent(state=state)
+    shell._RunStatus = RunStatus
+    shell._agent_kind = "react"
+    shell._provider = "test"
+    shell._model = "test"
     shell._last_run_id = None
     return shell
 
@@ -87,6 +92,44 @@ def test_history_copy_copies_full_transcript(monkeypatch) -> None:
     assert "assistant:\na2" in transcript
 
 
+def test_context_copy_copies_full_context_json(monkeypatch) -> None:
+    state = RunState(
+        run_id="rid",
+        workflow_id="wf",
+        status=RunStatus.COMPLETED,
+        current_node="n",
+        vars={"context": {"messages": []}},
+        waiting=None,
+        output=None,
+        error=None,
+        created_at=_now_iso(),
+        updated_at=_now_iso(),
+        actor_id=None,
+        session_id=None,
+        parent_run_id=None,
+    )
+    shell = _minimal_shell(state=state)
+    shell._agent.session_messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "content": "a1"},
+    ]
+
+    captured: Dict[str, str] = {}
+
+    def _capture(text: str) -> bool:
+        captured["text"] = str(text)
+        return True
+
+    monkeypatch.setattr(shell, "_copy_to_clipboard", _capture)
+
+    ReactShell._dispatch_command(shell, "context copy")
+
+    assert "Copied." in "\n".join(shell._output_lines)
+    payload = json.loads(captured.get("text", "{}"))
+    assert [m.get("content") for m in payload.get("session_messages", [])] == ["sys", "u1", "a1"]
+
+
 def test_help_mentions_history_copy() -> None:
     shell = ReactShell.__new__(ReactShell)
     shell._color = False
@@ -97,6 +140,7 @@ def test_help_mentions_history_copy() -> None:
 
     combined = "\n".join(shell._output_lines)
     assert "/history copy" in combined
+    assert "/context copy" in combined
 
 
 def test_help_mentions_mcp_and_executor_usage() -> None:

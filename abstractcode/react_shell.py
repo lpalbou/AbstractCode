@@ -3909,6 +3909,7 @@ class ReactShell:
 
         Usage:
           /context [--json-only] [--derived]
+          /context copy [--derived]
           /context last [--last] [--verbatim] [--json-only] [--save <path>]
         """
         import copy
@@ -3926,6 +3927,11 @@ class ReactShell:
             self._handle_llm(rest_raw)
             return
 
+        copy_to_clipboard = False
+        if parts and str(parts[0] or "").strip().lower() == "copy":
+            copy_to_clipboard = True
+            parts = parts[1:]
+
         json_only = False
         derived = False
         for p in parts:
@@ -3936,7 +3942,13 @@ class ReactShell:
                 derived = True
                 continue
             self._print(_style(f"Unknown flag: {p}", _C.YELLOW, enabled=self._color))
-            self._print(_style("Usage: /context [--json-only] [--derived]", _C.DIM, enabled=self._color))
+            self._print(
+                _style(
+                    "Usage: /context [--json-only] [--derived]  |  /context copy [--derived]",
+                    _C.DIM,
+                    enabled=self._color,
+                )
+            )
             return
 
         state = self._safe_get_state()
@@ -4063,6 +4075,16 @@ class ReactShell:
                     }
 
             text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False, default=str)
+            if copy_to_clipboard:
+                ok = self._copy_to_clipboard(text)
+                self._print(
+                    _style(
+                        "Copied." if ok else "Copy failed (no clipboard helper found).",
+                        _C.DIM,
+                        enabled=self._color,
+                    )
+                )
+                return
             copy_id = f"context_{uuid.uuid4().hex}"
             self._ui.register_copy_payload(copy_id, text)
             self._print(_style("\nContext (next /task seed)", _C.CYAN, _C.BOLD, enabled=self._color))
@@ -4198,6 +4220,16 @@ class ReactShell:
                 out["derived_tool_prompt"] = tool_prompt
 
         text = json.dumps(out, ensure_ascii=False, indent=2, sort_keys=False, default=str)
+        if copy_to_clipboard:
+            ok = self._copy_to_clipboard(text)
+            self._print(
+                _style(
+                    "Copied." if ok else "Copy failed (no clipboard helper found).",
+                    _C.DIM,
+                    enabled=self._color,
+                )
+            )
+            return
         copy_id = f"context_{uuid.uuid4().hex}"
         self._ui.register_copy_payload(copy_id, text)
 
@@ -4717,6 +4749,7 @@ class ReactShell:
             "  /vars [path]        Inspect run vars (scratchpad, _runtime, ...)\n"
             "  /context            Show the exact context for the next LLM call\n"
             "  /context last       Show last prompt/answer + LLM/tool steps (alias: /llm)\n"
+            "  /context copy       Copy full next-call context to clipboard\n"
             "  /memorize <note>    Store a durable memory note (tags + provenance)\n"
             "  /mouse              Toggle mouse mode (wheel scroll vs terminal selection)\n"
             "  /flow ...           Run AbstractFlow workflows inside this REPL\n"
