@@ -498,9 +498,21 @@ class ReactShell:
             active_memory = ""
             system_memory = ""
             if render_active_memory_split_for_llm_request is not None:
+                # Keep token estimation aligned with the actual prompt that will be sent:
+                # for native-tool models, avoid counting the full Tools(session) catalog
+                # (it is not injected into the visible system prompt).
+                include_tools_summary = True
+                try:
+                    from abstractcore.tools.handler import UniversalToolHandler
+
+                    if effective_model and isinstance(effective_model, str) and effective_model.strip():
+                        include_tools_summary = not bool(UniversalToolHandler(str(effective_model)).supports_native)
+                except Exception:
+                    include_tools_summary = True
+
                 mem_split = render_active_memory_split_for_llm_request(
                     state.vars,
-                    include_tools_summary=True,
+                    include_tools_summary=include_tools_summary,
                     token_counter=estimate_tokens,
                 )
                 active_memory = str(mem_split.get("user_memory") or "")
