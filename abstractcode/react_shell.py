@@ -374,6 +374,20 @@ class ReactShell:
         self._run_thread: Optional[threading.Thread] = None
         self._run_thread_lock = threading.Lock()
 
+    def _reset_repeat_guardrails(self) -> None:
+        """
+        Reset the simple duplicate-tool-call guardrails.
+
+        These caches exist to avoid a common LLM failure mode where the model repeats the
+        exact same mutating tool call in a loop. However, when a user explicitly cancels
+        a run (or starts a new run), they are signalling “stop and retry”, so stale cache
+        state must not block legitimate retries.
+        """
+        self._last_execute_command = None
+        self._last_execute_command_result = None
+        self._last_mutating_tool_call_key = None
+        self._last_mutating_tool_call_result = None
+
     # ---------------------------------------------------------------------
     # UI helpers
     # ---------------------------------------------------------------------
@@ -3107,10 +3121,34 @@ class ReactShell:
             except Exception:
                 return max(1, len(s) // 4)
 
+        # Keep `/memory` aligned with the *actual* prompt composition:
+        # when tools are supplied natively, the visible `Tools (session)` block is omitted.
+        include_tools_summary = True
+        try:
+            runtime_ns = state.vars.get("_runtime") if isinstance(getattr(state, "vars", None), dict) else {}
+            if not isinstance(runtime_ns, dict):
+                runtime_ns = {}
+
+            flag = runtime_ns.get("supports_native_tools")
+            if isinstance(flag, bool):
+                include_tools_summary = not flag
+            else:
+                ts = runtime_ns.get("tool_support")
+                if isinstance(ts, str) and ts.strip():
+                    include_tools_summary = ts.strip() != "native"
+                else:
+                    # Backward compatibility: infer from model capabilities via AbstractCore.
+                    from abstractcore.tools.handler import UniversalToolHandler
+
+                    if effective_model and isinstance(effective_model, str) and effective_model.strip():
+                        include_tools_summary = not bool(UniversalToolHandler(str(effective_model)).supports_native)
+        except Exception:
+            include_tools_summary = True
+
         breakdown = compute_active_memory_token_breakdown(
             state.vars,
             token_counter=count_tokens,
-            include_tools_summary=True,
+            include_tools_summary=include_tools_summary,
         )
         components = breakdown.get("components") if isinstance(breakdown.get("components"), dict) else {}
         active_mem_max = int(breakdown.get("active_memory_max_tokens") or 0)
@@ -3135,12 +3173,12 @@ class ReactShell:
             mem = ensure_active_memory(state.vars)
             blocks_fitted = render_active_memory_blocks_for_prompt(
                 state.vars,
-                include_tools_summary=True,
+                include_tools_summary=include_tools_summary,
                 token_counter=count_tokens,
             )
             blocks_full = render_active_memory_blocks_for_prompt(
                 state.vars,
-                include_tools_summary=True,
+                include_tools_summary=include_tools_summary,
                 max_tokens=0,  # show unfitted render
                 token_counter=count_tokens,
             )
@@ -5311,6 +5349,7 @@ class ReactShell:
             self._print(_style("A run is already executing. Use /pause or /cancel first.", _C.DIM, enabled=self._color))
             return
         # Note: _approve_all_session is NOT reset here - it persists for the entire session
+        self._reset_repeat_guardrails()
         self._maybe_sync_executor_tools()
         self._turn_task = str(task or "").strip() or None
         self._turn_trace = []
@@ -5368,6 +5407,7 @@ class ReactShell:
             self._print(_style("Cancel failed:", _C.YELLOW, enabled=self._color) + f" {e}")
             return
         self._print(_style(f"Cancel requested (run_id={run_id}).", _C.DIM, enabled=self._color))
+        self._reset_repeat_guardrails()
 
     def _try_load_state(self) -> None:
         try:
@@ -5592,6 +5632,32 @@ class ReactShell:
                                 "output": None,
                                 "error": "Rejected by user",
                             }
+                        )
+                        continue
+
+                # Guardrail: require write_file.content to be present.
+                #
+                # Without this, models often omit `content` (it's optional in older tool
+                # schemas), which creates a 0-byte file and can then get “stuck” repeating
+                # the same call (triggering the duplicate-call cache).
+                if name == "write_file":
+                    if "content" not in args or args.get("content") is None:
+                        results.append(
+                            {
+                                "call_id": call_id,
+                                "name": name,
+                                "success": False,
+                                "output": None,
+                                "error": (
+                                    "Invalid tool call: write_file requires a `content` string. "
+                                    "Provide it explicitly (content may be an empty string)."
+                                ),
+                            }
+                        )
+                        self._print(
+                            _style(
+                                "Blocked write_file without content (repeat guardrail).", _C.YELLOW, enabled=self._color
+                            )
                         )
                         continue
 

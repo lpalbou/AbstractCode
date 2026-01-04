@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tool result visibility**: increased the default tool observation preview to **1000 characters** (was 120) so small-but-critical outputs (e.g., exit codes, working directories) are not silently truncated in the UI.
 - **Web search reliability**: add `ddgs` as a dependency so the default `web_search` tool works without requiring manual installs.
 - **Native tools prompt accounting**: ReactShell token estimation now excludes the full `Tools (session)` Active Memory catalog for **native-tool models**, matching the prompt actually sent to OpenAI-compatible servers (e.g. LMStudio).
+- **Repeat guardrail**: reset duplicate-tool-call caches on **new runs** and **/cancel**, and block `write_file` calls missing `content` to prevent repeated 0‑byte file writes.
 
 ### Changed
 - **`/clear`**: now clears the screen (UI output) in addition to clearing in-memory conversation context.
