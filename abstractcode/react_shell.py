@@ -689,6 +689,161 @@ class ReactShell:
         self._output_lines.append(text)
         self._ui.append_output(text)
 
+    def _ui_append_fold_region(
+        self,
+        *,
+        fold_id: str,
+        visible_lines: List[str],
+        hidden_lines: List[str],
+        collapsed: bool = True,
+    ) -> None:
+        """Best-effort: append a collapsible region if the UI supports it."""
+        ui = getattr(self, "_ui", None)
+        if ui is None:
+            for line in (visible_lines or []):
+                self._print(line)
+            if not collapsed:
+                for line in (hidden_lines or []):
+                    self._print(line)
+            return
+
+        fn = getattr(ui, "append_fold_region", None)
+        if callable(fn):
+            fn(fold_id=str(fold_id), visible_lines=list(visible_lines or []), hidden_lines=list(hidden_lines or []), collapsed=bool(collapsed))
+            return
+
+        # Fallback: no interactivity, print expanded content.
+        for line in (visible_lines or []):
+            self._print(line)
+        for line in (hidden_lines or []):
+            self._print(line)
+
+    def _ui_update_fold_region(
+        self,
+        fold_id: str,
+        *,
+        visible_lines: Optional[List[str]] = None,
+        hidden_lines: Optional[List[str]] = None,
+    ) -> bool:
+        """Best-effort: update a collapsible region if the UI supports it."""
+        ui = getattr(self, "_ui", None)
+        fn = getattr(ui, "update_fold_region", None) if ui is not None else None
+        if callable(fn):
+            return bool(fn(str(fold_id), visible_lines=visible_lines, hidden_lines=hidden_lines))
+        return False
+
+    def _tool_result_summary(
+        self,
+        *,
+        tool_name: str,
+        raw: str,
+        ok: Optional[bool],
+        tool_args: Optional[Dict[str, Any]],
+        max_chars: int = 160,
+    ) -> str:
+        """Return a single-line summary for the tool result (UI-facing)."""
+        tool_name = str(tool_name or "")
+        raw = "" if raw is None else str(raw)
+
+        if tool_name == "write_file":
+            cleaned = self._strip_tool_prefix(raw, tool_name=tool_name).strip()
+            line = (cleaned.splitlines() or [""])[0].strip()
+            if ok is False and line and not line.startswith("❌"):
+                line = f"❌ {line}"
+            return line or ("✅ Done" if ok is not False else "❌ Failed")
+
+        if tool_name == "read_file":
+            import re
+
+            cleaned = self._strip_tool_prefix(raw, tool_name=tool_name).strip()
+            file_path = ""
+            if isinstance(tool_args, dict):
+                file_path = str(tool_args.get("file_path") or "")
+            if ok is False or cleaned.startswith("Error:") or cleaned.startswith("❌"):
+                msg = cleaned
+                if msg and not msg.startswith("❌"):
+                    msg = f"❌ {msg}"
+                return msg or "❌ Failed"
+
+            header = (cleaned.splitlines() or [""])[0].strip()
+            m = re.match(r"^File:\s*(?P<path>.+?)\s*\((?P<lines>[\d,]+)\s+lines\)\s*$", header)
+            if m:
+                file_path = m.group("path").strip() or file_path
+                try:
+                    line_count = int(m.group("lines").replace(",", ""))
+                except Exception:
+                    line_count = None
+
+                split_idx = cleaned.find("\n\n")
+                if split_idx >= 0:
+                    content = cleaned[split_idx + 2 :]
+                else:
+                    content = "\n".join(cleaned.splitlines()[1:])
+
+                bytes_read = len(content.encode("utf-8"))
+                lines_read = line_count if isinstance(line_count, int) else len(content.splitlines())
+                return f"✅ Read '{file_path}' ({bytes_read:,} bytes, {lines_read:,} lines)"
+
+            bytes_read = len(cleaned.encode("utf-8"))
+            lines_read = len(cleaned.splitlines())
+            path_part = f" '{file_path}'" if file_path else ""
+            return f"✅ Read{path_part} ({bytes_read:,} bytes, {lines_read:,} lines)"
+
+        cleaned = self._strip_tool_prefix(raw, tool_name=tool_name).strip()
+        first = (cleaned.splitlines() or [""])[0].strip()
+        if not first:
+            return "✅ Done" if ok is not False else "❌ Failed"
+        if len(first) <= max_chars:
+            return first
+        return first[: max(1, max_chars - 1)] + "…"
+
+    def _format_tool_output_lines(
+        self,
+        *,
+        tool_name: str,
+        raw: str,
+        indent: str = "    ",
+        include_read_file_content: bool = True,
+        tool_args: Optional[Dict[str, Any]] = None,
+    ) -> List[str]:
+        """Format tool output for inclusion inside an expanded tool block."""
+        tool_name = str(tool_name or "")
+        raw = "" if raw is None else str(raw)
+
+        if tool_name == "read_file" and include_read_file_content:
+            cleaned = self._strip_tool_prefix(raw, tool_name=tool_name).strip()
+            if cleaned.startswith(("Error:", "❌")):
+                return [_style(f"{indent}{cleaned}", _C.DIM, enabled=self._color)]
+            split_idx = cleaned.find("\n\n")
+            if split_idx >= 0:
+                content = cleaned[split_idx + 2 :]
+            else:
+                content = "\n".join(cleaned.splitlines()[1:])
+            out: List[str] = []
+            out.append(_style(f"{indent}content:", _C.DIM, enabled=self._color))
+            for line in (content.splitlines() or [""]):
+                out.append(f"{indent}{line}")
+            return out
+
+        out_lines: List[str] = []
+        for line in (raw.splitlines() or [""]):
+            style_codes: Tuple[str, ...] = (_C.DIM,)
+            if tool_name == "edit_file":
+                if line.startswith("Edited ") or line.startswith("Preview "):
+                    style_codes = (_C.BOLD,)
+                elif line.startswith("@@"):
+                    style_codes = (_C.DIM,)
+                elif line.startswith(" "):
+                    style_codes = ()
+                elif line.startswith("+") and not line.startswith("+++"):
+                    style_codes = (_C.BLUE,)
+                elif line.startswith("-") and not line.startswith("---"):
+                    style_codes = (_C.RED,)
+                else:
+                    style_codes = (_C.DIM,)
+            out_lines.append(_style(f"{indent}{line}", *style_codes, enabled=self._color))
+        return out_lines
+
     def _terminal_width(self) -> int:
         """Best-effort current terminal width (for full-line ANSI background blocks)."""
         try:
@@ -1285,12 +1440,16 @@ class ReactShell:
             has_tool_calls = bool(data.get("has_tool_calls"))
             content = str(data.get("content", "") or "")
             if has_tool_calls and content.strip():
+                import uuid
+
                 text = content.strip()
                 self._turn_trace.append("Thought:\n" + text)
-                self._print("")
-                self._print(_style("Thought", _C.ORANGE, _C.BOLD, enabled=self._color))
-                self._print(_style(text, _C.ORANGE, enabled=self._color))
-                self._print("")
+                fid = f"thought_{uuid.uuid4().hex}"
+                header = _style("Thought", _C.ORANGE, _C.BOLD, enabled=self._color)
+                visible = ["", f"[[FOLD:{fid}]]{header}", _style("  (click to expand/collapse)", _C.DIM, enabled=self._color)]
+                hidden = [_style(f"  {line}" if line else "  ", _C.ORANGE, enabled=self._color) for line in (text.splitlines() or [""])]
+                hidden.append("")
+                self._ui_append_fold_region(fold_id=fid, visible_lines=visible, hidden_lines=hidden, collapsed=True)
         elif step == "act":
             import uuid
 
@@ -1304,12 +1463,33 @@ class ReactShell:
             except Exception:
                 args_str = str(ui_args)
             call_suffix = f" [{call_id}]" if call_id else ""
-            marker_id = f"tool_{uuid.uuid4().hex}"
-            marker = f"[[SPINNER:{marker_id}]]"
+            fold_id = f"tool_{uuid.uuid4().hex}"
+            marker = f"[[SPINNER:{fold_id}]]"
             self._pending_tool_markers.append(marker)
-            self._pending_tool_metas.append({"tool": tool, "args": dict(args), "call_id": call_id})
-            header = f"Tool: {tool}{call_suffix}({args_str})"
-            self._print(_style(header, _C.GREEN, _C.BOLD, enabled=self._color) + f" {marker}")
+            self._pending_tool_metas.append({"tool": tool, "args": dict(args), "call_id": call_id, "fold_id": fold_id})
+
+            header_core = _style(f"Tool Call: {tool}{call_suffix}", _C.GREEN, _C.BOLD, enabled=self._color)
+            header_line = f"[[FOLD:{fold_id}]]{header_core} {marker}"
+            vis = [
+                header_line,
+                _style(f"  args: {args_str}", _C.DIM, enabled=self._color),
+                _style("  result: (running…)", _C.DIM, enabled=self._color),
+            ]
+
+            try:
+                args_pretty = json.dumps(args, ensure_ascii=False, sort_keys=True, indent=2)
+            except Exception:
+                args_pretty = str(args)
+            hid = [
+                _style("  arguments:", _C.DIM, enabled=self._color),
+                *[f"    {ln}" if ln else "    " for ln in (args_pretty.splitlines() or [""])],
+                "",
+                _style("  output:", _C.DIM, enabled=self._color),
+                _style("    (pending…)", _C.DIM, enabled=self._color),
+                "",
+            ]
+            self._ui_append_fold_region(fold_id=fold_id, visible_lines=vis, hidden_lines=hid, collapsed=True)
+
             # Track full arguments for copy payloads (no truncation).
             try:
                 args_full = json.dumps(args, ensure_ascii=False, sort_keys=True)
@@ -1335,23 +1515,70 @@ class ReactShell:
                     ok = False
             except Exception:
                 pass
-            if self._pending_tool_markers:
-                marker = self._pending_tool_markers.pop(0)
-                icon = "✅" if ok else "❌"
-                # Best-effort in-place update; if not found, fall back silently.
-                self._ui.replace_output_marker(marker, icon)
             tool_args = None
+            fold_id: Optional[str] = None
             if self._pending_tool_metas:
                 try:
                     meta = self._pending_tool_metas.pop(0)
                     if isinstance(meta, dict):
+                        fold_id = str(meta.get("fold_id") or "") or None
                         args_meta = meta.get("args")
                         if isinstance(args_meta, dict):
                             tool_args = args_meta
                 except Exception:
                     tool_args = None
-            # Keep observability compact, but render diffs with clear colors.
-            self._print_tool_observation(tool_name=tool_name, raw=raw, ok=ok, indent="", tool_args=tool_args)
+
+            icon = "✅" if ok else "❌"
+            summary = self._tool_result_summary(tool_name=tool_name, raw=raw, ok=ok, tool_args=tool_args)
+
+            if fold_id:
+                # Keep pending marker queue bounded (header is rewritten on update).
+                if self._pending_tool_markers:
+                    try:
+                        self._pending_tool_markers.pop(0)
+                    except Exception:
+                        pass
+
+                # Update the existing tool block to show status + summary, and populate expanded details.
+                tool_call = tool_args or {}
+                try:
+                    args_pretty = json.dumps(tool_call, ensure_ascii=False, sort_keys=True, indent=2)
+                except Exception:
+                    args_pretty = str(tool_call)
+
+                call_id = ""
+                tool_label = str(data.get("tool", "") or tool_name)
+                # Best-effort: preserve original call_id in meta if present.
+                if isinstance(meta, dict):
+                    call_id = str(meta.get("call_id") or "")
+                call_suffix = f" [{call_id}]" if call_id else ""
+
+                header_core = _style(f"Tool Call: {tool_label}{call_suffix}", _C.GREEN, _C.BOLD, enabled=self._color)
+                try:
+                    args_preview = json.dumps(
+                        self._truncate_for_ui(tool_call, max_chars=200),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        default=str,
+                    )
+                except Exception:
+                    args_preview = str(self._truncate_for_ui(tool_call, max_chars=200))
+                visible = [
+                    f"[[FOLD:{fold_id}]]{header_core} {icon}",
+                    _style(f"  args: {args_preview}", _C.DIM, enabled=self._color),
+                    _style(f"  result: {summary}", _C.DIM, enabled=self._color),
+                ]
+
+                hidden = [
+                    _style("  arguments:", _C.DIM, enabled=self._color),
+                    *[f"    {ln}" if ln else "    " for ln in (args_pretty.splitlines() or [""])],
+                    "",
+                    _style("  output:", _C.DIM, enabled=self._color),
+                    *self._format_tool_output_lines(tool_name=tool_name, raw=raw, indent="    ", include_read_file_content=True, tool_args=tool_args),
+                    "",
+                ]
+                self._ui_update_fold_region(fold_id, visible_lines=visible, hidden_lines=hidden)
+
             self._turn_trace.append(f"Result ({tool_name}):\n{raw}".rstrip())
             self._ui.set_spinner("Processing result...")
         elif step == "ask_user":

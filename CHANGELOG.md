@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Collapsible Thought/Tool blocks**: tool-using iterations now render **Thought** and **Tool Call** as **click-to-toggle** blocks (collapsed by default) with a high-signal one-line summary always visible.
+- **Spinner shimmer**: status bar spinner text now has a subtle **reflect/shimmer** highlight so “still working” is obvious without re-rendering the full scrollback.
+
 ### Fixed
 - **Tool result visibility**: increased the default tool observation preview to **1000 characters** (was 120) so small-but-critical outputs (e.g., exit codes, working directories) are not silently truncated in the UI.
 - **Web search reliability**: add `ddgs` as a dependency so the default `web_search` tool works without requiring manual installs.
 - **Native tools prompt accounting**: ReactShell token estimation now excludes the full `Tools (session)` Active Memory catalog for **native-tool models**, matching the prompt actually sent to OpenAI-compatible servers (e.g. LMStudio).
+- **LLM-call payload observability**: `/llm` (alias `/context last`) now reliably shows the exact OpenAI-style `messages/tools` request payload via `metadata._provider_request` for both remote AbstractCore-server calls and local/provider calls (no more missing “provider request context” blocks).
 - **Repeat guardrail**: reset duplicate-tool-call caches on **new runs** and **/cancel**, and block `write_file` calls missing `content` to prevent repeated 0‑byte file writes.
 
 ### Changed

@@ -9,6 +9,7 @@ Uses prompt_toolkit's Application with HSplit layout to provide:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import queue
 import re
 import threading
@@ -96,7 +97,22 @@ class CommandCompleter(Completer):
 class FullScreenUI:
     """Full-screen chat interface with scrollable history and ANSI color support."""
 
-    _MARKER_RE = re.compile(r"\[\[(COPY|SPINNER):([^\]]+)\]\]")
+    _MARKER_RE = re.compile(r"\[\[(COPY|SPINNER|FOLD):([^\]]+)\]\]")
+
+    @dataclass
+    class _FoldRegion:
+        """A collapsible region rendered inline in the scrollback.
+
+        - `visible_lines` are always displayed.
+        - `hidden_lines` are displayed only when expanded.
+        - `start_idx` is the absolute line index (in `_output_lines`) of the first visible line.
+        """
+
+        fold_id: str
+        start_idx: int
+        visible_lines: List[str]
+        hidden_lines: List[str]
+        collapsed: bool = True
 
     class _ScrollAwareFormattedTextControl(FormattedTextControl):
         def __init__(
@@ -127,6 +143,7 @@ class FullScreenUI:
         get_status_text: Callable[[], str],
         on_input: Callable[[str], None],
         on_copy_payload: Optional[Callable[[str], bool]] = None,
+        on_fold_toggle: Optional[Callable[[str], None]] = None,
         color: bool = True,
         mouse_support: bool = True,
     ):
@@ -145,6 +162,9 @@ class FullScreenUI:
 
         self._on_copy_payload = on_copy_payload
         self._copy_payloads: Dict[str, str] = {}
+
+        self._on_fold_toggle = on_fold_toggle
+        self._fold_regions: Dict[str, FullScreenUI._FoldRegion] = {}
 
         # Output content storage (raw text lines with ANSI codes).
         # Keeping a line list lets us render a virtualized view window instead of
@@ -268,6 +288,168 @@ class FullScreenUI:
             self._app.invalidate()
         return True
 
+    def append_fold_region(
+        self,
+        *,
+        fold_id: str,
+        visible_lines: List[str],
+        hidden_lines: List[str],
+        collapsed: bool = True,
+    ) -> None:
+        """Append a collapsible region to the output.
+
+        The region is addressable via `[[FOLD:<fold_id>]]` markers embedded in `visible_lines`.
+        """
+        fid = str(fold_id or "").strip()
+        if not fid:
+            return
+        vis = list(visible_lines or [])
+        hid = list(hidden_lines or [])
+        if not vis:
+            vis = [f"[[FOLD:{fid}]]"]
+
+        with self._output_lock:
+            start_idx = len(self._output_lines)
+            self._output_lines.extend(vis)
+            if not collapsed and hid:
+                self._output_lines.extend(hid)
+            self._output_line_count = max(1, len(self._output_lines))
+            self._output_version += 1
+
+            self._fold_regions[fid] = FullScreenUI._FoldRegion(
+                fold_id=fid,
+                start_idx=start_idx,
+                visible_lines=vis,
+                hidden_lines=hid,
+                collapsed=bool(collapsed),
+            )
+
+            if self._follow_output:
+                self._scroll_offset = max(0, self._output_line_count - 1)
+                self._scroll_col = 10**9
+            else:
+                self._scroll_offset = max(0, min(self._scroll_offset, self._output_line_count - 1))
+                self._scroll_col = max(0, int(self._scroll_col or 0))
+            self._ensure_view_window_locked()
+
+        if self._app and self._app.is_running:
+            self._app.invalidate()
+
+    def update_fold_region(
+        self,
+        fold_id: str,
+        *,
+        visible_lines: Optional[List[str]] = None,
+        hidden_lines: Optional[List[str]] = None,
+    ) -> bool:
+        """Update an existing fold region in-place.
+
+        If the region is expanded and `hidden_lines` changes length, subsequent fold regions are shifted.
+        """
+        fid = str(fold_id or "").strip()
+        if not fid:
+            return False
+
+        def _shift_regions(after_idx: int, delta: int, *, exclude: str) -> None:
+            if not delta:
+                return
+            for rid, reg in self._fold_regions.items():
+                if rid == exclude:
+                    continue
+                if reg.start_idx >= after_idx:
+                    reg.start_idx += delta
+
+        with self._output_lock:
+            reg = self._fold_regions.get(fid)
+            if reg is None:
+                return False
+
+            vis_old = list(reg.visible_lines)
+            hid_old = list(reg.hidden_lines)
+            vis_new = list(visible_lines) if visible_lines is not None else vis_old
+            hid_new = list(hidden_lines) if hidden_lines is not None else hid_old
+
+            # Compute where the region is currently rendered in `_output_lines`.
+            start = int(reg.start_idx)
+            if start < 0:
+                start = 0
+            # Best-effort safety if output was cleared externally.
+            if start >= len(self._output_lines):
+                return False
+
+            current_len = len(vis_old) + (0 if reg.collapsed else len(hid_old))
+            new_len = len(vis_new) + (0 if reg.collapsed else len(hid_new))
+
+            # Replace the rendered slice.
+            end = min(len(self._output_lines), start + current_len)
+            rendered = list(vis_new)
+            if not reg.collapsed:
+                rendered.extend(hid_new)
+            self._output_lines[start:end] = rendered
+
+            delta = new_len - current_len
+            if delta:
+                _shift_regions(after_idx=start + current_len, delta=delta, exclude=fid)
+
+            reg.visible_lines = vis_new
+            reg.hidden_lines = hid_new
+
+            self._output_line_count = max(1, len(self._output_lines))
+            self._output_version += 1
+            self._scroll_offset = max(0, min(self._scroll_offset, self._output_line_count - 1))
+            self._ensure_view_window_locked()
+
+        if self._app and self._app.is_running:
+            self._app.invalidate()
+        return True
+
+    def toggle_fold(self, fold_id: str) -> bool:
+        """Toggle a fold region (collapsed/expanded) by id."""
+        fid = str(fold_id or "").strip()
+        if not fid:
+            return False
+
+        def _shift_regions(after_idx: int, delta: int, *, exclude: str) -> None:
+            if not delta:
+                return
+            for rid, reg in self._fold_regions.items():
+                if rid == exclude:
+                    continue
+                if reg.start_idx >= after_idx:
+                    reg.start_idx += delta
+
+        with self._output_lock:
+            reg = self._fold_regions.get(fid)
+            if reg is None:
+                return False
+
+            start = int(reg.start_idx)
+            start = max(0, min(start, max(0, len(self._output_lines) - 1)))
+            insert_at = start + len(reg.visible_lines)
+
+            if reg.collapsed:
+                # Expand: insert hidden lines.
+                if reg.hidden_lines:
+                    self._output_lines[insert_at:insert_at] = list(reg.hidden_lines)
+                    _shift_regions(after_idx=insert_at, delta=len(reg.hidden_lines), exclude=fid)
+                reg.collapsed = False
+            else:
+                # Collapse: remove hidden lines slice.
+                n = len(reg.hidden_lines)
+                if n:
+                    del self._output_lines[insert_at : insert_at + n]
+                    _shift_regions(after_idx=insert_at, delta=-n, exclude=fid)
+                reg.collapsed = True
+
+            self._output_line_count = max(1, len(self._output_lines))
+            self._output_version += 1
+            self._scroll_offset = max(0, min(self._scroll_offset, self._output_line_count - 1))
+            self._ensure_view_window_locked()
+
+        if self._app and self._app.is_running:
+            self._app.invalidate()
+        return True
+
     def toggle_mouse_support(self) -> bool:
         """Toggle mouse reporting (wheel scroll) vs terminal selection mode."""
         self._mouse_support_enabled = not self._mouse_support_enabled
@@ -308,6 +490,27 @@ class FullScreenUI:
 
         return _handler
 
+    def _fold_handler(self, fold_id: str) -> Callable[[MouseEvent], None]:
+        def _handler(mouse_event: MouseEvent) -> None:
+            if mouse_event.event_type not in (MouseEventType.MOUSE_UP, MouseEventType.MOUSE_DOWN):
+                return
+            fid = str(fold_id or "").strip()
+            if not fid:
+                return
+            # Host callback (optional): lets outer layers synchronize additional state.
+            try:
+                if self._on_fold_toggle is not None:
+                    self._on_fold_toggle(fid)
+            except Exception:
+                pass
+            # Always toggle locally for immediate UX.
+            try:
+                self.toggle_fold(fid)
+            except Exception:
+                return
+
+        return _handler
+
     def _format_output_text(self, text: str) -> FormattedText:
         """Convert output text into formatted fragments and attach handlers for copy markers."""
         if not text:
@@ -334,6 +537,17 @@ class FullScreenUI:
                     # Keep inline spinners static; the status bar already animates.
                     # This avoids reformatting the whole history on every spinner frame.
                     out.append(("class:inline-spinner", "…"))
+                else:
+                    out.extend(to_formatted_text(ANSI(m.group(0))))
+            elif kind == "FOLD":
+                if payload:
+                    collapsed = True
+                    with self._output_lock:
+                        reg = self._fold_regions.get(payload)
+                        if reg is not None:
+                            collapsed = bool(reg.collapsed)
+                    arrow = "▶" if collapsed else "▼"
+                    out.append(("class:fold-toggle", f"{arrow} ", self._fold_handler(payload)))
                 else:
                     out.extend(to_formatted_text(ANSI(m.group(0))))
             else:
@@ -568,9 +782,25 @@ class FullScreenUI:
         # If spinner is active, show it prominently
         if self._spinner_active and self._spinner_text:
             spinner_char = self._spinner_frames[self._spinner_frame % len(self._spinner_frames)]
+            shimmer = str(self._spinner_text or "")
+            # "Reflect" shimmer: highlight one character that moves across the text.
+            # This is intentionally subtle; the spinner glyph already provides motion.
+            parts: List[Tuple[str, str]] = []
+            if shimmer:
+                i = int(self._spinner_frame) % max(1, len(shimmer))
+                pre = shimmer[:i]
+                mid = shimmer[i : i + 1]
+                post = shimmer[i + 1 :]
+                if pre:
+                    parts.append(("class:spinner-text", pre))
+                if mid:
+                    parts.append(("class:spinner-text-highlight", mid))
+                if post:
+                    parts.append(("class:spinner-text", post))
+            text_parts: List[Tuple[str, str]] = parts if parts else [("class:spinner-text", f"{self._spinner_text}")]
             return [
                 ("class:spinner", f" {spinner_char} "),
-                ("class:spinner-text", f"{self._spinner_text}"),
+                *text_parts,
                 ("class:status-text", f"  │  {text}"),
             ]
 
@@ -903,6 +1133,7 @@ class FullScreenUI:
                 # Spinner styling
                 "spinner": "#00aaff bold",
                 "spinner-text": "#ffaa00",
+                "spinner-text-highlight": "#ffffff bold",
                 # Completion menu styling
                 "completion-menu": "bg:#1a1a2e #cccccc",
                 "completion-menu.completion": "bg:#1a1a2e #cccccc",
@@ -911,6 +1142,7 @@ class FullScreenUI:
                 "completion-menu.meta.completion.current": "bg:#444444 #aaaaaa italic",
                 "copy-button": "bg:#444444 #ffffff bold",
                 "inline-spinner": "#ffaa00 bold",
+                "fold-toggle": "#cccccc bold",
             })
         else:
             self._style = Style.from_dict({})
