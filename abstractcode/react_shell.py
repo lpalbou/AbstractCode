@@ -1290,7 +1290,11 @@ class ReactShell:
             except Exception:
                 args_full = str(args)
             self._turn_trace.append(f"Tool: {tool}{call_suffix}({args_full})")
-            self._ui.set_spinner(f"Running {tool}...")
+            tool_s = str(tool or "")
+            if tool_s.startswith("mcp::"):
+                self._ui.set_spinner("MCP")
+            else:
+                self._ui.set_spinner(f"Running {tool}...")
         elif step == "observe":
             raw = str(data.get("result", "") or "")
             success = data.get("success")
@@ -2777,6 +2781,10 @@ class ReactShell:
             self._print(_style(f"MCP tools unavailable: {e}", _C.YELLOW, enabled=self._color))
             return
 
+        set_spinner = getattr(self._ui, "set_spinner", None)
+        clear_spinner = getattr(self._ui, "clear_spinner", None)
+        if callable(set_spinner):
+            set_spinner("MCP")
         self._print(_style(f"Syncing MCP tools from '{server_id}'...", _C.DIM, enabled=self._color))
         cache: Dict[str, Any] = {}
         try:
@@ -2789,6 +2797,8 @@ class ReactShell:
             self._print(_style(f"Failed to sync MCP tools from '{server_id}': {e}", _C.YELLOW, enabled=self._color))
             return
         finally:
+            if callable(clear_spinner):
+                clear_spinner()
             for c in cache.values():
                 try:
                     close = getattr(c, "close", None)
