@@ -492,7 +492,10 @@ class FullScreenUI:
 
     def _fold_handler(self, fold_id: str) -> Callable[[MouseEvent], None]:
         def _handler(mouse_event: MouseEvent) -> None:
-            if mouse_event.event_type not in (MouseEventType.MOUSE_UP, MouseEventType.MOUSE_DOWN):
+            # Important: only toggle on MOUSE_UP.
+            # prompt_toolkit typically emits both DOWN and UP for a click; toggling on both
+            # will expand then immediately collapse (the "briefly unfolds then snaps back" bug).
+            if mouse_event.event_type != MouseEventType.MOUSE_UP:
                 return
             fid = str(fold_id or "").strip()
             if not fid:
@@ -519,12 +522,59 @@ class FullScreenUI:
         if "[[" not in text:
             return to_formatted_text(ANSI(text))
 
+        def _attach_handler_until_newline(
+            fragments: FormattedText, handler: Callable[[MouseEvent], None]
+        ) -> tuple[FormattedText, bool]:
+            """Attach a mouse handler to fragments until the next newline.
+
+            Returns (new_fragments, still_active), where still_active is True iff no newline
+            was encountered (so caller should keep the handler for subsequent fragments).
+            """
+            out_frags: List[Tuple[Any, ...]] = []
+            active = True
+            for frag in fragments:
+                # frag can be (style, text) or (style, text, handler)
+                if len(frag) < 2:
+                    out_frags.append(frag)
+                    continue
+                style = frag[0]
+                s = frag[1]
+                existing_handler = frag[2] if len(frag) >= 3 else None
+                if not active or not isinstance(s, str) or "\n" not in s:
+                    if active and existing_handler is None:
+                        out_frags.append((style, s, handler))
+                    else:
+                        out_frags.append(frag)
+                    continue
+
+                # Split on the first newline: handler applies only before it.
+                before, after = s.split("\n", 1)
+                if before:
+                    if existing_handler is None:
+                        out_frags.append((style, before, handler))
+                    else:
+                        out_frags.append((style, before, existing_handler))
+                out_frags.append((style, "\n"))
+                if after:
+                    out_frags.append((style, after))
+                active = False
+
+            return out_frags, active
+
         out: List[Tuple[Any, ...]] = []
         pos = 0
+        active_fold_handler: Optional[Callable[[MouseEvent], None]] = None
         for m in self._MARKER_RE.finditer(text):
             before = text[pos : m.start()]
             if before:
-                out.extend(to_formatted_text(ANSI(before)))
+                before_frags = to_formatted_text(ANSI(before))
+                if active_fold_handler is not None:
+                    patched, still_active = _attach_handler_until_newline(before_frags, active_fold_handler)
+                    out.extend(patched)
+                    if not still_active:
+                        active_fold_handler = None
+                else:
+                    out.extend(before_frags)
             kind = str(m.group(1) or "").strip().upper()
             payload = str(m.group(2) or "").strip()
             if kind == "COPY":
@@ -547,7 +597,11 @@ class FullScreenUI:
                         if reg is not None:
                             collapsed = bool(reg.collapsed)
                     arrow = "▶" if collapsed else "▼"
-                    out.append(("class:fold-toggle", f"{arrow} ", self._fold_handler(payload)))
+                    handler = self._fold_handler(payload)
+                    # Make the whole header line clickable by attaching this handler to
+                    # subsequent fragments until the next newline.
+                    out.append(("class:fold-toggle", f"{arrow} ", handler))
+                    active_fold_handler = handler
                 else:
                     out.extend(to_formatted_text(ANSI(m.group(0))))
             else:
@@ -555,7 +609,12 @@ class FullScreenUI:
             pos = m.end()
         tail = text[pos:]
         if tail:
-            out.extend(to_formatted_text(ANSI(tail)))
+            tail_frags = to_formatted_text(ANSI(tail))
+            if active_fold_handler is not None:
+                patched, _still_active = _attach_handler_until_newline(tail_frags, active_fold_handler)
+                out.extend(patched)
+            else:
+                out.extend(tail_frags)
         return out
 
     def _compute_view_params_locked(self) -> Tuple[int, int]:
@@ -787,10 +846,17 @@ class FullScreenUI:
             # This is intentionally subtle; the spinner glyph already provides motion.
             parts: List[Tuple[str, str]] = []
             if shimmer:
-                i = int(self._spinner_frame) % max(1, len(shimmer))
-                pre = shimmer[:i]
-                mid = shimmer[i : i + 1]
-                post = shimmer[i + 1 :]
+                # Avoid highlighting whitespace (looks like "no shimmer"). Only sweep over
+                # visible characters; highlight a small 3-char window.
+                visible_positions = [idx for idx, ch in enumerate(shimmer) if not ch.isspace()]
+                if not visible_positions:
+                    visible_positions = list(range(len(shimmer)))
+                center = visible_positions[int(self._spinner_frame) % max(1, len(visible_positions))]
+                lo = max(0, center - 1)
+                hi = min(len(shimmer), center + 2)
+                pre = shimmer[:lo]
+                mid = shimmer[lo:hi]
+                post = shimmer[hi:]
                 if pre:
                     parts.append(("class:spinner-text", pre))
                 if mid:

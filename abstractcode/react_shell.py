@@ -13,6 +13,7 @@ from prompt_toolkit.formatted_text import HTML
 
 from .input_handler import create_prompt_session, create_simple_session
 from .fullscreen_ui import FullScreenUI
+from .terminal_markdown import TerminalMarkdownRenderer
 
 
 def _supports_color() -> bool:
@@ -745,12 +746,17 @@ class ReactShell:
         tool_name = str(tool_name or "")
         raw = "" if raw is None else str(raw)
 
+        def strip_status_prefix(s: str) -> str:
+            t = str(s or "").lstrip()
+            for p in ("✅", "❌", "🟢", "🔴", "⏰", "🚫"):
+                if t.startswith(p):
+                    return t[len(p) :].lstrip(" :")
+            return t
+
         if tool_name == "write_file":
             cleaned = self._strip_tool_prefix(raw, tool_name=tool_name).strip()
             line = (cleaned.splitlines() or [""])[0].strip()
-            if ok is False and line and not line.startswith("❌"):
-                line = f"❌ {line}"
-            return line or ("✅ Done" if ok is not False else "❌ Failed")
+            return strip_status_prefix(line) or ("Done" if ok is not False else "Failed")
 
         if tool_name == "read_file":
             import re
@@ -761,9 +767,8 @@ class ReactShell:
                 file_path = str(tool_args.get("file_path") or "")
             if ok is False or cleaned.startswith("Error:") or cleaned.startswith("❌"):
                 msg = cleaned
-                if msg and not msg.startswith("❌"):
-                    msg = f"❌ {msg}"
-                return msg or "❌ Failed"
+                msg2 = strip_status_prefix(msg)
+                return msg2 or "Failed"
 
             header = (cleaned.splitlines() or [""])[0].strip()
             m = re.match(r"^File:\s*(?P<path>.+?)\s*\((?P<lines>[\d,]+)\s+lines\)\s*$", header)
@@ -782,20 +787,74 @@ class ReactShell:
 
                 bytes_read = len(content.encode("utf-8"))
                 lines_read = line_count if isinstance(line_count, int) else len(content.splitlines())
-                return f"✅ Read '{file_path}' ({bytes_read:,} bytes, {lines_read:,} lines)"
+                return f"Read '{file_path}' ({bytes_read:,} bytes, {lines_read:,} lines)"
 
             bytes_read = len(cleaned.encode("utf-8"))
             lines_read = len(cleaned.splitlines())
             path_part = f" '{file_path}'" if file_path else ""
-            return f"✅ Read{path_part} ({bytes_read:,} bytes, {lines_read:,} lines)"
+            return f"Read{path_part} ({bytes_read:,} bytes, {lines_read:,} lines)"
 
         cleaned = self._strip_tool_prefix(raw, tool_name=tool_name).strip()
         first = (cleaned.splitlines() or [""])[0].strip()
         if not first:
-            return "✅ Done" if ok is not False else "❌ Failed"
+            return "Done" if ok is not False else "Failed"
+        first = strip_status_prefix(first)
         if len(first) <= max_chars:
             return first
         return first[: max(1, max_chars - 1)] + "…"
+
+    def _tool_args_preview(self, *, tool_name: str, args: Dict[str, Any], max_chars: int = 140) -> str:
+        """Build a high-signal, low-noise args preview for tool calls.
+
+        The goal is to avoid dumping massive `content` fields into the visible transcript.
+        Full args remain available in the expanded tool block.
+        """
+        name = str(tool_name or "")
+        a = dict(args or {})
+
+        def trunc(s: str) -> str:
+            s2 = str(s or "")
+            if len(s2) <= max_chars:
+                return s2
+            return s2[: max(1, max_chars - 1)] + "…"
+
+        if name == "write_file":
+            fp = str(a.get("file_path") or a.get("path") or "")
+            content = a.get("content")
+            content_s = str(content or "")
+            bytes_n = len(content_s.encode("utf-8")) if content is not None else 0
+            lines_n = len(content_s.splitlines()) if content is not None else 0
+            return trunc(json.dumps({"file_path": fp, "bytes": bytes_n, "lines": lines_n}, ensure_ascii=False))
+
+        if name == "read_file":
+            fp = str(a.get("file_path") or a.get("path") or "")
+            offset = a.get("offset")
+            limit = a.get("limit")
+            payload: Dict[str, Any] = {"file_path": fp}
+            if offset is not None:
+                payload["offset"] = offset
+            if limit is not None:
+                payload["limit"] = limit
+            return trunc(json.dumps(payload, ensure_ascii=False))
+
+        if name == "edit_file":
+            tf = str(a.get("target_file") or a.get("file_path") or "")
+            return trunc(json.dumps({"target_file": tf}, ensure_ascii=False))
+
+        if name == "execute_command":
+            cmd = str(a.get("command") or "")
+            cwd = str(a.get("cwd") or "")
+            payload2: Dict[str, Any] = {"command": cmd}
+            if cwd:
+                payload2["cwd"] = cwd
+            return trunc(json.dumps(payload2, ensure_ascii=False))
+
+        if name == "web_search":
+            term = str(a.get("search_term") or a.get("query") or "")
+            return trunc(json.dumps({"search_term": term}, ensure_ascii=False))
+
+        # Default: compact JSON with truncation.
+        return trunc(json.dumps(self._truncate_for_ui(a, max_chars=max_chars), ensure_ascii=False, sort_keys=True, default=str))
 
     def _format_tool_output_lines(
         self,
@@ -1341,7 +1400,13 @@ class ReactShell:
 
         self._print(_style(f"\n{title}", _C.GREEN, _C.BOLD, enabled=self._color))
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
-        self._print(answer)
+        # Render Markdown for the terminal, but keep copy payload lossless (raw answer).
+        try:
+            renderer = TerminalMarkdownRenderer(color=self._color)
+            rendered = renderer.render(answer)
+        except Exception:
+            rendered = answer
+        self._print(rendered)
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
         footer_text = self._build_answer_footer(state=state)
         footer = _style(footer_text, _C.DIM, enabled=self._color) if footer_text else ""
@@ -1446,8 +1511,14 @@ class ReactShell:
                 self._turn_trace.append("Thought:\n" + text)
                 fid = f"thought_{uuid.uuid4().hex}"
                 header = _style("Thought", _C.ORANGE, _C.BOLD, enabled=self._color)
-                visible = ["", f"[[FOLD:{fid}]]{header}", _style("  (click to expand/collapse)", _C.DIM, enabled=self._color)]
-                hidden = [_style(f"  {line}" if line else "  ", _C.ORANGE, enabled=self._color) for line in (text.splitlines() or [""])]
+                lines = text.splitlines() or [""]
+                first_line = lines[0].strip()
+                if len(first_line) > 200:
+                    first_line = first_line[:199] + "…"
+                visible = ["", f"[[FOLD:{fid}]]{header}", _style(f"  {first_line}", _C.ORANGE, enabled=self._color)]
+                # Hidden part shows the remaining thought (avoid duplicating the first line).
+                rest = lines[1:] if len(lines) > 1 else []
+                hidden = [_style(f"  {line}" if line else "  ", _C.ORANGE, enabled=self._color) for line in (rest or [""])]
                 hidden.append("")
                 self._ui_append_fold_region(fold_id=fid, visible_lines=visible, hidden_lines=hidden, collapsed=True)
         elif step == "act":
@@ -1459,16 +1530,15 @@ class ReactShell:
             call_id = str(call_id_raw).strip() if call_id_raw is not None else ""
             ui_args = self._truncate_for_ui(args, max_chars=200)
             try:
-                args_str = json.dumps(ui_args, ensure_ascii=False, sort_keys=True)
+                args_str = self._tool_args_preview(tool_name=str(tool), args=dict(args), max_chars=140)
             except Exception:
                 args_str = str(ui_args)
-            call_suffix = f" [{call_id}]" if call_id else ""
             fold_id = f"tool_{uuid.uuid4().hex}"
             marker = f"[[SPINNER:{fold_id}]]"
             self._pending_tool_markers.append(marker)
             self._pending_tool_metas.append({"tool": tool, "args": dict(args), "call_id": call_id, "fold_id": fold_id})
 
-            header_core = _style(f"Tool Call: {tool}{call_suffix}", _C.GREEN, _C.BOLD, enabled=self._color)
+            header_core = _style(f"Tool Call: {tool}", _C.GREEN, _C.BOLD, enabled=self._color)
             header_line = f"[[FOLD:{fold_id}]]{header_core} {marker}"
             vis = [
                 header_line,
@@ -1481,6 +1551,7 @@ class ReactShell:
             except Exception:
                 args_pretty = str(args)
             hid = [
+                _style(f"  call_id: {call_id}" if call_id else "  call_id: (none)", _C.DIM, enabled=self._color),
                 _style("  arguments:", _C.DIM, enabled=self._color),
                 *[f"    {ln}" if ln else "    " for ln in (args_pretty.splitlines() or [""])],
                 "",
@@ -1495,7 +1566,8 @@ class ReactShell:
                 args_full = json.dumps(args, ensure_ascii=False, sort_keys=True)
             except Exception:
                 args_full = str(args)
-            self._turn_trace.append(f"Tool: {tool}{call_suffix}({args_full})")
+            call_id_note = f" [{call_id}]" if call_id else ""
+            self._turn_trace.append(f"Tool: {tool}{call_id_note}({args_full})")
             tool_s = str(tool or "")
             if tool_s.startswith("mcp::"):
                 self._ui.set_spinner("MCP")
@@ -1551,16 +1623,10 @@ class ReactShell:
                 # Best-effort: preserve original call_id in meta if present.
                 if isinstance(meta, dict):
                     call_id = str(meta.get("call_id") or "")
-                call_suffix = f" [{call_id}]" if call_id else ""
 
-                header_core = _style(f"Tool Call: {tool_label}{call_suffix}", _C.GREEN, _C.BOLD, enabled=self._color)
+                header_core = _style(f"Tool Call: {tool_label}", _C.GREEN, _C.BOLD, enabled=self._color)
                 try:
-                    args_preview = json.dumps(
-                        self._truncate_for_ui(tool_call, max_chars=200),
-                        ensure_ascii=False,
-                        sort_keys=True,
-                        default=str,
-                    )
+                    args_preview = self._tool_args_preview(tool_name=tool_label, args=dict(tool_call) if isinstance(tool_call, dict) else {}, max_chars=140)
                 except Exception:
                     args_preview = str(self._truncate_for_ui(tool_call, max_chars=200))
                 visible = [
@@ -1570,6 +1636,7 @@ class ReactShell:
                 ]
 
                 hidden = [
+                    _style(f"  call_id: {call_id}" if call_id else "  call_id: (none)", _C.DIM, enabled=self._color),
                     _style("  arguments:", _C.DIM, enabled=self._color),
                     *[f"    {ln}" if ln else "    " for ln in (args_pretty.splitlines() or [""])],
                     "",
@@ -4568,7 +4635,7 @@ class ReactShell:
         Source of truth: `RunState.vars["_runtime"]["node_traces"]`.
 
         Usage:
-          /context last [--last] [--verbatim] [--json-only] [--save <path>]
+          /context last [copy] [--last] [--all] [--verbatim] [--json-only] [--save <path>]
           /llm ...  (alias)
         """
         import shlex
@@ -4580,11 +4647,19 @@ class ReactShell:
         except ValueError:
             parts = raw.split() if raw else []
 
+        copy_to_clipboard = False
+        if parts and str(parts[0] or "").strip().lower() == "copy":
+            copy_to_clipboard = True
+            parts = parts[1:]
+
         json_only = False
         last_only = False
+        all_calls = False
         verbatim = False
         save_path: Optional[str] = None
-        usage = "Usage: /context last [--last] [--verbatim] [--json-only] [--save <path>] (alias: /llm)"
+        usage = (
+            "Usage: /context last [copy] [--last|--all] [--verbatim] [--json-only] [--save <path>] (alias: /llm)"
+        )
         i = 0
         while i < len(parts):
             p = parts[i]
@@ -4594,6 +4669,10 @@ class ReactShell:
                 continue
             if p in ("--last", "--latest"):
                 last_only = True
+                i += 1
+                continue
+            if p in ("--all", "--full", "--cycle"):
+                all_calls = True
                 i += 1
                 continue
             if p in ("--verbatim", "--context", "--messages"):
@@ -4654,6 +4733,13 @@ class ReactShell:
 
         llm_steps.sort(key=lambda d: str(d.get("ts") or ""))
         tool_steps.sort(key=lambda d: str(d.get("ts") or ""))
+        if all_calls:
+            last_only = False
+
+        # For copy-to-clipboard, default to the last LLM call unless the user explicitly asked for --all.
+        if copy_to_clipboard and not last_only and not all_calls:
+            last_only = True
+
         if last_only and llm_steps:
             llm_steps = [llm_steps[-1]]
 
@@ -4713,7 +4799,43 @@ class ReactShell:
             "tool_calls": tool_calls_out,
         }
 
+        # Compact "wire export" for sharing/debugging: exact request sent + exact response received.
+        # This intentionally avoids the larger runtime views (derived prompts, redundant fields, etc.).
+        wire_calls: List[Dict[str, Any]] = []
+        for call in calls_out:
+            res_payload = call.get("result") if isinstance(call.get("result"), dict) else {}
+            meta = res_payload.get("metadata") if isinstance(res_payload.get("metadata"), dict) else {}
+            provider_req = meta.get("_provider_request") if isinstance(meta, dict) else None
+            provider_resp = res_payload.get("raw_response")
+            wire_calls.append(
+                {
+                    "index": call.get("index"),
+                    "ts": call.get("ts"),
+                    "node_id": call.get("node_id"),
+                    "status": call.get("status"),
+                    "duration_ms": call.get("duration_ms"),
+                    "request_sent": provider_req,
+                    "response_received": provider_resp,
+                    "normalized": {
+                        "model": res_payload.get("model"),
+                        "finish_reason": res_payload.get("finish_reason"),
+                        "usage": res_payload.get("usage"),
+                        "content": res_payload.get("content"),
+                        "tool_calls": res_payload.get("tool_calls"),
+                        "trace_id": res_payload.get("trace_id"),
+                    },
+                }
+            )
+        wire_out: Dict[str, Any] = {
+            "kind": "llm_verbatim_export",
+            "run_id": getattr(state, "run_id", None),
+            "provider": self._provider,
+            "model": self._model,
+            "calls": wire_calls,
+        }
+
         text = json.dumps(out, ensure_ascii=False, indent=2, sort_keys=False, default=str)
+        wire_text = json.dumps(wire_out, ensure_ascii=False, indent=2, sort_keys=False, default=str)
 
         if save_path:
             try:
@@ -4721,10 +4843,16 @@ class ReactShell:
                 if not path.is_absolute():
                     path = Path.cwd() / path
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(text, encoding="utf-8")
-                self._print(_style(f"✅ Saved runtime trace payloads to {path}", _C.DIM, enabled=self._color))
+                payload_to_save = wire_text if copy_to_clipboard else text
+                path.write_text(payload_to_save, encoding="utf-8")
+                self._print(_style(f"✅ Saved LLM trace payloads to {path}", _C.DIM, enabled=self._color))
             except Exception as e:
                 self._print(_style(f"❌ Failed to save: {e}", _C.DIM, enabled=self._color))
+
+        if copy_to_clipboard:
+            ok = self._copy_to_clipboard(wire_text)
+            self._print(_style("Copied." if ok else "Copy failed (no clipboard helper found).", _C.DIM, enabled=self._color))
+            return
 
         copy_id = f"llm_{uuid.uuid4().hex}"
         self._ui.register_copy_payload(copy_id, text)
