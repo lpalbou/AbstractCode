@@ -3404,7 +3404,7 @@ class ReactShell:
             self._print(_style("  /memory <component>", _C.DIM, enabled=self._color))
             self._print(
                 _style(
-                    "Components: persona, memory_organization, tools, current_tasks, current_context, critical_insights, key_history",
+                    "Components: persona, memory_organization, tools, current_tasks, current_context, critical_insights, references, key_history",
                     _C.DIM,
                     enabled=self._color,
                 )
@@ -3426,6 +3426,9 @@ class ReactShell:
             "critical_insights": "critical_insights",
             "critical-insights": "critical_insights",
             "insights": "critical_insights",
+            "references": "references",
+            "reference": "references",
+            "refs": "references",
             "key_history": "key_history",
             "key-history": "key_history",
             "history": "key_history",

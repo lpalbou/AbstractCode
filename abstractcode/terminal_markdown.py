@@ -53,8 +53,70 @@ class TerminalMarkdownRenderer:
         out = self._re_inline_code.sub(_code, out)
         return out
 
+    def _unescape_newlines_if_needed(self, s: str) -> str:
+        """Convert literal "\\n" / "\\r" / "\\r\\n" sequences into real newlines.
+
+        Some upstream layers accidentally pass serialized strings (repr/json) where newlines are
+        encoded as the two characters backslash+n. We only unescape when the input has *no* real
+        newlines to avoid corrupting valid code like `print("a\\nb")`.
+        """
+        if "\n" in s or "\r" in s:
+            return s
+        if "\\n" not in s and "\\r" not in s:
+            return s
+
+        out: List[str] = []
+        i = 0
+        n = len(s)
+        while i < n:
+            ch = s[i]
+            if ch != "\\":
+                out.append(ch)
+                i += 1
+                continue
+
+            # Count consecutive backslashes.
+            j = i
+            while j < n and s[j] == "\\":
+                j += 1
+            run_len = j - i
+
+            if j >= n:
+                out.append("\\" * run_len)
+                break
+
+            nxt = s[j]
+
+            # Only treat "\n"/"\r" as escapes when the escape backslash is not itself escaped.
+            if nxt in ("n", "r") and (run_len % 2 == 1):
+                # Preserve all but the escape backslash.
+                if run_len > 1:
+                    out.append("\\" * (run_len - 1))
+                out.append("\n")
+                i = j + 1
+
+                # Collapse \r\n into a single newline (Windows-style payloads).
+                if nxt == "r" and i < n and s[i] == "\\":
+                    k = i
+                    while k < n and s[k] == "\\":
+                        k += 1
+                    run2_len = k - i
+                    if k < n and s[k] == "n" and (run2_len % 2 == 1):
+                        if run2_len > 1:
+                            out.append("\\" * (run2_len - 1))
+                        i = k + 1
+                continue
+
+            # Not an escape we handle; emit literally.
+            out.append("\\" * run_len)
+            out.append(nxt)
+            i = j + 1
+
+        return "".join(out)
+
     def render(self, text: str) -> str:
         s = "" if text is None else str(text)
+        s = self._unescape_newlines_if_needed(s)
         lines = s.splitlines()
         out: List[str] = []
 

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Tool result visibility**: increased the default tool observation preview to **1000 characters** (was 120) so small-but-critical outputs (e.g., exit codes, working directories) are not silently truncated in the UI.
+- **ANSWER newline rendering**: unescape literal `\n` / `\r\n` sequences into real line breaks before terminal Markdown rendering, so multi-line answers display correctly.
 - **Web search reliability**: add `ddgs` as a dependency so the default `web_search` tool works without requiring manual installs.
 - **Native tools prompt accounting**: ReactShell token estimation now excludes the full `Tools (session)` Active Memory catalog for **native-tool models**, matching the prompt actually sent to OpenAI-compatible servers (e.g. LMStudio).
 - **LLM-call payload observability**: `/log provider` now shows the verbatim provider request/response (`_provider_request` + `raw_response`), and `/log runtime` shows the durable runtime step trace for LLM/tool calls.
