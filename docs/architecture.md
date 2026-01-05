@@ -41,6 +41,7 @@ The current interactive app is `ReactShell` (`abstractcode/abstractcode/react_sh
 `abstractcode/abstractcode/cli.py` selects:
 - `--agent react` → `abstractagent.agents.react.ReactAgent`
 - `--agent codeact` → `abstractagent.agents.codeact.CodeActAgent`
+- `--agent memact` → `abstractagent.agents.memact.MemActAgent`
 
 ### Durability (default-on)
 If a state file is enabled (default: `~/.abstractcode/state.json`), `ReactShell` configures file-backed stores:
@@ -79,6 +80,12 @@ AbstractCode’s memory commands are thin UX wrappers over runtime contracts:
   - `--scope run|session|global|all`
 
 This keeps “what memory means” consistent across hosts (CLI, web UI, etc.).
+
+### MemAct Active Memory (MemAct-only)
+When running `--agent memact`, AbstractCode also exposes:
+- `/memory` to inspect MemAct’s runtime-owned memory blocks (`_runtime.active_memory`).
+
+ReAct/CodeAct remain conventional chat-history agents; `/memory` is not available for them.
 
 ## Observability
 

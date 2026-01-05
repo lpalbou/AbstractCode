@@ -56,9 +56,9 @@ def build_agent_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--agent",
-        choices=("react", "codeact"),
+        choices=("react", "codeact", "memact"),
         default=os.getenv("ABSTRACTCODE_AGENT", "react"),
-        help="Agent type to run (react|codeact).",
+        help="Agent type to run (react|codeact|memact).",
     )
     parser.add_argument("--provider", default="ollama", help="LLM provider (e.g. ollama, openai)")
     parser.add_argument("--model", default="qwen3:1.7b-q4_K_M", help="Model name")
