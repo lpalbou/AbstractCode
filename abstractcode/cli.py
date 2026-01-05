@@ -92,13 +92,21 @@ def build_agent_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--review",
         action="store_true",
-        help="Enable Review mode (agent self-checks completion after answering).",
+        dest="review",
+        help="Enable verifier mode (default: enabled).",
     )
+    parser.add_argument(
+        "--no-review",
+        action="store_false",
+        dest="review",
+        help="Disable verifier mode (not recommended).",
+    )
+    parser.set_defaults(review=True)
     parser.add_argument(
         "--review-max-rounds",
         type=int,
-        default=1,
-        help="Max Review rounds per task when --review is enabled (default: 1).",
+        default=3,
+        help="Max verifier rounds per task (default: 3).",
     )
     parser.add_argument(
         "--max-iterations",
@@ -376,7 +384,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         auto_approve=bool(args.auto_approve),
         plan_mode=bool(args.plan),
         review_mode=bool(args.review),
-        review_max_rounds=int(args.review_max_rounds or 1),
+        review_max_rounds=int(args.review_max_rounds),
         max_iterations=int(args.max_iterations),
         max_tokens=args.max_tokens,
         color=not bool(args.no_color),

@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **/log copy UX**: `/log runtime ... copy` and `/log provider ... copy` now accept `copy` as a trailing token and copy without rendering.
 - **/log provider format**: `/log provider` now defaults to the full ReAct cycle (all LLM calls) and renders OpenAI/LMS-style “Received request … Generated prediction …” blocks (no truncation).
 - **/log provider scope**: `/log provider` now reads from the durable ledger and, by default, includes **all LLM provider calls in the current session** (across runs) unless `--run` is used.
+- **/log provider tool-call detection**: best-effort tool-call summary now detects Anthropic `tool_use` blocks in addition to OpenAI-style `tool_calls`.
 - **Repeat guardrail**: reset duplicate-tool-call caches on **new runs** and **/cancel**, and block `write_file` calls missing `content` to prevent repeated 0‑byte file writes.
 
 ### Changed
@@ -31,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Repeating `--tag k=v` now builds multi-value tags (e.g. `--tag person=alice --tag person=bob`).
   - `--into-context` now also rehydrates matching `memory_note` spans as a synthetic system message (`[MEMORY NOTE] ...`).
 - **Logging commands**: replaced legacy `/context` + `/llm` with `/log runtime` + `/log provider` (no backward compatibility).
+- **Verifier (review) mode**: now enabled by default to prevent premature “stops” when the model returns incomplete prose without tool calls.
+  - Added `--no-review` to disable (not recommended).
+  - Default `--review-max-rounds` increased to 3.
 
 ### Removed
 - **`/new`, `/reset`**: removed alias commands (they were identical to `/clear`). Use `/clear`.

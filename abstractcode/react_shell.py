@@ -148,8 +148,8 @@ class ReactShell:
         state_file: Optional[str],
         auto_approve: bool,
         plan_mode: bool = False,
-        review_mode: bool = False,
-        review_max_rounds: int = 1,
+        review_mode: bool = True,
+        review_max_rounds: int = 3,
         max_iterations: int,
         max_tokens: Optional[int] = None,
         color: bool,
@@ -4949,6 +4949,51 @@ class ReactShell:
             def _json(obj: Any) -> str:
                 return json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=False, default=str)
 
+            def _extract_tool_calls(resp_obj: Any) -> list[Any]:
+                """Best-effort tool-call extraction for human-readable logs.
+
+                `/log provider` is intentionally provider-wire oriented, but this line helps
+                quickly spot whether the model asked for tools. Not all providers share the
+                OpenAI `choices[0].message.tool_calls` shape (e.g. Anthropic `tool_use` blocks).
+                """
+                if not isinstance(resp_obj, dict):
+                    return []
+
+                # OpenAI-compatible shape (including many local servers).
+                try:
+                    choices = resp_obj.get("choices")
+                    if isinstance(choices, list) and choices:
+                        ch0 = choices[0] if isinstance(choices[0], dict) else {}
+                        msg0 = ch0.get("message") if isinstance(ch0, dict) else {}
+                        msg0 = msg0 if isinstance(msg0, dict) else {}
+                        tcs = msg0.get("tool_calls")
+                        if isinstance(tcs, list):
+                            return tcs
+                except Exception:
+                    pass
+
+                # Anthropic Messages API shape: tool calls are `content` blocks with type=tool_use.
+                content = resp_obj.get("content")
+                if isinstance(content, list):
+                    out: list[dict[str, Any]] = []
+                    for block in content:
+                        if not isinstance(block, dict):
+                            continue
+                        if str(block.get("type") or "") != "tool_use":
+                            continue
+                        out.append(
+                            {
+                                "type": "tool_use",
+                                "call_id": block.get("id"),
+                                "name": block.get("name"),
+                                "arguments": block.get("input"),
+                            }
+                        )
+                    if out:
+                        return out
+
+                return []
+
             blocks: List[str] = []
             for c in calls:
                 ts = str(c.get("ts") or "")
@@ -4971,14 +5016,7 @@ class ReactShell:
                     n_messages = len(msgs) if isinstance(msgs, list) else None
 
                 resp = c.get("response_received")
-                tool_calls_val: Any = None
-                if isinstance(resp, dict):
-                    try:
-                        ch0 = resp.get("choices")[0] if isinstance(resp.get("choices"), list) and resp.get("choices") else {}
-                        msg0 = ch0.get("message") if isinstance(ch0, dict) else {}
-                        tool_calls_val = msg0.get("tool_calls") if isinstance(msg0, dict) else None
-                    except Exception:
-                        tool_calls_val = None
+                tool_calls_val: Any = _extract_tool_calls(resp) if resp is not None else []
 
                 # Minimal prefix similar to LMStudio; include run/node for disambiguation (not present in LMStudio logs).
                 prefix_dbg = f"{ts} [DEBUG]"
@@ -4996,7 +5034,7 @@ class ReactShell:
                 else:
                     blocks.append(f"{prefix_inf} {model_tag} Running chat completion.{extra}")
 
-                blocks.append(f"{prefix_inf} {model_tag} Model generated tool calls:  {_json(tool_calls_val if tool_calls_val is not None else [])}{extra}")
+                blocks.append(f"{prefix_inf} {model_tag} Model generated tool calls:  {_json(tool_calls_val)}{extra}")
 
                 if resp is None:
                     # Preserve failure info when available.
