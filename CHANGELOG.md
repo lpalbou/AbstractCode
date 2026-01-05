@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **LLM-call payload observability**: `/log provider` now shows the verbatim provider request/response (`_provider_request` + `raw_response`), and `/log runtime` shows the durable runtime step trace for LLM/tool calls.
 - **/log copy UX**: `/log runtime ... copy` and `/log provider ... copy` now accept `copy` as a trailing token and copy without rendering.
 - **/log provider format**: `/log provider` now defaults to the full ReAct cycle (all LLM calls) and renders OpenAI/LMS-style “Received request … Generated prediction …” blocks (no truncation).
+- **/log provider scope**: `/log provider` now reads from the durable ledger and, by default, includes **all LLM provider calls in the current session** (across runs) unless `--run` is used.
 - **Repeat guardrail**: reset duplicate-tool-call caches on **new runs** and **/cancel**, and block `write_file` calls missing `content` to prevent repeated 0‑byte file writes.
 
 ### Changed

@@ -5026,12 +5026,12 @@ class ReactShell:
     def _handle_log_provider(self, raw: str) -> None:
         """Show the provider wire request/response for past LLM calls (durable).
 
-        Source of truth: `RunState.vars["_runtime"]["node_traces"]`, specifically:
-        - request: `result.metadata._provider_request`
-        - response: `result.raw_response`
+        Source of truth: durable runtime state + ledger.
+        - request: `result.metadata._provider_request` (captured by AbstractCore providers/clients)
+        - response: `result.raw_response` (provider JSON response, best-effort preserved)
 
         Usage:
-          /log provider [copy] [--last|--all] [--json-only] [--save <path>]
+          /log provider [copy] [--last] [--run] [--json-only] [--save <path>]
         """
         import shlex
         import uuid
@@ -5053,9 +5053,9 @@ class ReactShell:
 
         json_only = False
         last_only = False
-        all_calls = False
+        run_only = False
         save_path: Optional[str] = None
-        usage = "Usage: /log provider [copy] [--last|--all] [--json-only] [--save <path>]"
+        usage = "Usage: /log provider [copy] [--last] [--run] [--json-only] [--save <path>]"
 
         i = 0
         while i < len(parts):
@@ -5068,8 +5068,8 @@ class ReactShell:
                 last_only = True
                 i += 1
                 continue
-            if p in ("--all", "--full", "--cycle"):
-                all_calls = True
+            if p in ("--run", "--current-run", "--this-run"):
+                run_only = True
                 i += 1
                 continue
             if p in ("--save", "--out", "--output"):
@@ -5088,63 +5088,92 @@ class ReactShell:
             self._print(_style("No run loaded. Use /resume or start a task first.", _C.DIM, enabled=self._color))
             return
 
-        runtime_ns = state.vars.get("_runtime") if isinstance(state.vars, dict) else None
-        traces = runtime_ns.get("node_traces") if isinstance(runtime_ns, dict) else None
-        if not isinstance(traces, dict) or not traces:
-            self._print(_style("No runtime node_traces found for this run.", _C.DIM, enabled=self._color))
+        # --- Collect provider calls from the durable ledger (authoritative, append-only) ---
+        #
+        # Why ledger over node_traces?
+        # - node_traces are intentionally bounded per-node (default 100 entries) and may drop older calls.
+        # - ledger is append-only per run, suitable for "show me everything" observability.
+        run_id = getattr(state, "run_id", None)
+        if not isinstance(run_id, str) or not run_id:
+            self._print(_style("No run_id found on current state.", _C.DIM, enabled=self._color))
             return
 
-        llm_steps: List[Dict[str, Any]] = []
-        for node_trace in traces.values():
-            if not isinstance(node_trace, dict):
-                continue
-            steps = node_trace.get("steps")
-            if not isinstance(steps, list):
-                continue
-            for step in steps:
-                if not isinstance(step, dict):
-                    continue
-                eff = step.get("effect")
-                if not isinstance(eff, dict):
-                    continue
-                if str(eff.get("type") or "") == "llm_call":
-                    llm_steps.append(step)
+        session_id = getattr(state, "session_id", None)
 
-        if not llm_steps:
-            self._print(_style("No llm_call steps found in node_traces.", _C.DIM, enabled=self._color))
-            return
+        # Default behavior: include the full session (all runs sharing session_id), unless --run is set.
+        run_ids: List[str] = [run_id]
+        try:
+            from abstractruntime.storage.base import QueryableRunStore
 
-        llm_steps.sort(key=lambda d: str(d.get("ts") or ""))
-
-        # Default behavior: show the full ReAct cycle (all llm_call steps) unless --last is requested.
-        # This matches typical OpenAI-compatible server logs and avoids "why no tools?" confusion when
-        # the last call is a synthesis/finalize step that intentionally disables tools.
-        if all_calls:
-            last_only = False
-        if last_only and llm_steps:
-            llm_steps = [llm_steps[-1]]
+            if not run_only and isinstance(session_id, str) and session_id.strip() and isinstance(self._runtime.run_store, QueryableRunStore):
+                # Pull a bounded set of runs and filter client-side by session_id.
+                # (QueryableRunStore doesn't expose a session_id filter in v0.1.)
+                # Prefer completeness over speed: /log provider is a debugging tool.
+                # JsonFileRunStore scans all run_*.json files anyway; a low limit can hide older runs.
+                runs = self._runtime.run_store.list_runs(limit=100000)
+                run_ids = [r.run_id for r in runs if getattr(r, "session_id", None) == session_id]
+                # Ensure deterministic chronological order by created_at (fallback to updated_at).
+                runs_by_id = {r.run_id: r for r in runs}
+                run_ids.sort(
+                    key=lambda rid: (
+                        str(getattr(runs_by_id.get(rid), "created_at", "") or ""),
+                        str(getattr(runs_by_id.get(rid), "updated_at", "") or ""),
+                        str(rid),
+                    )
+                )
+        except Exception:
+            # Fall back to current run only.
+            run_ids = [run_id]
 
         calls: List[Dict[str, Any]] = []
-        for idx, step in enumerate(llm_steps, 1):
-            result = step.get("result") if isinstance(step.get("result"), dict) else {}
-            meta = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
-            provider_req = meta.get("_provider_request") if isinstance(meta, dict) else None
-            provider_resp = result.get("raw_response")
-            calls.append(
-                {
-                    "index": idx,
-                    "ts": step.get("ts"),
-                    "node_id": step.get("node_id"),
-                    "status": step.get("status"),
-                    "duration_ms": step.get("duration_ms"),
-                    "request_sent": provider_req,
-                    "response_received": provider_resp,
-                }
-            )
+        for rid in run_ids:
+            try:
+                records = self._runtime.ledger_store.list(str(rid))
+            except Exception:
+                continue
+            if not isinstance(records, list):
+                continue
+
+            for rec in records:
+                if not isinstance(rec, dict):
+                    continue
+                eff = rec.get("effect")
+                if not isinstance(eff, dict):
+                    continue
+                if str(eff.get("type") or "") != "llm_call":
+                    continue
+                status = str(rec.get("status") or "")
+                result = rec.get("result") if isinstance(rec.get("result"), dict) else {}
+                meta = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+                provider_req = meta.get("_provider_request") if isinstance(meta, dict) else None
+                provider_resp = result.get("raw_response")
+                err = rec.get("error")
+
+                calls.append(
+                    {
+                        "run_id": str(rid),
+                        "node_id": rec.get("node_id"),
+                        "ts": rec.get("ended_at") or rec.get("started_at"),
+                        "status": status,
+                        "error": err,
+                        "request_sent": provider_req,
+                        "response_received": provider_resp,
+                    }
+                )
+
+        if not calls:
+            self._print(_style("No completed llm_call records found in the ledger for this scope.", _C.DIM, enabled=self._color))
+            return
+
+        calls.sort(key=lambda d: str(d.get("ts") or ""))
+        if last_only:
+            calls = [calls[-1]]
 
         out: Dict[str, Any] = {
             "kind": "provider_wire_export",
-            "run_id": getattr(state, "run_id", None),
+            "scope": "run" if run_only or not isinstance(session_id, str) else "session",
+            "session_id": session_id,
+            "run_id": run_id,
             "provider": self._provider,
             "model": self._model,
             "calls": calls,
@@ -5152,50 +5181,78 @@ class ReactShell:
 
         text = json.dumps(out, ensure_ascii=False, indent=2, sort_keys=False, default=str)
 
-        # OpenAI/LMS-style log rendering (human-friendly; still verbatim bodies).
-        def _openai_log_text() -> str:
+        # LMStudio-ish log rendering (human-friendly; still verbatim bodies).
+        def _lmstudio_like_text() -> str:
             from urllib.parse import urlparse
+
+            def _json(obj: Any) -> str:
+                return json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=False, default=str)
 
             blocks: List[str] = []
             for c in calls:
-                ts = c.get("ts")
+                ts = str(c.get("ts") or "")
+                rid = c.get("run_id")
                 node_id = c.get("node_id")
-                status = c.get("status")
-                dur = c.get("duration_ms")
-                header = f"--- CALL node={node_id} ts={ts} status={status}"
-                if isinstance(dur, (int, float)):
-                    header += f" duration_ms={dur:.1f}"
-                header += " ---"
-                blocks.append(header)
+                status = str(c.get("status") or "")
+                err = c.get("error")
 
                 req = c.get("request_sent")
                 req_url = req.get("url") if isinstance(req, dict) else None
                 req_payload = req.get("payload") if isinstance(req, dict) else None
                 path = urlparse(str(req_url)).path if isinstance(req_url, str) and req_url else ""
+                endpoint = path or (str(req_url) if isinstance(req_url, str) else "(unknown)")
 
+                model = None
+                n_messages = None
                 if isinstance(req_payload, dict):
-                    blocks.append(
-                        "Received request: POST to "
-                        + (path or (str(req_url) if isinstance(req_url, str) else "(unknown)"))
-                        + " with body  "
-                        + json.dumps(req_payload, ensure_ascii=False, indent=2, sort_keys=False, default=str)
-                    )
-                else:
-                    blocks.append("Received request: (missing provider request capture)")
+                    model = req_payload.get("model")
+                    msgs = req_payload.get("messages")
+                    n_messages = len(msgs) if isinstance(msgs, list) else None
 
                 resp = c.get("response_received")
-                if resp is None:
-                    blocks.append("Generated prediction: (missing provider response capture)")
-                else:
-                    blocks.append(
-                        "Generated prediction:  "
-                        + json.dumps(resp, ensure_ascii=False, indent=2, sort_keys=False, default=str)
-                    )
+                tool_calls_val: Any = None
+                if isinstance(resp, dict):
+                    try:
+                        ch0 = resp.get("choices")[0] if isinstance(resp.get("choices"), list) and resp.get("choices") else {}
+                        msg0 = ch0.get("message") if isinstance(ch0, dict) else {}
+                        tool_calls_val = msg0.get("tool_calls") if isinstance(msg0, dict) else None
+                    except Exception:
+                        tool_calls_val = None
 
-                blocks.append("")  # spacer
+                # Minimal prefix similar to LMStudio; include run/node for disambiguation (not present in LMStudio logs).
+                prefix_dbg = f"{ts} [DEBUG]"
+                prefix_inf = f"{ts} [INFO]"
+                model_tag = f"[{model}]" if isinstance(model, str) and model else ""
+                extra = f" (run={rid} node={node_id})" if rid or node_id else ""
+
+                if isinstance(req_payload, dict):
+                    blocks.append(f"{prefix_dbg} Received request: POST to {endpoint} with body  {_json(req_payload)}")
+                else:
+                    blocks.append(f"{prefix_dbg} Received request: (missing provider request capture){extra}")
+
+                if isinstance(n_messages, int):
+                    blocks.append(f"{prefix_inf} {model_tag} Running chat completion on conversation with {n_messages} messages.{extra}")
+                else:
+                    blocks.append(f"{prefix_inf} {model_tag} Running chat completion.{extra}")
+
+                blocks.append(f"{prefix_inf} {model_tag} Model generated tool calls:  {_json(tool_calls_val if tool_calls_val is not None else [])}{extra}")
+
+                if resp is None:
+                    # Preserve failure info when available.
+                    if status and status != "completed":
+                        blocks.append(f"{prefix_inf} {model_tag} Generated prediction:  (no provider response captured; status={status}){extra}")
+                    elif err:
+                        blocks.append(f"{prefix_inf} {model_tag} Generated prediction:  (no provider response captured; error={err}){extra}")
+                    else:
+                        blocks.append(f"{prefix_inf} {model_tag} Generated prediction:  (missing provider response capture){extra}")
+                else:
+                    blocks.append(f"{prefix_inf} {model_tag} Generated prediction:  {_json(resp)}{extra}")
+
+                blocks.append("")
+
             return "\n".join(blocks).rstrip()
 
-        pretty_text = _openai_log_text()
+        pretty_text = _lmstudio_like_text()
 
         if save_path:
             try:
