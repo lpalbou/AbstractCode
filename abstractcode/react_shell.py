@@ -365,7 +365,7 @@ class ReactShell:
         self._pending_tool_markers: List[str] = []
         # Pending tool call metadata (aligned with tool markers/results).
         self._pending_tool_metas: List[Dict[str, Any]] = []
-        # Keep the last started run id so /context can show traces even after completion.
+        # Keep the last started run id so /log can show traces even after completion.
         self._last_run_id: Optional[str] = None
         # Status bar cache (token counting can be expensive; avoid per-frame rescans).
         self._status_cache_key: Optional[Tuple[Any, ...]] = None
@@ -1342,7 +1342,7 @@ class ReactShell:
             "expand",
             "vars",
             "var",
-            "context",
+            "log",
             "memorize",
             "recall",
             "copy",
@@ -1804,11 +1804,8 @@ class ReactShell:
         if command in ("vars", "var"):
             self._handle_vars(arg)
             return False
-        if command == "context":
-            self._handle_context(arg)
-            return False
-        if command == "llm":
-            self._handle_llm(arg)
+        if command == "log":
+            self._handle_log(arg)
             return False
         if command == "mouse":
             self._handle_mouse_toggle()
@@ -1823,6 +1820,46 @@ class ReactShell:
         self._print(_style(f"Unknown command: /{command}", _C.YELLOW, enabled=self._color))
         self._print(_style("Type /help for commands.", _C.DIM, enabled=self._color))
         return False
+
+    def _handle_log(self, raw: str) -> None:
+        """Show durable logs for the current run.
+
+        `/log runtime` is the AbstractRuntime-centric view (step trace, payloads).
+        `/log provider` is the provider wire view (request sent + response received).
+
+        Usage:
+          /log runtime [copy] [--last] [--json-only] [--save <path>]
+          /log provider [copy] [--last|--all] [--json-only] [--save <path>]
+        """
+        import shlex
+
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split() if raw else []
+
+        usage = (
+            "Usage:\n"
+            "  /log runtime [copy] [--last] [--json-only] [--save <path>]\n"
+            "  /log provider [copy] [--last|--all] [--json-only] [--save <path>]\n"
+        )
+        if not parts:
+            self._print(_style(usage, _C.DIM, enabled=self._color))
+            return
+
+        kind = str(parts[0] or "").strip().lower()
+        rest = parts[1:]
+        rest_raw = shlex.join(rest) if hasattr(shlex, "join") else " ".join(rest)
+
+        if kind in ("runtime", "rt"):
+            self._handle_log_runtime(rest_raw)
+            return
+        if kind in ("provider", "wire"):
+            self._handle_log_provider(rest_raw)
+            return
+
+        self._print(_style(f"Unknown /log kind: {kind}", _C.YELLOW, enabled=self._color))
+        self._print(_style(usage, _C.DIM, enabled=self._color))
 
     def _append_to_active_context(self, *, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
         """Append a message to the active context view (durably when a run is loaded)."""
@@ -4259,12 +4296,11 @@ class ReactShell:
         self._print(json.dumps(out, ensure_ascii=False, indent=2, sort_keys=True, default=str))
 
     def _handle_context(self, raw: str) -> None:
-        """Show the exact context that will be sent with the next LLM call.
+        """(Deprecated) Legacy context preview command.
 
-        Usage:
-          /context [--json-only] [--derived]
-          /context copy [--derived]
-          /context last [--last] [--verbatim] [--json-only] [--save <path>]
+        The public `/context` and `/llm` commands were removed in favor of:
+        - `/log runtime`
+        - `/log provider`
         """
         import copy
         import shlex
@@ -4278,13 +4314,17 @@ class ReactShell:
         if parts and str(parts[0] or "").strip().lower() in ("last", "prev", "previous"):
             rest = parts[1:]
             rest_raw = shlex.join(rest) if hasattr(shlex, "join") else " ".join(rest)
-            self._handle_llm(rest_raw)
+            self._handle_log_runtime(rest_raw)
             return
 
         copy_to_clipboard = False
+        # Accept `copy` as either a leading or trailing token (UX: "/log runtime ... copy").
         if parts and str(parts[0] or "").strip().lower() == "copy":
             copy_to_clipboard = True
             parts = parts[1:]
+        elif parts and str(parts[-1] or "").strip().lower() == "copy":
+            copy_to_clipboard = True
+            parts = parts[:-1]
 
         json_only = False
         derived = False
@@ -4298,7 +4338,7 @@ class ReactShell:
             self._print(_style(f"Unknown flag: {p}", _C.YELLOW, enabled=self._color))
             self._print(
                 _style(
-                    "Usage: /context [--json-only] [--derived]  |  /context copy [--derived]",
+                    "Usage: /log runtime  |  /log provider",
                     _C.DIM,
                     enabled=self._color,
                 )
@@ -4319,7 +4359,7 @@ class ReactShell:
                 "provider": self._provider,
                 "model": self._model,
                 "note": "No active run. This is the current session context that will be included in the next /task.",
-                "tip": "Use /context last (or /llm) to inspect verbatim LLM/tool call payloads from the last run.",
+                "tip": "Use /log runtime (or /log provider) to inspect durable LLM/tool call payloads from the last run.",
                 "session_messages": list(self._agent.session_messages or []),
             }
             if state is not None and hasattr(state, "run_id") and hasattr(state, "status"):
@@ -4629,14 +4669,13 @@ class ReactShell:
 
         self._print(f"[[COPY:{copy_id}]]")
 
-    def _handle_llm(self, raw: str) -> None:
-        """Show the last prompt/answer and verbatim LLM/TOOL call payloads captured by AbstractRuntime.
+    def _handle_log_runtime(self, raw: str) -> None:
+        """Show the runtime-centric step trace for LLM/tool calls (durable).
 
         Source of truth: `RunState.vars["_runtime"]["node_traces"]`.
 
         Usage:
-          /context last [copy] [--last] [--all] [--verbatim] [--json-only] [--save <path>]
-          /llm ...  (alias)
+          /log runtime [copy] [--last] [--json-only] [--save <path>]
         """
         import shlex
         import uuid
@@ -4648,18 +4687,20 @@ class ReactShell:
             parts = raw.split() if raw else []
 
         copy_to_clipboard = False
+        # Accept `copy` as either a leading or trailing token (UX: "/log runtime ... copy").
         if parts and str(parts[0] or "").strip().lower() == "copy":
             copy_to_clipboard = True
             parts = parts[1:]
+        elif parts and str(parts[-1] or "").strip().lower() == "copy":
+            copy_to_clipboard = True
+            parts = parts[:-1]
 
         json_only = False
         last_only = False
         all_calls = False
         verbatim = False
         save_path: Optional[str] = None
-        usage = (
-            "Usage: /context last [copy] [--last|--all] [--verbatim] [--json-only] [--save <path>] (alias: /llm)"
-        )
+        usage = "Usage: /log runtime [copy] [--last] [--json-only] [--save <path>]"
         i = 0
         while i < len(parts):
             p = parts[i]
@@ -4798,44 +4839,7 @@ class ReactShell:
             "llm_calls": calls_out,
             "tool_calls": tool_calls_out,
         }
-
-        # Compact "wire export" for sharing/debugging: exact request sent + exact response received.
-        # This intentionally avoids the larger runtime views (derived prompts, redundant fields, etc.).
-        wire_calls: List[Dict[str, Any]] = []
-        for call in calls_out:
-            res_payload = call.get("result") if isinstance(call.get("result"), dict) else {}
-            meta = res_payload.get("metadata") if isinstance(res_payload.get("metadata"), dict) else {}
-            provider_req = meta.get("_provider_request") if isinstance(meta, dict) else None
-            provider_resp = res_payload.get("raw_response")
-            wire_calls.append(
-                {
-                    "index": call.get("index"),
-                    "ts": call.get("ts"),
-                    "node_id": call.get("node_id"),
-                    "status": call.get("status"),
-                    "duration_ms": call.get("duration_ms"),
-                    "request_sent": provider_req,
-                    "response_received": provider_resp,
-                    "normalized": {
-                        "model": res_payload.get("model"),
-                        "finish_reason": res_payload.get("finish_reason"),
-                        "usage": res_payload.get("usage"),
-                        "content": res_payload.get("content"),
-                        "tool_calls": res_payload.get("tool_calls"),
-                        "trace_id": res_payload.get("trace_id"),
-                    },
-                }
-            )
-        wire_out: Dict[str, Any] = {
-            "kind": "llm_verbatim_export",
-            "run_id": getattr(state, "run_id", None),
-            "provider": self._provider,
-            "model": self._model,
-            "calls": wire_calls,
-        }
-
         text = json.dumps(out, ensure_ascii=False, indent=2, sort_keys=False, default=str)
-        wire_text = json.dumps(wire_out, ensure_ascii=False, indent=2, sort_keys=False, default=str)
 
         if save_path:
             try:
@@ -4843,14 +4847,13 @@ class ReactShell:
                 if not path.is_absolute():
                     path = Path.cwd() / path
                 path.parent.mkdir(parents=True, exist_ok=True)
-                payload_to_save = wire_text if copy_to_clipboard else text
-                path.write_text(payload_to_save, encoding="utf-8")
-                self._print(_style(f"✅ Saved LLM trace payloads to {path}", _C.DIM, enabled=self._color))
+                path.write_text(text, encoding="utf-8")
+                self._print(_style(f"✅ Saved runtime log payloads to {path}", _C.DIM, enabled=self._color))
             except Exception as e:
                 self._print(_style(f"❌ Failed to save: {e}", _C.DIM, enabled=self._color))
 
         if copy_to_clipboard:
-            ok = self._copy_to_clipboard(wire_text)
+            ok = self._copy_to_clipboard(text)
             self._print(_style("Copied." if ok else "Copy failed (no clipboard helper found).", _C.DIM, enabled=self._color))
             return
 
@@ -5020,6 +5023,204 @@ class ReactShell:
 
         self._print(f"[[COPY:{copy_id}]]")
 
+    def _handle_log_provider(self, raw: str) -> None:
+        """Show the provider wire request/response for past LLM calls (durable).
+
+        Source of truth: `RunState.vars["_runtime"]["node_traces"]`, specifically:
+        - request: `result.metadata._provider_request`
+        - response: `result.raw_response`
+
+        Usage:
+          /log provider [copy] [--last|--all] [--json-only] [--save <path>]
+        """
+        import shlex
+        import uuid
+        from pathlib import Path
+
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split() if raw else []
+
+        copy_to_clipboard = False
+        # Accept `copy` as either a leading or trailing token (UX: "/log provider --all copy").
+        if parts and str(parts[0] or "").strip().lower() == "copy":
+            copy_to_clipboard = True
+            parts = parts[1:]
+        elif parts and str(parts[-1] or "").strip().lower() == "copy":
+            copy_to_clipboard = True
+            parts = parts[:-1]
+
+        json_only = False
+        last_only = False
+        all_calls = False
+        save_path: Optional[str] = None
+        usage = "Usage: /log provider [copy] [--last|--all] [--json-only] [--save <path>]"
+
+        i = 0
+        while i < len(parts):
+            p = parts[i]
+            if p in ("--json", "--json-only"):
+                json_only = True
+                i += 1
+                continue
+            if p in ("--last", "--latest"):
+                last_only = True
+                i += 1
+                continue
+            if p in ("--all", "--full", "--cycle"):
+                all_calls = True
+                i += 1
+                continue
+            if p in ("--save", "--out", "--output"):
+                if i + 1 >= len(parts):
+                    self._print(_style(usage, _C.DIM, enabled=self._color))
+                    return
+                save_path = parts[i + 1]
+                i += 2
+                continue
+            self._print(_style(f"Unknown flag: {p}", _C.YELLOW, enabled=self._color))
+            self._print(_style(usage, _C.DIM, enabled=self._color))
+            return
+
+        state = self._safe_get_state()
+        if state is None or not hasattr(state, "vars"):
+            self._print(_style("No run loaded. Use /resume or start a task first.", _C.DIM, enabled=self._color))
+            return
+
+        runtime_ns = state.vars.get("_runtime") if isinstance(state.vars, dict) else None
+        traces = runtime_ns.get("node_traces") if isinstance(runtime_ns, dict) else None
+        if not isinstance(traces, dict) or not traces:
+            self._print(_style("No runtime node_traces found for this run.", _C.DIM, enabled=self._color))
+            return
+
+        llm_steps: List[Dict[str, Any]] = []
+        for node_trace in traces.values():
+            if not isinstance(node_trace, dict):
+                continue
+            steps = node_trace.get("steps")
+            if not isinstance(steps, list):
+                continue
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                eff = step.get("effect")
+                if not isinstance(eff, dict):
+                    continue
+                if str(eff.get("type") or "") == "llm_call":
+                    llm_steps.append(step)
+
+        if not llm_steps:
+            self._print(_style("No llm_call steps found in node_traces.", _C.DIM, enabled=self._color))
+            return
+
+        llm_steps.sort(key=lambda d: str(d.get("ts") or ""))
+
+        # Default behavior: show the full ReAct cycle (all llm_call steps) unless --last is requested.
+        # This matches typical OpenAI-compatible server logs and avoids "why no tools?" confusion when
+        # the last call is a synthesis/finalize step that intentionally disables tools.
+        if all_calls:
+            last_only = False
+        if last_only and llm_steps:
+            llm_steps = [llm_steps[-1]]
+
+        calls: List[Dict[str, Any]] = []
+        for idx, step in enumerate(llm_steps, 1):
+            result = step.get("result") if isinstance(step.get("result"), dict) else {}
+            meta = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+            provider_req = meta.get("_provider_request") if isinstance(meta, dict) else None
+            provider_resp = result.get("raw_response")
+            calls.append(
+                {
+                    "index": idx,
+                    "ts": step.get("ts"),
+                    "node_id": step.get("node_id"),
+                    "status": step.get("status"),
+                    "duration_ms": step.get("duration_ms"),
+                    "request_sent": provider_req,
+                    "response_received": provider_resp,
+                }
+            )
+
+        out: Dict[str, Any] = {
+            "kind": "provider_wire_export",
+            "run_id": getattr(state, "run_id", None),
+            "provider": self._provider,
+            "model": self._model,
+            "calls": calls,
+        }
+
+        text = json.dumps(out, ensure_ascii=False, indent=2, sort_keys=False, default=str)
+
+        # OpenAI/LMS-style log rendering (human-friendly; still verbatim bodies).
+        def _openai_log_text() -> str:
+            from urllib.parse import urlparse
+
+            blocks: List[str] = []
+            for c in calls:
+                ts = c.get("ts")
+                node_id = c.get("node_id")
+                status = c.get("status")
+                dur = c.get("duration_ms")
+                header = f"--- CALL node={node_id} ts={ts} status={status}"
+                if isinstance(dur, (int, float)):
+                    header += f" duration_ms={dur:.1f}"
+                header += " ---"
+                blocks.append(header)
+
+                req = c.get("request_sent")
+                req_url = req.get("url") if isinstance(req, dict) else None
+                req_payload = req.get("payload") if isinstance(req, dict) else None
+                path = urlparse(str(req_url)).path if isinstance(req_url, str) and req_url else ""
+
+                if isinstance(req_payload, dict):
+                    blocks.append(
+                        "Received request: POST to "
+                        + (path or (str(req_url) if isinstance(req_url, str) else "(unknown)"))
+                        + " with body  "
+                        + json.dumps(req_payload, ensure_ascii=False, indent=2, sort_keys=False, default=str)
+                    )
+                else:
+                    blocks.append("Received request: (missing provider request capture)")
+
+                resp = c.get("response_received")
+                if resp is None:
+                    blocks.append("Generated prediction: (missing provider response capture)")
+                else:
+                    blocks.append(
+                        "Generated prediction:  "
+                        + json.dumps(resp, ensure_ascii=False, indent=2, sort_keys=False, default=str)
+                    )
+
+                blocks.append("")  # spacer
+            return "\n".join(blocks).rstrip()
+
+        pretty_text = _openai_log_text()
+
+        if save_path:
+            try:
+                path = Path(save_path).expanduser()
+                if not path.is_absolute():
+                    path = Path.cwd() / path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text if json_only else pretty_text, encoding="utf-8")
+                self._print(_style(f"✅ Saved provider log payloads to {path}", _C.DIM, enabled=self._color))
+            except Exception as e:
+                self._print(_style(f"❌ Failed to save: {e}", _C.DIM, enabled=self._color))
+
+        if copy_to_clipboard:
+            ok = self._copy_to_clipboard(text if json_only else pretty_text)
+            self._print(_style("Copied." if ok else "Copy failed (no clipboard helper found).", _C.DIM, enabled=self._color))
+            return
+
+        copy_id = f"log_provider_{uuid.uuid4().hex}"
+        self._ui.register_copy_payload(copy_id, text if json_only else pretty_text)
+
+        self._print(_style("\nLog (provider wire)", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 80, _C.DIM, enabled=self._color))
+        self._print(text if json_only else pretty_text)
+        self._print(f"[[COPY:{copy_id}]]")
+
     def _handle_memorize(self, raw: str) -> None:
         """Store a durable memory note (runtime MEMORY_NOTE) with optional tags and provenance.
 
@@ -5162,9 +5363,10 @@ class ReactShell:
             "  /expand <span>      Expand an archived span (--show, --into-context)\n"
             "  /recall [opts]      Recall spans by time/tags/query (--into-context)\n"
             "  /vars [path]        Inspect run vars (scratchpad, _runtime, ...)\n"
-            "  /context            Show the exact context for the next LLM call\n"
-            "  /context last       Show last prompt/answer + LLM/tool steps (alias: /llm)\n"
-            "  /context copy       Copy full next-call context to clipboard\n"
+            "  /log runtime        Show runtime step trace for LLM/tool calls (durable)\n"
+            "                     - /log runtime [copy] [--last] [--json-only] [--save <path>]\n"
+            "  /log provider       Show provider wire request+response (durable)\n"
+            "                     - /log provider [copy] [--last|--all] [--json-only] [--save <path>]\n"
             "  /memorize <note>    Store a durable memory note (tags + provenance)\n"
             "  /mouse              Toggle mouse mode (wheel scroll vs terminal selection)\n"
             "  /flow ...           Run AbstractFlow workflows inside this REPL\n"

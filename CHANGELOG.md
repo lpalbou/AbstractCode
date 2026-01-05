@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tool result visibility**: increased the default tool observation preview to **1000 characters** (was 120) so small-but-critical outputs (e.g., exit codes, working directories) are not silently truncated in the UI.
 - **Web search reliability**: add `ddgs` as a dependency so the default `web_search` tool works without requiring manual installs.
 - **Native tools prompt accounting**: ReactShell token estimation now excludes the full `Tools (session)` Active Memory catalog for **native-tool models**, matching the prompt actually sent to OpenAI-compatible servers (e.g. LMStudio).
-- **LLM-call payload observability**: `/llm` (alias `/context last`) now reliably shows the exact OpenAI-style `messages/tools` request payload via `metadata._provider_request` for both remote AbstractCore-server calls and local/provider calls (no more missing “provider request context” blocks).
+- **LLM-call payload observability**: `/log provider` now shows the verbatim provider request/response (`_provider_request` + `raw_response`), and `/log runtime` shows the durable runtime step trace for LLM/tool calls.
+- **/log copy UX**: `/log runtime ... copy` and `/log provider ... copy` now accept `copy` as a trailing token and copy without rendering.
+- **/log provider format**: `/log provider` now defaults to the full ReAct cycle (all LLM calls) and renders OpenAI/LMS-style “Received request … Generated prediction …” blocks (no truncation).
 - **Repeat guardrail**: reset duplicate-tool-call caches on **new runs** and **/cancel**, and block `write_file` calls missing `content` to prevent repeated 0‑byte file writes.
 
 ### Changed
@@ -25,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `--tags-mode all|any`, repeatable `--user NAME`, and repeatable `--location LOC`.
   - Repeating `--tag k=v` now builds multi-value tags (e.g. `--tag person=alice --tag person=bob`).
   - `--into-context` now also rehydrates matching `memory_note` spans as a synthetic system message (`[MEMORY NOTE] ...`).
+- **Logging commands**: replaced legacy `/context` + `/llm` with `/log runtime` + `/log provider` (no backward compatibility).
 
 ### Removed
 - **`/new`, `/reset`**: removed alias commands (they were identical to `/clear`). Use `/clear`.
