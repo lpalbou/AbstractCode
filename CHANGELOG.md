@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Collapsible Thought/Tool blocks**: tool-using iterations now render **Thought** and **Tool Call** as **click-to-toggle** blocks (collapsed by default) with a high-signal one-line summary always visible.
 - **Spinner shimmer**: status bar spinner text now has a subtle **reflect/shimmer** highlight so “still working” is obvious without re-rendering the full scrollback.
+- **`/log provider --no-tool-defs`**: optionally replace the provider request `tools` array (full tool definitions) with an array of tool names for compact sharing/debugging.
 
 ### Fixed
 - **Tool result visibility**: increased the default tool observation preview to **1000 characters** (was 120) so small-but-critical outputs (e.g., exit codes, working directories) are not silently truncated in the UI.

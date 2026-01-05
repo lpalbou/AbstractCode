@@ -5054,8 +5054,9 @@ class ReactShell:
         json_only = False
         last_only = False
         run_only = False
+        no_tool_defs = False
         save_path: Optional[str] = None
-        usage = "Usage: /log provider [copy] [--last] [--run] [--json-only] [--save <path>]"
+        usage = "Usage: /log provider [copy] [--last] [--run] [--json-only] [--no-tool-defs] [--save <path>]"
 
         i = 0
         while i < len(parts):
@@ -5070,6 +5071,10 @@ class ReactShell:
                 continue
             if p in ("--run", "--current-run", "--this-run"):
                 run_only = True
+                i += 1
+                continue
+            if p in ("--no-tool-defs", "--no_tool_defs"):
+                no_tool_defs = True
                 i += 1
                 continue
             if p in ("--save", "--out", "--output"):
@@ -5168,6 +5173,62 @@ class ReactShell:
         calls.sort(key=lambda d: str(d.get("ts") or ""))
         if last_only:
             calls = [calls[-1]]
+
+        def _tool_name_from_def(obj: Any) -> Optional[str]:
+            if isinstance(obj, str) and obj.strip():
+                return obj.strip()
+            if isinstance(obj, dict):
+                name = obj.get("name")
+                if isinstance(name, str) and name.strip():
+                    return name.strip()
+                fn = obj.get("function")
+                if isinstance(fn, dict):
+                    fn_name = fn.get("name")
+                    if isinstance(fn_name, str) and fn_name.strip():
+                        return fn_name.strip()
+                return None
+            # Best-effort for ToolDefinition-like objects
+            try:
+                name2 = getattr(obj, "name", None)
+                if isinstance(name2, str) and name2.strip():
+                    return name2.strip()
+            except Exception:
+                pass
+            return None
+
+        def _simplify_tools(obj: Any) -> Any:
+            """Return a copy of obj where `tools` is replaced with tool names (if present)."""
+            if not isinstance(obj, dict):
+                return obj
+            tools = obj.get("tools")
+            if not isinstance(tools, list):
+                return obj
+            names: List[str] = []
+            for t in tools:
+                n = _tool_name_from_def(t)
+                if isinstance(n, str) and n:
+                    names.append(n)
+            obj2 = dict(obj)
+            obj2["tools"] = names
+            return obj2
+
+        def _simplify_provider_request(req: Any) -> Any:
+            if not isinstance(req, dict):
+                return req
+            req2 = dict(req)
+            payload = req2.get("payload")
+            if isinstance(payload, dict):
+                req2["payload"] = _simplify_tools(payload)
+            call_params = req2.get("call_params")
+            if isinstance(call_params, dict):
+                req2["call_params"] = _simplify_tools(call_params)
+            return req2
+
+        if no_tool_defs:
+            for c in calls:
+                if not isinstance(c, dict):
+                    continue
+                c["request_sent"] = _simplify_provider_request(c.get("request_sent"))
 
         out: Dict[str, Any] = {
             "kind": "provider_wire_export",
