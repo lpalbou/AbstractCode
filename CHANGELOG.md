@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Verifier (review) mode**: now enabled by default to prevent premature “stops” when the model returns incomplete prose without tool calls.
   - Added `--no-review` to disable (not recommended).
   - Default `--review-max-rounds` increased to 3.
+- **Tool prompt examples**: now **off by default** to avoid large token overhead; use `/tools examples on` if you want to include examples.
 
 ### Removed
 - **`/new`, `/reset`**: removed alias commands (they were identical to `/clear`). Use `/clear`.

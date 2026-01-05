@@ -180,7 +180,9 @@ class ReactShell:
         # Session-level tool allowlist (None = default/all tools for the agent kind).
         self._allowed_tools: Optional[List[str]] = None
         # Whether to include tool usage examples in the prompted tool section (token-expensive).
-        self._tool_prompt_examples = True
+        #
+        # Default OFF: examples can be very large and materially increase prompt size and latency.
+        self._tool_prompt_examples = False
         # Optional MCP server configuration (used for remote tool execution and tool discovery).
         # Shape:
         # - HTTP: {server_id: {"transport":"streamable_http", "url":"...", "headers": {...}}}
