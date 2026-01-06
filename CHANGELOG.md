@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/log provider --no-tool-defs`**: optionally replace the provider request `tools` array (full tool definitions) with an array of tool names for compact sharing/debugging.
 
 ### Fixed
+- **Spinner shimmer sweep**: the status bar spinner shimmer now traverses the **entire** spinner text (previously capped to the first ~10 visible characters).
 - **Tool result visibility**: increased the default tool observation preview to **1000 characters** (was 120) so small-but-critical outputs (e.g., exit codes, working directories) are not silently truncated in the UI.
 - **ANSWER newline rendering**: unescape literal `\n` / `\r\n` sequences into real line breaks before terminal Markdown rendering, so multi-line answers display correctly.
 - **Web search reliability**: add `ddgs` as a dependency so the default `web_search` tool works without requiring manual installs.

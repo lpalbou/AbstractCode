@@ -1274,10 +1274,20 @@ class FullScreenUI:
         if self._app and self._app.is_running:
             self._app.invalidate()
 
+    def _advance_spinner_frame(self) -> None:
+        """Advance spinner animation counters by one tick.
+
+        `_spinner_frame` is intentionally monotonic: the status-bar shimmer uses it
+        to select which character(s) to highlight. If `_spinner_frame` were wrapped
+        by the number of spinner glyph frames (typically 10), the shimmer would
+        never reach beyond the first ~10 visible characters of long status texts.
+        """
+        self._spinner_frame += 1
+
     def _spinner_loop(self) -> None:
         """Background thread that animates the spinner."""
         while self._spinner_active and not self._shutdown:
-            self._spinner_frame = (self._spinner_frame + 1) % len(self._spinner_frames)
+            self._advance_spinner_frame()
             if self._app and self._app.is_running:
                 self._app.invalidate()
             time.sleep(0.1)  # 10 FPS animation
