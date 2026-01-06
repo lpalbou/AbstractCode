@@ -58,3 +58,4 @@ def test_spinner_shimmer_reaches_end_of_long_text() -> None:
     assert (len(ui._spinner_text) - 1) in highlighted
 
 
+
