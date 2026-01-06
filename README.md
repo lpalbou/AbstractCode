@@ -41,6 +41,35 @@ By default, AbstractCode uses `~/.abstractcode/state.json` and stores the durabl
 - disable persistence: `abstractcode --no-state`
 - override path: `ABSTRACTCODE_STATE_FILE=... abstractcode`
 
+## Workflow Agents (VisualFlow as `--agent`)
+
+AbstractCode can run an AbstractFlow VisualFlow workflow *as an agent* (instead of using the built-in `react|codeact|memact` agents).
+
+### Requirements (`abstractcode.agent.v1`)
+- The workflow JSON must declare: `interfaces: ["abstractcode.agent.v1"]`
+- The workflow must expose these pins:
+  - `On Flow Start`: output pin `request` (type `string`)
+  - `On Flow End`: input pin `response` (type `string`)
+
+### Authoring in the AbstractFlow visual editor
+- **Mark the interface**: click `📂 Load` → select the workflow → in the right preview panel find **Interfaces** → click the ✏️ icon → enable **AbstractCode Agent (v1)** → **Save Interfaces**
+- **Add pins**:
+  - select the **On Flow Start** node → **Flow Start Parameters** → add a parameter and rename it to `request` (type `string`)
+  - select the **On Flow End** node → **Flow Outputs** → add an output and rename it to `response` (type `string`)
+
+Tip: an example workflow is shipped at `abstractflow/web/flows/acagent01.json` (implements the interface).
+
+### Run
+Use `--agent` with a workflow id/name (from the flows directory) or a direct JSON path:
+
+```bash
+abstractcode --agent acagent01
+abstractcode --agent abstractflow/web/flows/acagent01.json
+
+# If your flows are stored elsewhere:
+ABSTRACTFLOW_FLOWS_DIR=/path/to/flows abstractcode --agent my_flow_id
+```
+
 ## Run Workflows (AbstractFlow VisualFlow)
 
 ### From the CLI
