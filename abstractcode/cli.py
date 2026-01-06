@@ -56,9 +56,13 @@ def build_agent_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--agent",
-        choices=("react", "codeact", "memact"),
         default=os.getenv("ABSTRACTCODE_AGENT", "react"),
-        help="Agent type to run (react|codeact|memact).",
+        help=(
+            "Agent selector:\n"
+            "  - Built-ins: react | codeact | memact\n"
+            "  - Workflow agent: <flow_id> | <flow_name> | </path/to/flow.json>\n"
+            "    (must implement interface 'abstractcode.agent.v1')"
+        ),
     )
     parser.add_argument("--provider", default="ollama", help="LLM provider (e.g. ollama, openai)")
     parser.add_argument("--model", default="qwen3:1.7b-q4_K_M", help="Model name")

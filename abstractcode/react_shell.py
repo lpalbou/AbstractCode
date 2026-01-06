@@ -154,9 +154,17 @@ class ReactShell:
         max_tokens: Optional[int] = None,
         color: bool,
     ):
-        self._agent_kind = str(agent or "react").strip().lower()
-        if self._agent_kind not in ("react", "codeact", "memact"):
-            raise ValueError("agent must be 'react', 'codeact', or 'memact'")
+        raw_agent = str(agent or "react").strip()
+        if not raw_agent:
+            raw_agent = "react"
+        agent_lower = raw_agent.lower()
+        self._workflow_agent_ref: Optional[str] = None
+        if agent_lower in ("react", "codeact", "memact"):
+            self._agent_kind = agent_lower
+        else:
+            # Treat any other value as a workflow reference (id/name/path).
+            self._agent_kind = raw_agent
+            self._workflow_agent_ref = raw_agent
         self._provider = provider
         self._model = model
         self._base_url = str(base_url).strip() if isinstance(base_url, str) and base_url.strip() else None
@@ -254,7 +262,11 @@ class ReactShell:
             self_improve,
         ]
 
-        if self._agent_kind == "react":
+        if self._workflow_agent_ref is not None:
+            # Workflow agents use the "safe" default toolset (same as ReAct).
+            self._tools = list(DEFAULT_TOOLS)
+            agent_cls = None
+        elif self._agent_kind == "react":
             self._tools = list(DEFAULT_TOOLS)
             agent_cls = ReactAgent
         elif self._agent_kind == "memact":
@@ -325,16 +337,31 @@ class ReactShell:
             self._artifact_store = InMemoryArtifactStore()
         self._runtime.set_artifact_store(self._artifact_store)
 
-        self._agent = agent_cls(
-            runtime=self._runtime,
-            tools=self._tools,
-            on_step=self._on_step,
-            max_iterations=self._max_iterations,
-            max_tokens=self._max_tokens,
-            plan_mode=self._plan_mode,
-            review_mode=self._review_mode,
-            review_max_rounds=self._review_max_rounds,
-        )
+        if self._workflow_agent_ref is not None:
+            try:
+                from .workflow_agent import WorkflowAgent
+            except Exception as e:
+                raise SystemExit(f"Workflow agents require AbstractFlow to be installed/importable.\n\n{e}")
+
+            self._agent = WorkflowAgent(
+                runtime=self._runtime,
+                flow_ref=self._workflow_agent_ref,
+                tools=self._tools,
+                on_step=self._on_step,
+                max_iterations=self._max_iterations,
+                max_tokens=self._max_tokens,
+            )
+        else:
+            self._agent = agent_cls(
+                runtime=self._runtime,
+                tools=self._tools,
+                on_step=self._on_step,
+                max_iterations=self._max_iterations,
+                max_tokens=self._max_tokens,
+                plan_mode=self._plan_mode,
+                review_mode=self._review_mode,
+                review_max_rounds=self._review_max_rounds,
+            )
 
         # Session-level tool approval (persists across all requests)
         self._approve_all_session = False
@@ -5907,6 +5934,151 @@ class ReactShell:
                     return
                 response = self._prompt_user(wait.prompt or "Please respond:", wait.choices)
                 state = self._agent.resume(response)
+                continue
+
+            if wait.reason == self._WaitReason.SUBWORKFLOW:
+                # Subworkflow waits require host orchestration:
+                # - tick the deepest running child
+                # - surface its waits (USER / tool approvals)
+                # - bubble completion back up to the parent run(s)
+                def _extract_sub_run_id(wait_state: Any) -> Optional[str]:
+                    details = getattr(wait_state, "details", None)
+                    if isinstance(details, dict):
+                        sub_run_id = details.get("sub_run_id")
+                        if isinstance(sub_run_id, str) and sub_run_id:
+                            return sub_run_id
+                    wait_key = getattr(wait_state, "wait_key", None)
+                    if isinstance(wait_key, str) and wait_key.startswith("subworkflow:"):
+                        return wait_key.split("subworkflow:", 1)[1] or None
+                    return None
+
+                def _workflow_for(run_state: Any):
+                    reg = getattr(self._runtime, "workflow_registry", None)
+                    getter = getattr(reg, "get", None) if reg is not None else None
+                    if callable(getter):
+                        wf = getter(run_state.workflow_id)
+                        if wf is not None:
+                            return wf
+                    if getattr(self._agent.workflow, "workflow_id", None) == run_state.workflow_id:
+                        return self._agent.workflow
+                    raise RuntimeError(f"Workflow '{run_state.workflow_id}' not found in runtime registry")
+
+                top_run_id = run_id
+
+                def _bubble_completion(child_state: Any) -> Optional[str]:
+                    parent_id = getattr(child_state, "parent_run_id", None)
+                    if not isinstance(parent_id, str) or not parent_id:
+                        return None
+                    parent_state = self._runtime.get_state(parent_id)
+                    parent_wait = getattr(parent_state, "waiting", None)
+                    if parent_state.status != self._RunStatus.WAITING or parent_wait is None:
+                        return None
+                    if parent_wait.reason != self._WaitReason.SUBWORKFLOW:
+                        return None
+                    self._runtime.resume(
+                        workflow=_workflow_for(parent_state),
+                        run_id=parent_id,
+                        wait_key=None,
+                        payload={
+                            "sub_run_id": child_state.run_id,
+                            "output": getattr(child_state, "output", None),
+                            "node_traces": self._runtime.get_node_traces(child_state.run_id),
+                        },
+                        max_steps=0,
+                    )
+                    return parent_id
+
+                # Drive subruns until we either make progress or hit a non-subworkflow wait.
+                for _ in range(200):
+                    # Descend to the deepest sub-run referenced by SUBWORKFLOW waits.
+                    current_run_id = top_run_id
+                    for _ in range(25):
+                        cur_state = self._runtime.get_state(current_run_id)
+                        cur_wait = getattr(cur_state, "waiting", None)
+                        if cur_state.status != self._RunStatus.WAITING or cur_wait is None:
+                            break
+                        if cur_wait.reason != self._WaitReason.SUBWORKFLOW:
+                            break
+                        next_id = _extract_sub_run_id(cur_wait)
+                        if not next_id:
+                            break
+                        current_run_id = next_id
+
+                    current_state = self._runtime.get_state(current_run_id)
+
+                    # Tick running subruns until they block/complete.
+                    if current_state.status == self._RunStatus.RUNNING:
+                        current_state = self._runtime.tick(
+                            workflow=_workflow_for(current_state),
+                            run_id=current_run_id,
+                            max_steps=100,
+                        )
+
+                    if current_state.status == self._RunStatus.RUNNING:
+                        continue
+
+                    if current_state.status == self._RunStatus.FAILED:
+                        raise RuntimeError(current_state.error or "Subworkflow failed")
+
+                    if current_state.status == self._RunStatus.WAITING:
+                        cur_wait = getattr(current_state, "waiting", None)
+                        if cur_wait is None:
+                            break
+                        if cur_wait.reason == self._WaitReason.SUBWORKFLOW:
+                            continue
+
+                        # Surface child waits to the shell.
+                        if cur_wait.reason == self._WaitReason.USER:
+                            self._ui.clear_spinner()
+                            response = self._prompt_user(cur_wait.prompt or "Please respond:", cur_wait.choices)
+                            self._runtime.resume(
+                                workflow=_workflow_for(current_state),
+                                run_id=current_run_id,
+                                wait_key=cur_wait.wait_key,
+                                payload={"response": response},
+                            )
+                            continue
+
+                        details = cur_wait.details if isinstance(cur_wait.details, dict) else {}
+                        tool_calls = details.get("tool_calls")
+                        if isinstance(tool_calls, list):
+                            self._ui.clear_spinner()
+                            payload = self._approve_and_execute(tool_calls)
+                            if payload is None:
+                                self._print(_style("\nLeft run waiting (not resumed).", _C.DIM, enabled=self._color))
+                                return
+                            self._runtime.resume(
+                                workflow=_workflow_for(current_state),
+                                run_id=current_run_id,
+                                wait_key=cur_wait.wait_key,
+                                payload=payload,
+                            )
+                            continue
+
+                        self._ui.clear_spinner()
+                        self._print(
+                            _style("\nWaiting:", _C.YELLOW, enabled=self._color)
+                            + f" {cur_wait.reason.value} ({cur_wait.wait_key})"
+                        )
+                        return
+
+                    if current_state.status == self._RunStatus.CANCELLED:
+                        self._ui.clear_spinner()
+                        self._ui.scroll_to_bottom()
+                        self._print(_style("\nRun cancelled. State preserved.", _C.YELLOW, enabled=self._color))
+                        return
+
+                    if current_state.status != self._RunStatus.COMPLETED:
+                        break
+
+                    # Bubble completion to the parent and keep going.
+                    parent_id = _bubble_completion(current_state)
+                    if not parent_id:
+                        break
+                    if parent_id == top_run_id:
+                        break
+
+                # After bubbling, continue the top-level loop.
                 continue
 
             # Tool approval waits are modeled as EVENT waits with details.tool_calls.
