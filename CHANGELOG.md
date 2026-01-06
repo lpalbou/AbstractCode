@@ -7,43 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- **Workflow agents docs**: documented running VisualFlow workflows as `--agent <flow>` via the `abstractcode.agent.v1` interface contract.
-- **Workflow agent interface contract**: `abstractcode.agent.v1` now requires host-configurable `provider`/`model`/`tools` start pins (in addition to `request`/`response`) so workflows don’t need hardcoded node configs.
-- **Workflow agent status events**: workflows can emit `Emit Event(name="abstractcode.status")` to update the TUI footer status text in real time.
-- **Workflow agent meta propagation**: `On Flow End.meta` (and optional `scratchpad` / `raw_result`) are surfaced back to AbstractCode as assistant-message metadata (`workflow_meta`, `workflow_scratchpad`, `workflow_raw_result`).
-- **Collapsible Thought/Tool blocks**: tool-using iterations now render **Thought** and **Tool Call** as **click-to-toggle** blocks (collapsed by default) with a high-signal one-line summary always visible.
-- **Spinner shimmer**: status bar spinner text now has a subtle **reflect/shimmer** highlight so “still working” is obvious without re-rendering the full scrollback.
-- **`/log provider --no-tool-defs`**: optionally replace the provider request `tools` array (full tool definitions) with an array of tool names for compact sharing/debugging.
+## [0.3.0] - 2025-01-06
 
-### Fixed
-- **Spinner shimmer sweep**: the status bar spinner shimmer now traverses the **entire** spinner text (previously capped to the first ~10 visible characters).
-- **Tool result visibility**: increased the default tool observation preview to **1000 characters** (was 120) so small-but-critical outputs (e.g., exit codes, working directories) are not silently truncated in the UI.
-- **ANSWER newline rendering**: unescape literal `\n` / `\r\n` sequences into real line breaks before terminal Markdown rendering, so multi-line answers display correctly.
-- **Web search reliability**: add `ddgs` as a dependency so the default `web_search` tool works without requiring manual installs.
-- **Native tools prompt accounting**: ReactShell token estimation now excludes the full `Tools (session)` Active Memory catalog for **native-tool models**, matching the prompt actually sent to OpenAI-compatible servers (e.g. LMStudio).
-- **LLM-call payload observability**: `/log provider` now shows the verbatim provider request/response (`_provider_request` + `raw_response`), and `/log runtime` shows the durable runtime step trace for LLM/tool calls.
-- **/log copy UX**: `/log runtime ... copy` and `/log provider ... copy` now accept `copy` as a trailing token and copy without rendering.
-- **/log provider format**: `/log provider` now defaults to the full ReAct cycle (all LLM calls) and renders OpenAI/LMS-style “Received request … Generated prediction …” blocks (no truncation).
-- **/log provider scope**: `/log provider` now reads from the durable ledger and, by default, includes **all LLM provider calls in the current session** (across runs) unless `--run` is used.
-- **/log provider tool-call detection**: best-effort tool-call summary now detects Anthropic `tool_use` blocks in addition to OpenAI-style `tool_calls`.
-- **Repeat guardrail**: reset duplicate-tool-call caches on **new runs** and **/cancel**, and block `write_file` calls missing `content` to prevent repeated 0‑byte file writes.
+### Added
+- **Workflow Agent Support** (`abstractcode/workflow_agent.py`): Run VisualFlow workflows as first-class agents via `abstractcode --agent <flow_id|flow_name|/path/to/flow.json>`
+  - `abstractcode.agent.v1` interface contract requires host-configurable `provider`/`model`/`tools` start pins (in addition to `request`/`response`)
+  - Workflows can emit `Emit Event(name="abstractcode.status")` to update TUI footer status text in real time
+  - `On Flow End.meta` (and optional `scratchpad`/`raw_result`) surfaced as assistant-message metadata (`workflow_meta`, `workflow_scratchpad`, `workflow_raw_result`)
+  - File-backed persistence support for durable workflow execution
+  - Documented in README with usage examples
+- **MCP (Model Context Protocol) Integration**: Connect to remote MCP servers for tool execution
+  - `/mcp` command to configure and manage MCP server connections
+  - `/executor` command to set default tool executor (local vs remote MCP server, session-persistent)
+  - Automatic tool synchronization from MCP servers
+  - Spinner feedback for remote MCP tool calls
+  - Support for stdio-based MCP servers
+  - MCP tools integrated into native tool allowlist
+- **Enhanced History & Context Commands**:
+  - `/history copy` command to copy full conversation history to clipboard
+  - `/context copy` command to copy current context to clipboard (deprecated in favor of `/log runtime ... copy`)
+  - Copy buttons for user prompts and assistant answers in TUI
+- **Collapsible Thought/Tool Blocks**: Tool-using iterations now render **Thought** and **Tool Call** as **click-to-toggle** blocks (collapsed by default) with high-signal one-line summary always visible
+- **Spinner Shimmer**: Status bar spinner text has subtle **reflect/shimmer** highlight traversing the entire text so "still working" is obvious without re-rendering scrollback
+- **`/log provider --no-tool-defs`**: Optionally replace provider request `tools` array (full tool definitions) with array of tool names for compact sharing/debugging
+- **Terminal Markdown Module** (`abstractcode/terminal_markdown.py`): Dedicated module for rendering Markdown in terminal with newline unescaping
+- **New Test Coverage**:
+  - Workflow agent tests (`test_workflow_agent.py`)
+  - MCP remote tool execution tests (`test_remote_mcp_tool_execution.py`, `test_remote_mcp_tool_execution_stdio.py`)
+  - Repeat guardrail tests (`test_repeat_guardrail_write_file_content.py`)
+  - Tool examples toggle tests (`test_tools_examples_toggle.py`)
+  - History copy tests (`test_history_copy_full_to_clipboard.py`)
+  - Executor command tests (`test_executor_command.py`, `test_executor_real_logic.py`)
+  - Spinner shimmer tests (`test_fullscreen_ui_spinner_shimmer.py`)
+  - Log provider tests (`test_log_provider_no_tool_defs.py`, `test_log_provider_tool_calls_anthropic.py`)
+  - Answer markdown tests (`test_answer_markdown_newline_unescape.py`)
 
 ### Changed
-- **`/clear`**: now clears the screen (UI output) in addition to clearing in-memory conversation context.
-- **`/memorize`**: the memory-note command is now **Memorize** (consistent UX term) to avoid ambiguity with span tagging.
-- **`/recall`**: richer filtering and rehydration controls:
-  - Added `--tags-mode all|any`, repeatable `--user NAME`, and repeatable `--location LOC`.
-  - Repeating `--tag k=v` now builds multi-value tags (e.g. `--tag person=alice --tag person=bob`).
-  - `--into-context` now also rehydrates matching `memory_note` spans as a synthetic system message (`[MEMORY NOTE] ...`).
-- **Logging commands**: replaced legacy `/context` + `/llm` with `/log runtime` + `/log provider` (no backward compatibility).
-- **Verifier (review) mode**: now enabled by default to prevent premature “stops” when the model returns incomplete prose without tool calls.
-  - Added `--no-review` to disable (not recommended).
-  - Default `--review-max-rounds` increased to 3.
-- **Tool prompt examples**: now **off by default** to avoid large token overhead; use `/tools examples on` if you want to include examples.
+- **`/clear`**: Now clears the screen (UI output) in addition to clearing in-memory conversation context
+- **`/memorize`**: Renamed from memory-note command to **Memorize** (consistent UX term) to avoid ambiguity with span tagging
+- **`/recall`**: Richer filtering and rehydration controls:
+  - Added `--tags-mode all|any`, repeatable `--user NAME`, and repeatable `--location LOC`
+  - Repeating `--tag k=v` now builds multi-value tags (e.g. `--tag person=alice --tag person=bob`)
+  - `--into-context` now also rehydrates matching `memory_note` spans as synthetic system message (`[MEMORY NOTE] ...`)
+- **Logging Commands**: Replaced legacy `/context` + `/llm` with `/log runtime` + `/log provider` (no backward compatibility)
+  - `/log provider` now reads from durable ledger and includes **all LLM provider calls in current session** (across runs) unless `--run` is used
+  - `/log provider` renders OpenAI/LMS-style "Received request … Generated prediction …" blocks (no truncation)
+  - `/log runtime ... copy` and `/log provider ... copy` now accept `copy` as trailing token and copy without rendering
+- **Verifier (Review) Mode**: Now enabled by default to prevent premature "stops" when model returns incomplete prose without tool calls
+  - Added `--no-review` to disable (not recommended)
+  - Default `--review-max-rounds` increased to 3
+- **Tool Prompt Examples**: Now **off by default** to avoid large token overhead; use `/tools examples on` to enable
+- **Output Versioning**: FullScreenUI now uses output versioning and caching for improved render performance
+- **Scrolling Behavior**: Enhanced scrolling in FullScreenUI with better page up/down and smooth scroll support
+
+### Fixed
+- **Spinner Shimmer Sweep**: Status bar spinner shimmer now traverses **entire** spinner text (previously capped to first ~10 visible characters)
+- **Tool Result Visibility**: Increased default tool observation preview to **1000 characters** (was 120) so small-but-critical outputs (e.g. exit codes, working directories) not silently truncated in UI
+- **ANSWER Newline Rendering**: Unescape literal `\n` / `\r\n` sequences into real line breaks before terminal Markdown rendering, so multi-line answers display correctly
+- **Web Search Reliability**: Added `ddgs>=9.10.0` as dependency so default `web_search` tool works without manual installs
+- **Native Tools Prompt Accounting**: ReactShell token estimation now excludes full `Tools (session)` Active Memory catalog for **native-tool models**, matching prompt actually sent to OpenAI-compatible servers (e.g. LMStudio)
+- **LLM-Call Payload Observability**: `/log provider` shows verbatim provider request/response (`_provider_request` + `raw_response`), `/log runtime` shows durable runtime step trace for LLM/tool calls
+- **`/log provider` Tool-Call Detection**: Best-effort tool-call summary now detects Anthropic `tool_use` blocks in addition to OpenAI-style `tool_calls`
+- **Repeat Guardrail**: Reset duplicate-tool-call caches on **new runs** and **/cancel**, block `write_file` calls missing `content` to prevent repeated 0‑byte file writes
+- **File Tool CWD Injection**: File tools (read/write/edit) no longer inject `cwd` into UI preview, preventing confusion when relative paths shown
+- **Async Run Controls**: Improved async handling for pause/resume/cancel controls
+- **Flow CLI Entry Validation**: Added required entry inputs validation in CLI flow commands
 
 ### Removed
-- **`/new`, `/reset`**: removed alias commands (they were identical to `/clear`). Use `/clear`.
+- **`/new`, `/reset`**: Removed alias commands (identical to `/clear`). Use `/clear`
+- **Legacy `/context`, `/llm`**: Removed in favor of `/log runtime` and `/log provider`
+
+### Technical Details
+- **41 commits**, **30 files changed**: 8,731 insertions, 756 deletions
+- New modules: `workflow_agent.py` (717 lines), `terminal_markdown.py` (139 lines)
+- 15 new test files covering workflow agents, MCP integration, repeat guardrails, and UI enhancements
+- AbstractCore dependency updated to include `[tools]` extras for web search reliability
+- Enhanced ReactShell with MCP client management, executor configuration, and improved token estimation
+
+### Migration Notes
+- Legacy `/context` and `/llm` commands removed; use `/log runtime` and `/log provider` instead
+- Tool prompt examples now off by default; enable with `/tools examples on` if needed
+- Verifier (review) mode now enabled by default; disable with `--no-review` if unwanted
 
 ## [0.2.0] - 2025-12-17
 
