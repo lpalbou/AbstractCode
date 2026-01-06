@@ -9,10 +9,11 @@ def test_parse_remember_args_and_store_note_into_target_run() -> None:
     from abstractruntime.storage.artifacts import InMemoryArtifactStore
     from abstractruntime.storage.in_memory import InMemoryLedgerStore, InMemoryRunStore
 
-    req = parse_remember_args('Important decision --tag topic=api --tag person=alice --last 3')
+    req = parse_remember_args('Important decision --tag topic=api --tag person=alice --last 3 --scope run')
     assert req.note == "Important decision"
     assert req.tags == {"topic": "api", "person": "alice"}
     assert req.last_messages == 3
+    assert req.scope == "run"
 
     run_store = InMemoryRunStore()
     ledger_store = InMemoryLedgerStore()
@@ -55,6 +56,7 @@ def test_parse_remember_args_and_store_note_into_target_run() -> None:
         actor_id=None,
         session_id=None,
         call_id="remember",
+        scope=req.scope,
     )
 
     assert result.get("mode") == "executed"

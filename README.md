@@ -41,6 +41,78 @@ By default, AbstractCode uses `~/.abstractcode/state.json` and stores the durabl
 - disable persistence: `abstractcode --no-state`
 - override path: `ABSTRACTCODE_STATE_FILE=... abstractcode`
 
+## Workflow Agents (VisualFlow as `--agent`)
+
+AbstractCode can run an AbstractFlow VisualFlow workflow *as an agent* (instead of using the built-in `react|codeact|memact` agents).
+
+### Requirements (`abstractcode.agent.v1`)
+- The workflow JSON must declare: `interfaces: ["abstractcode.agent.v1"]`
+- The workflow must expose these pins:
+  - `On Flow Start`: output pins:
+    - `request` (type `string`)
+    - `provider` (type `provider`)
+    - `model` (type `model`)
+    - `tools` (type `tools`)
+  - `On Flow End`: input pin `response` (type `string`)
+
+Recommended (optional) pins:
+- `On Flow Start`: `context` (object), `max_iterations` (number)
+- `On Flow End`: `meta` (object), `scratchpad` (object), `raw_result` (object)
+
+### Authoring in the AbstractFlow visual editor
+- **Mark the interface**: click `📂 Load` → select the workflow → in the right preview panel find **Interfaces** → click the ✏️ icon → enable **AbstractCode Agent (v1)** → **Save Interfaces**
+- **Pins are scaffolded automatically**: when the interface is enabled, AbstractFlow will ensure `On Flow Start` and `On Flow End` have the required pins. You can still add/remove optional pins as needed.
+
+Tip: an example workflow is shipped at `abstractflow/web/flows/acagent01.json` (implements the interface).
+
+### What is `meta` and how do I use it?
+`On Flow End.meta` is an **optional JSON object** for host-facing metadata (usage, trace ids, warnings, raw provider info, etc.).
+
+It is intentionally **not strictly validated** today (the host treats it as opaque JSON). To make workflows portable and predictable across hosts, we recommend using a small “envelope” shape:
+
+```json
+{
+  "schema": "abstractcode.agent.v1.meta",
+  "version": 1,
+  "provider": "lmstudio",
+  "model": "qwen/qwen3-next-80b",
+  "usage": { "input_tokens": 123, "output_tokens": 456 },
+  "trace": { "trace_id": "..." },
+  "warnings": ["..."],
+  "debug": {}
+}
+```
+
+Hosts should treat unknown fields as allowed and ignore what they don’t understand (forward-compatible).
+
+Typical ways to produce it inside a workflow:
+- Wire `LLM Call.result` (object) → `On Flow End.meta`
+- Wire `Agent.result` (object) → `On Flow End.meta`
+- Or build your own object and wire it into `meta`
+
+When present, AbstractCode attaches it to the assistant message metadata as `workflow_meta`.
+
+### Workflow-driven status updates (footer / live UX)
+Inside a workflow, you can update AbstractCode’s footer status text by emitting the reserved event:
+- Add an **Emit Event** node
+- Set **name** to `abstractcode.status`
+- Set **payload** to:
+  - a string (e.g. `"Enrich Query..."`), or
+  - an object like `{ "text": "Enrich Query..." }`
+
+Example workflow: `abstractflow/web/flows/acagent_status_demo.json` (3 status updates, each separated by a 2s Delay).
+
+### Run
+Use `--agent` with a workflow id/name (from the flows directory) or a direct JSON path:
+
+```bash
+abstractcode --agent acagent01
+abstractcode --agent abstractflow/web/flows/acagent01.json
+
+# If your flows are stored elsewhere:
+ABSTRACTFLOW_FLOWS_DIR=/path/to/flows abstractcode --agent my_flow_id
+```
+
 ## Run Workflows (AbstractFlow VisualFlow)
 
 ### From the CLI
@@ -116,12 +188,13 @@ abstractcode --help
 
 ## Default Tools
 
-AbstractCode provides a curated set of 9 tools for coding tasks (ReAct agent):
+AbstractCode provides a curated set of 10 tools for coding tasks (ReAct agent):
 
 | Tool | Description |
 |------|-------------|
 | `list_files` | Find and list files using glob patterns (case-insensitive) |
 | `search_files` | Search for text patterns inside files using regex |
+| `analyze_code` | Outline a Python/JS file (imports/classes/functions + line ranges) |
 | `read_file` | Read file contents with optional line range |
 | `write_file` | Write content to files, creating directories as needed |
 | `edit_file` | Edit files by replacing text patterns (supports regex, line ranges, preview mode) |

@@ -36,10 +36,10 @@ def _default_max_tokens() -> Optional[int]:
             value = int(env)
         except ValueError:
             raise SystemExit("ABSTRACTCODE_MAX_TOKENS must be an integer.")
-        if value < 1024:
-            raise SystemExit("ABSTRACTCODE_MAX_TOKENS must be >= 1024.")
+        if value != -1 and value < 1024:
+            raise SystemExit("ABSTRACTCODE_MAX_TOKENS must be -1 (auto) or >= 1024.")
         return value
-    return 32768  # Default 32k context
+    return -1  # Auto (use model capabilities)
 
 
 def build_agent_parser() -> argparse.ArgumentParser:
@@ -56,12 +56,21 @@ def build_agent_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--agent",
-        choices=("react", "codeact"),
         default=os.getenv("ABSTRACTCODE_AGENT", "react"),
-        help="Agent type to run (react|codeact).",
+        help=(
+            "Agent selector:\n"
+            "  - Built-ins: react | codeact | memact\n"
+            "  - Workflow agent: <flow_id> | <flow_name> | </path/to/flow.json>\n"
+            "    (must implement interface 'abstractcode.agent.v1')"
+        ),
     )
     parser.add_argument("--provider", default="ollama", help="LLM provider (e.g. ollama, openai)")
     parser.add_argument("--model", default="qwen3:1.7b-q4_K_M", help="Model name")
+    parser.add_argument(
+        "--base-url",
+        default=os.getenv("ABSTRACTCODE_BASE_URL"),
+        help="Provider base URL (e.g. http://localhost:1234/v1). Also supports ABSTRACTCODE_BASE_URL.",
+    )
     parser.add_argument(
         "--state-file",
         default=_default_state_file(),
@@ -80,6 +89,30 @@ def build_agent_parser() -> argparse.ArgumentParser:
         help="Automatically approve tool calls (unsafe; disables interactive approvals).",
     )
     parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="Enable Plan mode (agent generates a TODO plan before acting).",
+    )
+    parser.add_argument(
+        "--review",
+        action="store_true",
+        dest="review",
+        help="Enable verifier mode (default: enabled).",
+    )
+    parser.add_argument(
+        "--no-review",
+        action="store_false",
+        dest="review",
+        help="Disable verifier mode (not recommended).",
+    )
+    parser.set_defaults(review=True)
+    parser.add_argument(
+        "--review-max-rounds",
+        type=int,
+        default=3,
+        help="Max verifier rounds per task (default: 3).",
+    )
+    parser.add_argument(
         "--max-iterations",
         type=int,
         default=_default_max_iterations(),
@@ -89,7 +122,7 @@ def build_agent_parser() -> argparse.ArgumentParser:
         "--max-tokens",
         type=int,
         default=_default_max_tokens(),
-        help="Maximum context tokens for LLM calls (default: 32768).",
+        help="Maximum context tokens for LLM calls (-1 = auto from model capabilities).",
     )
     parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
     return parser
@@ -350,8 +383,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         agent=str(args.agent),
         provider=args.provider,
         model=args.model,
+        base_url=getattr(args, "base_url", None),
         state_file=state_file,
         auto_approve=bool(args.auto_approve),
+        plan_mode=bool(args.plan),
+        review_mode=bool(args.review),
+        review_max_rounds=int(args.review_max_rounds),
         max_iterations=int(args.max_iterations),
         max_tokens=args.max_tokens,
         color=not bool(args.no_color),

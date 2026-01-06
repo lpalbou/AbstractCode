@@ -11,7 +11,7 @@ The goal is testability without requiring an LLM provider to be reachable.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from abstractruntime.memory import ActiveContextPolicy, TimeRange
 
@@ -20,15 +20,54 @@ from abstractruntime.memory import ActiveContextPolicy, TimeRange
 class RecallRequest:
     since: Optional[str] = None
     until: Optional[str] = None
-    tags: Dict[str, str] = None  # type: ignore[assignment]
+    tags: Dict[str, Any] = None  # type: ignore[assignment]
+    tags_mode: str = "all"  # all|any
+    users: List[str] = None  # type: ignore[assignment]
+    locations: List[str] = None  # type: ignore[assignment]
     query: Optional[str] = None
     limit: int = 10
     into_context: bool = False
     placement: str = "after_summary"
     show: bool = False
+    scope: str = "run"  # run|session|global|all
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tags", dict(self.tags or {}))
+
+        raw_mode = str(getattr(self, "tags_mode", "") or "").strip().lower() or "all"
+        if raw_mode in ("and",):
+            raw_mode = "all"
+        if raw_mode in ("or",):
+            raw_mode = "any"
+        if raw_mode not in ("all", "any"):
+            raw_mode = "all"
+        object.__setattr__(self, "tags_mode", raw_mode)
+
+        def _norm_list(values: Any) -> List[str]:
+            if not isinstance(values, list):
+                return []
+            out: List[str] = []
+            for v in values:
+                if isinstance(v, str) and v.strip():
+                    out.append(v.strip())
+            # preserve order but dedup (case-insensitive)
+            seen: set[str] = set()
+            deduped: List[str] = []
+            for s in out:
+                key = s.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(s)
+            return deduped
+
+        object.__setattr__(self, "users", _norm_list(getattr(self, "users", None)))
+        object.__setattr__(self, "locations", _norm_list(getattr(self, "locations", None)))
+
+        raw_scope = str(getattr(self, "scope", "") or "").strip().lower() or "run"
+        if raw_scope not in ("run", "session", "global", "all"):
+            raw_scope = "run"
+        object.__setattr__(self, "scope", raw_scope)
 
 
 def parse_recall_args(raw: str) -> RecallRequest:
@@ -38,11 +77,15 @@ def parse_recall_args(raw: str) -> RecallRequest:
       - `--since ISO`
       - `--until ISO`
       - `--tag k=v` (repeatable)
+      - `--tags-mode all|any` (default all; AND/OR across tag keys)
+      - `--user NAME` (repeatable; alias: --users)
+      - `--location LOC` (repeatable; alias: --locations)
       - `--q text`  (if absent, remaining args become query)
       - `--limit N`
       - `--into-context`
       - `--placement after_summary|after_system|end`
       - `--show` (show full note content for memory_note matches)
+      - `--scope run|session|global|all`
     """
     import shlex
 
@@ -53,12 +96,16 @@ def parse_recall_args(raw: str) -> RecallRequest:
 
     since: Optional[str] = None
     until: Optional[str] = None
-    tags: Dict[str, str] = {}
+    tags: Dict[str, Any] = {}
+    tags_mode = "all"
+    users: List[str] = []
+    locations: List[str] = []
     query: Optional[str] = None
     limit = 10
     into_context = False
     placement = "after_summary"
     show = False
+    scope = "run"
 
     leftovers: list[str] = []
     i = 0
@@ -88,7 +135,50 @@ def parse_recall_args(raw: str) -> RecallRequest:
             if not k or not v:
                 raise ValueError("--tag requires non-empty k=v")
             if k != "kind":
-                tags[k] = v
+                prev = tags.get(k)
+                if prev is None:
+                    tags[k] = v
+                elif isinstance(prev, str):
+                    if prev != v:
+                        tags[k] = [prev, v]
+                elif isinstance(prev, list):
+                    if v not in prev:
+                        prev.append(v)
+            i += 2
+            continue
+        if p in ("--tags-mode", "--tag-mode", "--tags-op", "--tag-op"):
+            if i + 1 >= len(parts):
+                raise ValueError("--tags-mode requires all|any")
+            mode = str(parts[i + 1]).strip().lower()
+            if mode in ("and",):
+                mode = "all"
+            if mode in ("or",):
+                mode = "any"
+            if mode not in ("all", "any"):
+                raise ValueError("--tags-mode must be all|any")
+            tags_mode = mode
+            i += 2
+            continue
+        if p in ("--user", "--users"):
+            if i + 1 >= len(parts):
+                raise ValueError("--user requires a name")
+            raw_user = str(parts[i + 1]).strip()
+            if raw_user:
+                for seg in raw_user.split(","):
+                    s = seg.strip()
+                    if s:
+                        users.append(s)
+            i += 2
+            continue
+        if p in ("--location", "--locations"):
+            if i + 1 >= len(parts):
+                raise ValueError("--location requires a value")
+            raw_loc = str(parts[i + 1]).strip()
+            if raw_loc:
+                for seg in raw_loc.split(","):
+                    s = seg.strip()
+                    if s:
+                        locations.append(s)
             i += 2
             continue
         if p in ("--q", "--query"):
@@ -123,6 +213,14 @@ def parse_recall_args(raw: str) -> RecallRequest:
         if p == "--show":
             show = True
             i += 1
+            continue
+        if p == "--scope":
+            if i + 1 >= len(parts):
+                raise ValueError("--scope requires a value")
+            scope = str(parts[i + 1]).strip().lower() or "run"
+            if scope not in ("run", "session", "global", "all"):
+                raise ValueError("--scope must be run|session|global|all")
+            i += 2
             continue
         if p == "--placement":
             if i + 1 >= len(parts):
@@ -163,11 +261,15 @@ def parse_recall_args(raw: str) -> RecallRequest:
         since=since,
         until=until,
         tags=tags,
+        tags_mode=tags_mode,
+        users=users,
+        locations=locations,
         query=query,
         limit=limit,
         into_context=into_context,
         placement=placement,
         show=show,
+        scope=scope,
     )
 
 
@@ -187,26 +289,86 @@ def execute_recall(
     """
     policy = ActiveContextPolicy(run_store=run_store, artifact_store=artifact_store)
 
+    def _resolve_session_root_id(start_run_id: str) -> str:
+        cur_id = str(start_run_id or "").strip()
+        seen: set[str] = set()
+        while cur_id and cur_id not in seen:
+            seen.add(cur_id)
+            st = run_store.load(cur_id)
+            if st is None:
+                return cur_id
+            parent = getattr(st, "parent_run_id", None)
+            if not isinstance(parent, str) or not parent.strip():
+                return cur_id
+            cur_id = parent.strip()
+        return str(start_run_id or "").strip()
+
+    def _global_memory_run_id() -> str:
+        import os
+        import re
+
+        rid = str(os.environ.get("ABSTRACTRUNTIME_GLOBAL_MEMORY_RUN_ID") or "").strip()
+        if rid and re.match(r"^[a-zA-Z0-9_-]+$", rid):
+            return rid
+        return "global_memory"
+
     time_range: Optional[TimeRange] = None
     if request.since or request.until:
         time_range = TimeRange(start=request.since, end=request.until)
 
-    matches = policy.filter_spans(
-        run_id,
-        time_range=time_range,
-        tags=(request.tags or None),
-        query=request.query,
-        limit=int(request.limit),
-    )
+    scope = str(request.scope or "run").strip().lower() or "run"
+    run_ids: list[str] = []
+    if scope == "run":
+        run_ids = [run_id]
+    elif scope == "session":
+        run_ids = [_resolve_session_root_id(run_id)]
+    elif scope == "global":
+        run_ids = [_global_memory_run_id()]
+    else:  # all
+        root_id = _resolve_session_root_id(run_id)
+        global_id = _global_memory_run_id()
+        # Deterministic order; dedup.
+        seen_ids: set[str] = set()
+        for rid in (run_id, root_id, global_id):
+            if rid and rid not in seen_ids:
+                seen_ids.add(rid)
+                run_ids.append(rid)
+
+    matches: list[dict[str, Any]] = []
+    seen_artifacts: set[str] = set()
+    for rid in run_ids:
+        # Skip missing runs (e.g. global memory not created yet).
+        st = run_store.load(rid)
+        if st is None:
+            continue
+        part = policy.filter_spans(
+            rid,
+            time_range=time_range,
+            tags=(request.tags or None),
+            tags_mode=request.tags_mode,
+            authors=(request.users or None),
+            locations=(request.locations or None),
+            query=request.query,
+            limit=int(request.limit),
+        )
+        for s in part:
+            if not isinstance(s, dict):
+                continue
+            aid = str(s.get("artifact_id") or "").strip()
+            if not aid or aid in seen_artifacts:
+                continue
+            seen_artifacts.add(aid)
+            annotated = dict(s)
+            annotated["owner_run_id"] = rid
+            matches.append(annotated)
 
     rehydration: Optional[Dict[str, Any]] = None
     if request.into_context:
-        # Only rehydrate spans that have archived messages (notes are not message spans).
+        # Rehydrate the selected span(s) into active context. This is deterministic and persists
+        # the updated run state. Notes are rehydrated as a synthetic message.
         span_ids: list[str] = []
         for s in matches:
             if not isinstance(s, dict):
-                continue
-            if str(s.get("kind") or "") == "memory_note":
                 continue
             aid = s.get("artifact_id")
             if isinstance(aid, str) and aid:

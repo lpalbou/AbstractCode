@@ -27,6 +27,96 @@ def test_flow_cli_input_parsing():
     assert kv == {"a": 1, "b": True, "c": {"x": 2}, "d": 0}
 
 
+def test_flow_cli_entry_inputs_prompting_matches_web_ui_defaults():
+    from abstractcode.flow_cli import _required_entry_inputs, run_flow_command
+
+    try:
+        from abstractflow.visual.models import VisualFlow
+    except Exception:
+        pytest.skip("abstractflow not installed")
+
+    vf = VisualFlow.model_validate(
+        {
+            "id": "x",
+            "name": "x",
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "on_flow_start",
+                    "position": {"x": 0, "y": 0},
+                    "data": {
+                        "outputs": [
+                            {"id": "exec-out", "label": "", "type": "execution"},
+                            {"id": "query", "label": "query", "type": "string"},
+                            {"id": "limit", "label": "limit", "type": "number"},
+                            {"id": "flags", "label": "flags", "type": "object"},
+                        ]
+                    },
+                }
+            ],
+            "edges": [],
+            "entryNode": "start",
+        }
+    )
+
+    required = _required_entry_inputs(vf)
+    assert required == ["query", "limit", "flags"]
+
+
+def test_flow_cli_run_errors_when_required_inputs_missing(tmp_path):
+    from abstractcode.flow_cli import run_flow_command
+
+    try:
+        import abstractflow  # noqa: F401
+        from abstractflow.visual.models import VisualFlow
+    except Exception:
+        pytest.skip("abstractflow not installed")
+
+    vf = VisualFlow.model_validate(
+        {
+            "id": "x",
+            "name": "x",
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "on_flow_start",
+                    "position": {"x": 0, "y": 0},
+                    "data": {
+                        "outputs": [
+                            {"id": "exec-out", "label": "", "type": "execution"},
+                            {"id": "query", "label": "query", "type": "string"},
+                        ]
+                    },
+                }
+            ],
+            "edges": [],
+            "entryNode": "start",
+        }
+    )
+
+    flow_path = tmp_path / "flow.json"
+    flow_path.write_text(vf.model_dump_json(), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Missing required flow inputs"):
+        run_flow_command(
+            flow_ref=str(flow_path),
+            flows_dir=None,
+            input_json=None,
+            input_file=None,
+            params=[],
+            extra_args=[],
+            flow_state_file=str(tmp_path / "state.json"),
+            no_state=True,
+            auto_approve=True,
+            wait_until=False,
+            verbosity="none",
+            prompt_fn=lambda _: "",
+            ask_user_fn=lambda *_: "",
+            print_fn=lambda *_: None,
+            on_answer_user=lambda *_: None,
+        )
+
+
 def test_flow_cli_tool_approve_all_persists_for_run():
     from abstractcode.flow_cli import _ApprovalState, _approve_and_execute
 

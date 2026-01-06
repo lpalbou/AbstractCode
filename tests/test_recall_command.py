@@ -13,17 +13,21 @@ from abstractruntime.storage.in_memory import InMemoryRunStore
 def test_parse_recall_args_supports_time_tags_query_and_into_context() -> None:
     req = parse_recall_args(
         "--since 2025-01-01T00:00:00+00:00 --until 2025-01-02T00:00:00+00:00 "
-        "--tag topic=r-type --tag person=alice --q player dies --limit 3 --into-context --placement end --show"
+        "--tag topic=r-type --tag person=alice --q player dies --limit 3 --into-context --placement end --show --scope all"
     )
 
     assert req.since == "2025-01-01T00:00:00+00:00"
     assert req.until == "2025-01-02T00:00:00+00:00"
     assert req.tags == {"topic": "r-type", "person": "alice"}
+    assert req.tags_mode == "all"
+    assert req.users == []
+    assert req.locations == []
     assert req.query == "player dies"
     assert req.limit == 3
     assert req.into_context is True
     assert req.placement == "end"
     assert req.show is True
+    assert req.scope == "all"
 
 
 def test_parse_recall_args_uses_leftovers_as_query_when_missing_q_flag() -> None:
@@ -35,6 +39,21 @@ def test_parse_recall_args_uses_leftovers_as_query_when_missing_q_flag() -> None
 def test_parse_recall_args_rejects_invalid_iso() -> None:
     with pytest.raises(ValueError):
         parse_recall_args("--since not-a-time")
+
+
+def test_parse_recall_args_supports_tags_mode_users_locations_and_multi_value_tags() -> None:
+    req = parse_recall_args(
+        "--tags-mode any "
+        "--tag person=alice --tag person=bob "
+        "--user alice --user bob "
+        "--location paris --location nyc "
+        "--q opinions"
+    )
+    assert req.tags_mode == "any"
+    assert req.tags == {"person": ["alice", "bob"]}
+    assert req.users == ["alice", "bob"]
+    assert req.locations == ["paris", "nyc"]
+    assert req.query == "opinions"
 
 
 def test_execute_recall_filters_spans_and_rehydrates_messages() -> None:
@@ -138,7 +157,9 @@ def test_execute_recall_filters_spans_and_rehydrates_messages() -> None:
     res2 = execute_recall(run_id=run_id, run_store=run_store, artifact_store=artifact_store, request=req2)
     rehydration = res2.get("rehydration")
     assert isinstance(rehydration, dict)
-    assert rehydration.get("inserted") == 2
+    # `memory_note` spans include their linked conversation summary text in the query haystack,
+    # so searching for "player dies" surfaces both the archived span and the derived note.
+    assert rehydration.get("inserted") == 3
     assert rehydration.get("skipped") == 1
 
     updated = run_store.load(run_id)
@@ -152,4 +173,14 @@ def test_execute_recall_filters_spans_and_rehydrates_messages() -> None:
     assert isinstance(meta, dict)
     assert meta.get("rehydrated") is True
     assert meta.get("source_artifact_id") == span_art.artifact_id
+    # Notes are rehydrated as a synthetic system message (LLM-visible).
+    note_msg = next(
+        (
+            m
+            for m in active
+            if isinstance(m, dict) and (m.get("metadata") or {}).get("message_id") == f"memory_note:{note_art.artifact_id}"
+        ),
+        None,
+    )
+    assert isinstance(note_msg, dict)
 
