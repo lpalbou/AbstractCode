@@ -13,15 +13,19 @@ from abstractruntime import RunState, RunStatus, Runtime, WorkflowSpec
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+_STATUS_EVENT_NAME = "abstractcode.status"
 
-def _new_message(*, role: str, content: str) -> Dict[str, Any]:
+
+def _new_message(*, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     from uuid import uuid4
 
+    meta: Dict[str, Any] = dict(metadata) if isinstance(metadata, dict) else {}
+    meta.setdefault("message_id", f"msg_{uuid4().hex}")
     return {
         "role": str(role or "").strip() or "user",
         "content": str(content or ""),
         "timestamp": _now_iso(),
-        "metadata": {"message_id": f"msg_{uuid4().hex}"},
+        "metadata": meta,
     }
 
 
@@ -353,6 +357,8 @@ class WorkflowAgent(BaseAgent):
             raise ValueError(f"Workflow does not implement '{ABSTRACTCODE_AGENT_V1}':\n{joined}")
 
         self._last_task: Optional[str] = None
+        self._ledger_unsubscribe: Optional[Callable[[], None]] = None
+        self._node_labels_by_id: Dict[str, str] = {}
 
         super().__init__(
             runtime=runtime,
@@ -416,13 +422,40 @@ class WorkflowAgent(BaseAgent):
             # Provide a safe default so interface-scaffolded `tools` pins resolve.
             vars["tools"] = []
 
+        actor_id = self._ensure_actor_id()
+        session_id = self._ensure_session_id()
+
         run_id = self.runtime.start(
             workflow=self.workflow,
             vars=vars,
-            actor_id=self._ensure_actor_id(),
-            session_id=self._ensure_session_id(),
+            actor_id=actor_id,
+            session_id=session_id,
         )
         self._current_run_id = run_id
+
+        # Build a stable node_id -> label map for UX (used for status updates).
+        try:
+            labels: Dict[str, str] = {}
+            for n in getattr(self.visual_flow, "nodes", []) or []:
+                nid = getattr(n, "id", None)
+                if not isinstance(nid, str) or not nid:
+                    continue
+                data = getattr(n, "data", None)
+                label = data.get("label") if isinstance(data, dict) else None
+                if isinstance(label, str) and label.strip():
+                    labels[nid] = label.strip()
+            self._node_labels_by_id = labels
+        except Exception:
+            self._node_labels_by_id = {}
+
+        # Subscribe to ledger records so we can surface real-time status updates
+        # even while a blocking effect (LLM/tool HTTP) is in-flight.
+        self._ledger_unsubscribe = None
+        if self.on_step:
+            try:
+                self._ledger_unsubscribe = self._subscribe_status_events(actor_id=actor_id, session_id=session_id)
+            except Exception:
+                self._ledger_unsubscribe = None
 
         if self.on_step:
             try:
@@ -438,16 +471,170 @@ class WorkflowAgent(BaseAgent):
 
         return run_id
 
+    def _subscribe_status_events(self, *, actor_id: str, session_id: str) -> Optional[Callable[[], None]]:
+        """Subscribe to ledger appends and translate `abstractcode.status` into on_step("status", ...).
+
+        This is best-effort and must never affect correctness.
+        """
+
+        def _extract_status_text(payload: Any) -> str:
+            if isinstance(payload, str):
+                return payload
+            if isinstance(payload, dict):
+                v0 = payload.get("value")
+                if isinstance(v0, str) and v0.strip():
+                    return v0.strip()
+                for k in ("text", "message", "status"):
+                    v = payload.get(k)
+                    if isinstance(v, str) and v.strip():
+                        return v.strip()
+            return ""
+
+        def _on_record(rec: Dict[str, Any]) -> None:
+            try:
+                if rec.get("actor_id") != actor_id:
+                    return
+                if rec.get("session_id") != session_id:
+                    return
+                status = rec.get("status")
+                status_str = status.value if hasattr(status, "value") else str(status or "")
+                if status_str != "completed":
+                    return
+                eff = rec.get("effect")
+                if not isinstance(eff, dict) or str(eff.get("type") or "") != "emit_event":
+                    return
+                payload = eff.get("payload") if isinstance(eff.get("payload"), dict) else {}
+                name = str(payload.get("name") or payload.get("event_name") or "").strip()
+                if name != _STATUS_EVENT_NAME:
+                    return
+                text = _extract_status_text(payload.get("payload"))
+                if not text:
+                    return
+                if callable(self.on_step):
+                    self.on_step("status", {"text": text})
+            except Exception:
+                return
+
+        try:
+            unsub = self.runtime.subscribe_ledger(_on_record, run_id=None)
+            return unsub if callable(unsub) else None
+        except Exception:
+            return None
+
+    def _cleanup_ledger_subscription(self) -> None:
+        unsub = self._ledger_unsubscribe
+        self._ledger_unsubscribe = None
+        if callable(unsub):
+            try:
+                unsub()
+            except Exception:
+                pass
+
+    def _auto_wait_until(self, state: RunState) -> Optional[RunState]:
+        """Best-effort: auto-drive short WAIT_UNTIL delays for workflow agents.
+
+        Why:
+        - Visual workflows commonly use Delay (WAIT_UNTIL) for UX pacing.
+        - AbstractCode's agent run loop expects `step()` to keep making progress without
+          manual `/resume` for short waits.
+
+        Notes:
+        - This is intentionally conservative: it yields back if the wait changes to a
+          different reason (tool approvals, user prompts, pauses).
+        - Cancellation/pause are polled so control-plane actions remain responsive.
+        """
+        waiting = getattr(state, "waiting", None)
+        if waiting is None:
+            return None
+
+        reason = getattr(waiting, "reason", None)
+        reason_value = reason.value if hasattr(reason, "value") else str(reason or "")
+        if reason_value != "until":
+            return None
+
+        until_raw = getattr(waiting, "until", None)
+        if not isinstance(until_raw, str) or not until_raw.strip():
+            return None
+
+        def _parse_until_iso(value: str) -> Optional[datetime]:
+            s = str(value or "").strip()
+            if not s:
+                return None
+            # Accept both "+00:00" and "Z"
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            try:
+                dt = datetime.fromisoformat(s)
+            except Exception:
+                return None
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+
+        until_dt = _parse_until_iso(until_raw)
+        if until_dt is None:
+            return None
+
+        import time
+
+        # Cap auto-wait to avoid surprising "hangs" for long schedules.
+        max_auto_wait_s = 30.0
+
+        while True:
+            try:
+                latest = self.runtime.get_state(state.run_id)
+            except Exception:
+                latest = state
+
+            # Stop if externally controlled or otherwise no longer a time wait.
+            if getattr(latest, "status", None) in (RunStatus.CANCELLED, RunStatus.FAILED, RunStatus.COMPLETED):
+                return latest
+
+            latest_wait = getattr(latest, "waiting", None)
+            if latest_wait is None:
+                return latest
+            r = getattr(latest_wait, "reason", None)
+            r_val = r.value if hasattr(r, "value") else str(r or "")
+            if r_val != "until":
+                # Another wait type (pause/user/tool/event/subworkflow) should be handled by the host.
+                return latest
+
+            now = datetime.now(timezone.utc)
+            remaining = (until_dt - now).total_seconds()
+            if remaining <= 0:
+                # Runtime.tick will auto-unblock on the next call.
+                return None
+
+            if remaining > max_auto_wait_s:
+                # Leave it waiting; user can /resume later.
+                return latest
+
+            time.sleep(min(0.25, max(0.0, float(remaining))))
+
     def step(self) -> RunState:
         if not self._current_run_id:
             raise RuntimeError("No active run. Call start() first.")
 
         state = self.runtime.tick(workflow=self.workflow, run_id=self._current_run_id, max_steps=1)
 
+        # Auto-drive short time waits (Delay node) so workflow agents can use pacing
+        # without requiring manual `/resume`.
+        if state.status == RunStatus.WAITING:
+            advanced = self._auto_wait_until(state)
+            if isinstance(advanced, RunState):
+                state = advanced
+            elif advanced is None:
+                # Time passed (or will pass within our polling loop): continue ticking once.
+                state = self.runtime.tick(workflow=self.workflow, run_id=self._current_run_id, max_steps=1)
+
         if state.status == RunStatus.COMPLETED:
             response_text = ""
+            meta_out: Dict[str, Any] = {}
+            scratchpad_out: Any = None
+            raw_result_out: Any = None
             out = getattr(state, "output", None)
             if isinstance(out, dict):
+                result_payload = out.get("result") if isinstance(out.get("result"), dict) else None
                 if isinstance(out.get("response"), str):
                     response_text = str(out.get("response") or "")
                 else:
@@ -456,6 +643,17 @@ class WorkflowAgent(BaseAgent):
                         response_text = str(result.get("response") or "")
                     elif isinstance(result, str):
                         response_text = str(result or "")
+                raw_meta = out.get("meta")
+                if isinstance(raw_meta, dict):
+                    meta_out = dict(raw_meta)
+                elif isinstance(result_payload, dict) and isinstance(result_payload.get("meta"), dict):
+                    meta_out = dict(result_payload.get("meta") or {})
+                scratchpad_out = out.get("scratchpad")
+                if scratchpad_out is None and isinstance(result_payload, dict) and "scratchpad" in result_payload:
+                    scratchpad_out = result_payload.get("scratchpad")
+                raw_result_out = out.get("raw_result")
+                if raw_result_out is None and isinstance(result_payload, dict) and "raw_result" in result_payload:
+                    raw_result_out = result_payload.get("raw_result")
 
             task = str(self._last_task or "")
             ctx = state.vars.get("context") if isinstance(getattr(state, "vars", None), dict) else None
@@ -466,7 +664,16 @@ class WorkflowAgent(BaseAgent):
             msgs_raw = ctx.get("messages")
             msgs = _copy_messages(msgs_raw)
             msgs.append(_new_message(role="user", content=task))
-            msgs.append(_new_message(role="assistant", content=response_text))
+
+            assistant_meta: Dict[str, Any] = {}
+            if meta_out:
+                assistant_meta["workflow_meta"] = meta_out
+            if scratchpad_out is not None:
+                assistant_meta["workflow_scratchpad"] = scratchpad_out
+            if raw_result_out is not None:
+                assistant_meta["workflow_raw_result"] = raw_result_out
+
+            msgs.append(_new_message(role="assistant", content=response_text, metadata=assistant_meta))
             ctx["messages"] = msgs
 
             # Persist best-effort so restarts can load history from run state.
@@ -482,12 +689,22 @@ class WorkflowAgent(BaseAgent):
 
             if self.on_step:
                 try:
-                    self.on_step("done", {"answer": response_text})
+                    self.on_step(
+                        "done",
+                        {
+                            "answer": response_text,
+                            "meta": meta_out or None,
+                            "scratchpad": scratchpad_out,
+                            "raw_result": raw_result_out,
+                        },
+                    )
                 except Exception:
                     pass
+            self._cleanup_ledger_subscription()
 
         if state.status in (RunStatus.FAILED, RunStatus.CANCELLED):
             self._sync_session_caches_from_state(state)
+            self._cleanup_ledger_subscription()
 
         return state
 

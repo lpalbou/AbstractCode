@@ -55,6 +55,122 @@ def _make_agent_v1_flow_dict(*, flow_id: str, name: str, declare_interface: bool
         "entryNode": "start",
     }
 
+def _make_agent_v1_flow_with_meta(*, flow_id: str, name: str) -> dict:
+    """Flow that wires a JSON literal into On Flow End.meta."""
+    base = _make_agent_v1_flow_dict(flow_id=flow_id, name=name, declare_interface=True)
+    base_nodes = list(base.get("nodes") or [])
+    # Add meta pin on end and a JSON literal node.
+    for n in base_nodes:
+        if n.get("id") == "end" and isinstance(n.get("data"), dict):
+            pins = list(n["data"].get("inputs") or [])
+            pins.append({"id": "meta", "label": "meta", "type": "object"})
+            n["data"]["inputs"] = pins
+    base_nodes.append(
+        {
+            "id": "meta_lit",
+            "type": "literal_json",
+            "position": {"x": 5, "y": -10},
+            "data": {"literalValue": {"foo": "bar"}},
+        }
+    )
+    base["nodes"] = base_nodes
+    base_edges = list(base.get("edges") or [])
+    base_edges.append(
+        {
+            "id": "edge-meta",
+            "source": "meta_lit",
+            "sourceHandle": "value",
+            "target": "end",
+            "targetHandle": "meta",
+            "animated": False,
+        }
+    )
+    base["edges"] = base_edges
+    return base
+
+
+def _make_agent_v1_flow_with_status_event(*, flow_id: str, name: str) -> dict:
+    """Flow that emits `abstractcode.status` via Emit Event and then returns response."""
+    base = _make_agent_v1_flow_dict(flow_id=flow_id, name=name, declare_interface=True)
+    # Insert an emit_event node between start and end.
+    base["nodes"].append(
+        {
+            "id": "emit",
+            "type": "emit_event",
+            "position": {"x": 5, "y": 10},
+            "data": {
+                "inputs": [
+                    {"id": "exec-in", "label": "", "type": "execution"},
+                    {"id": "name", "label": "name", "type": "string"},
+                    {"id": "payload", "label": "payload", "type": "any"},
+                ],
+                "outputs": [{"id": "exec-out", "label": "", "type": "execution"}],
+            },
+        }
+    )
+    base["nodes"].append(
+        {
+            "id": "status_name",
+            "type": "literal_string",
+            "position": {"x": 2, "y": 20},
+            "data": {"literalValue": "abstractcode.status"},
+        }
+    )
+    base["nodes"].append(
+        {
+            "id": "status_payload",
+            "type": "literal_string",
+            "position": {"x": 2, "y": 30},
+            "data": {"literalValue": "Enrich Query..."},
+        }
+    )
+
+    # Rewrite exec edge: start -> emit -> end
+    edges = [e for e in base.get("edges") or [] if e.get("id") != "edge-exec"]
+    edges.append(
+        {
+            "id": "edge-exec-1",
+            "source": "start",
+            "sourceHandle": "exec-out",
+            "target": "emit",
+            "targetHandle": "exec-in",
+            "animated": True,
+        }
+    )
+    edges.append(
+        {
+            "id": "edge-exec-2",
+            "source": "emit",
+            "sourceHandle": "exec-out",
+            "target": "end",
+            "targetHandle": "exec-in",
+            "animated": True,
+        }
+    )
+    # Wire name/payload into emit
+    edges.append(
+        {
+            "id": "edge-status-name",
+            "source": "status_name",
+            "sourceHandle": "value",
+            "target": "emit",
+            "targetHandle": "name",
+            "animated": False,
+        }
+    )
+    edges.append(
+        {
+            "id": "edge-status-payload",
+            "source": "status_payload",
+            "sourceHandle": "value",
+            "target": "emit",
+            "targetHandle": "payload",
+            "animated": False,
+        }
+    )
+    base["edges"] = edges
+    return base
+
 
 def test_workflow_agent_runs_deterministic_flow(tmp_path) -> None:
     try:
@@ -93,6 +209,75 @@ def test_workflow_agent_runs_deterministic_flow(tmp_path) -> None:
     assert messages[-1].get("role") == "assistant"
     assert messages[-1].get("content") == "hello"
 
+
+def test_workflow_agent_propagates_meta_pin_to_assistant_message(tmp_path) -> None:
+    try:
+        from abstractflow.visual.models import VisualFlow
+    except Exception:
+        pytest.skip("abstractflow not installed")
+
+    from abstractruntime import InMemoryRunStore, Runtime
+    from abstractruntime.core.models import RunStatus
+    from abstractruntime.storage.in_memory import InMemoryLedgerStore
+    from abstractruntime.storage.observable import ObservableLedgerStore
+
+    from abstractcode.workflow_agent import WorkflowAgent
+
+    vf = VisualFlow.model_validate(_make_agent_v1_flow_with_meta(flow_id="wf_meta", name="wf_meta"))
+    flow_path = tmp_path / "wf.json"
+    flow_path.write_text(vf.model_dump_json(indent=2), encoding="utf-8")
+
+    runtime = Runtime(run_store=InMemoryRunStore(), ledger_store=ObservableLedgerStore(InMemoryLedgerStore()))
+    agent = WorkflowAgent(runtime=runtime, flow_ref=str(flow_path), tools=[])
+
+    agent.start("hello")
+    state = agent.step()
+    while state.status == RunStatus.RUNNING:
+        state = agent.step()
+
+    assert state.status == RunStatus.COMPLETED
+    ctx = state.vars.get("context") if isinstance(state.vars, dict) else None
+    assert isinstance(ctx, dict)
+    messages = ctx.get("messages")
+    assert isinstance(messages, list)
+    meta = (messages[-1].get("metadata") or {}) if isinstance(messages[-1], dict) else {}
+    assert isinstance(meta, dict)
+    assert meta.get("workflow_meta") == {"foo": "bar"}
+
+
+def test_workflow_agent_emits_status_updates_from_emit_event(tmp_path) -> None:
+    try:
+        from abstractflow.visual.models import VisualFlow
+    except Exception:
+        pytest.skip("abstractflow not installed")
+
+    from abstractruntime import InMemoryRunStore, Runtime
+    from abstractruntime.core.models import RunStatus
+    from abstractruntime.storage.in_memory import InMemoryLedgerStore
+    from abstractruntime.storage.observable import ObservableLedgerStore
+
+    from abstractcode.workflow_agent import WorkflowAgent
+
+    vf = VisualFlow.model_validate(_make_agent_v1_flow_with_status_event(flow_id="wf_status", name="wf_status"))
+    flow_path = tmp_path / "wf.json"
+    flow_path.write_text(vf.model_dump_json(indent=2), encoding="utf-8")
+
+    seen: list[dict] = []
+
+    def on_step(step: str, data: dict) -> None:
+        if step == "status":
+            seen.append(dict(data))
+
+    runtime = Runtime(run_store=InMemoryRunStore(), ledger_store=ObservableLedgerStore(InMemoryLedgerStore()))
+    agent = WorkflowAgent(runtime=runtime, flow_ref=str(flow_path), tools=[], on_step=on_step)
+
+    agent.start("hello")
+    state = agent.step()
+    while state.status == RunStatus.RUNNING:
+        state = agent.step()
+
+    assert state.status == RunStatus.COMPLETED
+    assert any(s.get("text") == "Enrich Query..." for s in seen)
 
 def test_workflow_agent_runs_with_file_run_store(tmp_path) -> None:
     """Regression test: file-backed persistence must not blow up on cyclic vars.

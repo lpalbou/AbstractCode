@@ -1645,6 +1645,11 @@ class ReactShell:
             self._ui.scroll_to_bottom()
             answer_text = str(data.get("answer", "") or "")
             self._print_answer_block(title="ANSWER", answer_text=answer_text, state=self._safe_get_state())
+        elif step == "status":
+            # Workflow-driven status update (e.g., VisualFlow emit_event name="abstractcode.status").
+            text = str(data.get("text", "") or "").strip()
+            if text:
+                self._ui.set_spinner(text)
         elif step == "error" or step == "failed":
             self._ui.clear_spinner()
             self._ui.scroll_to_bottom()
