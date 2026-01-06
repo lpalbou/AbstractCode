@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Workflow agents docs**: documented running VisualFlow workflows as `--agent <flow>` via the `abstractcode.agent.v1` interface contract.
+- **Workflow agent interface contract**: `abstractcode.agent.v1` now requires host-configurable `provider`/`model`/`tools` start pins (in addition to `request`/`response`) so workflows don’t need hardcoded node configs.
 - **Collapsible Thought/Tool blocks**: tool-using iterations now render **Thought** and **Tool Call** as **click-to-toggle** blocks (collapsed by default) with a high-signal one-line summary always visible.
 - **Spinner shimmer**: status bar spinner text now has a subtle **reflect/shimmer** highlight so “still working” is obvious without re-rendering the full scrollback.
 - **`/log provider --no-tool-defs`**: optionally replace the provider request `tools` array (full tool definitions) with an array of tool names for compact sharing/debugging.

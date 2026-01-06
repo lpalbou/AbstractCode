@@ -329,12 +329,23 @@ class WorkflowAgent(BaseAgent):
 
         # Validate interface contract before creating the workflow spec.
         try:
-            from abstractflow.visual.interfaces import ABSTRACTCODE_AGENT_V1, validate_visual_flow_interface
+            from abstractflow.visual.interfaces import (
+                ABSTRACTCODE_AGENT_V1,
+                apply_visual_flow_interface_scaffold,
+                validate_visual_flow_interface,
+            )
         except Exception as e:  # pragma: no cover
             raise RuntimeError(
                 "AbstractFlow is required to validate VisualFlow interfaces.\n"
                 'Install with: pip install "abstractcode[flow]"'
             ) from e
+
+        # Authoring UX: keep interface-marked flows scaffolded even if the underlying
+        # JSON was created before the contract expanded (or was edited manually).
+        try:
+            apply_visual_flow_interface_scaffold(self.visual_flow, ABSTRACTCODE_AGENT_V1, include_recommended=True)
+        except Exception:
+            pass
 
         errors = validate_visual_flow_interface(self.visual_flow, ABSTRACTCODE_AGENT_V1)
         if errors:
@@ -401,6 +412,9 @@ class WorkflowAgent(BaseAgent):
             normalized = [str(t).strip() for t in allowed_tools if isinstance(t, str) and t.strip()]
             vars["tools"] = normalized
             vars["_runtime"] = {"allowed_tools": normalized}
+        else:
+            # Provide a safe default so interface-scaffolded `tools` pins resolve.
+            vars["tools"] = []
 
         run_id = self.runtime.start(
             workflow=self.workflow,

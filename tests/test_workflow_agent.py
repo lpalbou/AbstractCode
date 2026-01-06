@@ -16,6 +16,9 @@ def _make_agent_v1_flow_dict(*, flow_id: str, name: str, declare_interface: bool
                     "outputs": [
                         {"id": "exec-out", "label": "", "type": "execution"},
                         {"id": "request", "label": "request", "type": "string"},
+                        {"id": "provider", "label": "provider", "type": "provider"},
+                        {"id": "model", "label": "model", "type": "model"},
+                        {"id": "tools", "label": "tools", "type": "tools"},
                     ]
                 },
             },

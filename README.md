@@ -48,7 +48,11 @@ AbstractCode can run an AbstractFlow VisualFlow workflow *as an agent* (instead 
 ### Requirements (`abstractcode.agent.v1`)
 - The workflow JSON must declare: `interfaces: ["abstractcode.agent.v1"]`
 - The workflow must expose these pins:
-  - `On Flow Start`: output pin `request` (type `string`)
+  - `On Flow Start`: output pins:
+    - `request` (type `string`)
+    - `provider` (type `provider`)
+    - `model` (type `model`)
+    - `tools` (type `tools`)
   - `On Flow End`: input pin `response` (type `string`)
 
 ### Authoring in the AbstractFlow visual editor
