@@ -1,12 +1,27 @@
 # AbstractCode — Architecture (Current)
 
-> Updated: 2026-01-02  
+> Updated: 2026-01-07  
 > Scope: this describes **what is implemented today** in this monorepo (no “future” design claims).
 
 AbstractCode is a **host UX** (terminal app) for running AbstractFramework agents and (increasingly) workflows.
 It owns terminal interaction, approvals, and persistence configuration; durable execution is owned by **AbstractRuntime**.
 
 AbstractFlow workflow support is an **optional integration** (install via `abstractcode[flow]` in standalone packaging).
+
+## High-level component/data flow
+
+```
+User (terminal)
+  │
+  ▼
+AbstractCode (ReactShell / FullScreenUI)
+  │ configures + drives
+  ▼
+AbstractRuntime (durable run + waits + ledger + artifacts)
+  │ calls via integration
+  ├── AbstractCore (LLM/providers/tool parsing)
+  └── ToolExecutor (local tools, passthrough/approval, MCP, ...)
+```
 
 ## Repository Layout
 
@@ -121,3 +136,7 @@ Current behavior:
 - REPL integration appends `ANSWER_USER` outputs into the active conversation context so users can keep iterating with the agent after a workflow step completes.
 - For flow entry vars, the CLI accepts either JSON input (`--input-json`/`--input-json-file`) or ergonomic flags (`--query "..." --max_web_search 10`) which are coerced into a JSON-safe input dict.
 - The CLI also includes lightweight run ops for portability: `flow runs`, `flow attach <run_id>`, and `flow emit ...` to inject custom events / resume event waits.
+
+## Deviations / perspectives
+- **Remote thin-client mode (planned)**: AbstractCode currently runs the runtime locally. For thin clients and unreliable networks, we plan to add a remote mode that renders from ledger replay and submits idempotent commands (ADR-0018; backlogs 307/308/309).
+- **Reducing dependency surface**: today, running VisualFlow JSON requires the `abstractflow` compiler (`create_visual_runner`). The long-term direction is a portable workflow IR (ADR-0012 / backlog 094) so non-AbstractFlow hosts can execute authored workflows without pulling in the full AbstractFlow library.
