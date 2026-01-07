@@ -102,6 +102,23 @@ Inside a workflow, you can update AbstractCode’s footer status text by emittin
 
 Example workflow: `abstractflow/web/flows/acagent_status_demo.json` (3 status updates, each separated by a 2s Delay).
 
+### Workflow-driven UI events (messages + tool UX)
+Workflows can also emit additional reserved events for host UX:
+- `abstractcode.message`: show a message/notification (payload is a string or `{text, level?, title?}`)
+- `abstractcode.tool_execution`: render a tool-call block (payload `{tool, arguments?, call_id?}`)
+- `abstractcode.tool_result`: render a tool-result block (payload `{tool, success?, output?, error?, call_id?}`)
+
+Example workflows:
+- `abstractflow/web/flows/acagent_message_demo.json`
+- `abstractflow/web/flows/acagent_tool_events_demo.json`
+
+### Durable ask+wait (prompt the user and resume)
+For workflows that need human input, you can:
+- use the **Ask User** node (WAIT_USER), or
+- use **Wait Event** with a `prompt` field (WAIT_EVENT), which is also durable and network-friendly.
+
+Example workflow: `abstractflow/web/flows/acagent_ask_demo.json`
+
 ### Run
 Use `--agent` with a workflow id/name (from the flows directory) or a direct JSON path:
 

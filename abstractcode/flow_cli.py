@@ -888,6 +888,27 @@ def _drive_until_blocked(
                 )
                 continue
 
+            # Event waits can carry prompt/choices for durable human input.
+            prompt = getattr(wait, "prompt", None)
+            if isinstance(prompt, str) and prompt.strip():
+                choices = getattr(wait, "choices", None)
+                if not isinstance(choices, list):
+                    choices = None
+                response = _ask_user(_render_text(prompt), choices)
+                if response is None:
+                    _print("Left run waiting (not resumed).")
+                    return
+                response = str(response).strip()
+                _resume_and_bubble(
+                    runtime=runtime,
+                    runner_workflow=runner.workflow,
+                    top_run_id=top_run_id,
+                    target_run_id=target_run_id,
+                    payload={"response": response},
+                    wait_key=getattr(wait, "wait_key", None),
+                )
+                continue
+
             _print(f"Waiting for event: {getattr(wait, 'wait_key', None)}")
             return
 

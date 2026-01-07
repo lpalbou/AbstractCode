@@ -14,6 +14,9 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 _STATUS_EVENT_NAME = "abstractcode.status"
+_MESSAGE_EVENT_NAME = "abstractcode.message"
+_TOOL_EXEC_EVENT_NAME = "abstractcode.tool_execution"
+_TOOL_RESULT_EVENT_NAME = "abstractcode.tool_result"
 
 
 def _new_message(*, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -453,7 +456,7 @@ class WorkflowAgent(BaseAgent):
         self._ledger_unsubscribe = None
         if self.on_step:
             try:
-                self._ledger_unsubscribe = self._subscribe_status_events(actor_id=actor_id, session_id=session_id)
+                self._ledger_unsubscribe = self._subscribe_ui_events(actor_id=actor_id, session_id=session_id)
             except Exception:
                 self._ledger_unsubscribe = None
 
@@ -471,13 +474,13 @@ class WorkflowAgent(BaseAgent):
 
         return run_id
 
-    def _subscribe_status_events(self, *, actor_id: str, session_id: str) -> Optional[Callable[[], None]]:
-        """Subscribe to ledger appends and translate `abstractcode.status` into on_step("status", ...).
+    def _subscribe_ui_events(self, *, actor_id: str, session_id: str) -> Optional[Callable[[], None]]:
+        """Subscribe to ledger appends and translate reserved workflow UX events into on_step(...).
 
         This is best-effort and must never affect correctness.
         """
 
-        def _extract_status_text(payload: Any) -> str:
+        def _extract_text(payload: Any) -> str:
             if isinstance(payload, str):
                 return payload
             if isinstance(payload, dict):
@@ -489,6 +492,84 @@ class WorkflowAgent(BaseAgent):
                     if isinstance(v, str) and v.strip():
                         return v.strip()
             return ""
+
+        def _extract_message(payload: Any) -> Dict[str, Any]:
+            if isinstance(payload, str):
+                return {"text": payload}
+            if isinstance(payload, dict):
+                text = _extract_text(payload)
+                out: Dict[str, Any] = {"text": text}
+                level = payload.get("level")
+                if isinstance(level, str) and level.strip():
+                    out["level"] = level.strip().lower()
+                title = payload.get("title")
+                if isinstance(title, str) and title.strip():
+                    out["title"] = title.strip()
+                meta = payload.get("meta")
+                if isinstance(meta, dict):
+                    out["meta"] = dict(meta)
+                return out
+            return {"text": str(payload or "")}
+
+        def _extract_tool_exec(payload: Any) -> Dict[str, Any]:
+            if isinstance(payload, str):
+                return {"tool": payload, "args": {}}
+            if isinstance(payload, dict):
+                tool = payload.get("tool") or payload.get("name") or payload.get("tool_name")
+                args = payload.get("arguments")
+                if args is None:
+                    args = payload.get("args")
+                call_id = payload.get("call_id") or payload.get("callId")
+                out: Dict[str, Any] = {"tool": str(tool or "tool")}
+                if isinstance(args, dict):
+                    out["args"] = dict(args)
+                else:
+                    out["args"] = {}
+                if isinstance(call_id, str) and call_id.strip():
+                    out["call_id"] = call_id.strip()
+                return out
+            return {"tool": "tool", "args": {}}
+
+        def _extract_tool_result(payload: Any) -> Dict[str, Any]:
+            # Normalize to ReactShell's existing "observe" step contract:
+            #   {tool, result (string), success?}
+            tool = "tool"
+            success = None
+            result_str = ""
+            if isinstance(payload, dict):
+                tool_raw = payload.get("tool") or payload.get("name") or payload.get("tool_name")
+                if isinstance(tool_raw, str) and tool_raw.strip():
+                    tool = tool_raw.strip()
+                if "success" in payload:
+                    try:
+                        success = bool(payload.get("success"))
+                    except Exception:
+                        success = None
+                # Prefer output/result; fallback to error/value.
+                raw = payload.get("output")
+                if raw is None:
+                    raw = payload.get("result")
+                if raw is None:
+                    raw = payload.get("error")
+                if raw is None:
+                    raw = payload.get("value")
+                if raw is None:
+                    raw = ""
+                if isinstance(raw, str):
+                    result_str = raw
+                else:
+                    try:
+                        result_str = json.dumps(raw, ensure_ascii=False, sort_keys=True, indent=2)
+                    except Exception:
+                        result_str = str(raw)
+            elif isinstance(payload, str):
+                result_str = payload
+            else:
+                result_str = str(payload or "")
+            out: Dict[str, Any] = {"tool": tool, "result": result_str}
+            if success is not None:
+                out["success"] = success
+            return out
 
         def _on_record(rec: Dict[str, Any]) -> None:
             try:
@@ -505,13 +586,35 @@ class WorkflowAgent(BaseAgent):
                     return
                 payload = eff.get("payload") if isinstance(eff.get("payload"), dict) else {}
                 name = str(payload.get("name") or payload.get("event_name") or "").strip()
-                if name != _STATUS_EVENT_NAME:
+                if not name:
                     return
-                text = _extract_status_text(payload.get("payload"))
-                if not text:
+
+                event_payload = payload.get("payload")
+                if name == _STATUS_EVENT_NAME:
+                    text = _extract_text(event_payload)
+                    if text and callable(self.on_step):
+                        self.on_step("status", {"text": text})
                     return
-                if callable(self.on_step):
-                    self.on_step("status", {"text": text})
+
+                if name == _MESSAGE_EVENT_NAME:
+                    msg = _extract_message(event_payload)
+                    if callable(self.on_step) and str(msg.get("text") or "").strip():
+                        self.on_step("message", msg)
+                    return
+
+                if name == _TOOL_EXEC_EVENT_NAME:
+                    tc = _extract_tool_exec(event_payload)
+                    if callable(self.on_step) and str(tc.get("tool") or "").strip():
+                        # Reuse AbstractCode's existing "tool call" UX.
+                        self.on_step("act", tc)
+                    return
+
+                if name == _TOOL_RESULT_EVENT_NAME:
+                    tr = _extract_tool_result(event_payload)
+                    if callable(self.on_step):
+                        # Reuse AbstractCode's existing "tool result" UX.
+                        self.on_step("observe", tr)
+                    return
             except Exception:
                 return
 

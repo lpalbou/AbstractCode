@@ -1650,6 +1650,37 @@ class ReactShell:
             text = str(data.get("text", "") or "").strip()
             if text:
                 self._ui.set_spinner(text)
+        elif step == "message":
+            # Workflow-driven message notification (e.g., VisualFlow emit_event name="abstractcode.message").
+            text = str(data.get("text") or data.get("message") or "").rstrip()
+            if not text.strip():
+                return
+            level = str(data.get("level") or "info").strip().lower()
+            title = str(data.get("title") or "").strip()
+
+            # Keep this simple: messages are UX-only and must not affect execution.
+            self._ui.clear_spinner()
+            self._ui.scroll_to_bottom()
+
+            if level == "error":
+                color = _C.RED
+                tag = "ERROR"
+            elif level == "warning":
+                color = _C.YELLOW
+                tag = "WARNING"
+            elif level == "success":
+                color = _C.GREEN
+                tag = "SUCCESS"
+            else:
+                color = _C.CYAN
+                tag = "MESSAGE"
+
+            header = title if title else tag
+            self._print(_style(f"\n{header}", color, _C.BOLD, enabled=self._color))
+            self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+            for ln in (text.splitlines() or [""]):
+                self._print(str(ln))
+            self._print(_style("─" * 60, _C.DIM, enabled=self._color))
         elif step == "error" or step == "failed":
             self._ui.clear_spinner()
             self._ui.scroll_to_bottom()
@@ -6044,6 +6075,22 @@ class ReactShell:
                             )
                             continue
 
+                        if cur_wait.reason == self._WaitReason.EVENT and isinstance(cur_wait.prompt, str) and cur_wait.prompt.strip():
+                            # Event waits can also carry a prompt (durable "ask+wait" over event wakeups).
+                            self._ui.clear_spinner()
+                            try:
+                                self._on_step("ask_user", {})
+                            except Exception:
+                                pass
+                            response = self._prompt_user(cur_wait.prompt or "Please respond:", cur_wait.choices)
+                            self._runtime.resume(
+                                workflow=_workflow_for(current_state),
+                                run_id=current_run_id,
+                                wait_key=cur_wait.wait_key,
+                                payload={"response": response},
+                            )
+                            continue
+
                         details = cur_wait.details if isinstance(cur_wait.details, dict) else {}
                         tool_calls = details.get("tool_calls")
                         if isinstance(tool_calls, list):
@@ -6101,6 +6148,22 @@ class ReactShell:
                     run_id=run_id,
                     wait_key=wait.wait_key,
                     payload=payload,
+                )
+                continue
+
+            # Event waits can also act as durable human prompts (useful for workflows).
+            if isinstance(wait.prompt, str) and wait.prompt.strip() and isinstance(wait.wait_key, str) and wait.wait_key:
+                self._ui.clear_spinner()
+                try:
+                    self._on_step("ask_user", {})
+                except Exception:
+                    pass
+                response = self._prompt_user(wait.prompt or "Please respond:", wait.choices)
+                state = self._runtime.resume(
+                    workflow=self._agent.workflow,
+                    run_id=run_id,
+                    wait_key=wait.wait_key,
+                    payload={"response": response},
                 )
                 continue
 

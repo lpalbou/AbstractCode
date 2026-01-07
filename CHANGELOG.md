@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Workflow-driven UI events (network-safe)**:
+  - Workflows can emit `Emit Event(name="abstractcode.message")` to show a message/notification in AbstractCode.
+  - Workflows can emit `Emit Event(name="abstractcode.tool_execution")` and `Emit Event(name="abstractcode.tool_result")` to render tool-call + tool-result UX blocks (without requiring actual tool execution).
+  - `WAIT_EVENT` can carry a `prompt` so workflows can do durable ask+wait under `WaitReason.EVENT` (useful for thin clients); AbstractCode will prompt and resume.
+
 ## [0.3.0] - 2025-01-06
 
 ### Added
