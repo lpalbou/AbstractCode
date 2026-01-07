@@ -172,6 +172,86 @@ def _make_agent_v1_flow_with_status_event(*, flow_id: str, name: str) -> dict:
     return base
 
 
+def _make_agent_v1_flow_with_status_event_duration(*, flow_id: str, name: str, duration_s: float) -> dict:
+    """Flow that emits `abstractcode.status` with a duration payload."""
+    base = _make_agent_v1_flow_dict(flow_id=flow_id, name=name, declare_interface=True)
+    base["nodes"].append(
+        {
+            "id": "emit",
+            "type": "emit_event",
+            "position": {"x": 5, "y": 10},
+            "data": {
+                "inputs": [
+                    {"id": "exec-in", "label": "", "type": "execution"},
+                    {"id": "name", "label": "name", "type": "string"},
+                    {"id": "payload", "label": "payload", "type": "any"},
+                ],
+                "outputs": [{"id": "exec-out", "label": "", "type": "execution"}],
+            },
+        }
+    )
+    base["nodes"].append(
+        {
+            "id": "status_name",
+            "type": "literal_string",
+            "position": {"x": 2, "y": 20},
+            "data": {"literalValue": "abstractcode.status"},
+        }
+    )
+    base["nodes"].append(
+        {
+            "id": "status_payload",
+            "type": "literal_json",
+            "position": {"x": 2, "y": 30},
+            "data": {"literalValue": {"text": "Enrich Query...", "duration": duration_s}},
+        }
+    )
+
+    edges = [e for e in base.get("edges") or [] if e.get("id") != "edge-exec"]
+    edges.append(
+        {
+            "id": "edge-exec-1",
+            "source": "start",
+            "sourceHandle": "exec-out",
+            "target": "emit",
+            "targetHandle": "exec-in",
+            "animated": True,
+        }
+    )
+    edges.append(
+        {
+            "id": "edge-exec-2",
+            "source": "emit",
+            "sourceHandle": "exec-out",
+            "target": "end",
+            "targetHandle": "exec-in",
+            "animated": True,
+        }
+    )
+    edges.append(
+        {
+            "id": "edge-status-name",
+            "source": "status_name",
+            "sourceHandle": "value",
+            "target": "emit",
+            "targetHandle": "name",
+            "animated": False,
+        }
+    )
+    edges.append(
+        {
+            "id": "edge-status-payload",
+            "source": "status_payload",
+            "sourceHandle": "value",
+            "target": "emit",
+            "targetHandle": "payload",
+            "animated": False,
+        }
+    )
+    base["edges"] = edges
+    return base
+
+
 def _make_agent_v1_flow_with_message_event(*, flow_id: str, name: str) -> dict:
     """Flow that emits `abstractcode.message` via Emit Event and then returns response."""
     base = _make_agent_v1_flow_dict(flow_id=flow_id, name=name, declare_interface=True)
@@ -406,6 +486,165 @@ def _make_agent_v1_flow_with_tool_events(*, flow_id: str, name: str) -> dict:
     return base
 
 
+def _make_agent_v1_flow_with_tool_events_batch(*, flow_id: str, name: str) -> dict:
+    """Flow that emits *batched* tool execution/result payloads (lists) for wiring convenience."""
+    base = _make_agent_v1_flow_dict(flow_id=flow_id, name=name, declare_interface=True)
+    base["nodes"].append(
+        {
+            "id": "emit_exec",
+            "type": "emit_event",
+            "position": {"x": 5, "y": 10},
+            "data": {
+                "inputs": [
+                    {"id": "exec-in", "label": "", "type": "execution"},
+                    {"id": "name", "label": "name", "type": "string"},
+                    {"id": "payload", "label": "payload", "type": "any"},
+                ],
+                "outputs": [{"id": "exec-out", "label": "", "type": "execution"}],
+            },
+        }
+    )
+    base["nodes"].append(
+        {
+            "id": "emit_result",
+            "type": "emit_event",
+            "position": {"x": 9, "y": 10},
+            "data": {
+                "inputs": [
+                    {"id": "exec-in", "label": "", "type": "execution"},
+                    {"id": "name", "label": "name", "type": "string"},
+                    {"id": "payload", "label": "payload", "type": "any"},
+                ],
+                "outputs": [{"id": "exec-out", "label": "", "type": "execution"}],
+            },
+        }
+    )
+    base["nodes"].append(
+        {
+            "id": "name_exec",
+            "type": "literal_string",
+            "position": {"x": 2, "y": 20},
+            "data": {"literalValue": "abstractcode.tool_execution"},
+        }
+    )
+    base["nodes"].append(
+        {
+            "id": "name_result",
+            "type": "literal_string",
+            "position": {"x": 2, "y": 30},
+            "data": {"literalValue": "abstractcode.tool_result"},
+        }
+    )
+    base["nodes"].append(
+        {
+            "id": "payload_exec",
+            "type": "literal_json",
+            "position": {"x": 2, "y": 40},
+            "data": {
+                "literalValue": [
+                    {
+                        "name": "read_file",
+                        "call_id": "c1",
+                        "arguments": {"target_file": "docs/architecture.md"},
+                    },
+                    {
+                        "id": "c2",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{\"target_file\":\"docs/architecture.md\"}"},
+                    },
+                ]
+            },
+        }
+    )
+    base["nodes"].append(
+        {
+            "id": "payload_result",
+            "type": "literal_json",
+            "position": {"x": 2, "y": 50},
+            "data": {
+                "literalValue": [
+                    {"tool": "read_file", "call_id": "c1", "success": True, "output": "ok"},
+                    {"tool": "read_file", "call_id": "c2", "success": True, "output": "ok2"},
+                ]
+            },
+        }
+    )
+
+    edges = [e for e in base.get("edges") or [] if e.get("id") != "edge-exec"]
+    edges.append(
+        {
+            "id": "edge-exec-1",
+            "source": "start",
+            "sourceHandle": "exec-out",
+            "target": "emit_exec",
+            "targetHandle": "exec-in",
+            "animated": True,
+        }
+    )
+    edges.append(
+        {
+            "id": "edge-exec-2",
+            "source": "emit_exec",
+            "sourceHandle": "exec-out",
+            "target": "emit_result",
+            "targetHandle": "exec-in",
+            "animated": True,
+        }
+    )
+    edges.append(
+        {
+            "id": "edge-exec-3",
+            "source": "emit_result",
+            "sourceHandle": "exec-out",
+            "target": "end",
+            "targetHandle": "exec-in",
+            "animated": True,
+        }
+    )
+    edges.append(
+        {
+            "id": "edge-name-exec",
+            "source": "name_exec",
+            "sourceHandle": "value",
+            "target": "emit_exec",
+            "targetHandle": "name",
+            "animated": False,
+        }
+    )
+    edges.append(
+        {
+            "id": "edge-name-result",
+            "source": "name_result",
+            "sourceHandle": "value",
+            "target": "emit_result",
+            "targetHandle": "name",
+            "animated": False,
+        }
+    )
+    edges.append(
+        {
+            "id": "edge-payload-exec",
+            "source": "payload_exec",
+            "sourceHandle": "value",
+            "target": "emit_exec",
+            "targetHandle": "payload",
+            "animated": False,
+        }
+    )
+    edges.append(
+        {
+            "id": "edge-payload-result",
+            "source": "payload_result",
+            "sourceHandle": "value",
+            "target": "emit_result",
+            "targetHandle": "payload",
+            "animated": False,
+        }
+    )
+    base["edges"] = edges
+    return base
+
+
 def test_workflow_agent_runs_deterministic_flow(tmp_path) -> None:
     try:
         from abstractflow.visual.models import VisualFlow
@@ -514,6 +753,43 @@ def test_workflow_agent_emits_status_updates_from_emit_event(tmp_path) -> None:
     assert any(s.get("text") == "Enrich Query..." for s in seen)
 
 
+def test_workflow_agent_emits_status_duration_from_emit_event(tmp_path) -> None:
+    try:
+        from abstractflow.visual.models import VisualFlow
+    except Exception:
+        pytest.skip("abstractflow not installed")
+
+    from abstractruntime import InMemoryRunStore, Runtime
+    from abstractruntime.core.models import RunStatus
+    from abstractruntime.storage.in_memory import InMemoryLedgerStore
+    from abstractruntime.storage.observable import ObservableLedgerStore
+
+    from abstractcode.workflow_agent import WorkflowAgent
+
+    vf = VisualFlow.model_validate(
+        _make_agent_v1_flow_with_status_event_duration(flow_id="wf_status_dur", name="wf_status_dur", duration_s=2.0)
+    )
+    flow_path = tmp_path / "wf.json"
+    flow_path.write_text(vf.model_dump_json(indent=2), encoding="utf-8")
+
+    seen: list[dict] = []
+
+    def on_step(step: str, data: dict) -> None:
+        if step == "status":
+            seen.append(dict(data))
+
+    runtime = Runtime(run_store=InMemoryRunStore(), ledger_store=ObservableLedgerStore(InMemoryLedgerStore()))
+    agent = WorkflowAgent(runtime=runtime, flow_ref=str(flow_path), tools=[], on_step=on_step)
+
+    agent.start("hello")
+    state = agent.step()
+    while state.status == RunStatus.RUNNING:
+        state = agent.step()
+
+    assert state.status == RunStatus.COMPLETED
+    assert any(s.get("text") == "Enrich Query..." and s.get("duration") == 2.0 for s in seen)
+
+
 def test_workflow_agent_emits_message_updates_from_emit_event(tmp_path) -> None:
     try:
         from abstractflow.visual.models import VisualFlow
@@ -583,6 +859,42 @@ def test_workflow_agent_emits_tool_events_from_emit_event(tmp_path) -> None:
     assert state.status == RunStatus.COMPLETED
     assert "act" in seen_steps
     assert "observe" in seen_steps
+
+
+def test_workflow_agent_emits_batched_tool_events_from_emit_event(tmp_path) -> None:
+    try:
+        from abstractflow.visual.models import VisualFlow
+    except Exception:
+        pytest.skip("abstractflow not installed")
+
+    from abstractruntime import InMemoryRunStore, Runtime
+    from abstractruntime.core.models import RunStatus
+    from abstractruntime.storage.in_memory import InMemoryLedgerStore
+    from abstractruntime.storage.observable import ObservableLedgerStore
+
+    from abstractcode.workflow_agent import WorkflowAgent
+
+    vf = VisualFlow.model_validate(_make_agent_v1_flow_with_tool_events_batch(flow_id="wf_tools_batch", name="wf_tools_batch"))
+    flow_path = tmp_path / "wf.json"
+    flow_path.write_text(vf.model_dump_json(indent=2), encoding="utf-8")
+
+    seen_steps: list[str] = []
+
+    def on_step(step: str, data: dict) -> None:
+        if step in ("act", "observe"):
+            seen_steps.append(step)
+
+    runtime = Runtime(run_store=InMemoryRunStore(), ledger_store=ObservableLedgerStore(InMemoryLedgerStore()))
+    agent = WorkflowAgent(runtime=runtime, flow_ref=str(flow_path), tools=[], on_step=on_step)
+
+    agent.start("hello")
+    state = agent.step()
+    while state.status == RunStatus.RUNNING:
+        state = agent.step()
+
+    assert state.status == RunStatus.COMPLETED
+    assert seen_steps.count("act") >= 2
+    assert seen_steps.count("observe") >= 2
 
 def test_workflow_agent_runs_with_file_run_store(tmp_path) -> None:
     """Regression test: file-backed persistence must not blow up on cyclic vars.

@@ -226,6 +226,9 @@ class FullScreenUI:
         self._spinner_frame = 0
         self._spinner_thread: Optional[threading.Thread] = None
         self._spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        # Optional auto-clear timer for transient status messages.
+        self._spinner_token: int = 0
+        self._spinner_clear_timer: Optional[threading.Timer] = None
 
         # Prompt history (persists across prompts in this session)
         self._history = InMemoryHistory()
@@ -1292,12 +1295,25 @@ class FullScreenUI:
                 self._app.invalidate()
             time.sleep(0.1)  # 10 FPS animation
 
-    def set_spinner(self, text: str) -> None:
+    def set_spinner(self, text: str, *, duration_s: Optional[float] = None) -> None:
         """Start the spinner with the given text (thread-safe).
 
         Args:
             text: Status text to show next to the spinner (e.g., "Generating...")
+            duration_s: Optional auto-clear timeout in seconds.
+                - If None or <= 0: spinner stays until explicitly cleared or replaced
+                - If > 0: spinner auto-clears after the timeout unless superseded by a newer spinner text
         """
+        # Invalidate any previous auto-clear timer.
+        self._spinner_token += 1
+        token = self._spinner_token
+        if self._spinner_clear_timer:
+            try:
+                self._spinner_clear_timer.cancel()
+            except Exception:
+                pass
+            self._spinner_clear_timer = None
+
         self._spinner_text = text
         self._spinner_frame = 0
 
@@ -1308,8 +1324,33 @@ class FullScreenUI:
         elif self._app and self._app.is_running:
             self._app.invalidate()
 
+        # Schedule optional auto-clear.
+        try:
+            dur = float(duration_s) if duration_s is not None else None
+        except Exception:
+            dur = None
+        if dur is not None and dur > 0:
+            def _clear_if_current() -> None:
+                if self._spinner_token != token:
+                    return
+                self.clear_spinner()
+
+            t = threading.Timer(dur, _clear_if_current)
+            t.daemon = True
+            self._spinner_clear_timer = t
+            t.start()
+
     def clear_spinner(self) -> None:
         """Stop and hide the spinner (thread-safe)."""
+        # Cancel any pending auto-clear (if any).
+        self._spinner_token += 1
+        if self._spinner_clear_timer:
+            try:
+                self._spinner_clear_timer.cancel()
+            except Exception:
+                pass
+            self._spinner_clear_timer = None
+
         self._spinner_active = False
         self._spinner_text = ""
 

@@ -1648,8 +1648,21 @@ class ReactShell:
         elif step == "status":
             # Workflow-driven status update (e.g., VisualFlow emit_event name="abstractcode.status").
             text = str(data.get("text", "") or "").strip()
-            if text:
-                self._ui.set_spinner(text)
+            dur_raw = data.get("duration")
+            dur: Optional[float]
+            if dur_raw is None:
+                dur = None
+            else:
+                try:
+                    dur = float(dur_raw)
+                except Exception:
+                    dur = None
+
+            if not text:
+                # Allow workflows to explicitly clear the status by sending an empty string.
+                self._ui.clear_spinner()
+            else:
+                self._ui.set_spinner(text, duration_s=dur)
         elif step == "message":
             # Workflow-driven message notification (e.g., VisualFlow emit_event name="abstractcode.message").
             text = str(data.get("text") or data.get("message") or "").rstrip()

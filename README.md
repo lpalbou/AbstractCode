@@ -98,15 +98,23 @@ Inside a workflow, you can update AbstractCode’s footer status text by emittin
 - Set **name** to `abstractcode.status`
 - Set **payload** to:
   - a string (e.g. `"Enrich Query..."`), or
-  - an object like `{ "text": "Enrich Query..." }`
+  - an object like `{ "text": "Enrich Query...", "duration": -1 }`
+
+`duration` is seconds:
+- default: `-1` (sticky)
+- if `> 0`: auto-clears after the timeout unless superseded by a newer status
 
 Example workflow: `abstractflow/web/flows/acagent_status_demo.json` (3 status updates, each separated by a 2s Delay).
 
 ### Workflow-driven UI events (messages + tool UX)
 Workflows can also emit additional reserved events for host UX:
 - `abstractcode.message`: show a message/notification (payload is a string or `{text, level?, title?}`)
-- `abstractcode.tool_execution`: render a tool-call block (payload `{tool, arguments?, call_id?}`)
-- `abstractcode.tool_result`: render a tool-result block (payload `{tool, success?, output?, error?, call_id?}`)
+- `abstractcode.tool_execution`: render a tool-call block (payload is a tool call object or a list)
+  - recommended shape: `{name, arguments, call_id?}`
+- `abstractcode.tool_result`: render a tool-result block (payload is a tool result object or a list)
+  - recommended shape: `{name, call_id?, success?, output?, error?}`
+
+Full contract (recommended for integrators): `docs/ui_events.md`
 
 Example workflows:
 - `abstractflow/web/flows/acagent_message_demo.json`

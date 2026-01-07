@@ -55,7 +55,8 @@ If `--no-state` is set, it uses in-memory stores only (cannot resume after quitt
 AbstractCode gates tool execution by configuring the runtime with:
 - `PassthroughToolExecutor(mode="approval_required")` as the runtime tool executor
 
-This forces `EffectType.TOOL_CALLS` to pause with a durable `WAIT_EVENT` (details include `tool_calls`).
+This forces `EffectType.TOOL_CALLS` to pause with a durable **wait state** (`WaitReason.EVENT`), where `waiting.details`
+includes the pending `tool_calls` (JSON-safe).
 The CLI then:
 1) prompts the user for approval (or auto-approves)
 2) executes tools locally via `MappingToolExecutor.from_tools(...)`
@@ -68,6 +69,16 @@ The run loop in `ReactShell._run_loop()` drives one step at a time (`agent.step(
 - `WaitReason.USER` → prompt user and `agent.resume(...)`
 - `WaitReason.EVENT` with `details.tool_calls` → approval + resume with tool results
 - other waits → display wait info and return to the shell
+
+## Workflow UX Events (VisualFlow → AbstractCode)
+When running VisualFlow workflows as first-class agents (`abstractcode --agent <flow_ref>`), AbstractCode can translate
+reserved `EMIT_EVENT` names into terminal UX updates:
+- `abstractcode.status`: update the footer status text (payload can be `"text"` or `{text, duration}`)
+  - `duration` is seconds; default `-1` (sticky) and `> 0` auto-clears
+- `abstractcode.message`: show a message block (payload can be `"text"` or `{text, level?, title?}`)
+- `abstractcode.tool_execution` / `abstractcode.tool_result`: show tool call/result blocks (payload can be a single object or a list)
+
+These are ledger-derived and JSON-safe, so hosts can forward them over a network transport (WebSocket/SSE/polling) if desired.
 
 ## Memory UX (Runtime-owned)
 

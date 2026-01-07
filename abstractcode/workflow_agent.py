@@ -493,6 +493,31 @@ class WorkflowAgent(BaseAgent):
                         return v.strip()
             return ""
 
+        def _extract_duration_seconds(payload: Any) -> Optional[float]:
+            if not isinstance(payload, dict):
+                return None
+            raw = payload.get("duration")
+            if raw is None:
+                raw = payload.get("duration_s")
+            if raw is None:
+                return None
+            try:
+                return float(raw)
+            except Exception:
+                return None
+
+        def _extract_status(payload: Any) -> Dict[str, Any]:
+            if isinstance(payload, str):
+                return {"text": payload}
+            if isinstance(payload, dict):
+                text = _extract_text(payload)
+                out: Dict[str, Any] = {"text": text}
+                dur = _extract_duration_seconds(payload)
+                if dur is not None:
+                    out["duration"] = dur
+                return out
+            return {"text": str(payload or "")}
+
         def _extract_message(payload: Any) -> Dict[str, Any]:
             if isinstance(payload, str):
                 return {"text": payload}
@@ -515,16 +540,38 @@ class WorkflowAgent(BaseAgent):
             if isinstance(payload, str):
                 return {"tool": payload, "args": {}}
             if isinstance(payload, dict):
+                # Support both AbstractCore-normalized tool call shapes and common OpenAI-style shapes.
+                #
+                # Normalized (preferred):
+                #   {"name": "...", "arguments": {...}, "call_id": "..."}
+                #
+                # OpenAI-ish:
+                #   {"id": "...", "type":"function", "function":{"name":"...", "arguments":"{...json...}"}}
                 tool = payload.get("tool") or payload.get("name") or payload.get("tool_name")
                 args = payload.get("arguments")
                 if args is None:
                     args = payload.get("args")
-                call_id = payload.get("call_id") or payload.get("callId")
-                out: Dict[str, Any] = {"tool": str(tool or "tool")}
+                call_id = payload.get("call_id") or payload.get("callId") or payload.get("id")
+
+                fn = payload.get("function")
+                if tool is None and isinstance(fn, dict):
+                    tool = fn.get("name")
+                if args is None and isinstance(fn, dict):
+                    args = fn.get("arguments")
+
+                parsed_args: Dict[str, Any] = {}
                 if isinstance(args, dict):
-                    out["args"] = dict(args)
-                else:
-                    out["args"] = {}
+                    parsed_args = dict(args)
+                elif isinstance(args, str) and args.strip():
+                    # Some providers send JSON arguments as a string.
+                    try:
+                        parsed = json.loads(args)
+                        if isinstance(parsed, dict):
+                            parsed_args = parsed
+                    except Exception:
+                        parsed_args = {}
+
+                out: Dict[str, Any] = {"tool": str(tool or "tool"), "args": parsed_args}
                 if isinstance(call_id, str) and call_id.strip():
                     out["call_id"] = call_id.strip()
                 return out
@@ -591,9 +638,9 @@ class WorkflowAgent(BaseAgent):
 
                 event_payload = payload.get("payload")
                 if name == _STATUS_EVENT_NAME:
-                    text = _extract_text(event_payload)
-                    if text and callable(self.on_step):
-                        self.on_step("status", {"text": text})
+                    st = _extract_status(event_payload)
+                    if callable(self.on_step) and str(st.get("text") or "").strip():
+                        self.on_step("status", st)
                     return
 
                 if name == _MESSAGE_EVENT_NAME:
@@ -603,17 +650,40 @@ class WorkflowAgent(BaseAgent):
                     return
 
                 if name == _TOOL_EXEC_EVENT_NAME:
-                    tc = _extract_tool_exec(event_payload)
-                    if callable(self.on_step) and str(tc.get("tool") or "").strip():
-                        # Reuse AbstractCode's existing "tool call" UX.
-                        self.on_step("act", tc)
+                    # Backwards-compatible: older emit_event nodes wrapped non-dict payloads under {"value": ...}.
+                    raw_tc_payload = event_payload
+                    if isinstance(raw_tc_payload, dict) and isinstance(raw_tc_payload.get("value"), list):
+                        raw_tc_payload = raw_tc_payload.get("value")
+
+                    if isinstance(raw_tc_payload, list):
+                        for item in raw_tc_payload:
+                            tc = _extract_tool_exec(item)
+                            if callable(self.on_step) and str(tc.get("tool") or "").strip():
+                                # Reuse AbstractCode's existing "tool call" UX.
+                                self.on_step("act", tc)
+                    else:
+                        tc = _extract_tool_exec(raw_tc_payload)
+                        if callable(self.on_step) and str(tc.get("tool") or "").strip():
+                            # Reuse AbstractCode's existing "tool call" UX.
+                            self.on_step("act", tc)
                     return
 
                 if name == _TOOL_RESULT_EVENT_NAME:
-                    tr = _extract_tool_result(event_payload)
-                    if callable(self.on_step):
-                        # Reuse AbstractCode's existing "tool result" UX.
-                        self.on_step("observe", tr)
+                    raw_tr_payload = event_payload
+                    if isinstance(raw_tr_payload, dict) and isinstance(raw_tr_payload.get("value"), list):
+                        raw_tr_payload = raw_tr_payload.get("value")
+
+                    if isinstance(raw_tr_payload, list):
+                        for item in raw_tr_payload:
+                            tr = _extract_tool_result(item)
+                            if callable(self.on_step):
+                                # Reuse AbstractCode's existing "tool result" UX.
+                                self.on_step("observe", tr)
+                    else:
+                        tr = _extract_tool_result(raw_tr_payload)
+                        if callable(self.on_step):
+                            # Reuse AbstractCode's existing "tool result" UX.
+                            self.on_step("observe", tr)
                     return
             except Exception:
                 return
