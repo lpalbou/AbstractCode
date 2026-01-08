@@ -67,6 +67,8 @@ export function App(): React.ReactElement {
   const [settings, set_settings] = useState<Settings>(() => load_settings());
   const [run_id, set_run_id] = useState<string>("");
   const [flow_id, set_flow_id] = useState<string>("");
+  const [bundle_id, set_bundle_id] = useState<string>("");
+  const [input_data_text, set_input_data_text] = useState<string>("{}");
 
   const [connected, set_connected] = useState(false);
   const [connecting, set_connecting] = useState(false);
@@ -191,13 +193,10 @@ export function App(): React.ReactElement {
         cursor_ref.current = after;
         return after;
       }
-      for (const item of items) {
-        const c = typeof item?.cursor === "number" ? item.cursor : null;
-        const r = item?.record;
-        if (typeof c === "number" && r) {
-          handle_step({ cursor: c, record: r });
-          after = c;
-        }
+      const base = after;
+      for (let i = 0; i < items.length; i++) {
+        const record = items[i] as StepRecord;
+        handle_step({ cursor: base + i + 1, record });
       }
       after = typeof page.next_after === "number" ? page.next_after : after;
     }
@@ -259,7 +258,19 @@ export function App(): React.ReactElement {
     set_error_text("");
     set_connecting(true);
     try {
-      const rid = await gateway.start_run(fid, {});
+      let input_data: Record<string, any> = {};
+      const raw = input_data_text.trim();
+      if (raw) {
+        try {
+          input_data = JSON.parse(raw);
+          if (typeof input_data !== "object" || input_data === null || Array.isArray(input_data)) {
+            throw new Error("input_data must be a JSON object");
+          }
+        } catch (e: any) {
+          throw new Error(`Invalid input_data JSON: ${String(e?.message || e)}`);
+        }
+      }
+      const rid = await gateway.start_run(fid, input_data, { bundle_id: bundle_id.trim() || undefined });
       set_run_id(rid);
       await connect_to_run(rid);
     } catch (e: any) {
@@ -385,7 +396,13 @@ export function App(): React.ReactElement {
             <div className="row">
               <div className="col">
                 <div className="field">
-                  <label>Flow ID (optional: start run)</label>
+                  <label>Bundle ID (optional)</label>
+                  <input className="mono" value={bundle_id} onChange={(e) => set_bundle_id(e.target.value)} placeholder="bundle-subflow" />
+                </div>
+              </div>
+              <div className="col">
+                <div className="field">
+                  <label>Flow ID (start run)</label>
                   <input className="mono" value={flow_id} onChange={(e) => set_flow_id(e.target.value)} placeholder="a803f4bd" />
                 </div>
               </div>
@@ -395,6 +412,17 @@ export function App(): React.ReactElement {
                   <input className="mono" value={run_id} onChange={(e) => set_run_id(e.target.value)} placeholder="run uuid" />
                 </div>
               </div>
+            </div>
+
+            <div className="field">
+              <label>Input data (JSON)</label>
+              <textarea
+                className="mono"
+                value={input_data_text}
+                onChange={(e) => set_input_data_text(e.target.value)}
+                placeholder='{"request":"...","provider":"lmstudio","model":"qwen/qwen3-next-80b"}'
+                rows={6}
+              />
             </div>
 
             <div className="actions">
@@ -579,5 +607,4 @@ function AskForm(props: { wait: WaitState; on_submit: (value: string) => void })
     </>
   );
 }
-
 
