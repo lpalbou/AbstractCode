@@ -42,19 +42,172 @@ function is_exec_edge(e: any): boolean {
   return false;
 }
 
+function node_type_from_raw(n: any): string {
+  if (!n || typeof n !== "object") return "";
+  const data = n?.data && typeof n.data === "object" ? n.data : {};
+  return safe_str((data as any)?.nodeType || n?.type || "").trim();
+}
+
+function subflow_id_from_raw(n: any): string {
+  if (!n || typeof n !== "object") return "";
+  const data = n?.data && typeof n.data === "object" ? n.data : {};
+  const sid = (data as any)?.subflowId || (data as any)?.flowId;
+  const s = safe_str(sid).trim();
+  if (!s) return "";
+  // Accept namespaced "bundle:flow" but return only the local flow id.
+  if (s.includes(":")) {
+    const parts = s.split(":", 2);
+    if (parts.length === 2 && parts[1]) return parts[1].trim();
+  }
+  return s;
+}
+
+function entry_node_id(flow: any): string {
+  const en = safe_str(flow?.entryNode).trim();
+  if (en) return en;
+  const nodes = Array.isArray(flow?.nodes) ? flow.nodes : [];
+  for (const n of nodes) {
+    if (node_type_from_raw(n) === "on_flow_start") {
+      const id = safe_str(n?.id).trim();
+      if (id) return id;
+    }
+  }
+  return "";
+}
+
+function node_pos(n: any): { x: number; y: number } {
+  const pos = n?.position && typeof n.position === "object" ? n.position : {};
+  const x = typeof (pos as any).x === "number" ? (pos as any).x : 0;
+  const y = typeof (pos as any).y === "number" ? (pos as any).y : 0;
+  return { x, y };
+}
+
+function prefixed_id(prefix: string, id: string): string {
+  const p = safe_str(prefix).trim();
+  const s = safe_str(id).trim();
+  if (!s) return "";
+  return p ? `${p}::${s}` : s;
+}
+
+function merge_flow_with_subflows(args: {
+  root: any;
+  flow_by_id: Record<string, any>;
+  expand_subflows: boolean;
+  max_depth: number;
+  max_nodes: number;
+  max_edges: number;
+}): VisualFlow {
+  const root = args.root && typeof args.root === "object" ? args.root : {};
+  if (!args.expand_subflows) return root;
+
+  const merged_nodes: any[] = [];
+  const merged_edges: any[] = [];
+  const seen = new Set<string>();
+
+  const add_flow = (flow: any, prefix: string, offset: { x: number; y: number }, depth: number) => {
+    if (!flow || typeof flow !== "object") return;
+    if (merged_nodes.length >= args.max_nodes || merged_edges.length >= args.max_edges) return;
+
+    const raw_nodes = Array.isArray(flow.nodes) ? flow.nodes : [];
+    const raw_edges = Array.isArray(flow.edges) ? flow.edges : [];
+
+    for (const n of raw_nodes) {
+      const id = safe_str(n?.id).trim();
+      if (!id) continue;
+      const nid = prefixed_id(prefix, id);
+      if (!nid || seen.has(nid)) continue;
+      const pos = node_pos(n);
+      const next = { ...(n as any), id: nid, position: { x: pos.x + offset.x, y: pos.y + offset.y } };
+      merged_nodes.push(next);
+      seen.add(nid);
+      if (merged_nodes.length >= args.max_nodes) break;
+    }
+
+    for (const e of raw_edges) {
+      if (!is_exec_edge(e)) continue;
+      const source = safe_str(e?.source).trim();
+      const target = safe_str(e?.target).trim();
+      if (!source || !target) continue;
+      const sid = prefixed_id(prefix, source);
+      const tid = prefixed_id(prefix, target);
+      if (!sid || !tid) continue;
+      merged_edges.push({
+        ...(e as any),
+        id: safe_str(e?.id || `${sid}->${tid}`),
+        source: sid,
+        target: tid,
+      });
+      if (merged_edges.length >= args.max_edges) break;
+    }
+
+    if (depth >= args.max_depth) return;
+
+    for (const n of raw_nodes) {
+      if (merged_nodes.length >= args.max_nodes || merged_edges.length >= args.max_edges) return;
+      if (node_type_from_raw(n) !== "subflow") continue;
+      const child_fid = subflow_id_from_raw(n);
+      if (!child_fid) continue;
+      const child = args.flow_by_id[child_fid];
+      if (!child || typeof child !== "object") continue;
+
+      const parent_id = prefixed_id(prefix, safe_str(n?.id));
+      if (!parent_id) continue;
+      const en = entry_node_id(child);
+      if (!en) continue;
+      const child_nodes = Array.isArray((child as any).nodes) ? (child as any).nodes : [];
+      const entry_raw = child_nodes.find((x: any) => safe_str(x?.id).trim() === en) || null;
+      if (!entry_raw) continue;
+
+      const parent_pos = node_pos(n);
+      const entry_pos = node_pos(entry_raw);
+      const dx = 240;
+      const dy = 0;
+      const child_offset = { x: parent_pos.x + offset.x + dx - entry_pos.x, y: parent_pos.y + offset.y + dy - entry_pos.y };
+
+      const child_entry_id = prefixed_id(parent_id, en);
+      merged_edges.push({
+        id: `${parent_id}=>${child_entry_id}`,
+        source: parent_id,
+        target: child_entry_id,
+        sourceHandle: "exec-out",
+        targetHandle: "exec-in",
+      });
+
+      add_flow(child, parent_id, child_offset, depth + 1);
+    }
+  };
+
+  add_flow(root, "", { x: 0, y: 0 }, 0);
+  return {
+    ...(root as any),
+    id: safe_str((root as any).id),
+    nodes: merged_nodes,
+    edges: merged_edges,
+  };
+}
+
 export function FlowGraph(props: {
   flow: VisualFlow | null;
+  flow_by_id?: Record<string, any>;
+  expand_subflows?: boolean;
   active_node_id?: string;
   recent_nodes?: Record<string, number>;
   now_ms?: number;
 }): React.ReactElement {
   const now_ms = typeof props.now_ms === "number" ? props.now_ms : Date.now();
-  const flow = props.flow;
+  const flow_in = props.flow;
   const active = safe_str(props.active_node_id);
   const recent = props.recent_nodes || {};
 
   const { nodes, edges, bounds } = useMemo(() => {
-    const vf: any = flow || {};
+    const vf: any = merge_flow_with_subflows({
+      root: flow_in || {},
+      flow_by_id: props.flow_by_id || {},
+      expand_subflows: props.expand_subflows === true,
+      max_depth: 3,
+      max_nodes: 700,
+      max_edges: 900,
+    });
     const raw_nodes = Array.isArray(vf.nodes) ? vf.nodes : [];
     const raw_edges = Array.isArray(vf.edges) ? vf.edges : [];
 
@@ -104,9 +257,9 @@ export function FlowGraph(props: {
       node_h: h,
     };
     return { nodes: nodes_out, edges: edges_out, bounds: vb };
-  }, [flow]);
+  }, [flow_in, props.flow_by_id, props.expand_subflows]);
 
-  if (!flow) {
+  if (!flow_in) {
     return (
       <div className="graph_empty mono">
         (no graph loaded)
@@ -170,4 +323,3 @@ export function FlowGraph(props: {
     </div>
   );
 }
-

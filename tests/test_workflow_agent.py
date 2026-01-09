@@ -90,7 +90,7 @@ def _make_agent_v1_flow_with_meta(*, flow_id: str, name: str) -> dict:
 
 
 def _make_agent_v1_flow_with_status_event(*, flow_id: str, name: str) -> dict:
-    """Flow that emits `abstractcode.status` via Emit Event and then returns response."""
+    """Flow that emits `abstract.status` via Emit Event and then returns response."""
     base = _make_agent_v1_flow_dict(flow_id=flow_id, name=name, declare_interface=True)
     # Insert an emit_event node between start and end.
     base["nodes"].append(
@@ -113,7 +113,7 @@ def _make_agent_v1_flow_with_status_event(*, flow_id: str, name: str) -> dict:
             "id": "status_name",
             "type": "literal_string",
             "position": {"x": 2, "y": 20},
-            "data": {"literalValue": "abstractcode.status"},
+            "data": {"literalValue": "abstract.status"},
         }
     )
     base["nodes"].append(
@@ -173,7 +173,7 @@ def _make_agent_v1_flow_with_status_event(*, flow_id: str, name: str) -> dict:
 
 
 def _make_agent_v1_flow_with_status_event_duration(*, flow_id: str, name: str, duration_s: float) -> dict:
-    """Flow that emits `abstractcode.status` with a duration payload."""
+    """Flow that emits `abstract.status` with a duration payload."""
     base = _make_agent_v1_flow_dict(flow_id=flow_id, name=name, declare_interface=True)
     base["nodes"].append(
         {
@@ -195,7 +195,7 @@ def _make_agent_v1_flow_with_status_event_duration(*, flow_id: str, name: str, d
             "id": "status_name",
             "type": "literal_string",
             "position": {"x": 2, "y": 20},
-            "data": {"literalValue": "abstractcode.status"},
+            "data": {"literalValue": "abstract.status"},
         }
     )
     base["nodes"].append(
@@ -253,7 +253,7 @@ def _make_agent_v1_flow_with_status_event_duration(*, flow_id: str, name: str, d
 
 
 def _make_agent_v1_flow_with_message_event(*, flow_id: str, name: str) -> dict:
-    """Flow that emits `abstractcode.message` via Emit Event and then returns response."""
+    """Flow that emits `abstract.message` via Emit Event and then returns response."""
     base = _make_agent_v1_flow_dict(flow_id=flow_id, name=name, declare_interface=True)
     base["nodes"].append(
         {
@@ -275,7 +275,7 @@ def _make_agent_v1_flow_with_message_event(*, flow_id: str, name: str) -> dict:
             "id": "msg_name",
             "type": "literal_string",
             "position": {"x": 2, "y": 20},
-            "data": {"literalValue": "abstractcode.message"},
+            "data": {"literalValue": "abstract.message"},
         }
     )
     base["nodes"].append(
@@ -370,7 +370,7 @@ def _make_agent_v1_flow_with_tool_events(*, flow_id: str, name: str) -> dict:
             "id": "name_exec",
             "type": "literal_string",
             "position": {"x": 2, "y": 20},
-            "data": {"literalValue": "abstractcode.tool_execution"},
+            "data": {"literalValue": "abstract.tool_execution"},
         }
     )
     base["nodes"].append(
@@ -378,7 +378,7 @@ def _make_agent_v1_flow_with_tool_events(*, flow_id: str, name: str) -> dict:
             "id": "name_result",
             "type": "literal_string",
             "position": {"x": 2, "y": 30},
-            "data": {"literalValue": "abstractcode.tool_result"},
+            "data": {"literalValue": "abstract.tool_result"},
         }
     )
     base["nodes"].append(
@@ -524,7 +524,7 @@ def _make_agent_v1_flow_with_tool_events_batch(*, flow_id: str, name: str) -> di
             "id": "name_exec",
             "type": "literal_string",
             "position": {"x": 2, "y": 20},
-            "data": {"literalValue": "abstractcode.tool_execution"},
+            "data": {"literalValue": "abstract.tool_execution"},
         }
     )
     base["nodes"].append(
@@ -532,7 +532,7 @@ def _make_agent_v1_flow_with_tool_events_batch(*, flow_id: str, name: str) -> di
             "id": "name_result",
             "type": "literal_string",
             "position": {"x": 2, "y": 30},
-            "data": {"literalValue": "abstractcode.tool_result"},
+            "data": {"literalValue": "abstract.tool_result"},
         }
     )
     base["nodes"].append(
@@ -732,6 +732,46 @@ def test_workflow_agent_emits_status_updates_from_emit_event(tmp_path) -> None:
     from abstractcode.workflow_agent import WorkflowAgent
 
     vf = VisualFlow.model_validate(_make_agent_v1_flow_with_status_event(flow_id="wf_status", name="wf_status"))
+    flow_path = tmp_path / "wf.json"
+    flow_path.write_text(vf.model_dump_json(indent=2), encoding="utf-8")
+
+    seen: list[dict] = []
+
+    def on_step(step: str, data: dict) -> None:
+        if step == "status":
+            seen.append(dict(data))
+
+    runtime = Runtime(run_store=InMemoryRunStore(), ledger_store=ObservableLedgerStore(InMemoryLedgerStore()))
+    agent = WorkflowAgent(runtime=runtime, flow_ref=str(flow_path), tools=[], on_step=on_step)
+
+    agent.start("hello")
+    state = agent.step()
+    while state.status == RunStatus.RUNNING:
+        state = agent.step()
+
+    assert state.status == RunStatus.COMPLETED
+    assert any(s.get("text") == "Enrich Query..." for s in seen)
+
+
+def test_workflow_agent_accepts_legacy_abstractcode_status_event(tmp_path) -> None:
+    try:
+        from abstractflow.visual.models import VisualFlow
+    except Exception:
+        pytest.skip("abstractflow not installed")
+
+    from abstractruntime import InMemoryRunStore, Runtime
+    from abstractruntime.core.models import RunStatus
+    from abstractruntime.storage.in_memory import InMemoryLedgerStore
+    from abstractruntime.storage.observable import ObservableLedgerStore
+
+    from abstractcode.workflow_agent import WorkflowAgent
+
+    flow = _make_agent_v1_flow_with_status_event(flow_id="wf_status_legacy", name="wf_status_legacy")
+    for n in flow.get("nodes") or []:
+        if n.get("id") == "status_name" and isinstance(n.get("data"), dict):
+            n["data"]["literalValue"] = "abstractcode.status"
+
+    vf = VisualFlow.model_validate(flow)
     flow_path = tmp_path / "wf.json"
     flow_path.write_text(vf.model_dump_json(indent=2), encoding="utf-8")
 
@@ -989,4 +1029,3 @@ def test_workflow_agent_requires_interface_marker(tmp_path) -> None:
     runtime = Runtime(run_store=InMemoryRunStore(), ledger_store=InMemoryLedgerStore())
     with pytest.raises(ValueError, match="does not implement 'abstractcode\\.agent\\.v1'"):
         WorkflowAgent(runtime=runtime, flow_ref=str(flow_path), tools=[])
-

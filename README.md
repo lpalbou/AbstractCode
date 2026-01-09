@@ -95,7 +95,7 @@ When present, AbstractCode attaches it to the assistant message metadata as `wor
 ### Workflow-driven status updates (footer / live UX)
 Inside a workflow, you can update AbstractCode’s footer status text by emitting the reserved event:
 - Add an **Emit Event** node
-- Set **name** to `abstractcode.status`
+- Set **name** to `abstract.status` (preferred; `abstractcode.status` is a deprecated alias)
 - Set **payload** to:
   - a string (e.g. `"Enrich Query..."`), or
   - an object like `{ "text": "Enrich Query...", "duration": -1 }`
@@ -108,10 +108,10 @@ Example workflow: `abstractflow/web/flows/acagent_status_demo.json` (3 status up
 
 ### Workflow-driven UI events (messages + tool UX)
 Workflows can also emit additional reserved events for host UX:
-- `abstractcode.message`: show a message/notification (payload is a string or `{text, level?, title?}`)
-- `abstractcode.tool_execution`: render a tool-call block (payload is a tool call object or a list)
+- `abstract.message`: show a message/notification (payload is a string or `{text, level?, title?}`)
+- `abstract.tool_execution`: render a tool-call block (payload is a tool call object or a list)
   - recommended shape: `{name, arguments, call_id?}`
-- `abstractcode.tool_result`: render a tool-result block (payload is a tool result object or a list)
+- `abstract.tool_result`: render a tool-result block (payload is a tool result object or a list)
   - recommended shape: `{name, call_id?, success?, output?, error?}`
 
 Full contract (recommended for integrators): `docs/ui_events.md`

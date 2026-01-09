@@ -1646,7 +1646,7 @@ class ReactShell:
             answer_text = str(data.get("answer", "") or "")
             self._print_answer_block(title="ANSWER", answer_text=answer_text, state=self._safe_get_state())
         elif step == "status":
-            # Workflow-driven status update (e.g., VisualFlow emit_event name="abstractcode.status").
+            # Workflow-driven status update (e.g., VisualFlow emit_event name="abstract.status").
             text = str(data.get("text", "") or "").strip()
             dur_raw = data.get("duration")
             dur: Optional[float]
@@ -1664,7 +1664,7 @@ class ReactShell:
             else:
                 self._ui.set_spinner(text, duration_s=dur)
         elif step == "message":
-            # Workflow-driven message notification (e.g., VisualFlow emit_event name="abstractcode.message").
+            # Workflow-driven message notification (e.g., VisualFlow emit_event name="abstract.message").
             text = str(data.get("text") or data.get("message") or "").rstrip()
             if not text.strip():
                 return

@@ -89,6 +89,64 @@ function parse_namespaced_workflow_id(workflow_id: string): { bundle_id: string;
   return { bundle_id: s.slice(0, idx), flow_id: s.slice(idx + 1) };
 }
 
+function normalize_ui_event_name(name: string): string {
+  const s = String(name || "").trim();
+  if (s.startsWith("abstractcode.")) return `abstract.${s.slice("abstractcode.".length)}`;
+  return s;
+}
+
+function is_ui_event_name(name: string): boolean {
+  const s = String(name || "").trim();
+  return s.startsWith("abstract.") || s.startsWith("abstractcode.");
+}
+
+function event_name_from_wait_key(wait_key: string): string {
+  const wk = String(wait_key || "").trim();
+  if (wk.startsWith("evt:")) {
+    const parts = wk.split(":", 4);
+    if (parts.length === 4 && parts[3]) return String(parts[3]).trim();
+  }
+  return wk;
+}
+
+function extract_start_pins_from_visualflow(raw: any): BundlePinDef[] {
+  if (!raw || typeof raw !== "object") return [];
+  const nodes = Array.isArray((raw as any).nodes) ? (raw as any).nodes : [];
+  if (!nodes.length) return [];
+
+  let start_node: any = null;
+  for (const n of nodes) {
+    if (!n || typeof n !== "object") continue;
+    const data = n.data && typeof n.data === "object" ? n.data : {};
+    const nt = String((data as any).nodeType || n.type || "").trim();
+    if (nt === "on_flow_start") {
+      start_node = n;
+      break;
+    }
+  }
+  if (!start_node) return [];
+
+  const data = start_node.data && typeof start_node.data === "object" ? start_node.data : {};
+  const outputs = Array.isArray((data as any).outputs) ? (data as any).outputs : [];
+  const pin_defaults = data.pinDefaults && typeof data.pinDefaults === "object" ? data.pinDefaults : {};
+
+  const out: BundlePinDef[] = [];
+  for (const p of outputs) {
+    if (!p || typeof p !== "object") continue;
+    const pid = String((p as any).id || "").trim();
+    if (!pid) continue;
+    const ptype = String((p as any).type || "").trim();
+    if (ptype === "execution" || pid === "exec-out" || pid === "exec") continue;
+    const label = String((p as any).label || pid).trim() || pid;
+    const item: BundlePinDef = { id: pid, label, type: ptype || "unknown" };
+    if (pin_defaults && Object.prototype.hasOwnProperty.call(pin_defaults, pid)) {
+      item.default = (pin_defaults as any)[pid];
+    }
+    out.push(item);
+  }
+  return out;
+}
+
 function clamp_preview(text: string, opts?: { max_chars?: number; max_lines?: number }): string {
   const max_chars = typeof opts?.max_chars === "number" ? opts.max_chars : 360;
   const max_lines = typeof opts?.max_lines === "number" ? opts.max_lines : 2;
@@ -192,6 +250,7 @@ export function App(): React.ReactElement {
   const [right_tab, set_right_tab] = useState<"ledger" | "graph">("ledger");
   const [graph_flow_id, set_graph_flow_id] = useState<string>("");
   const [graph_flow, set_graph_flow] = useState<any | null>(null);
+  const [graph_flow_cache, set_graph_flow_cache] = useState<Record<string, any>>({});
   const [graph_loading, set_graph_loading] = useState(false);
   const [graph_error, set_graph_error] = useState<string>("");
   const [graph_show_subflows, set_graph_show_subflows] = useState(false);
@@ -200,11 +259,16 @@ export function App(): React.ReactElement {
   const [recent_nodes, set_recent_nodes] = useState<Record<string, number>>({});
   const recent_prune_timer_ref = useRef<number | null>(null);
   const active_node_ref = useRef<string>("");
+  const run_prefix_ref = useRef<Record<string, string>>({});
+  const subrun_parent_ref = useRef<Record<string, string>>({});
+  const root_subrun_ref = useRef<string>("");
 
   const abort_ref = useRef<AbortController | null>(null);
   const child_abort_ref = useRef<AbortController | null>(null);
   const child_cursor_ref = useRef<number>(0);
   const [following_child_run_id, set_following_child_run_id] = useState<string>("");
+  const [follow_run_id, set_follow_run_id] = useState<string>("");
+  const follow_run_ref = useRef<string>("");
 
   const gateway = useMemo(() => new GatewayClient({ base_url: settings.gateway_url, auth_token: settings.auth_token }), [settings]);
   const worker = useMemo(
@@ -233,6 +297,9 @@ export function App(): React.ReactElement {
     const pins = selected_entrypoint?.inputs;
     return Array.isArray(pins) ? (pins as BundlePinDef[]) : [];
   }, [selected_entrypoint]);
+
+  const flow_pins: BundlePinDef[] = useMemo(() => extract_start_pins_from_visualflow(graph_flow), [graph_flow]);
+  const adaptive_pins: BundlePinDef[] = useMemo(() => (entrypoint_pins.length ? entrypoint_pins : flow_pins), [entrypoint_pins, flow_pins]);
 
   const node_index_for_run: Record<string, any> = useMemo(() => {
     const wid = typeof run_state?.workflow_id === "string" ? String(run_state.workflow_id) : "";
@@ -276,7 +343,7 @@ export function App(): React.ReactElement {
   const request_value = typeof input_data_obj?.request === "string" ? String(input_data_obj.request) : "";
   const provider_value = typeof input_data_obj?.provider === "string" ? String(input_data_obj.provider) : "";
   const model_value = typeof input_data_obj?.model === "string" ? String(input_data_obj.model) : "";
-  const has_adaptive_inputs = entrypoint_pins.length > 0 && Boolean(bundle_id.trim());
+  const has_adaptive_inputs = adaptive_pins.length > 0 && Boolean(bundle_id.trim());
 
   function update_input_data_field(key: string, value: string): void {
     let obj: Record<string, any> = {};
@@ -315,11 +382,11 @@ export function App(): React.ReactElement {
     set_input_data_text(JSON.stringify(obj, null, 2));
   }
 
-  async function on_load_bundle(): Promise<void> {
-    const bid = bundle_id.trim();
+  async function load_bundle_info(bid_raw: string): Promise<BundleInfo | null> {
+    const bid = String(bid_raw || "").trim();
     if (!bid) {
       set_bundle_error("Missing bundle_id");
-      return;
+      return null;
     }
     set_bundle_error("");
     set_bundle_loading(true);
@@ -329,16 +396,22 @@ export function App(): React.ReactElement {
       set_input_field_drafts({});
       set_input_field_errors({});
       push_log({ ts: now_iso(), kind: "info", title: `Loaded bundle ${bid}` });
+      return info;
     } catch (e: any) {
       set_bundle_info(null);
       set_bundle_error(String(e?.message || e || "Failed to load bundle"));
+      return null;
     } finally {
       set_bundle_loading(false);
     }
   }
 
+  async function on_load_bundle(): Promise<void> {
+    await load_bundle_info(bundle_id.trim());
+  }
+
   function apply_entrypoint_defaults(): void {
-    const pins = entrypoint_pins;
+    const pins = adaptive_pins;
     if (!pins.length) return;
 
     let obj: Record<string, any> = {};
@@ -446,14 +519,75 @@ export function App(): React.ReactElement {
     }
   }
 
+  function graph_node_id_for(run_id_value: string, node_id_value: string): string {
+    const rid = String(run_id_value || "").trim();
+    const nid = String(node_id_value || "").trim();
+    if (!nid) return "";
+    const prefix = rid ? String(run_prefix_ref.current[rid] || "").trim() : "";
+    return prefix ? `${prefix}::${nid}` : nid;
+  }
+
+  function register_subworkflow_child_run(parent_run_id_value: string, parent_node_id_value: string, sub_run_id_value: string): void {
+    const parent_run_id = String(parent_run_id_value || "").trim();
+    const parent_node_id = String(parent_node_id_value || "").trim();
+    const sub_run_id = String(sub_run_id_value || "").trim();
+    if (!parent_run_id || !parent_node_id || !sub_run_id) return;
+    const prefix = graph_node_id_for(parent_run_id, parent_node_id);
+    if (!prefix) return;
+    run_prefix_ref.current[sub_run_id] = prefix;
+    subrun_parent_ref.current[sub_run_id] = parent_run_id;
+  }
+
+  function mark_node_activity(node_id_for_graph: string): void {
+    const node_id = String(node_id_for_graph || "").trim();
+    if (!node_id) return;
+    const now = Date.now();
+    const prev_active = active_node_ref.current;
+    active_node_ref.current = node_id;
+    set_active_node_id(node_id);
+    set_graph_now_ms(now);
+
+    set_recent_nodes((prev) => {
+      const next: Record<string, number> = {};
+      for (const [k, until] of Object.entries(prev)) {
+        if (typeof until === "number" && until > now) next[k] = until;
+      }
+      next[node_id] = Math.max(next[node_id] || 0, now + 2000);
+      if (prev_active && prev_active !== node_id) next[prev_active] = Math.max(next[prev_active] || 0, now + 2000);
+
+      // Cap to avoid unbounded growth.
+      const keys = Object.keys(next);
+      if (keys.length <= 200) return next;
+      const keep = keys.sort((a, b) => (next[b] || 0) - (next[a] || 0)).slice(0, 200);
+      const pruned: Record<string, number> = {};
+      for (const k of keep) pruned[k] = next[k] || 0;
+      return pruned;
+    });
+
+    if (recent_prune_timer_ref.current) window.clearTimeout(recent_prune_timer_ref.current);
+    recent_prune_timer_ref.current = window.setTimeout(() => {
+      const t = Date.now();
+      set_recent_nodes((prev) => {
+        const next: Record<string, number> = {};
+        for (const [k, until] of Object.entries(prev)) {
+          if (typeof until === "number" && until > t) next[k] = until;
+        }
+        return next;
+      });
+      set_graph_now_ms(t);
+      recent_prune_timer_ref.current = null;
+    }, 2200);
+  }
+
   function handle_step(ev: LedgerStreamEvent): void {
     cursor_ref.current = ev.cursor;
     set_cursor(ev.cursor);
     set_records((prev) => [...prev, { cursor: ev.cursor, record: ev.record }]);
 
     const emit = extract_emit_event(ev.record);
-    if (emit && emit.name === "abstractcode.status") {
-      const { text, duration } = extract_textish(emit.payload);
+    const emit_name = emit && emit.name ? normalize_ui_event_name(emit.name) : "";
+    if (emit_name === "abstract.status") {
+      const { text, duration } = extract_textish(emit?.payload);
       set_status(text, duration);
     }
 
@@ -463,51 +597,26 @@ export function App(): React.ReactElement {
     const effect_type = typeof rec?.effect?.type === "string" ? rec.effect.type : "";
     const rec_run_id = typeof rec?.run_id === "string" ? rec.run_id : "";
 
-    if (node_id) {
-      const now = Date.now();
-      const prev_active = active_node_ref.current;
-      active_node_ref.current = node_id;
-      set_active_node_id(node_id);
-      set_graph_now_ms(now);
-      set_recent_nodes((prev) => {
-        const next: Record<string, number> = {};
-        for (const [k, until] of Object.entries(prev)) {
-          if (typeof until === "number" && until > now) next[k] = until;
-        }
-        next[node_id] = Math.max(next[node_id] || 0, now + 2000);
-        if (prev_active && prev_active !== node_id) next[prev_active] = Math.max(next[prev_active] || 0, now + 2000);
-        // Cap to avoid unbounded growth.
-        const keys = Object.keys(next);
-        if (keys.length <= 80) return next;
-        const keep = keys.sort((a, b) => (next[b] || 0) - (next[a] || 0)).slice(0, 80);
-        const pruned: Record<string, number> = {};
-        for (const k of keep) pruned[k] = next[k] || 0;
-        return pruned;
-      });
-
-      if (recent_prune_timer_ref.current) window.clearTimeout(recent_prune_timer_ref.current);
-      recent_prune_timer_ref.current = window.setTimeout(() => {
-        const t = Date.now();
-        set_recent_nodes((prev) => {
-          const next: Record<string, number> = {};
-          for (const [k, until] of Object.entries(prev)) {
-            if (typeof until === "number" && until > t) next[k] = until;
-          }
-          return next;
-        });
-        set_graph_now_ms(t);
-        recent_prune_timer_ref.current = null;
-      }, 2200);
+    const effective_run_id = rec_run_id || run_id.trim();
+    if (status === "waiting") {
+      const w = extract_wait_from_record(rec);
+      const reason = String(w?.reason || "").trim();
+      if (reason === "subworkflow") {
+        const sub = typeof (w as any)?.details?.sub_run_id === "string" ? String((w as any).details.sub_run_id) : "";
+        if (sub && node_id) register_subworkflow_child_run(effective_run_id, node_id, sub);
+      }
     }
+
+    if (node_id) mark_node_activity(graph_node_id_for(effective_run_id, node_id));
 
     let kind: UiLogItem["kind"] = "step";
     let title = node_id || "(node?)";
     let preview = "";
 
-    if (emit && emit.name && emit.name.startsWith("abstractcode.")) {
-      kind = emit.name === "abstractcode.message" ? "message" : "event";
-      title = emit.name;
-      preview = clamp_preview(extract_textish(emit.payload).text);
+    if (emit && emit.name && is_ui_event_name(emit.name)) {
+      kind = emit_name === "abstract.message" ? "message" : "event";
+      title = emit_name || emit.name;
+      preview = clamp_preview(extract_textish(emit?.payload).text);
     } else if (rec?.error) {
       kind = "error";
       title = "error";
@@ -536,29 +645,57 @@ export function App(): React.ReactElement {
       node_id,
       status,
       effect_type,
-      emit_name: emit?.name || undefined,
+      emit_name: emit_name || emit?.name || undefined,
     });
   }
 
   function handle_child_step(child_run_id: string, ev: LedgerStreamEvent): void {
     child_cursor_ref.current = Math.max(child_cursor_ref.current, ev.cursor);
     const emit = extract_emit_event(ev.record);
-    if (!emit || !emit.name || !emit.name.startsWith("abstractcode.")) return;
-
-    if (emit.name === "abstractcode.status") {
-      const { text, duration } = extract_textish(emit.payload);
-      set_status(text, duration);
-      return;
-    }
-
+    const emit_name = emit && emit.name ? normalize_ui_event_name(emit.name) : "";
     const rec = ev.record;
     const node_id = typeof rec?.node_id === "string" ? rec.node_id : "";
     const status = typeof rec?.status === "string" ? rec.status : "";
+    if (status === "waiting") {
+      const w = extract_wait_from_record(rec);
+      const reason = String(w?.reason || "").trim();
+      if (reason === "subworkflow") {
+        const sub = typeof (w as any)?.details?.sub_run_id === "string" ? String((w as any).details.sub_run_id) : "";
+        if (sub && node_id) register_subworkflow_child_run(child_run_id, node_id, sub);
+        // Descend into nested subflows so status/events aren't missed when emitted in grandchildren.
+        if (sub && follow_run_ref.current.trim() === String(child_run_id || "").trim()) {
+          follow_run_ref.current = sub;
+          set_follow_run_id(sub);
+        }
+      }
+    }
+    if (node_id) mark_node_activity(graph_node_id_for(child_run_id, node_id));
+
+    // If the currently-followed run completes, fall back to its parent (if any).
+    if ((status === "completed" || status === "failed") && follow_run_ref.current.trim() === String(child_run_id || "").trim()) {
+      const parent = String(subrun_parent_ref.current[String(child_run_id || "").trim()] || "").trim();
+      if (parent && parent !== run_id.trim()) {
+        follow_run_ref.current = parent;
+        set_follow_run_id(parent);
+      } else {
+        follow_run_ref.current = "";
+        set_follow_run_id("");
+      }
+    }
+
+    if (!emit || !emit.name) return;
+
+    if (emit_name === "abstract.status") {
+      const { text, duration } = extract_textish(emit?.payload);
+      set_status(text, duration);
+      return;
+    }
+    if (!is_ui_event_name(emit.name)) return;
     const effect_type = typeof rec?.effect?.type === "string" ? rec.effect.type : "";
 
-    const kind: UiLogItem["kind"] = emit.name === "abstractcode.message" ? "message" : "event";
-    const title = `child • ${emit.name}`;
-    const preview = clamp_preview(extract_textish(emit.payload).text);
+    const kind: UiLogItem["kind"] = emit_name === "abstract.message" ? "message" : "event";
+    const title = `child • ${emit_name || emit.name}`;
+    const preview = clamp_preview(extract_textish(emit?.payload).text);
 
     push_log({
       id: `child:${child_run_id}:${ev.cursor}`,
@@ -572,7 +709,7 @@ export function App(): React.ReactElement {
       node_id,
       status,
       effect_type,
-      emit_name: emit.name,
+      emit_name: emit_name || emit.name,
     });
   }
 
@@ -596,6 +733,7 @@ export function App(): React.ReactElement {
   }
 
   async function connect_to_run(run_id_value: string): Promise<void> {
+    const rid = String(run_id_value || "").trim();
     set_error_text("");
     set_connecting(true);
     set_connected(false);
@@ -606,11 +744,18 @@ export function App(): React.ReactElement {
     set_log_open({});
     set_status_text("");
     set_run_state(null);
+    set_input_field_drafts({});
+    set_input_field_errors({});
     set_dismissed_wait_key("");
     set_active_node_id("");
     active_node_ref.current = "";
     set_recent_nodes({});
     set_graph_now_ms(Date.now());
+    run_prefix_ref.current = rid ? { [rid]: "" } : {};
+    subrun_parent_ref.current = {};
+    root_subrun_ref.current = "";
+    follow_run_ref.current = "";
+    set_follow_run_id("");
     if (recent_prune_timer_ref.current) window.clearTimeout(recent_prune_timer_ref.current);
     recent_prune_timer_ref.current = null;
     if (dismiss_timer_ref.current) window.clearTimeout(dismiss_timer_ref.current);
@@ -625,16 +770,54 @@ export function App(): React.ReactElement {
     abort_ref.current = abort;
 
     try {
-      let after = await replay_ledger(run_id_value, { after: 0 });
+      // Best-effort attach context (bundle/flow + input_data) to make Attach match Start.
+      let inferred_bundle_id = "";
+      let inferred_flow_id = "";
+      try {
+        const st = await gateway.get_run(rid);
+        set_run_state(st);
+        const wid = typeof st?.workflow_id === "string" ? String(st.workflow_id) : "";
+        const parsed = parse_namespaced_workflow_id(wid);
+        if (parsed) {
+          inferred_bundle_id = parsed.bundle_id;
+          inferred_flow_id = parsed.flow_id;
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        const inp = await gateway.get_run_input_data(rid);
+        if (typeof (inp as any)?.bundle_id === "string") inferred_bundle_id = String((inp as any).bundle_id || "").trim() || inferred_bundle_id;
+        if (typeof (inp as any)?.flow_id === "string") inferred_flow_id = String((inp as any).flow_id || "").trim() || inferred_flow_id;
+
+        const data = inp && typeof inp.input_data === "object" && inp.input_data && !Array.isArray(inp.input_data) ? inp.input_data : null;
+        if (data) {
+          set_input_data_text(JSON.stringify(data, null, 2));
+          set_input_field_drafts({});
+          set_input_field_errors({});
+        }
+      } catch {
+        // ignore
+      }
+
+      if (inferred_bundle_id && inferred_flow_id) {
+        set_bundle_id(inferred_bundle_id);
+        set_flow_id(inferred_flow_id);
+        set_graph_flow_id(inferred_flow_id);
+        await load_bundle_info(inferred_bundle_id);
+      }
+
+      let after = await replay_ledger(rid, { after: 0 });
       set_connected(true);
-      push_log({ ts: now_iso(), kind: "info", title: `Attached to run ${run_id_value}`, data: { run_id: run_id_value } });
+      push_log({ ts: now_iso(), kind: "info", title: `Attached to run ${rid}`, data: { run_id: rid } });
 
       let backoff_ms = 250;
       while (!abort.signal.aborted) {
         // Best-effort resync before streaming (replay-first).
-        after = await replay_ledger(run_id_value, { after: cursor_ref.current });
+        after = await replay_ledger(rid, { after: cursor_ref.current });
         try {
-          await gateway.stream_ledger(run_id_value, {
+          await gateway.stream_ledger(rid, {
             after,
             on_step: handle_step,
             signal: abort.signal,
@@ -804,9 +987,38 @@ export function App(): React.ReactElement {
   const wait_reason = String(wait_state?.reason || "").trim();
   const is_waiting = is_waiting_status(last_record) && Boolean(wait_key);
   const is_user_wait = wait_reason === "user";
+  const wait_event_name = wait_reason === "event" ? normalize_ui_event_name(event_name_from_wait_key(wait_key)) : "";
+  const is_ask_event_wait = wait_reason === "event" && wait_event_name === "abstract.ask";
   const has_tool_wait = tool_calls_for_wait.length > 0;
-  const show_wait_modal = is_waiting && wait_key && (is_user_wait || has_tool_wait) && dismissed_wait_key !== wait_key;
+  const show_wait_modal = is_waiting && wait_key && (is_user_wait || is_ask_event_wait || has_tool_wait) && dismissed_wait_key !== wait_key;
   const sub_run_id = typeof (wait_state as any)?.details?.sub_run_id === "string" ? String((wait_state as any).details.sub_run_id) : "";
+
+  // Follow the deepest active subworkflow run for status/event UX (not just the immediate child).
+  useEffect(() => {
+    follow_run_ref.current = follow_run_id.trim();
+  }, [follow_run_id]);
+
+  useEffect(() => {
+    const rid = run_id.trim();
+    const child = sub_run_id.trim();
+    const should_follow = connected && wait_reason === "subworkflow" && Boolean(child) && child !== rid;
+    if (!should_follow) {
+      root_subrun_ref.current = "";
+      if (follow_run_id.trim()) set_follow_run_id("");
+      return;
+    }
+    // Only reset when the root's immediate child changes, so deeper-follow can take over.
+    if (root_subrun_ref.current !== child) {
+      root_subrun_ref.current = child;
+      follow_run_ref.current = child;
+      set_follow_run_id(child);
+    }
+  }, [connected, run_id, wait_reason, sub_run_id, follow_run_id]);
+
+  useEffect(() => {
+    // Bundle switch should invalidate any cached flow JSON.
+    set_graph_flow_cache({});
+  }, [bundle_id]);
 
   const graph_entrypoint_ids = useMemo(() => {
     const eps = Array.isArray(bundle_info?.entrypoints) ? bundle_info?.entrypoints : [];
@@ -838,7 +1050,9 @@ export function App(): React.ReactElement {
       .then((res) => {
         if (stopped) return;
         const flow = (res as any)?.flow;
-        set_graph_flow(flow && typeof flow === "object" ? flow : null);
+        const vf = flow && typeof flow === "object" ? flow : null;
+        set_graph_flow(vf);
+        if (vf) set_graph_flow_cache((prev) => ({ ...prev, [fid]: vf }));
       })
       .catch((e: any) => {
         if (stopped) return;
@@ -854,45 +1068,97 @@ export function App(): React.ReactElement {
     };
   }, [bundle_id, graph_flow_id, gateway]);
 
-  const graph_subflow_ids = useMemo(() => {
-    if (!graph_show_subflows) return [];
-    const nodes = Array.isArray((graph_flow as any)?.nodes) ? (graph_flow as any).nodes : [];
-    const out = new Set<string>();
-    for (const n of nodes) {
-      const data = n?.data && typeof n.data === "object" ? n.data : {};
-      const nt = String((data as any)?.nodeType || n?.type || "").trim();
-      if (nt !== "subflow") continue;
-      const sid = (data as any)?.subflowId || (data as any)?.flowId;
-      const s = typeof sid === "string" ? sid.trim() : "";
-      if (s) out.add(s.includes(":") ? s.split(":", 2)[1] : s);
-    }
-    return Array.from(out).sort();
-  }, [graph_flow, graph_show_subflows]);
+  useEffect(() => {
+    const bid = bundle_id.trim();
+    if (!graph_show_subflows || !bid || !graph_flow) return;
+
+    let stopped = false;
+    const max_depth = 3;
+
+    const extract_subflow_ids = (flow: any): string[] => {
+      const nodes = Array.isArray(flow?.nodes) ? flow.nodes : [];
+      const out: string[] = [];
+      for (const n of nodes) {
+        const data = n?.data && typeof n.data === "object" ? n.data : {};
+        const nt = String((data as any)?.nodeType || n?.type || "").trim();
+        if (nt !== "subflow") continue;
+        const sid = (data as any)?.subflowId || (data as any)?.flowId;
+        const s = typeof sid === "string" ? sid.trim() : "";
+        if (s) out.push(s.includes(":") ? s.split(":", 2)[1] : s);
+      }
+      return out;
+    };
+
+    const seen = new Set<string>();
+    const want = new Set<string>();
+    const visit = (flow: any, depth: number) => {
+      if (!flow || depth >= max_depth) return;
+      for (const sid of extract_subflow_ids(flow)) {
+        const s = String(sid || "").trim();
+        if (!s || seen.has(s)) continue;
+        seen.add(s);
+        want.add(s);
+        const cached = graph_flow_cache[s];
+        if (cached) visit(cached, depth + 1);
+      }
+    };
+
+    visit(graph_flow, 0);
+    const missing = Array.from(want).filter((fid) => !graph_flow_cache[fid]).slice(0, 20);
+    if (!missing.length) return;
+
+    const run = async () => {
+      for (const fid of missing) {
+        if (stopped) return;
+        try {
+          const res = await gateway.get_bundle_flow(bid, fid);
+          const flow = (res as any)?.flow;
+          const vf = flow && typeof flow === "object" ? flow : null;
+          if (!vf) continue;
+          set_graph_flow_cache((prev) => (prev[fid] ? prev : { ...prev, [fid]: vf }));
+        } catch {
+          // ignore missing subflows (best-effort)
+        }
+      }
+    };
+    run();
+
+    return () => {
+      stopped = true;
+    };
+  }, [graph_show_subflows, bundle_id, graph_flow, graph_flow_cache, gateway]);
 
   const graph_flow_options = useMemo(() => {
-    const out = new Set<string>();
-    graph_entrypoint_ids.forEach((x) => out.add(x));
-    if (graph_show_subflows) graph_subflow_ids.forEach((x) => out.add(x));
-    return Array.from(out).sort();
-  }, [graph_entrypoint_ids, graph_subflow_ids, graph_show_subflows]);
+    const flows = Array.isArray(bundle_info?.flows) ? (bundle_info?.flows as any[]) : [];
+    const from_bundle = flows.map((x) => String(x || "").trim()).filter(Boolean);
+    if (from_bundle.length) return Array.from(new Set(from_bundle)).sort();
+    return Array.from(new Set(graph_entrypoint_ids)).sort();
+  }, [bundle_info, graph_entrypoint_ids]);
 
   const graph_legend = useMemo(() => {
-    const nodes = Array.isArray((graph_flow as any)?.nodes) ? (graph_flow as any).nodes : [];
+    const flows: any[] = [];
+    if (graph_flow) flows.push(graph_flow);
+    if (graph_show_subflows) {
+      for (const v of Object.values(graph_flow_cache || {})) flows.push(v);
+    }
     const map = new Map<string, string>();
-    for (const n of nodes) {
-      const data = n?.data && typeof n.data === "object" ? n.data : {};
-      const nt = String((data as any)?.nodeType || n?.type || "").trim() || "unknown";
-      const col = String((data as any)?.headerColor || n?.headerColor || "").trim();
-      if (!map.has(nt)) map.set(nt, col);
+    for (const f of flows) {
+      const nodes = Array.isArray((f as any)?.nodes) ? (f as any).nodes : [];
+      for (const n of nodes) {
+        const data = n?.data && typeof n.data === "object" ? n.data : {};
+        const nt = String((data as any)?.nodeType || n?.type || "").trim() || "unknown";
+        const col = String((data as any)?.headerColor || n?.headerColor || "").trim();
+        if (!map.has(nt)) map.set(nt, col);
+      }
     }
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [graph_flow]);
+  }, [graph_flow, graph_show_subflows, graph_flow_cache]);
 
-  // Follow child run status/events while the attached run is waiting on a subworkflow.
+  // Follow the current deepest descendant run for status/events.
   useEffect(() => {
-    const child_id = sub_run_id.trim();
+    const child_id = follow_run_id.trim();
     const parent_id = run_id.trim();
-    const should_follow = connected && wait_reason === "subworkflow" && Boolean(child_id) && child_id !== parent_id;
+    const should_follow = connected && Boolean(child_id) && child_id !== parent_id;
 
     if (!should_follow) {
       if (child_abort_ref.current) child_abort_ref.current.abort();
@@ -909,7 +1175,7 @@ export function App(): React.ReactElement {
     child_abort_ref.current = abort;
     child_cursor_ref.current = 0;
     set_following_child_run_id(child_id);
-    push_log({ ts: now_iso(), kind: "info", title: `Following child run ${child_id} (status/events)` });
+    push_log({ ts: now_iso(), kind: "info", title: `Following run ${child_id} (status/events)` });
 
     let backoff_ms = 250;
     const run = async () => {
@@ -943,7 +1209,7 @@ export function App(): React.ReactElement {
     return () => {
       abort.abort();
     };
-  }, [connected, wait_reason, sub_run_id, run_id, gateway, following_child_run_id]);
+  }, [connected, follow_run_id, run_id, gateway, following_child_run_id]);
 
   return (
     <div className="app-shell">
@@ -1035,6 +1301,7 @@ export function App(): React.ReactElement {
                           className="btn"
                           onClick={() => {
                             set_flow_id(fid);
+                            set_graph_flow_id(fid);
                           }}
                           disabled={connecting || resuming}
                         >
@@ -1042,16 +1309,16 @@ export function App(): React.ReactElement {
                         </button>
                       );
                     })}
-                    {entrypoint_pins.some((p) => p && typeof p === "object" && p.default !== undefined) ? (
+                    {adaptive_pins.some((p) => p && typeof p === "object" && p.default !== undefined) ? (
                       <button className="btn" onClick={apply_entrypoint_defaults} disabled={connecting || resuming}>
                         Apply defaults
                       </button>
                     ) : null}
                   </div>
 
-                  {entrypoint_pins.length ? (
+                  {adaptive_pins.length ? (
                     <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "6px" }}>
-                      {entrypoint_pins.map((p) => {
+                      {adaptive_pins.map((p) => {
                         const pid = String(p.id || "").trim();
                         if (!pid) return null;
                         const ptype = String(p.type || "").trim() || "unknown";
@@ -1086,7 +1353,7 @@ export function App(): React.ReactElement {
                   </div>
                 ) : null}
 
-                {entrypoint_pins.map((p) => {
+                {adaptive_pins.map((p) => {
                   const pid = String(p?.id || "").trim();
                   if (!pid) return null;
                   const ptype = String(p?.type || "").trim().toLowerCase() || "unknown";
@@ -1610,7 +1877,14 @@ export function App(): React.ReactElement {
                   ) : null}
 
                   <div className="graph_panel">
-                    <FlowGraph flow={graph_flow} active_node_id={active_node_id} recent_nodes={recent_nodes} now_ms={graph_now_ms} />
+                    <FlowGraph
+                      flow={graph_flow}
+                      flow_by_id={graph_flow_cache}
+                      expand_subflows={graph_show_subflows}
+                      active_node_id={active_node_id}
+                      recent_nodes={recent_nodes}
+                      now_ms={graph_now_ms}
+                    />
                   </div>
 
                   <details className="graph_legend">

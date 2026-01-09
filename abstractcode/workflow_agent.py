@@ -13,10 +13,19 @@ from abstractruntime import RunState, RunStatus, Runtime, WorkflowSpec
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-_STATUS_EVENT_NAME = "abstractcode.status"
-_MESSAGE_EVENT_NAME = "abstractcode.message"
-_TOOL_EXEC_EVENT_NAME = "abstractcode.tool_execution"
-_TOOL_RESULT_EVENT_NAME = "abstractcode.tool_result"
+_UI_EVENT_NAMESPACE = "abstract"
+
+_STATUS_EVENT_NAME = f"{_UI_EVENT_NAMESPACE}.status"
+_MESSAGE_EVENT_NAME = f"{_UI_EVENT_NAMESPACE}.message"
+_TOOL_EXEC_EVENT_NAME = f"{_UI_EVENT_NAMESPACE}.tool_execution"
+_TOOL_RESULT_EVENT_NAME = f"{_UI_EVENT_NAMESPACE}.tool_result"
+
+
+def _normalize_ui_event_name(name: str) -> str:
+    s = str(name or "").strip()
+    if s.startswith("abstractcode."):
+        return f"{_UI_EVENT_NAMESPACE}.{s[len('abstractcode.'):]}".strip(".")
+    return s
 
 
 def _new_message(*, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -635,6 +644,7 @@ class WorkflowAgent(BaseAgent):
                 name = str(payload.get("name") or payload.get("event_name") or "").strip()
                 if not name:
                     return
+                name = _normalize_ui_event_name(name)
 
                 event_payload = payload.get("payload")
                 if name == _STATUS_EVENT_NAME:

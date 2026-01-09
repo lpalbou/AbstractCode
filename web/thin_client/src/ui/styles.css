@@ -491,15 +491,9 @@ a {
 }
 
 .json_line {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  display: block;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.json_line > * {
-  min-width: 0;
 }
 
 .json_toggle {
@@ -511,6 +505,7 @@ a {
   color: var(--muted);
   cursor: pointer;
   flex: 0 0 auto;
+  margin-right: 6px;
 }
 
 .json_toggle_inline {
@@ -518,6 +513,8 @@ a {
   height: 20px;
   border-radius: 8px;
   padding: 0;
+  margin-right: 0;
+  margin-left: 6px;
 }
 
 .json_toggle:hover {

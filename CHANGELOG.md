@@ -9,18 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Workflow-driven UI events (network-safe)**:
-  - Workflows can emit `Emit Event(name="abstractcode.message")` to show a message/notification in AbstractCode.
-  - Workflows can emit `Emit Event(name="abstractcode.tool_execution")` and `Emit Event(name="abstractcode.tool_result")` to render tool-call + tool-result UX blocks (without requiring actual tool execution).
+  - Workflows can emit `Emit Event(name="abstract.message")` to show a message/notification in AbstractCode.
+  - Workflows can emit `Emit Event(name="abstract.tool_execution")` and `Emit Event(name="abstract.tool_result")` to render tool-call + tool-result UX blocks (without requiring actual tool execution).
   - `WAIT_EVENT` can carry a `prompt` so workflows can do durable ask+wait under `WaitReason.EVENT` (useful for thin clients); AbstractCode will prompt and resume.
-  - `abstractcode.status` payload supports `duration` (seconds): default `-1` (sticky), `> 0` auto-clears unless superseded.
+  - `abstract.status` payload supports `duration` (seconds): default `-1` (sticky), `> 0` auto-clears unless superseded.
   - Tool event payloads can be a **single object or a list** (e.g., wire `LLM Call.tool_calls` / `Tool Calls.results` directly into an `Emit Event`).
+  - Backward compatibility: `abstractcode.*` remains a deprecated alias accepted by existing hosts.
 
 ## [0.3.0] - 2025-01-06
 
 ### Added
 - **Workflow Agent Support** (`abstractcode/workflow_agent.py`): Run VisualFlow workflows as first-class agents via `abstractcode --agent <flow_id|flow_name|/path/to/flow.json>`
   - `abstractcode.agent.v1` interface contract requires host-configurable `provider`/`model`/`tools` start pins (in addition to `request`/`response`)
-  - Workflows can emit `Emit Event(name="abstractcode.status")` to update TUI footer status text in real time
+  - Workflows can emit `Emit Event(name="abstract.status")` to update TUI footer status text in real time
   - `On Flow End.meta` (and optional `scratchpad`/`raw_result`) surfaced as assistant-message metadata (`workflow_meta`, `workflow_scratchpad`, `workflow_raw_result`)
   - File-backed persistence support for durable workflow execution
   - Documented in README with usage examples

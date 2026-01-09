@@ -88,12 +88,14 @@ The run loop in `ReactShell._run_loop()` drives one step at a time (`agent.step(
 ## Workflow UX Events (VisualFlow → AbstractCode)
 When running VisualFlow workflows as first-class agents (`abstractcode --agent <flow_ref>`), AbstractCode can translate
 reserved `EMIT_EVENT` names into terminal UX updates:
-- `abstractcode.status`: update the footer status text (payload can be `"text"` or `{text, duration}`)
+- `abstract.status`: update the footer status text (payload can be `"text"` or `{text, duration}`)
   - `duration` is seconds; default `-1` (sticky) and `> 0` auto-clears
-- `abstractcode.message`: show a message block (payload can be `"text"` or `{text, level?, title?}`)
-- `abstractcode.tool_execution` / `abstractcode.tool_result`: show tool call/result blocks (payload can be a single object or a list)
+- `abstract.message`: show a message block (payload can be `"text"` or `{text, level?, title?}`)
+- `abstract.tool_execution` / `abstract.tool_result`: show tool call/result blocks (payload can be a single object or a list)
 
 These are ledger-derived and JSON-safe, so hosts can forward them over a network transport (WebSocket/SSE/polling) if desired.
+
+Backward compatibility: `abstractcode.*` remains a deprecated alias accepted by existing hosts.
 
 ## Memory UX (Runtime-owned)
 
