@@ -5,6 +5,8 @@ import { random_id } from "../lib/ids";
 import { McpWorkerClient } from "../lib/mcp_worker_client";
 import { extract_emit_event, extract_tool_calls_from_wait, extract_wait_from_record } from "../lib/runtime_extractors";
 import { LedgerStreamEvent, StepRecord, ToolCall, ToolResult, WaitState } from "../lib/types";
+import { FlowGraph } from "./flow_graph";
+import { JsonViewer } from "./json_viewer";
 
 type Settings = {
   gateway_url: string;
@@ -14,10 +16,45 @@ type Settings = {
 };
 
 type UiLogItem = {
+  id: string;
   ts: string;
   kind: "step" | "event" | "message" | "error" | "info";
   title: string;
-  body?: string;
+  preview?: string;
+  data?: any;
+  cursor?: number;
+  run_id?: string;
+  node_id?: string;
+  status?: string;
+  effect_type?: string;
+  emit_name?: string;
+};
+
+type BundlePinDef = {
+  id: string;
+  label?: string;
+  type?: string;
+  default?: any;
+};
+
+type BundleEntrypoint = {
+  flow_id?: string;
+  workflow_id?: string | null;
+  name?: string | null;
+  description?: string;
+  interfaces?: string[];
+  inputs?: BundlePinDef[];
+  node_index?: Record<string, any>;
+};
+
+type BundleInfo = {
+  bundle_id?: string;
+  bundle_version?: string;
+  created_at?: string;
+  default_entrypoint?: string | null;
+  entrypoints?: BundleEntrypoint[];
+  flows?: string[];
+  metadata?: any;
 };
 
 function now_iso(): string {
@@ -30,6 +67,61 @@ function safe_json(v: any): string {
   } catch {
     return String(v);
   }
+}
+
+function safe_json_inline(v: any, max_len: number): string {
+  try {
+    const s = JSON.stringify(v);
+    if (typeof s !== "string") return String(v);
+    if (s.length <= max_len) return s;
+    return `${s.slice(0, Math.max(0, max_len - 1))}…`;
+  } catch {
+    const s = String(v);
+    if (s.length <= max_len) return s;
+    return `${s.slice(0, Math.max(0, max_len - 1))}…`;
+  }
+}
+
+function parse_namespaced_workflow_id(workflow_id: string): { bundle_id: string; flow_id: string } | null {
+  const s = String(workflow_id || "").trim();
+  const idx = s.indexOf(":");
+  if (idx <= 0 || idx >= s.length - 1) return null;
+  return { bundle_id: s.slice(0, idx), flow_id: s.slice(idx + 1) };
+}
+
+function clamp_preview(text: string, opts?: { max_chars?: number; max_lines?: number }): string {
+  const max_chars = typeof opts?.max_chars === "number" ? opts.max_chars : 360;
+  const max_lines = typeof opts?.max_lines === "number" ? opts.max_lines : 2;
+  const raw = String(text || "");
+  const lines = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const head = lines.slice(0, Math.max(1, max_lines)).join("\n");
+  const more_lines = lines.length > max_lines;
+  const trimmed = head.length > max_chars ? `${head.slice(0, Math.max(0, max_chars - 1))}…` : head;
+  if (more_lines && trimmed === head) return `${head}…`;
+  return trimmed;
+}
+
+function short_id(id: string, keep: number): string {
+  const s = String(id || "");
+  if (s.length <= keep) return s;
+  return `${s.slice(0, Math.max(0, keep - 1))}…`;
+}
+
+function extract_textish(payload: any): { text: string; duration: number } {
+  if (typeof payload === "string") return { text: payload, duration: -1 };
+  if (payload && typeof payload === "object") {
+    const text =
+      typeof (payload as any).text === "string"
+        ? String((payload as any).text)
+        : typeof (payload as any).value === "string"
+          ? String((payload as any).value)
+          : typeof (payload as any).message === "string"
+            ? String((payload as any).message)
+            : safe_json_inline(payload, 320);
+    const duration = typeof (payload as any).duration === "number" ? Number((payload as any).duration) : -1;
+    return { text, duration };
+  }
+  return { text: safe_json_inline(payload, 320), duration: -1 };
 }
 
 function load_settings(): Settings {
@@ -66,12 +158,20 @@ function is_waiting_status(rec: StepRecord | null): boolean {
 export function App(): React.ReactElement {
   const [settings, set_settings] = useState<Settings>(() => load_settings());
   const [run_id, set_run_id] = useState<string>("");
+  const [root_run_id, set_root_run_id] = useState<string>("");
   const [flow_id, set_flow_id] = useState<string>("");
   const [bundle_id, set_bundle_id] = useState<string>("");
   const [input_data_text, set_input_data_text] = useState<string>("{}");
 
+  const [bundle_info, set_bundle_info] = useState<BundleInfo | null>(null);
+  const [bundle_loading, set_bundle_loading] = useState(false);
+  const [bundle_error, set_bundle_error] = useState<string>("");
+  const [input_field_drafts, set_input_field_drafts] = useState<Record<string, string>>({});
+  const [input_field_errors, set_input_field_errors] = useState<Record<string, string>>({});
+
   const [connected, set_connected] = useState(false);
   const [connecting, set_connecting] = useState(false);
+  const [resuming, set_resuming] = useState(false);
   const [cursor, set_cursor] = useState<number>(0);
   const [records, set_records] = useState<Array<{ cursor: number; record: StepRecord }>>([]);
   const cursor_ref = useRef<number>(0);
@@ -80,11 +180,31 @@ export function App(): React.ReactElement {
 
   const [status_text, set_status_text] = useState<string>("");
   const status_timer_ref = useRef<number | null>(null);
+  const status_pulse_timer_ref = useRef<number | null>(null);
+  const [status_pulse, set_status_pulse] = useState(false);
+  const dismiss_timer_ref = useRef<number | null>(null);
+  const [dismissed_wait_key, set_dismissed_wait_key] = useState<string>("");
 
   const [log, set_log] = useState<UiLogItem[]>([]);
+  const [log_open, set_log_open] = useState<Record<string, boolean>>({});
   const [error_text, set_error_text] = useState<string>("");
 
+  const [right_tab, set_right_tab] = useState<"ledger" | "graph">("ledger");
+  const [graph_flow_id, set_graph_flow_id] = useState<string>("");
+  const [graph_flow, set_graph_flow] = useState<any | null>(null);
+  const [graph_loading, set_graph_loading] = useState(false);
+  const [graph_error, set_graph_error] = useState<string>("");
+  const [graph_show_subflows, set_graph_show_subflows] = useState(false);
+  const [graph_now_ms, set_graph_now_ms] = useState<number>(() => Date.now());
+  const [active_node_id, set_active_node_id] = useState<string>("");
+  const [recent_nodes, set_recent_nodes] = useState<Record<string, number>>({});
+  const recent_prune_timer_ref = useRef<number | null>(null);
+  const active_node_ref = useRef<string>("");
+
   const abort_ref = useRef<AbortController | null>(null);
+  const child_abort_ref = useRef<AbortController | null>(null);
+  const child_cursor_ref = useRef<number>(0);
+  const [following_child_run_id, set_following_child_run_id] = useState<string>("");
 
   const gateway = useMemo(() => new GatewayClient({ base_url: settings.gateway_url, auth_token: settings.auth_token }), [settings]);
   const worker = useMemo(
@@ -95,6 +215,38 @@ export function App(): React.ReactElement {
   const last_record = records.length ? records[records.length - 1].record : null;
   const wait_state: WaitState | null = useMemo(() => extract_wait_from_record(last_record), [last_record]);
 
+  const selected_entrypoint: BundleEntrypoint | null = useMemo(() => {
+    const bid = bundle_id.trim();
+    if (!bundle_info || !bid) return null;
+    if (String(bundle_info.bundle_id || "").trim() && String(bundle_info.bundle_id || "").trim() !== bid) return null;
+    const eps = Array.isArray(bundle_info.entrypoints) ? bundle_info.entrypoints : [];
+    if (!eps.length) return null;
+    const fid = flow_id.trim();
+    if (fid) return eps.find((e) => String(e.flow_id || "").trim() === fid) || null;
+    if (eps.length === 1) return eps[0];
+    const de = String(bundle_info.default_entrypoint || "").trim();
+    if (de) return eps.find((e) => String(e.flow_id || "").trim() === de) || null;
+    return null;
+  }, [bundle_info, bundle_id, flow_id]);
+
+  const entrypoint_pins: BundlePinDef[] = useMemo(() => {
+    const pins = selected_entrypoint?.inputs;
+    return Array.isArray(pins) ? (pins as BundlePinDef[]) : [];
+  }, [selected_entrypoint]);
+
+  const node_index_for_run: Record<string, any> = useMemo(() => {
+    const wid = typeof run_state?.workflow_id === "string" ? String(run_state.workflow_id) : "";
+    const parsed = parse_namespaced_workflow_id(wid);
+    if (parsed && bundle_info && String(bundle_info.bundle_id || "").trim() === parsed.bundle_id) {
+      const eps = Array.isArray(bundle_info.entrypoints) ? bundle_info.entrypoints : [];
+      const ep = eps.find((e) => String(e?.flow_id || "").trim() === parsed.flow_id);
+      if (ep && ep.node_index && typeof ep.node_index === "object") return ep.node_index as any;
+    }
+    const idx = selected_entrypoint?.node_index;
+    if (idx && typeof idx === "object") return idx as any;
+    return {};
+  }, [run_state, bundle_info, selected_entrypoint]);
+
   useEffect(() => {
     save_settings(settings);
   }, [settings]);
@@ -102,9 +254,146 @@ export function App(): React.ReactElement {
   useEffect(() => {
     return () => {
       if (abort_ref.current) abort_ref.current.abort();
+      if (child_abort_ref.current) child_abort_ref.current.abort();
       if (status_timer_ref.current) window.clearTimeout(status_timer_ref.current);
+      if (status_pulse_timer_ref.current) window.clearTimeout(status_pulse_timer_ref.current);
+      if (recent_prune_timer_ref.current) window.clearTimeout(recent_prune_timer_ref.current);
+      if (dismiss_timer_ref.current) window.clearTimeout(dismiss_timer_ref.current);
     };
   }, []);
+
+  const input_data_obj: Record<string, any> | null = useMemo(() => {
+    const raw = input_data_text.trim();
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }, [input_data_text]);
+  const request_value = typeof input_data_obj?.request === "string" ? String(input_data_obj.request) : "";
+  const provider_value = typeof input_data_obj?.provider === "string" ? String(input_data_obj.provider) : "";
+  const model_value = typeof input_data_obj?.model === "string" ? String(input_data_obj.model) : "";
+  const has_adaptive_inputs = entrypoint_pins.length > 0 && Boolean(bundle_id.trim());
+
+  function update_input_data_field(key: string, value: string): void {
+    let obj: Record<string, any> = {};
+    try {
+      const parsed = JSON.parse(input_data_text || "{}");
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) obj = parsed;
+    } catch {
+      obj = {};
+    }
+
+    const trimmed = String(value || "").trim();
+    if (!trimmed) delete obj[key];
+    else obj[key] = trimmed;
+
+    set_input_data_text(JSON.stringify(obj, null, 2));
+  }
+
+  function set_input_data_value(key: string, value: any): void {
+    if (input_data_obj === null) {
+      set_error_text("Invalid input_data JSON (fix it in Advanced JSON or Reset input).");
+      return;
+    }
+    const obj: Record<string, any> = { ...(input_data_obj || {}) };
+    if (value === undefined) delete obj[key];
+    else obj[key] = value;
+    set_input_data_text(JSON.stringify(obj, null, 2));
+  }
+
+  function delete_input_data_key(key: string): void {
+    if (input_data_obj === null) {
+      set_error_text("Invalid input_data JSON (fix it in Advanced JSON or Reset input).");
+      return;
+    }
+    const obj: Record<string, any> = { ...(input_data_obj || {}) };
+    delete obj[key];
+    set_input_data_text(JSON.stringify(obj, null, 2));
+  }
+
+  async function on_load_bundle(): Promise<void> {
+    const bid = bundle_id.trim();
+    if (!bid) {
+      set_bundle_error("Missing bundle_id");
+      return;
+    }
+    set_bundle_error("");
+    set_bundle_loading(true);
+    try {
+      const info = (await gateway.get_bundle(bid)) as BundleInfo;
+      set_bundle_info(info);
+      set_input_field_drafts({});
+      set_input_field_errors({});
+      push_log({ ts: now_iso(), kind: "info", title: `Loaded bundle ${bid}` });
+    } catch (e: any) {
+      set_bundle_info(null);
+      set_bundle_error(String(e?.message || e || "Failed to load bundle"));
+    } finally {
+      set_bundle_loading(false);
+    }
+  }
+
+  function apply_entrypoint_defaults(): void {
+    const pins = entrypoint_pins;
+    if (!pins.length) return;
+
+    let obj: Record<string, any> = {};
+    try {
+      const parsed = JSON.parse(input_data_text || "{}");
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) obj = parsed;
+    } catch {
+      obj = {};
+    }
+
+    let changed = false;
+    for (const p of pins) {
+      if (!p || typeof p !== "object") continue;
+      const k = String(p.id || "").trim();
+      if (!k) continue;
+      if (obj[k] !== undefined) continue;
+      if (p.default === undefined) continue;
+      obj[k] = p.default;
+      changed = true;
+    }
+
+    if (changed) {
+      set_input_data_text(JSON.stringify(obj, null, 2));
+      set_input_field_drafts({});
+      set_input_field_errors({});
+    }
+  }
+
+  async function copy_to_clipboard(text: string): Promise<void> {
+    const payload = String(text ?? "");
+    if (!payload) return;
+    try {
+      await navigator.clipboard.writeText(payload);
+      set_status("Copied to clipboard", 2);
+      return;
+    } catch {
+      // fall back
+    }
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = payload;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      ta.style.top = "0";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      set_status("Copied to clipboard", 2);
+    } catch {
+      set_status("Copy failed", 2);
+    }
+  }
 
   // Best-effort run state polling (pause/cancel are run-level changes that are not currently ledgered).
   useEffect(() => {
@@ -129,12 +418,22 @@ export function App(): React.ReactElement {
     };
   }, [connected, run_id, gateway]);
 
-  function push_log(item: UiLogItem): void {
-    set_log((prev) => [item, ...prev].slice(0, 200));
+  function push_log(item: Omit<UiLogItem, "id"> & { id?: string }): void {
+    const id = String(item.id || "").trim() || random_id();
+    set_log((prev) => [{ ...(item as any), id } as UiLogItem, ...prev].slice(0, 200));
   }
 
   function set_status(text: string, duration_s: number): void {
     set_status_text(text);
+
+    if (status_pulse_timer_ref.current) window.clearTimeout(status_pulse_timer_ref.current);
+    set_status_pulse(false);
+    window.requestAnimationFrame(() => set_status_pulse(true));
+    status_pulse_timer_ref.current = window.setTimeout(() => {
+      set_status_pulse(false);
+      status_pulse_timer_ref.current = null;
+    }, 1500);
+
     if (status_timer_ref.current) {
       window.clearTimeout(status_timer_ref.current);
       status_timer_ref.current = null;
@@ -153,34 +452,128 @@ export function App(): React.ReactElement {
     set_records((prev) => [...prev, { cursor: ev.cursor, record: ev.record }]);
 
     const emit = extract_emit_event(ev.record);
-    if (emit && emit.name.startsWith("abstractcode.")) {
-      if (emit.name === "abstractcode.status") {
-        const payload = emit.payload;
-        const text = typeof payload?.text === "string" ? payload.text : typeof payload === "string" ? payload : safe_json(payload);
-        const duration = typeof payload?.duration === "number" ? payload.duration : -1;
-        set_status(text, duration);
-      } else if (emit.name === "abstractcode.message") {
-        const payload = emit.payload;
-        const text =
-          typeof payload?.text === "string"
-            ? payload.text
-            : typeof payload?.message === "string"
-              ? payload.message
-              : typeof payload === "string"
-                ? payload
-                : safe_json(payload);
-        push_log({ ts: now_iso(), kind: "message", title: "Message", body: text });
-      } else if (emit.name === "abstractcode.tool_execution") {
-        push_log({ ts: now_iso(), kind: "event", title: "Tool execution", body: safe_json(emit.payload) });
-      } else if (emit.name === "abstractcode.tool_result") {
-        push_log({ ts: now_iso(), kind: "event", title: "Tool result", body: safe_json(emit.payload) });
-      } else {
-        push_log({ ts: now_iso(), kind: "event", title: emit.name, body: safe_json(emit.payload) });
-      }
-    } else {
-      // Default trace log
-      push_log({ ts: now_iso(), kind: "step", title: format_step_summary(ev.record), body: safe_json(ev.record) });
+    if (emit && emit.name === "abstractcode.status") {
+      const { text, duration } = extract_textish(emit.payload);
+      set_status(text, duration);
     }
+
+    const rec = ev.record;
+    const node_id = typeof rec?.node_id === "string" ? rec.node_id : "";
+    const status = typeof rec?.status === "string" ? rec.status : "";
+    const effect_type = typeof rec?.effect?.type === "string" ? rec.effect.type : "";
+    const rec_run_id = typeof rec?.run_id === "string" ? rec.run_id : "";
+
+    if (node_id) {
+      const now = Date.now();
+      const prev_active = active_node_ref.current;
+      active_node_ref.current = node_id;
+      set_active_node_id(node_id);
+      set_graph_now_ms(now);
+      set_recent_nodes((prev) => {
+        const next: Record<string, number> = {};
+        for (const [k, until] of Object.entries(prev)) {
+          if (typeof until === "number" && until > now) next[k] = until;
+        }
+        next[node_id] = Math.max(next[node_id] || 0, now + 2000);
+        if (prev_active && prev_active !== node_id) next[prev_active] = Math.max(next[prev_active] || 0, now + 2000);
+        // Cap to avoid unbounded growth.
+        const keys = Object.keys(next);
+        if (keys.length <= 80) return next;
+        const keep = keys.sort((a, b) => (next[b] || 0) - (next[a] || 0)).slice(0, 80);
+        const pruned: Record<string, number> = {};
+        for (const k of keep) pruned[k] = next[k] || 0;
+        return pruned;
+      });
+
+      if (recent_prune_timer_ref.current) window.clearTimeout(recent_prune_timer_ref.current);
+      recent_prune_timer_ref.current = window.setTimeout(() => {
+        const t = Date.now();
+        set_recent_nodes((prev) => {
+          const next: Record<string, number> = {};
+          for (const [k, until] of Object.entries(prev)) {
+            if (typeof until === "number" && until > t) next[k] = until;
+          }
+          return next;
+        });
+        set_graph_now_ms(t);
+        recent_prune_timer_ref.current = null;
+      }, 2200);
+    }
+
+    let kind: UiLogItem["kind"] = "step";
+    let title = node_id || "(node?)";
+    let preview = "";
+
+    if (emit && emit.name && emit.name.startsWith("abstractcode.")) {
+      kind = emit.name === "abstractcode.message" ? "message" : "event";
+      title = emit.name;
+      preview = clamp_preview(extract_textish(emit.payload).text);
+    } else if (rec?.error) {
+      kind = "error";
+      title = "error";
+      preview = clamp_preview(safe_json_inline(rec.error, 360));
+    } else if (status === "waiting") {
+      const w = extract_wait_from_record(rec);
+      const reason = String(w?.reason || "").trim();
+      preview = clamp_preview(reason ? `waiting • ${reason}` : "waiting");
+    } else if (rec?.result) {
+      preview = clamp_preview(safe_json_inline(rec.result, 360));
+    } else if (effect_type) {
+      preview = clamp_preview(effect_type);
+    } else {
+      preview = clamp_preview(format_step_summary(rec));
+    }
+
+    push_log({
+      id: `step:${rec_run_id || run_id.trim() || "?"}:${ev.cursor}`,
+      ts: String(rec?.ended_at || rec?.started_at || now_iso()),
+      kind,
+      title,
+      preview,
+      data: rec,
+      cursor: ev.cursor,
+      run_id: rec_run_id || run_id.trim() || undefined,
+      node_id,
+      status,
+      effect_type,
+      emit_name: emit?.name || undefined,
+    });
+  }
+
+  function handle_child_step(child_run_id: string, ev: LedgerStreamEvent): void {
+    child_cursor_ref.current = Math.max(child_cursor_ref.current, ev.cursor);
+    const emit = extract_emit_event(ev.record);
+    if (!emit || !emit.name || !emit.name.startsWith("abstractcode.")) return;
+
+    if (emit.name === "abstractcode.status") {
+      const { text, duration } = extract_textish(emit.payload);
+      set_status(text, duration);
+      return;
+    }
+
+    const rec = ev.record;
+    const node_id = typeof rec?.node_id === "string" ? rec.node_id : "";
+    const status = typeof rec?.status === "string" ? rec.status : "";
+    const effect_type = typeof rec?.effect?.type === "string" ? rec.effect.type : "";
+
+    const kind: UiLogItem["kind"] = emit.name === "abstractcode.message" ? "message" : "event";
+    const title = `child • ${emit.name}`;
+    const preview = clamp_preview(extract_textish(emit.payload).text);
+
+    push_log({
+      id: `child:${child_run_id}:${ev.cursor}`,
+      ts: String(rec?.ended_at || rec?.started_at || now_iso()),
+      kind,
+      title,
+      preview,
+      data: rec,
+      cursor: ev.cursor,
+      run_id: child_run_id,
+      node_id,
+      status,
+      effect_type,
+      emit_name: emit.name,
+    });
   }
 
   async function replay_ledger(run_id_value: string, opts: { after: number }): Promise<number> {
@@ -209,15 +602,32 @@ export function App(): React.ReactElement {
     set_records([]);
     set_cursor(0);
     cursor_ref.current = 0;
+    set_log([]);
+    set_log_open({});
+    set_status_text("");
+    set_run_state(null);
+    set_dismissed_wait_key("");
+    set_active_node_id("");
+    active_node_ref.current = "";
+    set_recent_nodes({});
+    set_graph_now_ms(Date.now());
+    if (recent_prune_timer_ref.current) window.clearTimeout(recent_prune_timer_ref.current);
+    recent_prune_timer_ref.current = null;
+    if (dismiss_timer_ref.current) window.clearTimeout(dismiss_timer_ref.current);
+    dismiss_timer_ref.current = null;
 
     if (abort_ref.current) abort_ref.current.abort();
+    if (child_abort_ref.current) child_abort_ref.current.abort();
+    child_abort_ref.current = null;
+    child_cursor_ref.current = 0;
+    set_following_child_run_id("");
     const abort = new AbortController();
     abort_ref.current = abort;
 
     try {
       let after = await replay_ledger(run_id_value, { after: 0 });
       set_connected(true);
-      push_log({ ts: now_iso(), kind: "info", title: `Attached to run ${run_id_value}` });
+      push_log({ ts: now_iso(), kind: "info", title: `Attached to run ${run_id_value}`, data: { run_id: run_id_value } });
 
       let backoff_ms = 250;
       while (!abort.signal.aborted) {
@@ -232,7 +642,7 @@ export function App(): React.ReactElement {
         } catch (e: any) {
           if (abort.signal.aborted) break;
           const msg = String(e?.message || e || "stream error");
-          push_log({ ts: now_iso(), kind: "error", title: "Ledger stream error (will retry)", body: msg });
+          push_log({ ts: now_iso(), kind: "error", title: "Ledger stream error (will retry)", preview: clamp_preview(msg), data: { error: msg } });
         }
 
         if (abort.signal.aborted) break;
@@ -242,7 +652,7 @@ export function App(): React.ReactElement {
     } catch (e: any) {
       const msg = String(e?.message || e || "unknown error");
       set_error_text(msg);
-      push_log({ ts: now_iso(), kind: "error", title: "Connection error", body: msg });
+      push_log({ ts: now_iso(), kind: "error", title: "Connection error", preview: clamp_preview(msg), data: { error: msg } });
       set_connected(false);
     } finally {
       set_connecting(false);
@@ -251,9 +661,18 @@ export function App(): React.ReactElement {
 
   async function on_start_run(): Promise<void> {
     const fid = flow_id.trim();
-    if (!fid) {
-      set_error_text("Missing flow_id");
+    const bid = bundle_id.trim();
+    if (!fid && !bid) {
+      set_error_text("Missing flow_id (or bundle_id for bundle entrypoint)");
       return;
+    }
+    if (bid && !fid && bundle_info && String(bundle_info.bundle_id || "").trim() === bid) {
+      const eps = Array.isArray(bundle_info.entrypoints) ? bundle_info.entrypoints : [];
+      const de = String(bundle_info.default_entrypoint || "").trim();
+      if (eps.length > 1 && !de) {
+        set_error_text(`Bundle '${bid}' has multiple entrypoints; set flow_id to select which one to start (or set a bundle default entrypoint).`);
+        return;
+      }
     }
     set_error_text("");
     set_connecting(true);
@@ -270,7 +689,8 @@ export function App(): React.ReactElement {
           throw new Error(`Invalid input_data JSON: ${String(e?.message || e)}`);
         }
       }
-      const rid = await gateway.start_run(fid, input_data, { bundle_id: bundle_id.trim() || undefined });
+      const rid = await gateway.start_run(fid || undefined, input_data, { bundle_id: bid || undefined });
+      set_root_run_id(rid);
       set_run_id(rid);
       await connect_to_run(rid);
     } catch (e: any) {
@@ -286,6 +706,7 @@ export function App(): React.ReactElement {
       set_error_text("Missing run_id");
       return;
     }
+    set_root_run_id(rid);
     await connect_to_run(rid);
   }
 
@@ -307,7 +728,7 @@ export function App(): React.ReactElement {
         payload,
         client_id: "web_pwa",
       });
-      push_log({ ts: now_iso(), kind: "info", title: `${type} submitted`, body: reason ? `reason: ${reason}` : "" });
+      push_log({ ts: now_iso(), kind: "info", title: `${type} submitted`, preview: reason ? `reason: ${reason}` : "", data: { type, reason } });
       // Refresh run state quickly.
       try {
         const st = await gateway.get_run(rid);
@@ -327,7 +748,12 @@ export function App(): React.ReactElement {
       set_error_text("No active wait to resume");
       return;
     }
+    if (String(wait_state?.reason || "").trim() === "subworkflow") {
+      set_error_text("This run is waiting on a subworkflow; attach to the child run instead of resuming manually.");
+      return;
+    }
     set_error_text("");
+    set_resuming(true);
     try {
       await gateway.submit_command({
         command_id: random_id(),
@@ -336,9 +762,16 @@ export function App(): React.ReactElement {
         payload: { wait_key: wk, payload: payload_obj || {} },
         client_id: "web_pwa",
       });
-      push_log({ ts: now_iso(), kind: "info", title: "Resume submitted", body: safe_json({ wait_key: wk }) });
+      push_log({ ts: now_iso(), kind: "info", title: "Resume submitted", preview: clamp_preview(`wait_key: ${wk}`), data: { wait_key: wk, payload: payload_obj || {} } });
+      set_dismissed_wait_key(wk);
+      if (dismiss_timer_ref.current) window.clearTimeout(dismiss_timer_ref.current);
+      dismiss_timer_ref.current = window.setTimeout(() => {
+        set_dismissed_wait_key((prev) => (prev === wk ? "" : prev));
+      }, 2000);
     } catch (e: any) {
       set_error_text(String(e?.message || e || "resume failed"));
+    } finally {
+      set_resuming(false);
     }
   }
 
@@ -347,34 +780,184 @@ export function App(): React.ReactElement {
       set_error_text("No worker configured");
       return;
     }
+    if (resuming) return;
     set_error_text("");
+    set_resuming(true);
 
-    const results: ToolResult[] = [];
-    for (const tc of tool_calls) {
-      // Sequential to keep UX predictable (and avoid flooding).
-      // Future: bounded concurrency + cancellation.
-      const res = await worker.call_tool(tc);
-      results.push(res);
+    try {
+      const results: ToolResult[] = [];
+      for (const tc of tool_calls) {
+        // Sequential to keep UX predictable (and avoid flooding).
+        // Future: bounded concurrency + cancellation.
+        const res = await worker.call_tool(tc);
+        results.push(res);
+      }
+
+      await resume_wait({ mode: "executed", results });
+    } finally {
+      set_resuming(false);
     }
-
-    await resume_wait({ mode: "executed", results });
   }
 
   const tool_calls_for_wait = useMemo(() => extract_tool_calls_from_wait(wait_state), [wait_state]);
-  const show_wait_modal = is_waiting_status(last_record) && wait_state && wait_state.wait_key;
+  const wait_key = String(wait_state?.wait_key || "").trim();
+  const wait_reason = String(wait_state?.reason || "").trim();
+  const is_waiting = is_waiting_status(last_record) && Boolean(wait_key);
+  const is_user_wait = wait_reason === "user";
+  const has_tool_wait = tool_calls_for_wait.length > 0;
+  const show_wait_modal = is_waiting && wait_key && (is_user_wait || has_tool_wait) && dismissed_wait_key !== wait_key;
+  const sub_run_id = typeof (wait_state as any)?.details?.sub_run_id === "string" ? String((wait_state as any).details.sub_run_id) : "";
+
+  const graph_entrypoint_ids = useMemo(() => {
+    const eps = Array.isArray(bundle_info?.entrypoints) ? bundle_info?.entrypoints : [];
+    return (eps || [])
+      .map((e: any) => String(e?.flow_id || "").trim())
+      .filter(Boolean);
+  }, [bundle_info]);
+
+  useEffect(() => {
+    const root = String(selected_entrypoint?.flow_id || "").trim();
+    if (!root) return;
+    if (!graph_flow_id.trim()) set_graph_flow_id(root);
+  }, [selected_entrypoint, graph_flow_id]);
+
+  useEffect(() => {
+    const bid = bundle_id.trim();
+    const fid = graph_flow_id.trim();
+    if (!bid || !fid) {
+      set_graph_flow(null);
+      set_graph_error("");
+      set_graph_loading(false);
+      return;
+    }
+    let stopped = false;
+    set_graph_loading(true);
+    set_graph_error("");
+    gateway
+      .get_bundle_flow(bid, fid)
+      .then((res) => {
+        if (stopped) return;
+        const flow = (res as any)?.flow;
+        set_graph_flow(flow && typeof flow === "object" ? flow : null);
+      })
+      .catch((e: any) => {
+        if (stopped) return;
+        set_graph_flow(null);
+        set_graph_error(String(e?.message || e || "Failed to load flow"));
+      })
+      .finally(() => {
+        if (stopped) return;
+        set_graph_loading(false);
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [bundle_id, graph_flow_id, gateway]);
+
+  const graph_subflow_ids = useMemo(() => {
+    if (!graph_show_subflows) return [];
+    const nodes = Array.isArray((graph_flow as any)?.nodes) ? (graph_flow as any).nodes : [];
+    const out = new Set<string>();
+    for (const n of nodes) {
+      const data = n?.data && typeof n.data === "object" ? n.data : {};
+      const nt = String((data as any)?.nodeType || n?.type || "").trim();
+      if (nt !== "subflow") continue;
+      const sid = (data as any)?.subflowId || (data as any)?.flowId;
+      const s = typeof sid === "string" ? sid.trim() : "";
+      if (s) out.add(s.includes(":") ? s.split(":", 2)[1] : s);
+    }
+    return Array.from(out).sort();
+  }, [graph_flow, graph_show_subflows]);
+
+  const graph_flow_options = useMemo(() => {
+    const out = new Set<string>();
+    graph_entrypoint_ids.forEach((x) => out.add(x));
+    if (graph_show_subflows) graph_subflow_ids.forEach((x) => out.add(x));
+    return Array.from(out).sort();
+  }, [graph_entrypoint_ids, graph_subflow_ids, graph_show_subflows]);
+
+  const graph_legend = useMemo(() => {
+    const nodes = Array.isArray((graph_flow as any)?.nodes) ? (graph_flow as any).nodes : [];
+    const map = new Map<string, string>();
+    for (const n of nodes) {
+      const data = n?.data && typeof n.data === "object" ? n.data : {};
+      const nt = String((data as any)?.nodeType || n?.type || "").trim() || "unknown";
+      const col = String((data as any)?.headerColor || n?.headerColor || "").trim();
+      if (!map.has(nt)) map.set(nt, col);
+    }
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [graph_flow]);
+
+  // Follow child run status/events while the attached run is waiting on a subworkflow.
+  useEffect(() => {
+    const child_id = sub_run_id.trim();
+    const parent_id = run_id.trim();
+    const should_follow = connected && wait_reason === "subworkflow" && Boolean(child_id) && child_id !== parent_id;
+
+    if (!should_follow) {
+      if (child_abort_ref.current) child_abort_ref.current.abort();
+      child_abort_ref.current = null;
+      child_cursor_ref.current = 0;
+      if (following_child_run_id) set_following_child_run_id("");
+      return;
+    }
+
+    if (following_child_run_id === child_id) return;
+
+    if (child_abort_ref.current) child_abort_ref.current.abort();
+    const abort = new AbortController();
+    child_abort_ref.current = abort;
+    child_cursor_ref.current = 0;
+    set_following_child_run_id(child_id);
+    push_log({ ts: now_iso(), kind: "info", title: `Following child run ${child_id} (status/events)` });
+
+    let backoff_ms = 250;
+    const run = async () => {
+      while (!abort.signal.aborted) {
+        try {
+          await gateway.stream_ledger(child_id, {
+            after: child_cursor_ref.current,
+            on_step: (ev) => handle_child_step(child_id, ev),
+            signal: abort.signal,
+          });
+          return;
+        } catch (e: any) {
+          if (abort.signal.aborted) break;
+          const msg = String(e?.message || e || "stream error");
+          push_log({
+            ts: now_iso(),
+            kind: "error",
+            title: `Child ledger stream error (will retry)`,
+            preview: clamp_preview(msg),
+            data: { child_run_id: child_id, error: msg },
+          });
+        }
+
+        if (abort.signal.aborted) break;
+        await new Promise((r) => setTimeout(r, backoff_ms));
+        backoff_ms = Math.min(5000, Math.floor(backoff_ms * 1.6));
+      }
+    };
+    run();
+
+    return () => {
+      abort.abort();
+    };
+  }, [connected, wait_reason, sub_run_id, run_id, gateway, following_child_run_id]);
 
   return (
-    <div className="container">
-      <div className="title">
-        <h1>AbstractCode Thin Client (Web/PWA)</h1>
-        <div className="badge mono">
-          {connected ? "connected" : connecting ? "connecting…" : "disconnected"} • cursor {cursor}
+    <div className="app-shell">
+      <div className="container">
+        <div className="title">
+          <h1>AbstractCode Thin Client (Web/PWA)</h1>
+          <div className="badge mono">
+            {connected ? "connected" : connecting ? "connecting…" : "disconnected"} • cursor {cursor}
+          </div>
         </div>
-      </div>
 
-      <div className="row">
-        <div className="col">
-          <div className="card">
+        <div className="app-main">
+          <div className="panel">
+            <div className="card panel_card scroll_y">
             <div className="field">
               <label>Gateway URL (blank = same origin / dev proxy)</label>
               <input
@@ -397,13 +980,24 @@ export function App(): React.ReactElement {
               <div className="col">
                 <div className="field">
                   <label>Bundle ID (optional)</label>
-                  <input className="mono" value={bundle_id} onChange={(e) => set_bundle_id(e.target.value)} placeholder="bundle-subflow" />
+                  <div className="field_inline">
+                    <input className="mono" value={bundle_id} onChange={(e) => set_bundle_id(e.target.value)} placeholder="ac-advanced-agent-v2" />
+                    <button className="btn" onClick={on_load_bundle} disabled={bundle_loading || connecting || resuming || !bundle_id.trim()}>
+                      {bundle_loading ? "Loading…" : "Load"}
+                    </button>
+                  </div>
+                  {bundle_error ? <div className="mono" style={{ color: "rgba(239, 68, 68, 0.9)", fontSize: "12px" }}>{bundle_error}</div> : null}
                 </div>
               </div>
               <div className="col">
                 <div className="field">
-                  <label>Flow ID (start run)</label>
-                  <input className="mono" value={flow_id} onChange={(e) => set_flow_id(e.target.value)} placeholder="a803f4bd" />
+                  <label>Flow ID (start run; optional with bundle entrypoint)</label>
+                  <input
+                    className="mono"
+                    value={flow_id}
+                    onChange={(e) => set_flow_id(e.target.value)}
+                    placeholder="(optional) defaults to bundle entrypoint"
+                  />
                 </div>
               </div>
               <div className="col">
@@ -414,19 +1008,345 @@ export function App(): React.ReactElement {
               </div>
             </div>
 
-            <div className="field">
-              <label>Input data (JSON)</label>
-              <textarea
-                className="mono"
-                value={input_data_text}
-                onChange={(e) => set_input_data_text(e.target.value)}
-                placeholder='{"request":"...","provider":"lmstudio","model":"qwen/qwen3-next-80b"}'
-                rows={6}
-              />
-            </div>
+            {bundle_info && String(bundle_info.bundle_id || "").trim() === bundle_id.trim() ? (
+              <div className="log_item" style={{ borderColor: "rgba(96, 165, 250, 0.25)" }}>
+                <div className="meta">
+                  <span className="mono">bundle</span>
+                  <span className="mono">
+                    {String(bundle_info.bundle_id || "")}
+                    {bundle_info.bundle_version ? ` • v${String(bundle_info.bundle_version)}` : ""}
+                  </span>
+                </div>
+                <div className="body">
+                  <div className="mono" style={{ fontSize: "12px", color: "var(--muted)" }}>
+                    {Array.isArray(bundle_info.entrypoints) ? `${bundle_info.entrypoints.length} entrypoint(s)` : "entrypoints: (unknown)"}
+                    {bundle_info.default_entrypoint ? ` • default: ${String(bundle_info.default_entrypoint)}` : ""}
+                    {selected_entrypoint?.flow_id ? ` • selected: ${String(selected_entrypoint.flow_id)}` : ""}
+                  </div>
+                  <div className="log_actions">
+                    {(Array.isArray(bundle_info.entrypoints) ? bundle_info.entrypoints : []).map((ep) => {
+                      const fid = String(ep?.flow_id || "").trim();
+                      if (!fid) return null;
+                      const name = String(ep?.name || "").trim();
+                      const label = name ? `${name} (${fid})` : fid;
+                      return (
+                        <button
+                          key={fid}
+                          className="btn"
+                          onClick={() => {
+                            set_flow_id(fid);
+                          }}
+                          disabled={connecting || resuming}
+                        >
+                          Use {label}
+                        </button>
+                      );
+                    })}
+                    {entrypoint_pins.some((p) => p && typeof p === "object" && p.default !== undefined) ? (
+                      <button className="btn" onClick={apply_entrypoint_defaults} disabled={connecting || resuming}>
+                        Apply defaults
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {entrypoint_pins.length ? (
+                    <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                      {entrypoint_pins.map((p) => {
+                        const pid = String(p.id || "").trim();
+                        if (!pid) return null;
+                        const ptype = String(p.type || "").trim() || "unknown";
+                        const def = p.default;
+                        return (
+                          <div key={pid} style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
+                            <span className="chip mono">{pid}</span>
+                            <span className="chip mono muted">{ptype}</span>
+                            {def !== undefined ? <span className="chip mono muted">default {safe_json_inline(def, 80)}</span> : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="mono" style={{ marginTop: "8px", fontSize: "12px", color: "var(--muted)" }}>
+                      (no input pin definitions discovered)
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {has_adaptive_inputs ? (
+              <>
+                {input_data_obj === null ? (
+                  <div className="log_item" style={{ borderColor: "rgba(239, 68, 68, 0.35)" }}>
+                    <div className="meta">
+                      <span className="mono">input error</span>
+                      <span className="mono">{now_iso()}</span>
+                    </div>
+                    <div className="body mono">Invalid input JSON. Fix it in Advanced JSON or click “Reset input”.</div>
+                  </div>
+                ) : null}
+
+                {entrypoint_pins.map((p) => {
+                  const pid = String(p?.id || "").trim();
+                  if (!pid) return null;
+                  const ptype = String(p?.type || "").trim().toLowerCase() || "unknown";
+                  const disabled = input_data_obj === null || connecting || resuming;
+                  const cur = input_data_obj && input_data_obj[pid] !== undefined ? input_data_obj[pid] : undefined;
+                  const err = input_field_errors[pid];
+                  const def = (p as any).default;
+
+                  const label_bits: string[] = [pid];
+                  if (ptype) label_bits.push(ptype);
+                  if (def !== undefined) label_bits.push(`default ${safe_json_inline(def, 60)}`);
+
+                  const label = label_bits.join(" • ");
+
+                  // Special-cases: tools/context are common and benefit from dedicated widgets.
+                  if (pid === "tools") {
+                    const draft =
+                      input_field_drafts[pid] ??
+                      (Array.isArray(cur) ? (cur as any[]).map((x) => String(x)).join("\n") : typeof cur === "string" ? String(cur) : "");
+                    return (
+                      <div key={pid} className="field">
+                        <label>{label}</label>
+                        <textarea
+                          className="mono"
+                          disabled={disabled}
+                          value={draft}
+                          onChange={(e) => {
+                            const text = e.target.value;
+                            set_input_field_drafts((prev) => ({ ...prev, [pid]: text }));
+                            const arr = text
+                              .split("\n")
+                              .map((x) => x.trim())
+                              .filter(Boolean);
+                            set_input_field_errors((prev) => {
+                              const next = { ...prev };
+                              delete next[pid];
+                              return next;
+                            });
+                            if (!arr.length) delete_input_data_key(pid);
+                            else set_input_data_value(pid, arr);
+                          }}
+                          rows={4}
+                          placeholder={"list_files\nsearch_files\nread_file\n..."}
+                        />
+                        {err ? <div className="mono" style={{ color: "rgba(239, 68, 68, 0.9)", fontSize: "12px" }}>{err}</div> : null}
+                      </div>
+                    );
+                  }
+
+                  if (ptype === "number" || pid === "max_iterations") {
+                    const base = typeof cur === "number" ? String(cur) : cur !== undefined ? String(cur) : "";
+                    const draft = input_field_drafts[pid] ?? base;
+                    return (
+                      <div key={pid} className="field">
+                        <label>{label}</label>
+                        <input
+                          className="mono"
+                          disabled={disabled}
+                          type="number"
+                          value={draft}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            set_input_field_drafts((prev) => ({ ...prev, [pid]: raw }));
+                            if (!raw.trim()) {
+                              set_input_field_errors((prev) => {
+                                const next = { ...prev };
+                                delete next[pid];
+                                return next;
+                              });
+                              delete_input_data_key(pid);
+                              return;
+                            }
+                            const num = Number(raw);
+                            if (!Number.isFinite(num)) {
+                              set_input_field_errors((prev) => ({ ...prev, [pid]: "Invalid number" }));
+                              return;
+                            }
+                            set_input_field_errors((prev) => {
+                              const next = { ...prev };
+                              delete next[pid];
+                              return next;
+                            });
+                            set_input_data_value(pid, num);
+                          }}
+                        />
+                        {err ? <div className="mono" style={{ color: "rgba(239, 68, 68, 0.9)", fontSize: "12px" }}>{err}</div> : null}
+                      </div>
+                    );
+                  }
+
+                  if (ptype === "boolean") {
+                    const checked = Boolean(cur === true);
+                    return (
+                      <div key={pid} className="field">
+                        <label>{label}</label>
+                        <label className="mono" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={disabled}
+                            onChange={(e) => {
+                              set_input_field_errors((prev) => {
+                                const next = { ...prev };
+                                delete next[pid];
+                                return next;
+                              });
+                              set_input_data_value(pid, Boolean(e.target.checked));
+                            }}
+                          />
+                          {checked ? "true" : "false"}
+                        </label>
+                        {err ? <div className="mono" style={{ color: "rgba(239, 68, 68, 0.9)", fontSize: "12px" }}>{err}</div> : null}
+                      </div>
+                    );
+                  }
+
+                  if (ptype === "object" || ptype === "array" || pid === "context") {
+                    const draft = input_field_drafts[pid] ?? (cur !== undefined ? safe_json(cur) : "");
+                    return (
+                      <div key={pid} className="field">
+                        <label>{label}</label>
+                        <textarea
+                          className="mono"
+                          disabled={disabled}
+                          value={draft}
+                          onChange={(e) => {
+                            const text = e.target.value;
+                            set_input_field_drafts((prev) => ({ ...prev, [pid]: text }));
+                            if (!text.trim()) {
+                              set_input_field_errors((prev) => {
+                                const next = { ...prev };
+                                delete next[pid];
+                                return next;
+                              });
+                              delete_input_data_key(pid);
+                              return;
+                            }
+                            try {
+                              const parsed = JSON.parse(text);
+                              set_input_field_errors((prev) => {
+                                const next = { ...prev };
+                                delete next[pid];
+                                return next;
+                              });
+                              set_input_data_value(pid, parsed);
+                            } catch (e2: any) {
+                              set_input_field_errors((prev) => ({ ...prev, [pid]: String(e2?.message || "Invalid JSON") }));
+                            }
+                          }}
+                          rows={4}
+                          placeholder={ptype === "array" ? '["a","b"]' : '{"key":"value"}'}
+                        />
+                        {err ? <div className="mono" style={{ color: "rgba(239, 68, 68, 0.9)", fontSize: "12px" }}>{err}</div> : null}
+                      </div>
+                    );
+                  }
+
+                  const is_textarea = pid === "request" || pid.endsWith("_prompt") || pid.includes("prompt");
+                  const sv = typeof cur === "string" ? String(cur) : cur !== undefined ? String(cur) : "";
+                  return (
+                    <div key={pid} className="field">
+                      <label>{label}</label>
+                      {is_textarea ? (
+                        <textarea
+                          className="mono"
+                          disabled={disabled}
+                          value={sv}
+                          onChange={(e) => {
+                            const t = e.target.value;
+                            if (!t.trim()) delete_input_data_key(pid);
+                            else set_input_data_value(pid, t);
+                          }}
+                          rows={3}
+                        />
+                      ) : (
+                        <input
+                          className="mono"
+                          disabled={disabled}
+                          value={sv}
+                          onChange={(e) => {
+                            const t = e.target.value;
+                            if (!t.trim()) delete_input_data_key(pid);
+                            else set_input_data_value(pid, t);
+                          }}
+                        />
+                      )}
+                      {err ? <div className="mono" style={{ color: "rgba(239, 68, 68, 0.9)", fontSize: "12px" }}>{err}</div> : null}
+                    </div>
+                  );
+                })}
+
+                <details style={{ marginTop: "6px" }}>
+                  <summary className="mono" style={{ color: "var(--muted)", cursor: "pointer" }}>
+                    Advanced: input_data JSON
+                  </summary>
+                  <div className="field" style={{ marginTop: "10px" }}>
+                    <label>Input data (JSON)</label>
+                    <textarea
+                      className="mono"
+                      value={input_data_text}
+                      onChange={(e) => set_input_data_text(e.target.value)}
+                      placeholder='{"request":"..."}'
+                      rows={8}
+                      disabled={connecting || resuming}
+                    />
+                  </div>
+                </details>
+              </>
+            ) : (
+              <>
+                <div className="field">
+                  <label>Request (common)</label>
+                  <textarea
+                    className="mono"
+                    value={request_value}
+                    onChange={(e) => update_input_data_field("request", e.target.value)}
+                    placeholder="What do you want the workflow/agent to do?"
+                    rows={3}
+                  />
+                </div>
+                <div className="row">
+                  <div className="col">
+                    <div className="field">
+                      <label>Provider (common)</label>
+                      <input
+                        className="mono"
+                        value={provider_value}
+                        onChange={(e) => update_input_data_field("provider", e.target.value)}
+                        placeholder="lmstudio / ollama / openai / ..."
+                      />
+                    </div>
+                  </div>
+                  <div className="col">
+                    <div className="field">
+                      <label>Model (common)</label>
+                      <input
+                        className="mono"
+                        value={model_value}
+                        onChange={(e) => update_input_data_field("model", e.target.value)}
+                        placeholder="qwen/qwen3-next-80b / gpt-4.1 / ..."
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="field">
+                  <label>Input data (JSON)</label>
+                  <textarea
+                    className="mono"
+                    value={input_data_text}
+                    onChange={(e) => set_input_data_text(e.target.value)}
+                    placeholder='{"request":"...","provider":"lmstudio","model":"qwen/qwen3-next-80b"}'
+                    rows={6}
+                  />
+                </div>
+              </>
+            )}
 
             <div className="actions">
-              <button className="btn primary" onClick={on_start_run} disabled={connecting}>
+              <button className="btn primary" onClick={on_start_run} disabled={connecting || resuming || (connected && run_id.trim() !== "")}>
                 Start run
               </button>
               <button className="btn" onClick={on_attach_run} disabled={connecting}>
@@ -445,11 +1365,25 @@ export function App(): React.ReactElement {
                 className="btn danger"
                 onClick={() => {
                   if (abort_ref.current) abort_ref.current.abort();
+                  if (child_abort_ref.current) child_abort_ref.current.abort();
+                  child_abort_ref.current = null;
+                  child_cursor_ref.current = 0;
+                  set_following_child_run_id("");
                   set_connected(false);
                   set_connecting(false);
+                  set_resuming(false);
                 }}
               >
                 Disconnect
+              </button>
+              <button
+                className="btn"
+                onClick={() => {
+                  set_input_data_text("{}");
+                }}
+                disabled={connecting || resuming}
+              >
+                Reset input
               </button>
             </div>
 
@@ -457,6 +1391,48 @@ export function App(): React.ReactElement {
               <label>Run control reason (optional)</label>
               <input className="mono" value={control_reason} onChange={(e) => set_control_reason(e.target.value)} placeholder="reason…" />
             </div>
+
+            {is_waiting ? (
+              <div className="log_item" style={{ borderColor: "rgba(96, 165, 250, 0.25)" }}>
+                <div className="meta">
+                  <span className="mono">waiting</span>
+                  <span className="mono">{wait_reason || "unknown"}</span>
+                </div>
+                <div className="body mono">
+                  {safe_json({
+                    wait_key: wait_key,
+                    reason: wait_reason,
+                    sub_run_id: sub_run_id || undefined,
+                  })}
+                </div>
+                {wait_reason === "subworkflow" && sub_run_id ? (
+                  <div className="actions">
+                    <button
+                      className="btn primary"
+                      onClick={async () => {
+                        set_run_id(sub_run_id);
+                        await connect_to_run(sub_run_id);
+                      }}
+                      disabled={connecting}
+                    >
+                      Attach to child run
+                    </button>
+                    {root_run_id.trim() && root_run_id.trim() !== run_id.trim() ? (
+                      <button
+                        className="btn"
+                        onClick={async () => {
+                          set_run_id(root_run_id.trim());
+                          await connect_to_run(root_run_id.trim());
+                        }}
+                        disabled={connecting}
+                      >
+                        Back to root
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             {run_state ? (
               <div className="log_item">
@@ -469,7 +1445,9 @@ export function App(): React.ReactElement {
                     status: run_state?.status,
                     paused: run_state?.paused,
                     current_node: run_state?.current_node,
-                    waiting: run_state?.waiting ? { reason: run_state.waiting.reason, prompt: run_state.waiting.prompt } : null,
+                    waiting: run_state?.waiting
+                      ? { reason: run_state.waiting.reason, wait_key: run_state.waiting.wait_key, prompt: run_state.waiting.prompt, details: run_state.waiting.details }
+                      : null,
                     error: run_state?.error,
                   })}
                 </div>
@@ -505,76 +1483,201 @@ export function App(): React.ReactElement {
               </div>
             ) : null}
           </div>
-        </div>
+          </div>
 
-        <div className="col">
-          <div className="card">
-            <div className="meta">
-              <span className="mono">ledger log (newest first)</span>
-            </div>
-            <div className="log">
-              {log.map((item, idx) => (
-                <div key={idx} className="log_item">
-                  <div className="meta">
-                    <span className="mono">
-                      {item.kind} • {item.title}
-                    </span>
-                    <span className="mono">{item.ts}</span>
+          <div className="panel">
+            <div className="card panel_card card_scroll">
+              <div className="tab_bar">
+                <button className={`tab mono ${right_tab === "ledger" ? "active" : ""}`} onClick={() => set_right_tab("ledger")}>
+                  Ledger
+                </button>
+                <button className={`tab mono ${right_tab === "graph" ? "active" : ""}`} onClick={() => set_right_tab("graph")}>
+                  Graph
+                </button>
+              </div>
+
+              {right_tab === "ledger" ? (
+                <>
+                  <div className="meta" style={{ marginTop: "10px" }}>
+                    <span className="mono">ledger log (newest first)</span>
+                    <span className="mono">{run_id.trim() ? `run ${run_id.trim()}` : ""}</span>
                   </div>
-                  {item.body ? <div className="body mono">{item.body}</div> : null}
-                </div>
-              ))}
+                  <div className="log_actions" style={{ marginTop: "10px" }}>
+                    <button
+                      className="btn"
+                      disabled={!records.length}
+                      onClick={() => {
+                        const max = 5000;
+                        const items = records.length > max ? records.slice(records.length - max) : records;
+                        const text = items.map((x) => JSON.stringify({ cursor: x.cursor, record: x.record })).join("\n");
+                        copy_to_clipboard(text);
+                      }}
+                    >
+                      Copy ledger (JSONL)
+                    </button>
+                  </div>
+                  <div className="log log_scroll">
+                    {log.map((item) => (
+                      <LedgerCard
+                        key={item.id}
+                        item={item}
+                        open={log_open[item.id] === true}
+                        on_toggle={() => set_log_open((prev) => ({ ...prev, [item.id]: !prev[item.id] }))}
+                        node_index={node_index_for_run}
+                        on_copy={copy_to_clipboard}
+                      />
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="meta" style={{ marginTop: "10px" }}>
+                    <span className="mono">workflow graph</span>
+                    <span className="mono">{bundle_id.trim() && graph_flow_id.trim() ? `${bundle_id.trim()}:${graph_flow_id.trim()}` : ""}</span>
+                  </div>
+
+                  <div className="graph_toolbar">
+                    <div className="field" style={{ margin: 0 }}>
+                      <label>Flow</label>
+                      <select
+                        className="mono"
+                        value={graph_flow_id}
+                        onChange={(e) => set_graph_flow_id(String(e.target.value || ""))}
+                        disabled={!bundle_id.trim() || graph_loading}
+                      >
+                        <option value="">(select)</option>
+                        {graph_flow_options.map((fid) => (
+                          <option key={fid} value={fid}>
+                            {fid}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="field" style={{ margin: 0 }}>
+                      <label>Subflows</label>
+                      <label className="mono" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={graph_show_subflows}
+                          onChange={(e) => set_graph_show_subflows(Boolean(e.target.checked))}
+                        />
+                        {graph_show_subflows ? "shown" : "hidden"}
+                      </label>
+                    </div>
+                    <div className="field" style={{ margin: 0 }}>
+                      <label>Actions</label>
+                      <div className="field_inline">
+                        <button
+                          className="btn"
+                          onClick={() => {
+                            const root = String(selected_entrypoint?.flow_id || "").trim();
+                            if (root) set_graph_flow_id(root);
+                          }}
+                          disabled={!selected_entrypoint?.flow_id}
+                        >
+                          Go to root
+                        </button>
+                        <button
+                          className="btn"
+                          onClick={() => {
+                            if (graph_flow) copy_to_clipboard(JSON.stringify(graph_flow, null, 2));
+                          }}
+                          disabled={!graph_flow}
+                        >
+                          Copy flow JSON
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {graph_error ? (
+                    <div className="log_item" style={{ borderColor: "rgba(239, 68, 68, 0.35)" }}>
+                      <div className="meta">
+                        <span className="mono">graph error</span>
+                        <span className="mono">{now_iso()}</span>
+                      </div>
+                      <div className="body mono">{graph_error}</div>
+                    </div>
+                  ) : null}
+                  {graph_loading ? (
+                    <div className="log_item" style={{ borderColor: "rgba(96, 165, 250, 0.25)" }}>
+                      <div className="meta">
+                        <span className="mono">loading</span>
+                        <span className="mono">{graph_flow_id}</span>
+                      </div>
+                      <div className="body mono">Loading graph…</div>
+                    </div>
+                  ) : null}
+
+                  <div className="graph_panel">
+                    <FlowGraph flow={graph_flow} active_node_id={active_node_id} recent_nodes={recent_nodes} now_ms={graph_now_ms} />
+                  </div>
+
+                  <details className="graph_legend">
+                    <summary className="mono">Legend</summary>
+                    <div className="graph_legend_items">
+                      {graph_legend.map(([t, c]) => (
+                        <div key={t} className="graph_legend_row">
+                          <span className="graph_legend_swatch" style={{ background: c || "rgba(255,255,255,0.16)" }} />
+                          <span className="mono">{t}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </>
+              )}
+            </div>
+
+            <div className={`status_bar ${status_pulse ? "pulse" : ""}`}>
+              <strong>Status</strong>: {status_text ? <span className="mono">{status_text}</span> : <span className="mono">(none)</span>}
             </div>
           </div>
-
-          <div className="status_bar">
-            <strong>Status</strong>: {status_text ? <span className="mono">{status_text}</span> : <span className="mono">(none)</span>}
-          </div>
         </div>
+
+        {show_wait_modal ? (
+          <div className="overlay">
+            <div className="modal">
+              <h2 className="mono">Run is waiting ({String(wait_state?.reason || "unknown")})</h2>
+              <p className="mono">wait_key: {String(wait_state?.wait_key || "")}</p>
+
+              {tool_calls_for_wait.length ? (
+                <>
+                  <div className="field">
+                    <label>Tool calls (from wait.details.tool_calls)</label>
+                    <textarea className="mono" readOnly value={safe_json(tool_calls_for_wait)} />
+                  </div>
+                  <div className="actions">
+                    <button className="btn primary" disabled={!worker || resuming} onClick={() => execute_tools_via_worker(tool_calls_for_wait)}>
+                      Execute via tool worker + resume
+                    </button>
+                    <button className="btn" disabled={resuming} onClick={() => resume_wait({ approved: true })}>
+                      Resume (manual / advanced)
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="field">
+                    <label>Prompt</label>
+                    <textarea className="mono" readOnly value={String(wait_state?.prompt || "") || "(no prompt provided)"} />
+                  </div>
+
+                  <AskForm wait={wait_state as WaitState} disabled={resuming} on_submit={(val) => resume_wait({ response: val })} />
+                </>
+              )}
+            </div>
+          </div>
+        ) : null}
       </div>
-
-      {show_wait_modal ? (
-        <div className="overlay">
-          <div className="modal">
-            <h2 className="mono">Run is waiting ({String(wait_state?.reason || "unknown")})</h2>
-            <p className="mono">wait_key: {String(wait_state?.wait_key || "")}</p>
-
-            {tool_calls_for_wait.length ? (
-              <>
-                <div className="field">
-                  <label>Tool calls (from wait.details.tool_calls)</label>
-                  <textarea className="mono" readOnly value={safe_json(tool_calls_for_wait)} />
-                </div>
-                <div className="actions">
-                  <button className="btn primary" disabled={!worker} onClick={() => execute_tools_via_worker(tool_calls_for_wait)}>
-                    Execute via tool worker + resume
-                  </button>
-                  <button className="btn" onClick={() => resume_wait({ approved: true })}>
-                    Resume (manual / advanced)
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="field">
-                  <label>Prompt</label>
-                  <textarea className="mono" readOnly value={String(wait_state?.prompt || "")} />
-                </div>
-
-                <AskForm wait={wait_state} on_submit={(val) => resume_wait({ response: val })} />
-              </>
-            )}
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
 
-function AskForm(props: { wait: WaitState; on_submit: (value: string) => void }): React.ReactElement {
+function AskForm(props: { wait: WaitState; disabled?: boolean; on_submit: (value: string) => void }): React.ReactElement {
   const [value, set_value] = useState("");
   const choices = Array.isArray(props.wait.choices) ? props.wait.choices : [];
   const allow_free_text = props.wait.allow_free_text !== false;
+  const disabled = props.disabled === true;
 
   return (
     <>
@@ -600,7 +1703,7 @@ function AskForm(props: { wait: WaitState; on_submit: (value: string) => void })
       ) : null}
 
       <div className="actions">
-        <button className="btn primary" disabled={!value.trim()} onClick={() => props.on_submit(value.trim())}>
+        <button className="btn primary" disabled={disabled || !value.trim()} onClick={() => props.on_submit(value.trim())}>
           Submit response
         </button>
       </div>
@@ -608,3 +1711,88 @@ function AskForm(props: { wait: WaitState; on_submit: (value: string) => void })
   );
 }
 
+function LedgerCard(props: {
+  item: UiLogItem;
+  open: boolean;
+  on_toggle: () => void;
+  node_index: Record<string, any>;
+  on_copy: (text: string) => void;
+}): React.ReactElement {
+  const item = props.item;
+  const node_id = String(item.node_id || "").trim();
+  const meta = node_id && props.node_index && typeof props.node_index === "object" ? (props.node_index as any)[node_id] : null;
+  const node_label = typeof meta?.label === "string" && meta.label.trim() ? meta.label.trim() : node_id || item.title;
+  const node_type = typeof meta?.type === "string" && meta.type.trim() ? meta.type.trim() : "";
+  const header_color = typeof meta?.headerColor === "string" && meta.headerColor.trim() ? meta.headerColor.trim() : "";
+  const display_label = item.kind === "step" ? node_label : item.title;
+
+  const accent =
+    header_color ||
+    (item.kind === "error"
+      ? "rgba(239, 68, 68, 0.85)"
+      : item.kind === "message"
+        ? "rgba(167, 139, 250, 0.85)"
+        : item.kind === "event"
+          ? "rgba(96, 165, 250, 0.85)"
+          : item.status === "waiting"
+            ? "rgba(96, 165, 250, 0.65)"
+            : item.status === "completed"
+              ? "rgba(34, 197, 94, 0.65)"
+              : "rgba(255, 255, 255, 0.14)");
+
+  const status = String(item.status || "").trim();
+  const status_chip =
+    status === "completed"
+      ? "chip ok"
+      : status === "failed"
+        ? "chip danger"
+        : status === "waiting"
+          ? "chip"
+          : status
+            ? "chip muted"
+            : "chip muted";
+
+  return (
+    <div className="log_item card" style={{ ["--card-accent" as any]: accent }}>
+      <div className="meta">
+        <span className="mono">
+          {item.kind} • {display_label}
+        </span>
+        <span className="mono">{item.ts}</span>
+      </div>
+      <div className="meta2">
+        {status ? <span className={`mono ${status_chip}`}>{status}</span> : null}
+        {node_type ? <span className="chip mono muted">{node_type}</span> : null}
+        {item.effect_type ? <span className="chip mono muted">{String(item.effect_type)}</span> : null}
+        {item.cursor ? <span className="chip mono muted">#{item.cursor}</span> : null}
+        {item.run_id ? <span className="chip mono muted">{short_id(String(item.run_id), 10)}</span> : null}
+        {item.kind !== "step" && node_id ? <span className="chip mono muted">{node_id}</span> : null}
+      </div>
+      {item.preview ? <div className="log_preview mono">{item.preview}</div> : null}
+      {item.data ? (
+        <div className="log_actions">
+          <button className="btn" onClick={props.on_toggle}>
+            {props.open ? "Fold JSON" : "Unfold JSON"}
+          </button>
+          <button
+            className="btn"
+            onClick={() => {
+              try {
+                props.on_copy(JSON.stringify(item.data, null, 2));
+              } catch {
+                props.on_copy(String(item.data));
+              }
+            }}
+          >
+            Copy JSON
+          </button>
+        </div>
+      ) : null}
+      {props.open && item.data ? (
+        <div className="body mono">
+          <JsonViewer value={item.data} max_string_len={220} />
+        </div>
+      ) : null}
+    </div>
+  );
+}

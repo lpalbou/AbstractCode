@@ -23,6 +23,6 @@ npm run dev
   - `ABSTRACTGATEWAY_TOOL_MODE=passthrough` (default) or `ABSTRACTGATEWAY_TOOL_MODE=local` (dev only)
 - In the UI:
   - set `bundle_id` (optional if only one bundle is loaded),
-  - set `flow_id`,
+  - set `flow_id` (optional if the bundle has a single entrypoint),
   - set `input_data` JSON (keys match the VisualFlow `On Flow Start` output pins),
   - click “Start run”.
