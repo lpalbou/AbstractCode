@@ -134,7 +134,7 @@ a {
   color: var(--muted);
 }
 
-.field input,
+.field input:not([type="checkbox"]):not([type="radio"]),
 .field textarea,
 .field select {
   width: 100%;
@@ -145,6 +145,15 @@ a {
   color: var(--text);
   outline: none;
   font-size: 13px;
+}
+
+.field input[type="checkbox"],
+.field input[type="radio"] {
+  width: auto;
+  padding: 0;
+  border-radius: 0;
+  border: none;
+  background: transparent;
 }
 
 .field_inline {

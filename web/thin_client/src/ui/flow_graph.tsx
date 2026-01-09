@@ -135,9 +135,11 @@ function merge_flow_with_subflows(args: {
       const sid = prefixed_id(prefix, source);
       const tid = prefixed_id(prefix, target);
       if (!sid || !tid) continue;
+      const raw_id = safe_str(e?.id).trim();
+      const edge_id = raw_id ? `${sid}->${tid}::${raw_id}` : `${sid}->${tid}`;
       merged_edges.push({
         ...(e as any),
-        id: safe_str(e?.id || `${sid}->${tid}`),
+        id: edge_id,
         source: sid,
         target: tid,
       });
@@ -306,6 +308,10 @@ export function FlowGraph(props: {
       if (!source || !target) continue;
       edges_out.push({ id: safe_str(e?.id || `${source}->${target}`), source, target });
     }
+
+    // Only keep edges that connect nodes we actually have (important when graphs are truncated).
+    const node_ids = new Set(nodes_out.map((n) => n.id));
+    edges_out = edges_out.filter((e) => node_ids.has(e.source) && node_ids.has(e.target));
 
     if (props.simplify === true) {
       const keep_id = (id: string) => {

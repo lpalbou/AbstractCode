@@ -70,7 +70,9 @@ type RunSummary = {
   run_id: string;
   workflow_id?: string | null;
   status?: string;
+  created_at?: string | null;
   updated_at?: string | null;
+  ledger_len?: number | null;
   parent_run_id?: string | null;
 };
 
@@ -237,6 +239,28 @@ function parse_iso_ms(ts: any): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+function fixed_col(text: string, width: number): string {
+  const raw = String(text || "");
+  if (raw.length === width) return raw;
+  if (raw.length > width) {
+    if (width <= 1) return "…";
+    return `${raw.slice(0, Math.max(0, width - 1))}…`;
+  }
+  return raw + "\u00A0".repeat(width - raw.length);
+}
+
+function format_local_ts(ts: any): string {
+  const ms = parse_iso_ms(ts);
+  if (ms === null) return "—";
+  const d = new Date(ms);
+  const yyyy = String(d.getFullYear()).padStart(4, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+
 export function App(): React.ReactElement {
   const [is_narrow, set_is_narrow] = useState<boolean>(() => {
     try {
@@ -298,7 +322,6 @@ export function App(): React.ReactElement {
   const [graph_loading, set_graph_loading] = useState(false);
   const [graph_error, set_graph_error] = useState<string>("");
   const [graph_show_subflows, set_graph_show_subflows] = useState(false);
-  const [graph_simplify, set_graph_simplify] = useState(false);
   const [graph_highlight_path, set_graph_highlight_path] = useState(false);
   const [graph_now_ms, set_graph_now_ms] = useState<number>(() => Date.now());
   const [active_node_id, set_active_node_id] = useState<string>("");
@@ -409,6 +432,16 @@ export function App(): React.ReactElement {
   const has_adaptive_inputs = adaptive_pins.length > 0 && Boolean(bundle_id.trim());
 
   const selected_workflow_value = bundle_id.trim() && flow_id.trim() ? `${bundle_id.trim()}:${flow_id.trim()}` : "";
+
+  const workflow_label_by_id = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const w of workflow_options) {
+      const key = String(w.workflow_id || "").trim();
+      const label = String(w.label || "").trim();
+      if (key && label) out[key] = label;
+    }
+    return out;
+  }, [workflow_options]);
 
   const available_tool_names = useMemo(() => {
     const out = new Set<string>();
@@ -562,7 +595,9 @@ export function App(): React.ReactElement {
           run_id: String(r?.run_id || "").trim(),
           workflow_id: typeof r?.workflow_id === "string" ? String(r.workflow_id) : r?.workflow_id ?? null,
           status: typeof r?.status === "string" ? String(r.status) : "",
+          created_at: typeof r?.created_at === "string" ? String(r.created_at) : r?.created_at ?? null,
           updated_at: typeof r?.updated_at === "string" ? String(r.updated_at) : r?.updated_at ?? null,
+          ledger_len: typeof r?.ledger_len === "number" ? Number(r.ledger_len) : r?.ledger_len ?? null,
           parent_run_id: typeof r?.parent_run_id === "string" ? String(r.parent_run_id) : r?.parent_run_id ?? null,
         }))
         .filter((r) => Boolean(r.run_id));
@@ -1111,14 +1146,56 @@ export function App(): React.ReactElement {
     }
   }
 
-  async function on_attach_run(): Promise<void> {
-    const rid = run_id.trim();
-    if (!rid) {
-      set_error_text("Missing run_id");
-      return;
-    }
-    set_root_run_id(rid);
-    await connect_to_run(rid);
+  async function attach_to_run(rid: string): Promise<void> {
+    const run = String(rid || "").trim();
+    if (!run) return;
+    set_error_text("");
+    set_root_run_id(run);
+    set_run_id(run);
+    await connect_to_run(run);
+  }
+
+  function clear_run_view(): void {
+    if (abort_ref.current) abort_ref.current.abort();
+    abort_ref.current = null;
+    if (child_abort_ref.current) child_abort_ref.current.abort();
+    child_abort_ref.current = null;
+    child_cursor_ref.current = 0;
+    set_following_child_run_id("");
+
+    set_run_id("");
+    set_root_run_id("");
+    run_prefix_ref.current = {};
+    subrun_parent_ref.current = {};
+    root_subrun_ref.current = "";
+    follow_run_ref.current = "";
+    set_follow_run_id("");
+    set_dismissed_wait_key("");
+    if (recent_prune_timer_ref.current) window.clearTimeout(recent_prune_timer_ref.current);
+    recent_prune_timer_ref.current = null;
+    if (dismiss_timer_ref.current) window.clearTimeout(dismiss_timer_ref.current);
+    dismiss_timer_ref.current = null;
+
+    set_connected(false);
+    set_connecting(false);
+    set_resuming(false);
+
+    cursor_ref.current = 0;
+    set_cursor(0);
+    set_records([]);
+    set_child_records_for_digest([]);
+    digest_seen_ref.current = new Set();
+    set_run_state(null);
+    set_log([]);
+    set_log_open({});
+    set_active_node_id("");
+    active_node_ref.current = "";
+    set_recent_nodes({});
+    set_visited_nodes({});
+    visited_order_ref.current = [];
+    set_graph_now_ms(Date.now());
+    set_status("", -1);
+    set_error_text("");
   }
 
   async function submit_run_control(type: "pause" | "resume" | "cancel"): Promise<void> {
@@ -1590,6 +1667,9 @@ export function App(): React.ReactElement {
                   </option>
                 ))}
               </select>
+              <div className="mono muted" style={{ fontSize: "12px" }}>
+                Workflows are the gateway’s registered `.flow` bundles (configured via `ABSTRACTGATEWAY_FLOWS_DIR`).
+              </div>
             </div>
             <div className="row">
               <div className="col">
@@ -1617,44 +1697,58 @@ export function App(): React.ReactElement {
               </div>
               <div className="col">
                 <div className="field">
-                  <label>Run ID (attach)</label>
+                  <label>Runs (recent — select to attach)</label>
                   <div className="field_inline">
-                    <input className="mono" value={run_id} onChange={(e) => set_run_id(e.target.value)} placeholder="run uuid" />
-                    <button className="btn" onClick={on_attach_run} disabled={connecting || !run_id.trim()}>
-                      Attach
+                    <select
+                      className="mono"
+                      value={run_options.some((r) => r.run_id === run_id.trim()) ? run_id.trim() : ""}
+                      onChange={async (e) => {
+                        const rid = String(e.target.value || "").trim();
+                        if (!rid) return;
+                        await attach_to_run(rid);
+                      }}
+                      disabled={!gateway_connected || runs_loading || discovery_loading || connecting || resuming}
+                    >
+                      <option value="">
+                        {runs_loading
+                          ? "(loading…)"
+                          : run_options.length
+                            ? "(select recent run)"
+                            : "(empty — click Connect)"}
+                      </option>
+                      {/* Keep the currently-selected run visible even if it isn't in the current list. */}
+                      {run_id.trim() && !run_options.some((r) => r.run_id === run_id.trim()) ? (
+                        <option value={run_id.trim()}>{`(attached) ${run_id.trim()}`}</option>
+                      ) : null}
+                      {run_options.map((r) => {
+                        const rid = String(r.run_id || "").trim();
+                        if (!rid) return null;
+                        const wid = typeof r.workflow_id === "string" ? String(r.workflow_id) : "";
+                        const wf_label = wid ? workflow_label_by_id[wid] || wid : "";
+                        const wf_display = wf_label ? wf_label.replace(/\s+/g, " ").trim() : "(unknown workflow)";
+                        const st = typeof r.status === "string" ? String(r.status) : "";
+                        const start_ts = format_local_ts(r.created_at || r.updated_at);
+                        const cnt = typeof r.ledger_len === "number" ? `#${r.ledger_len}` : "";
+                        const label = `${fixed_col(start_ts, 16)} | ${fixed_col(wf_display, 34)} | ${fixed_col(
+                          st || "unknown",
+                          10
+                        )} | ${fixed_col(cnt, 6)} | ${fixed_col(short_id(rid, 14), 14)}`;
+                        return (
+                          <option key={rid} value={rid}>
+                            {label}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <button className="btn" onClick={clear_run_view} disabled={connecting || resuming || (!run_id.trim() && !connected && !log.length)}>
+                      Clear
                     </button>
                   </div>
-                  {run_options.length ? (
-                    <div className="field_inline" style={{ marginTop: "6px" }}>
-                      <select
-                        className="mono"
-                        value={run_options.some((r) => r.run_id === run_id.trim()) ? run_id.trim() : ""}
-                        onChange={(e) => set_run_id(String(e.target.value || ""))}
-                        disabled={!gateway_connected || runs_loading}
-                      >
-                        <option value="">{runs_loading ? "(loading…)" : "(select recent run)"}</option>
-                        {run_options.map((r) => {
-                          const rid = String(r.run_id || "").trim();
-                          if (!rid) return null;
-                          const wid = typeof r.workflow_id === "string" ? String(r.workflow_id) : "";
-                          const st = typeof r.status === "string" ? String(r.status) : "";
-                          const label = `${short_id(rid, 18)}${st ? ` • ${st}` : ""}${wid ? ` • ${wid}` : ""}`;
-                          return (
-                            <option key={rid} value={rid}>
-                              {label}
-                            </option>
-                          );
-                        })}
-                      </select>
-                      <button className="btn" onClick={refresh_runs} disabled={!gateway_connected || runs_loading || discovery_loading}>
-                        {runs_loading ? "…" : "Refresh"}
-                      </button>
-                    </div>
-                  ) : (
+                  {!run_options.length ? (
                     <div className="mono muted" style={{ fontSize: "12px" }}>
                       Tip: click “Connect” to load recent runs from the gateway.
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -2329,10 +2423,6 @@ export function App(): React.ReactElement {
                         subflows {graph_show_subflows ? "shown" : "hidden"}
                       </label>
                       <label className="mono" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                        <input type="checkbox" checked={graph_simplify} onChange={(e) => set_graph_simplify(Boolean(e.target.checked))} />
-                        simplify
-                      </label>
-                      <label className="mono" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                         <input
                           type="checkbox"
                           checked={graph_highlight_path}
@@ -2391,7 +2481,7 @@ export function App(): React.ReactElement {
                       flow={graph_flow}
                       flow_by_id={graph_flow_cache}
                       expand_subflows={graph_show_subflows}
-                      simplify={graph_simplify}
+                      simplify={true}
                       active_node_id={active_node_id}
                       recent_nodes={recent_nodes}
                       visited_nodes={visited_nodes}
