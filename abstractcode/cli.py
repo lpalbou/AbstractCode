@@ -285,8 +285,90 @@ def build_flow_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_gateway_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="abstractcode gateway",
+        description="Run/observe workflows via AbstractGateway (HTTP control plane).",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    run = sub.add_parser("run", help="Start a new gateway run and follow it")
+    run.add_argument("flow_id", help="Flow id to start (or 'bundle:flow')")
+    run.add_argument("--bundle-id", default=None, help="Bundle id (optional if flow_id is namespaced)")
+    run.add_argument("--gateway-url", default=None, help="Gateway base URL (default: $ABSTRACTCODE_GATEWAY_URL)")
+    run.add_argument("--gateway-token", default=None, help="Gateway auth token (default: $ABSTRACTCODE_GATEWAY_TOKEN)")
+    run.add_argument(
+        "--input-json",
+        default=None,
+        help='JSON object string passed to the flow entry (e.g. \'{"request":"..."}\')',
+    )
+    run.add_argument(
+        "--input-file",
+        "--input-json-file",
+        dest="input_file",
+        default=None,
+        help="Path to a JSON file (object) passed to the flow entry",
+    )
+    run.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        help="Set an input param as key=value (repeatable). Example: --param max_iterations=5",
+    )
+    run.add_argument("--no-follow", action="store_true", help="Do not tail the run; only print run_id")
+    run.add_argument("--poll-s", type=float, default=0.25, help="Polling interval when following (default: 0.25)")
+
+    attach = sub.add_parser("attach", help="Attach to an existing run_id and follow it")
+    attach.add_argument("run_id", help="Existing run_id to follow")
+    attach.add_argument("--gateway-url", default=None, help="Gateway base URL (default: $ABSTRACTCODE_GATEWAY_URL)")
+    attach.add_argument("--gateway-token", default=None, help="Gateway auth token (default: $ABSTRACTCODE_GATEWAY_TOKEN)")
+    attach.add_argument("--poll-s", type=float, default=0.25, help="Polling interval when following (default: 0.25)")
+
+    return parser
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     argv_list = list(argv) if argv is not None else sys.argv[1:]
+
+    if argv_list and argv_list[0] == "gateway":
+        parser = build_gateway_parser()
+        args, unknown = parser.parse_known_args(argv_list[1:])
+        from .gateway_cli import attach_gateway_run_command, run_gateway_flow_command
+
+        cmd = getattr(args, "command", None)
+        if cmd == "run":
+            from .flow_cli import _parse_input_json, _parse_kv_list, _parse_unknown_params
+
+            input_data = _parse_input_json(raw_json=args.input_json, json_path=args.input_file)
+            input_data.update(_parse_kv_list(list(getattr(args, "param", []) or [])))
+            # Allow unknown args to be interpreted as params (same as `flow run`).
+            input_data.update(_parse_unknown_params(list(unknown or [])))
+
+            run_gateway_flow_command(
+                gateway_url=args.gateway_url,
+                gateway_token=args.gateway_token,
+                flow_id=str(args.flow_id),
+                bundle_id=str(args.bundle_id).strip() if isinstance(args.bundle_id, str) and str(args.bundle_id).strip() else None,
+                input_data=input_data,
+                follow=not bool(getattr(args, "no_follow", False)),
+                poll_s=float(getattr(args, "poll_s", 0.25) or 0.25),
+            )
+            return 0
+
+        if cmd == "attach":
+            if unknown:
+                parser.error(f"Unknown arguments: {' '.join(unknown)}")
+            attach_gateway_run_command(
+                gateway_url=args.gateway_url,
+                gateway_token=args.gateway_token,
+                run_id=str(args.run_id),
+                follow=True,
+                poll_s=float(getattr(args, "poll_s", 0.25) or 0.25),
+            )
+            return 0
+
+        build_gateway_parser().print_help()
+        return 2
 
     if argv_list and argv_list[0] == "flow":
         parser = build_flow_parser()
