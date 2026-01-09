@@ -1,4 +1,6 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+
+import { PinLegend } from "./pin_legend";
 
 type VisualFlow = {
   id?: string;
@@ -22,6 +24,8 @@ type GraphEdge = {
   source: string;
   target: string;
 };
+
+type ViewBox = { x: number; y: number; w: number; h: number };
 
 function safe_str(v: any): string {
   return typeof v === "string" ? v : v === null || v === undefined ? "" : String(v);
@@ -186,18 +190,87 @@ function merge_flow_with_subflows(args: {
   };
 }
 
+function is_plumbing_type(node_type: string): boolean {
+  const t = safe_str(node_type).trim().toLowerCase();
+  if (!t) return false;
+  if (t.startsWith("literal")) return true;
+  if (t.includes("literal")) return true;
+  if (t === "concat") return true;
+  if (t === "cast") return true;
+  if (t === "parse_json" || t === "stringify_json") return true;
+  if (t === "break_object") return true;
+  if (t === "json_schema") return true;
+  return false;
+}
+
+function simplify_exec_graph(args: {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  keep_id: (id: string) => boolean;
+  max_edges: number;
+}): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const nodes = args.nodes.filter((n) => args.keep_id(n.id));
+  const keep = new Set(nodes.map((n) => n.id));
+
+  const outgoing: Record<string, string[]> = {};
+  for (const e of args.edges) {
+    if (!outgoing[e.source]) outgoing[e.source] = [];
+    outgoing[e.source].push(e.target);
+  }
+
+  const dedup = new Map<string, GraphEdge>();
+  for (const s of nodes) {
+    const seen = new Set<string>();
+    const stack = (outgoing[s.id] || []).slice();
+    while (stack.length) {
+      const t = stack.pop() as string;
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      if (keep.has(t)) {
+        const key = `${s.id}->${t}`;
+        if (!dedup.has(key)) dedup.set(key, { id: key, source: s.id, target: t });
+        continue;
+      }
+      const nexts = outgoing[t] || [];
+      for (const nx of nexts) {
+        if (!seen.has(nx)) stack.push(nx);
+      }
+      if (dedup.size >= args.max_edges) break;
+    }
+    if (dedup.size >= args.max_edges) break;
+  }
+
+  return { nodes, edges: Array.from(dedup.values()) };
+}
+
+function clamp_view(view: ViewBox, bounds: { x: number; y: number; w: number; h: number }): ViewBox {
+  const min_w = 160;
+  const min_h = 120;
+  const max_w = Math.max(bounds.w * 8, min_w);
+  const max_h = Math.max(bounds.h * 8, min_h);
+
+  const w = Math.max(min_w, Math.min(max_w, view.w));
+  const h = Math.max(min_h, Math.min(max_h, view.h));
+  return { x: view.x, y: view.y, w, h };
+}
+
 export function FlowGraph(props: {
   flow: VisualFlow | null;
   flow_by_id?: Record<string, any>;
   expand_subflows?: boolean;
+  simplify?: boolean;
   active_node_id?: string;
   recent_nodes?: Record<string, number>;
+  visited_nodes?: Record<string, number>;
+  highlight_path?: boolean;
   now_ms?: number;
 }): React.ReactElement {
   const now_ms = typeof props.now_ms === "number" ? props.now_ms : Date.now();
   const flow_in = props.flow;
   const active = safe_str(props.active_node_id);
   const recent = props.recent_nodes || {};
+  const visited = props.visited_nodes || {};
+  const highlight_path = props.highlight_path === true;
 
   const { nodes, edges, bounds } = useMemo(() => {
     const vf: any = merge_flow_with_subflows({
@@ -211,7 +284,7 @@ export function FlowGraph(props: {
     const raw_nodes = Array.isArray(vf.nodes) ? vf.nodes : [];
     const raw_edges = Array.isArray(vf.edges) ? vf.edges : [];
 
-    const nodes_out: GraphNode[] = [];
+    let nodes_out: GraphNode[] = [];
     for (const n of raw_nodes) {
       const id = safe_str(n?.id).trim();
       if (!id) continue;
@@ -225,13 +298,28 @@ export function FlowGraph(props: {
       nodes_out.push({ id, x, y, label, type, color });
     }
 
-    const edges_out: GraphEdge[] = [];
+    let edges_out: GraphEdge[] = [];
     for (const e of raw_edges) {
       if (!is_exec_edge(e)) continue;
       const source = safe_str(e?.source).trim();
       const target = safe_str(e?.target).trim();
       if (!source || !target) continue;
       edges_out.push({ id: safe_str(e?.id || `${source}->${target}`), source, target });
+    }
+
+    if (props.simplify === true) {
+      const keep_id = (id: string) => {
+        if (active && id === active) return true;
+        const n = nodes_out.find((x) => x.id === id);
+        if (!n) return false;
+        const t = safe_str(n.type).trim().toLowerCase();
+        if (t === "on_flow_start" || t === "on_flow_end") return true;
+        if (t === "subflow") return true;
+        return !is_plumbing_type(t);
+      };
+      const simplified = simplify_exec_graph({ nodes: nodes_out, edges: edges_out, keep_id, max_edges: 900 });
+      nodes_out = simplified.nodes;
+      edges_out = simplified.edges;
     }
 
     // Estimate bounds based on node positions.
@@ -257,7 +345,7 @@ export function FlowGraph(props: {
       node_h: h,
     };
     return { nodes: nodes_out, edges: edges_out, bounds: vb };
-  }, [flow_in, props.flow_by_id, props.expand_subflows]);
+  }, [flow_in, props.flow_by_id, props.expand_subflows, props.simplify, active]);
 
   if (!flow_in) {
     return (
@@ -267,13 +355,171 @@ export function FlowGraph(props: {
     );
   }
 
-  const view_box = `${bounds.x} ${bounds.y} ${bounds.w} ${bounds.h}`;
+  const svg_ref = useRef<SVGSVGElement | null>(null);
+  const [view, set_view] = useState<ViewBox>(() => ({ x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h }));
+  const view_ref = useRef<ViewBox>(view);
+  view_ref.current = view;
+
+  useEffect(() => {
+    set_view({ x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h });
+  }, [bounds.x, bounds.y, bounds.w, bounds.h]);
+
+  const pointers_ref = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const gesture_ref = useRef<
+    | null
+    | {
+        mode: "pan" | "pinch";
+        start_view: ViewBox;
+        start_client: { x: number; y: number };
+        start_dist: number;
+        anchor_svg: { x: number; y: number };
+      }
+  >(null);
+
+  const view_box = `${view.x} ${view.y} ${view.w} ${view.h}`;
   const node_by_id: Record<string, GraphNode> = {};
   for (const n of nodes) node_by_id[n.id] = n;
 
+  const client_to_svg = (client_x: number, client_y: number, use_view?: ViewBox): { x: number; y: number } => {
+    const vb = use_view || view_ref.current;
+    const svg = svg_ref.current;
+    if (!svg) return { x: client_x, y: client_y };
+    const rect = svg.getBoundingClientRect();
+    const px = rect.width > 0 ? (client_x - rect.left) / rect.width : 0;
+    const py = rect.height > 0 ? (client_y - rect.top) / rect.height : 0;
+    return { x: vb.x + px * vb.w, y: vb.y + py * vb.h };
+  };
+
+  const zoom_at = (anchor: { x: number; y: number }, factor: number, base_view?: ViewBox) => {
+    const vb = base_view || view_ref.current;
+    const f = Math.max(0.12, Math.min(8, factor));
+    const next_w = vb.w * f;
+    const next_h = vb.h * f;
+    const rx = vb.w > 0 ? (anchor.x - vb.x) / vb.w : 0.5;
+    const ry = vb.h > 0 ? (anchor.y - vb.y) / vb.h : 0.5;
+    const next_x = anchor.x - rx * next_w;
+    const next_y = anchor.y - ry * next_h;
+    set_view(clamp_view({ x: next_x, y: next_y, w: next_w, h: next_h }, bounds));
+  };
+
+  const pan_by = (dx_client: number, dy_client: number, base_view?: ViewBox) => {
+    const vb = base_view || view_ref.current;
+    const svg = svg_ref.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const dx = rect.width > 0 ? (dx_client / rect.width) * vb.w : 0;
+    const dy = rect.height > 0 ? (dy_client / rect.height) * vb.h : 0;
+    set_view((prev) => clamp_view({ x: (base_view || prev).x - dx, y: (base_view || prev).y - dy, w: (base_view || prev).w, h: (base_view || prev).h }, bounds));
+  };
+
   return (
     <div className="graph_wrap">
-      <svg className="graph_svg" viewBox={view_box} role="img" aria-label="Workflow execution graph">
+      <div className="graph_corner">
+        <div className="graph_corner_buttons">
+          <button
+            className="btn graph_corner_btn"
+            type="button"
+            onClick={() => set_view({ x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h })}
+            title="Recenter"
+          >
+            ⤢
+          </button>
+          <button
+            className="btn graph_corner_btn"
+            type="button"
+            onClick={() => {
+              const svg = svg_ref.current;
+              if (!svg) return;
+              const rect = svg.getBoundingClientRect();
+              const anchor = client_to_svg(rect.left + rect.width / 2, rect.top + rect.height / 2);
+              zoom_at(anchor, 0.84);
+            }}
+            title="Zoom in"
+          >
+            +
+          </button>
+          <button
+            className="btn graph_corner_btn"
+            type="button"
+            onClick={() => {
+              const svg = svg_ref.current;
+              if (!svg) return;
+              const rect = svg.getBoundingClientRect();
+              const anchor = client_to_svg(rect.left + rect.width / 2, rect.top + rect.height / 2);
+              zoom_at(anchor, 1.18);
+            }}
+            title="Zoom out"
+          >
+            −
+          </button>
+        </div>
+        <PinLegend />
+      </div>
+      <svg
+        ref={svg_ref}
+        className="graph_svg"
+        viewBox={view_box}
+        role="img"
+        aria-label="Workflow execution graph"
+        onWheel={(e) => {
+          e.preventDefault();
+          const anchor = client_to_svg(e.clientX, e.clientY);
+          const delta = typeof e.deltaY === "number" ? e.deltaY : 0;
+          const factor = delta > 0 ? 1.12 : 0.89;
+          zoom_at(anchor, factor);
+        }}
+        onPointerDown={(e) => {
+          (e.currentTarget as any).setPointerCapture?.(e.pointerId);
+          pointers_ref.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+          const pts = Array.from(pointers_ref.current.values());
+          if (pts.length === 1) {
+            gesture_ref.current = { mode: "pan", start_view: view_ref.current, start_client: { x: e.clientX, y: e.clientY }, start_dist: 0, anchor_svg: { x: 0, y: 0 } };
+          } else if (pts.length >= 2) {
+            const a = pts[0];
+            const b = pts[1];
+            const dx = a.x - b.x;
+            const dy = a.y - b.y;
+            const dist = Math.max(1, Math.hypot(dx, dy));
+            const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+            const start_view = view_ref.current;
+            gesture_ref.current = {
+              mode: "pinch",
+              start_view,
+              start_client: mid,
+              start_dist: dist,
+              anchor_svg: client_to_svg(mid.x, mid.y, start_view),
+            };
+          }
+        }}
+        onPointerMove={(e) => {
+          if (!pointers_ref.current.has(e.pointerId)) return;
+          pointers_ref.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+          const g = gesture_ref.current;
+          if (!g) return;
+          const pts = Array.from(pointers_ref.current.values());
+          if (g.mode === "pan" && pts.length === 1) {
+            const dx = e.clientX - g.start_client.x;
+            const dy = e.clientY - g.start_client.y;
+            pan_by(dx, dy, g.start_view);
+          } else if (g.mode === "pinch" && pts.length >= 2) {
+            const a = pts[0];
+            const b = pts[1];
+            const dx = a.x - b.x;
+            const dy = a.y - b.y;
+            const dist = Math.max(1, Math.hypot(dx, dy));
+            const factor = g.start_dist / dist;
+            zoom_at(g.anchor_svg, factor, g.start_view);
+          }
+        }}
+        onPointerUp={(e) => {
+          pointers_ref.current.delete(e.pointerId);
+          if (pointers_ref.current.size === 0) gesture_ref.current = null;
+        }}
+        onPointerCancel={(e) => {
+          pointers_ref.current.delete(e.pointerId);
+          if (pointers_ref.current.size === 0) gesture_ref.current = null;
+        }}
+      >
         <defs>
           <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(148,163,184,0.55)" />
@@ -295,14 +541,16 @@ export function FlowGraph(props: {
           const y1 = s.y + bounds.node_h / 2;
           const x2 = t.x + bounds.node_w / 2;
           const y2 = t.y + bounds.node_h / 2;
-          return <line key={e.id} x1={x1} y1={y1} x2={x2} y2={y2} className="graph_edge" markerEnd="url(#arrow)" />;
+          const is_visited_edge = highlight_path && visited && visited[e.source] !== undefined && visited[e.target] !== undefined;
+          return <line key={e.id} x1={x1} y1={y1} x2={x2} y2={y2} className={`graph_edge ${is_visited_edge ? "visited" : ""}`} markerEnd="url(#arrow)" />;
         })}
 
         {nodes.map((n) => {
           const until = typeof recent[n.id] === "number" ? recent[n.id] : 0;
           const is_recent = until > now_ms;
           const is_active = active && n.id === active;
-          const cls = `graph_node ${is_active ? "active" : is_recent ? "recent" : ""}`;
+          const is_visited = highlight_path && visited && visited[n.id] !== undefined;
+          const cls = `graph_node ${is_active ? "active" : is_recent ? "recent" : ""} ${is_visited ? "visited" : ""}`;
           const bar_color = n.color || "rgba(255,255,255,0.16)";
           const label = clamp_text(n.label || n.id, 22);
           const type = clamp_text(n.type, 18);

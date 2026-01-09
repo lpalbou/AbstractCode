@@ -7,6 +7,7 @@ import { extract_emit_event, extract_tool_calls_from_wait, extract_wait_from_rec
 import { LedgerStreamEvent, StepRecord, ToolCall, ToolResult, WaitState } from "../lib/types";
 import { FlowGraph } from "./flow_graph";
 import { JsonViewer } from "./json_viewer";
+import { MultiSelect } from "./multi_select";
 
 type Settings = {
   gateway_url: string;
@@ -55,6 +56,22 @@ type BundleInfo = {
   entrypoints?: BundleEntrypoint[];
   flows?: string[];
   metadata?: any;
+};
+
+type WorkflowOption = {
+  workflow_id: string; // bundle_id:flow_id
+  bundle_id: string;
+  flow_id: string;
+  label: string;
+  description?: string;
+};
+
+type RunSummary = {
+  run_id: string;
+  workflow_id?: string | null;
+  status?: string;
+  updated_at?: string | null;
+  parent_run_id?: string | null;
 };
 
 function now_iso(): string {
@@ -213,7 +230,23 @@ function is_waiting_status(rec: StepRecord | null): boolean {
   return Boolean(rec && String(rec.status || "") === "waiting");
 }
 
+function parse_iso_ms(ts: any): number | null {
+  const s = typeof ts === "string" ? ts.trim() : "";
+  if (!s) return null;
+  const ms = Date.parse(s);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 export function App(): React.ReactElement {
+  const [is_narrow, set_is_narrow] = useState<boolean>(() => {
+    try {
+      return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(max-width: 900px)").matches;
+    } catch {
+      return false;
+    }
+  });
+  const [mobile_tab, set_mobile_tab] = useState<"controls" | "viewer">("controls");
+
   const [settings, set_settings] = useState<Settings>(() => load_settings());
   const [run_id, set_run_id] = useState<string>("");
   const [root_run_id, set_root_run_id] = useState<string>("");
@@ -227,11 +260,22 @@ export function App(): React.ReactElement {
   const [input_field_drafts, set_input_field_drafts] = useState<Record<string, string>>({});
   const [input_field_errors, set_input_field_errors] = useState<Record<string, string>>({});
 
+  const [discovery_loading, set_discovery_loading] = useState(false);
+  const [discovery_error, set_discovery_error] = useState<string>("");
+  const [gateway_connected, set_gateway_connected] = useState(false);
+  const [workflow_options, set_workflow_options] = useState<WorkflowOption[]>([]);
+  const [run_options, set_run_options] = useState<RunSummary[]>([]);
+  const [runs_loading, set_runs_loading] = useState(false);
+  const [discovered_tool_specs, set_discovered_tool_specs] = useState<any[]>([]);
+  const [discovered_providers, set_discovered_providers] = useState<any[]>([]);
+  const [discovered_models_by_provider, set_discovered_models_by_provider] = useState<Record<string, { models: string[]; error?: string }>>({});
+
   const [connected, set_connected] = useState(false);
   const [connecting, set_connecting] = useState(false);
   const [resuming, set_resuming] = useState(false);
   const [cursor, set_cursor] = useState<number>(0);
   const [records, set_records] = useState<Array<{ cursor: number; record: StepRecord }>>([]);
+  const [child_records_for_digest, set_child_records_for_digest] = useState<Array<{ run_id: string; cursor: number; record: StepRecord }>>([]);
   const cursor_ref = useRef<number>(0);
   const [run_state, set_run_state] = useState<any>(null);
   const [control_reason, set_control_reason] = useState<string>("");
@@ -247,25 +291,31 @@ export function App(): React.ReactElement {
   const [log_open, set_log_open] = useState<Record<string, boolean>>({});
   const [error_text, set_error_text] = useState<string>("");
 
-  const [right_tab, set_right_tab] = useState<"ledger" | "graph">("ledger");
+  const [right_tab, set_right_tab] = useState<"ledger" | "graph" | "digest">("ledger");
   const [graph_flow_id, set_graph_flow_id] = useState<string>("");
   const [graph_flow, set_graph_flow] = useState<any | null>(null);
   const [graph_flow_cache, set_graph_flow_cache] = useState<Record<string, any>>({});
   const [graph_loading, set_graph_loading] = useState(false);
   const [graph_error, set_graph_error] = useState<string>("");
   const [graph_show_subflows, set_graph_show_subflows] = useState(false);
+  const [graph_simplify, set_graph_simplify] = useState(false);
+  const [graph_highlight_path, set_graph_highlight_path] = useState(false);
   const [graph_now_ms, set_graph_now_ms] = useState<number>(() => Date.now());
   const [active_node_id, set_active_node_id] = useState<string>("");
   const [recent_nodes, set_recent_nodes] = useState<Record<string, number>>({});
+  const [visited_nodes, set_visited_nodes] = useState<Record<string, number>>({});
+  const visited_order_ref = useRef<string[]>([]);
   const recent_prune_timer_ref = useRef<number | null>(null);
   const active_node_ref = useRef<string>("");
   const run_prefix_ref = useRef<Record<string, string>>({});
   const subrun_parent_ref = useRef<Record<string, string>>({});
   const root_subrun_ref = useRef<string>("");
+  const models_fetch_inflight_ref = useRef<Record<string, boolean>>({});
 
   const abort_ref = useRef<AbortController | null>(null);
   const child_abort_ref = useRef<AbortController | null>(null);
   const child_cursor_ref = useRef<number>(0);
+  const digest_seen_ref = useRef<Set<string>>(new Set());
   const [following_child_run_id, set_following_child_run_id] = useState<string>("");
   const [follow_run_id, set_follow_run_id] = useState<string>("");
   const follow_run_ref = useRef<string>("");
@@ -329,6 +379,19 @@ export function App(): React.ReactElement {
     };
   }, []);
 
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+      const media = window.matchMedia("(max-width: 900px)");
+      const on_change = (ev: MediaQueryListEvent) => set_is_narrow(Boolean(ev.matches));
+      set_is_narrow(Boolean(media.matches));
+      media.addEventListener("change", on_change);
+      return () => media.removeEventListener("change", on_change);
+    } catch {
+      return;
+    }
+  }, []);
+
   const input_data_obj: Record<string, any> | null = useMemo(() => {
     const raw = input_data_text.trim();
     if (!raw) return {};
@@ -344,6 +407,62 @@ export function App(): React.ReactElement {
   const provider_value = typeof input_data_obj?.provider === "string" ? String(input_data_obj.provider) : "";
   const model_value = typeof input_data_obj?.model === "string" ? String(input_data_obj.model) : "";
   const has_adaptive_inputs = adaptive_pins.length > 0 && Boolean(bundle_id.trim());
+
+  const selected_workflow_value = bundle_id.trim() && flow_id.trim() ? `${bundle_id.trim()}:${flow_id.trim()}` : "";
+
+  const available_tool_names = useMemo(() => {
+    const out = new Set<string>();
+    for (const s of Array.isArray(discovered_tool_specs) ? discovered_tool_specs : []) {
+      const name = String((s as any)?.name || "").trim();
+      if (name) out.add(name);
+    }
+    return Array.from(out).sort();
+  }, [discovered_tool_specs]);
+
+  const available_providers = useMemo(() => {
+    const out = new Set<string>();
+    for (const p of Array.isArray(discovered_providers) ? discovered_providers : []) {
+      const name = String((p as any)?.name || "").trim();
+      if (name) out.add(name);
+    }
+    return Array.from(out).sort();
+  }, [discovered_providers]);
+
+  const models_for_provider = useMemo(() => {
+    const prov = provider_value.trim();
+    if (!prov) return { models: [] as string[], error: "" };
+    const found = discovered_models_by_provider[prov];
+    if (!found) return { models: [] as string[], error: "" };
+    const models = Array.isArray(found.models) ? found.models : [];
+    return { models: models.map((x) => String(x || "").trim()).filter(Boolean), error: String((found as any).error || "") };
+  }, [discovered_models_by_provider, provider_value]);
+
+  useEffect(() => {
+    const prov = provider_value.trim();
+    if (!prov) return;
+    if (discovered_models_by_provider[prov]) return;
+    if (models_fetch_inflight_ref.current[prov]) return;
+    models_fetch_inflight_ref.current[prov] = true;
+    let stopped = false;
+    const run = async () => {
+      try {
+        const res = await gateway.discovery_provider_models(prov);
+        if (stopped) return;
+        const models = Array.isArray(res?.models) ? res.models : [];
+        const err = typeof res?.error === "string" ? String(res.error) : "";
+        set_discovered_models_by_provider((prev) => ({ ...prev, [prov]: { models, error: err || undefined } }));
+      } catch (e: any) {
+        if (stopped) return;
+        set_discovered_models_by_provider((prev) => ({ ...prev, [prov]: { models: [], error: String(e?.message || e || "Failed to load models") } }));
+      } finally {
+        delete models_fetch_inflight_ref.current[prov];
+      }
+    };
+    run();
+    return () => {
+      stopped = true;
+    };
+  }, [provider_value, discovered_models_by_provider, gateway]);
 
   function update_input_data_field(key: string, value: string): void {
     let obj: Record<string, any> = {};
@@ -408,6 +527,94 @@ export function App(): React.ReactElement {
 
   async function on_load_bundle(): Promise<void> {
     await load_bundle_info(bundle_id.trim());
+  }
+
+  function build_workflow_options_from_bundles(resp: any): WorkflowOption[] {
+    const out: WorkflowOption[] = [];
+    const items = Array.isArray(resp?.items) ? resp.items : [];
+    for (const b of items) {
+      const bid = String(b?.bundle_id || "").trim();
+      if (!bid) continue;
+      const eps = Array.isArray(b?.entrypoints) ? b.entrypoints : [];
+      if (!eps.length) continue;
+      for (const ep of eps) {
+        const fid = String(ep?.flow_id || "").trim();
+        if (!fid) continue;
+        const workflow_id = `${bid}:${fid}`;
+        const name = String(ep?.name || "").trim();
+        const label = name ? `${bid} · ${name}` : `${bid} · ${fid}`;
+        const description = String(ep?.description || "").trim();
+        out.push({ workflow_id, bundle_id: bid, flow_id: fid, label, description: description || undefined });
+      }
+    }
+    out.sort((a, b) => a.label.localeCompare(b.label));
+    return out;
+  }
+
+  async function refresh_runs(): Promise<void> {
+    if (runs_loading) return;
+    set_runs_loading(true);
+    try {
+      const runs = await gateway.list_runs({ limit: 80 });
+      const items = Array.isArray((runs as any)?.items) ? ((runs as any).items as any[]) : [];
+      const next: RunSummary[] = items
+        .map((r) => ({
+          run_id: String(r?.run_id || "").trim(),
+          workflow_id: typeof r?.workflow_id === "string" ? String(r.workflow_id) : r?.workflow_id ?? null,
+          status: typeof r?.status === "string" ? String(r.status) : "",
+          updated_at: typeof r?.updated_at === "string" ? String(r.updated_at) : r?.updated_at ?? null,
+          parent_run_id: typeof r?.parent_run_id === "string" ? String(r.parent_run_id) : r?.parent_run_id ?? null,
+        }))
+        .filter((r) => Boolean(r.run_id));
+      set_run_options(next);
+    } catch (e: any) {
+      push_log({ ts: now_iso(), kind: "error", title: "Refresh runs failed", preview: clamp_preview(String(e?.message || e || "")) });
+    } finally {
+      set_runs_loading(false);
+    }
+  }
+
+  async function on_discover_gateway(): Promise<void> {
+    set_discovery_error("");
+    set_gateway_connected(false);
+    set_discovery_loading(true);
+    try {
+      const bundles = await gateway.list_bundles();
+      const opts = build_workflow_options_from_bundles(bundles);
+      set_workflow_options(opts);
+
+      try {
+        await refresh_runs();
+      } catch (e: any) {
+        set_run_options([]);
+        push_log({ ts: now_iso(), kind: "error", title: "Discovery runs failed", preview: clamp_preview(String(e?.message || e || "")) });
+      }
+
+      const [tools_res, providers_res] = await Promise.allSettled([gateway.discovery_tools(), gateway.discovery_providers({ include_models: false })]);
+      if (tools_res.status === "fulfilled") {
+        const items = Array.isArray(tools_res.value?.items) ? tools_res.value.items : [];
+        set_discovered_tool_specs(items);
+      } else {
+        set_discovered_tool_specs([]);
+        push_log({ ts: now_iso(), kind: "error", title: "Discovery tools failed", preview: clamp_preview(String(tools_res.reason || "")) });
+      }
+
+      if (providers_res.status === "fulfilled") {
+        const items = Array.isArray(providers_res.value?.items) ? providers_res.value.items : [];
+        set_discovered_providers(items);
+      } else {
+        set_discovered_providers([]);
+        push_log({ ts: now_iso(), kind: "error", title: "Discovery providers failed", preview: clamp_preview(String(providers_res.reason || "")) });
+      }
+
+      set_discovered_models_by_provider({});
+      set_gateway_connected(true);
+      push_log({ ts: now_iso(), kind: "info", title: "Gateway discovery loaded", preview: clamp_preview(`workflows: ${opts.length}`) });
+    } catch (e: any) {
+      set_discovery_error(String(e?.message || e || "Discovery failed"));
+    } finally {
+      set_discovery_loading(false);
+    }
   }
 
   function apply_entrypoint_defaults(): void {
@@ -564,6 +771,17 @@ export function App(): React.ReactElement {
       return pruned;
     });
 
+    set_visited_nodes((prev) => {
+      if (typeof prev[node_id] === "number") return prev;
+      const next = { ...prev, [node_id]: now };
+      visited_order_ref.current.push(node_id);
+      if (visited_order_ref.current.length > 1500) {
+        const drop = visited_order_ref.current.splice(0, 300);
+        for (const k of drop) delete next[k];
+      }
+      return next;
+    });
+
     if (recent_prune_timer_ref.current) window.clearTimeout(recent_prune_timer_ref.current);
     recent_prune_timer_ref.current = window.setTimeout(() => {
       const t = Date.now();
@@ -583,6 +801,7 @@ export function App(): React.ReactElement {
     cursor_ref.current = ev.cursor;
     set_cursor(ev.cursor);
     set_records((prev) => [...prev, { cursor: ev.cursor, record: ev.record }]);
+    if (run_id.trim()) digest_seen_ref.current.add(`${run_id.trim()}:${ev.cursor}`);
 
     const emit = extract_emit_event(ev.record);
     const emit_name = emit && emit.name ? normalize_ui_event_name(emit.name) : "";
@@ -651,6 +870,11 @@ export function App(): React.ReactElement {
 
   function handle_child_step(child_run_id: string, ev: LedgerStreamEvent): void {
     child_cursor_ref.current = Math.max(child_cursor_ref.current, ev.cursor);
+    const dig_key = `${child_run_id}:${ev.cursor}`;
+    if (!digest_seen_ref.current.has(dig_key)) {
+      digest_seen_ref.current.add(dig_key);
+      set_child_records_for_digest((prev) => [...prev, { run_id: child_run_id, cursor: ev.cursor, record: ev.record }].slice(-5000));
+    }
     const emit = extract_emit_event(ev.record);
     const emit_name = emit && emit.name ? normalize_ui_event_name(emit.name) : "";
     const rec = ev.record;
@@ -740,6 +964,8 @@ export function App(): React.ReactElement {
     set_records([]);
     set_cursor(0);
     cursor_ref.current = 0;
+    set_child_records_for_digest([]);
+    digest_seen_ref.current = new Set();
     set_log([]);
     set_log_open({});
     set_status_text("");
@@ -750,6 +976,8 @@ export function App(): React.ReactElement {
     set_active_node_id("");
     active_node_ref.current = "";
     set_recent_nodes({});
+    set_visited_nodes({});
+    visited_order_ref.current = [];
     set_graph_now_ms(Date.now());
     run_prefix_ref.current = rid ? { [rid]: "" } : {};
     subrun_parent_ref.current = {};
@@ -993,6 +1221,99 @@ export function App(): React.ReactElement {
   const show_wait_modal = is_waiting && wait_key && (is_user_wait || is_ask_event_wait || has_tool_wait) && dismissed_wait_key !== wait_key;
   const sub_run_id = typeof (wait_state as any)?.details?.sub_run_id === "string" ? String((wait_state as any).details.sub_run_id) : "";
 
+  const digest = useMemo(() => {
+    const all: StepRecord[] = [];
+    for (const x of records) {
+      if (x && x.record) all.push(x.record);
+    }
+    for (const x of child_records_for_digest) {
+      if (x && x.record) all.push(x.record);
+    }
+
+    const stats = {
+      steps: all.length,
+      tool_calls_effects: 0,
+      tool_calls: 0,
+      unique_tools: 0,
+      llm_calls: 0,
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+      started_at: "",
+      ended_at: "",
+      duration_s: 0,
+    };
+
+    const files: Array<{ tool: string; file_path: string; run_id: string; ts: string }> = [];
+    const commands: Array<{ command: string; run_id: string; ts: string }> = [];
+    const web: Array<{ tool: string; value: string; run_id: string; ts: string }> = [];
+    const tools_used = new Set<string>();
+
+    let min_ms: number | null = null;
+    let max_ms: number | null = null;
+
+    for (const rec of all) {
+      const rid = typeof rec?.run_id === "string" ? String(rec.run_id) : "";
+      const ts_s = String(rec?.ended_at || rec?.started_at || "").trim();
+      const ms = parse_iso_ms(ts_s);
+      if (ms !== null) {
+        if (min_ms === null || ms < min_ms) min_ms = ms;
+        if (max_ms === null || ms > max_ms) max_ms = ms;
+      }
+
+      const eff_type = typeof rec?.effect?.type === "string" ? String(rec.effect.type) : "";
+      if (eff_type === "llm_call") {
+        stats.llm_calls += 1;
+        const usage = rec?.result && typeof rec.result === "object" ? (rec.result as any).usage || (rec.result as any).token_usage : null;
+        if (usage && typeof usage === "object") {
+          const pt = Number((usage as any).prompt_tokens ?? (usage as any).input_tokens ?? 0);
+          const ct = Number((usage as any).completion_tokens ?? (usage as any).output_tokens ?? 0);
+          const tt = Number((usage as any).total_tokens ?? pt + ct);
+          if (Number.isFinite(pt)) stats.prompt_tokens += pt;
+          if (Number.isFinite(ct)) stats.completion_tokens += ct;
+          if (Number.isFinite(tt)) stats.total_tokens += tt;
+        }
+      }
+
+      if (eff_type !== "tool_calls") continue;
+      stats.tool_calls_effects += 1;
+      const payload = rec?.effect?.payload;
+      const tool_calls = payload && typeof payload === "object" ? (payload as any).tool_calls : null;
+      const calls = Array.isArray(tool_calls) ? (tool_calls as any[]) : [];
+      if (!calls.length) continue;
+      stats.tool_calls += calls.length;
+
+      for (const c of calls) {
+        if (!c || typeof c !== "object") continue;
+        const name = String((c as any).name || "").trim();
+        if (!name) continue;
+        tools_used.add(name);
+        const args = (c as any).arguments;
+
+        if (name === "write_file" || name === "edit_file" || name === "delete_file") {
+          const fp = args && typeof args === "object" ? String((args as any).file_path || (args as any).path || "").trim() : "";
+          if (fp) files.push({ tool: name, file_path: fp, run_id: rid, ts: ts_s });
+        } else if (name === "execute_command") {
+          const cmd = args && typeof args === "object" ? String((args as any).command || "").trim() : "";
+          if (cmd) commands.push({ command: cmd, run_id: rid, ts: ts_s });
+        } else if (name === "web_search") {
+          const q = args && typeof args === "object" ? String((args as any).query || "").trim() : "";
+          if (q) web.push({ tool: name, value: q, run_id: rid, ts: ts_s });
+        } else if (name === "fetch_url") {
+          const u = args && typeof args === "object" ? String((args as any).url || "").trim() : "";
+          if (u) web.push({ tool: name, value: u, run_id: rid, ts: ts_s });
+        }
+      }
+    }
+
+    stats.unique_tools = tools_used.size;
+    if (min_ms !== null) stats.started_at = new Date(min_ms).toISOString();
+    if (max_ms !== null) stats.ended_at = new Date(max_ms).toISOString();
+    if (min_ms !== null && max_ms !== null) stats.duration_s = Math.max(0, Math.round((max_ms - min_ms) / 1000));
+
+    return { stats, files, commands, web, tools_used: Array.from(tools_used).sort() };
+  }, [records, child_records_for_digest]);
+
   // Follow the deepest active subworkflow run for status/event UX (not just the immediate child).
   useEffect(() => {
     follow_run_ref.current = follow_run_id.trim();
@@ -1135,25 +1456,6 @@ export function App(): React.ReactElement {
     return Array.from(new Set(graph_entrypoint_ids)).sort();
   }, [bundle_info, graph_entrypoint_ids]);
 
-  const graph_legend = useMemo(() => {
-    const flows: any[] = [];
-    if (graph_flow) flows.push(graph_flow);
-    if (graph_show_subflows) {
-      for (const v of Object.values(graph_flow_cache || {})) flows.push(v);
-    }
-    const map = new Map<string, string>();
-    for (const f of flows) {
-      const nodes = Array.isArray((f as any)?.nodes) ? (f as any).nodes : [];
-      for (const n of nodes) {
-        const data = n?.data && typeof n.data === "object" ? n.data : {};
-        const nt = String((data as any)?.nodeType || n?.type || "").trim() || "unknown";
-        const col = String((data as any)?.headerColor || n?.headerColor || "").trim();
-        if (!map.has(nt)) map.set(nt, col);
-      }
-    }
-    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [graph_flow, graph_show_subflows, graph_flow_cache]);
-
   // Follow the current deepest descendant run for status/events.
   useEffect(() => {
     const child_id = follow_run_id.trim();
@@ -1217,21 +1519,43 @@ export function App(): React.ReactElement {
         <div className="title">
           <h1>AbstractCode Thin Client (Web/PWA)</h1>
           <div className="badge mono">
-            {connected ? "connected" : connecting ? "connecting…" : "disconnected"} • cursor {cursor}
+            {(gateway_connected ? "gateway ok" : discovery_loading ? "gateway…" : "gateway off")} •{" "}
+            {(connected ? "run ok" : connecting ? "run…" : "run off")} • cursor {cursor}
           </div>
         </div>
 
+        {is_narrow ? (
+          <div className="tab_bar" style={{ justifyContent: "flex-start" }}>
+            <button className={`tab mono ${mobile_tab === "controls" ? "active" : ""}`} onClick={() => set_mobile_tab("controls")}>
+              Controls
+            </button>
+            <button className={`tab mono ${mobile_tab === "viewer" ? "active" : ""}`} onClick={() => set_mobile_tab("viewer")}>
+              Viewer
+            </button>
+          </div>
+        ) : null}
+
         <div className="app-main">
-          <div className="panel">
+          <div className="panel" style={is_narrow && mobile_tab !== "controls" ? { display: "none" } : undefined}>
             <div className="card panel_card scroll_y">
             <div className="field">
               <label>Gateway URL (blank = same origin / dev proxy)</label>
-              <input
-                className="mono"
-                value={settings.gateway_url}
-                onChange={(e) => set_settings((s) => ({ ...s, gateway_url: e.target.value }))}
-                placeholder="https://your-gateway-host"
-              />
+              <div className="field_inline">
+                <input
+                  className="mono"
+                  value={settings.gateway_url}
+                  onChange={(e) => set_settings((s) => ({ ...s, gateway_url: e.target.value }))}
+                  placeholder="https://your-gateway-host"
+                />
+                <button className="btn" onClick={on_discover_gateway} disabled={discovery_loading || connecting || resuming}>
+                  {discovery_loading ? "Connecting…" : "Connect"}
+                </button>
+              </div>
+              {discovery_error ? (
+                <div className="mono" style={{ color: "rgba(239, 68, 68, 0.9)", fontSize: "12px" }}>
+                  {discovery_error}
+                </div>
+              ) : null}
             </div>
             <div className="field">
               <label>Gateway token (Authorization: Bearer …)</label>
@@ -1241,6 +1565,31 @@ export function App(): React.ReactElement {
                 onChange={(e) => set_settings((s) => ({ ...s, auth_token: e.target.value }))}
                 placeholder="(optional for localhost dev)"
               />
+            </div>
+            <div className="field">
+              <label>Workflows (discovered)</label>
+              <select
+                className="mono"
+                value={selected_workflow_value}
+                onChange={async (e) => {
+                  const wid = String(e.target.value || "").trim();
+                  if (!wid) return;
+                  const parsed = parse_namespaced_workflow_id(wid);
+                  if (!parsed) return;
+                  set_bundle_id(parsed.bundle_id);
+                  set_flow_id(parsed.flow_id);
+                  set_graph_flow_id(parsed.flow_id);
+                  await load_bundle_info(parsed.bundle_id);
+                }}
+                disabled={discovery_loading || !workflow_options.length}
+              >
+                <option value="">{workflow_options.length ? "(select)" : "(empty — click Connect)"}</option>
+                {workflow_options.map((w) => (
+                  <option key={w.workflow_id} value={w.workflow_id}>
+                    {w.label}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="row">
               <div className="col">
@@ -1269,7 +1618,43 @@ export function App(): React.ReactElement {
               <div className="col">
                 <div className="field">
                   <label>Run ID (attach)</label>
-                  <input className="mono" value={run_id} onChange={(e) => set_run_id(e.target.value)} placeholder="run uuid" />
+                  <div className="field_inline">
+                    <input className="mono" value={run_id} onChange={(e) => set_run_id(e.target.value)} placeholder="run uuid" />
+                    <button className="btn" onClick={on_attach_run} disabled={connecting || !run_id.trim()}>
+                      Attach
+                    </button>
+                  </div>
+                  {run_options.length ? (
+                    <div className="field_inline" style={{ marginTop: "6px" }}>
+                      <select
+                        className="mono"
+                        value={run_options.some((r) => r.run_id === run_id.trim()) ? run_id.trim() : ""}
+                        onChange={(e) => set_run_id(String(e.target.value || ""))}
+                        disabled={!gateway_connected || runs_loading}
+                      >
+                        <option value="">{runs_loading ? "(loading…)" : "(select recent run)"}</option>
+                        {run_options.map((r) => {
+                          const rid = String(r.run_id || "").trim();
+                          if (!rid) return null;
+                          const wid = typeof r.workflow_id === "string" ? String(r.workflow_id) : "";
+                          const st = typeof r.status === "string" ? String(r.status) : "";
+                          const label = `${short_id(rid, 18)}${st ? ` • ${st}` : ""}${wid ? ` • ${wid}` : ""}`;
+                          return (
+                            <option key={rid} value={rid}>
+                              {label}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <button className="btn" onClick={refresh_runs} disabled={!gateway_connected || runs_loading || discovery_loading}>
+                        {runs_loading ? "…" : "Refresh"}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mono muted" style={{ fontSize: "12px" }}>
+                      Tip: click “Connect” to load recent runs from the gateway.
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1370,34 +1755,147 @@ export function App(): React.ReactElement {
 
                   // Special-cases: tools/context are common and benefit from dedicated widgets.
                   if (pid === "tools") {
-                    const draft =
-                      input_field_drafts[pid] ??
-                      (Array.isArray(cur) ? (cur as any[]).map((x) => String(x)).join("\n") : typeof cur === "string" ? String(cur) : "");
+                    const cur_arr: string[] = Array.isArray(cur) ? (cur as any[]).map((x) => String(x)).filter(Boolean) : [];
+                    const draft = input_field_drafts[pid] ?? cur_arr.join("\n");
+                    const has_discovery = available_tool_names.length > 0;
                     return (
                       <div key={pid} className="field">
                         <label>{label}</label>
-                        <textarea
+                        {has_discovery ? (
+                          <MultiSelect
+                            options={available_tool_names}
+                            value={cur_arr}
+                            disabled={disabled}
+                            placeholder="Select allowed tools…"
+                            onChange={(next) => {
+                              set_input_field_drafts((prev) => {
+                                const n = { ...prev };
+                                delete n[pid];
+                                return n;
+                              });
+                              set_input_field_errors((prev) => {
+                                const n = { ...prev };
+                                delete n[pid];
+                                return n;
+                              });
+                              if (!next.length) delete_input_data_key(pid);
+                              else set_input_data_value(pid, next);
+                            }}
+                          />
+                        ) : (
+                          <textarea
+                            className="mono"
+                            disabled={disabled}
+                            value={draft}
+                            onChange={(e) => {
+                              const text = e.target.value;
+                              set_input_field_drafts((prev) => ({ ...prev, [pid]: text }));
+                              const arr = text
+                                .split("\n")
+                                .map((x) => x.trim())
+                                .filter(Boolean);
+                              set_input_field_errors((prev) => {
+                                const next = { ...prev };
+                                delete next[pid];
+                                return next;
+                              });
+                              if (!arr.length) delete_input_data_key(pid);
+                              else set_input_data_value(pid, arr);
+                            }}
+                            rows={4}
+                            placeholder={"list_files\nsearch_files\nread_file\n..."}
+                          />
+                        )}
+                        {err ? <div className="mono" style={{ color: "rgba(239, 68, 68, 0.9)", fontSize: "12px" }}>{err}</div> : null}
+                        {!has_discovery ? (
+                          <div className="mono muted" style={{ fontSize: "12px" }}>
+                            Tip: click “Connect” to load tool list from the gateway.
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  }
+
+                  if (pid === "provider" || ptype === "provider") {
+                    const has_discovery = available_providers.length > 0;
+                    return (
+                      <div key={pid} className="field">
+                        <label>{label}</label>
+                        {has_discovery ? (
+                          <select
+                            className="mono"
+                            disabled={disabled}
+                            value={provider_value}
+                            onChange={(e) => {
+                              const next = String(e.target.value || "").trim();
+                              if (!next) {
+                                delete_input_data_key("provider");
+                                delete_input_data_key("model");
+                                return;
+                              }
+                              set_input_data_value("provider", next);
+                              if (model_value.trim()) delete_input_data_key("model");
+                            }}
+                          >
+                            <option value="">(select)</option>
+                            {available_providers.map((pname) => (
+                              <option key={pname} value={pname}>
+                                {pname}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            className="mono"
+                            disabled={disabled}
+                            value={provider_value}
+                            onChange={(e) => {
+                              const t = String(e.target.value || "");
+                              if (!t.trim()) delete_input_data_key(pid);
+                              else set_input_data_value(pid, t);
+                            }}
+                          />
+                        )}
+                        {!has_discovery ? (
+                          <div className="mono muted" style={{ fontSize: "12px" }}>
+                            Tip: click “Connect” to load providers from the gateway.
+                          </div>
+                        ) : null}
+                        {err ? <div className="mono" style={{ color: "rgba(239, 68, 68, 0.9)", fontSize: "12px" }}>{err}</div> : null}
+                      </div>
+                    );
+                  }
+
+                  if (pid === "model" || ptype === "model") {
+                    const prov = provider_value.trim();
+                    const models = models_for_provider.models;
+                    const has_models = models.length > 0;
+                    const disabled_model = disabled || !prov;
+                    return (
+                      <div key={pid} className="field">
+                        <label>{label}</label>
+                        <select
                           className="mono"
-                          disabled={disabled}
-                          value={draft}
+                          disabled={disabled_model}
+                          value={model_value}
                           onChange={(e) => {
-                            const text = e.target.value;
-                            set_input_field_drafts((prev) => ({ ...prev, [pid]: text }));
-                            const arr = text
-                              .split("\n")
-                              .map((x) => x.trim())
-                              .filter(Boolean);
-                            set_input_field_errors((prev) => {
-                              const next = { ...prev };
-                              delete next[pid];
-                              return next;
-                            });
-                            if (!arr.length) delete_input_data_key(pid);
-                            else set_input_data_value(pid, arr);
+                            const next = String(e.target.value || "").trim();
+                            if (!next) delete_input_data_key("model");
+                            else set_input_data_value("model", next);
                           }}
-                          rows={4}
-                          placeholder={"list_files\nsearch_files\nread_file\n..."}
-                        />
+                        >
+                          <option value="">{prov ? (has_models ? "(select)" : "(loading…)") : "(select provider first)"}</option>
+                          {models.map((m) => (
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
+                          ))}
+                        </select>
+                        {models_for_provider.error ? (
+                          <div className="mono" style={{ color: "rgba(239, 68, 68, 0.9)", fontSize: "12px" }}>
+                            {models_for_provider.error}
+                          </div>
+                        ) : null}
                         {err ? <div className="mono" style={{ color: "rgba(239, 68, 68, 0.9)", fontSize: "12px" }}>{err}</div> : null}
                       </div>
                     );
@@ -1616,9 +2114,6 @@ export function App(): React.ReactElement {
               <button className="btn primary" onClick={on_start_run} disabled={connecting || resuming || (connected && run_id.trim() !== "")}>
                 Start run
               </button>
-              <button className="btn" onClick={on_attach_run} disabled={connecting}>
-                Attach
-              </button>
               <button className="btn" onClick={() => submit_run_control("pause")} disabled={!run_id.trim() || connecting}>
                 Pause
               </button>
@@ -1752,7 +2247,7 @@ export function App(): React.ReactElement {
           </div>
           </div>
 
-          <div className="panel">
+          <div className="panel" style={is_narrow && mobile_tab !== "viewer" ? { display: "none" } : undefined}>
             <div className="card panel_card card_scroll">
               <div className="tab_bar">
                 <button className={`tab mono ${right_tab === "ledger" ? "active" : ""}`} onClick={() => set_right_tab("ledger")}>
@@ -1760,6 +2255,9 @@ export function App(): React.ReactElement {
                 </button>
                 <button className={`tab mono ${right_tab === "graph" ? "active" : ""}`} onClick={() => set_right_tab("graph")}>
                   Graph
+                </button>
+                <button className={`tab mono ${right_tab === "digest" ? "active" : ""}`} onClick={() => set_right_tab("digest")}>
+                  Digest
                 </button>
               </div>
 
@@ -1796,7 +2294,7 @@ export function App(): React.ReactElement {
                     ))}
                   </div>
                 </>
-              ) : (
+              ) : right_tab === "graph" ? (
                 <>
                   <div className="meta" style={{ marginTop: "10px" }}>
                     <span className="mono">workflow graph</span>
@@ -1821,14 +2319,26 @@ export function App(): React.ReactElement {
                       </select>
                     </div>
                     <div className="field" style={{ margin: 0 }}>
-                      <label>Subflows</label>
+                      <label>View</label>
                       <label className="mono" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                         <input
                           type="checkbox"
                           checked={graph_show_subflows}
                           onChange={(e) => set_graph_show_subflows(Boolean(e.target.checked))}
                         />
-                        {graph_show_subflows ? "shown" : "hidden"}
+                        subflows {graph_show_subflows ? "shown" : "hidden"}
+                      </label>
+                      <label className="mono" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                        <input type="checkbox" checked={graph_simplify} onChange={(e) => set_graph_simplify(Boolean(e.target.checked))} />
+                        simplify
+                      </label>
+                      <label className="mono" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={graph_highlight_path}
+                          onChange={(e) => set_graph_highlight_path(Boolean(e.target.checked))}
+                        />
+                        highlight path
                       </label>
                     </div>
                     <div className="field" style={{ margin: 0 }}>
@@ -1881,23 +2391,110 @@ export function App(): React.ReactElement {
                       flow={graph_flow}
                       flow_by_id={graph_flow_cache}
                       expand_subflows={graph_show_subflows}
+                      simplify={graph_simplify}
                       active_node_id={active_node_id}
                       recent_nodes={recent_nodes}
+                      visited_nodes={visited_nodes}
+                      highlight_path={graph_highlight_path}
                       now_ms={graph_now_ms}
                     />
                   </div>
+                </>
+              ) : (
+                <>
+                  <div className="meta" style={{ marginTop: "10px" }}>
+                    <span className="mono">digest</span>
+                    <span className="mono">{run_id.trim() ? `run ${run_id.trim()}` : ""}</span>
+                  </div>
+                  <div className="log_actions" style={{ marginTop: "10px" }}>
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        copy_to_clipboard(JSON.stringify(digest, null, 2));
+                      }}
+                      disabled={!digest.stats.steps}
+                    >
+                      Copy digest (JSON)
+                    </button>
+                  </div>
 
-                  <details className="graph_legend">
-                    <summary className="mono">Legend</summary>
-                    <div className="graph_legend_items">
-                      {graph_legend.map(([t, c]) => (
-                        <div key={t} className="graph_legend_row">
-                          <span className="graph_legend_swatch" style={{ background: c || "rgba(255,255,255,0.16)" }} />
-                          <span className="mono">{t}</span>
-                        </div>
-                      ))}
+                  <div className="log log_scroll">
+                    <div className="log_item" style={{ borderColor: "rgba(96, 165, 250, 0.25)" }}>
+                      <div className="meta">
+                        <span className="mono">stats</span>
+                        <span className="mono">{digest.stats.duration_s ? `${digest.stats.duration_s}s` : ""}</span>
+                      </div>
+                      <div className="body mono">
+                        {safe_json({
+                          steps: digest.stats.steps,
+                          llm_calls: digest.stats.llm_calls,
+                          tool_calls: digest.stats.tool_calls,
+                          unique_tools: digest.stats.unique_tools,
+                          tokens: digest.stats.total_tokens
+                            ? { prompt: digest.stats.prompt_tokens, completion: digest.stats.completion_tokens, total: digest.stats.total_tokens }
+                            : null,
+                          started_at: digest.stats.started_at || null,
+                          ended_at: digest.stats.ended_at || null,
+                        })}
+                      </div>
                     </div>
-                  </details>
+
+                    {digest.files.length ? (
+                      <div className="log_item">
+                        <div className="meta">
+                          <span className="mono">files</span>
+                          <span className="mono">{digest.files.length}</span>
+                        </div>
+                        <div className="body mono">
+                          {digest.files.slice(0, 120).map((f, idx) => (
+                            <div key={`${f.run_id}:${f.ts}:${f.file_path}:${idx}`}>
+                              {f.tool} • {f.file_path}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {digest.commands.length ? (
+                      <div className="log_item">
+                        <div className="meta">
+                          <span className="mono">commands</span>
+                          <span className="mono">{digest.commands.length}</span>
+                        </div>
+                        <div className="body mono">
+                          {digest.commands.slice(0, 80).map((c, idx) => (
+                            <div key={`${c.run_id}:${c.ts}:${idx}`}>{c.command}</div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {digest.web.length ? (
+                      <div className="log_item">
+                        <div className="meta">
+                          <span className="mono">web</span>
+                          <span className="mono">{digest.web.length}</span>
+                        </div>
+                        <div className="body mono">
+                          {digest.web.slice(0, 80).map((w, idx) => (
+                            <div key={`${w.run_id}:${w.ts}:${idx}`}>
+                              {w.tool} • {w.value}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {digest.tools_used.length ? (
+                      <div className="log_item">
+                        <div className="meta">
+                          <span className="mono">tools used</span>
+                          <span className="mono">{digest.tools_used.length}</span>
+                        </div>
+                        <div className="body mono">{digest.tools_used.join(", ")}</div>
+                      </div>
+                    ) : null}
+                  </div>
                 </>
               )}
             </div>
