@@ -198,9 +198,14 @@ function is_plumbing_type(node_type: string): boolean {
   if (t.startsWith("literal")) return true;
   if (t.includes("literal")) return true;
   if (t === "concat") return true;
+  if (t === "join") return true;
   if (t === "cast") return true;
   if (t === "parse_json" || t === "stringify_json") return true;
   if (t === "break_object") return true;
+  if (t === "get_property" || t === "set_property") return true;
+  if (t.includes("get_property") || t.includes("set_property")) return true;
+  if (t === "get_variable" || t === "set_variable") return true;
+  if (t.includes("get_variable") || t.includes("set_variable")) return true;
   if (t === "json_schema") return true;
   return false;
 }
@@ -299,6 +304,8 @@ export function FlowGraph(props: {
       const color = safe_str(data?.headerColor || n?.headerColor || "") || "";
       nodes_out.push({ id, x, y, label, type, color });
     }
+    const node_lookup: Record<string, GraphNode> = {};
+    for (const n of nodes_out) node_lookup[n.id] = n;
 
     let edges_out: GraphEdge[] = [];
     for (const e of raw_edges) {
@@ -316,7 +323,7 @@ export function FlowGraph(props: {
     if (props.simplify === true) {
       const keep_id = (id: string) => {
         if (active && id === active) return true;
-        const n = nodes_out.find((x) => x.id === id);
+        const n = node_lookup[id];
         if (!n) return false;
         const t = safe_str(n.type).trim().toLowerCase();
         if (t === "on_flow_start" || t === "on_flow_end") return true;

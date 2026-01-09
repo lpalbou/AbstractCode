@@ -515,7 +515,7 @@ export function App(): React.ReactElement {
 
   function set_input_data_value(key: string, value: any): void {
     if (input_data_obj === null) {
-      set_error_text("Invalid input_data JSON (fix it in Advanced JSON or Reset input).");
+      set_error_text("Invalid input_data JSON (fix it in Advanced JSON).");
       return;
     }
     const obj: Record<string, any> = { ...(input_data_obj || {}) };
@@ -526,7 +526,7 @@ export function App(): React.ReactElement {
 
   function delete_input_data_key(key: string): void {
     if (input_data_obj === null) {
-      set_error_text("Invalid input_data JSON (fix it in Advanced JSON or Reset input).");
+      set_error_text("Invalid input_data JSON (fix it in Advanced JSON).");
       return;
     }
     const obj: Record<string, any> = { ...(input_data_obj || {}) };
@@ -810,8 +810,8 @@ export function App(): React.ReactElement {
       if (typeof prev[node_id] === "number") return prev;
       const next = { ...prev, [node_id]: now };
       visited_order_ref.current.push(node_id);
-      if (visited_order_ref.current.length > 1500) {
-        const drop = visited_order_ref.current.splice(0, 300);
+      if (visited_order_ref.current.length > 8000) {
+        const drop = visited_order_ref.current.splice(0, 1500);
         for (const k of drop) delete next[k];
       }
       return next;
@@ -1298,6 +1298,14 @@ export function App(): React.ReactElement {
   const show_wait_modal = is_waiting && wait_key && (is_user_wait || is_ask_event_wait || has_tool_wait) && dismissed_wait_key !== wait_key;
   const sub_run_id = typeof (wait_state as any)?.details?.sub_run_id === "string" ? String((wait_state as any).details.sub_run_id) : "";
 
+  const run_status = typeof run_state?.status === "string" ? String(run_state.status) : "";
+  const run_paused = Boolean(run_state?.paused);
+  const run_terminal = run_status === "completed" || run_status === "failed" || run_status === "cancelled";
+  const pause_resume_label = run_status === "running" && !run_paused ? "Pause" : "Resume";
+  const pause_resume_action: "pause" | "resume" = pause_resume_label === "Pause" ? "pause" : "resume";
+  const pause_resume_disabled =
+    !run_id.trim() || connecting || resuming || run_terminal || (pause_resume_label === "Resume" && !run_paused);
+
   const digest = useMemo(() => {
     const all: StepRecord[] = [];
     for (const x of records) {
@@ -1615,6 +1623,7 @@ export function App(): React.ReactElement {
         <div className="app-main">
           <div className="panel" style={is_narrow && mobile_tab !== "controls" ? { display: "none" } : undefined}>
             <div className="card panel_card scroll_y">
+            <div className="section_title mono">Connect</div>
             <div className="field">
               <label>Gateway URL (blank = same origin / dev proxy)</label>
               <div className="field_inline">
@@ -1643,6 +1652,8 @@ export function App(): React.ReactElement {
                 placeholder="(optional for localhost dev)"
               />
             </div>
+            <div className="section_divider" />
+            <div className="section_title mono">Workflow</div>
             <div className="field">
               <label>Workflows (discovered)</label>
               <select
@@ -1693,62 +1704,6 @@ export function App(): React.ReactElement {
                     onChange={(e) => set_flow_id(e.target.value)}
                     placeholder="(optional) defaults to bundle entrypoint"
                   />
-                </div>
-              </div>
-              <div className="col">
-                <div className="field">
-                  <label>Runs (recent — select to attach)</label>
-                  <div className="field_inline">
-                    <select
-                      className="mono"
-                      value={run_options.some((r) => r.run_id === run_id.trim()) ? run_id.trim() : ""}
-                      onChange={async (e) => {
-                        const rid = String(e.target.value || "").trim();
-                        if (!rid) return;
-                        await attach_to_run(rid);
-                      }}
-                      disabled={!gateway_connected || runs_loading || discovery_loading || connecting || resuming}
-                    >
-                      <option value="">
-                        {runs_loading
-                          ? "(loading…)"
-                          : run_options.length
-                            ? "(select recent run)"
-                            : "(empty — click Connect)"}
-                      </option>
-                      {/* Keep the currently-selected run visible even if it isn't in the current list. */}
-                      {run_id.trim() && !run_options.some((r) => r.run_id === run_id.trim()) ? (
-                        <option value={run_id.trim()}>{`(attached) ${run_id.trim()}`}</option>
-                      ) : null}
-                      {run_options.map((r) => {
-                        const rid = String(r.run_id || "").trim();
-                        if (!rid) return null;
-                        const wid = typeof r.workflow_id === "string" ? String(r.workflow_id) : "";
-                        const wf_label = wid ? workflow_label_by_id[wid] || wid : "";
-                        const wf_display = wf_label ? wf_label.replace(/\s+/g, " ").trim() : "(unknown workflow)";
-                        const st = typeof r.status === "string" ? String(r.status) : "";
-                        const start_ts = format_local_ts(r.created_at || r.updated_at);
-                        const cnt = typeof r.ledger_len === "number" ? `#${r.ledger_len}` : "";
-                        const label = `${fixed_col(start_ts, 16)} | ${fixed_col(wf_display, 34)} | ${fixed_col(
-                          st || "unknown",
-                          10
-                        )} | ${fixed_col(cnt, 6)} | ${fixed_col(short_id(rid, 14), 14)}`;
-                        return (
-                          <option key={rid} value={rid}>
-                            {label}
-                          </option>
-                        );
-                      })}
-                    </select>
-                    <button className="btn" onClick={clear_run_view} disabled={connecting || resuming || (!run_id.trim() && !connected && !log.length)}>
-                      Clear
-                    </button>
-                  </div>
-                  {!run_options.length ? (
-                    <div className="mono muted" style={{ fontSize: "12px" }}>
-                      Tip: click “Connect” to load recent runs from the gateway.
-                    </div>
-                  ) : null}
                 </div>
               </div>
             </div>
@@ -1820,6 +1775,54 @@ export function App(): React.ReactElement {
               </div>
             ) : null}
 
+            <div className="section_divider" />
+            <div className="section_title mono">Run</div>
+            <div className="field">
+              <label>Runs (recent — select to attach)</label>
+              <select
+                className="mono"
+                value={run_options.some((r) => r.run_id === run_id.trim()) ? run_id.trim() : ""}
+                onChange={async (e) => {
+                  const rid = String(e.target.value || "").trim();
+                  if (!rid) return;
+                  await attach_to_run(rid);
+                }}
+                disabled={!gateway_connected || runs_loading || discovery_loading || connecting || resuming}
+              >
+                <option value="">
+                  {runs_loading ? "(loading…)" : run_options.length ? "(select recent run)" : "(empty — click Connect)"}
+                </option>
+                {/* Keep the currently-selected run visible even if it isn't in the current list. */}
+                {run_id.trim() && !run_options.some((r) => r.run_id === run_id.trim()) ? (
+                  <option value={run_id.trim()}>{`(attached) ${run_id.trim()}`}</option>
+                ) : null}
+                {run_options.map((r) => {
+                  const rid = String(r.run_id || "").trim();
+                  if (!rid) return null;
+                  const wid = typeof r.workflow_id === "string" ? String(r.workflow_id) : "";
+                  const wf_label = wid ? workflow_label_by_id[wid] || wid : "";
+                  const wf_display = wf_label ? wf_label.replace(/\s+/g, " ").trim() : "(unknown workflow)";
+                  const st = typeof r.status === "string" ? String(r.status) : "";
+                  const start_ts = format_local_ts(r.created_at || r.updated_at);
+                  const cnt = typeof r.ledger_len === "number" ? `#${r.ledger_len}` : "";
+                  const label = `${fixed_col(start_ts, 16)} | ${fixed_col(wf_display, 34)} | ${fixed_col(
+                    st || "unknown",
+                    10
+                  )} | ${fixed_col(cnt, 6)} | ${fixed_col(short_id(rid, 14), 14)}`;
+                  return (
+                    <option key={rid} value={rid}>
+                      {label}
+                    </option>
+                  );
+                })}
+              </select>
+              {!run_options.length ? (
+                <div className="mono muted" style={{ fontSize: "12px" }}>
+                  Tip: click “Connect” to load recent runs from the gateway.
+                </div>
+              ) : null}
+            </div>
+
             {has_adaptive_inputs ? (
               <>
                 {input_data_obj === null ? (
@@ -1828,7 +1831,7 @@ export function App(): React.ReactElement {
                       <span className="mono">input error</span>
                       <span className="mono">{now_iso()}</span>
                     </div>
-                    <div className="body mono">Invalid input JSON. Fix it in Advanced JSON or click “Reset input”.</div>
+                    <div className="body mono">Invalid input JSON. Fix it in Advanced JSON.</div>
                   </div>
                 ) : null}
 
@@ -2205,16 +2208,16 @@ export function App(): React.ReactElement {
             )}
 
             <div className="actions">
+              <button className="btn" onClick={clear_run_view} disabled={connecting || resuming}>
+                New Run
+              </button>
               <button className="btn primary" onClick={on_start_run} disabled={connecting || resuming || (connected && run_id.trim() !== "")}>
-                Start run
+                Start Run
               </button>
-              <button className="btn" onClick={() => submit_run_control("pause")} disabled={!run_id.trim() || connecting}>
-                Pause
+              <button className="btn" onClick={() => submit_run_control(pause_resume_action)} disabled={pause_resume_disabled}>
+                {pause_resume_label}
               </button>
-              <button className="btn" onClick={() => submit_run_control("resume")} disabled={!run_id.trim() || connecting}>
-                Resume
-              </button>
-              <button className="btn danger" onClick={() => submit_run_control("cancel")} disabled={!run_id.trim() || connecting}>
+              <button className="btn danger" onClick={() => submit_run_control("cancel")} disabled={!run_id.trim() || connecting || resuming || run_terminal}>
                 Cancel
               </button>
               <button
@@ -2232,19 +2235,10 @@ export function App(): React.ReactElement {
               >
                 Disconnect
               </button>
-              <button
-                className="btn"
-                onClick={() => {
-                  set_input_data_text("{}");
-                }}
-                disabled={connecting || resuming}
-              >
-                Reset input
-              </button>
             </div>
 
             <div className="field">
-              <label>Run control reason (optional)</label>
+              <label>Reason (optional — for pause/cancel audit)</label>
               <input className="mono" value={control_reason} onChange={(e) => set_control_reason(e.target.value)} placeholder="reason…" />
             </div>
 
@@ -2291,25 +2285,34 @@ export function App(): React.ReactElement {
             ) : null}
 
             {run_state ? (
-              <div className="log_item">
-                <div className="meta">
-                  <span className="mono">run state</span>
-                  <span className="mono">{String(run_state?.status || "")}</span>
+              <details style={{ marginTop: "10px" }}>
+                <summary className="mono" style={{ color: "var(--muted)", cursor: "pointer" }}>
+                  Run state • {run_status || "unknown"}
+                  {run_paused ? " • paused" : ""}
+                </summary>
+                <div className="log_item" style={{ marginTop: "10px" }}>
+                  <div className="body mono">
+                    {safe_json({
+                      status: run_state?.status,
+                      paused: run_state?.paused,
+                      current_node: run_state?.current_node,
+                      waiting: run_state?.waiting
+                        ? {
+                            reason: run_state.waiting.reason,
+                            wait_key: run_state.waiting.wait_key,
+                            prompt: run_state.waiting.prompt,
+                            details: run_state.waiting.details,
+                          }
+                        : null,
+                      error: run_state?.error,
+                    })}
+                  </div>
                 </div>
-                <div className="body mono">
-                  {safe_json({
-                    status: run_state?.status,
-                    paused: run_state?.paused,
-                    current_node: run_state?.current_node,
-                    waiting: run_state?.waiting
-                      ? { reason: run_state.waiting.reason, wait_key: run_state.waiting.wait_key, prompt: run_state.waiting.prompt, details: run_state.waiting.details }
-                      : null,
-                    error: run_state?.error,
-                  })}
-                </div>
-              </div>
+              </details>
             ) : null}
 
+            <div className="section_divider" />
+            <div className="section_title mono">Remote Worker</div>
             <div className="field">
               <label>Tool worker (advanced / potentially dangerous) — MCP HTTP endpoint</label>
               <input

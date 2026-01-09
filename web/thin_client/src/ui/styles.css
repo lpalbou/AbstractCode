@@ -129,6 +129,21 @@ a {
   margin: 8px 0;
 }
 
+.section_title {
+  margin-top: 4px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.78);
+}
+
+.section_divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 14px 0;
+}
+
 .field label {
   font-size: 12px;
   color: var(--muted);
@@ -584,11 +599,13 @@ a {
 .graph_edge {
   stroke: rgba(148, 163, 184, 0.55);
   stroke-width: 2;
+  stroke-linecap: round;
 }
 
 .graph_edge.visited {
-  stroke: rgba(96, 165, 250, 0.55);
-  stroke-width: 2.4;
+  stroke: rgba(96, 165, 250, 0.95);
+  stroke-width: 3.6;
+  filter: drop-shadow(0 0 10px rgba(96, 165, 250, 0.25)) drop-shadow(0 0 24px rgba(96, 165, 250, 0.12));
 }
 
 .graph_node {
@@ -602,7 +619,8 @@ a {
 }
 
 .graph_node.visited .graph_node_bg {
-  stroke: rgba(96, 165, 250, 0.38);
+  stroke: rgba(96, 165, 250, 0.72);
+  stroke-width: 1.6;
 }
 
 .graph_node_label {
@@ -619,8 +637,18 @@ a {
   filter: drop-shadow(0 0 10px rgba(34, 197, 94, 0.25));
 }
 
+.graph_node.visited {
+  filter: drop-shadow(0 0 10px rgba(96, 165, 250, 0.25)) drop-shadow(0 0 24px rgba(96, 165, 250, 0.12));
+}
+
 .graph_node.active {
-  filter: drop-shadow(0 0 12px rgba(34, 197, 94, 0.55)) drop-shadow(0 0 26px rgba(34, 197, 94, 0.22));
+  /* Strongest emphasis (requested ~200% bloom). */
+  filter: drop-shadow(0 0 24px rgba(34, 197, 94, 0.62)) drop-shadow(0 0 52px rgba(34, 197, 94, 0.26));
+}
+
+.graph_node.active .graph_node_bg {
+  stroke: rgba(34, 197, 94, 0.65);
+  stroke-width: 2.2;
 }
 
 .graph_legend {
