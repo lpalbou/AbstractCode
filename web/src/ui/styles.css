@@ -472,6 +472,66 @@ textarea {
   background: rgba(251, 191, 36, 0.08);
 }
 
+.tool_block {
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.22);
+  overflow: hidden;
+}
+
+.tool_summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.tool_summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool_left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tool_badge {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: rgba(226, 232, 240, 0.9);
+  background: rgba(148, 163, 184, 0.1);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.tool_badge.ok {
+  border-color: rgba(96, 165, 250, 0.4);
+  background: rgba(96, 165, 250, 0.14);
+}
+
+.tool_badge.pending {
+  border-color: rgba(251, 191, 36, 0.45);
+  background: rgba(251, 191, 36, 0.14);
+}
+
+.tool_badge.error {
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.tool_body {
+  padding: 10px;
+}
+
 .wait {
   margin-top: 10px;
   border: 1px dashed rgba(148, 163, 184, 0.45);
@@ -484,6 +544,14 @@ textarea {
 }
 
 .repl_panel {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 140px);
+  min-height: 520px;
+  overflow: hidden;
+}
+
+.repl_panel.footer_open {
   padding-bottom: 76px; /* room for footer status */
 }
 
@@ -512,21 +580,71 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-height: 40vh;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .repl_composer {
-  position: sticky;
-  bottom: 0;
   margin-top: 12px;
   display: flex;
   gap: 10px;
+  align-items: flex-end;
   padding-top: 10px;
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.0), rgba(15, 23, 42, 0.92));
 }
 
-.repl_composer input {
+.repl_composer textarea {
   flex: 1;
+  min-height: 76px;
+  max-height: 240px;
+  resize: vertical;
+  overflow-y: auto;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+}
+
+.cmd_menu {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(2, 6, 23, 0.85);
+}
+
+.cmd_notice {
+  padding: 10px;
+  font-size: 13px;
+}
+
+.cmd_notice.error {
+  color: rgba(239, 68, 68, 0.95);
+}
+
+.cmd_item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.cmd_item:last-child {
+  border-bottom: none;
+}
+
+.cmd_item.active {
+  background: rgba(96, 165, 250, 0.14);
+}
+
+.cmd_item:hover {
+  background: rgba(96, 165, 250, 0.10);
 }
 
 .repl_wait {
@@ -534,6 +652,89 @@ textarea {
   border: 1px dashed rgba(148, 163, 184, 0.45);
   border-radius: 12px;
   padding: 10px;
+}
+
+.run_working {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  background: rgba(96, 165, 250, 0.08);
+  border-radius: 12px;
+}
+
+.run_working_title {
+  font-weight: 650;
+  letter-spacing: 0.2px;
+}
+
+.run_spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid rgba(148, 163, 184, 0.35);
+  border-top-color: rgba(96, 165, 250, 0.95);
+  animation: spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.file_chips {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.file_chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  background: rgba(96, 165, 250, 0.1);
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.file_chip.loading {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.file_chip.error {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.file_chip .mono {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip_remove {
+  background: transparent;
+  border: none;
+  color: rgba(226, 232, 240, 0.8);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.chip_remove:hover {
+  color: rgba(226, 232, 240, 0.95);
 }
 
 @keyframes shimmer {

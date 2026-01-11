@@ -5,7 +5,7 @@ This is the **web version of AbstractCode** (the Python CLI), designed as a **ga
 - renders by replaying/streaming the ledger
 - resumes waits by submitting durable commands
 
-Important: the existing workflow-run testbed remains at `abstractcode/web/thin_client/` and is **not** modified by this app.
+Important: the gateway-first **observability UI** moved to `abstractobserver/` (published separately). `abstractcode/web/` is now reserved for the AbstractCode web app.
 
 ## Local dev
 ```bash
@@ -17,4 +17,3 @@ npm run dev
 In the UI:
 - set `Gateway URL` (e.g. `http://127.0.0.1:8080`)
 - set `Auth token` if your gateway requires it
-

@@ -1,26 +1,25 @@
 # AbstractCode — Architecture (Current)
 
-> Updated: 2026-01-07  
+> Updated: 2026-01-10  
 > Scope: this describes **what is implemented today** in this monorepo (no “future” design claims).
 
-AbstractCode is a **host UX** (terminal app) for running AbstractFramework agents and (increasingly) workflows.
-It owns terminal interaction, approvals, and persistence configuration; durable execution is owned by **AbstractRuntime**.
+AbstractCode is a **host UX** for running AbstractFramework agents and (increasingly) workflows.
+It exists in two host forms:
+- **Python CLI / TUI** (`abstractcode/abstractcode/react_shell.py`)
+- **Web / PWA** (`abstractcode/web/`) — gateway-first, remote-runtime friendly
+
+Durable execution is owned by **AbstractRuntime**; hosts render from the durable ledger and act by submitting durable commands.
 
 AbstractFlow workflow support is an **optional integration** (install via `abstractcode[flow]` in standalone packaging).
 
 ## High-level component/data flow
 
 ```
-User (terminal)
-  │
-  ▼
-AbstractCode (ReactShell / FullScreenUI)
-  │ configures + drives
-  ▼
-AbstractRuntime (durable run + waits + ledger + artifacts)
-  │ calls via integration
-  ├── AbstractCore (LLM/providers/tool parsing)
-  └── ToolExecutor (local tools, passthrough/approval, MCP, ...)
+CLI:
+User (terminal) → AbstractCode (ReactShell / FullScreenUI) → AbstractRuntime → AbstractCore + ToolExecutor
+
+Web:
+User (browser) → AbstractCode Web → AbstractGateway → AbstractRuntime → AbstractCore + ToolExecutor
 ```
 
 ## Repository Layout
@@ -34,14 +33,15 @@ abstractcode/
     recall.py           # /recall parsing + runtime ActiveContextPolicy bridge
     input_handler.py    # prompt_toolkit sessions (helper)
     flow_cli.py         # VisualFlow runner helpers (run/resume/pause/cancel)
+  web/
+    src/               # Web/PWA host UI (gateway-first)
 ```
 
 ## What AbstractCode Owns vs Uses
 
 **AbstractCode owns**
-- the terminal UX (`FullScreenUI`) and command routing (`ReactShell`)
-- tool approval prompts (human-in-the-loop gate)
-- filesystem layout for durable stores and snapshot persistence
+- host UX (terminal and web) and command routing (/commands, approvals, session UX)
+- (CLI only) local filesystem layout for durable stores and snapshot persistence
 
 **AbstractCode uses**
 - **AbstractAgent**: `ReactAgent` / `CodeActAgent` workflows and the `BaseAgent` API surface
@@ -96,6 +96,17 @@ reserved `EMIT_EVENT` names into terminal UX updates:
 These are ledger-derived and JSON-safe, so hosts can forward them over a network transport (WebSocket/SSE/polling) if desired.
 
 Backward compatibility: `abstractcode.*` remains a deprecated alias accepted by existing hosts.
+
+## AbstractCode Web (Gateway-first)
+
+The web host lives in `abstractcode/web/` and speaks only to AbstractGateway (`/api/gateway/*`):
+- starts agent workflows (bundles implementing `abstractcode.agent.v1`)
+- streams/replays the durable ledger (SSE + cursor replay)
+- submits durable commands to resume waits (user prompts + tool approvals)
+- uses discovery endpoints for UI dropdowns: providers/models/tools
+- supports `@file` mentions via gateway file endpoints (`/files/search`, `/files/read`)
+
+This is designed to work with a **remote** AbstractRuntime deployment (including smartphone clients), as long as the gateway is reachable and configured with allowed origins + auth.
 
 ## Memory UX (Runtime-owned)
 
