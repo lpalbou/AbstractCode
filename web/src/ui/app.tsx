@@ -5,6 +5,7 @@ import { random_id } from "../lib/ids";
 import { extract_tool_calls_from_wait, extract_wait_from_record } from "../lib/runtime_extractors";
 import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types";
 import { MarkdownRenderer } from "./markdown_renderer";
+import { MultiSelect } from "./multi_select";
 import {
   create_new_repl_session,
   load_current_repl_session,
@@ -106,9 +107,9 @@ type UsageSummary = { input_tokens: number; output_tokens: number; total_tokens:
 function parse_usage_summary(value: any): UsageSummary | null {
   if (!value || typeof value !== "object") return null;
   const v: any = value;
-  const in_tok = Number(v.input_tokens ?? v.prompt_tokens ?? v.input ?? v.in ?? 0);
-  const out_tok = Number(v.output_tokens ?? v.completion_tokens ?? v.output ?? v.out ?? 0);
-  const total_tok = Number(v.total_tokens ?? (Number.isFinite(in_tok) && Number.isFinite(out_tok) ? in_tok + out_tok : 0));
+  const in_tok = Number(v.input_tokens ?? v.prompt_tokens ?? v.prompt ?? v.input ?? v.in ?? 0);
+  const out_tok = Number(v.output_tokens ?? v.completion_tokens ?? v.completion ?? v.output ?? v.out ?? 0);
+  const total_tok = Number(v.total_tokens ?? v.total ?? (Number.isFinite(in_tok) && Number.isFinite(out_tok) ? in_tok + out_tok : 0));
   if (!Number.isFinite(in_tok) && !Number.isFinite(out_tok) && !Number.isFinite(total_tok)) return null;
   return {
     input_tokens: Number.isFinite(in_tok) ? Math.max(0, Math.trunc(in_tok)) : 0,
@@ -149,7 +150,11 @@ function compute_run_stats(events: LedgerStreamEvent[]): {
     const eff_type = String(rec?.effect?.type || "").trim();
     if (eff_type === "llm_call" && st === "completed") {
       out.llm_calls += 1;
-      const usage = rec?.result && typeof rec.result === "object" ? (rec.result as any).usage || (rec.result as any).token_usage : null;
+      const res_obj: any = rec?.result && typeof rec.result === "object" ? (rec.result as any) : null;
+      const usage =
+        (res_obj ? res_obj.usage || res_obj.token_usage || res_obj.tokens : null) ||
+        (res_obj && res_obj.output && typeof res_obj.output === "object" ? (res_obj.output as any).usage || (res_obj.output as any).token_usage || (res_obj.output as any).tokens : null) ||
+        null;
       const parsed = parse_usage_summary(usage);
       if (parsed) {
         out.usage.input_tokens += parsed.input_tokens;
@@ -178,6 +183,61 @@ function format_duration_short(ms: number): string {
   const m = Math.floor(s / 60);
   const rs = Math.round(s % 60);
   return `${m}m${rs}s`;
+}
+
+function clamp_text(text: string, max_chars: number): string {
+  const s = String(text || "");
+  if (s.length <= max_chars) return s;
+  return `${s.slice(0, Math.max(0, max_chars - 1))}…`;
+}
+
+function format_tool_arg_value_inline(v: any): string {
+  if (v === null) return "null";
+  if (v === undefined) return "undefined";
+  if (typeof v === "string") return JSON.stringify(clamp_text(v, 80));
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) return "[…]";
+  if (typeof v === "object") return "{…}";
+  return JSON.stringify(clamp_text(String(v), 80));
+}
+
+function tool_call_signature(name: string, args: any): string {
+  const n = String(name || "").trim() || "tool";
+  if (args == null) return `${n}()`;
+  if (typeof args !== "object" || Array.isArray(args)) return `${n}(${clamp_text(String(args), 120)})`;
+  const entries = Object.entries(args as Record<string, any>)
+    .map(([k, v]) => [String(k || "").trim(), v] as const)
+    .filter(([k]) => Boolean(k))
+    .sort(([a], [b]) => a.localeCompare(b));
+  const parts: string[] = [];
+  for (const [k, v] of entries) {
+    if (parts.length >= 3) break;
+    parts.push(`${k}=${format_tool_arg_value_inline(v)}`);
+  }
+  const inside = clamp_text(parts.join(", "), 160);
+  return inside ? `${n}(${inside})` : `${n}()`;
+}
+
+function extract_tool_signatures(events: LedgerStreamEvent[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const ev of events) {
+    const rec: any = ev?.record;
+    const eff = rec?.effect;
+    if (!eff || typeof eff !== "object") continue;
+    if (String(eff.type || "") !== "tool_calls") continue;
+    if (String(rec?.status || "") !== "completed") continue;
+    const calls = eff?.payload && typeof eff.payload === "object" ? (eff.payload as any).tool_calls : null;
+    if (!Array.isArray(calls)) continue;
+    for (const c of calls) {
+      if (!c || typeof c !== "object") continue;
+      const sig = tool_call_signature(String((c as any).name || "").trim(), (c as any).arguments);
+      if (!sig || seen.has(sig)) continue;
+      seen.add(sig);
+      out.push(sig);
+    }
+  }
+  return out;
 }
 
 function normalize_ui_event_name(name: string): string {
@@ -700,6 +760,9 @@ function SessionsPage(props: {
 
 function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_change: (s: Settings) => void; on_done: () => void }): React.ReactElement {
   const s = props.settings;
+  const [gateway_connected, set_gateway_connected] = useState(false);
+  const [gateway_connecting, set_gateway_connecting] = useState(false);
+  const [gateway_error, set_gateway_error] = useState("");
   const [providers, set_providers] = useState<any[]>([]);
   const [models, set_models] = useState<string[]>([]);
   const [tools, set_tools] = useState<any[]>([]);
@@ -711,47 +774,66 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
   const [error_tools, set_error_tools] = useState("");
 
   useEffect(() => {
-    let stopped = false;
-    const run = async () => {
-      set_loading_providers(true);
-      set_loading_tools(true);
-      set_error_providers("");
-      set_error_tools("");
-      try {
-        const prov_res = await props.gateway.discovery_providers();
-        if (stopped) return;
-        const items = Array.isArray(prov_res?.items) ? prov_res.items : [];
-        set_providers(items);
-      } catch (e: any) {
-        if (stopped) return;
-        set_error_providers(String(e?.message || e || "Failed to load providers"));
-        set_providers([]);
-      } finally {
-        if (!stopped) set_loading_providers(false);
-      }
-      try {
-        const tool_res = await props.gateway.discovery_tools();
-        if (stopped) return;
-        const items = Array.isArray(tool_res?.items) ? tool_res.items : [];
-        set_tools(items);
-      } catch (e: any) {
-        if (stopped) return;
-        set_error_tools(String(e?.message || e || "Failed to load tools"));
-        set_tools([]);
-      } finally {
-        if (!stopped) set_loading_tools(false);
-      }
-    };
-    run();
-    return () => {
-      stopped = true;
-    };
+    // Treat gateway settings as “disconnected” until the user explicitly connects.
+    set_gateway_connected(false);
+    set_gateway_connecting(false);
+    set_gateway_error("");
+    set_providers([]);
+    set_models([]);
+    set_tools([]);
+    set_loading_providers(false);
+    set_loading_models(false);
+    set_loading_tools(false);
+    set_error_providers("");
+    set_error_models("");
+    set_error_tools("");
   }, [props.gateway]);
+
+  async function connect_gateway(): Promise<void> {
+    set_gateway_connecting(true);
+    set_gateway_error("");
+    set_loading_providers(true);
+    set_loading_tools(true);
+    set_error_providers("");
+    set_error_tools("");
+    try {
+      const [prov_res, tool_res] = await Promise.all([props.gateway.discovery_providers(), props.gateway.discovery_tools()]);
+      const prov_items = Array.isArray(prov_res?.items) ? prov_res.items : [];
+      const tool_items = Array.isArray(tool_res?.items) ? tool_res.items : [];
+      set_providers(prov_items);
+      set_tools(tool_items);
+      set_gateway_connected(true);
+    } catch (e: any) {
+      set_gateway_error(String(e?.message || e || "Failed to connect to gateway"));
+      set_gateway_connected(false);
+      set_providers([]);
+      set_tools([]);
+    } finally {
+      set_gateway_connecting(false);
+      set_loading_providers(false);
+      set_loading_tools(false);
+    }
+  }
+
+  function disconnect_gateway(): void {
+    set_gateway_connected(false);
+    set_gateway_error("");
+    set_providers([]);
+    set_models([]);
+    set_tools([]);
+    set_error_providers("");
+    set_error_models("");
+    set_error_tools("");
+  }
 
   // Provider → models.
   useEffect(() => {
     let stopped = false;
     const prov = String(s.provider || "").trim();
+    if (!gateway_connected) {
+      set_models([]);
+      return;
+    }
     if (!prov) {
       set_models([]);
       return;
@@ -780,7 +862,7 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
     return () => {
       stopped = true;
     };
-  }, [props.gateway, s.provider]);
+  }, [gateway_connected, props.gateway, s.provider]);
 
   // Auto-default provider/model when discovery loads.
   useEffect(() => {
@@ -826,20 +908,10 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
     return items;
   }, [providers]);
 
-  const tool_groups = useMemo(() => {
-    const groups = new Map<string, { toolset: string; items: { name: string; description: string }[] }>();
-    for (const t of tools) {
-      const name = String((t as any)?.name || "").trim();
-      if (!name) continue;
-      const toolset = String((t as any)?.toolset || "other").trim() || "other";
-      const description = String((t as any)?.description || "").trim();
-      if (!groups.has(toolset)) groups.set(toolset, { toolset, items: [] });
-      groups.get(toolset)!.items.push({ name, description });
-    }
-    const out = Array.from(groups.values());
-    out.forEach((g) => g.items.sort((a, b) => a.name.localeCompare(b.name)));
-    out.sort((a, b) => a.toolset.localeCompare(b.toolset));
-    return out;
+  const tool_options = useMemo(() => {
+    const names = tools.map((t: any) => String(t?.name || "").trim()).filter(Boolean);
+    names.sort((a, b) => a.localeCompare(b));
+    return names;
   }, [tools]);
 
   return (
@@ -847,11 +919,32 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
       <h2>Gateway</h2>
       <div className="field">
         <label>Gateway URL</label>
-        <input value={s.gateway_url} onChange={(e) => props.on_change({ ...s, gateway_url: e.target.value })} placeholder="http://127.0.0.1:8080" />
+        <div className="row" style={{ marginTop: 0 }}>
+          <input
+            style={{ flex: 1, minWidth: 0 }}
+            value={s.gateway_url}
+            onChange={(e) => props.on_change({ ...s, gateway_url: e.target.value })}
+            placeholder="http://127.0.0.1:8080"
+          />
+          <button
+            className="btn"
+            type="button"
+            onClick={gateway_connected ? disconnect_gateway : () => void connect_gateway()}
+            disabled={gateway_connecting}
+          >
+            {gateway_connecting ? "Connecting…" : gateway_connected ? "Disconnect" : "Connect"}
+          </button>
+        </div>
+        {gateway_error ? <div className="error">{gateway_error}</div> : null}
       </div>
       <div className="field">
         <label>Auth token</label>
-        <input value={s.auth_token} onChange={(e) => props.on_change({ ...s, auth_token: e.target.value })} placeholder="Bearer token (optional)" />
+        <input
+          type="password"
+          value={s.auth_token}
+          onChange={(e) => props.on_change({ ...s, auth_token: e.target.value })}
+          placeholder="Bearer token (optional)"
+        />
       </div>
       <div className="field">
         <label>Client id</label>
@@ -865,9 +958,10 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
           className="mono"
           value={s.provider}
           onChange={(e) => props.on_change({ ...s, provider: e.target.value, model: "" })}
-          disabled={loading_providers || !provider_options.length}
+          disabled={!gateway_connected || loading_providers || !provider_options.length}
         >
-          {!provider_options.length ? <option value="">(no providers)</option> : null}
+          {!gateway_connected ? <option value="">(click Connect)</option> : null}
+          {gateway_connected && !provider_options.length ? <option value="">(no providers)</option> : null}
           {provider_options.map((p) => (
             <option key={p.name} value={p.name}>
               {p.display_name || p.name}
@@ -879,7 +973,13 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
       </div>
       <div className="field">
         <label>Model</label>
-        <select className="mono" value={s.model} onChange={(e) => props.on_change({ ...s, model: e.target.value })} disabled={!s.provider || loading_models || !models.length}>
+        <select
+          className="mono"
+          value={s.model}
+          onChange={(e) => props.on_change({ ...s, model: e.target.value })}
+          disabled={!gateway_connected || !s.provider || loading_models || !models.length}
+        >
+          {!gateway_connected ? <option value="">(click Connect)</option> : null}
           {!s.provider ? <option value="">(select provider first)</option> : null}
           {s.provider && !models.length ? <option value="">(no models)</option> : null}
           {models.map((m) => (
@@ -918,41 +1018,13 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
       </div>
       <div className="field">
         <label>Tools allowlist</label>
-        <select
-          className="mono"
-          multiple
-          size={Math.min(10, Math.max(5, tools.length ? 10 : 5))}
+        <MultiSelect
+          options={tool_options}
           value={s.tools}
-          onChange={(e) => {
-            const selected = Array.from(e.target.selectedOptions).map((o) => String(o.value));
-            props.on_change({ ...s, tools: selected, tools_initialized: true });
-          }}
-          disabled={loading_tools || !tools.length}
-        >
-          {!tools.length ? <option value="">(no tools)</option> : null}
-          {tool_groups.map((g) => (
-            <optgroup key={g.toolset} label={g.toolset}>
-              {g.items.map((it) => (
-                <option key={it.name} value={it.name} title={it.description}>
-                  {it.name}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-        <div className="actions">
-          <button
-            className="btn"
-            type="button"
-            disabled={!tools.length}
-            onClick={() => props.on_change({ ...s, tools: tool_groups.flatMap((g) => g.items.map((it) => it.name)), tools_initialized: true })}
-          >
-            Select all
-          </button>
-          <button className="btn" type="button" disabled={!tools.length} onClick={() => props.on_change({ ...s, tools: [], tools_initialized: true })}>
-            Select none
-          </button>
-        </div>
+          placeholder={!gateway_connected ? "(click Connect)" : "(none)"}
+          disabled={!gateway_connected || loading_tools || !tool_options.length}
+          onChange={(next) => props.on_change({ ...s, tools: next, tools_initialized: true })}
+        />
         {loading_tools ? <div className="muted">Loading tools…</div> : null}
         {error_tools ? <div className="error">{error_tools}</div> : null}
       </div>
@@ -1468,6 +1540,7 @@ function ConsolePage(props: {
 
   function finish_run_with_response(resp: { response: string; meta: any }, run_id: string): void {
     const stats = compute_run_stats(records_ref.current);
+    const tool_sigs = extract_tool_signatures(records_ref.current);
     const meta_obj: any = {};
     if (resp.meta !== null && resp.meta !== undefined) meta_obj.workflow_meta = resp.meta;
     meta_obj._repl = {
@@ -1478,6 +1551,74 @@ function ConsolePage(props: {
       tok_s: stats.duration_ms > 0 ? stats.usage.total_tokens / (stats.duration_ms / 1000) : null,
     };
     append_message({ role: "assistant", content: resp.response, ts: now_iso(), meta: meta_obj, run_id });
+
+    const digest_lines: string[] = [];
+    digest_lines.push(`**outcome:** completed`);
+    digest_lines.push(`- duration: ${format_duration_short(stats.duration_ms)}`);
+    digest_lines.push(`- llm calls: ${stats.llm_calls}`);
+    digest_lines.push(`- tool calls: ${stats.tool_calls}`);
+    digest_lines.push(
+      stats.usage.total_tokens
+        ? `- tokens: in ${stats.usage.input_tokens} • out ${stats.usage.output_tokens} • total ${stats.usage.total_tokens}`
+        : `- tokens: —`
+    );
+    digest_lines.push(
+      meta_obj._repl.tok_s != null && Number.isFinite(Number(meta_obj._repl.tok_s)) ? `- speed: ${Number(meta_obj._repl.tok_s).toFixed(1)} tok/s` : `- speed: —`
+    );
+    if (tool_sigs.length) {
+      digest_lines.push("");
+      digest_lines.push("**tools used:**");
+      digest_lines.push(...tool_sigs.slice(0, 40).map((s) => `- \`${s}\``));
+      if (tool_sigs.length > 40) digest_lines.push(`- …and ${tool_sigs.length - 40} more`);
+    }
+
+    append_message({
+      role: "system",
+      level: "info",
+      title: "Digest",
+      ts: now_iso(),
+      run_id,
+      content: digest_lines.join("\n"),
+    });
+    clear_status();
+    stop_stream();
+    set_active_run_id(null);
+  }
+
+  function finish_run_without_output(outcome: "completed" | "failed" | "cancelled", run_id: string): void {
+    const stats = compute_run_stats(records_ref.current);
+    const tool_sigs = extract_tool_signatures(records_ref.current);
+
+    const digest_lines: string[] = [];
+    digest_lines.push(`Run ${outcome}.`);
+    digest_lines.push("");
+    digest_lines.push(`**digest:**`);
+    digest_lines.push(`- duration: ${format_duration_short(stats.duration_ms)}`);
+    digest_lines.push(`- llm calls: ${stats.llm_calls}`);
+    digest_lines.push(`- tool calls: ${stats.tool_calls}`);
+    digest_lines.push(
+      stats.usage.total_tokens
+        ? `- tokens: in ${stats.usage.input_tokens} • out ${stats.usage.output_tokens} • total ${stats.usage.total_tokens}`
+        : `- tokens: —`
+    );
+    digest_lines.push(
+      stats.duration_ms > 0 && stats.usage.total_tokens > 0 ? `- speed: ${(stats.usage.total_tokens / (stats.duration_ms / 1000)).toFixed(1)} tok/s` : `- speed: —`
+    );
+    if (tool_sigs.length) {
+      digest_lines.push("");
+      digest_lines.push("**tools used:**");
+      digest_lines.push(...tool_sigs.slice(0, 40).map((s) => `- \`${s}\``));
+      if (tool_sigs.length > 40) digest_lines.push(`- …and ${tool_sigs.length - 40} more`);
+    }
+
+    append_message({
+      role: "system",
+      level: outcome === "failed" ? "error" : outcome === "cancelled" ? "warn" : "info",
+      title: outcome.toUpperCase(),
+      ts: now_iso(),
+      run_id,
+      content: digest_lines.join("\n"),
+    });
     clear_status();
     stop_stream();
     set_active_run_id(null);
@@ -1593,17 +1734,6 @@ function ConsolePage(props: {
       const is_ask_wait = reason === "event" && ev_name === "abstract.ask";
       const is_user_wait = reason === "user";
 
-      if (reason === "subworkflow") {
-        const sub_run_id_raw =
-          (details && typeof details === "object" ? String((details as any)?.sub_run_id || "").trim() : "") ||
-          (wk.startsWith("subworkflow:") ? wk.split(":", 2)[1] : "");
-        const sub_run_id = String(sub_run_id_raw || "").trim();
-        if (sub_run_id && sub_run_id !== active_run_id) {
-          set_active_run_id(sub_run_id);
-          return;
-        }
-      }
-
       if (wk && prompt && (is_user_wait || is_ask_wait) && !is_tool_wait && !seen_wait_keys_ref.current.has(wk)) {
         clear_status(); // matches AbstractCode UX (spinner clears when awaiting user input)
         seen_wait_keys_ref.current.add(wk);
@@ -1619,9 +1749,7 @@ function ConsolePage(props: {
     if (st === "failed" && active_run_id) {
       const err = String((rec as any)?.error || (rec as any)?.result?.error || "step failed").trim();
       append_message({ role: "assistant", content: `Error: ${err}`, ts: now_iso(), run_id: active_run_id });
-      clear_status();
-      stop_stream();
-      set_active_run_id(null);
+      finish_run_without_output("failed", active_run_id);
     }
   }
 
@@ -1759,14 +1887,48 @@ function ConsolePage(props: {
         set_status("working…", -1);
         await append_page(0);
         if (stopped) return;
-        await props.gateway.stream_ledger(rid, {
-          after: cursor_ref.current,
-          signal: abort_ref.current?.signal,
-          on_step: (ev) => {
+        while (!stopped) {
+          try {
+            await props.gateway.stream_ledger(rid, {
+              after: cursor_ref.current,
+              signal: abort_ref.current?.signal,
+              on_step: (ev) => {
+                if (stopped) return;
+                handle_record(ev);
+              },
+            });
+          } catch (e: any) {
             if (stopped) return;
-            handle_record(ev);
-          },
-        });
+            if (String(e?.name || "") === "AbortError") return;
+            throw e;
+          }
+
+          if (stopped) return;
+
+          try {
+            await append_page(cursor_ref.current);
+          } catch {
+            // ignore
+          }
+          if (stopped) return;
+
+          // SSE streams may close even when the run is still active; poll status and reconnect.
+          let run_status = "";
+          try {
+            const info = await props.gateway.get_run(rid);
+            if (stopped) return;
+            run_status = String(info?.status || "").trim().toLowerCase();
+          } catch {
+            run_status = "";
+          }
+
+          if (run_status === "completed" || run_status === "failed" || run_status === "cancelled") {
+            finish_run_without_output(run_status as any, rid);
+            return;
+          }
+
+          await new Promise((r) => window.setTimeout(r, 900));
+        }
       } catch (e: any) {
         if (stopped) return;
         if (String(e?.name || "") === "AbortError") return;
@@ -2077,7 +2239,7 @@ function ConsolePage(props: {
 
   return (
     <div className="repl">
-      <div className={`panel repl_panel${is_working ? " footer_open" : ""}`}>
+      <div className="panel repl_panel">
         <div className="repl_meta">
           <div>
             <div className="muted">agent</div>
@@ -2137,7 +2299,7 @@ function ConsolePage(props: {
                 {wait_reason === "subworkflow" ? (
                   <div className="warn" style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
                     <div style={{ minWidth: 0 }}>
-                      Waiting on a subworkflow. Auto-follow should attach to the child run.
+                      Waiting on a subworkflow. This chat stays attached to the parent run, but you can open the child run to observe it.
                       <div className="muted mono" style={{ marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         sub_run_id:{" "}
                         {String((wait_state as any)?.details?.sub_run_id || "").trim() ||
@@ -2387,10 +2549,6 @@ function ConsolePage(props: {
         ) : null}
       </div>
 
-      {(() => {
-        const text = is_working ? status_text || "working…" : status_text;
-        return text ? <FooterStatus text={text} active={is_working} /> : null;
-      })()}
     </div>
   );
 }
@@ -2515,16 +2673,6 @@ function ToolBlockCard(props: { meta: any }): React.ReactElement {
         ) : null}
       </div>
     </details>
-  );
-}
-
-function FooterStatus(props: { text: string; active: boolean }): React.ReactElement {
-  const text = String(props.text || "").trim();
-  if (!text) return <></>;
-  return (
-    <div className={`footer_status ${props.active ? "active" : ""}`}>
-      <div className="mono">{text}</div>
-    </div>
   );
 }
 
