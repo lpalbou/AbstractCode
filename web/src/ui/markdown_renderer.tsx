@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef } from "react";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { useMonaco } from "@monaco-editor/react";
+import { copy_text } from "../lib/clipboard";
 
 export interface MarkdownRendererProps {
   markdown: string;
@@ -104,15 +105,11 @@ export function MarkdownRenderer({ markdown, className }: MarkdownRendererProps)
     const text = (code_el ? raw_code_by_el_ref.current.get(code_el) : null) || code_el?.textContent || "";
     if (!text) return;
 
-    try {
-      await navigator.clipboard.writeText(text);
-      btn.textContent = "Copied";
-      window.setTimeout(() => {
-        if (btn) btn.textContent = "Copy";
-      }, 900);
-    } catch {
-      // Ignore.
-    }
+    const ok = await copy_text(text);
+    btn.textContent = ok ? "Copied" : "Copy failed";
+    window.setTimeout(() => {
+      if (btn) btn.textContent = "Copy";
+    }, 900);
   };
 
   return (
@@ -126,4 +123,3 @@ export function MarkdownRenderer({ markdown, className }: MarkdownRendererProps)
 }
 
 export default MarkdownRenderer;
-

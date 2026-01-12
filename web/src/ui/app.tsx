@@ -6,6 +6,7 @@ import { extract_tool_calls_from_wait, extract_wait_from_record } from "../lib/r
 import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types";
 import { MarkdownRenderer } from "./markdown_renderer";
 import { MultiSelect } from "./multi_select";
+import { copy_text } from "../lib/clipboard";
 import {
   create_new_repl_session,
   load_current_repl_session,
@@ -17,9 +18,10 @@ import {
   save_current_repl_session,
   save_settings,
   Settings,
+  switch_current_repl_session,
 } from "../lib/storage";
 
-type Route = { name: "console" } | { name: "new" } | { name: "sessions" } | { name: "settings" };
+type Route = { name: "console"; session_id?: string } | { name: "new" } | { name: "sessions" } | { name: "settings" };
 
 type AgentTemplate = {
   bundle_id: string;
@@ -40,6 +42,7 @@ function parse_route(): Route {
   const h = String(window.location.hash || "").replace(/^#/, "");
   const parts = h.split("/").filter(Boolean);
   if (!parts.length) return { name: "console" };
+  if (parts[0] === "session" && parts[1]) return { name: "console", session_id: String(parts[1] || "").trim() };
   if (parts[0] === "new") return { name: "new" };
   if (parts[0] === "sessions") return { name: "sessions" };
   if (parts[0] === "settings") return { name: "settings" };
@@ -47,7 +50,7 @@ function parse_route(): Route {
 }
 
 function set_route(r: Route): void {
-  if (r.name === "console") window.location.hash = "#/";
+  if (r.name === "console") window.location.hash = r.session_id ? `#/session/${encodeURIComponent(r.session_id)}` : "#/";
   else if (r.name === "new") window.location.hash = "#/new";
   else if (r.name === "sessions") window.location.hash = "#/sessions";
   else if (r.name === "settings") window.location.hash = "#/settings";
@@ -111,11 +114,13 @@ function parse_usage_summary(value: any): UsageSummary | null {
   const out_tok = Number(v.output_tokens ?? v.completion_tokens ?? v.completion ?? v.output ?? v.out ?? 0);
   const total_tok = Number(v.total_tokens ?? v.total ?? (Number.isFinite(in_tok) && Number.isFinite(out_tok) ? in_tok + out_tok : 0));
   if (!Number.isFinite(in_tok) && !Number.isFinite(out_tok) && !Number.isFinite(total_tok)) return null;
-  return {
+  const parsed = {
     input_tokens: Number.isFinite(in_tok) ? Math.max(0, Math.trunc(in_tok)) : 0,
     output_tokens: Number.isFinite(out_tok) ? Math.max(0, Math.trunc(out_tok)) : 0,
     total_tokens: Number.isFinite(total_tok) ? Math.max(0, Math.trunc(total_tok)) : 0,
   };
+  if (parsed.input_tokens === 0 && parsed.output_tokens === 0 && parsed.total_tokens === 0) return null;
+  return parsed;
 }
 
 function compute_run_stats(events: LedgerStreamEvent[]): {
@@ -199,6 +204,38 @@ function format_tool_arg_value_inline(v: any): string {
   if (Array.isArray(v)) return "[…]";
   if (typeof v === "object") return "{…}";
   return JSON.stringify(clamp_text(String(v), 80));
+}
+
+function tool_call_signature_primary(name: string, args: any, tool_spec?: any): string {
+  const n = String(name || "").trim() || "tool";
+  if (args == null) return `${n}()`;
+  if (typeof args !== "object" || Array.isArray(args)) return `${n}(${clamp_text(String(args), 120)})`;
+
+  const params = tool_spec && typeof tool_spec === "object" ? (tool_spec as any).parameters : null;
+  const ordered_keys = params && typeof params === "object" && !Array.isArray(params) ? Object.keys(params as Record<string, any>) : Object.keys(args as Record<string, any>);
+
+  let primary_key: string | null = null;
+  for (const k of ordered_keys) {
+    if (!k || !(k in (args as any))) continue;
+    const v = (args as any)[k];
+    if (v === null || v === undefined) continue;
+    if (typeof v === "string" && !v.trim()) continue;
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+      primary_key = k;
+      break;
+    }
+  }
+  if (!primary_key) {
+    for (const k of ordered_keys) {
+      if (!k || !(k in (args as any))) continue;
+      const v = (args as any)[k];
+      if (v === null || v === undefined) continue;
+      primary_key = k;
+      break;
+    }
+  }
+  if (!primary_key) return `${n}()`;
+  return `${n}(${format_tool_arg_value_inline((args as any)[primary_key])})`;
 }
 
 function tool_call_signature(name: string, args: any): string {
@@ -462,6 +499,7 @@ export function App(): React.ReactElement {
   const [route, set_route_state] = useState<Route>(() => parse_route());
   const [session, set_session] = useState<{ session_id: string; state: ReplState }>(() => load_current_repl_session());
   const [pending_attach, set_pending_attach] = useState<{ run_id: string; template: ReplTemplate | null } | null>(null);
+  const pending_console_sid_ref = useRef<string>("");
   const repl = session.state;
   const session_id = session.session_id;
 
@@ -484,9 +522,39 @@ export function App(): React.ReactElement {
     return () => window.removeEventListener("hashchange", on_hash);
   }, []);
 
+  useEffect(() => {
+    if (route.name !== "console") return;
+    const sid = String((route as any)?.session_id || "").trim();
+    if (!sid) return;
+    if (sid === session.session_id) return;
+    set_session(switch_current_repl_session(sid));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.name, (route as any)?.session_id]);
+
+  useEffect(() => {
+    if (route.name !== "console") return;
+    const sid = session.session_id;
+    const want = `#/session/${encodeURIComponent(sid)}`;
+    const cur = String(window.location.hash || "");
+    if (cur === want) return;
+    if (cur === "#/" || cur === "" || cur === "#") {
+      try {
+        window.history.replaceState(null, "", want);
+      } catch {
+        window.location.hash = want;
+      }
+    }
+  }, [route.name, session.session_id]);
+
   return (
     <div className="app">
-      <Header route={route} on_nav={(name) => set_route({ name })} />
+      <Header
+        route={route}
+        on_nav={(name) => {
+          if (name === "console") set_route({ name: "console", session_id: session.session_id });
+          else set_route({ name });
+        }}
+      />
       <div className="content">
         {route.name === "console" ? (
           <ConsolePage
@@ -511,9 +579,14 @@ export function App(): React.ReactElement {
             repl={repl}
             on_start={(t) => {
               const created = create_new_repl_session(t);
+              pending_console_sid_ref.current = created.session_id;
               set_session({ session_id: created.session_id, state: created.state });
             }}
-            on_done={() => set_route({ name: "console" })}
+            on_done={() => {
+              const sid = pending_console_sid_ref.current || session.session_id;
+              pending_console_sid_ref.current = "";
+              set_route({ name: "console", session_id: sid });
+            }}
           />
         ) : null}
         {route.name === "sessions" ? (
@@ -524,12 +597,17 @@ export function App(): React.ReactElement {
               if (!sid) return;
               set_session({ session_id: sid, state: reset_repl_state({ template }, sid) });
               set_pending_attach({ run_id, template });
-              set_route({ name: "console" });
+              set_route({ name: "console", session_id: sid });
             }}
           />
         ) : null}
         {route.name === "settings" ? (
-          <SettingsPage gateway={gateway} settings={settings} on_change={set_settings} on_done={() => set_route({ name: "console" })} />
+          <SettingsPage
+            gateway={gateway}
+            settings={settings}
+            on_change={set_settings}
+            on_done={() => set_route({ name: "console", session_id: session.session_id })}
+          />
         ) : null}
       </div>
     </div>
@@ -1128,6 +1206,7 @@ function ConsolePage(props: {
   const [template_error, set_template_error] = useState("");
   const [model_caps, set_model_caps] = useState<any>(null);
   const [model_caps_error, set_model_caps_error] = useState("");
+  const [tool_specs_by_name, set_tool_specs_by_name] = useState<Record<string, any>>({});
 
   const [composer, set_composer] = useState("");
   const [composer_cursor, set_composer_cursor] = useState(0);
@@ -1138,6 +1217,8 @@ function ConsolePage(props: {
   const [active_run_id, set_active_run_id] = useState<string | null>(null);
   const [records, set_records] = useState<LedgerStreamEvent[]>([]);
   const records_ref = useRef<LedgerStreamEvent[]>([]);
+  const root_run_ref = useRef<string>("");
+  const [root_last_record, set_root_last_record] = useState<StepRecord | null>(null);
   const [status_text, set_status_text] = useState<string>("");
   const status_timer_ref = useRef<number | null>(null);
 
@@ -1152,13 +1233,15 @@ function ConsolePage(props: {
   const [file_error, set_file_error] = useState("");
 
   const abort_ref = useRef<AbortController | null>(null);
-  const cursor_ref = useRef<number>(0);
-  const seen_cursors_ref = useRef<Set<number>>(new Set());
+  const follow_abort_ref = useRef<AbortController | null>(null);
+  const cursor_by_run_ref = useRef<Record<string, number>>({});
+  const seen_keys_ref = useRef<Set<string>>(new Set());
   const seen_wait_keys_ref = useRef<Set<string>>(new Set());
   const seen_tool_call_ids_ref = useRef<Set<string>>(new Set());
+  const [follow_run_id, set_follow_run_id] = useState<string>("");
+  const [subworkflow_label, set_subworkflow_label] = useState<string>("");
 
-  const last_record: StepRecord | null = records.length ? records[records.length - 1].record : null;
-  const wait_state: WaitState | null = useMemo(() => extract_wait_from_record(last_record), [last_record]);
+  const wait_state: WaitState | null = useMemo(() => extract_wait_from_record(root_last_record), [root_last_record]);
   const tool_calls_for_wait: ToolCall[] = useMemo(() => extract_tool_calls_from_wait(wait_state), [wait_state]);
   const wait_reason = String(wait_state?.reason || "").trim();
   const wait_key = String(wait_state?.wait_key || "").trim();
@@ -1167,6 +1250,42 @@ function ConsolePage(props: {
   const is_ask_event_wait = wait_reason === "event" && wait_event_name === "abstract.ask";
   const can_user_answer_wait = is_user_wait || is_ask_event_wait;
   const is_working = Boolean(active_run_id) && !wait_state && !resuming;
+
+  const sub_run_id_for_wait = useMemo(() => {
+    if (wait_reason !== "subworkflow") return "";
+    const from_details = String((wait_state as any)?.details?.sub_run_id || "").trim();
+    if (from_details) return from_details;
+    if (wait_key.startsWith("subworkflow:")) return String(wait_key.split(":", 2)[1] || "").trim();
+    return "";
+  }, [wait_reason, wait_key, wait_state]);
+
+  useEffect(() => {
+    if (wait_reason !== "subworkflow") {
+      set_follow_run_id("");
+      set_subworkflow_label("");
+      return;
+    }
+    if (sub_run_id_for_wait) set_follow_run_id(sub_run_id_for_wait);
+  }, [wait_reason, sub_run_id_for_wait]);
+
+  useEffect(() => {
+    if (!sub_run_id_for_wait) return;
+    let stopped = false;
+    set_subworkflow_label("");
+    void (async () => {
+      try {
+        const info = await props.gateway.get_run(sub_run_id_for_wait);
+        if (stopped) return;
+        const wid = String(info?.workflow_id || "").trim();
+        set_subworkflow_label(wid || "subflow");
+      } catch {
+        if (!stopped) set_subworkflow_label("subflow");
+      }
+    })();
+    return () => {
+      stopped = true;
+    };
+  }, [props.gateway, sub_run_id_for_wait]);
 
   const repl_template = props.repl.template;
   const template_label = repl_template?.name || (repl_template ? `${repl_template.bundle_id}:${repl_template.flow_id}` : "");
@@ -1216,6 +1335,30 @@ function ConsolePage(props: {
       stopped = true;
     };
   }, [props.gateway, props.settings.provider, props.settings.model]);
+
+  useEffect(() => {
+    let stopped = false;
+    set_tool_specs_by_name({});
+    void (async () => {
+      try {
+        const res = await props.gateway.discovery_tools();
+        const items = Array.isArray(res?.items) ? res.items : [];
+        const by_name: Record<string, any> = {};
+        for (const it of items) {
+          if (!it || typeof it !== "object") continue;
+          const n = String((it as any).name || "").trim();
+          if (!n) continue;
+          by_name[n] = it;
+        }
+        if (!stopped) set_tool_specs_by_name(by_name);
+      } catch {
+        if (!stopped) set_tool_specs_by_name({});
+      }
+    })();
+    return () => {
+      stopped = true;
+    };
+  }, [props.gateway]);
 
   const context_meter = useMemo(() => {
     const history = (props.repl.messages || []).filter((m) => m.role === "user" || m.role === "assistant");
@@ -1317,8 +1460,6 @@ function ConsolePage(props: {
       if (cid) by_call_id.set(cid, r);
     }
 
-    const MAX_OUTPUT_CHARS = 4000;
-
     for (let i = 0; i < calls.length; i++) {
       const c: any = calls[i];
       if (!c || typeof c !== "object") continue;
@@ -1332,7 +1473,7 @@ function ConsolePage(props: {
       const error = r && typeof r === "object" ? String((r as any).error || "").trim() : "";
       const output_raw = r && typeof r === "object" ? ((r as any).output ?? (r as any).result ?? null) : null;
       const output_s = output_raw == null ? "" : typeof output_raw === "string" ? output_raw : safe_json(output_raw);
-      const output_preview = output_s.length > MAX_OUTPUT_CHARS ? `${output_s.slice(0, MAX_OUTPUT_CHARS)}\n…(truncated)…` : output_s;
+      const output_preview = output_s;
 
       append_message({
         role: "system",
@@ -1498,12 +1639,14 @@ function ConsolePage(props: {
     clear_status();
     records_ref.current = [];
     set_records([]);
-    cursor_ref.current = 0;
-    seen_cursors_ref.current = new Set();
+    root_run_ref.current = "";
+    set_root_last_record(null);
+    cursor_by_run_ref.current = {};
+    seen_keys_ref.current = new Set();
     seen_wait_keys_ref.current = new Set();
     seen_tool_call_ids_ref.current = new Set();
-    seen_wait_keys_ref.current = new Set();
-    seen_tool_call_ids_ref.current = new Set();
+    set_follow_run_id("");
+    set_subworkflow_label("");
 
     append_message({ role: "user", content: t, ts: now_iso() });
 
@@ -1536,6 +1679,8 @@ function ConsolePage(props: {
   function stop_stream(): void {
     if (abort_ref.current) abort_ref.current.abort();
     abort_ref.current = null;
+    if (follow_abort_ref.current) follow_abort_ref.current.abort();
+    follow_abort_ref.current = null;
   }
 
   function finish_run_with_response(resp: { response: string; meta: any }, run_id: string): void {
@@ -1548,7 +1693,7 @@ function ConsolePage(props: {
       llm_calls: stats.llm_calls,
       tool_calls: stats.tool_calls,
       usage: stats.usage,
-      tok_s: stats.duration_ms > 0 ? stats.usage.total_tokens / (stats.duration_ms / 1000) : null,
+      tok_s: stats.duration_ms > 0 && stats.usage.total_tokens > 0 ? stats.usage.total_tokens / (stats.duration_ms / 1000) : null,
     };
     append_message({ role: "assistant", content: resp.response, ts: now_iso(), meta: meta_obj, run_id });
 
@@ -1624,13 +1769,18 @@ function ConsolePage(props: {
     set_active_run_id(null);
   }
 
-  function handle_record(ev: LedgerStreamEvent): void {
+  function handle_record(ev: LedgerStreamEvent, source_run_id: string): void {
     const rec = ev.record as StepRecord;
-    if (seen_cursors_ref.current.has(ev.cursor)) return;
-    seen_cursors_ref.current.add(ev.cursor);
-    cursor_ref.current = Math.max(cursor_ref.current, ev.cursor);
-    records_ref.current = [...records_ref.current, ev].slice(-2000);
+    const src = String(source_run_id || rec?.run_id || "").trim();
+    if (!src) return;
+    const key = `${src}:${ev.cursor}`;
+    if (seen_keys_ref.current.has(key)) return;
+    seen_keys_ref.current.add(key);
+    cursor_by_run_ref.current[src] = Math.max(Number(cursor_by_run_ref.current[src] || 0), Number(ev.cursor || 0));
+
+    records_ref.current = [...records_ref.current, ev].slice(-4000);
     set_records(records_ref.current);
+    if (src === root_run_ref.current) set_root_last_record(rec);
 
     const st = String((rec as any)?.status || "").trim();
     const eff_type = String((rec as any)?.effect?.type || "").trim();
@@ -1682,7 +1832,7 @@ function ConsolePage(props: {
         const err = String((it as any)?.error || "").trim();
         const output_raw = (it as any)?.output ?? (it as any)?.result ?? (it as any)?.response ?? (it as any)?.value ?? null;
         const output_s = output_raw == null ? "" : typeof output_raw === "string" ? output_raw : safe_json(output_raw);
-        const output_preview = output_s.length > 4000 ? `${output_s.slice(0, 4000)}\n…(truncated)…` : output_s;
+        const output_preview = output_s;
         append_message({
           role: "system",
           level: err ? "error" : success === false ? "warn" : "info",
@@ -1734,6 +1884,16 @@ function ConsolePage(props: {
       const is_ask_wait = reason === "event" && ev_name === "abstract.ask";
       const is_user_wait = reason === "user";
 
+      // Track the direct subworkflow run id from the ROOT run (parent chat context).
+      // We intentionally do not overwrite this from nested subruns to avoid "losing" the parent subrun
+      // when it waits on its own children.
+      if (src === root_run_ref.current && reason === "subworkflow") {
+        const sub =
+          String((w as any)?.details?.sub_run_id || "").trim() ||
+          (wk.startsWith("subworkflow:") ? String(wk.split(":", 2)[1] || "").trim() : "");
+        if (sub) set_follow_run_id(sub);
+      }
+
       if (wk && prompt && (is_user_wait || is_ask_wait) && !is_tool_wait && !seen_wait_keys_ref.current.has(wk)) {
         clear_status(); // matches AbstractCode UX (spinner clears when awaiting user input)
         seen_wait_keys_ref.current.add(wk);
@@ -1742,16 +1902,29 @@ function ConsolePage(props: {
     }
 
     const out = extract_flow_end_output(rec);
-    if (out && active_run_id) {
-      finish_run_with_response(out, active_run_id);
+    if (out && active_run_id && (src === String(active_run_id || "").trim() || src === String(follow_run_id || "").trim())) {
+      finish_run_with_response(out, String(active_run_id || "").trim());
     }
 
-    if (st === "failed" && active_run_id) {
+    if (st === "failed" && active_run_id && (src === String(active_run_id || "").trim() || src === String(follow_run_id || "").trim())) {
       const err = String((rec as any)?.error || (rec as any)?.result?.error || "step failed").trim();
       append_message({ role: "assistant", content: `Error: ${err}`, ts: now_iso(), run_id: active_run_id });
       finish_run_without_output("failed", active_run_id);
     }
   }
+
+  const append_page = async (run_id: string, after: number): Promise<number> => {
+    const page = await props.gateway.get_ledger(run_id, { after, limit: 2000 });
+    const items = Array.isArray(page.items) ? page.items : [];
+    const start_cursor = after + 1;
+    for (let i = 0; i < items.length; i++) {
+      const rec = items[i] as StepRecord;
+      handle_record({ cursor: start_cursor + i, record: rec }, run_id);
+    }
+    const next = typeof page.next_after === "number" ? page.next_after : after + items.length;
+    cursor_by_run_ref.current[run_id] = Math.max(Number(cursor_by_run_ref.current[run_id] || 0), Number(next || 0));
+    return next;
+  };
 
   useEffect(() => {
     const rid = String(active_run_id || "").trim();
@@ -1762,25 +1935,19 @@ function ConsolePage(props: {
     clear_status();
     records_ref.current = [];
     set_records([]);
-    cursor_ref.current = 0;
-    seen_cursors_ref.current = new Set();
+    root_run_ref.current = rid;
+    set_root_last_record(null);
+    cursor_by_run_ref.current = { [rid]: 0 };
+    seen_keys_ref.current = new Set();
     seen_wait_keys_ref.current = new Set();
     seen_tool_call_ids_ref.current = new Set();
+    set_follow_run_id("");
+    set_subworkflow_label("");
 
     if (abort_ref.current) abort_ref.current.abort();
     abort_ref.current = new AbortController();
-
-    const append_page = async (after: number): Promise<void> => {
-      const page = await props.gateway.get_ledger(rid, { after, limit: 2000 });
-      const items = Array.isArray(page.items) ? page.items : [];
-      const start_cursor = after + 1;
-      for (let i = 0; i < items.length; i++) {
-        const rec = items[i] as StepRecord;
-        handle_record({ cursor: start_cursor + i, record: rec });
-      }
-      const next = typeof page.next_after === "number" ? page.next_after : after + items.length;
-      cursor_ref.current = Math.max(cursor_ref.current, next);
-    };
+    if (follow_abort_ref.current) follow_abort_ref.current.abort();
+    follow_abort_ref.current = null;
 
     const run = async () => {
       try {
@@ -1885,16 +2052,16 @@ function ConsolePage(props: {
           }
         }
         set_status("working…", -1);
-        await append_page(0);
+        await append_page(rid, 0);
         if (stopped) return;
         while (!stopped) {
           try {
             await props.gateway.stream_ledger(rid, {
-              after: cursor_ref.current,
+              after: Number(cursor_by_run_ref.current[rid] || 0),
               signal: abort_ref.current?.signal,
               on_step: (ev) => {
                 if (stopped) return;
-                handle_record(ev);
+                handle_record(ev, rid);
               },
             });
           } catch (e: any) {
@@ -1906,7 +2073,7 @@ function ConsolePage(props: {
           if (stopped) return;
 
           try {
-            await append_page(cursor_ref.current);
+            await append_page(rid, Number(cursor_by_run_ref.current[rid] || 0));
           } catch {
             // ignore
           }
@@ -1943,6 +2110,80 @@ function ConsolePage(props: {
     };
   }, [active_run_id, props.gateway]);
 
+  useEffect(() => {
+    const rid = String(active_run_id || "").trim();
+    const fid = String(follow_run_id || "").trim();
+    if (!rid) return;
+    if (!fid || fid === rid) return;
+
+    let stopped = false;
+    if (follow_abort_ref.current) follow_abort_ref.current.abort();
+    const ctrl = new AbortController();
+    follow_abort_ref.current = ctrl;
+
+    const run = async () => {
+      try {
+        const ensure_cursor = () => {
+          if (typeof cursor_by_run_ref.current[fid] !== "number") cursor_by_run_ref.current[fid] = 0;
+        };
+        ensure_cursor();
+        try {
+          await append_page(fid, Number(cursor_by_run_ref.current[fid] || 0));
+        } catch {
+          // ignore
+        }
+        if (stopped || ctrl.signal.aborted) return;
+
+        while (!stopped && !ctrl.signal.aborted) {
+          try {
+            await props.gateway.stream_ledger(fid, {
+              after: Number(cursor_by_run_ref.current[fid] || 0),
+              signal: ctrl.signal,
+              on_step: (ev) => {
+                if (stopped) return;
+                handle_record(ev, fid);
+              },
+            });
+          } catch (e: any) {
+            if (stopped) return;
+            if (String(e?.name || "") === "AbortError") return;
+            // Follow-stream errors are best-effort; retry after a brief delay.
+          }
+          if (stopped || ctrl.signal.aborted) return;
+
+          try {
+            await append_page(fid, Number(cursor_by_run_ref.current[fid] || 0));
+          } catch {
+            // ignore
+          }
+          if (stopped || ctrl.signal.aborted) return;
+
+          // Streams may close while still active; poll + reconnect.
+          let run_status = "";
+          try {
+            const info = await props.gateway.get_run(fid);
+            if (stopped) return;
+            run_status = String(info?.status || "").trim().toLowerCase();
+          } catch {
+            run_status = "";
+          }
+          if (run_status === "completed" || run_status === "failed" || run_status === "cancelled") return;
+
+          await new Promise((r) => window.setTimeout(r, 900));
+        }
+      } catch {
+        // ignore
+      }
+    };
+    void run();
+
+    return () => {
+      stopped = true;
+      ctrl.abort();
+      if (follow_abort_ref.current === ctrl) follow_abort_ref.current = null;
+    };
+  }, [active_run_id, follow_run_id, props.gateway]);
+
   async function submit_resume(payload_obj: any): Promise<void> {
     if (!active_run_id || !wait_key) return;
     set_error("");
@@ -1956,16 +2197,8 @@ function ConsolePage(props: {
         client_id: props.settings.client_id || "abstractcode_web",
       });
       try {
-        const after = cursor_ref.current;
-        const page = await props.gateway.get_ledger(active_run_id, { after, limit: 2000 });
-        const items = Array.isArray(page.items) ? page.items : [];
-        const start_cursor = after + 1;
-        for (let i = 0; i < items.length; i++) {
-          const rec = items[i] as StepRecord;
-          handle_record({ cursor: start_cursor + i, record: rec });
-        }
-        const next = typeof page.next_after === "number" ? page.next_after : after + items.length;
-        cursor_ref.current = Math.max(cursor_ref.current, next);
+        const after = Number(cursor_by_run_ref.current[active_run_id] || 0);
+        await append_page(active_run_id, after);
       } catch {
         // ignore
       }
@@ -2283,7 +2516,7 @@ function ConsolePage(props: {
         <div className="repl_chat">
           {!props.repl.messages.length ? <div className="muted">Start typing to begin.</div> : null}
           {props.repl.messages.map((m, idx) => (
-            <ChatMessageCard key={`${m.ts}:${idx}`} m={m} />
+            <ChatMessageCard key={`${m.ts}:${idx}`} m={m} tool_specs_by_name={tool_specs_by_name} />
           ))}
         </div>
 
@@ -2297,17 +2530,17 @@ function ConsolePage(props: {
                 </div>
 
                 {wait_reason === "subworkflow" ? (
-                  <div className="warn" style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-                    <div style={{ minWidth: 0 }}>
-                      Waiting on a subworkflow. This chat stays attached to the parent run, but you can open the child run to observe it.
-                      <div className="muted mono" style={{ marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        sub_run_id:{" "}
+                  <div className="wait_status pulse" aria-live="polite">
+                    <div className="wait_status_text">
+                      <span className="muted">subworkflow</span>
+                      <span className="mono">{subworkflow_label || "subflow"}</span>
+                      <span className="muted mono" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {String((wait_state as any)?.details?.sub_run_id || "").trim() ||
                           (wait_key.startsWith("subworkflow:") ? wait_key.split(":", 2)[1] : "—")}
-                      </div>
+                      </span>
                     </div>
                     <button
-                      className="btn"
+                      className="btn mini"
                       type="button"
                       onClick={() => {
                         const sub =
@@ -2338,6 +2571,8 @@ function ConsolePage(props: {
                               output_preview: "",
                               pending: true,
                             }}
+                            ts={now_iso()}
+                            tool_specs_by_name={tool_specs_by_name}
                           />
                         );
                       })}
@@ -2517,21 +2752,58 @@ function ConsolePage(props: {
               }
             }}
           />
-          <button
-            className="btn primary"
-            disabled={!can_send || !composer.trim()}
-            onClick={() => {
-              const v = composer;
-              set_composer("");
-              void (async () => {
-                const handled = await run_command(v);
-                if (handled) return;
-                await start_turn(v);
-              })();
-            }}
-          >
-            Send
-          </button>
+          <div className="repl_send_panel">
+            <select
+              className="mono"
+              value={props.repl.template ? `${props.repl.template.bundle_id}::${props.repl.template.flow_id}` : ""}
+              onChange={(e) => {
+                const raw = String(e.target.value || "").trim();
+                const [bid, fid] = raw.split("::", 2);
+                const bundle_id = String(bid || "").trim();
+                const flow_id = String(fid || "").trim();
+                if (!bundle_id || !flow_id) return;
+                const match = templates.find((t) => t.bundle_id === bundle_id && t.flow_id === flow_id);
+                update_repl((prev) => ({
+                  ...prev,
+                  template: {
+                    bundle_id,
+                    flow_id,
+                    name: match?.name || prev.template?.name || undefined,
+                  },
+                  updated_at: now_iso(),
+                }));
+              }}
+              disabled={templates.length === 0}
+              aria-label="Select agent workflow"
+            >
+              {!props.repl.template ? <option value="">(select agent)</option> : null}
+              {props.repl.template && !templates.some((t) => t.bundle_id === props.repl.template?.bundle_id && t.flow_id === props.repl.template?.flow_id) ? (
+                <option value={`${props.repl.template.bundle_id}::${props.repl.template.flow_id}`}>
+                  {props.repl.template.name || `${props.repl.template.bundle_id}:${props.repl.template.flow_id}`}
+                </option>
+              ) : null}
+              {templates.map((t) => (
+                <option key={`${t.bundle_id}::${t.flow_id}`} value={`${t.bundle_id}::${t.flow_id}`}>
+                  {t.name} • {t.bundle_id}:{t.flow_id}
+                </option>
+              ))}
+            </select>
+            <button
+              className="btn primary send_btn"
+              disabled={!can_send || !composer.trim()}
+              onClick={() => {
+                const v = composer;
+                set_composer("");
+                void (async () => {
+                  const handled = await run_command(v);
+                  if (handled) return;
+                  await start_turn(v);
+                })();
+              }}
+            >
+              Send
+            </button>
+          </div>
         </div>
 
         {details_open ? (
@@ -2553,7 +2825,7 @@ function ConsolePage(props: {
   );
 }
 
-function ChatMessageCard(props: { m: ReplMessage }): React.ReactElement {
+function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<string, any> }): React.ReactElement {
   const m = props.m;
   const meta_obj: any = m.meta && typeof m.meta === "object" ? (m.meta as any) : null;
   const kind = meta_obj && typeof meta_obj._kind === "string" ? String(meta_obj._kind) : "";
@@ -2574,7 +2846,16 @@ function ChatMessageCard(props: { m: ReplMessage }): React.ReactElement {
             ? "message warn"
             : "status"
         : "user";
-  const [copied, set_copied] = useState(false);
+  const [copy_state, set_copy_state] = useState<"idle" | "copied" | "failed">("idle");
+
+  const is_digest = m.role === "system" && String(m.title || "").trim() === "Digest";
+  if (kind === "tool") {
+    return (
+      <div className={`chat_item ${cls}`}>
+        <ToolBlockCard meta={meta_obj?.tool} ts={m.ts} tool_specs_by_name={props.tool_specs_by_name} />
+      </div>
+    );
+  }
   return (
     <div className={`chat_item ${cls}`}>
       <div className="meta mono">
@@ -2589,7 +2870,7 @@ function ChatMessageCard(props: { m: ReplMessage }): React.ReactElement {
                 {usage_parsed ? `in ${usage_parsed.input_tokens} • out ${usage_parsed.output_tokens}` : ""}
                 {usage_parsed && dur_ms !== null ? " • " : ""}
                 {dur_ms !== null ? format_duration_short(dur_ms) : ""}
-                {(usage_parsed || dur_ms !== null) && tok_s !== null ? ` • ${tok_s.toFixed(1)} tok/s` : ""}
+                {tok_s !== null ? ` • ${tok_s.toFixed(1)} tok/s` : ""}
               </span>
             </>
           ) : null}
@@ -2597,38 +2878,34 @@ function ChatMessageCard(props: { m: ReplMessage }): React.ReactElement {
         <button
           className="btn mini"
           onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(String(m.content || ""));
-              set_copied(true);
-              window.setTimeout(() => set_copied(false), 900);
-            } catch {
-              // ignore
-            }
+            const ok = await copy_text(String(m.content || ""));
+            set_copy_state(ok ? "copied" : "failed");
+            window.setTimeout(() => set_copy_state("idle"), 900);
           }}
           type="button"
         >
-          {copied ? "Copied" : "Copy"}
+          {copy_state === "copied" ? "Copied" : copy_state === "failed" ? "Copy failed" : "Copy"}
         </button>
       </div>
-      {kind === "tool" ? <ToolBlockCard meta={meta_obj?.tool} /> : null}
       {kind !== "tool" ? (
-        <div className="body markdown">
-          <MarkdownRenderer markdown={m.content} />
-        </div>
-      ) : null}
-      {m.meta ? (
-        <details style={{ marginTop: 8 }}>
-          <summary className="muted">meta</summary>
-          <pre className="mono" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-            {safe_json(m.meta)}
-          </pre>
-        </details>
+        is_digest ? (
+          <details className="digest_details">
+            <summary className="muted">digest</summary>
+            <div className="body markdown" style={{ marginTop: 8 }}>
+              <MarkdownRenderer markdown={m.content} />
+            </div>
+          </details>
+        ) : (
+          <div className="body markdown">
+            <MarkdownRenderer markdown={m.content} />
+          </div>
+        )
       ) : null}
     </div>
   );
 }
 
-function ToolBlockCard(props: { meta: any }): React.ReactElement {
+function ToolBlockCard(props: { meta: any; ts?: string; tool_specs_by_name?: Record<string, any> }): React.ReactElement {
   const t: any = props.meta && typeof props.meta === "object" ? props.meta : {};
   const name = String(t.name || "").trim() || "(unknown tool)";
   const call_id = String(t.call_id || "").trim();
@@ -2638,6 +2915,11 @@ function ToolBlockCard(props: { meta: any }): React.ReactElement {
   const error = String(t.error || "").trim();
   const args = t.arguments;
   const output_preview = String(t.output_preview || "").trim();
+  const ts = String(props.ts || "").trim();
+  const tool_specs_by_name = props.tool_specs_by_name || {};
+  const tool_spec = tool_specs_by_name[name];
+  const sig = tool_call_signature_primary(name, args, tool_spec);
+  const [copy_state, set_copy_state] = useState<"idle" | "copied" | "failed">("idle");
 
   const status = pending ? "pending" : error ? "error" : success === false ? "failed" : success === true ? "ok" : "done";
   const badge_cls =
@@ -2652,23 +2934,47 @@ function ToolBlockCard(props: { meta: any }): React.ReactElement {
       <summary className="tool_summary">
         <div className="tool_left">
           <span className={badge_cls}>{status}</span>
-          <span className="mono">{name}</span>
-          {call_id ? <span className="muted mono">• {call_id}</span> : null}
+          <span className="mono tool_sig">{sig}</span>
         </div>
-        <span className="muted">details</span>
+        <div className="tool_right">
+          <span className="muted mono tool_time">{ts ? new Date(ts).toLocaleTimeString() : ""}</span>
+          <button
+            className="btn mini"
+            type="button"
+            onClick={async (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const payload = safe_json({
+                name,
+                call_id: call_id || null,
+                status,
+                success,
+                error: error || null,
+                arguments: args ?? null,
+                output_preview: output_preview || null,
+              });
+              const ok = await copy_text(payload);
+              set_copy_state(ok ? "copied" : "failed");
+              window.setTimeout(() => set_copy_state("idle"), 900);
+            }}
+          >
+            {copy_state === "copied" ? "Copied" : copy_state === "failed" ? "Copy failed" : "Copy"}
+          </button>
+        </div>
       </summary>
 
       <div className="tool_body">
         {error ? <div className="error">Error: {error}</div> : null}
         {pending ? <div className="muted">Awaiting approval / execution.</div> : null}
+        {call_id ? <div className="muted mono">call_id: {call_id}</div> : null}
         <div className="field">
           <label>arguments</label>
           <textarea className="mono" readOnly rows={6} value={safe_json(args)} />
         </div>
         {!pending || output_preview ? (
           <div className="field">
-            <label>output (preview)</label>
-            <textarea className="mono" readOnly rows={10} value={output_preview} />
+            <label>output</label>
+            <textarea className="mono" readOnly rows={12} value={output_preview} />
           </div>
         ) : null}
       </div>

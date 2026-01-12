@@ -357,12 +357,19 @@ textarea {
   border-radius: 12px;
   padding: 10px;
   background: rgba(2, 6, 23, 0.25);
+  width: fit-content;
+  max-width: 70%;
 }
 
 .chat_item .meta {
   font-size: 12px;
   color: var(--muted);
   margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
 }
 
 .chat_item .body {
@@ -375,6 +382,21 @@ textarea {
   font-size: 13px;
   line-height: 1.55;
   color: var(--text);
+}
+
+.markdown-body a {
+  color: rgba(147, 197, 253, 0.95);
+  text-decoration: underline;
+  text-decoration-color: rgba(147, 197, 253, 0.5);
+}
+
+.markdown-body a:hover {
+  color: rgba(191, 219, 254, 0.98);
+  text-decoration-color: rgba(191, 219, 254, 0.7);
+}
+
+.markdown-body a:visited {
+  color: rgba(186, 230, 253, 0.9);
 }
 
 .markdown-body p {
@@ -502,26 +524,37 @@ textarea {
 .chat_item.user {
   border-color: rgba(167, 139, 250, 0.35);
   background: rgba(167, 139, 250, 0.08);
+  align-self: flex-end;
 }
 
 .chat_item.assistant {
   border-color: rgba(96, 165, 250, 0.35);
   background: rgba(96, 165, 250, 0.08);
+  align-self: flex-start;
 }
 
 .chat_item.status {
   border-color: rgba(148, 163, 184, 0.35);
   background: rgba(148, 163, 184, 0.06);
+  width: 100%;
+  max-width: 100%;
+  align-self: stretch;
 }
 
 .chat_item.message.error {
   border-color: rgba(239, 68, 68, 0.35);
   background: rgba(239, 68, 68, 0.08);
+  width: 100%;
+  max-width: 100%;
+  align-self: stretch;
 }
 
 .chat_item.message.warn {
   border-color: rgba(251, 191, 36, 0.35);
   background: rgba(251, 191, 36, 0.08);
+  width: 100%;
+  max-width: 100%;
+  align-self: stretch;
 }
 
 .tool_block {
@@ -541,6 +574,7 @@ textarea {
   gap: 10px;
   padding: 10px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  font-size: 14px;
 }
 
 .tool_summary::-webkit-details-marker {
@@ -552,6 +586,25 @@ textarea {
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+
+.tool_right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.tool_sig {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.tool_time {
+  font-size: 11px;
 }
 
 .tool_badge {
@@ -628,27 +681,71 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  align-items: flex-start;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+@media (max-width: 680px) {
+  .chat_item {
+    max-width: 100%;
+  }
+
+  .repl_composer {
+    flex-direction: column;
+  }
+
+  .repl_send_panel {
+    max-width: none;
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .repl_send_panel select {
+    flex: 1 1 auto;
+  }
+
+  .send_btn {
+    width: auto;
+    min-width: 110px;
+  }
 }
 
 .repl_composer {
   margin-top: 12px;
   display: flex;
   gap: 10px;
-  align-items: flex-end;
+  align-items: stretch;
   padding-top: 10px;
 }
 
 .repl_composer textarea {
-  flex: 1;
+  flex: 7 1 0;
   min-height: 76px;
   max-height: 240px;
   resize: vertical;
   overflow-y: auto;
   overflow-x: hidden;
   white-space: pre-wrap;
+}
+
+.repl_send_panel {
+  flex: 3 1 0;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.repl_send_panel select {
+  width: 100%;
+}
+
+.send_btn {
+  width: 100%;
+  padding: 12px 12px;
+  font-size: 14px;
 }
 
 .cmd_menu {
@@ -700,6 +797,49 @@ textarea {
   border: 1px dashed rgba(148, 163, 184, 0.45);
   border-radius: 12px;
   padding: 10px;
+}
+
+.wait_status {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(2, 6, 23, 0.28);
+  color: var(--muted);
+}
+
+.wait_status_text {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wait_status.pulse {
+  position: relative;
+  overflow: hidden;
+}
+
+.wait_status.pulse::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(96, 165, 250, 0.16), transparent);
+  transform: translateX(-100%);
+  animation: status_shimmer 1.4s ease-out 1;
+}
+
+@keyframes status_shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 .run_working {
