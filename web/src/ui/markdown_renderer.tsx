@@ -52,8 +52,8 @@ export function MarkdownRenderer({ markdown, className }: MarkdownRendererProps)
 
     return DOMPurify.sanitize(raw, {
       USE_PROFILES: { html: true },
-      ADD_TAGS: ["button"],
-      ADD_ATTR: ["data-lang", "data-md-copy"],
+      ADD_TAGS: ["button", "span"],
+      ADD_ATTR: ["data-lang", "data-md-copy", "style", "class"],
     });
   }, [markdown]);
 

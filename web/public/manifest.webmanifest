@@ -1,15 +1,19 @@
 {
   "name": "AbstractCode",
-  "short_name": "AbstractCode",
+  "short_name": "Abstract",
+  "description": "Agentic Chat Interface for the AbstractFramework",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#0b1020",
-  "theme_color": "#0b1020",
+  "orientation": "portrait-primary",
+  "background_color": "#1a1a2e",
+  "theme_color": "#1a1a2e",
   "icons": [
     {
       "src": "icon.svg",
       "sizes": "any",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     }
-  ]
+  ],
+  "categories": ["developer", "productivity", "utilities"]
 }

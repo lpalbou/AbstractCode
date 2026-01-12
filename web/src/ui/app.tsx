@@ -617,24 +617,34 @@ export function App(): React.ReactElement {
 function Header(props: { route: Route; on_nav: (name: Route["name"]) => void }): React.ReactElement {
   const r = props.route;
   const title = r.name === "settings" ? "Settings" : r.name === "new" ? "New Chat" : r.name === "sessions" ? "Sessions" : "AbstractCode";
+  
+  // Navigation items with icons (using simple symbols for cross-platform compatibility)
+  const nav_items: { name: Route["name"]; label: string; icon: string }[] = [
+    { name: "console", label: "Chat", icon: "◉" },
+    { name: "new", label: "New", icon: "+" },
+    { name: "sessions", label: "History", icon: "≡" },
+    { name: "settings", label: "Settings", icon: "⚙" },
+  ];
+  
   return (
-    <div className="header">
+    <header className="header">
       <div className="title">{title}</div>
-      <div className="nav">
-        <button className="btn" onClick={() => props.on_nav("console")} disabled={r.name === "console"}>
-          Console
-        </button>
-        <button className="btn" onClick={() => props.on_nav("new")} disabled={r.name === "new"}>
-          New
-        </button>
-        <button className="btn" onClick={() => props.on_nav("sessions")} disabled={r.name === "sessions"}>
-          Sessions
-        </button>
-        <button className="btn" onClick={() => props.on_nav("settings")} disabled={r.name === "settings"}>
-          Settings
-        </button>
-      </div>
-    </div>
+      <nav className="nav" role="navigation" aria-label="Main navigation">
+        {nav_items.map((item) => (
+          <button
+            key={item.name}
+            className="btn"
+            onClick={() => props.on_nav(item.name)}
+            disabled={r.name === item.name}
+            aria-current={r.name === item.name ? "page" : undefined}
+            title={item.label}
+          >
+            <span className="nav-icon" aria-hidden="true">{item.icon}</span>
+            <span className="nav-label">{item.label}</span>
+          </button>
+        ))}
+      </nav>
+    </header>
   );
 }
 
@@ -790,50 +800,82 @@ function SessionsPage(props: {
         </div>
       ) : null}
 
-      {!loading && !error && !runs.length ? <div className="muted" style={{ marginTop: 10 }}>No sessions yet.</div> : null}
+      {!loading && !error && !runs.length ? (
+        <div className="sessions_empty">
+          <span className="sessions_empty_icon">◇</span>
+          <div>No sessions yet</div>
+          <div className="muted">Start a new chat to create your first session</div>
+        </div>
+      ) : null}
 
-      <div className="list">
+      <div className="sessions_grid">
         {runs.map((r) => {
           const wid = String(r.workflow_id || "").trim();
           const ref = parse_workflow_ref(wid);
           const key = ref ? `${ref.bundle_id}:${ref.flow_id}` : "";
           const tpl = key ? workflow_to_template.get(key) : undefined;
           const tpl2 = !tpl && ref?.bundle_id ? bundle_to_template.get(ref.bundle_id) : undefined;
-          const label = tpl?.name || tpl2?.name || wid || "—";
+          const agent_name = tpl?.name || tpl2?.name || ref?.bundle_id || "Agent";
           const ts = String(r.updated_at || r.created_at || "").trim();
-          const status = String(r.status || "").trim();
-          const status_cls = status === "failed" ? "danger" : "muted";
+          const status = String(r.status || "").toLowerCase().trim();
           const open_template = ref ? { bundle_id: ref.bundle_id, flow_id: ref.flow_id, name: tpl?.name || tpl2?.name } : null;
           const sid = String(r.session_id || r.run_id).trim();
+          
+          // Format relative time
+          const time_ago = ts ? format_relative_time(new Date(ts)) : "";
+          
+          // Status styling
+          const status_config: Record<string, { label: string; cls: string }> = {
+            completed: { label: "Completed", cls: "success" },
+            failed: { label: "Failed", cls: "error" },
+            cancelled: { label: "Cancelled", cls: "muted" },
+            waiting: { label: "Waiting", cls: "warning" },
+            running: { label: "Running", cls: "info" },
+          };
+          const status_info = status_config[status] || { label: status || "Unknown", cls: "muted" };
+          
           return (
-            <div key={sid || r.run_id} className="list_item" style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div className="mono" style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {sid || r.run_id}
-                  </div>
-                  {status ? <span className={`pill ${status_cls}`}>{status}</span> : null}
-                </div>
-                <div className="muted mono" style={{ marginTop: 4 }}>
-                  {label} {ts ? `• ${new Date(ts).toLocaleString()}` : ""}
-                </div>
-                {sid && sid !== r.run_id ? <div className="muted mono" style={{ marginTop: 4 }}>run: {r.run_id}</div> : null}
+            <button
+              key={sid || r.run_id}
+              className="session_card"
+              onClick={() => props.on_open_session(sid || r.run_id, r.run_id, open_template)}
+              type="button"
+            >
+              <div className="session_card_header">
+                <span className="session_card_agent">{agent_name}</span>
+                <span className={`session_card_status ${status_info.cls}`}>{status_info.label}</span>
               </div>
-              <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                <button
-                  className="btn"
-                  onClick={() => props.on_open_session(sid || r.run_id, r.run_id, open_template)}
-                  type="button"
-                >
-                  Open
-                </button>
-              </div>
-            </div>
+              <div className="session_card_time">{time_ago}</div>
+              {r.ledger_len != null && r.ledger_len > 0 ? (
+                <div className="session_card_meta">
+                  <span title="Steps">{r.ledger_len} steps</span>
+                </div>
+              ) : null}
+            </button>
           );
         })}
       </div>
     </div>
   );
+}
+
+function format_relative_time(date: Date): string {
+  const now = Date.now();
+  const then = date.getTime();
+  const diff = now - then;
+  
+  const seconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  
+  if (seconds < 60) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 7) return `${days}d ago`;
+  
+  // For older dates, show the actual date
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_change: (s: Settings) => void; on_done: () => void }): React.ReactElement {
@@ -851,8 +893,16 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
   const [error_models, set_error_models] = useState("");
   const [error_tools, set_error_tools] = useState("");
 
+  // Auto-connect if previously connected
   useEffect(() => {
-    // Treat gateway settings as “disconnected” until the user explicitly connects.
+    if (s.gateway_was_connected && s.gateway_url && !gateway_connected && !gateway_connecting) {
+      void connect_gateway();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    // Reset state on gateway URL/token change
     set_gateway_connected(false);
     set_gateway_connecting(false);
     set_gateway_error("");
@@ -881,6 +931,8 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
       set_providers(prov_items);
       set_tools(tool_items);
       set_gateway_connected(true);
+      // Remember that we were connected for auto-reconnect
+      props.on_change({ ...s, gateway_was_connected: true });
     } catch (e: any) {
       set_gateway_error(String(e?.message || e || "Failed to connect to gateway"));
       set_gateway_connected(false);
@@ -902,6 +954,8 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
     set_error_providers("");
     set_error_models("");
     set_error_tools("");
+    // Clear auto-reconnect flag
+    props.on_change({ ...s, gateway_was_connected: false });
   }
 
   // Provider → models.
@@ -1387,7 +1441,19 @@ function ConsolePage(props: {
         if (props.repl.template) {
           const cur = props.repl.template;
           if (cur && !items.some((t) => t.bundle_id === cur.bundle_id && t.flow_id === cur.flow_id)) {
-            set_template_error("Selected agent not found on gateway. Pick a new one in New.");
+            // Agent workflow may have been renamed, deleted, or gateway restarted
+            // Auto-select a new agent instead of blocking the user
+            const replacement = items.find((t) => t.bundle_id === cur.bundle_id) || items.find((t) => t.bundle_id === "basic-agent") || items[0];
+            if (replacement) {
+              update_repl((prev) => ({
+                ...prev,
+                template: { bundle_id: replacement.bundle_id, flow_id: replacement.flow_id, name: replacement.name },
+                updated_at: now_iso(),
+              }));
+              set_template_error(`Agent "${cur.name || cur.bundle_id}" was updated or unavailable — switched to "${replacement.name}".`);
+            } else {
+              set_template_error(`Agent "${cur.name || cur.bundle_id}" unavailable. Select an agent in New.`);
+            }
           }
         }
       } catch (e: any) {
@@ -1400,6 +1466,13 @@ function ConsolePage(props: {
       stopped = true;
     };
   }, [props.gateway]);
+
+  // Auto-dismiss informational template messages after a few seconds
+  useEffect(() => {
+    if (!template_error || !template_error.includes("switched to")) return;
+    const timer = setTimeout(() => set_template_error(""), 6000);
+    return () => clearTimeout(timer);
+  }, [template_error]);
 
   // Only auto-select a default template when the user is starting a fresh chat,
   // not when attaching to an existing run (where the agent must be inferred from workflow_id).
@@ -2474,36 +2547,41 @@ function ConsolePage(props: {
     <div className="repl">
       <div className="panel repl_panel">
         <div className="repl_meta">
-          <div>
-            <div className="muted">agent</div>
-            <div className="mono">{template_label || "—"}</div>
-          </div>
-          <div>
-            <div className="muted">provider/model</div>
-            <div className="mono">
-              {props.settings.provider || "—"} / {props.settings.model || "—"}
+          <div className="repl_meta_info">
+            <div className="repl_meta_item">
+              <span className="repl_meta_label">Agent</span>
+              <span className="repl_meta_value accent">{template_label || "—"}</span>
             </div>
-            <div className="muted" style={{ marginTop: 6 }}>
-              Context(next):{" "}
-              <span className="mono">
-                {context_meter.used.toLocaleString()}
-                {context_meter.max_tokens ? `/${context_meter.max_tokens.toLocaleString()}` : "/?"} tk
+            <div className="repl_meta_item">
+              <span className="repl_meta_label">Model</span>
+              <span className="repl_meta_value">
+                {props.settings.provider || "—"}/{props.settings.model || "—"}
               </span>
-              {context_meter.max_tokens ? ` (${context_meter.pct.toFixed(0)}%)` : ""}
-              {model_caps_error ? <span className="error" style={{ marginTop: 6 }}>{model_caps_error}</span> : null}
+            </div>
+            <div className="repl_context_badge" title="Estimated context window usage">
+              <span>◐</span>
+              <span>
+                {context_meter.used.toLocaleString()}
+                {context_meter.max_tokens ? `/${(context_meter.max_tokens / 1000).toFixed(0)}k` : ""}
+              </span>
+              {context_meter.max_tokens ? <span className="pct">{context_meter.pct.toFixed(0)}%</span> : null}
             </div>
           </div>
           <div className="repl_actions">
-            <button className="btn" onClick={() => set_details_open((v) => !v)}>
-              {details_open ? "Hide details" : "Show details"}
+            <button className="btn mini" onClick={() => set_details_open((v) => !v)} title={details_open ? "Hide run details" : "Show run details"}>
+              {details_open ? "▼" : "▶"}
             </button>
-          <button className="btn" onClick={() => update_repl(() => reset_repl_state({ template: props.repl.template }, props.session_id))}>
-            Clear chat
-          </button>
+            <button className="btn mini" onClick={() => update_repl(() => reset_repl_state({ template: props.repl.template }, props.session_id))} title="Clear chat history">
+              ✕
+            </button>
+          </div>
         </div>
-      </div>
 
-        {template_error ? <div className="warn">{template_error}</div> : null}
+        {template_error ? (
+          <div className={`warn ${template_error.includes("switched to") ? "info" : ""}`} onClick={() => set_template_error("")} style={{ cursor: "pointer" }} title="Click to dismiss">
+            {template_error}
+          </div>
+        ) : null}
         {!props.settings.provider.trim() || !props.settings.model.trim() ? (
           <div className="warn">Set provider + model in Settings. (These agent workflows require them.)</div>
         ) : null}
@@ -2825,7 +2903,7 @@ function ConsolePage(props: {
   );
 }
 
-function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<string, any> }): React.ReactElement {
+function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<string, any> }): React.ReactElement | null {
   const m = props.m;
   const meta_obj: any = m.meta && typeof m.meta === "object" ? (m.meta as any) : null;
   const kind = meta_obj && typeof meta_obj._kind === "string" ? String(meta_obj._kind) : "";
@@ -2834,8 +2912,17 @@ function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<st
   const usage_parsed = parse_usage_summary(usage);
   const dur_ms = repl_meta && Number.isFinite(Number(repl_meta.duration_ms)) ? Number(repl_meta.duration_ms) : null;
   const tok_s = repl_meta && Number.isFinite(Number(repl_meta.tok_s)) ? Number(repl_meta.tok_s) : null;
+  const llm_calls = repl_meta && Number.isFinite(Number(repl_meta.llm_calls)) ? Number(repl_meta.llm_calls) : null;
+  const tool_calls = repl_meta && Number.isFinite(Number(repl_meta.tool_calls)) ? Number(repl_meta.tool_calls) : null;
 
-  const who = m.role === "assistant" ? "assistant" : m.role === "system" ? (m.title || m.level || "system") : "you";
+  // Role display with icons
+  const role_config = {
+    user: { label: "You", icon: "👤" },
+    assistant: { label: "Agent", icon: "🤖" },
+    system: { label: m.title || (m.level === "error" ? "Error" : m.level === "warn" ? "Warning" : "System"), icon: m.level === "error" ? "❌" : m.level === "warn" ? "⚠️" : "ℹ️" },
+  };
+  const role_info = role_config[m.role as keyof typeof role_config] || role_config.system;
+  
   const cls =
     m.role === "assistant"
       ? "assistant"
@@ -2849,6 +2936,7 @@ function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<st
   const [copy_state, set_copy_state] = useState<"idle" | "copied" | "failed">("idle");
 
   const is_digest = m.role === "system" && String(m.title || "").trim() === "Digest";
+  
   if (kind === "tool") {
     return (
       <div className={`chat_item ${cls}`}>
@@ -2856,50 +2944,75 @@ function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<st
       </div>
     );
   }
+  
+  // Digest messages are now hidden - their info is in the assistant message stats
+  if (is_digest) {
+    return null;
+  }
+
+  // Build stats items for assistant messages
+  const has_stats = m.role === "assistant" && (usage_parsed || dur_ms !== null || llm_calls !== null || tool_calls !== null);
+  
   return (
     <div className={`chat_item ${cls}`}>
-      <div className="meta mono">
-        <span>
-          {who}
-          {m.run_id ? ` • ${m.run_id.slice(0, 8)}` : ""} • {new Date(m.ts).toLocaleTimeString()}
-          {m.role === "assistant" && (usage_parsed || dur_ms !== null) ? (
-            <>
-              {" "}
-              •{" "}
-              <span className="muted">
-                {usage_parsed ? `in ${usage_parsed.input_tokens} • out ${usage_parsed.output_tokens}` : ""}
-                {usage_parsed && dur_ms !== null ? " • " : ""}
-                {dur_ms !== null ? format_duration_short(dur_ms) : ""}
-                {tok_s !== null ? ` • ${tok_s.toFixed(1)} tok/s` : ""}
-              </span>
-            </>
-          ) : null}
-        </span>
+      <div className="chat_header">
+        <div className="chat_avatar" aria-hidden="true">{role_info.icon}</div>
+        <div className="chat_meta">
+          <span className="chat_role">{role_info.label}</span>
+          <span className="chat_time">
+            {new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            {m.run_id ? ` • ${m.run_id.slice(0, 6)}` : ""}
+          </span>
+        </div>
         <button
-          className="btn mini"
+          className={`btn mini chat_copy ${copy_state}`}
           onClick={async () => {
             const ok = await copy_text(String(m.content || ""));
             set_copy_state(ok ? "copied" : "failed");
             window.setTimeout(() => set_copy_state("idle"), 900);
           }}
           type="button"
+          aria-label="Copy message"
         >
-          {copy_state === "copied" ? "Copied" : copy_state === "failed" ? "Copy failed" : "Copy"}
+          {copy_state === "copied" ? "✓" : copy_state === "failed" ? "✕" : "⊡"}
         </button>
       </div>
-      {kind !== "tool" ? (
-        is_digest ? (
-          <details className="digest_details">
-            <summary className="muted">digest</summary>
-            <div className="body markdown" style={{ marginTop: 8 }}>
-              <MarkdownRenderer markdown={m.content} />
-            </div>
-          </details>
-        ) : (
-          <div className="body markdown">
-            <MarkdownRenderer markdown={m.content} />
-          </div>
-        )
+      <div className="body markdown">
+        <MarkdownRenderer markdown={m.content} />
+      </div>
+      {has_stats ? (
+        <div className="chat_stats_bar">
+          {usage_parsed ? (
+            <span className="stat_item" title="Tokens in/out/total">
+              <span className="stat_icon">◈</span>
+              {usage_parsed.input_tokens}/{usage_parsed.output_tokens}
+            </span>
+          ) : null}
+          {dur_ms !== null ? (
+            <span className="stat_item" title="Duration">
+              <span className="stat_icon">◷</span>
+              {format_duration_short(dur_ms)}
+            </span>
+          ) : null}
+          {tok_s !== null ? (
+            <span className="stat_item" title="Tokens per second">
+              <span className="stat_icon">◐</span>
+              {tok_s.toFixed(0)}/s
+            </span>
+          ) : null}
+          {llm_calls !== null && llm_calls > 0 ? (
+            <span className="stat_item" title="LLM calls">
+              <span className="stat_icon">◉</span>
+              {llm_calls}
+            </span>
+          ) : null}
+          {tool_calls !== null && tool_calls > 0 ? (
+            <span className="stat_item" title="Tool calls">
+              <span className="stat_icon">⚙</span>
+              {tool_calls}
+            </span>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -2939,8 +3052,9 @@ function ToolBlockCard(props: { meta: any; ts?: string; tool_specs_by_name?: Rec
         <div className="tool_right">
           <span className="muted mono tool_time">{ts ? new Date(ts).toLocaleTimeString() : ""}</span>
           <button
-            className="btn mini"
+            className={`btn mini tool_copy_btn ${copy_state}`}
             type="button"
+            aria-label="Copy tool call"
             onClick={async (e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -2958,7 +3072,7 @@ function ToolBlockCard(props: { meta: any; ts?: string; tool_specs_by_name?: Rec
               window.setTimeout(() => set_copy_state("idle"), 900);
             }}
           >
-            {copy_state === "copied" ? "Copied" : copy_state === "failed" ? "Copy failed" : "Copy"}
+            {copy_state === "copied" ? "✓" : copy_state === "failed" ? "✕" : "⊡"}
           </button>
         </div>
       </summary>
@@ -2966,15 +3080,19 @@ function ToolBlockCard(props: { meta: any; ts?: string; tool_specs_by_name?: Rec
       <div className="tool_body">
         {error ? <div className="error">Error: {error}</div> : null}
         {pending ? <div className="muted">Awaiting approval / execution.</div> : null}
-        {call_id ? <div className="muted mono">call_id: {call_id}</div> : null}
+        {call_id ? <div className="muted mono tool_call_id">call_id: {call_id}</div> : null}
         <div className="field">
           <label>arguments</label>
-          <textarea className="mono" readOnly rows={6} value={safe_json(args)} />
+          <div className="tool_json_preview">
+            <MarkdownRenderer markdown={`\`\`\`json\n${safe_json(args)}\n\`\`\``} />
+          </div>
         </div>
         {!pending || output_preview ? (
           <div className="field">
             <label>output</label>
-            <textarea className="mono" readOnly rows={12} value={output_preview} />
+            <div className="tool_json_preview">
+              <MarkdownRenderer markdown={`\`\`\`json\n${output_preview}\n\`\`\``} />
+            </div>
           </div>
         ) : null}
       </div>
