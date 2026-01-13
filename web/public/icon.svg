@@ -19,21 +19,21 @@
   <!-- Abstract "A" symbol with gradient -->
   <g transform="translate(256, 256)">
     <!-- Main "A" shape -->
-    <path 
+  <path
       d="M-80 80 L0 -100 L80 80" 
       stroke="url(#accentGrad)" 
       stroke-width="32" 
       stroke-linecap="round" 
       stroke-linejoin="round"
-      fill="none"
+    fill="none"
     />
     <!-- Crossbar -->
     <path 
       d="M-50 20 L50 20" 
       stroke="url(#accentGrad)" 
-      stroke-width="24" 
-      stroke-linecap="round"
-    />
+    stroke-width="24"
+    stroke-linecap="round"
+  />
     <!-- Dot accent -->
     <circle cx="0" cy="-100" r="12" fill="#7dd3fc"/>
   </g>

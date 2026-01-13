@@ -1,7 +1,7 @@
 // Minimal service worker (PWA shell cache).
 // Note: PWA on iOS requires HTTPS (except localhost) and has platform-specific limitations.
 
-const CACHE_NAME = "abstractcode-web-v0";
+const CACHE_NAME = "abstractcode-web-v1";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -33,13 +33,18 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     (async () => {
       const cache = await caches.open(CACHE_NAME);
-      const cached = await cache.match(req);
-      if (cached) return cached;
-      const resp = await fetch(req);
-      if (req.method === "GET" && resp && resp.status === 200 && url.origin === self.location.origin) {
-        cache.put(req, resp.clone());
+      // Network-first to avoid stale bundles after deploy; cache as a fallback for offline.
+      try {
+        const resp = await fetch(req);
+        if (req.method === "GET" && resp && resp.status === 200 && url.origin === self.location.origin) {
+          cache.put(req, resp.clone());
+        }
+        return resp;
+      } catch {
+        const cached = await cache.match(req);
+        if (cached) return cached;
+        throw new Error("offline and not cached");
       }
-      return resp;
     })()
   );
 });

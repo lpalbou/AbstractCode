@@ -5,7 +5,7 @@ import { random_id } from "../lib/ids";
 import { extract_tool_calls_from_wait, extract_wait_from_record } from "../lib/runtime_extractors";
 import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types";
 import { MarkdownRenderer } from "./markdown_renderer";
-import { MultiSelect } from "./multi_select";
+import { ToolPicker } from "./tool_picker";
 import { copy_text } from "../lib/clipboard";
 import {
   create_new_repl_session,
@@ -445,14 +445,28 @@ function extract_context_messages_from_run_input(raw: any): { role: string; cont
   return out;
 }
 
-type WorkflowRef = { bundle_id: string; flow_id: string; kind: "bundle" | "visual_react" };
+type WorkflowRef = {
+  bundle_id: string; // base bundle id (no @version)
+  bundle_version?: string; // optional @version
+  flow_id: string;
+  kind: "bundle" | "visual_react";
+};
+
+function split_bundle_ref(bundle_id: string): { base: string; version: string } {
+  const raw = String(bundle_id || "").trim();
+  if (!raw) return { base: "", version: "" };
+  const i = raw.indexOf("@");
+  if (i <= 0) return { base: raw, version: "" };
+  return { base: raw.slice(0, i).trim(), version: raw.slice(i + 1).trim() };
+}
 
 function parse_workflow_ref(workflow_id: string): WorkflowRef | null {
   const wid = String(workflow_id || "").trim();
   if (!wid) return null;
   if (wid.includes(":")) {
-    const [bundle_id, flow_id] = wid.split(":", 2);
-    if (bundle_id?.trim() && flow_id?.trim()) return { bundle_id: bundle_id.trim(), flow_id: flow_id.trim(), kind: "bundle" };
+    const [bundle_id_raw, flow_id] = wid.split(":", 2);
+    const { base, version } = split_bundle_ref(bundle_id_raw);
+    if (base && flow_id?.trim()) return { bundle_id: base, bundle_version: version || undefined, flow_id: flow_id.trim(), kind: "bundle" };
   }
   const prefix = "visual_react_agent_";
   if (wid.startsWith(prefix)) {
@@ -665,9 +679,11 @@ function SessionsPage(props: {
 }): React.ReactElement {
   const [templates, set_templates] = useState<AgentTemplate[]>([]);
   const [runs, set_runs] = useState<RemoteRunSummary[]>([]);
+  const [page, set_page] = useState<number>(0);
   const [loading, set_loading] = useState(false);
   const [error, set_error] = useState("");
   const [attach_id, set_attach_id] = useState("");
+  const page_size = 50;
 
   const workflow_to_template = useMemo(() => {
     const m = new Map<string, AgentTemplate>();
@@ -690,6 +706,7 @@ function SessionsPage(props: {
       const [tpls, r] = await Promise.all([list_agent_templates(props.gateway), props.gateway.list_runs({ limit: 500 })]);
       const items = Array.isArray((r as any)?.items) ? (r as any).items : [];
       set_templates(tpls);
+      set_page(0);
 
       const allowed_bundles = new Set(tpls.map((t) => t.bundle_id));
       const filtered: RemoteRunSummary[] = items
@@ -800,6 +817,25 @@ function SessionsPage(props: {
         </div>
       ) : null}
 
+      {!error && runs.length ? (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
+          <span className="muted mono">
+            showing {Math.min(runs.length, page * page_size + 1)}-{Math.min(runs.length, (page + 1) * page_size)} of {runs.length}
+          </span>
+          <button className="btn mini" type="button" onClick={() => set_page((p) => Math.max(0, p - 1))} disabled={page <= 0}>
+            Prev
+          </button>
+          <button
+            className="btn mini"
+            type="button"
+            onClick={() => set_page((p) => ((p + 1) * page_size < runs.length ? p + 1 : p))}
+            disabled={(page + 1) * page_size >= runs.length}
+          >
+            Next
+          </button>
+        </div>
+      ) : null}
+
       {!loading && !error && !runs.length ? (
         <div className="sessions_empty">
           <span className="sessions_empty_icon">◇</span>
@@ -809,7 +845,7 @@ function SessionsPage(props: {
       ) : null}
 
       <div className="sessions_grid">
-        {runs.map((r) => {
+        {runs.slice(page * page_size, page * page_size + page_size).map((r) => {
           const wid = String(r.workflow_id || "").trim();
           const ref = parse_workflow_ref(wid);
           const key = ref ? `${ref.bundle_id}:${ref.flow_id}` : "";
@@ -1046,122 +1082,204 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
     return names;
   }, [tools]);
 
+  const tools_selected_set = useMemo(() => {
+    const out = new Set<string>();
+    for (const n of (s.tools || []).map((x) => String(x || "").trim()).filter(Boolean)) out.add(n);
+    return out;
+  }, [s.tools]);
+
+  const tools_all_selected = useMemo(() => {
+    if (!tool_options.length) return false;
+    for (const n of tool_options) if (!tools_selected_set.has(n)) return false;
+    return tools_selected_set.size === tool_options.length;
+  }, [tool_options, tools_selected_set]);
+
+  // UI state: user can open "Custom allowlist" even if everything is currently selected.
+  const [tools_editor_open, set_tools_editor_open] = useState<boolean>(false);
+
+  // If the selection becomes a strict subset (e.g. loaded from storage), auto-open the editor.
+  useEffect(() => {
+    if (!gateway_connected) return;
+    if (!tool_options.length) return;
+    if (!tools_all_selected) set_tools_editor_open(true);
+  }, [gateway_connected, tool_options.length, tools_all_selected]);
+
   return (
-    <div className="panel">
-      <h2>Gateway</h2>
-      <div className="field">
-        <label>Gateway URL</label>
-        <div className="row" style={{ marginTop: 0 }}>
-          <input
-            style={{ flex: 1, minWidth: 0 }}
-            value={s.gateway_url}
-            onChange={(e) => props.on_change({ ...s, gateway_url: e.target.value })}
-            placeholder="http://127.0.0.1:8080"
-          />
-          <button
-            className="btn"
-            type="button"
-            onClick={gateway_connected ? disconnect_gateway : () => void connect_gateway()}
-            disabled={gateway_connecting}
-          >
-            {gateway_connecting ? "Connecting…" : gateway_connected ? "Disconnect" : "Connect"}
-          </button>
+    <div className="settings_page">
+      <div className="settings_grid">
+        <div className="panel settings_card">
+          <div className="settings_card_header">
+            <h2>Gateway</h2>
+            <span className={`chip ${gateway_connected ? "ok" : gateway_connecting ? "info" : "muted"}`}>
+              {gateway_connecting ? "connecting" : gateway_connected ? "connected" : "disconnected"}
+            </span>
+          </div>
+          <div className="muted">Connect once to discover providers/models/tools. Settings are saved locally.</div>
+
+          <div className="field">
+            <label>Gateway URL</label>
+            <div className="row" style={{ marginTop: 0 }}>
+              <input
+                style={{ flex: 1, minWidth: 0 }}
+                value={s.gateway_url}
+                onChange={(e) => props.on_change({ ...s, gateway_url: e.target.value })}
+                placeholder="http://127.0.0.1:8080"
+              />
+              <button
+                className="btn"
+                type="button"
+                onClick={gateway_connected ? disconnect_gateway : () => void connect_gateway()}
+                disabled={gateway_connecting}
+              >
+                {gateway_connecting ? "Connecting…" : gateway_connected ? "Disconnect" : "Connect"}
+              </button>
+            </div>
+            {gateway_error ? <div className="error">{gateway_error}</div> : null}
+          </div>
+          <div className="field">
+            <label>Auth token</label>
+            <input
+              type="password"
+              value={s.auth_token}
+              onChange={(e) => props.on_change({ ...s, auth_token: e.target.value })}
+              placeholder="Bearer token (optional)"
+            />
+          </div>
+          <div className="field">
+            <label>Client id</label>
+            <input value={s.client_id} onChange={(e) => props.on_change({ ...s, client_id: e.target.value })} placeholder="abstractcode_web" />
+          </div>
         </div>
-        {gateway_error ? <div className="error">{gateway_error}</div> : null}
-      </div>
-      <div className="field">
-        <label>Auth token</label>
-        <input
-          type="password"
-          value={s.auth_token}
-          onChange={(e) => props.on_change({ ...s, auth_token: e.target.value })}
-          placeholder="Bearer token (optional)"
-        />
-      </div>
-      <div className="field">
-        <label>Client id</label>
-        <input value={s.client_id} onChange={(e) => props.on_change({ ...s, client_id: e.target.value })} placeholder="abstractcode_web" />
+
+        <div className="panel settings_card">
+          <div className="settings_card_header">
+            <h2>Model</h2>
+            <span className="muted mono">{gateway_connected ? "discovered" : "connect first"}</span>
+          </div>
+          <div className="muted">Choose provider/model and runtime parameters.</div>
+
+          <div className="field">
+            <label>Provider</label>
+            <select
+              className="mono"
+              value={s.provider}
+              onChange={(e) => props.on_change({ ...s, provider: e.target.value, model: "" })}
+              disabled={!gateway_connected || loading_providers || !provider_options.length}
+            >
+              {!gateway_connected ? <option value="">(click Connect)</option> : null}
+              {gateway_connected && !provider_options.length ? <option value="">(no providers)</option> : null}
+              {provider_options.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.display_name || p.name}
+                </option>
+              ))}
+            </select>
+            {loading_providers ? <div className="muted">Loading providers…</div> : null}
+            {error_providers ? <div className="error">{error_providers}</div> : null}
+          </div>
+          <div className="field">
+            <label>Model</label>
+            <select
+              className="mono"
+              value={s.model}
+              onChange={(e) => props.on_change({ ...s, model: e.target.value })}
+              disabled={!gateway_connected || !s.provider || loading_models || !models.length}
+            >
+              {!gateway_connected ? <option value="">(click Connect)</option> : null}
+              {!s.provider ? <option value="">(select provider first)</option> : null}
+              {s.provider && !models.length ? <option value="">(no models)</option> : null}
+              {models.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            {loading_models ? <div className="muted">Loading models…</div> : null}
+            {error_models ? <div className="error">{error_models}</div> : null}
+          </div>
+
+          <div className="settings_row2">
+            <div className="field">
+              <label>Max iterations</label>
+              <input
+                value={String(s.max_iterations)}
+                onChange={(e) => props.on_change({ ...s, max_iterations: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : 20 })}
+                placeholder="20"
+              />
+            </div>
+            <div className="field">
+              <label>Temperature</label>
+              <input
+                value={String(s.temperature)}
+                onChange={(e) => props.on_change({ ...s, temperature: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : 0.7 })}
+                placeholder="0.7"
+              />
+            </div>
+          </div>
+          <div className="field">
+            <label>Seed</label>
+            <input
+              value={String(s.seed)}
+              onChange={(e) => props.on_change({ ...s, seed: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : -1 })}
+              placeholder="-1"
+            />
+            <div className="muted">-1 = random/unset; ≥ 0 = deterministic (provider permitting)</div>
+          </div>
+        </div>
+
+        <div className="panel settings_card settings_card_full">
+          <div className="settings_card_header">
+            <h2>Tools</h2>
+            <span className="muted mono">
+              {gateway_connected ? (tools_all_selected ? "all tools" : `${tools_selected_set.size}/${tool_options.length}`) : "connect first"}
+            </span>
+          </div>
+          <div className="muted">Default is all tools. Switch to a custom allowlist only when needed.</div>
+
+          <div className="tool_mode_row">
+            <div className="segmented" role="group" aria-label="Tools mode">
+              <button
+                className={`seg_btn ${!tools_editor_open ? "active" : ""}`}
+                type="button"
+                disabled={!gateway_connected || loading_tools || !tool_options.length}
+                onClick={() => {
+                  set_tools_editor_open(false);
+                  props.on_change({ ...s, tools: tool_options, tools_initialized: true });
+                }}
+              >
+                All tools
+              </button>
+              <button
+                className={`seg_btn ${tools_editor_open ? "active" : ""}`}
+                type="button"
+                disabled={!gateway_connected || loading_tools || !tool_options.length}
+                onClick={() => {
+                  if (tools_editor_open) return;
+                  set_tools_editor_open(true);
+                  // Default custom allowlist to 0 tools selected.
+                  props.on_change({ ...s, tools: [], tools_initialized: true });
+                }}
+              >
+                Custom allowlist
+              </button>
+            </div>
+          </div>
+
+          {tools_editor_open ? (
+            <ToolPicker
+              tools={tools as any[]}
+              selected={s.tools}
+              disabled={!gateway_connected || loading_tools || !tool_options.length}
+              onChange={(next) => props.on_change({ ...s, tools: next, tools_initialized: true })}
+            />
+          ) : null}
+
+          {loading_tools ? <div className="muted" style={{ marginTop: 10 }}>Loading tools…</div> : null}
+          {error_tools ? <div className="error">{error_tools}</div> : null}
+        </div>
       </div>
 
-      <h2 style={{ marginTop: 18 }}>Model</h2>
-      <div className="field">
-        <label>Provider</label>
-        <select
-          className="mono"
-          value={s.provider}
-          onChange={(e) => props.on_change({ ...s, provider: e.target.value, model: "" })}
-          disabled={!gateway_connected || loading_providers || !provider_options.length}
-        >
-          {!gateway_connected ? <option value="">(click Connect)</option> : null}
-          {gateway_connected && !provider_options.length ? <option value="">(no providers)</option> : null}
-          {provider_options.map((p) => (
-            <option key={p.name} value={p.name}>
-              {p.display_name || p.name}
-            </option>
-          ))}
-        </select>
-        {loading_providers ? <div className="muted">Loading providers…</div> : null}
-        {error_providers ? <div className="error">{error_providers}</div> : null}
-      </div>
-      <div className="field">
-        <label>Model</label>
-        <select
-          className="mono"
-          value={s.model}
-          onChange={(e) => props.on_change({ ...s, model: e.target.value })}
-          disabled={!gateway_connected || !s.provider || loading_models || !models.length}
-        >
-          {!gateway_connected ? <option value="">(click Connect)</option> : null}
-          {!s.provider ? <option value="">(select provider first)</option> : null}
-          {s.provider && !models.length ? <option value="">(no models)</option> : null}
-          {models.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
-        {loading_models ? <div className="muted">Loading models…</div> : null}
-        {error_models ? <div className="error">{error_models}</div> : null}
-      </div>
-      <div className="field">
-        <label>Max iterations</label>
-        <input
-          value={String(s.max_iterations)}
-          onChange={(e) => props.on_change({ ...s, max_iterations: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : 20 })}
-          placeholder="20"
-        />
-      </div>
-      <div className="field">
-        <label>Temperature</label>
-        <input
-          value={String(s.temperature)}
-          onChange={(e) => props.on_change({ ...s, temperature: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : 0.7 })}
-          placeholder="0.7"
-        />
-      </div>
-      <div className="field">
-        <label>Seed</label>
-        <input
-          value={String(s.seed)}
-          onChange={(e) => props.on_change({ ...s, seed: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : -1 })}
-          placeholder="-1"
-        />
-        <div className="muted">-1 = random/unset; ≥ 0 = deterministic (provider permitting)</div>
-      </div>
-      <div className="field">
-        <label>Tools allowlist</label>
-        <MultiSelect
-          options={tool_options}
-          value={s.tools}
-          placeholder={!gateway_connected ? "(click Connect)" : "(none)"}
-          disabled={!gateway_connected || loading_tools || !tool_options.length}
-          onChange={(next) => props.on_change({ ...s, tools: next, tools_initialized: true })}
-        />
-        {loading_tools ? <div className="muted">Loading tools…</div> : null}
-        {error_tools ? <div className="error">{error_tools}</div> : null}
-      </div>
-
-      <div className="actions">
+      <div className="settings_footer">
         <button className="btn primary" onClick={() => props.on_done()}>
           Done
         </button>
@@ -1280,6 +1398,8 @@ function ConsolePage(props: {
   const [resuming, set_resuming] = useState(false);
 
   const input_ref = useRef<HTMLTextAreaElement | null>(null);
+  const chat_scroll_ref = useRef<HTMLDivElement | null>(null);
+  const chat_at_bottom_ref = useRef<boolean>(true);
   const [attached_files, set_attached_files] = useState<AttachedFile[]>([]);
   const pending_files = attached_files.some((f) => f.loading);
   const [file_matches, set_file_matches] = useState<string[]>([]);
@@ -1516,6 +1636,19 @@ function ConsolePage(props: {
       updated_at: now_iso(),
     }));
   }
+
+  // Smart autoscroll: follow new messages only when the user is already at the bottom.
+  useEffect(() => {
+    const el = chat_scroll_ref.current;
+    if (!el) return;
+    if (!chat_at_bottom_ref.current) return;
+    // rAF ensures DOM has committed the new message height before we scroll.
+    requestAnimationFrame(() => {
+      const el2 = chat_scroll_ref.current;
+      if (!el2) return;
+      el2.scrollTop = el2.scrollHeight;
+    });
+  }, [props.repl.messages.length]);
 
   function append_tool_blocks_from_effect(rec: StepRecord): void {
     const payload: any = (rec as any)?.effect?.payload;
@@ -2546,7 +2679,24 @@ function ConsolePage(props: {
   return (
     <div className="repl">
       <div className="panel repl_panel">
-        <div className="repl_meta">
+        <div
+          className="repl_meta repl_meta_clickable"
+          role="button"
+          tabIndex={0}
+          title="Back to parent run"
+          onClick={() => {
+            const root = String(root_run_ref.current || "").trim();
+            const cur = String(active_run_id || "").trim();
+            if (root && cur && root !== cur) set_active_run_id(root);
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            e.preventDefault();
+            const root = String(root_run_ref.current || "").trim();
+            const cur = String(active_run_id || "").trim();
+            if (root && cur && root !== cur) set_active_run_id(root);
+          }}
+        >
           <div className="repl_meta_info">
             <div className="repl_meta_item">
               <span className="repl_meta_label">Agent</span>
@@ -2558,24 +2708,53 @@ function ConsolePage(props: {
                 {props.settings.provider || "—"}/{props.settings.model || "—"}
               </span>
             </div>
+          </div>
+          <div className="repl_actions" onClick={(e) => e.stopPropagation()}>
             <div className="repl_context_badge" title="Estimated context window usage">
-              <span>◐</span>
-              <span>
+              <span className="muted">ctx</span>
+              <span className="mono">
                 {context_meter.used.toLocaleString()}
                 {context_meter.max_tokens ? `/${(context_meter.max_tokens / 1000).toFixed(0)}k` : ""}
               </span>
               {context_meter.max_tokens ? <span className="pct">{context_meter.pct.toFixed(0)}%</span> : null}
             </div>
-          </div>
-          <div className="repl_actions">
-            <button className="btn mini" onClick={() => set_details_open((v) => !v)} title={details_open ? "Hide run details" : "Show run details"}>
+            <button
+              className="btn mini"
+              onClick={() => set_details_open((v) => !v)}
+              title={details_open ? "Hide run details" : "Show run details"}
+            >
               {details_open ? "▼" : "▶"}
             </button>
-            <button className="btn mini" onClick={() => update_repl(() => reset_repl_state({ template: props.repl.template }, props.session_id))} title="Clear chat history">
+            <button
+              className="btn mini"
+              onClick={() => update_repl(() => reset_repl_state({ template: props.repl.template }, props.session_id))}
+              title="Clear chat history"
+            >
               ✕
             </button>
           </div>
         </div>
+
+        {details_open ? (
+          <div className="repl_details">
+            <div className="repl_details_header">
+              <span className="mono muted">details</span>
+              <button className="btn mini" type="button" onClick={() => set_details_open(false)} title="Close details">
+                ✕
+              </button>
+            </div>
+            <div className="field">
+              <label>active run id</label>
+              <input className="mono" readOnly value={active_run_id || ""} />
+            </div>
+            <div className="field">
+              <label>ledger (latest)</label>
+              <div className="repl_details_json">
+                <MarkdownRenderer markdown={json_fenced(records.map((r) => r.record))} />
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {template_error ? (
           <div className={`warn ${template_error.includes("switched to") ? "info" : ""}`} onClick={() => set_template_error("")} style={{ cursor: "pointer" }} title="Click to dismiss">
@@ -2591,7 +2770,16 @@ function ConsolePage(props: {
 
         {error ? <div className="error">{error}</div> : null}
 
-        <div className="repl_chat">
+        <div
+          className="repl_chat"
+          ref={chat_scroll_ref}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            // Treat "near bottom" as at-bottom so we keep following naturally.
+            const threshold_px = 40;
+            chat_at_bottom_ref.current = el.scrollTop + el.clientHeight >= el.scrollHeight - threshold_px;
+          }}
+        >
           {!props.repl.messages.length ? <div className="muted">Start typing to begin.</div> : null}
           {props.repl.messages.map((m, idx) => (
             <ChatMessageCard key={`${m.ts}:${idx}`} m={m} tool_specs_by_name={tool_specs_by_name} />
@@ -2602,38 +2790,12 @@ function ConsolePage(props: {
           <div className="repl_wait">
             {wait_state ? (
               <>
-                <div className="muted mono">
-                  waiting: {wait_reason || "unknown"}
-                  {wait_event_name ? `:${wait_event_name}` : ""} • {wait_key}
-                </div>
-
-                {wait_reason === "subworkflow" ? (
-                  <div className="wait_status pulse" aria-live="polite">
-                    <div className="wait_status_text">
-                      <span className="muted">subworkflow</span>
-                      <span className="mono">{subworkflow_label || "subflow"}</span>
-                      <span className="muted mono" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {String((wait_state as any)?.details?.sub_run_id || "").trim() ||
-                          (wait_key.startsWith("subworkflow:") ? wait_key.split(":", 2)[1] : "—")}
-                      </span>
-                    </div>
-                    <button
-                      className="btn mini"
-                      type="button"
-                      onClick={() => {
-                        const sub =
-                          String((wait_state as any)?.details?.sub_run_id || "").trim() ||
-                          (wait_key.startsWith("subworkflow:") ? wait_key.split(":", 2)[1] : "");
-                        if (sub) set_active_run_id(sub);
-                      }}
-                    >
-                      Open
-                    </button>
-                  </div>
-                ) : null}
-
                 {tool_calls_for_wait.length ? (
                   <>
+                    <div className="wait_line shimmer" aria-live="polite">
+                      <span className="mono">Waiting</span>
+                      <span className="muted">for approval to run tools…</span>
+                    </div>
                     <div className="muted">Approve to run these tools.</div>
                     <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
                       {tool_calls_for_wait.map((tc, idx) => {
@@ -2667,9 +2829,30 @@ function ConsolePage(props: {
                 ) : can_user_answer_wait ? (
                   <AskForm wait={wait_state} disabled={resuming} on_submit={(val) => submit_answer(val)} />
                 ) : (
-                  <div className="warn">
-                    This run is waiting ({wait_reason || "unknown"}
-                    {wait_event_name ? `:${wait_event_name}` : ""}). This web host can only answer user waits and `abstract.ask`.
+                  <div className="wait_line shimmer" aria-live="polite" title={wait_key ? `wait_key: ${wait_key}` : undefined}>
+                    <span className="mono">Waiting</span>
+                    <span className="muted">
+                      for{" "}
+                      {wait_reason === "subworkflow"
+                        ? `subworkflow ${subworkflow_label || "subflow"} to complete`
+                        : `${wait_reason || "unknown"}${wait_event_name ? `:${wait_event_name}` : ""}`}
+                      …
+                    </span>
+                    {wait_reason === "subworkflow" ? (
+                      <button
+                        className="btn mini"
+                        type="button"
+                        onClick={() => {
+                          const sub =
+                            String((wait_state as any)?.details?.sub_run_id || "").trim() ||
+                            (wait_key.startsWith("subworkflow:") ? wait_key.split(":", 2)[1] : "");
+                          if (sub) set_active_run_id(sub);
+                        }}
+                        title="Open the child/subworkflow run"
+                      >
+                        Open
+                      </button>
+                    ) : null}
                   </div>
                 )}
               </>
@@ -2884,19 +3067,6 @@ function ConsolePage(props: {
           </div>
         </div>
 
-        {details_open ? (
-          <div style={{ marginTop: 12 }}>
-            <h2>Details</h2>
-            <div className="field">
-              <label>active run id</label>
-              <input className="mono" readOnly value={active_run_id || ""} />
-            </div>
-            <div className="field">
-              <label>ledger (latest)</label>
-              <textarea className="mono" readOnly value={safe_json(records.map((r) => r.record))} rows={12} />
-            </div>
-          </div>
-        ) : null}
       </div>
 
     </div>
@@ -2957,13 +3127,9 @@ function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<st
     <div className={`chat_item ${cls}`}>
       <div className="chat_header">
         <div className="chat_avatar" aria-hidden="true">{role_info.icon}</div>
-        <div className="chat_meta">
-          <span className="chat_role">{role_info.label}</span>
-          <span className="chat_time">
-            {new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-            {m.run_id ? ` • ${m.run_id.slice(0, 6)}` : ""}
-          </span>
-        </div>
+        <span className="chat_role">{role_info.label}</span>
+        <span className="chat_header_spacer" />
+        <span className="chat_time">{new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
         <button
           className={`btn mini chat_copy ${copy_state}`}
           onClick={async () => {
