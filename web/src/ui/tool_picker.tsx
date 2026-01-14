@@ -93,7 +93,7 @@ export function ToolPicker(props: {
                 const spec = by_name.get(name);
                 const desc = String((spec as any)?.description || "").trim();
                 return (
-                  <label key={name} className={`tool_row ${checked ? "checked" : ""}`}>
+                  <label key={name} className={`tool_row ${checked ? "checked" : ""}`} data-toolset={g.key}>
                     <input
                       type="checkbox"
                       checked={checked}

@@ -359,8 +359,19 @@ body::before {
   margin-top: 12px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   flex-wrap: wrap;
+}
+
+.tools_counter {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
+  white-space: nowrap;
 }
 
 /* Tool picker */
@@ -422,7 +433,7 @@ body::before {
 .tool_row {
   display: grid;
   grid-template-columns: 18px minmax(140px, 260px) 1fr;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
   padding: 8px 10px;
   border-radius: var(--radius-md);
@@ -441,16 +452,37 @@ body::before {
 }
 
 .tool_name {
+  font-size: 13.5px;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* Category-based colors for tool names */
+.tool_row[data-toolset="files"] .tool_name {
+  color: #27ae60;
+}
+
+.tool_row[data-toolset="web"] .tool_name {
+  color: #3498db;
+}
+
+.tool_row[data-toolset="system"] .tool_name {
+  color: #f39c12;
+}
+
+.tool_row[data-toolset="comms"] .tool_name {
+  color: #9b59b6;
+}
+
 .tool_desc {
-  font-size: 12px;
+  font-size: 11.5px;
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding-left: 0;
 }
 
 h2 {
@@ -459,7 +491,7 @@ h2 {
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -485,7 +517,7 @@ h2:not(:first-child) {
 }
 
 .muted {
-  color: var(--text-secondary);
+  color: var(--text-muted);
   font-size: 13px;
 }
 
@@ -564,9 +596,24 @@ h2:not(:first-child) {
 label {
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.field_label_with_hint {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.field_hint {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 input,
@@ -749,10 +796,10 @@ select {
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  padding: 16px;
+  padding: 14px 16px;
   cursor: pointer;
   transition: all var(--transition-fast);
-  min-height: 100px;
+  gap: 8px;
 }
 
 .session_card:hover {
@@ -767,7 +814,6 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 8px;
 }
 
 .session_card_agent {
@@ -781,11 +827,11 @@ select {
 
 .session_card_status {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  padding: 4px 8px;
+  padding: 3px 7px;
   border-radius: var(--radius-full);
   background: var(--bg-deep);
   color: var(--text-muted);
@@ -811,22 +857,18 @@ select {
   color: var(--accent);
 }
 
-.session_card_time {
-  font-size: 13px;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-
-.session_card_meta {
+.session_card_stats {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   font-size: 11px;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  margin-top: auto;
-  padding-top: 8px;
-  border-top: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+
+.session_card_sep {
+  opacity: 0.4;
 }
 
 @media (max-width: 600px) {

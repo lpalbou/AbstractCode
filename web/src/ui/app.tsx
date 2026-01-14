@@ -870,6 +870,12 @@ function SessionsPage(props: {
           };
           const status_info = status_config[status] || { label: status || "Unknown", cls: "muted" };
           
+          // Format dates
+          const created = r.created_at ? new Date(r.created_at) : null;
+          const updated = r.updated_at ? new Date(r.updated_at) : null;
+          const created_str = created ? created.toLocaleDateString(undefined, { month: "short", day: "numeric", year: created.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined }) : "—";
+          const updated_str = updated ? format_relative_time(updated) : "—";
+          
           return (
             <button
               key={sid || r.run_id}
@@ -881,12 +887,13 @@ function SessionsPage(props: {
                 <span className="session_card_agent">{agent_name}</span>
                 <span className={`session_card_status ${status_info.cls}`}>{status_info.label}</span>
               </div>
-              <div className="session_card_time">{time_ago}</div>
-              {r.ledger_len != null && r.ledger_len > 0 ? (
-                <div className="session_card_meta">
-                  <span title="Steps">{r.ledger_len} steps</span>
-                </div>
-              ) : null}
+              <div className="session_card_stats">
+                <span title="Number of ledger steps">{r.ledger_len ?? 0} steps</span>
+                <span className="session_card_sep">•</span>
+                <span title="Created date">created {created_str}</span>
+                <span className="session_card_sep">•</span>
+                <span title="Last activity">updated {updated_str}</span>
+              </div>
             </button>
           );
         })}
@@ -1217,22 +1224,21 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
             </div>
           </div>
           <div className="field">
-            <label>Seed</label>
+            <div className="field_label_with_hint">
+              <label>Seed</label>
+              <span className="field_hint">-1 = random/unset; ≥ 0 = deterministic (provider permitting)</span>
+            </div>
             <input
               value={String(s.seed)}
               onChange={(e) => props.on_change({ ...s, seed: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : -1 })}
               placeholder="-1"
             />
-            <div className="muted">-1 = random/unset; ≥ 0 = deterministic (provider permitting)</div>
           </div>
         </div>
 
         <div className="panel settings_card settings_card_full">
           <div className="settings_card_header">
             <h2>Tools</h2>
-            <span className="muted mono">
-              {gateway_connected ? (tools_all_selected ? "all tools" : `${tools_selected_set.size}/${tool_options.length}`) : "connect first"}
-            </span>
           </div>
           <div className="muted">Default is all tools. Switch to a custom allowlist only when needed.</div>
 
@@ -1263,6 +1269,15 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
                 Custom allowlist
               </button>
             </div>
+            {gateway_connected && tool_options.length > 0 ? (
+              <span className="tools_counter">
+                {tools_all_selected ? (
+                  <>✓ All {tool_options.length} tools</>
+                ) : (
+                  <>✓ {tools_selected_set.size} of {tool_options.length} selected</>
+                )}
+              </span>
+            ) : null}
           </div>
 
           {tools_editor_open ? (
@@ -1277,12 +1292,6 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
           {loading_tools ? <div className="muted" style={{ marginTop: 10 }}>Loading tools…</div> : null}
           {error_tools ? <div className="error">{error_tools}</div> : null}
         </div>
-      </div>
-
-      <div className="settings_footer">
-        <button className="btn primary" onClick={() => props.on_done()}>
-          Done
-        </button>
       </div>
     </div>
   );
