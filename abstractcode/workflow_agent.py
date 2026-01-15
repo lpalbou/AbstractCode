@@ -253,6 +253,7 @@ def _compile_visual_flow_tree(
         from abstractagent.logic.builtins import (
             ASK_USER_TOOL,
             COMPACT_MEMORY_TOOL,
+            DELEGATE_AGENT_TOOL,
             INSPECT_VARS_TOOL,
             RECALL_MEMORY_TOOL,
             REMEMBER_NOTE_TOOL,
@@ -276,6 +277,7 @@ def _compile_visual_flow_tree(
             REMEMBER_TOOL,
             REMEMBER_NOTE_TOOL,
             COMPACT_MEMORY_TOOL,
+            DELEGATE_AGENT_TOOL,
             *_tool_definitions_from_callables(tools),
         ]
 
