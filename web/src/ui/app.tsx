@@ -6,16 +6,23 @@ import { extract_tool_calls_from_wait, extract_wait_from_record } from "../lib/r
 import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types";
 import { MarkdownRenderer } from "./markdown_renderer";
 import { ToolPicker } from "./tool_picker";
+import { Icon, type IconName } from "./icons";
 import { copy_text } from "../lib/clipboard";
 import {
+  clear_active_run_id,
+  clear_run_cursor,
   create_new_repl_session,
+  load_active_run_id,
   load_current_repl_session,
+  load_run_cursor,
   load_settings,
   ReplMessage,
   ReplState,
   ReplTemplate,
   reset_repl_state,
+  save_active_run_id,
   save_current_repl_session,
+  save_run_cursor,
   save_settings,
   Settings,
   switch_current_repl_session,
@@ -632,33 +639,61 @@ function Header(props: { route: Route; on_nav: (name: Route["name"]) => void }):
   const r = props.route;
   const title = r.name === "settings" ? "Settings" : r.name === "new" ? "New Chat" : r.name === "sessions" ? "Sessions" : "AbstractCode";
   
-  // Navigation items with icons (using simple symbols for cross-platform compatibility)
-  const nav_items: { name: Route["name"]; label: string; icon: string }[] = [
-    { name: "console", label: "Chat", icon: "◉" },
-    { name: "new", label: "New", icon: "+" },
-    { name: "sessions", label: "History", icon: "≡" },
-    { name: "settings", label: "Settings", icon: "⚙" },
+  const nav_items: { name: Route["name"]; label: string; icon: IconName }[] = [
+    { name: "console", label: "Chat", icon: "chat" },
+    { name: "new", label: "New", icon: "plus" },
+    { name: "sessions", label: "History", icon: "history" },
+    { name: "settings", label: "Settings", icon: "settings" },
   ];
   
   return (
     <header className="header">
       <div className="title">{title}</div>
       <nav className="nav" role="navigation" aria-label="Main navigation">
-        {nav_items.map((item) => (
-          <button
-            key={item.name}
-            className="btn"
-            onClick={() => props.on_nav(item.name)}
-            disabled={r.name === item.name}
-            aria-current={r.name === item.name ? "page" : undefined}
-            title={item.label}
-          >
-            <span className="nav-icon" aria-hidden="true">{item.icon}</span>
-            <span className="nav-label">{item.label}</span>
-          </button>
-        ))}
+        {nav_items.map((item) => {
+          const active = r.name === item.name;
+          return (
+            <button
+              key={item.name}
+              className="btn"
+              onClick={() => {
+                if (active) return;
+                props.on_nav(item.name);
+              }}
+              aria-current={active ? "page" : undefined}
+              title={item.label}
+              type="button"
+            >
+              <Icon name={item.icon} className="nav-icon" />
+              <span className="nav-label">{item.label}</span>
+            </button>
+          );
+        })}
       </nav>
     </header>
+  );
+}
+
+function Notice(props: {
+  variant: "warn" | "error" | "info";
+  children: React.ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
+  title?: string;
+  onClick?: React.MouseEventHandler<HTMLDivElement>;
+}): React.ReactElement {
+  const variant = props.variant;
+  const cls_base = variant === "error" ? "error" : "warn";
+  const cls = `${cls_base}${variant === "info" ? " info" : ""}${props.className ? ` ${props.className}` : ""}`;
+  const icon: IconName = variant === "error" ? "error" : variant === "warn" ? "warning" : "info";
+
+  return (
+    <div className={cls} style={props.style} title={props.title} onClick={props.onClick} role="status">
+      <span className="notice_icon" aria-hidden="true">
+        <Icon name={icon} size={14} />
+      </span>
+      <div className="notice_content">{props.children}</div>
+    </div>
   );
 }
 
@@ -812,9 +847,9 @@ function SessionsPage(props: {
       </div>
 
       {error ? (
-        <div className="error" style={{ marginTop: 12 }}>
+        <Notice variant="error" style={{ marginTop: 12 }}>
           {error}
-        </div>
+        </Notice>
       ) : null}
 
       {!error && runs.length ? (
@@ -1141,7 +1176,11 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
                 {gateway_connecting ? "Connecting…" : gateway_connected ? "Disconnect" : "Connect"}
               </button>
             </div>
-            {gateway_error ? <div className="error">{gateway_error}</div> : null}
+            {gateway_error ? (
+              <Notice variant="error" className="inline">
+                {gateway_error}
+              </Notice>
+            ) : null}
           </div>
           <div className="field">
             <label>Auth token</label>
@@ -1182,7 +1221,11 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
               ))}
             </select>
             {loading_providers ? <div className="muted">Loading providers…</div> : null}
-            {error_providers ? <div className="error">{error_providers}</div> : null}
+            {error_providers ? (
+              <Notice variant="error" className="inline">
+                {error_providers}
+              </Notice>
+            ) : null}
           </div>
           <div className="field">
             <label>Model</label>
@@ -1202,7 +1245,11 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
               ))}
             </select>
             {loading_models ? <div className="muted">Loading models…</div> : null}
-            {error_models ? <div className="error">{error_models}</div> : null}
+            {error_models ? (
+              <Notice variant="error" className="inline">
+                {error_models}
+              </Notice>
+            ) : null}
           </div>
 
           <div className="settings_row2">
@@ -1290,7 +1337,11 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
           ) : null}
 
           {loading_tools ? <div className="muted" style={{ marginTop: 10 }}>Loading tools…</div> : null}
-          {error_tools ? <div className="error">{error_tools}</div> : null}
+          {error_tools ? (
+            <Notice variant="error">
+              {error_tools}
+            </Notice>
+          ) : null}
         </div>
       </div>
     </div>
@@ -1344,7 +1395,11 @@ function NewChatPage(props: { gateway: GatewayClient; repl: ReplState; on_start:
       <h2>Agents</h2>
       <div className="muted">Pick an agent workflow (must implement `abstractcode.agent.v1`).</div>
       {loading ? <div className="muted" style={{ marginTop: 10 }}>Loading…</div> : null}
-      {error ? <div className="error">{error}</div> : null}
+      {error ? (
+        <Notice variant="error">
+          {error}
+        </Notice>
+      ) : null}
 
       <div className="grid">
         {templates.slice(0, 200).map((t) => {
@@ -1409,6 +1464,7 @@ function ConsolePage(props: {
   const input_ref = useRef<HTMLTextAreaElement | null>(null);
   const chat_scroll_ref = useRef<HTMLDivElement | null>(null);
   const chat_at_bottom_ref = useRef<boolean>(true);
+  const [chat_at_bottom, set_chat_at_bottom] = useState<boolean>(true);
   const [attached_files, set_attached_files] = useState<AttachedFile[]>([]);
   const pending_files = attached_files.some((f) => f.loading);
   const [file_matches, set_file_matches] = useState<string[]>([]);
@@ -1421,6 +1477,8 @@ function ConsolePage(props: {
   const seen_keys_ref = useRef<Set<string>>(new Set());
   const seen_wait_keys_ref = useRef<Set<string>>(new Set());
   const seen_tool_call_ids_ref = useRef<Set<string>>(new Set());
+  const cursor_flush_timer_ref = useRef<number | null>(null);
+  const cursor_flush_pending_ref = useRef<Record<string, number>>({});
   const [follow_run_id, set_follow_run_id] = useState<string>("");
   const [subworkflow_label, set_subworkflow_label] = useState<string>("");
 
@@ -1432,7 +1490,7 @@ function ConsolePage(props: {
   const is_user_wait = wait_reason === "user";
   const is_ask_event_wait = wait_reason === "event" && wait_event_name === "abstract.ask";
   const can_user_answer_wait = is_user_wait || is_ask_event_wait;
-  const is_working = Boolean(active_run_id) && !wait_state && !resuming;
+  const is_working = Boolean(active_run_id) && !wait_state && !resuming && Boolean(status_text.trim());
 
   const sub_run_id_for_wait = useMemo(() => {
     if (wait_reason !== "subworkflow") return "";
@@ -1614,6 +1672,42 @@ function ConsolePage(props: {
     update_repl((prev) => ({ ...prev, template: { bundle_id: def.bundle_id, flow_id: def.flow_id, name: def.name }, updated_at: now_iso() }));
   }, [templates, props.repl.template, active_run_id, props.repl.messages]);
 
+  // Crash/reload recovery: re-attach to an in-flight run for this session.
+  useEffect(() => {
+    const sid = String(props.session_id || "").trim();
+    if (!sid) return;
+    if (active_run_id) return;
+
+    // 1) Prefer the persisted active run id (written when the user started a run).
+    const stored = load_active_run_id(sid);
+    if (stored) {
+      const already_has_answer = (props.repl.messages || []).some(
+        (m) => m.role === "assistant" && String(m.run_id || "").trim() === stored && String(m.content || "").trim()
+      );
+      if (already_has_answer) {
+        clear_active_run_id(sid);
+        clear_run_cursor(stored);
+        return;
+      }
+      set_active_run_id(stored);
+      return;
+    }
+
+    // 2) Fallback: last user message may already be tagged with a run_id.
+    const msgs = props.repl.messages || [];
+    const last = msgs.length ? msgs[msgs.length - 1] : null;
+    const msg_rid = last && last.role === "user" ? String((last as any).run_id || "").trim() : "";
+    if (!msg_rid) return;
+
+    const already_has_answer = msgs.some(
+      (m) => m.role === "assistant" && String(m.run_id || "").trim() === msg_rid && String(m.content || "").trim()
+    );
+    if (already_has_answer) return;
+
+    save_active_run_id(sid, msg_rid);
+    set_active_run_id(msg_rid);
+  }, [active_run_id, props.session_id, props.repl.messages]);
+
   function clear_status(): void {
     set_status_text("");
     if (status_timer_ref.current !== null) {
@@ -1646,6 +1740,34 @@ function ConsolePage(props: {
     }));
   }
 
+  function schedule_cursor_flush(run_id: string, cursor: number): void {
+    const rid = String(run_id || "").trim();
+    const cur = Number(cursor);
+    if (!rid) return;
+    if (!Number.isFinite(cur)) return;
+
+    cursor_flush_pending_ref.current[rid] = Math.max(Number(cursor_flush_pending_ref.current[rid] || 0), Math.max(0, Math.trunc(cur)));
+    if (cursor_flush_timer_ref.current !== null) return;
+    cursor_flush_timer_ref.current = window.setTimeout(() => {
+      const pending = cursor_flush_pending_ref.current;
+      cursor_flush_pending_ref.current = {};
+      cursor_flush_timer_ref.current = null;
+      for (const [k, v] of Object.entries(pending)) {
+        save_run_cursor(k, v);
+      }
+    }, 250);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (cursor_flush_timer_ref.current !== null) {
+        window.clearTimeout(cursor_flush_timer_ref.current);
+        cursor_flush_timer_ref.current = null;
+      }
+      cursor_flush_pending_ref.current = {};
+    };
+  }, []);
+
   // Smart autoscroll: follow new messages only when the user is already at the bottom.
   useEffect(() => {
     const el = chat_scroll_ref.current;
@@ -1656,8 +1778,26 @@ function ConsolePage(props: {
       const el2 = chat_scroll_ref.current;
       if (!el2) return;
       el2.scrollTop = el2.scrollHeight;
+      set_chat_at_bottom(true);
     });
   }, [props.repl.messages.length]);
+
+  function autosize_composer(el: HTMLTextAreaElement | null): void {
+    if (!el) return;
+    try {
+      const style = window.getComputedStyle(el);
+      const max_h = Number.parseFloat(style.maxHeight || "");
+      const cap = Number.isFinite(max_h) ? max_h : 200;
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
+    } catch {
+      // Best-effort.
+    }
+  }
+
+  useEffect(() => {
+    autosize_composer(input_ref.current);
+  }, [composer]);
 
   function append_tool_blocks_from_effect(rec: StepRecord): void {
     const payload: any = (rec as any)?.effect?.payload;
@@ -1863,7 +2003,8 @@ function ConsolePage(props: {
     set_follow_run_id("");
     set_subworkflow_label("");
 
-    append_message({ role: "user", content: t, ts: now_iso() });
+    const user_ts = now_iso();
+    append_message({ role: "user", content: t, ts: user_ts });
 
     const attach_errors = attached_files.filter((f) => !f.loading && String(f.error || "").trim());
     if (attach_errors.length) {
@@ -1876,13 +2017,24 @@ function ConsolePage(props: {
       });
     }
 
-    set_status("working…", -1);
     const input_data = build_input_data(t);
     try {
       const run_id = await props.gateway.start_run(props.repl.template.flow_id, input_data, {
         bundle_id: props.repl.template.bundle_id,
         session_id: String(props.session_id || "").trim() || undefined,
       });
+      save_active_run_id(props.session_id, run_id);
+      save_run_cursor(run_id, 0);
+      update_repl((prev) => ({
+        ...prev,
+        messages: (prev.messages || []).map((m) => {
+          if (m.role !== "user") return m;
+          if (m.ts !== user_ts) return m;
+          if (String(m.content || "").trim() !== t) return m;
+          return { ...m, run_id };
+        }),
+        updated_at: now_iso(),
+      }));
       set_active_run_id(run_id);
       set_attached_files([]);
     } catch (e: any) {
@@ -1940,6 +2092,8 @@ function ConsolePage(props: {
       run_id,
       content: digest_lines.join("\n"),
     });
+    if (load_active_run_id(props.session_id) === run_id) clear_active_run_id(props.session_id);
+    clear_run_cursor(run_id);
     clear_status();
     stop_stream();
     set_active_run_id(null);
@@ -1979,6 +2133,8 @@ function ConsolePage(props: {
       run_id,
       content: digest_lines.join("\n"),
     });
+    if (load_active_run_id(props.session_id) === run_id) clear_active_run_id(props.session_id);
+    clear_run_cursor(run_id);
     clear_status();
     stop_stream();
     set_active_run_id(null);
@@ -1992,6 +2148,7 @@ function ConsolePage(props: {
     if (seen_keys_ref.current.has(key)) return;
     seen_keys_ref.current.add(key);
     cursor_by_run_ref.current[src] = Math.max(Number(cursor_by_run_ref.current[src] || 0), Number(ev.cursor || 0));
+    schedule_cursor_flush(src, cursor_by_run_ref.current[src]);
 
     records_ref.current = [...records_ref.current, ev].slice(-4000);
     set_records(records_ref.current);
@@ -2138,6 +2295,7 @@ function ConsolePage(props: {
     }
     const next = typeof page.next_after === "number" ? page.next_after : after + items.length;
     cursor_by_run_ref.current[run_id] = Math.max(Number(cursor_by_run_ref.current[run_id] || 0), Number(next || 0));
+    schedule_cursor_flush(run_id, cursor_by_run_ref.current[run_id]);
     return next;
   };
 
@@ -2152,10 +2310,18 @@ function ConsolePage(props: {
     set_records([]);
     root_run_ref.current = rid;
     set_root_last_record(null);
-    cursor_by_run_ref.current = { [rid]: 0 };
+    cursor_by_run_ref.current = { [rid]: load_run_cursor(rid) ?? 0 };
     seen_keys_ref.current = new Set();
-    seen_wait_keys_ref.current = new Set();
-    seen_tool_call_ids_ref.current = new Set();
+    seen_wait_keys_ref.current = new Set(
+      (props.repl.messages || [])
+        .map((m) => String((m as any)?.meta?.wait_key || "").trim())
+        .filter(Boolean)
+    );
+    seen_tool_call_ids_ref.current = new Set(
+      (props.repl.messages || [])
+        .map((m) => String((m as any)?.meta?._kind === "tool" ? (m as any)?.meta?.tool?.call_id || "" : "").trim())
+        .filter(Boolean)
+    );
     set_follow_run_id("");
     set_subworkflow_label("");
 
@@ -2266,8 +2432,8 @@ function ConsolePage(props: {
             // ignore
           }
         }
-        set_status("working…", -1);
-        await append_page(rid, 0);
+        const resume_after = Math.max(0, Number(cursor_by_run_ref.current[rid] || 0));
+        await append_page(rid, Math.max(0, resume_after - 1));
         if (stopped) return;
         while (!stopped) {
           try {
@@ -2566,6 +2732,9 @@ function ConsolePage(props: {
     }
 
     if (cmd === "clear") {
+      const rid = String(active_run_id || "").trim();
+      if (rid) clear_run_cursor(rid);
+      clear_active_run_id(props.session_id);
       clear_status();
       records_ref.current = [];
       set_records([]);
@@ -2731,15 +2900,17 @@ function ConsolePage(props: {
               className="btn mini"
               onClick={() => set_details_open((v) => !v)}
               title={details_open ? "Hide run details" : "Show run details"}
+              type="button"
             >
-              {details_open ? "▼" : "▶"}
+              {details_open ? <Icon name="chevronDown" size={14} /> : <Icon name="chevronRight" size={14} />}
             </button>
             <button
               className="btn mini"
               onClick={() => update_repl(() => reset_repl_state({ template: props.repl.template }, props.session_id))}
               title="Clear chat history"
+              type="button"
             >
-              ✕
+              <Icon name="trash" size={14} />
             </button>
           </div>
         </div>
@@ -2749,7 +2920,7 @@ function ConsolePage(props: {
             <div className="repl_details_header">
               <span className="mono muted">details</span>
               <button className="btn mini" type="button" onClick={() => set_details_open(false)} title="Close details">
-                ✕
+                <Icon name="x" size={14} />
               </button>
             </div>
             <div className="field">
@@ -2766,33 +2937,60 @@ function ConsolePage(props: {
         ) : null}
 
         {template_error ? (
-          <div className={`warn ${template_error.includes("switched to") ? "info" : ""}`} onClick={() => set_template_error("")} style={{ cursor: "pointer" }} title="Click to dismiss">
+          <Notice
+            variant={template_error.includes("switched to") ? "info" : "warn"}
+            onClick={() => set_template_error("")}
+            style={{ cursor: "pointer" }}
+            title="Click to dismiss"
+          >
             {template_error}
-          </div>
+          </Notice>
         ) : null}
         {!props.settings.provider.trim() || !props.settings.model.trim() ? (
-          <div className="warn">Set provider + model in Settings. (These agent workflows require them.)</div>
+          <Notice variant="warn">Set provider + model in Settings. (These agent workflows require them.)</Notice>
         ) : null}
         {!props.settings.gateway_url.trim() ? (
-          <div className="warn">Set a Gateway URL in Settings (or host this app on the same origin as the gateway).</div>
+          <Notice variant="warn">Set a Gateway URL in Settings (or host this app on the same origin as the gateway).</Notice>
         ) : null}
 
-        {error ? <div className="error">{error}</div> : null}
+        {error ? <Notice variant="error">{error}</Notice> : null}
 
-        <div
-          className="repl_chat"
-          ref={chat_scroll_ref}
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            // Treat "near bottom" as at-bottom so we keep following naturally.
-            const threshold_px = 40;
-            chat_at_bottom_ref.current = el.scrollTop + el.clientHeight >= el.scrollHeight - threshold_px;
-          }}
-        >
-          {!props.repl.messages.length ? <div className="muted">Start typing to begin.</div> : null}
-          {props.repl.messages.map((m, idx) => (
-            <ChatMessageCard key={`${m.ts}:${idx}`} m={m} tool_specs_by_name={tool_specs_by_name} />
-          ))}
+        <div className="repl_chat_wrap">
+          <div
+            className="repl_chat"
+            ref={chat_scroll_ref}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              // Treat "near bottom" as at-bottom so we keep following naturally.
+              const threshold_px = 40;
+              const at_bottom = el.scrollTop + el.clientHeight >= el.scrollHeight - threshold_px;
+              chat_at_bottom_ref.current = at_bottom;
+              set_chat_at_bottom(at_bottom);
+            }}
+          >
+            {!props.repl.messages.length ? <div className="muted">Start typing to begin.</div> : null}
+            {props.repl.messages.map((m, idx) => (
+              <ChatMessageCard key={`${m.ts}:${idx}`} m={m} tool_specs_by_name={tool_specs_by_name} />
+            ))}
+          </div>
+          {!chat_at_bottom && props.repl.messages.length ? (
+            <button
+              className="btn scroll_to_bottom"
+              type="button"
+              aria-label="Scroll to latest"
+              title="Scroll to latest"
+              onClick={() => {
+                const el = chat_scroll_ref.current;
+                if (!el) return;
+                el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+                chat_at_bottom_ref.current = true;
+                set_chat_at_bottom(true);
+              }}
+            >
+              <Icon name="chevronDown" size={16} />
+              Latest
+            </button>
+          ) : null}
         </div>
 
         {active_run_id ? (
@@ -2865,17 +3063,17 @@ function ConsolePage(props: {
                   </div>
                 )}
               </>
-            ) : (
+            ) : is_working ? (
               <div className="run_working" aria-live="polite">
                 <span className="run_spinner" aria-label="working" />
                 <div style={{ minWidth: 0 }}>
                   <div className="run_working_title">Working…</div>
                   <div className="muted mono" style={{ marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {status_text || "working…"}
+                    {status_text}
                   </div>
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
         ) : null}
 
@@ -2884,8 +3082,12 @@ function ConsolePage(props: {
             {attached_files.map((f) => {
               const p = String(f.path || "").trim();
               const cls = f.error ? "file_chip error" : f.loading ? "file_chip loading" : "file_chip";
+              const icon: IconName = f.error ? "warning" : f.loading ? "loader" : "paperclip";
               return (
                 <div key={p} className={cls} title={f.error ? String(f.error) : p}>
+                  <span className="file_chip_icon" aria-hidden="true">
+                    <Icon name={icon} size={14} className={f.loading ? "spin" : undefined} />
+                  </span>
                   <span className="mono">@{p}</span>
                   {f.loading ? <span className="muted">loading…</span> : null}
                   {f.error ? <span className="muted">{String(f.error)}</span> : null}
@@ -2936,92 +3138,111 @@ function ConsolePage(props: {
         ) : null}
 
         <div className="repl_composer">
-          <textarea
-            className="mono"
-            ref={input_ref}
-            value={composer}
-            rows={3}
-            onChange={(e) => {
-              set_composer(e.target.value);
-              const pos = typeof e.target.selectionStart === "number" ? e.target.selectionStart : e.target.value.length;
-              set_composer_cursor(pos);
-            }}
-            onClick={(e) => {
-              const el = e.currentTarget;
-              const pos = typeof el.selectionStart === "number" ? el.selectionStart : el.value.length;
-              set_composer_cursor(pos);
-            }}
-            onKeyUp={(e) => {
-              const el = e.currentTarget;
-              const pos = typeof el.selectionStart === "number" ? el.selectionStart : el.value.length;
-              set_composer_cursor(pos);
-            }}
-            placeholder={!can_type ? "Waiting for the current run…" : pending_files ? "Loading attached files…" : "Type a message…"}
-            disabled={!can_type}
-            onKeyDown={(e) => {
-              if (file_token) {
-                if (e.key === "Escape") {
-                  if (file_matches.length || file_error) {
-                    e.preventDefault();
-                    set_file_matches([]);
-                    set_file_error("");
-                    set_file_loading(false);
-                    return;
+          <div className="repl_input">
+            <textarea
+              className="mono"
+              ref={input_ref}
+              value={composer}
+              rows={3}
+              onChange={(e) => {
+                set_composer(e.target.value);
+                const pos = typeof e.target.selectionStart === "number" ? e.target.selectionStart : e.target.value.length;
+                set_composer_cursor(pos);
+              }}
+              onClick={(e) => {
+                const el = e.currentTarget;
+                const pos = typeof el.selectionStart === "number" ? el.selectionStart : el.value.length;
+                set_composer_cursor(pos);
+              }}
+              onKeyUp={(e) => {
+                const el = e.currentTarget;
+                const pos = typeof el.selectionStart === "number" ? el.selectionStart : el.value.length;
+                set_composer_cursor(pos);
+              }}
+              placeholder={!can_type ? "Waiting for the current run…" : pending_files ? "Loading attached files…" : "Type a message…"}
+              disabled={!can_type}
+              onKeyDown={(e) => {
+                if (file_token) {
+                  if (e.key === "Escape") {
+                    if (file_matches.length || file_error) {
+                      e.preventDefault();
+                      set_file_matches([]);
+                      set_file_error("");
+                      set_file_loading(false);
+                      return;
+                    }
+                  }
+                  if (file_matches.length) {
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      set_file_active((v) => Math.min(file_matches.length - 1, v + 1));
+                      return;
+                    }
+                    if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      set_file_active((v) => Math.max(0, v - 1));
+                      return;
+                    }
+                    if (e.key === "Tab") {
+                      e.preventDefault();
+                      const picked = file_matches[file_active] || file_matches[0];
+                      if (picked) void attach_file(picked, file_token);
+                      return;
+                    }
                   }
                 }
-                if (file_matches.length) {
+                if (cmd_matches.length) {
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
-                    set_file_active((v) => Math.min(file_matches.length - 1, v + 1));
+                    set_cmd_active((v) => Math.min(cmd_matches.length - 1, v + 1));
                     return;
                   }
                   if (e.key === "ArrowUp") {
                     e.preventDefault();
-                    set_file_active((v) => Math.max(0, v - 1));
+                    set_cmd_active((v) => Math.max(0, v - 1));
                     return;
                   }
                   if (e.key === "Tab") {
                     e.preventDefault();
-                    const picked = file_matches[file_active] || file_matches[0];
-                    if (picked) void attach_file(picked, file_token);
+                    const picked = cmd_matches[cmd_active] || cmd_matches[0];
+                    if (picked) set_composer(`/${picked.name} `);
                     return;
                   }
                 }
-              }
-              if (cmd_matches.length) {
-                if (e.key === "ArrowDown") {
+                if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  set_cmd_active((v) => Math.min(cmd_matches.length - 1, v + 1));
-                  return;
+                  if (pending_files) {
+                    set_error("Wait for attached files to finish loading.");
+                    return;
+                  }
+                  const v = composer;
+                  set_composer("");
+                  void (async () => {
+                    const handled = await run_command(v);
+                    if (handled) return;
+                    await start_turn(v);
+                  })();
                 }
-                if (e.key === "ArrowUp") {
-                  e.preventDefault();
-                  set_cmd_active((v) => Math.max(0, v - 1));
-                  return;
-                }
-                if (e.key === "Tab") {
-                  e.preventDefault();
-                  const picked = cmd_matches[cmd_active] || cmd_matches[0];
-                  if (picked) set_composer(`/${picked.name} `);
-                  return;
-                }
-              }
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (pending_files) {
-                  set_error("Wait for attached files to finish loading.");
-                  return;
-                }
-                const v = composer;
-                set_composer("");
-                void (async () => {
-                  const handled = await run_command(v);
-                  if (handled) return;
-                  await start_turn(v);
-                })();
-              }
-            }}
-          />
+              }}
+            />
+            <div className="composer_hint" aria-hidden="true">
+              <span>
+                <kbd>Enter</kbd> send
+              </span>
+              <span className="composer_dot">•</span>
+              <span>
+                <kbd>Shift</kbd> <kbd>Enter</kbd> newline
+              </span>
+              <span className="composer_dot">•</span>
+              <span>
+                <kbd>/</kbd> commands
+              </span>
+              <span className="composer_dot">•</span>
+              <span>
+                <kbd>@</kbd> attach
+              </span>
+            </div>
+          </div>
           <div className="repl_send_panel">
             <select
               className="mono"
@@ -3094,13 +3315,15 @@ function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<st
   const llm_calls = repl_meta && Number.isFinite(Number(repl_meta.llm_calls)) ? Number(repl_meta.llm_calls) : null;
   const tool_calls = repl_meta && Number.isFinite(Number(repl_meta.tool_calls)) ? Number(repl_meta.tool_calls) : null;
 
-  // Role display with icons
-  const role_config = {
-    user: { label: "You", icon: "👤" },
-    assistant: { label: "Agent", icon: "🤖" },
-    system: { label: m.title || (m.level === "error" ? "Error" : m.level === "warn" ? "Warning" : "System"), icon: m.level === "error" ? "❌" : m.level === "warn" ? "⚠️" : "ℹ️" },
+  const role_config: Record<string, { label: string; icon: IconName }> = {
+    user: { label: "You", icon: "user" },
+    assistant: { label: "Agent", icon: "bot" },
+    system: {
+      label: m.title || (m.level === "error" ? "Error" : m.level === "warn" ? "Warning" : "System"),
+      icon: m.level === "error" ? "error" : m.level === "warn" ? "warning" : "info",
+    },
   };
-  const role_info = role_config[m.role as keyof typeof role_config] || role_config.system;
+  const role_info = role_config[m.role] || role_config.system;
   
   const cls =
     m.role === "assistant"
@@ -3135,7 +3358,9 @@ function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<st
   return (
     <div className={`chat_item ${cls}`}>
       <div className="chat_header">
-        <div className="chat_avatar" aria-hidden="true">{role_info.icon}</div>
+        <div className="chat_avatar" aria-hidden="true">
+          <Icon name={role_info.icon} size={14} />
+        </div>
         <span className="chat_role">{role_info.label}</span>
         <span className="chat_header_spacer" />
         <span className="chat_time">{new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
@@ -3149,7 +3374,7 @@ function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<st
           type="button"
           aria-label="Copy message"
         >
-          {copy_state === "copied" ? "✓" : copy_state === "failed" ? "✕" : "⊡"}
+          {copy_state === "copied" ? <Icon name="check" size={14} /> : copy_state === "failed" ? <Icon name="x" size={14} /> : <Icon name="copy" size={14} />}
         </button>
       </div>
       <div className="body markdown">
@@ -3247,13 +3472,17 @@ function ToolBlockCard(props: { meta: any; ts?: string; tool_specs_by_name?: Rec
               window.setTimeout(() => set_copy_state("idle"), 900);
             }}
           >
-            {copy_state === "copied" ? "✓" : copy_state === "failed" ? "✕" : "⊡"}
+            {copy_state === "copied" ? <Icon name="check" size={14} /> : copy_state === "failed" ? <Icon name="x" size={14} /> : <Icon name="copy" size={14} />}
           </button>
         </div>
       </summary>
 
       <div className="tool_body">
-        {error ? <div className="error">Error: {error}</div> : null}
+        {error ? (
+          <Notice variant="error" className="inline">
+            Error: {error}
+          </Notice>
+        ) : null}
         {pending ? <div className="muted">Awaiting approval / execution.</div> : null}
         {call_id ? <div className="muted mono tool_call_id">call_id: {call_id}</div> : null}
         <div className="field">
