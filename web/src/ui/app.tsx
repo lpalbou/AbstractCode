@@ -4,6 +4,7 @@ import { GatewayClient } from "../lib/gateway_client";
 import { random_id } from "../lib/ids";
 import { extract_tool_calls_from_wait, extract_wait_from_record } from "../lib/runtime_extractors";
 import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types";
+import { ChatMessageContent } from "@abstractuic/panel-chat";
 import { MarkdownRenderer } from "./markdown_renderer";
 import { ToolPicker } from "./tool_picker";
 import { Icon, type IconName } from "./icons";
@@ -417,12 +418,10 @@ function extract_user_prompt_from_run_input(raw: any): string | null {
   const input = v?.input_data && typeof v.input_data === "object" ? v.input_data : v;
 
   const candidates = [
-    input?.request,
-    input?.message,
     input?.prompt,
+    input?.message,
     input?.task,
     input?.context?.task,
-    input?.context?.request,
     input?.context?.message,
   ];
   for (const c of candidates) {
@@ -1403,7 +1402,7 @@ function NewChatPage(props: { gateway: GatewayClient; repl: ReplState; on_start:
   return (
     <div className="panel">
       <h2>Agents</h2>
-      <div className="muted">Pick an agent workflow (must implement `abstractcode.agent.v1`).</div>
+      <div className="muted">Pick a RunnableFlow workflow (must implement `abstractcode.agent.v1`).</div>
       {loading ? <div className="muted" style={{ marginTop: 10 }}>Loading…</div> : null}
       {error ? (
         <Notice variant="error">
@@ -1861,7 +1860,7 @@ function ConsolePage(props: {
     }
   }
 
-  function build_input_data(request: string): Record<string, any> {
+  function build_input_data(prompt: string): Record<string, any> {
     const tools = parse_tools_allowlist(props.settings.tools);
     const history_msgs: ReplMessage[] = (props.repl.messages || []).filter((m) => m.role === "user" || m.role === "assistant" || m.role === "system");
     const ctx_messages: { role: string; content: string }[] = history_msgs
@@ -1965,7 +1964,7 @@ function ConsolePage(props: {
     }
 
     return {
-      request,
+      prompt,
       provider: props.settings.provider || null,
       model: props.settings.model || null,
       tools: tools.length ? tools : null,
@@ -2344,8 +2343,8 @@ function ConsolePage(props: {
       try {
         // If attaching to an existing run (Sessions/Open), seed the UI with the original user prompt.
         //
-        // Note: the durable ledger for subworkflow runs may only contain an "enriched request".
-        // The original user request is typically stored in the root parent run input_data.
+        // Note: the durable ledger for subworkflow runs may only contain an "enriched prompt".
+        // The original user prompt is typically stored in the root parent run input_data.
         if (!props.repl.messages.length) {
           try {
             let current_run: any = null;
@@ -2412,7 +2411,7 @@ function ConsolePage(props: {
             }
 
             if (root_prompt && cur_prompt && root_prompt.trim() && cur_prompt.trim() && root_prompt.trim() !== cur_prompt.trim()) {
-              seeded.push({ role: "system", level: "info", title: "Enriched request", content: cur_prompt.trim(), ts: now_iso(), run_id: rid });
+              seeded.push({ role: "system", level: "info", title: "Enriched prompt", content: cur_prompt.trim(), ts: now_iso(), run_id: rid });
             }
 
             if (seeded.length) {
@@ -3388,7 +3387,7 @@ function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<st
         </button>
       </div>
       <div className="body markdown">
-        <MarkdownRenderer markdown={m.content} />
+        <ChatMessageContent text={m.content} renderMarkdown={(markdown) => <MarkdownRenderer markdown={markdown} />} />
       </div>
       {has_stats ? (
         <div className="chat_stats_bar">

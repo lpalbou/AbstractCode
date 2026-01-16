@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Workflow Agent Support** (`abstractcode/workflow_agent.py`): Run VisualFlow workflows as first-class agents via `abstractcode --agent <flow_id|flow_name|/path/to/flow.json>`
-  - `abstractcode.agent.v1` interface contract requires host-configurable `provider`/`model`/`tools` start pins (in addition to `request`/`response`)
+  - `abstractcode.agent.v1` interface contract requires host-configurable `provider`/`model`/`tools` start pins (in addition to `prompt`/`response`)
   - Workflows can emit `Emit Event(name="abstract.status")` to update TUI footer status text in real time
   - `On Flow End.meta` (and optional `scratchpad`/`success`) surfaced as assistant-message metadata (`workflow_meta`, `workflow_scratchpad`, `workflow_success`)
   - File-backed persistence support for durable workflow execution

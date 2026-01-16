@@ -100,7 +100,7 @@ Backward compatibility: `abstractcode.*` remains a deprecated alias accepted by 
 ## AbstractCode Web (Gateway-first)
 
 The web host lives in `abstractcode/web/` and speaks only to AbstractGateway (`/api/gateway/*`):
-- starts agent workflows (bundles implementing `abstractcode.agent.v1`)
+- starts RunnableFlow workflows (bundles implementing `abstractcode.agent.v1`)
 - streams/replays the durable ledger (SSE + cursor replay)
 - submits durable commands to resume waits (user prompts + tool approvals)
 - uses discovery endpoints for UI dropdowns: providers/models/tools

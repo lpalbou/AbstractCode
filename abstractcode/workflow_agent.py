@@ -312,11 +312,11 @@ def _compile_visual_flow_tree(
 
 
 class WorkflowAgent(BaseAgent):
-    """Run a VisualFlow workflow as an AbstractCode agent.
+    """Run a VisualFlow workflow as a RunnableFlow in AbstractCode.
 
     Contract: the workflow must declare `interfaces: ["abstractcode.agent.v1"]` and expose:
-    - On Flow Start output pin: `request` (string)
-    - On Flow End input pin: `response` (string)
+    - On Flow Start output pins (required): `provider` (provider), `model` (model), `prompt` (string)
+    - On Flow End input pins (required): `response` (string), `success` (boolean), `meta` (object)
     """
 
     def __init__(
@@ -417,7 +417,7 @@ class WorkflowAgent(BaseAgent):
         runtime_model = getattr(getattr(self.runtime, "config", None), "model", None)
 
         vars: Dict[str, Any] = {
-            "request": task,
+            "prompt": task,
             "context": {"task": task, "messages": _copy_messages(self.session_messages)},
             "_temp": {},
             "_limits": limits,

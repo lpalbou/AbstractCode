@@ -45,28 +45,30 @@ By default, AbstractCode uses `~/.abstractcode/state.json` and stores the durabl
 
 AbstractCode can run an AbstractFlow VisualFlow workflow *as an agent* (instead of using the built-in `react|codeact|memact` agents).
 
-### Requirements (`abstractcode.agent.v1`)
+### Requirements (RunnableFlow (v1), `abstractcode.agent.v1`)
 - The workflow JSON must declare: `interfaces: ["abstractcode.agent.v1"]`
 - The workflow must expose these pins:
-  - `On Flow Start`: output pins:
-    - `request` (type `string`)
+  - `On Flow Start`: output pins (required):
     - `provider` (type `provider`)
     - `model` (type `model`)
-    - `tools` (type `tools`)
-  - `On Flow End`: input pin `response` (type `string`)
+    - `prompt` (type `string`)
+  - `On Flow End`: input pins (required):
+    - `response` (type `string`)
+    - `success` (type `boolean`)
+    - `meta` (type `object`)
 
 Recommended (optional) pins:
-- `On Flow Start`: `context` (object), `max_iterations` (number)
-- `On Flow End`: `result` (object), `meta` (object), `scratchpad` (object)
+- `On Flow Start`: `use_context` (boolean), `context` (object), `system` (string), `tools` (tools), `max_iterations` (number), `max_in_tokens` (number), `temperature` (number), `seed` (number), `resp_schema` (object)
+- `On Flow End`: `scratchpad` (object)
 
 ### Authoring in the AbstractFlow visual editor
-- **Mark the interface**: click `📂 Load` → select the workflow → in the right preview panel find **Interfaces** → click the ✏️ icon → enable **AbstractCode Agent (v1)** → **Save Interfaces**
-- **Pins are scaffolded automatically**: when the interface is enabled, AbstractFlow will ensure `On Flow Start` and `On Flow End` have the required pins. You can still add/remove optional pins as needed.
+- **Mark the interface**: click `📂 Load` → select the workflow → in the right preview panel find **Interfaces** → click the ✏️ icon → enable **RunnableFlow (v1)** → **Save Interfaces**
+- **Pins are scaffolded automatically**: when the interface is enabled, AbstractFlow will ensure `On Flow Start` and `On Flow End` have the required pins (and may add common optional pins). You can still add/remove optional pins as needed.
 
 Tip: an example workflow is shipped at `abstractflow/web/flows/acagent01.json` (implements the interface).
 
 ### What is `meta` and how do I use it?
-`On Flow End.meta` is an **optional JSON object** for host-facing metadata (usage, trace ids, warnings, raw provider info, etc.).
+`On Flow End.meta` is a **required JSON object** for host-facing metadata (usage, trace ids, warnings, raw provider info, etc.).
 
 It is intentionally **not strictly validated** today (the host treats it as opaque JSON). To make workflows portable and predictable across hosts, we recommend using a small “envelope” shape:
 

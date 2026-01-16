@@ -11,8 +11,15 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
+    "baseUrl": ".",
+    "paths": {
+      "@abstractuic/panel-chat": ["../../abstractuic/panel-chat/src/index.ts"],
+      "@abstractuic/panel-chat/*": ["../../abstractuic/panel-chat/src/*"],
+      "react": ["./node_modules/@types/react/index.d.ts"],
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime.d.ts"],
+      "react/jsx-dev-runtime": ["./node_modules/@types/react/jsx-dev-runtime.d.ts"]
+    },
     "types": ["vitest/globals", "vite/client"]
   },
   "include": ["src"]
 }
-

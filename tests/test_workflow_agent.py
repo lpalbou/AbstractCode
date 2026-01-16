@@ -15,7 +15,7 @@ def _make_agent_v1_flow_dict(*, flow_id: str, name: str, declare_interface: bool
                 "data": {
                     "outputs": [
                         {"id": "exec-out", "label": "", "type": "execution"},
-                        {"id": "request", "label": "request", "type": "string"},
+                        {"id": "prompt", "label": "prompt", "type": "string"},
                         {"id": "provider", "label": "provider", "type": "provider"},
                         {"id": "model", "label": "model", "type": "model"},
                         {"id": "tools", "label": "tools", "type": "tools"},
@@ -46,7 +46,7 @@ def _make_agent_v1_flow_dict(*, flow_id: str, name: str, declare_interface: bool
             {
                 "id": "edge-data",
                 "source": "start",
-                "sourceHandle": "request",
+                "sourceHandle": "prompt",
                 "target": "end",
                 "targetHandle": "response",
                 "animated": False,

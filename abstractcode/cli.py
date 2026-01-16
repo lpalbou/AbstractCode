@@ -300,7 +300,7 @@ def build_gateway_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--input-json",
         default=None,
-        help='JSON object string passed to the flow entry (e.g. \'{"request":"..."}\')',
+        help='JSON object string passed to the flow entry (e.g. \'{"prompt":"..."}\')',
     )
     run.add_argument(
         "--input-file",
