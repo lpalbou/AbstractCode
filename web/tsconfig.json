@@ -15,6 +15,7 @@
     "paths": {
       "@abstractuic/panel-chat": ["../../abstractuic/panel-chat/src/index.ts"],
       "@abstractuic/panel-chat/*": ["../../abstractuic/panel-chat/src/*"],
+      "@abstractutils/monitor-gpu": ["../../abstractuic/monitor-gpu/src/index.d.ts"],
       "react": ["./node_modules/@types/react/index.d.ts"],
       "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime.d.ts"],
       "react/jsx-dev-runtime": ["./node_modules/@types/react/jsx-dev-runtime.d.ts"]

@@ -124,8 +124,128 @@ def build_agent_parser() -> argparse.ArgumentParser:
         default=_default_max_tokens(),
         help="Maximum context tokens for LLM calls (-1 = auto from model capabilities).",
     )
+    parser.add_argument(
+        "--prompt",
+        default=None,
+        help="Run a single prompt and exit (supports @file mentions).",
+    )
     parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
     return parser
+
+
+def _run_one_shot_prompt(*, shell: ReactShell, prompt: str) -> int:
+    """Run one task and exit (no full-screen UI)."""
+    from .file_mentions import extract_at_file_mentions, normalize_relative_path
+    from .flow_cli import _ApprovalState, _approve_and_execute
+
+    # Lazy imports: keep `abstractcode --help` fast.
+    from abstractruntime.core.models import RunStatus, WaitReason
+
+    text = str(prompt or "").strip()
+    if not text:
+        return 0
+
+    cleaned, mentions = extract_at_file_mentions(text)
+    paths: list[str] = []
+    for m in mentions:
+        norm = normalize_relative_path(m)
+        if norm:
+            paths.append(norm)
+
+    # De-dup while preserving order.
+    seen: set[str] = set()
+    paths = [p for p in paths if not (p in seen or seen.add(p))]
+
+    attachment_refs = shell._ingest_workspace_attachments(paths) if paths else []
+    if attachment_refs:
+        joined = ", ".join(
+            [
+                str(a.get("source_path") or a.get("filename") or "?")
+                for a in attachment_refs
+                if isinstance(a, dict)
+            ]
+        )
+        if joined:
+            print(f"Attachments: {joined}", file=sys.stderr)
+
+    run_id = shell._agent.start(cleaned or text, allowed_tools=shell._allowed_tools, attachments=attachment_refs or None)
+    if getattr(shell, "_state_file", None):
+        try:
+            shell._agent.save_state(shell._state_file)  # type: ignore[arg-type]
+        except Exception:
+            pass
+
+    approval_state = _ApprovalState()
+
+    state = None
+    while True:
+        state = shell._agent.step()
+        if state.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
+            break
+
+        if state.status != RunStatus.WAITING or not getattr(state, "waiting", None):
+            continue
+
+        wait = state.waiting
+
+        if wait.reason == WaitReason.USER:
+            prompt_text = str(wait.prompt or "Please respond:").strip()
+            response = input(prompt_text + " ")
+            shell._agent.resume(response)
+            continue
+
+        if wait.reason == WaitReason.EVENT:
+            details = wait.details or {}
+            tool_calls = details.get("tool_calls")
+            if isinstance(tool_calls, list):
+                payload = _approve_and_execute(
+                    tool_calls=tool_calls,
+                    tool_runner=shell._tool_runner,
+                    auto_approve=bool(shell._auto_approve),
+                    approval_state=approval_state,
+                    prompt_fn=input,
+                    print_fn=lambda s: print(s, file=sys.stderr),
+                )
+                if payload is None:
+                    print("Aborted (tool calls not executed).", file=sys.stderr)
+                    return 1
+
+                shell._runtime.resume(
+                    workflow=shell._agent.workflow,
+                    run_id=run_id,
+                    wait_key=wait.wait_key,
+                    payload=payload,
+                )
+                continue
+
+            if isinstance(wait.prompt, str) and wait.prompt.strip() and isinstance(wait.wait_key, str) and wait.wait_key:
+                response = input(wait.prompt.strip() + " ")
+                shell._runtime.resume(
+                    workflow=shell._agent.workflow,
+                    run_id=run_id,
+                    wait_key=wait.wait_key,
+                    payload={"response": response},
+                )
+                continue
+
+        print(f"Run waiting: {wait.reason.value} ({wait.wait_key})", file=sys.stderr)
+        return 2
+
+    if state is None:
+        print("Run failed: no state produced.", file=sys.stderr)
+        return 1
+
+    output = getattr(state, "output", None)
+    answer = output.get("answer") if isinstance(output, dict) else None
+    if isinstance(answer, str) and answer.strip():
+        print(answer.strip())
+
+    if state.status == RunStatus.COMPLETED:
+        return 0
+
+    err = str(getattr(state, "error", None) or "unknown error")
+    print(f"Run failed: {err}", file=sys.stderr)
+    return 1
 
 
 def build_flow_parser() -> argparse.ArgumentParser:
@@ -475,6 +595,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         max_tokens=args.max_tokens,
         color=not bool(args.no_color),
     )
+
+    prompt = getattr(args, "prompt", None)
+    if isinstance(prompt, str) and prompt.strip():
+        if state_file:
+            try:
+                shell._try_load_state()
+            except Exception:
+                pass
+        return _run_one_shot_prompt(shell=shell, prompt=prompt)
+
     shell.run()
     return 0
 

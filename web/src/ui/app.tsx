@@ -5,6 +5,7 @@ import { random_id } from "../lib/ids";
 import { extract_tool_calls_from_wait, extract_wait_from_record } from "../lib/runtime_extractors";
 import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types";
 import { ChatMessageContent } from "@abstractuic/panel-chat";
+import { registerMonitorGpuWidget } from "@abstractutils/monitor-gpu";
 import { MarkdownRenderer } from "./markdown_renderer";
 import { ToolPicker } from "./tool_picker";
 import { Icon, type IconName } from "./icons";
@@ -99,6 +100,23 @@ function extract_active_token(text: string, cursor: number, token: string): Acti
 
 function now_iso(): string {
   return new Date().toISOString();
+}
+
+function flag_enabled(value: unknown): boolean {
+  const s = String(value ?? "").trim().toLowerCase();
+  return s === "1" || s === "true" || s === "yes" || s === "on";
+}
+
+function monitor_gpu_enabled(): boolean {
+  if (typeof window === "undefined") return false;
+  if (window.__ABSTRACT_UI_CONFIG__?.monitor_gpu === true) return true;
+  if (flag_enabled(import.meta.env?.VITE_MONITOR_GPU)) return true;
+  try {
+    const q = new URLSearchParams(window.location.search);
+    return flag_enabled(q.get("monitor-gpu"));
+  } catch {
+    return false;
+  }
 }
 
 function parse_tools_allowlist(raw: string[]): string[] {
@@ -399,17 +417,7 @@ function extract_flow_end_output(rec: StepRecord | null | undefined): { response
       return { response: msg, meta: meta && typeof meta === "object" ? meta : null };
     }
   }
-
-  const out = r?.result?.output?.result;
-  if (!out || typeof out !== "object") return null;
-  const msg =
-    (typeof out?.response === "string" ? out.response : "") ||
-    (typeof out?.message === "string" ? out.message : "") ||
-    (typeof out?.text === "string" ? out.text : "") ||
-    (typeof out?.content === "string" ? out.content : "");
-  const response = String(msg ?? "").trim();
-  if (!response) return null;
-  return { response, meta: out?.meta ?? null };
+  return null;
 }
 
 function extract_user_prompt_from_run_input(raw: any): string | null {
@@ -526,6 +534,8 @@ async function list_agent_templates(gateway: GatewayClient): Promise<AgentTempla
 
 export function App(): React.ReactElement {
   const [settings, set_settings] = useState<Settings>(() => load_settings());
+  const gpu_enabled = monitor_gpu_enabled();
+  const monitor_gpu_ref = useRef<HTMLElement | null>(null);
   const [route, set_route_state] = useState<Route>(() => parse_route());
   const [session, set_session] = useState<{ session_id: string; state: ReplState }>(() => load_current_repl_session());
   const [pending_attach, set_pending_attach] = useState<{ run_id: string; template: ReplTemplate | null } | null>(null);
@@ -541,6 +551,17 @@ export function App(): React.ReactElement {
   useEffect(() => {
     save_settings(settings);
   }, [settings]);
+
+  useEffect(() => {
+    if (!gpu_enabled) return;
+    registerMonitorGpuWidget();
+  }, [gpu_enabled]);
+
+  useEffect(() => {
+    if (!gpu_enabled) return;
+    const el = monitor_gpu_ref.current as any;
+    if (el) el.token = settings.auth_token || "";
+  }, [gpu_enabled, settings.auth_token]);
 
   useEffect(() => {
     save_current_repl_session(session_id, repl);
@@ -584,6 +605,9 @@ export function App(): React.ReactElement {
           if (name === "console") set_route({ name: "console", session_id: session.session_id });
           else set_route({ name });
         }}
+        monitor_gpu_enabled={gpu_enabled}
+        monitor_gpu_ref={monitor_gpu_ref}
+        gateway_url={settings.gateway_url}
       />
       <div className="content">
         {route.name === "console" ? (
@@ -644,7 +668,13 @@ export function App(): React.ReactElement {
   );
 }
 
-function Header(props: { route: Route; on_nav: (name: Route["name"]) => void }): React.ReactElement {
+function Header(props: {
+  route: Route;
+  on_nav: (name: Route["name"]) => void;
+  monitor_gpu_enabled?: boolean;
+  monitor_gpu_ref?: React.RefObject<HTMLElement>;
+  gateway_url?: string;
+}): React.ReactElement {
   const r = props.route;
   const title = r.name === "settings" ? "Settings" : r.name === "new" ? "New Chat" : r.name === "sessions" ? "Sessions" : "AbstractCode";
   
@@ -658,27 +688,50 @@ function Header(props: { route: Route; on_nav: (name: Route["name"]) => void }):
   return (
     <header className="header">
       <div className="title">{title}</div>
-      <nav className="nav" role="navigation" aria-label="Main navigation">
-        {nav_items.map((item) => {
-          const active = r.name === item.name;
-          return (
-            <button
-              key={item.name}
-              className="btn"
-              onClick={() => {
-                if (active) return;
-                props.on_nav(item.name);
-              }}
-              aria-current={active ? "page" : undefined}
-              title={item.label}
-              type="button"
-            >
-              <Icon name={item.icon} className="nav-icon" />
-              <span className="nav-label">{item.label}</span>
-            </button>
-          );
-        })}
-      </nav>
+      <div className="header_right">
+        <nav className="nav" role="navigation" aria-label="Main navigation">
+          {nav_items.map((item) => {
+            const active = r.name === item.name;
+            return (
+              <button
+                key={item.name}
+                className="btn"
+                onClick={() => {
+                  if (active) return;
+                  props.on_nav(item.name);
+                }}
+                aria-current={active ? "page" : undefined}
+                title={item.label}
+                type="button"
+              >
+                <Icon name={item.icon} className="nav-icon" />
+                <span className="nav-label">{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+        {props.monitor_gpu_enabled ? (
+          <monitor-gpu
+            ref={props.monitor_gpu_ref as any}
+            mode="icon"
+            history-size="5"
+            tick-ms="1500"
+            base-url={String(props.gateway_url || "")}
+            title="GPU usage (host)"
+            style={
+              {
+                ["--monitor-gpu-width" as any]: "34px",
+                ["--monitor-gpu-bars-height" as any]: "28px",
+                ["--monitor-gpu-padding" as any]: "0px 4px",
+                ["--monitor-gpu-radius" as any]: "999px",
+                ["--monitor-gpu-bg" as any]: "rgba(0,0,0,0.18)",
+                ["--monitor-gpu-border" as any]: "rgba(255,255,255,0.16)",
+                flexShrink: 0,
+              } as React.CSSProperties
+            }
+          />
+        ) : null}
+      </div>
     </header>
   );
 }
@@ -1271,6 +1324,25 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
               />
             </div>
             <div className="field">
+              <div className="field_label_with_hint">
+                <label>Max in tokens</label>
+                <span className="field_hint">0 = unset</span>
+              </div>
+              <input
+                value={String(s.max_in_tokens || 0)}
+                onChange={(e) =>
+                  props.on_change({
+                    ...s,
+                    max_in_tokens: Number.isFinite(Number(e.target.value)) ? Math.max(0, Number(e.target.value)) : 0,
+                  })
+                }
+                placeholder="0"
+              />
+            </div>
+          </div>
+
+          <div className="settings_row2">
+            <div className="field">
               <label>Temperature</label>
               <input
                 value={String(s.temperature)}
@@ -1278,16 +1350,53 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
                 placeholder="0.7"
               />
             </div>
+            <div className="field">
+              <div className="field_label_with_hint">
+                <label>Seed</label>
+                <span className="field_hint">-1 = random/unset; ≥ 0 = deterministic (provider permitting)</span>
+              </div>
+              <input
+                value={String(s.seed)}
+                onChange={(e) => props.on_change({ ...s, seed: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : -1 })}
+                placeholder="-1"
+              />
+            </div>
           </div>
+
+          <div className="field">
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={Boolean(s.use_context)}
+                onChange={(e) => props.on_change({ ...s, use_context: Boolean(e.target.checked) })}
+              />
+              <span>Use context</span>
+            </label>
+            <div className="field_hint">When enabled, workflows can include context.messages as history (Agent/LLM Call use_context).</div>
+          </div>
+
+          <div className="field">
+            <label>System</label>
+            <textarea
+              className="mono"
+              rows={3}
+              placeholder="Optional system prompt (high priority instructions)…"
+              value={String(s.system || "")}
+              onChange={(e) => props.on_change({ ...s, system: e.target.value })}
+            />
+          </div>
+
           <div className="field">
             <div className="field_label_with_hint">
-              <label>Seed</label>
-              <span className="field_hint">-1 = random/unset; ≥ 0 = deterministic (provider permitting)</span>
+              <label>resp_schema</label>
+              <span className="field_hint">Optional JSON Schema object (JSON)</span>
             </div>
-            <input
-              value={String(s.seed)}
-              onChange={(e) => props.on_change({ ...s, seed: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : -1 })}
-              placeholder="-1"
+            <textarea
+              className="mono"
+              rows={6}
+              placeholder='{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}'
+              value={String(s.resp_schema || "")}
+              onChange={(e) => props.on_change({ ...s, resp_schema: e.target.value })}
             />
           </div>
         </div>
@@ -1360,14 +1469,47 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
 function NewChatPage(props: { gateway: GatewayClient; repl: ReplState; on_start: (t: ReplTemplate | null) => void; on_done: () => void }): React.ReactElement {
   const [templates, set_templates] = useState<AgentTemplate[]>([]);
   const [loading, set_loading] = useState(false);
+  const [reloading_bundles, set_reloading_bundles] = useState(false);
   const [error, set_error] = useState("");
   const [selected, set_selected] = useState<AgentTemplate | null>(null);
+
+  const refresh_templates = async (opts?: { preserve_selection?: boolean }): Promise<void> => {
+    set_loading(true);
+    set_error("");
+    try {
+      const items = await list_agent_templates(props.gateway);
+      set_templates(items);
+
+      const cur = opts?.preserve_selection ? props.repl.template : null;
+      if (cur && items.some((t) => t.bundle_id === cur.bundle_id && t.flow_id === cur.flow_id)) {
+        const t = items.find((x) => x.bundle_id === cur.bundle_id && x.flow_id === cur.flow_id) || null;
+        set_selected(t);
+      } else {
+        set_selected(items.find((t) => t.bundle_id === "basic-agent") || items[0] || null);
+      }
+    } catch (e: any) {
+      set_error(String(e?.message || e || "Failed to load agents"));
+    } finally {
+      set_loading(false);
+    }
+  };
+
+  const reload_gateway_bundles = async (): Promise<void> => {
+    set_reloading_bundles(true);
+    set_error("");
+    try {
+      await props.gateway.reload_bundles();
+      await refresh_templates({ preserve_selection: true });
+    } catch (e: any) {
+      set_error(String(e?.message || e || "Bundle reload failed"));
+    } finally {
+      set_reloading_bundles(false);
+    }
+  };
 
   useEffect(() => {
     let stopped = false;
     const run = async () => {
-      set_loading(true);
-      set_error("");
       try {
         const items = await list_agent_templates(props.gateway);
         if (stopped) return;
@@ -1386,6 +1528,8 @@ function NewChatPage(props: { gateway: GatewayClient; repl: ReplState; on_start:
         if (!stopped) set_loading(false);
       }
     };
+    set_loading(true);
+    set_error("");
     run();
     return () => {
       stopped = true;
@@ -1429,6 +1573,15 @@ function NewChatPage(props: { gateway: GatewayClient; repl: ReplState; on_start:
       </div>
 
       <div className="actions">
+        <button
+          className="btn"
+          type="button"
+          disabled={loading || reloading_bundles}
+          onClick={() => void reload_gateway_bundles()}
+          title="Reload the gateway’s in-memory .flow bundles (useful after updating bundles on disk)."
+        >
+          {reloading_bundles ? "Reloading…" : "Reload bundles"}
+        </button>
         <button className="btn primary" disabled={!selected} onClick={() => start()}>
           Start new chat
         </button>
@@ -1870,11 +2023,11 @@ function ConsolePage(props: {
     // Durable, agent-consumable context (structured) so workflows can remain stateful
     // even when the UI reloads and has to reconstruct history from runs.
     const turns: any[] = [];
-    let pending_request: string | null = null;
+    let pending_prompt: string | null = null;
     let pending_tools: any[] = [];
     for (const m of history_msgs) {
       if (m.role === "user") {
-        pending_request = String(m.content || "");
+        pending_prompt = String(m.content || "");
         pending_tools = [];
         continue;
       }
@@ -1899,16 +2052,16 @@ function ConsolePage(props: {
         continue;
       }
       if (m.role === "assistant") {
-        if (pending_request) {
+        if (pending_prompt) {
           const stats = m.meta && typeof m.meta === "object" ? (m.meta as any)._repl : null;
           turns.push({
-            request: pending_request,
+            prompt: pending_prompt,
             answer: String(m.content || ""),
             run_id: m.run_id || null,
             stats: stats && typeof stats === "object" ? stats : null,
             tools: pending_tools.slice(0, 50),
           });
-          pending_request = null;
+          pending_prompt = null;
           pending_tools = [];
         }
       }
@@ -1963,10 +2116,27 @@ function ConsolePage(props: {
       ctx_messages.push({ role: "system", content: digest.length > 1500 ? `${digest.slice(0, 1500)}…` : digest });
     }
 
+    const system = String(props.settings.system || "").trim();
+    const max_in_tokens = Number.isFinite(Number(props.settings.max_in_tokens)) ? Math.max(0, Number(props.settings.max_in_tokens)) : 0;
+    const resp_schema_text = String(props.settings.resp_schema || "").trim();
+    let resp_schema: any = null;
+    if (resp_schema_text) {
+      try {
+        resp_schema = JSON.parse(resp_schema_text);
+      } catch {
+        throw new Error("resp_schema must be valid JSON (object)");
+      }
+      if (!resp_schema || typeof resp_schema !== "object" || Array.isArray(resp_schema)) {
+        throw new Error("resp_schema must be a JSON object (JSON Schema)");
+      }
+    }
+
     return {
       prompt,
+      use_context: Boolean(props.settings.use_context),
       provider: props.settings.provider || null,
       model: props.settings.model || null,
+      system: system || null,
       tools: tools.length ? tools : null,
       context: {
         messages: ctx_messages,
@@ -1977,8 +2147,10 @@ function ConsolePage(props: {
         },
       },
       max_iterations: Number.isFinite(Number(props.settings.max_iterations)) ? Number(props.settings.max_iterations) : 20,
+      max_in_tokens: max_in_tokens > 0 ? max_in_tokens : null,
       temperature: Number.isFinite(Number(props.settings.temperature)) ? Number(props.settings.temperature) : 0.7,
       seed: Number.isFinite(Number(props.settings.seed)) ? Number(props.settings.seed) : -1,
+      resp_schema: resp_schema || null,
     };
   }
 
@@ -2026,8 +2198,8 @@ function ConsolePage(props: {
       });
     }
 
-    const input_data = build_input_data(t);
     try {
+      const input_data = build_input_data(t);
       const run_id = await props.gateway.start_run(props.repl.template.flow_id, input_data, {
         bundle_id: props.repl.template.bundle_id,
         session_id: String(props.session_id || "").trim() || undefined,

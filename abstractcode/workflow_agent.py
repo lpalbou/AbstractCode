@@ -387,7 +387,14 @@ class WorkflowAgent(BaseAgent):
         spec, _registry = _compile_visual_flow_tree(root=self.visual_flow, flows=self.flows, tools=tools, runtime=self.runtime)
         return spec
 
-    def start(self, task: str, *, allowed_tools: Optional[List[str]] = None, **_: Any) -> str:
+    def start(
+        self,
+        task: str,
+        *,
+        allowed_tools: Optional[List[str]] = None,
+        attachments: Optional[List[Any]] = None,
+        **_: Any,
+    ) -> str:
         task = str(task or "").strip()
         if not task:
             raise ValueError("task must be a non-empty string")
@@ -422,6 +429,20 @@ class WorkflowAgent(BaseAgent):
             "_temp": {},
             "_limits": limits,
         }
+        if attachments:
+            items = list(attachments) if isinstance(attachments, tuple) else attachments if isinstance(attachments, list) else []
+            normalized: list[Any] = []
+            for a in items:
+                if isinstance(a, dict):
+                    normalized.append(dict(a))
+                elif isinstance(a, str) and a.strip():
+                    normalized.append(a.strip())
+            if normalized:
+                ctx = vars.get("context")
+                if not isinstance(ctx, dict):
+                    ctx = {"task": task, "messages": _copy_messages(self.session_messages)}
+                    vars["context"] = ctx
+                ctx["attachments"] = normalized
 
         if isinstance(runtime_provider, str) and runtime_provider.strip():
             vars["provider"] = runtime_provider.strip()

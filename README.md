@@ -41,6 +41,17 @@ By default, AbstractCode uses `~/.abstractcode/state.json` and stores the durabl
 - disable persistence: `abstractcode --no-state`
 - override path: `ABSTRACTCODE_STATE_FILE=... abstractcode`
 
+## One-shot mode (`--prompt`)
+Run a single prompt and exit (useful for quick manual tests and scripting):
+
+```bash
+abstractcode --provider lmstudio --model qwen/qwen3-next-80b --prompt "What is this @abstractcode/abstractcode/cli.py about?"
+```
+
+Notes:
+- `@path` mentions attach workspace-relative files (stored in the run `ArtifactStore`; passed to the LLM via artifact-backed media).
+- Tool calls are approval-gated by default; use `--auto-approve` to run non-interactively.
+
 ## Workflow Agents (VisualFlow as `--agent`)
 
 AbstractCode can run an AbstractFlow VisualFlow workflow *as an agent* (instead of using the built-in `react|codeact|memact` agents).

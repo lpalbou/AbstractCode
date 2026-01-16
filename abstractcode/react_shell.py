@@ -12,7 +12,8 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from prompt_toolkit.formatted_text import HTML
 
 from .input_handler import create_prompt_session, create_simple_session
-from .fullscreen_ui import FullScreenUI
+from .file_mentions import default_workspace_root, extract_at_file_mentions, normalize_relative_path
+from .fullscreen_ui import FullScreenUI, SubmittedInput
 from .terminal_markdown import TerminalMarkdownRenderer
 
 
@@ -213,6 +214,7 @@ class ReactShell:
             from abstractagent.agents.react import ReactAgent
             from abstractagent.tools import execute_python, self_improve
             from abstractcore.tools import ToolDefinition
+            from abstractcore.tools.abstractignore import AbstractIgnore
             from abstractcore.tools.common_tools import (
                 list_files,
                 search_files,
@@ -247,6 +249,7 @@ class ReactShell:
         self._Snapshot = Snapshot
         self._JsonSnapshotStore = JsonSnapshotStore
         self._InMemorySnapshotStore = InMemorySnapshotStore
+        self._AbstractIgnore = AbstractIgnore
 
         # Default tools for AbstractCode (curated subset for coding tasks)
         DEFAULT_TOOLS = [
@@ -322,6 +325,15 @@ class ReactShell:
             llm_kwargs=llm_kwargs or None,
         )
 
+        # Artifact storage is the durability-safe place for large payloads (including attachments).
+        #
+        # Important: create the ArtifactStore BEFORE wiring the Runtime so effect handlers
+        # (LLM_CALL media resolution) and host-side ingestion use the same store instance.
+        if self._store_dir is not None:
+            self._artifact_store = FileArtifactStore(self._store_dir)
+        else:
+            self._artifact_store = InMemoryArtifactStore()
+
         self._runtime = create_local_runtime(
             provider=self._provider,
             model=self._model,
@@ -329,13 +341,16 @@ class ReactShell:
             run_store=run_store,
             ledger_store=ledger_store,
             tool_executor=tool_executor,
+            artifact_store=self._artifact_store,
         )
-        # Artifact storage is the durability-safe place for large payloads (including archived memory spans).
-        if self._store_dir is not None:
-            self._artifact_store = FileArtifactStore(self._store_dir)
-        else:
-            self._artifact_store = InMemoryArtifactStore()
         self._runtime.set_artifact_store(self._artifact_store)
+
+        # Workspace root for `@file` mentions / attachments.
+        self._workspace_root: Path = default_workspace_root()
+        try:
+            self._workspace_ignore = self._AbstractIgnore.for_path(self._workspace_root)
+        except Exception:
+            self._workspace_ignore = None
 
         if self._workflow_agent_ref is not None:
             try:
@@ -1287,9 +1302,18 @@ class ReactShell:
         out_lines.append("")
         return "\n".join(out_lines)
 
-    def _handle_input(self, text: str) -> None:
+    def _handle_input(self, inp: SubmittedInput) -> None:
         """Handle user input from the UI (called from worker thread)."""
         import uuid
+
+        attachment_paths: List[str] = []
+        text = ""
+        if isinstance(inp, SubmittedInput):
+            text = str(inp.text or "")
+            if isinstance(inp.attachments, list):
+                attachment_paths = [str(p) for p in inp.attachments if isinstance(p, str) and p.strip()]
+        else:  # pragma: no cover
+            text = str(inp or "")
 
         text = text.strip()
         if not text:
@@ -1353,8 +1377,136 @@ class ReactShell:
             self._print(_style(f"Try: /{lower}", _C.DIM, enabled=self._color))
             return
 
-        # Otherwise treat as a task
-        self._start(cmd)
+        # Otherwise treat as a task. Allow both:
+        # - chips-based attachments (from `@` completion), and
+        # - inline `@file` mentions typed manually.
+        cleaned, mentions = extract_at_file_mentions(cmd)
+        paths: List[str] = []
+        for p in attachment_paths:
+            norm = normalize_relative_path(p)
+            if norm:
+                paths.append(norm)
+        for m in mentions:
+            norm = normalize_relative_path(m)
+            if norm:
+                paths.append(norm)
+
+        # De-dup while preserving order.
+        seen: set[str] = set()
+        paths = [p for p in paths if not (p in seen or seen.add(p))]
+
+        attachment_refs = self._ingest_workspace_attachments(paths)
+        if attachment_refs:
+            joined = ", ".join([str(a.get("source_path") or a.get("filename") or "?") for a in attachment_refs if isinstance(a, dict)])
+            if joined:
+                self._print(_style(f"Attachments: {joined}", _C.DIM, enabled=self._color))
+
+        self._start(cleaned or cmd, attachments=attachment_refs or None)
+
+    def _resolve_workspace_file(self, rel_path: str) -> Optional[Path]:
+        rel = normalize_relative_path(rel_path)
+        if not rel:
+            return None
+        try:
+            p = (self._workspace_root / rel).resolve()
+        except Exception:
+            return None
+        try:
+            p.relative_to(self._workspace_root)
+        except Exception:
+            return None
+        try:
+            if not p.is_file():
+                return None
+        except Exception:
+            return None
+        try:
+            ign = getattr(self, "_workspace_ignore", None)
+            if ign is not None and ign.is_ignored(p, is_dir=False):
+                return None
+        except Exception:
+            pass
+        return p
+
+    def _max_attachment_bytes(self) -> int:
+        raw = os.environ.get("ABSTRACTCODE_MAX_ATTACHMENT_BYTES") or os.environ.get("ABSTRACTGATEWAY_MAX_ATTACHMENT_BYTES")
+        try:
+            n = int(raw) if raw is not None else 25 * 1024 * 1024
+        except Exception:
+            n = 25 * 1024 * 1024
+        return max(1, n)
+
+    def _session_memory_run_id(self) -> Optional[str]:
+        try:
+            ensure = getattr(self._agent, "_ensure_session_id", None)
+            if callable(ensure):
+                sid = ensure()
+                if isinstance(sid, str) and sid.strip():
+                    return f"session_memory_{sid.strip()}"
+        except Exception:
+            return None
+        return None
+
+    def _ingest_workspace_attachments(self, rel_paths: Sequence[str]) -> List[Dict[str, Any]]:
+        """Store workspace files in ArtifactStore and return AttachmentRefs (best-effort)."""
+        import mimetypes
+
+        paths: list[str] = [normalize_relative_path(p) for p in (rel_paths or []) if normalize_relative_path(p)]
+        if not paths:
+            return []
+
+        max_bytes = self._max_attachment_bytes()
+        run_id = self._session_memory_run_id()
+        out: List[Dict[str, Any]] = []
+
+        for rel in paths:
+            p = self._resolve_workspace_file(rel)
+            if p is None:
+                self._print(_style(f"Attachment ignored/not found: {rel}", _C.YELLOW, enabled=self._color))
+                continue
+
+            try:
+                size = int(p.stat().st_size)
+            except Exception:
+                size = -1
+            if size >= 0 and size > max_bytes:
+                self._print(
+                    _style(
+                        f"Attachment too large ({size:,} bytes > {max_bytes:,}): {rel}",
+                        _C.YELLOW,
+                        enabled=self._color,
+                    )
+                )
+                continue
+
+            try:
+                content = p.read_bytes()
+            except Exception as e:
+                self._print(_style(f"Attachment read failed: {rel} ({e})", _C.YELLOW, enabled=self._color))
+                continue
+
+            ct = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
+            try:
+                meta = self._artifact_store.store(
+                    bytes(content),
+                    content_type=str(ct),
+                    run_id=run_id,
+                    tags={"kind": "attachment", "source": "workspace", "path": rel},
+                )
+            except Exception as e:
+                self._print(_style(f"Attachment ingest failed: {rel} ({e})", _C.YELLOW, enabled=self._color))
+                continue
+
+            out.append(
+                {
+                    "$artifact": str(meta.artifact_id),
+                    "filename": str(p.name),
+                    "content_type": str(ct),
+                    "source_path": str(rel),
+                }
+            )
+
+        return out
 
     def _build_answer_copy_payload(self, *, answer_text: str, prompt_text: Optional[str] = None) -> str:
         """Build the payload for the assistant copy button (best-effort, lossless)."""
@@ -5835,7 +5987,7 @@ class ReactShell:
         except Exception:
             pass
 
-    def _start(self, task: str) -> None:
+    def _start(self, task: str, *, attachments: Optional[List[Dict[str, Any]]] = None) -> None:
         if self._run_thread_active():
             self._print(_style("A run is already executing. Use /pause or /cancel first.", _C.DIM, enabled=self._color))
             return
@@ -5845,7 +5997,7 @@ class ReactShell:
         self._turn_task = str(task or "").strip() or None
         self._turn_trace = []
         self._turn_started_at = time.perf_counter()
-        run_id = self._agent.start(task, allowed_tools=self._allowed_tools)
+        run_id = self._agent.start(task, allowed_tools=self._allowed_tools, attachments=attachments)
         self._sync_tool_prompt_settings_to_run(run_id)
         self._last_run_id = run_id
         if self._state_file:

@@ -8,6 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@abstractuic/panel-chat": resolve(__dirname, "../../abstractuic/panel-chat/src"),
+      "@abstractutils/monitor-gpu": resolve(__dirname, "../../abstractuic/monitor-gpu/src"),
     },
   },
   server: {

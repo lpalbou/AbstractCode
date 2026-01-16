@@ -10,17 +10,19 @@ Uses prompt_toolkit's Application with HSplit layout to provide:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 import queue
 import re
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
-from prompt_toolkit.filters import Always, Never, has_completions
+from prompt_toolkit.filters import Always, Condition, Never, has_completions
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.formatted_text import FormattedText, ANSI
@@ -32,6 +34,8 @@ from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 from prompt_toolkit.styles import Style
+
+from .file_mentions import default_workspace_root, list_workspace_files, search_workspace_files
 
 
 # Command definitions: (command, description)
@@ -69,6 +73,11 @@ COMMANDS = [
     ("q", "Exit"),
 ]
 
+@dataclass(frozen=True)
+class SubmittedInput:
+    text: str
+    attachments: List[str]
+
 
 class CommandCompleter(Completer):
     """Completer for / commands."""
@@ -92,6 +101,36 @@ class CommandCompleter(Completer):
                     display=f"/{cmd}",
                     display_meta=description,
                 )
+
+class _CommandAndFileCompleter(Completer):
+    """Completer for both `/commands` and `@files`."""
+
+    _AT_RE = re.compile(r"(^|\s)@([^\s]*)$")
+
+    def __init__(self, *, ui: "FullScreenUI"):
+        self._ui = ui
+        self._cmd = CommandCompleter()
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+
+        # `/` commands (only when command is the whole input, consistent with existing UX).
+        if text.startswith("/"):
+            yield from self._cmd.get_completions(document, complete_event)
+            return
+
+        # `@` file mentions (can appear anywhere in the input; only complete the current token).
+        m = self._AT_RE.search(text)
+        if not m:
+            return
+        prefix = str(m.group(2) or "")
+        for rel in self._ui._file_suggestions(prefix):
+            yield Completion(
+                rel,
+                start_position=-len(prefix),
+                display=f"@{rel}",
+                display_meta="file",
+            )
 
 
 class FullScreenUI:
@@ -141,7 +180,7 @@ class FullScreenUI:
     def __init__(
         self,
         get_status_text: Callable[[], str],
-        on_input: Callable[[str], None],
+        on_input: Callable[[SubmittedInput], None],
         on_copy_payload: Optional[Callable[[str], bool]] = None,
         on_fold_toggle: Optional[Callable[[str], None]] = None,
         color: bool = True,
@@ -211,7 +250,7 @@ class FullScreenUI:
         self._render_cache_cursor_col: int = 0
 
         # Command queue for background processing
-        self._command_queue: queue.Queue[Optional[str]] = queue.Queue()
+        self._command_queue: queue.Queue[Optional[SubmittedInput]] = queue.Queue()
 
         # Blocking prompt support (for tool approvals)
         self._pending_blocking_prompt: Optional[queue.Queue[str]] = None
@@ -233,11 +272,24 @@ class FullScreenUI:
         # Prompt history (persists across prompts in this session)
         self._history = InMemoryHistory()
 
+        # Workspace `@file` completion + pending attachment chips.
+        self._workspace_root: Path = default_workspace_root()
+        try:
+            from abstractcore.tools.abstractignore import AbstractIgnore  # type: ignore
+
+            self._workspace_ignore = AbstractIgnore.for_path(self._workspace_root)
+        except Exception:
+            self._workspace_ignore = None
+        self._workspace_files: List[str] = []
+        self._workspace_files_built_at: float = 0.0
+        self._workspace_files_ttl_s: float = 2.0
+        self._pending_attachments: List[str] = []
+
         # Input buffer with command completer and history
         self._input_buffer = Buffer(
             name="input",
             multiline=False,
-            completer=CommandCompleter(),
+            completer=_CommandAndFileCompleter(ui=self),
             complete_while_typing=True,
             history=self._history,
         )
@@ -776,6 +828,13 @@ class FullScreenUI:
         # Separator line
         separator = Window(height=1, char="─", style="class:separator")
 
+        # Attachment chips bar (per-turn attachments).
+        attachments_bar = Window(
+            content=FormattedTextControl(self._get_attachments_formatted),
+            height=1,
+            style="class:attachments-bar",
+        )
+
         # Input area
         input_window = Window(
             content=BufferControl(buffer=self._input_buffer),
@@ -813,6 +872,7 @@ class FullScreenUI:
         body = HSplit([
             output_window,    # Scrollable output (takes remaining space)
             separator,        # Visual separator
+            attachments_bar,  # Pending attachments (chips)
             input_row,        # Input area with prompt
             status_bar,       # Status info
             help_bar,         # Help hints
@@ -836,6 +896,38 @@ class FullScreenUI:
 
         # Store references for later
         self._output_window = output_window
+
+    def _get_attachments_formatted(self) -> FormattedText:
+        """Get formatted attachment chips (best-effort, single-line)."""
+        if not getattr(self, "_pending_attachments", None):
+            return []
+        parts: List[Tuple[str, str]] = [("class:attachments-label", " Attachments: ")]
+        for rel in list(self._pending_attachments):
+            parts.append(("class:attachment-chip", f"[{rel}] "))
+        parts.append(("class:attachments-hint", " (Backspace=remove)"))
+        return parts
+
+    def _refresh_workspace_files(self) -> None:
+        now = time.monotonic()
+        if (now - float(self._workspace_files_built_at)) < float(self._workspace_files_ttl_s):
+            return
+        try:
+            self._workspace_files = list_workspace_files(
+                root=self._workspace_root,
+                ignore=self._workspace_ignore,
+                max_files=20000,
+            )
+        except Exception:
+            self._workspace_files = []
+        self._workspace_files_built_at = now
+
+    def _file_suggestions(self, prefix: str) -> List[str]:
+        """Return best-effort file suggestions for `@` completion."""
+        self._refresh_workspace_files()
+        q = str(prefix or "").strip()
+        if not q:
+            return list(self._workspace_files)[:25]
+        return search_workspace_files(self._workspace_files, q, limit=25)
 
     def _get_status_formatted(self) -> FormattedText:
         """Get formatted status text with optional spinner."""
@@ -875,6 +967,62 @@ class FullScreenUI:
 
         return [("class:status-text", f" {text}")]
 
+    _AT_TOKEN_RE = re.compile(r"(^|\s)@([^\s]*)$")
+
+    def _accept_completion(self, event) -> None:
+        """Accept the current completion.
+
+        - In `@file` context: add an attachment chip and remove the `@token` from the composer.
+        - Otherwise: apply the completion normally.
+        """
+        buff = event.app.current_buffer
+        state = buff.complete_state
+        if state is None:
+            return
+
+        comp = state.current_completion
+        if comp is None:
+            comps = getattr(state, "completions", None)
+            if isinstance(comps, list) and comps:
+                comp = comps[0]
+        if comp is None:
+            try:
+                buff.cancel_completion()
+            except Exception:
+                buff.complete_state = None
+            return
+
+        before = buff.document.text_before_cursor
+        m = self._AT_TOKEN_RE.search(before)
+        if m:
+            prefix = str(m.group(2) or "")
+            rel = str(getattr(comp, "text", "") or "").strip()
+            if rel:
+                if rel not in self._pending_attachments:
+                    self._pending_attachments.append(rel)
+            # Remove the whole `@prefix` token from the composer.
+            try:
+                buff.delete_before_cursor(count=len(prefix) + 1)
+            except Exception:
+                pass
+            try:
+                buff.cancel_completion()
+            except Exception:
+                buff.complete_state = None
+            event.app.invalidate()
+            return
+
+        # Normal completion: insert selected text.
+        try:
+            buff.apply_completion(comp)
+        except Exception:
+            pass
+        try:
+            buff.cancel_completion()
+        except Exception:
+            buff.complete_state = None
+        event.app.invalidate()
+
     def _build_keybindings(self) -> None:
         """Build key bindings."""
         self._kb = KeyBindings()
@@ -893,8 +1041,14 @@ class FullScreenUI:
                 if self._pending_blocking_prompt is not None:
                     self._pending_blocking_prompt.put(text)
                 else:
+                    if text.startswith("/"):
+                        # Commands should not consume per-turn attachments.
+                        attachments = []
+                    else:
+                        attachments = list(self._pending_attachments)
+                        self._pending_attachments.clear()
                     # Queue for background processing (don't exit app!)
-                    self._command_queue.put(text)
+                    self._command_queue.put(SubmittedInput(text=text, attachments=attachments))
 
                 # After submitting, jump back to the latest output.
                 self.scroll_to_bottom()
@@ -910,19 +1064,25 @@ class FullScreenUI:
         # Enter with completions = accept completion (don't submit)
         @self._kb.add("enter", filter=has_completions)
         def handle_enter_completion(event):
-            # Accept the current completion
-            buff = event.app.current_buffer
-            if buff.complete_state:
-                buff.complete_state = None
-            # Apply the completion but don't submit
-            event.current_buffer.complete_state = None
+            self._accept_completion(event)
 
         # Tab = accept completion
         @self._kb.add("tab", filter=has_completions)
         def handle_tab_completion(event):
-            buff = event.app.current_buffer
-            if buff.complete_state:
-                buff.complete_state = None
+            self._accept_completion(event)
+
+        # Backspace on empty input removes the last pending attachment chip.
+        @self._kb.add(
+            "backspace",
+            filter=Condition(lambda: (not self._input_buffer.text) and bool(getattr(self, "_pending_attachments", None)))
+            & ~has_completions,
+        )
+        def handle_backspace_attachment(event):
+            try:
+                self._pending_attachments.pop()
+            except Exception:
+                pass
+            event.app.invalidate()
 
         # Up arrow = history previous (when no completions showing)
         @self._kb.add("up", filter=~has_completions)
@@ -1196,6 +1356,10 @@ class FullScreenUI:
                 "separator": "#444444",
                 "status-bar": "bg:#1a1a2e #888888",
                 "status-text": "#888888",
+                "attachments-bar": "bg:#1a1a2e #666666",
+                "attachments-label": "#666666",
+                "attachment-chip": "bg:#333333 #dddddd",
+                "attachments-hint": "#555555 italic",
                 "help-bar": "bg:#1a1a2e #666666",
                 "help": "#666666 italic",
                 "prompt": "#00aa00 bold",
