@@ -670,8 +670,8 @@ def test_workflow_agent_runs_deterministic_flow(tmp_path) -> None:
 
     assert state.status == RunStatus.COMPLETED
     assert isinstance(state.output, dict)
-    assert isinstance(state.output.get("result"), dict)
-    assert state.output["result"]["response"] == "hello"
+    assert "result" not in state.output
+    assert state.output.get("response") == "hello"
 
     ctx = state.vars.get("context") if isinstance(state.vars, dict) else None
     assert isinstance(ctx, dict)
@@ -971,8 +971,8 @@ def test_workflow_agent_runs_with_file_run_store(tmp_path) -> None:
 
     assert state.status == RunStatus.COMPLETED
     assert isinstance(state.output, dict)
-    assert isinstance(state.output.get("result"), dict)
-    assert state.output["result"]["response"] == "hello"
+    assert "result" not in state.output
+    assert state.output.get("response") == "hello"
 
     # Ensure the run was actually persisted as valid JSON.
     run_file = tmp_path / f"run_{state.run_id}.json"
@@ -1008,8 +1008,8 @@ def test_workflow_agent_resolves_by_name(tmp_path) -> None:
 
     assert state.status == RunStatus.COMPLETED
     assert isinstance(state.output, dict)
-    assert isinstance(state.output.get("result"), dict)
-    assert state.output["result"]["response"] == "ping"
+    assert "result" not in state.output
+    assert state.output.get("response") == "ping"
 
 
 def test_workflow_agent_requires_interface_marker(tmp_path) -> None:

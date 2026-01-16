@@ -86,7 +86,7 @@ It is intentionally **not strictly validated** today (the host treats it as opaq
 Hosts should treat unknown fields as allowed and ignore what they don’t understand (forward-compatible).
 
 Typical ways to produce it inside a workflow:
-- Wire `LLM Call.result` (object) → `On Flow End.meta`
+- Wire `LLM Call.meta` (object) → `On Flow End.meta`
 - Wire `Agent.meta` (object) → `On Flow End.meta`
 - Or build your own object and wire it into `meta`
 

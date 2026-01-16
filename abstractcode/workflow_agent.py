@@ -816,7 +816,7 @@ class WorkflowAgent(BaseAgent):
             response_text = ""
             meta_out: Dict[str, Any] = {}
             scratchpad_out: Any = None
-            result_out: Any = None
+            workflow_success: Optional[bool] = None
             out = getattr(state, "output", None)
             if isinstance(out, dict):
                 def _pick_textish(value: Any) -> str:
@@ -830,39 +830,38 @@ class WorkflowAgent(BaseAgent):
                         return str(value)
                     return ""
 
-                result_payload = out.get("result") if isinstance(out.get("result"), dict) else None
-                response_text = _pick_textish(out.get("response"))
+                payload = out.get("result") if isinstance(out.get("result"), dict) else out
+
+                response_text = _pick_textish(payload.get("response"))
                 if not response_text:
-                    result = out.get("result")
-                    if isinstance(result, dict):
-                        response_text = (
-                            _pick_textish(result.get("response"))
-                            or _pick_textish(result.get("answer"))
-                            or _pick_textish(result.get("message"))
-                            or _pick_textish(result.get("text"))
-                            or _pick_textish(result.get("content"))
-                        )
-                    elif isinstance(result, str):
-                        response_text = str(result or "").strip()
-                raw_meta = out.get("meta")
+                    response_text = (
+                        _pick_textish(payload.get("answer"))
+                        or _pick_textish(payload.get("message"))
+                        or _pick_textish(payload.get("text"))
+                        or _pick_textish(payload.get("content"))
+                    )
+                if not response_text and isinstance(out.get("result"), str):
+                    response_text = str(out.get("result") or "").strip()
+
+                if isinstance(payload.get("success"), bool):
+                    workflow_success = bool(payload.get("success"))
+
+                raw_meta = payload.get("meta")
                 if isinstance(raw_meta, dict):
                     meta_out = dict(raw_meta)
-                elif isinstance(result_payload, dict) and isinstance(result_payload.get("meta"), dict):
-                    meta_out = dict(result_payload.get("meta") or {})
-                scratchpad_out = out.get("scratchpad")
-                if scratchpad_out is None and isinstance(result_payload, dict) and "scratchpad" in result_payload:
-                    scratchpad_out = result_payload.get("scratchpad")
-                # Optional full object output (interface pin renamed from `raw_result` → `result`).
-                result_out = out.get("result")
-                if isinstance(result_out, dict) and "response" in result_out and result_payload is not None:
-                    # Avoid accidentally grabbing the outer run output dict as the "interface result".
-                    # The interface value should live inside the inner `result_payload`.
-                    result_out = None
-                if result_out is None and isinstance(result_payload, dict) and "result" in result_payload:
-                    result_out = result_payload.get("result")
-                # Backward-compat: legacy workflows used `raw_result`.
-                if result_out is None and isinstance(result_payload, dict) and "raw_result" in result_payload:
-                    result_out = result_payload.get("raw_result")
+                scratchpad_out = payload.get("scratchpad")
+                if scratchpad_out is None and isinstance(out.get("scratchpad"), (dict, list, str, int, float, bool)):
+                    scratchpad_out = out.get("scratchpad")
+
+                # Backward-compat: older runs used meta.success instead of a first-class pin.
+                if workflow_success is None and isinstance(meta_out.get("success"), bool):
+                    workflow_success = bool(meta_out.get("success"))
+
+                # Fallback: if the workflow doesn't expose success, treat run completion as success.
+                if workflow_success is None and isinstance(out.get("success"), bool):
+                    workflow_success = bool(out.get("success"))
+                if workflow_success is None:
+                    workflow_success = True
 
             task = str(self._last_task or "")
             ctx = state.vars.get("context") if isinstance(getattr(state, "vars", None), dict) else None
@@ -879,8 +878,8 @@ class WorkflowAgent(BaseAgent):
                 assistant_meta["workflow_meta"] = meta_out
             if scratchpad_out is not None:
                 assistant_meta["workflow_scratchpad"] = scratchpad_out
-            if result_out is not None:
-                assistant_meta["workflow_result"] = result_out
+            if workflow_success is not None:
+                assistant_meta["workflow_success"] = workflow_success
 
             msgs.append(_new_message(role="assistant", content=response_text, metadata=assistant_meta))
             ctx["messages"] = msgs
@@ -902,9 +901,9 @@ class WorkflowAgent(BaseAgent):
                         "done",
                         {
                             "answer": response_text,
+                            "success": workflow_success,
                             "meta": meta_out or None,
                             "scratchpad": scratchpad_out,
-                            "result": result_out,
                         },
                     )
                 except Exception:
