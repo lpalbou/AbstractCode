@@ -816,18 +816,34 @@ class WorkflowAgent(BaseAgent):
             response_text = ""
             meta_out: Dict[str, Any] = {}
             scratchpad_out: Any = None
-            raw_result_out: Any = None
+            result_out: Any = None
             out = getattr(state, "output", None)
             if isinstance(out, dict):
+                def _pick_textish(value: Any) -> str:
+                    if isinstance(value, str):
+                        return value.strip()
+                    if value is None:
+                        return ""
+                    if isinstance(value, bool):
+                        return str(value).lower()
+                    if isinstance(value, (int, float)):
+                        return str(value)
+                    return ""
+
                 result_payload = out.get("result") if isinstance(out.get("result"), dict) else None
-                if isinstance(out.get("response"), str):
-                    response_text = str(out.get("response") or "")
-                else:
+                response_text = _pick_textish(out.get("response"))
+                if not response_text:
                     result = out.get("result")
-                    if isinstance(result, dict) and "response" in result:
-                        response_text = str(result.get("response") or "")
+                    if isinstance(result, dict):
+                        response_text = (
+                            _pick_textish(result.get("response"))
+                            or _pick_textish(result.get("answer"))
+                            or _pick_textish(result.get("message"))
+                            or _pick_textish(result.get("text"))
+                            or _pick_textish(result.get("content"))
+                        )
                     elif isinstance(result, str):
-                        response_text = str(result or "")
+                        response_text = str(result or "").strip()
                 raw_meta = out.get("meta")
                 if isinstance(raw_meta, dict):
                     meta_out = dict(raw_meta)
@@ -836,9 +852,17 @@ class WorkflowAgent(BaseAgent):
                 scratchpad_out = out.get("scratchpad")
                 if scratchpad_out is None and isinstance(result_payload, dict) and "scratchpad" in result_payload:
                     scratchpad_out = result_payload.get("scratchpad")
-                raw_result_out = out.get("raw_result")
-                if raw_result_out is None and isinstance(result_payload, dict) and "raw_result" in result_payload:
-                    raw_result_out = result_payload.get("raw_result")
+                # Optional full object output (interface pin renamed from `raw_result` → `result`).
+                result_out = out.get("result")
+                if isinstance(result_out, dict) and "response" in result_out and result_payload is not None:
+                    # Avoid accidentally grabbing the outer run output dict as the "interface result".
+                    # The interface value should live inside the inner `result_payload`.
+                    result_out = None
+                if result_out is None and isinstance(result_payload, dict) and "result" in result_payload:
+                    result_out = result_payload.get("result")
+                # Backward-compat: legacy workflows used `raw_result`.
+                if result_out is None and isinstance(result_payload, dict) and "raw_result" in result_payload:
+                    result_out = result_payload.get("raw_result")
 
             task = str(self._last_task or "")
             ctx = state.vars.get("context") if isinstance(getattr(state, "vars", None), dict) else None
@@ -855,8 +879,8 @@ class WorkflowAgent(BaseAgent):
                 assistant_meta["workflow_meta"] = meta_out
             if scratchpad_out is not None:
                 assistant_meta["workflow_scratchpad"] = scratchpad_out
-            if raw_result_out is not None:
-                assistant_meta["workflow_raw_result"] = raw_result_out
+            if result_out is not None:
+                assistant_meta["workflow_result"] = result_out
 
             msgs.append(_new_message(role="assistant", content=response_text, metadata=assistant_meta))
             ctx["messages"] = msgs
@@ -880,7 +904,7 @@ class WorkflowAgent(BaseAgent):
                             "answer": response_text,
                             "meta": meta_out or None,
                             "scratchpad": scratchpad_out,
-                            "raw_result": raw_result_out,
+                            "result": result_out,
                         },
                     )
                 except Exception:

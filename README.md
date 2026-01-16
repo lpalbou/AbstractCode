@@ -57,7 +57,7 @@ AbstractCode can run an AbstractFlow VisualFlow workflow *as an agent* (instead 
 
 Recommended (optional) pins:
 - `On Flow Start`: `context` (object), `max_iterations` (number)
-- `On Flow End`: `meta` (object), `scratchpad` (object), `raw_result` (object)
+- `On Flow End`: `result` (object), `meta` (object), `scratchpad` (object)
 
 ### Authoring in the AbstractFlow visual editor
 - **Mark the interface**: click `📂 Load` → select the workflow → in the right preview panel find **Interfaces** → click the ✏️ icon → enable **AbstractCode Agent (v1)** → **Save Interfaces**
@@ -87,7 +87,7 @@ Hosts should treat unknown fields as allowed and ignore what they don’t unders
 
 Typical ways to produce it inside a workflow:
 - Wire `LLM Call.result` (object) → `On Flow End.meta`
-- Wire `Agent.result` (object) → `On Flow End.meta`
+- Wire `Agent.meta` (object) → `On Flow End.meta`
 - Or build your own object and wire it into `meta`
 
 When present, AbstractCode attaches it to the assistant message metadata as `workflow_meta`.

@@ -378,24 +378,34 @@ function extract_flow_end_output(rec: StepRecord | null | undefined): { response
     if (response) return { response, meta: null };
   }
   if (out0 && typeof out0 === "object") {
-    const msg = (out0 as any)?.answer ?? (out0 as any)?.response ?? (out0 as any)?.message ?? (out0 as any)?.text ?? (out0 as any)?.content;
-    const response = String(msg ?? "").trim();
-    if (response) {
-      const meta: any = { ...(out0 as any) };
-      delete meta.answer;
-      delete meta.response;
-      delete meta.message;
-      delete meta.text;
-      delete meta.content;
-      // Avoid persisting huge transcripts in the web UI meta.
-      if (Array.isArray(meta.messages)) delete meta.messages;
-      return { response, meta };
+    const pick_textish = (v: any): string => {
+      if (typeof v === "string") return v.trim();
+      if (v == null) return "";
+      if (typeof v === "number" || typeof v === "boolean") return String(v);
+      return "";
+    };
+
+    const msg =
+      pick_textish((out0 as any)?.answer) ||
+      pick_textish((out0 as any)?.response) ||
+      pick_textish((out0 as any)?.message) ||
+      pick_textish((out0 as any)?.text) ||
+      pick_textish((out0 as any)?.content);
+
+    if (msg) {
+      // Respect the interface contract: meta is optional but should be under `meta`.
+      const meta = (out0 as any)?.meta ?? null;
+      return { response: msg, meta: meta && typeof meta === "object" ? meta : null };
     }
   }
 
   const out = r?.result?.output?.result;
   if (!out || typeof out !== "object") return null;
-  const msg = out?.response ?? out?.message ?? out?.text ?? out?.content;
+  const msg =
+    (typeof out?.response === "string" ? out.response : "") ||
+    (typeof out?.message === "string" ? out.message : "") ||
+    (typeof out?.text === "string" ? out.text : "") ||
+    (typeof out?.content === "string" ? out.content : "");
   const response = String(msg ?? "").trim();
   if (!response) return null;
   return { response, meta: out?.meta ?? null };
