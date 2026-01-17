@@ -429,6 +429,9 @@ class ReactShell:
         self._turn_trace: List[str] = []
         # Turn-level timing (for per-answer stats).
         self._turn_started_at: Optional[float] = None
+        # Session-level attachment refs (workspace-relative path -> artifact-backed ref dict).
+        # Avoids re-ingesting the same file every turn when attachments persist.
+        self._attachment_ref_cache: Dict[str, Dict[str, Any]] = {}
         # Simple in-session dedup for obviously repeated shell commands.
         self._last_execute_command: Optional[str] = None
         self._last_execute_command_result: Optional[Dict[str, Any]] = None
@@ -1345,16 +1348,16 @@ class ReactShell:
         if not text:
             return
 
-        # Echo user input (styled so user prompts are easy to spot).
-        copy_id = f"user_{uuid.uuid4().hex}"
-        self._ui.register_copy_payload(copy_id, text)
-        ts_text = self._format_timestamp_short(_now_iso())
-        footer = _style(ts_text, _C.DIM, enabled=self._color) if ts_text else ""
-        self._print(self._format_user_prompt_block(text, copy_id=copy_id, footer=footer))
-
         cmd = text.strip()
 
         if cmd.startswith("/"):
+            # Echo commands as-is.
+            copy_id = f"user_{uuid.uuid4().hex}"
+            self._ui.register_copy_payload(copy_id, cmd)
+            ts_text = self._format_timestamp_short(_now_iso())
+            footer = _style(ts_text, _C.DIM, enabled=self._color) if ts_text else ""
+            self._print(self._format_user_prompt_block(cmd, copy_id=copy_id, footer=footer))
+
             should_exit = self._dispatch_command(cmd[1:].strip())
             if should_exit:
                 self._ui.stop()
@@ -1408,28 +1411,81 @@ class ReactShell:
         # Otherwise treat as a task. Allow both:
         # - chips-based attachments (from `@` completion), and
         # - inline `@file` mentions typed manually.
-        mentions = find_at_file_mentions(cmd)
+        from .file_mentions import extract_at_file_mentions
+
+        cleaned_cmd, mentions = extract_at_file_mentions(cmd)
         paths: List[str] = []
         for p in attachment_paths:
             norm = normalize_relative_path(p)
             if norm:
                 paths.append(norm)
+        mention_paths: List[str] = []
         for m in mentions:
             norm = normalize_relative_path(m)
             if norm:
                 paths.append(norm)
+                mention_paths.append(norm)
+
+        # Persist manual `@file` mentions into the attachment chips bar.
+        if mention_paths:
+            try:
+                adder = getattr(self._ui, "add_attachments", None)
+                if callable(adder):
+                    adder(mention_paths)
+            except Exception:
+                pass
 
         # De-dup while preserving order.
         seen: set[str] = set()
         paths = [p for p in paths if not (p in seen or seen.add(p))]
 
-        attachment_refs = self._ingest_workspace_attachments(paths)
-        if attachment_refs:
-            joined = ", ".join([str(a.get("source_path") or a.get("filename") or "?") for a in attachment_refs if isinstance(a, dict)])
+        # Ingest missing attachments once; reuse cached refs across turns.
+        newly_added: List[str] = []
+        if paths:
+            missing = [p for p in paths if p not in self._attachment_ref_cache]
+            if missing:
+                for ref in self._ingest_workspace_attachments(missing):
+                    if not isinstance(ref, dict):
+                        continue
+                    key = normalize_relative_path(str(ref.get("source_path") or ""))
+                    if not key:
+                        continue
+                    if key in self._attachment_ref_cache:
+                        continue
+                    self._attachment_ref_cache[key] = dict(ref)
+                    newly_added.append(key)
+
+        attachment_refs: List[Dict[str, Any]] = []
+        for p in paths:
+            ref = self._attachment_ref_cache.get(p)
+            if isinstance(ref, dict):
+                attachment_refs.append(dict(ref))
+
+        # Attachment-only message: update the session attachments and don't start a run.
+        if not cleaned_cmd and attachment_refs:
+            joined = ", ".join(
+                [str(a.get("source_path") or a.get("filename") or "?") for a in attachment_refs if isinstance(a, dict)]
+            )
             if joined:
                 self._print(_style(f"Attachments: {joined}", _C.DIM, enabled=self._color))
+            return
 
-        self._start(cmd, attachments=attachment_refs or None)
+        cleaned_cmd = str(cleaned_cmd or "").strip()
+        if not cleaned_cmd:
+            return
+
+        # Echo cleaned user prompt (without `@file` mentions).
+        copy_id = f"user_{uuid.uuid4().hex}"
+        self._ui.register_copy_payload(copy_id, cleaned_cmd)
+        ts_text = self._format_timestamp_short(_now_iso())
+        footer = _style(ts_text, _C.DIM, enabled=self._color) if ts_text else ""
+        self._print(self._format_user_prompt_block(cleaned_cmd, copy_id=copy_id, footer=footer))
+
+        if newly_added:
+            joined = ", ".join(newly_added)
+            self._print(_style(f"Attachments: {joined}", _C.DIM, enabled=self._color))
+
+        self._start(cleaned_cmd, attachments=attachment_refs or None)
 
     def _resolve_workspace_file(self, rel_path: str) -> Optional[tuple[Path, str]]:
         rel = normalize_relative_path(rel_path)

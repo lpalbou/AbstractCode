@@ -294,7 +294,8 @@ class FullScreenUI:
         self._workspace_files: List[str] = []
         self._workspace_files_built_at: float = 0.0
         self._workspace_files_ttl_s: float = 2.0
-        self._pending_attachments: List[str] = []
+        # Persistent attachment chips: these are included in context turn-after-turn by default.
+        self._attachments: List[str] = []
 
         # Input buffer with command completer and history
         self._input_buffer = Buffer(
@@ -910,13 +911,54 @@ class FullScreenUI:
 
     def _get_attachments_formatted(self) -> FormattedText:
         """Get formatted attachment chips (best-effort, single-line)."""
-        if not getattr(self, "_pending_attachments", None):
+        if not getattr(self, "_attachments", None):
             return []
-        parts: List[Tuple[str, str]] = [("class:attachments-label", " Attachments: ")]
-        for rel in list(self._pending_attachments):
-            parts.append(("class:attachment-chip", f"[{rel}] "))
-        parts.append(("class:attachments-hint", " (Backspace=remove)"))
+        parts: List[Tuple[Any, ...]] = [("class:attachments-label", " Attachments: ")]
+        for rel in list(self._attachments):
+            label = str(rel or "").strip()
+            if not label:
+                continue
+            parts.append(("class:attachment-chip", f"[{label} ×] ", self._remove_attachment_handler(label)))
+        parts.append(("class:attachments-hint", " (Click=remove, Backspace=remove last)"))
         return parts
+
+    def add_attachments(self, rel_paths: Sequence[str]) -> None:
+        """Add attachment chips (de-dup; preserves order)."""
+        changed = False
+        for p in list(rel_paths or []):
+            rel = str(p or "").strip()
+            if not rel:
+                continue
+            if rel in self._attachments:
+                continue
+            self._attachments.append(rel)
+            changed = True
+        if changed:
+            try:
+                if self._app and self._app.is_running:
+                    self._app.invalidate()
+            except Exception:
+                pass
+
+    def _remove_attachment_handler(self, rel_path: str) -> Callable[[MouseEvent], None]:
+        def _handler(mouse_event: MouseEvent) -> None:
+            if mouse_event.event_type != MouseEventType.MOUSE_UP:
+                return
+            rel = str(rel_path or "").strip()
+            if not rel:
+                return
+            try:
+                self._attachments = [p for p in self._attachments if str(p) != rel]
+            except Exception:
+                return
+            try:
+                app = get_app()
+                if app and app.is_running:
+                    app.invalidate()
+            except Exception:
+                pass
+
+        return _handler
 
     def set_workspace_policy(
         self,
@@ -1088,7 +1130,7 @@ class FullScreenUI:
     def _accept_completion(self, event) -> None:
         """Accept the current completion.
 
-        - In `@file` context: add an attachment chip and keep the `@...` mention in the composer.
+        - In `@file` context: add an attachment chip and remove the `@...` mention from the composer.
         - Otherwise: apply the completion normally.
         """
         buff = event.app.current_buffer
@@ -1111,13 +1153,14 @@ class FullScreenUI:
         before = buff.document.text_before_cursor
         m = self._AT_TOKEN_RE.search(before)
         if m:
+            prefix = str(m.group(2) or "")
             rel = str(getattr(comp, "text", "") or "").strip()
             if rel:
-                if rel not in self._pending_attachments:
-                    self._pending_attachments.append(rel)
-            # Apply completion normally so the `@file` mention remains in the text.
+                self.add_attachments([rel])
+            # Remove the `@...` token from the composer so it doesn't leak into the prompt.
             try:
-                buff.apply_completion(comp)
+                # Delete the `@` plus the currently-typed prefix (if any).
+                buff.delete_before_cursor(count=len(prefix) + 1)
             except Exception:
                 pass
             try:
@@ -1156,12 +1199,7 @@ class FullScreenUI:
                 if self._pending_blocking_prompt is not None:
                     self._pending_blocking_prompt.put(text)
                 else:
-                    if text.startswith("/"):
-                        # Commands should not consume per-turn attachments.
-                        attachments = []
-                    else:
-                        attachments = list(self._pending_attachments)
-                        self._pending_attachments.clear()
+                    attachments = list(self._attachments)
                     # Queue for background processing (don't exit app!)
                     self._command_queue.put(SubmittedInput(text=text, attachments=attachments))
 
@@ -1189,12 +1227,12 @@ class FullScreenUI:
         # Backspace on empty input removes the last pending attachment chip.
         @self._kb.add(
             "backspace",
-            filter=Condition(lambda: (not self._input_buffer.text) and bool(getattr(self, "_pending_attachments", None)))
+            filter=Condition(lambda: (not self._input_buffer.text) and bool(getattr(self, "_attachments", None)))
             & ~has_completions,
         )
         def handle_backspace_attachment(event):
             try:
-                self._pending_attachments.pop()
+                self._attachments.pop()
             except Exception:
                 pass
             event.app.invalidate()
