@@ -152,4 +152,4 @@ Current behavior:
 
 ## Deviations / perspectives
 - **Remote thin-client mode (planned)**: AbstractCode currently runs the runtime locally. For thin clients and unreliable networks, we plan to add a remote mode that renders from ledger replay and submits idempotent commands (ADR-0018; backlogs 307/308/309).
-- **Reducing dependency surface**: today, running VisualFlow JSON requires the `abstractflow` compiler (`create_visual_runner`). The long-term direction is a portable workflow IR (ADR-0012 / backlog 094) so non-AbstractFlow hosts can execute authored workflows without pulling in the full AbstractFlow library.
+- **Reducing dependency surface**: VisualFlow compilation semantics now live in `abstractruntime.visualflow_compiler` (single semantics engine) and `abstractflow` re-exports it for convenience. The remaining opportunity is to make AbstractCode’s local “run VisualFlow” path use the runtime compiler directly (dropping `abstractflow` as an execution dependency), while keeping `abstractflow` as an optional authoring integration. The old WorkflowArtifact execution direction (ADR-0012 / backlog 094) is deprecated.

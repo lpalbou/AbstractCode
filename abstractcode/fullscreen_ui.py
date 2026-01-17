@@ -16,7 +16,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import get_app
@@ -35,7 +35,7 @@ from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 from prompt_toolkit.styles import Style
 
-from .file_mentions import default_workspace_root, list_workspace_files, search_workspace_files
+from .file_mentions import default_workspace_mounts, default_workspace_root, list_workspace_files, search_workspace_files
 
 
 # Command definitions: (command, description)
@@ -57,6 +57,8 @@ COMMANDS = [
     ("recall", "Recall memory spans by query/time/tags"),
     ("vars", "Inspect durable run vars (scratchpad, _runtime, ...)"),
     ("context", "Show the exact context for the next LLM call"),
+    ("whitelist", "Whitelist workspace mounts for this session"),
+    ("blacklist", "Blacklist folders/files for this session"),
     ("memorize", "Store a durable memory note"),
     ("flow", "Run AbstractFlow workflows (run/resume/pause/cancel)"),
     ("mouse", "Toggle mouse mode (wheel scroll vs terminal selection)"),
@@ -274,12 +276,21 @@ class FullScreenUI:
 
         # Workspace `@file` completion + pending attachment chips.
         self._workspace_root: Path = default_workspace_root()
+        self._workspace_mounts: Dict[str, Path] = default_workspace_mounts()
+        self._workspace_mount_ignores: Dict[str, Any] = {}
+        self._workspace_blocked_paths: List[Path] = []
         try:
             from abstractcore.tools.abstractignore import AbstractIgnore  # type: ignore
 
             self._workspace_ignore = AbstractIgnore.for_path(self._workspace_root)
+            for name, root in dict(self._workspace_mounts).items():
+                try:
+                    self._workspace_mount_ignores[name] = AbstractIgnore.for_path(root)
+                except Exception:
+                    self._workspace_mount_ignores[name] = None
         except Exception:
             self._workspace_ignore = None
+            self._workspace_mount_ignores = {}
         self._workspace_files: List[str] = []
         self._workspace_files_built_at: float = 0.0
         self._workspace_files_ttl_s: float = 2.0
@@ -907,16 +918,121 @@ class FullScreenUI:
         parts.append(("class:attachments-hint", " (Backspace=remove)"))
         return parts
 
+    def set_workspace_policy(
+        self,
+        *,
+        workspace_root: Optional[Path] = None,
+        mounts: Optional[Dict[str, Path]] = None,
+        blocked_paths: Optional[Sequence[Path]] = None,
+    ) -> None:
+        """Best-effort: update workspace roots used for `@file` completion."""
+        if isinstance(workspace_root, Path):
+            self._workspace_root = workspace_root
+            try:
+                from abstractcore.tools.abstractignore import AbstractIgnore  # type: ignore
+
+                self._workspace_ignore = AbstractIgnore.for_path(self._workspace_root)
+            except Exception:
+                self._workspace_ignore = None
+
+        if mounts is not None:
+            self._workspace_mounts = dict(mounts or {})
+            self._workspace_mount_ignores = {}
+            try:
+                from abstractcore.tools.abstractignore import AbstractIgnore  # type: ignore
+
+                for name, root in dict(self._workspace_mounts).items():
+                    try:
+                        self._workspace_mount_ignores[name] = AbstractIgnore.for_path(root)
+                    except Exception:
+                        self._workspace_mount_ignores[name] = None
+            except Exception:
+                self._workspace_mount_ignores = {}
+
+        if blocked_paths is not None:
+            out: List[Path] = []
+            for p in blocked_paths:
+                if not isinstance(p, Path):
+                    continue
+                try:
+                    out.append(p.expanduser().resolve())
+                except Exception:
+                    try:
+                        out.append(Path(str(p)).expanduser())
+                    except Exception:
+                        continue
+            self._workspace_blocked_paths = out
+
+        # Force a rebuild of the file index on next completion.
+        self._workspace_files_built_at = 0.0
+
     def _refresh_workspace_files(self) -> None:
         now = time.monotonic()
         if (now - float(self._workspace_files_built_at)) < float(self._workspace_files_ttl_s):
             return
         try:
-            self._workspace_files = list_workspace_files(
-                root=self._workspace_root,
-                ignore=self._workspace_ignore,
-                max_files=20000,
-            )
+            blocked = list(self._workspace_blocked_paths or [])
+
+            def _is_under(child: Path, parent: Path) -> bool:
+                try:
+                    child.resolve().relative_to(parent.resolve())
+                    return True
+                except Exception:
+                    return False
+
+            def _is_blocked(p: Path) -> bool:
+                for b in blocked:
+                    try:
+                        if _is_under(p, b) or p.resolve() == b.resolve():
+                            return True
+                    except Exception:
+                        continue
+                return False
+
+            out: List[str] = []
+            remaining = 20000
+
+            base_files = list_workspace_files(root=self._workspace_root, ignore=self._workspace_ignore, max_files=remaining)
+            for rel in base_files:
+                if not rel:
+                    continue
+                if blocked:
+                    try:
+                        p = (self._workspace_root / Path(rel)).resolve()
+                        if _is_blocked(p):
+                            continue
+                    except Exception:
+                        continue
+                out.append(rel)
+                remaining -= 1
+                if remaining <= 0:
+                    break
+
+            if remaining > 0:
+                for name in sorted((self._workspace_mounts or {}).keys()):
+                    if remaining <= 0:
+                        break
+                    root = self._workspace_mounts.get(name)
+                    if not isinstance(root, Path):
+                        continue
+                    ignore = self._workspace_mount_ignores.get(name)
+                    files = list_workspace_files(root=root, ignore=ignore, max_files=remaining)
+                    for rel in files:
+                        if not rel:
+                            continue
+                        if blocked:
+                            try:
+                                p = (root / Path(rel)).resolve()
+                                if _is_blocked(p):
+                                    continue
+                            except Exception:
+                                continue
+                        out.append(f"{name}/{rel}")
+                        remaining -= 1
+                        if remaining <= 0:
+                            break
+
+            self._workspace_files = out
         except Exception:
             self._workspace_files = []
         self._workspace_files_built_at = now
@@ -972,7 +1088,7 @@ class FullScreenUI:
     def _accept_completion(self, event) -> None:
         """Accept the current completion.
 
-        - In `@file` context: add an attachment chip and remove the `@token` from the composer.
+        - In `@file` context: add an attachment chip and keep the `@...` mention in the composer.
         - Otherwise: apply the completion normally.
         """
         buff = event.app.current_buffer
@@ -995,14 +1111,13 @@ class FullScreenUI:
         before = buff.document.text_before_cursor
         m = self._AT_TOKEN_RE.search(before)
         if m:
-            prefix = str(m.group(2) or "")
             rel = str(getattr(comp, "text", "") or "").strip()
             if rel:
                 if rel not in self._pending_attachments:
                     self._pending_attachments.append(rel)
-            # Remove the whole `@prefix` token from the composer.
+            # Apply completion normally so the `@file` mention remains in the text.
             try:
-                buff.delete_before_cursor(count=len(prefix) + 1)
+                buff.apply_completion(comp)
             except Exception:
                 pass
             try:

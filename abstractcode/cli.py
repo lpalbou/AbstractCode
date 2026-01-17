@@ -135,7 +135,7 @@ def build_agent_parser() -> argparse.ArgumentParser:
 
 def _run_one_shot_prompt(*, shell: ReactShell, prompt: str) -> int:
     """Run one task and exit (no full-screen UI)."""
-    from .file_mentions import extract_at_file_mentions, normalize_relative_path
+    from .file_mentions import find_at_file_mentions, normalize_relative_path
     from .flow_cli import _ApprovalState, _approve_and_execute
 
     # Lazy imports: keep `abstractcode --help` fast.
@@ -145,7 +145,7 @@ def _run_one_shot_prompt(*, shell: ReactShell, prompt: str) -> int:
     if not text:
         return 0
 
-    cleaned, mentions = extract_at_file_mentions(text)
+    mentions = find_at_file_mentions(text)
     paths: list[str] = []
     for m in mentions:
         norm = normalize_relative_path(m)
@@ -168,7 +168,11 @@ def _run_one_shot_prompt(*, shell: ReactShell, prompt: str) -> int:
         if joined:
             print(f"Attachments: {joined}", file=sys.stderr)
 
-    run_id = shell._agent.start(cleaned or text, allowed_tools=shell._allowed_tools, attachments=attachment_refs or None)
+    run_id = shell._agent.start(text, allowed_tools=shell._allowed_tools, attachments=attachment_refs or None)
+    try:
+        shell._sync_tool_prompt_settings_to_run(run_id)
+    except Exception:
+        pass
     if getattr(shell, "_state_file", None):
         try:
             shell._agent.save_state(shell._state_file)  # type: ignore[arg-type]

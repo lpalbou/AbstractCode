@@ -39,3 +39,38 @@ def test_list_workspace_files_respects_abstractignore() -> None:
         assert "b.txt" not in out
         assert "node_modules/x.txt" not in out
 
+
+def test_find_at_file_mentions_does_not_mutate_text() -> None:
+    from abstractcode.file_mentions import find_at_file_mentions
+
+    text = "What is @docs/arch.md about?"
+    assert find_at_file_mentions(text) == ["docs/arch.md"]
+    assert text == "What is @docs/arch.md about?"
+
+
+def test_resolve_workspace_path_supports_mount_prefix_and_blocks_traversal(tmp_path: Path) -> None:
+    from abstractcode.file_mentions import resolve_workspace_path
+
+    ws = tmp_path / "ws"
+    mount = tmp_path / "notes"
+    ws.mkdir()
+    mount.mkdir()
+    (mount / "todo.md").write_text("x", encoding="utf-8")
+
+    resolved, virt, mount_name, root = resolve_workspace_path(
+        raw_path="notes/todo.md",
+        workspace_root=ws,
+        mounts={"notes": mount},
+    )
+    assert resolved == (mount / "todo.md").resolve()
+    assert virt == "notes/todo.md"
+    assert mount_name == "notes"
+    assert root == mount.resolve()
+
+    # Mount traversal is rejected.
+    try:
+        resolve_workspace_path(raw_path="notes/../ws/secret.txt", workspace_root=ws, mounts={"notes": mount})
+    except ValueError as e:
+        assert "escapes" in str(e).lower()
+    else:
+        raise AssertionError("Expected traversal to be rejected")

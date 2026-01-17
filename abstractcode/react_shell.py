@@ -12,7 +12,13 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from prompt_toolkit.formatted_text import HTML
 
 from .input_handler import create_prompt_session, create_simple_session
-from .file_mentions import default_workspace_root, extract_at_file_mentions, normalize_relative_path
+from .file_mentions import (
+    default_workspace_mounts,
+    default_workspace_root,
+    find_at_file_mentions,
+    normalize_relative_path,
+    resolve_workspace_path,
+)
 from .fullscreen_ui import FullScreenUI, SubmittedInput
 from .terminal_markdown import TerminalMarkdownRenderer
 
@@ -347,10 +353,19 @@ class ReactShell:
 
         # Workspace root for `@file` mentions / attachments.
         self._workspace_root: Path = default_workspace_root()
+        self._workspace_mounts: Dict[str, Path] = default_workspace_mounts()
+        self._workspace_mount_ignores: Dict[str, Any] = {}
+        self._workspace_blocked_paths: List[Path] = []
         try:
             self._workspace_ignore = self._AbstractIgnore.for_path(self._workspace_root)
+            for name, root in dict(self._workspace_mounts).items():
+                try:
+                    self._workspace_mount_ignores[name] = self._AbstractIgnore.for_path(root)
+                except Exception:
+                    self._workspace_mount_ignores[name] = None
         except Exception:
             self._workspace_ignore = None
+            self._workspace_mount_ignores = {}
 
         if self._workflow_agent_ref is not None:
             try:
@@ -391,6 +406,17 @@ class ReactShell:
             on_copy_payload=self._copy_to_clipboard,
             color=self._color,
         )
+        # Keep `@file` completion consistent with the shell's workspace policy.
+        try:
+            setter = getattr(self._ui, "set_workspace_policy", None)
+            if callable(setter):
+                setter(
+                    workspace_root=self._workspace_root,
+                    mounts=dict(self._workspace_mounts),
+                    blocked_paths=list(self._workspace_blocked_paths),
+                )
+        except Exception:
+            pass
 
         # Keep simple session for tool approvals (runs within full-screen)
         self._simple_session = create_simple_session(color=self._color)
@@ -1354,6 +1380,8 @@ class ReactShell:
             "expand",
             "vars",
             "var",
+            "whitelist",
+            "blacklist",
             "log",
             "memorize",
             "recall",
@@ -1380,7 +1408,7 @@ class ReactShell:
         # Otherwise treat as a task. Allow both:
         # - chips-based attachments (from `@` completion), and
         # - inline `@file` mentions typed manually.
-        cleaned, mentions = extract_at_file_mentions(cmd)
+        mentions = find_at_file_mentions(cmd)
         paths: List[str] = []
         for p in attachment_paths:
             norm = normalize_relative_path(p)
@@ -1401,32 +1429,46 @@ class ReactShell:
             if joined:
                 self._print(_style(f"Attachments: {joined}", _C.DIM, enabled=self._color))
 
-        self._start(cleaned or cmd, attachments=attachment_refs or None)
+        self._start(cmd, attachments=attachment_refs or None)
 
-    def _resolve_workspace_file(self, rel_path: str) -> Optional[Path]:
+    def _resolve_workspace_file(self, rel_path: str) -> Optional[tuple[Path, str]]:
         rel = normalize_relative_path(rel_path)
         if not rel:
             return None
         try:
-            p = (self._workspace_root / rel).resolve()
+            p, virt, mount, root = resolve_workspace_path(
+                raw_path=rel,
+                workspace_root=self._workspace_root,
+                mounts=dict(self._workspace_mounts or {}),
+            )
+            del root
         except Exception:
             return None
-        try:
-            p.relative_to(self._workspace_root)
-        except Exception:
-            return None
+
+        blocked = list(self._workspace_blocked_paths or [])
+        for b in blocked:
+            if not isinstance(b, Path):
+                continue
+            try:
+                if p.resolve() == b.resolve():
+                    return None
+                p.resolve().relative_to(b.resolve())
+                return None
+            except Exception:
+                continue
+
         try:
             if not p.is_file():
                 return None
         except Exception:
             return None
         try:
-            ign = getattr(self, "_workspace_ignore", None)
+            ign = self._workspace_ignore if mount is None else self._workspace_mount_ignores.get(str(mount))
             if ign is not None and ign.is_ignored(p, is_dir=False):
                 return None
         except Exception:
             pass
-        return p
+        return (p, virt)
 
     def _max_attachment_bytes(self) -> int:
         raw = os.environ.get("ABSTRACTCODE_MAX_ATTACHMENT_BYTES") or os.environ.get("ABSTRACTGATEWAY_MAX_ATTACHMENT_BYTES")
@@ -1460,10 +1502,11 @@ class ReactShell:
         out: List[Dict[str, Any]] = []
 
         for rel in paths:
-            p = self._resolve_workspace_file(rel)
-            if p is None:
+            resolved = self._resolve_workspace_file(rel)
+            if resolved is None:
                 self._print(_style(f"Attachment ignored/not found: {rel}", _C.YELLOW, enabled=self._color))
                 continue
+            p, virt = resolved
 
             try:
                 size = int(p.stat().st_size)
@@ -1491,7 +1534,7 @@ class ReactShell:
                     bytes(content),
                     content_type=str(ct),
                     run_id=run_id,
-                    tags={"kind": "attachment", "source": "workspace", "path": rel},
+                    tags={"kind": "attachment", "source": "workspace", "path": virt},
                 )
             except Exception as e:
                 self._print(_style(f"Attachment ingest failed: {rel} ({e})", _C.YELLOW, enabled=self._color))
@@ -1502,7 +1545,7 @@ class ReactShell:
                     "$artifact": str(meta.artifact_id),
                     "filename": str(p.name),
                     "content_type": str(ct),
-                    "source_path": str(rel),
+                    "source_path": str(virt),
                 }
             )
 
@@ -1992,6 +2035,12 @@ class ReactShell:
             return False
         if command in ("vars", "var"):
             self._handle_vars(arg)
+            return False
+        if command == "whitelist":
+            self._handle_whitelist(arg)
+            return False
+        if command == "blacklist":
+            self._handle_blacklist(arg)
             return False
         if command == "log":
             self._handle_log(arg)
@@ -4221,6 +4270,208 @@ class ReactShell:
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
         self._print(json.dumps(out, ensure_ascii=False, indent=2, sort_keys=True, default=str))
 
+    def _sync_workspace_policy_to_ui(self) -> None:
+        """Best-effort: keep UI `@file` completion aligned with shell workspace policy."""
+        try:
+            setter = getattr(self._ui, "set_workspace_policy", None)
+            if callable(setter):
+                setter(
+                    workspace_root=self._workspace_root,
+                    mounts=dict(self._workspace_mounts or {}),
+                    blocked_paths=list(self._workspace_blocked_paths or []),
+                )
+        except Exception:
+            pass
+
+    def _handle_whitelist(self, raw: str) -> None:
+        """Whitelist directories for this session as named workspace mounts.
+
+        Usage:
+          /whitelist
+          /whitelist <dir...>
+          /whitelist name=/abs/dir [name2=/abs/dir2 ...]
+
+        Notes:
+        - Mounts are referenced in prompts as: `@<mount>/<path/to/file>`
+        - Blacklist has priority over whitelist.
+        """
+        import re
+        import shlex
+
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split() if raw else []
+
+        if not parts:
+            mounts = dict(self._workspace_mounts or {})
+            if not mounts:
+                self._print(_style("No mounts configured. Use /whitelist <dir...>.", _C.DIM, enabled=self._color))
+                return
+            self._print(_style("\nWorkspace mounts", _C.CYAN, _C.BOLD, enabled=self._color))
+            self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+            for name, root in sorted(mounts.items()):
+                self._print(f"- {name}={root}")
+            return
+
+        def _sanitize_mount_name(name: str) -> str:
+            s = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(name or "").strip())
+            s = s.strip("_-")
+            if not s:
+                s = "mount"
+            return s[:32]
+
+        existing = dict(self._workspace_mounts or {})
+        added: list[tuple[str, Path]] = []
+
+        for tok in parts:
+            name: Optional[str] = None
+            path_text = str(tok or "").strip()
+            if not path_text:
+                continue
+            if "=" in path_text:
+                a, b = path_text.split("=", 1)
+                cand_name = a.strip()
+                cand_path = b.strip()
+                if cand_name and re.match(r"^[a-zA-Z0-9_-]{1,32}$", cand_name):
+                    name = cand_name
+                    path_text = cand_path
+
+            if not path_text:
+                continue
+
+            p = Path(path_text).expanduser()
+            try:
+                resolved = p.resolve() if p.is_absolute() else (self._workspace_root / p).resolve()
+            except Exception:
+                self._print(_style(f"Invalid path: {path_text}", _C.YELLOW, enabled=self._color))
+                continue
+            try:
+                if not resolved.exists() or not resolved.is_dir():
+                    self._print(_style(f"Not a directory: {resolved}", _C.YELLOW, enabled=self._color))
+                    continue
+            except Exception:
+                self._print(_style(f"Directory not accessible: {resolved}", _C.YELLOW, enabled=self._color))
+                continue
+
+            mount = _sanitize_mount_name(name or resolved.name or "mount")
+            base = mount
+            i = 2
+            while mount in existing and existing.get(mount) != resolved:
+                suffix = f"_{i}"
+                mount = (base[: max(1, 32 - len(suffix))] + suffix)[:32]
+                i += 1
+
+            existing[mount] = resolved
+            try:
+                self._workspace_mount_ignores[mount] = self._AbstractIgnore.for_path(resolved)
+            except Exception:
+                self._workspace_mount_ignores[mount] = None
+            added.append((mount, resolved))
+
+        self._workspace_mounts = existing
+        self._sync_workspace_policy_to_ui()
+
+        rid = self._attached_run_id()
+        if rid is not None:
+            self._sync_tool_prompt_settings_to_run(rid)
+
+        if not added:
+            return
+        self._print(_style("Whitelisted:", _C.DIM, enabled=self._color))
+        for mount, root in added:
+            self._print(_style(f"  {mount}={root}", _C.DIM, enabled=self._color))
+
+    def _handle_blacklist(self, raw: str) -> None:
+        """Blacklist folders/files for this session (overrides whitelist)."""
+        import shlex
+
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split() if raw else []
+
+        if not parts:
+            blocked = list(self._workspace_blocked_paths or [])
+            if not blocked:
+                self._print(_style("No blacklist entries.", _C.DIM, enabled=self._color))
+                return
+            self._print(_style("\nWorkspace blacklist", _C.CYAN, _C.BOLD, enabled=self._color))
+            self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+            for p in blocked:
+                self._print(f"- {p}")
+            return
+
+        head = str(parts[0] or "").strip().lower()
+        if head in ("reset", "clear"):
+            self._workspace_blocked_paths = []
+            self._sync_workspace_policy_to_ui()
+            rid = self._attached_run_id()
+            if rid is not None:
+                self._sync_tool_prompt_settings_to_run(rid)
+            self._print(_style("Blacklist cleared.", _C.DIM, enabled=self._color))
+            return
+
+        blocked = list(self._workspace_blocked_paths or [])
+        added: list[Path] = []
+        for tok in parts:
+            text = str(tok or "").strip()
+            if not text:
+                continue
+            p = Path(text).expanduser()
+            if p.is_absolute():
+                try:
+                    resolved = p.resolve()
+                except Exception:
+                    self._print(_style(f"Invalid path: {text}", _C.YELLOW, enabled=self._color))
+                    continue
+            else:
+                norm = normalize_relative_path(text)
+                if not norm:
+                    self._print(_style(f"Invalid path: {text}", _C.YELLOW, enabled=self._color))
+                    continue
+                try:
+                    resolved, _virt, _mount, _root = resolve_workspace_path(
+                        raw_path=norm,
+                        workspace_root=self._workspace_root,
+                        mounts=dict(self._workspace_mounts or {}),
+                    )
+                except Exception:
+                    self._print(_style(f"Invalid path: {text}", _C.YELLOW, enabled=self._color))
+                    continue
+
+            try:
+                resolved = resolved.resolve()
+            except Exception:
+                pass
+
+            # De-dup
+            already = False
+            for cur in blocked:
+                try:
+                    if resolved == cur.resolve():
+                        already = True
+                        break
+                except Exception:
+                    continue
+            if already:
+                continue
+            blocked.append(resolved)
+            added.append(resolved)
+
+        self._workspace_blocked_paths = blocked
+        self._sync_workspace_policy_to_ui()
+
+        rid = self._attached_run_id()
+        if rid is not None:
+            self._sync_tool_prompt_settings_to_run(rid)
+
+        if not added:
+            return
+        self._print(_style("Blacklisted:", _C.DIM, enabled=self._color))
+        for p in added:
+            self._print(_style(f"  {p}", _C.DIM, enabled=self._color))
+
     def _handle_context(self, raw: str) -> None:
         """(Deprecated) Legacy context preview command.
 
@@ -5449,6 +5700,12 @@ class ReactShell:
             "  /expand <span>      Expand an archived span (--show, --into-context)\n"
             "  /recall [opts]      Recall spans by time/tags/query (--into-context)\n"
             "  /vars [path]        Inspect run vars (scratchpad, _runtime, ...)\n"
+            "  /whitelist ...      Add workspace mounts for this session\n"
+            "                     - /whitelist <dir...>\n"
+            "                     - /whitelist name=/abs/dir [name2=/abs/dir2 ...]\n"
+            "  /blacklist ...      Block folders/files for this session (overrides whitelist)\n"
+            "                     - /blacklist <path...>\n"
+            "                     - /blacklist reset\n"
             "  /log runtime        Show runtime step trace for LLM/tool calls (durable)\n"
             "                     - /log runtime [copy] [--last] [--json-only] [--save <path>]\n"
             "  /log provider       Show provider wire request+response (durable)\n"
@@ -5982,6 +6239,75 @@ class ReactShell:
             runtime_ns = {}
             state.vars["_runtime"] = runtime_ns
         runtime_ns["tool_prompt_examples"] = bool(self._tool_prompt_examples)
+
+        # Workspace policy (tool-call scoping): keep it JSON-safe and stable across runs.
+        #
+        # Notes:
+        # - `workspace_root` applies to relative paths and command working_directory defaults.
+        # - Mount roots are expressed as `workspace_allowed_paths` (absolute paths).
+        # - Blacklist uses `workspace_ignored_paths` (absolute paths) and always has priority.
+        try:
+            if "workspace_root" not in state.vars:
+                state.vars["workspace_root"] = str(self._workspace_root)
+
+            allowed_paths = [str(p) for p in (self._workspace_mounts or {}).values() if isinstance(p, Path)]
+            ignored_paths = [str(p) for p in (self._workspace_blocked_paths or []) if isinstance(p, Path)]
+
+            def _as_list(value: Any) -> List[str]:
+                if value is None:
+                    return []
+                if isinstance(value, list):
+                    return [str(x).strip() for x in value if isinstance(x, (str, int, float, bool)) and str(x).strip()]
+                if isinstance(value, str):
+                    s = value.strip()
+                    if not s:
+                        return []
+                    if s.startswith("["):
+                        try:
+                            parsed = json.loads(s)
+                            if isinstance(parsed, list):
+                                return [str(x).strip() for x in parsed if isinstance(x, str) and str(x).strip()]
+                        except Exception:
+                            pass
+                    return [ln.strip() for ln in s.splitlines() if ln.strip()]
+                return []
+
+            def _merge_unique(existing: Any, extra: List[str]) -> List[str]:
+                base = _as_list(existing)
+                seen: set[str] = set()
+                out: List[str] = []
+                for x in list(base) + list(extra):
+                    if not isinstance(x, str):
+                        continue
+                    s = x.strip()
+                    if not s or s in seen:
+                        continue
+                    seen.add(s)
+                    out.append(s)
+                return out
+
+            if allowed_paths:
+                state.vars["workspace_allowed_paths"] = _merge_unique(
+                    state.vars.get("workspace_allowed_paths") or state.vars.get("workspaceAllowedPaths"),
+                    allowed_paths,
+                )
+                mode_raw = state.vars.get("workspace_access_mode") or state.vars.get("workspaceAccessMode")
+                mode = str(mode_raw or "").strip().lower()
+                if not mode or mode == "workspace_only":
+                    state.vars["workspace_access_mode"] = "workspace_or_allowed"
+            else:
+                # Default to workspace_only when no allowlist is present and caller didn't specify.
+                if "workspace_access_mode" not in state.vars and "workspaceAccessMode" not in state.vars:
+                    state.vars["workspace_access_mode"] = "workspace_only"
+
+            if ignored_paths:
+                state.vars["workspace_ignored_paths"] = _merge_unique(
+                    state.vars.get("workspace_ignored_paths") or state.vars.get("workspaceIgnoredPaths"),
+                    ignored_paths,
+                )
+        except Exception:
+            pass
+
         try:
             self._runtime.run_store.save(state)
         except Exception:

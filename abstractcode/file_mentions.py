@@ -8,6 +8,7 @@ from typing import Iterable, List, Tuple
 
 _AT_MENTION_RE = re.compile(r"(^|\s)@([^\s]+)")
 _TRAILING_PUNCT = ".,;:!?)]}>\"'"
+_MOUNT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 
 
 def default_workspace_root(*, cwd: Path | None = None) -> Path:
@@ -52,6 +53,55 @@ def extract_at_file_mentions(text: str) -> Tuple[str, List[str]]:
     return cleaned, mentions
 
 
+def find_at_file_mentions(text: str) -> List[str]:
+    """Return `@file` mention tokens without mutating the original text."""
+    raw = str(text or "")
+    out: List[str] = []
+    for m in _AT_MENTION_RE.finditer(raw):
+        tok = str(m.group(2) or "")
+        tok = tok.rstrip(_TRAILING_PUNCT).strip()
+        if tok:
+            out.append(tok)
+    return out
+
+
+def parse_workspace_mounts(raw: str) -> dict[str, Path]:
+    """Parse newline-separated `name=/abs/path` mount entries (best-effort)."""
+    out: dict[str, Path] = {}
+    for ln in str(raw or "").splitlines():
+        line = str(ln or "").strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        name, path = line.split("=", 1)
+        name = name.strip()
+        path = path.strip()
+        if not name or not _MOUNT_NAME_RE.match(name):
+            continue
+        if not path:
+            continue
+        try:
+            p = Path(path).expanduser()
+            if not p.is_absolute():
+                continue
+            resolved = p.resolve()
+        except Exception:
+            continue
+        try:
+            if not resolved.exists() or not resolved.is_dir():
+                continue
+        except Exception:
+            continue
+        out[name] = resolved
+    return dict(out)
+
+
+def default_workspace_mounts() -> dict[str, Path]:
+    raw = os.environ.get("ABSTRACTCODE_WORKSPACE_MOUNTS") or os.environ.get("ABSTRACTGATEWAY_WORKSPACE_MOUNTS") or ""
+    return parse_workspace_mounts(raw)
+
+
 def _is_safe_relpath(path: str) -> bool:
     p = str(path or "").strip()
     if not p:
@@ -66,12 +116,85 @@ def _is_safe_relpath(path: str) -> bool:
 
 def normalize_relative_path(path: str) -> str:
     p = str(path or "").strip()
+    p = p.replace("\\", "/")
     if not _is_safe_relpath(p):
         return ""
     # Collapse a leading "./" for nicer UX and more stable matching.
     if p.startswith("./"):
         p = p[2:]
     return p
+
+
+def resolve_workspace_path(
+    *,
+    raw_path: str,
+    workspace_root: Path,
+    mounts: dict[str, Path],
+) -> tuple[Path, str, str | None, Path]:
+    """Resolve a virtual path against workspace_root + mounts.
+
+    Virtual path grammar:
+    - Primary root: `docs/readme.md`
+    - Mount root: `mount/path/to/file.md` (mount must be in `mounts`)
+
+    Notes:
+    - Mount resolution requires `mount/...` (at least one `/`) to avoid collisions.
+    - Absolute paths are allowed only when under workspace_root or a mount root.
+    """
+    raw = str(raw_path or "").strip()
+    if not raw:
+        raise ValueError("Empty path")
+
+    cleaned = raw.replace("\\", "/")
+    p = Path(cleaned).expanduser()
+    root = Path(workspace_root).expanduser()
+
+    if p.is_absolute():
+        resolved = p.resolve()
+        candidates: list[tuple[int, str | None, Path]] = []
+        try:
+            resolved.relative_to(root)
+            candidates.append((len(str(root)), None, root))
+        except Exception:
+            pass
+        for name, mroot in (mounts or {}).items():
+            if not isinstance(mroot, Path):
+                continue
+            try:
+                resolved.relative_to(mroot)
+                candidates.append((len(str(mroot)), str(name), mroot))
+            except Exception:
+                continue
+        if not candidates:
+            raise ValueError("Path is outside workspace roots")
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        _len, mount, selected_root = candidates[0]
+        rel = resolved.relative_to(selected_root).as_posix()
+        virt = f"{mount}/{rel}" if mount and rel else (str(mount) if mount else rel)
+        return resolved, virt, mount, selected_root
+
+    virt_raw = cleaned
+    while virt_raw.startswith("./"):
+        virt_raw = virt_raw[2:]
+
+    parts = [seg for seg in virt_raw.split("/") if seg not in ("", ".")]
+    mount: str | None = None
+    selected_root = root
+    rel_part = virt_raw
+    if len(parts) >= 2 and parts[0] in (mounts or {}):
+        mount = parts[0]
+        selected_root = mounts[mount]
+        rel_part = "/".join(parts[1:])
+
+    resolved = (selected_root / Path(rel_part)).resolve()
+    try:
+        resolved.relative_to(selected_root)
+    except Exception:
+        raise ValueError("Path escapes workspace root")
+
+    rel_norm = resolved.relative_to(selected_root).as_posix()
+    virt_norm = f"{mount}/{rel_norm}" if mount and rel_norm else (str(mount) if mount else rel_norm)
+    return resolved, virt_norm, mount, selected_root
 
 
 def list_workspace_files(*, root: Path, ignore, max_files: int = 20000) -> List[str]:
