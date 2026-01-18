@@ -1194,12 +1194,13 @@ class FullScreenUI:
                 self._history.append_string(text)
                 # Clear input
                 self._input_buffer.reset()
+                attachments = list(self._attachments)
+                self._attachments = []
 
                 # If there's a pending blocking prompt, respond to it
                 if self._pending_blocking_prompt is not None:
                     self._pending_blocking_prompt.put(text)
                 else:
-                    attachments = list(self._attachments)
                     # Queue for background processing (don't exit app!)
                     self._command_queue.put(SubmittedInput(text=text, attachments=attachments))
 

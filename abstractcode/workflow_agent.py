@@ -255,6 +255,7 @@ def _compile_visual_flow_tree(
             COMPACT_MEMORY_TOOL,
             DELEGATE_AGENT_TOOL,
             INSPECT_VARS_TOOL,
+            OPEN_ATTACHMENT_TOOL,
             RECALL_MEMORY_TOOL,
             REMEMBER_NOTE_TOOL,
             REMEMBER_TOOL,
@@ -272,6 +273,7 @@ def _compile_visual_flow_tree(
 
         tool_defs = [
             ASK_USER_TOOL,
+            OPEN_ATTACHMENT_TOOL,
             RECALL_MEMORY_TOOL,
             INSPECT_VARS_TOOL,
             REMEMBER_TOOL,

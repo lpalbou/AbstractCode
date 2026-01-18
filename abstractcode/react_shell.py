@@ -432,6 +432,8 @@ class ReactShell:
         # Session-level attachment refs (workspace-relative path -> artifact-backed ref dict).
         # Avoids re-ingesting the same file every turn when attachments persist.
         self._attachment_ref_cache: Dict[str, Dict[str, Any]] = {}
+        # Workspace file signatures (path -> (size_bytes, mtime_ns)) used to detect file changes.
+        self._attachment_sig_cache: Dict[str, Tuple[int, int]] = {}
         # Simple in-session dedup for obviously repeated shell commands.
         self._last_execute_command: Optional[str] = None
         self._last_execute_command_result: Optional[Dict[str, Any]] = None
@@ -1442,18 +1444,61 @@ class ReactShell:
         # Ingest missing attachments once; reuse cached refs across turns.
         newly_added: List[str] = []
         if paths:
-            missing = [p for p in paths if p not in self._attachment_ref_cache]
-            if missing:
-                for ref in self._ingest_workspace_attachments(missing):
+            def _workspace_sig(rel: str) -> Optional[Tuple[int, int]]:
+                resolved = self._resolve_workspace_file(rel)
+                if resolved is None:
+                    return None
+                p, _virt = resolved
+                try:
+                    st = p.stat()
+                    size = int(st.st_size)
+                    mtime_ns = int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
+                    return (size, mtime_ns)
+                except Exception:
+                    return None
+
+            needs_ingest: List[str] = []
+            for rel in paths:
+                cached = self._attachment_ref_cache.get(rel)
+                if not isinstance(cached, dict) or not cached:
+                    needs_ingest.append(rel)
+                    continue
+                cached_sig = self._attachment_sig_cache.get(rel)
+                cur_sig = _workspace_sig(rel)
+                if cached_sig is not None and cur_sig is not None and cached_sig != cur_sig:
+                    needs_ingest.append(rel)
+
+            if needs_ingest:
+                for ref in self._ingest_workspace_attachments(needs_ingest):
                     if not isinstance(ref, dict):
                         continue
                     key = normalize_relative_path(str(ref.get("source_path") or ""))
                     if not key:
                         continue
-                    if key in self._attachment_ref_cache:
-                        continue
-                    self._attachment_ref_cache[key] = dict(ref)
-                    newly_added.append(key)
+                    prev = self._attachment_ref_cache.get(key)
+                    prev_sha = str(prev.get("sha256") or "").strip() if isinstance(prev, dict) else ""
+                    # Strip internal fields before caching/passing to the agent.
+                    clean = {k: v for k, v in dict(ref).items() if isinstance(k, str) and not k.startswith("_")}
+                    sig0 = ref.get("_sig") if isinstance(ref.get("_sig"), dict) else {}
+                    try:
+                        size0 = int((sig0 or {}).get("size_bytes"))
+                    except Exception:
+                        size0 = -1
+                    try:
+                        mtime0 = int((sig0 or {}).get("mtime_ns"))
+                    except Exception:
+                        mtime0 = -1
+                    existed = isinstance(prev, dict)
+                    self._attachment_ref_cache[key] = clean
+                    if size0 >= 0 and mtime0 >= 0:
+                        self._attachment_sig_cache[key] = (size0, mtime0)
+                    if not existed:
+                        newly_added.append(key)
+                    else:
+                        # Only report as "new" when the content hash changed (version update).
+                        next_sha = str(clean.get("sha256") or "").strip()
+                        if next_sha and prev_sha and next_sha != prev_sha:
+                            newly_added.append(key)
 
         attachment_refs: List[Dict[str, Any]] = []
         for p in paths:
@@ -1547,6 +1592,7 @@ class ReactShell:
 
     def _ingest_workspace_attachments(self, rel_paths: Sequence[str]) -> List[Dict[str, Any]]:
         """Store workspace files in ArtifactStore and return AttachmentRefs (best-effort)."""
+        import hashlib
         import mimetypes
 
         paths: list[str] = [normalize_relative_path(p) for p in (rel_paths or []) if normalize_relative_path(p)]
@@ -1566,8 +1612,10 @@ class ReactShell:
 
             try:
                 size = int(p.stat().st_size)
+                mtime_ns = int(getattr(p.stat(), "st_mtime_ns", int(p.stat().st_mtime * 1e9)))
             except Exception:
                 size = -1
+                mtime_ns = -1
             if size >= 0 and size > max_bytes:
                 self._print(
                     _style(
@@ -1584,13 +1632,20 @@ class ReactShell:
                 self._print(_style(f"Attachment read failed: {rel} ({e})", _C.YELLOW, enabled=self._color))
                 continue
 
+            sha256 = hashlib.sha256(bytes(content)).hexdigest()
             ct = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
             try:
                 meta = self._artifact_store.store(
                     bytes(content),
                     content_type=str(ct),
                     run_id=run_id,
-                    tags={"kind": "attachment", "source": "workspace", "path": virt},
+                    tags={
+                        "kind": "attachment",
+                        "source": "workspace",
+                        "path": virt,
+                        "filename": str(p.name),
+                        "sha256": sha256,
+                    },
                 )
             except Exception as e:
                 self._print(_style(f"Attachment ingest failed: {rel} ({e})", _C.YELLOW, enabled=self._color))
@@ -1602,6 +1657,8 @@ class ReactShell:
                     "filename": str(p.name),
                     "content_type": str(ct),
                     "source_path": str(virt),
+                    "sha256": sha256,
+                    "_sig": {"size_bytes": size, "mtime_ns": mtime_ns},
                 }
             )
 

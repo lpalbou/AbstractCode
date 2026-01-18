@@ -4,12 +4,14 @@ import { GatewayClient } from "../lib/gateway_client";
 import { random_id } from "../lib/ids";
 import { extract_tool_calls_from_wait, extract_wait_from_record } from "../lib/runtime_extractors";
 import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types";
+import type { AttachmentRef } from "../lib/types";
 import { ChatMessageContent } from "@abstractuic/panel-chat";
 import { registerMonitorGpuWidget } from "@abstractutils/monitor-gpu";
 import { MarkdownRenderer } from "./markdown_renderer";
 import { ToolPicker } from "./tool_picker";
 import { Icon, type IconName } from "./icons";
 import { copy_text } from "../lib/clipboard";
+import { build_run_input_data } from "../lib/run_input";
 import {
   clear_active_run_id,
   clear_run_cursor,
@@ -42,7 +44,7 @@ type AgentTemplate = {
 
 type AttachedFile = {
   path: string;
-  content: string | null;
+  attachment: AttachmentRef | null;
   loading: boolean;
   error?: string;
 };
@@ -117,18 +119,6 @@ function monitor_gpu_enabled(): boolean {
   } catch {
     return false;
   }
-}
-
-function parse_tools_allowlist(raw: string[]): string[] {
-  const parts = Array.isArray(raw) ? raw.map((x) => String(x || "").trim()).filter(Boolean) : [];
-  const uniq: string[] = [];
-  const seen = new Set<string>();
-  for (const p of parts) {
-    if (seen.has(p)) continue;
-    seen.add(p);
-    uniq.push(p);
-  }
-  return uniq;
 }
 
 type UsageSummary = { input_tokens: number; output_tokens: number; total_tokens: number };
@@ -1767,12 +1757,7 @@ function ConsolePage(props: {
     const history = (props.repl.messages || []).filter((m) => m.role === "user" || m.role === "assistant");
     const joined = history.map((m) => `${m.role}: ${m.content}`).join("\n\n");
     const next_text = composer.trim() ? `${joined}\n\nuser: ${composer.trim()}` : joined;
-    const files_text = attached_files
-      .filter((f) => !f.loading && !f.error && typeof f.content === "string" && f.content.trim())
-      .map((f) => String(f.content || "").trim())
-      .join("\n\n");
-    const next_with_files = files_text ? `${next_text}\n\nsystem: ${files_text}` : next_text;
-    const used = Math.max(0, Math.ceil(next_with_files.length / 4));
+    const used = Math.max(0, Math.ceil(next_text.length / 4));
     const caps = model_caps && typeof model_caps === "object" ? (model_caps as any).capabilities : null;
     const max_tokens = caps && typeof caps === "object" ? Number((caps as any).max_tokens ?? 0) : 0;
     const pct = max_tokens > 0 ? (used / max_tokens) * 100 : 0;
@@ -2013,147 +1998,6 @@ function ConsolePage(props: {
     }
   }
 
-  function build_input_data(prompt: string): Record<string, any> {
-    const tools = parse_tools_allowlist(props.settings.tools);
-    const history_msgs: ReplMessage[] = (props.repl.messages || []).filter((m) => m.role === "user" || m.role === "assistant" || m.role === "system");
-    const ctx_messages: { role: string; content: string }[] = history_msgs
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .map((m) => ({ role: m.role, content: m.content }));
-
-    // Durable, agent-consumable context (structured) so workflows can remain stateful
-    // even when the UI reloads and has to reconstruct history from runs.
-    const turns: any[] = [];
-    let pending_prompt: string | null = null;
-    let pending_tools: any[] = [];
-    for (const m of history_msgs) {
-      if (m.role === "user") {
-        pending_prompt = String(m.content || "");
-        pending_tools = [];
-        continue;
-      }
-      if (m.role === "system") {
-        const kind = String(m.meta?._kind || "").trim();
-        if (kind === "tool") {
-          const tool_meta = m.meta?.tool;
-          const name = String(tool_meta?.name || "").trim();
-          const args = tool_meta?.arguments;
-          const ok = typeof tool_meta?.success === "boolean" ? tool_meta.success : null;
-          const entry: any = { name: name || "tool", ok };
-          if (args && typeof args === "object") {
-            const path = typeof (args as any).path === "string" ? String((args as any).path).trim() : "";
-            const query = typeof (args as any).query === "string" ? String((args as any).query).trim() : "";
-            const command = typeof (args as any).command === "string" ? String((args as any).command).trim() : "";
-            if (path) entry.path = path;
-            if (query) entry.query = query;
-            if (command) entry.command = command;
-          }
-          pending_tools.push(entry);
-        }
-        continue;
-      }
-      if (m.role === "assistant") {
-        if (pending_prompt) {
-          const stats = m.meta && typeof m.meta === "object" ? (m.meta as any)._repl : null;
-          turns.push({
-            prompt: pending_prompt,
-            answer: String(m.content || ""),
-            run_id: m.run_id || null,
-            stats: stats && typeof stats === "object" ? stats : null,
-            tools: pending_tools.slice(0, 50),
-          });
-          pending_prompt = null;
-          pending_tools = [];
-        }
-      }
-    }
-
-    let last_run_id: string | null = null;
-    for (let i = history_msgs.length - 1; i >= 0; i--) {
-      const m = history_msgs[i];
-      if (m.role !== "assistant") continue;
-      const rid = String(m.run_id || "").trim();
-      if (rid) {
-        last_run_id = rid;
-        break;
-      }
-    }
-    const file_contents = attached_files
-      .filter((f) => !f.loading && !f.error && typeof f.content === "string" && f.content.trim())
-      .map((f) => String(f.content || "").trim());
-    const file_labels = attached_files
-      .filter((f) => !f.loading && !f.error && typeof f.content === "string" && f.content.trim())
-      .map((f) => `@${String(f.path || "").trim()}`)
-      .filter(Boolean);
-    if (file_contents.length) {
-      const header = file_labels.length ? `Attached files: ${file_labels.join(", ")}` : "Attached files:";
-      ctx_messages.push({ role: "system", content: `${header}\n\n${file_contents.join("\n\n")}` });
-    }
-
-    if (turns.length) {
-      const recent = turns.slice(-3);
-      const lines: string[] = [];
-      for (let i = 0; i < recent.length; i++) {
-        const t = recent[i] || {};
-        const tools_used = Array.isArray((t as any).tools) ? ((t as any).tools as any[]) : [];
-        const tool_names: string[] = [];
-        const file_paths: string[] = [];
-        const commands: string[] = [];
-        for (const tc of tools_used) {
-          if (!tc || typeof tc !== "object") continue;
-          const name = String((tc as any).name || "").trim();
-          if (name && !tool_names.includes(name)) tool_names.push(name);
-          const path = String((tc as any).path || "").trim();
-          if (path && !file_paths.includes(path)) file_paths.push(path);
-          const cmd = String((tc as any).command || "").trim();
-          if (cmd && !commands.includes(cmd)) commands.push(cmd);
-        }
-        const tools_part = tool_names.length ? tool_names.slice(0, 8).join(", ") : "—";
-        const files_part = file_paths.length ? `; files: ${file_paths.slice(0, 6).join(", ")}` : "";
-        const cmd_part = commands.length ? `; commands: ${commands.slice(0, 3).join(" | ")}` : "";
-        lines.push(`- turn ${Math.max(1, turns.length - recent.length + i + 1)}: tools: ${tools_part}${files_part}${cmd_part}`);
-      }
-      const digest = `Recent tool activity (auto):\n${lines.join("\n")}`;
-      ctx_messages.push({ role: "system", content: digest.length > 1500 ? `${digest.slice(0, 1500)}…` : digest });
-    }
-
-    const system = String(props.settings.system || "").trim();
-    const max_in_tokens = Number.isFinite(Number(props.settings.max_in_tokens)) ? Math.max(0, Number(props.settings.max_in_tokens)) : 0;
-    const resp_schema_text = String(props.settings.resp_schema || "").trim();
-    let resp_schema: any = null;
-    if (resp_schema_text) {
-      try {
-        resp_schema = JSON.parse(resp_schema_text);
-      } catch {
-        throw new Error("resp_schema must be valid JSON (object)");
-      }
-      if (!resp_schema || typeof resp_schema !== "object" || Array.isArray(resp_schema)) {
-        throw new Error("resp_schema must be a JSON object (JSON Schema)");
-      }
-    }
-
-    return {
-      prompt,
-      use_context: Boolean(props.settings.use_context),
-      provider: props.settings.provider || null,
-      model: props.settings.model || null,
-      system: system || null,
-      tools: tools.length ? tools : null,
-      context: {
-        messages: ctx_messages,
-        session: {
-          id: String(props.session_id || "").trim() || null,
-          last_run_id,
-          turns: turns.slice(-12),
-        },
-      },
-      max_iterations: Number.isFinite(Number(props.settings.max_iterations)) ? Number(props.settings.max_iterations) : 20,
-      max_in_tokens: max_in_tokens > 0 ? max_in_tokens : null,
-      temperature: Number.isFinite(Number(props.settings.temperature)) ? Number(props.settings.temperature) : 0.7,
-      seed: Number.isFinite(Number(props.settings.seed)) ? Number(props.settings.seed) : -1,
-      resp_schema: resp_schema || null,
-    };
-  }
-
   async function start_turn(text: string): Promise<void> {
     const t = String(text || "").trim();
     if (!t) return;
@@ -2199,7 +2043,13 @@ function ConsolePage(props: {
     }
 
     try {
-      const input_data = build_input_data(t);
+      const input_data = build_run_input_data({
+        prompt: t,
+        settings: props.settings,
+        repl_messages: props.repl.messages || [],
+        session_id: props.session_id,
+        attached_files,
+      });
       const run_id = await props.gateway.start_run(props.repl.template.flow_id, input_data, {
         bundle_id: props.repl.template.bundle_id,
         session_id: String(props.session_id || "").trim() || undefined,
@@ -3005,21 +2855,19 @@ function ConsolePage(props: {
 
     set_attached_files((prev) => {
       if (prev.some((f) => f.path === p)) return prev;
-      return [...prev, { path: p, content: null, loading: true }].slice(-12);
+      return [...prev, { path: p, attachment: null, loading: true }].slice(-12);
     });
 
     try {
-      const res = await props.gateway.files_read(p);
-      const content_raw = typeof res?.content === "string" ? res.content : String(res?.content ?? "");
-      const content = content_raw.trimEnd();
-      const is_err = content.startsWith("Error:") || content.startsWith("Refused:");
-      const err = is_err ? content.split("\n")[0] : "";
+      const sid = String(props.session_id || "").trim();
+      if (!sid) throw new Error("session_id is required");
+      const attachment = await props.gateway.attachments_ingest(sid, p);
       set_attached_files((prev) =>
-        prev.map((f) => (f.path === p ? { ...f, loading: false, content: is_err ? null : content, error: err || undefined } : f))
+        prev.map((f) => (f.path === p ? { ...f, loading: false, attachment, error: undefined } : f))
       );
     } catch (e: any) {
-      const msg = String(e?.message || e || "Failed to read file");
-      set_attached_files((prev) => prev.map((f) => (f.path === p ? { ...f, loading: false, content: null, error: msg } : f)));
+      const msg = String(e?.message || e || "Failed to ingest attachment");
+      set_attached_files((prev) => prev.map((f) => (f.path === p ? { ...f, loading: false, attachment: null, error: msg } : f)));
     } finally {
       try {
         input_ref.current?.focus();
@@ -3270,7 +3118,7 @@ function ConsolePage(props: {
                     <Icon name={icon} size={14} className={f.loading ? "spin" : undefined} />
                   </span>
                   <span className="mono">@{p}</span>
-                  {f.loading ? <span className="muted">loading…</span> : null}
+                  {f.loading ? <span className="muted">ingesting…</span> : null}
                   {f.error ? <span className="muted">{String(f.error)}</span> : null}
                   <button className="chip_remove" type="button" onClick={() => remove_attached_file(p)} aria-label="Remove file">
                     ×
