@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,6 +70,177 @@ def _default_flows_dir() -> Path:
         return Path("flows")
 
 
+def _default_bundles_dir() -> Path:
+    """Best-effort location for `.flow` bundles (WorkflowBundle zips)."""
+    env_candidates = [
+        "ABSTRACTGATEWAY_FLOWS_DIR",  # gateway bundle dir (canonical for bundled flows)
+        "ABSTRACTFLOW_PUBLISH_DIR",  # authoring/publish tooling
+    ]
+    for name in env_candidates:
+        v = os.getenv(name)
+        if isinstance(v, str) and v.strip():
+            return Path(v.strip()).expanduser()
+
+    candidate = Path("flows") / "bundles"
+    if candidate.exists() and candidate.is_dir():
+        return candidate
+    return Path("flows")
+
+
+def _is_flow_bundle(path: Path) -> bool:
+    try:
+        if path.suffix.lower() == ".flow":
+            return True
+    except Exception:
+        pass
+    try:
+        return zipfile.is_zipfile(path)
+    except Exception:
+        return False
+
+
+def _load_visual_flows_from_bundle(bundle_path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Load VisualFlow JSON files from a `.flow` zip bundle.
+
+    Returns: (flows_by_id, manifest_dict)
+    """
+    try:
+        from abstractruntime.workflow_bundle import open_workflow_bundle  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(
+            "AbstractRuntime workflow_bundle support is required to run `.flow` bundles.\n"
+            'Install with: pip install "abstractruntime"'
+        ) from e
+
+    try:
+        from abstractflow.visual.models import VisualFlow
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(
+            "AbstractFlow is required to run VisualFlow workflows.\n"
+            'Install with: pip install "abstractcode[flow]"'
+        ) from e
+
+    bundle = open_workflow_bundle(bundle_path)
+    man = bundle.manifest
+
+    entrypoints: List[Dict[str, Any]] = []
+    for ep in getattr(man, "entrypoints", None) or []:
+        try:
+            fid = str(getattr(ep, "flow_id", "") or "").strip()
+        except Exception:
+            fid = ""
+        if not fid:
+            continue
+        entrypoints.append(
+            {
+                "flow_id": fid,
+                "name": str(getattr(ep, "name", "") or ""),
+                "description": str(getattr(ep, "description", "") or ""),
+                "interfaces": list(getattr(ep, "interfaces", []) or []),
+            }
+        )
+
+    manifest: Dict[str, Any] = {
+        "bundle_id": str(getattr(man, "bundle_id", "") or ""),
+        "bundle_version": str(getattr(man, "bundle_version", "") or ""),
+        "default_entrypoint": str(getattr(man, "default_entrypoint", "") or ""),
+        "entrypoints": entrypoints,
+        "flows": dict(getattr(man, "flows", None) or {}),
+    }
+
+    flows: Dict[str, Any] = {}
+    for _fid, rel in (getattr(man, "flows", None) or {}).items():
+        if not isinstance(rel, str) or not rel.strip():
+            continue
+        try:
+            raw = bundle.read_text(rel)
+            vf = VisualFlow.model_validate_json(raw)
+        except Exception:
+            continue
+        flows[str(vf.id)] = vf
+    return flows, manifest
+
+
+def _find_bundle_path(bundle_ref: str, *, bundles_dir: Optional[Path] = None) -> Optional[Path]:
+    """Resolve a bundle ref to an on-disk `.flow` path."""
+    ref = str(bundle_ref or "").strip()
+    if not ref:
+        return None
+
+    direct = Path(ref).expanduser()
+    if direct.exists() and direct.is_file():
+        return direct.resolve()
+
+    bundles_dir = (bundles_dir or _default_bundles_dir()).expanduser()
+
+    # If the user passed "foo.flow" (not found), try within the bundles dir.
+    if ref.lower().endswith(".flow"):
+        candidate = (bundles_dir / ref).expanduser()
+        if candidate.exists() and candidate.is_file():
+            return candidate.resolve()
+
+    # Parse "bundle_id@version" (without extension).
+    stem = ref[:-5] if ref.lower().endswith(".flow") else ref
+    base, version = stem, None
+    if "@" in stem:
+        base, version = stem.split("@", 1)
+        base = base.strip()
+        version = version.strip() if version is not None else None
+
+    if not base:
+        return None
+
+    # Exact match first.
+    if version:
+        named = bundles_dir / f"{base}@{version}.flow"
+        if named.exists() and named.is_file():
+            return named.resolve()
+
+    candidates: List[Path] = []
+    alias = bundles_dir / f"{base}.flow"
+    if alias.exists() and alias.is_file():
+        candidates.append(alias)
+    candidates.extend(sorted(bundles_dir.glob(f"{base}@*.flow")))
+    if not candidates:
+        return None
+
+    try:
+        from packaging.version import Version
+    except Exception:  # pragma: no cover
+
+        def Version(v: str) -> Any:  # type: ignore[misc]
+            return v
+
+    best: Optional[Tuple[Any, Path]] = None
+    try:
+        from abstractruntime.workflow_bundle import open_workflow_bundle  # type: ignore
+    except Exception:  # pragma: no cover
+        open_workflow_bundle = None  # type: ignore[assignment]
+
+    for p in candidates:
+        try:
+            if open_workflow_bundle is not None:
+                man = open_workflow_bundle(p).manifest
+                bid = str(getattr(man, "bundle_id", "") or "").strip()
+                bv = str(getattr(man, "bundle_version", "") or "").strip() or "0.0.0"
+            else:  # pragma: no cover
+                _flows, manifest = _load_visual_flows_from_bundle(p)
+                bid = str(manifest.get("bundle_id") or "").strip()
+                bv = str(manifest.get("bundle_version") or "").strip() or "0.0.0"
+        except Exception:
+            continue
+        if bid != base:
+            continue
+        try:
+            vkey = Version(bv)
+        except Exception:
+            vkey = bv
+        if best is None or vkey > best[0]:
+            best = (vkey, p)
+
+    return best[1].resolve() if best else None
+
+
 def _load_visual_flows(flows_dir: Path) -> Dict[str, Any]:
     try:
         from abstractflow.visual.models import VisualFlow
@@ -90,13 +264,43 @@ def _load_visual_flows(flows_dir: Path) -> Dict[str, Any]:
 
 
 def resolve_visual_flow(flow_ref: str, *, flows_dir: Optional[str]) -> ResolvedVisualFlow:
-    """Resolve a VisualFlow by id, name, or path to a .json file."""
-    ref = str(flow_ref or "").strip()
-    if not ref:
-        raise ValueError("flow reference is required (flow id, name, or .json path)")
+    """Resolve a VisualFlow by id, name, or path to a `.json` or bundled `.flow` file.
+
+    Also accepts bundle refs (by bundle_id), e.g.:
+      - basic-agent
+      - basic-llm@0.0.2
+      - basic-llm.flow
+      - basic-llm@0.0.2.flow
+      - basic-llm:c4bd3db6      (bundle_id:flow_id)
+      - basic-llm@0.0.2:c4bd3db6
+    """
+    ref_raw = str(flow_ref or "").strip()
+    if not ref_raw:
+        raise ValueError("flow reference is required (flow id, name, .json/.flow path, or bundle id)")
+
+    ref = ref_raw
+    bundle_flow_id: Optional[str] = None
+    # Support bundle_id:flow_id (like AbstractCode web). Avoid clobbering Windows drive letters.
+    if ":" in ref and not re.match(r"^[A-Za-z]:[\\\\/]", ref):
+        left, right = ref.split(":", 1)
+        if left.strip() and right.strip():
+            ref = left.strip()
+            bundle_flow_id = right.strip()
 
     path = Path(ref).expanduser()
     flows_dir_path: Path
+    if path.exists() and path.is_file() and _is_flow_bundle(path):
+        flows, manifest = _load_visual_flows_from_bundle(path)
+        default_id = str(manifest.get("default_entrypoint") or "").strip()
+        selected_id = bundle_flow_id or default_id
+        if not selected_id and flows:
+            selected_id = next(iter(flows.keys()))
+        vf = flows.get(selected_id) if selected_id else None
+        if vf is None:
+            available = ", ".join(sorted(flows.keys()))
+            raise ValueError(f"Bundle entrypoint '{selected_id}' not found in {path} (available: {available})")
+        return ResolvedVisualFlow(visual_flow=vf, flows=flows, flows_dir=path.resolve())
+
     if path.exists() and path.is_file():
         try:
             raw = path.read_text(encoding="utf-8")
@@ -117,6 +321,20 @@ def resolve_visual_flow(flow_ref: str, *, flows_dir: Optional[str]) -> ResolvedV
         flows[str(vf.id)] = vf
         return ResolvedVisualFlow(visual_flow=vf, flows=flows, flows_dir=flows_dir_path)
 
+    # Prefer bundled `.flow` agents when a bundle_id matches, even if source VisualFlows exist.
+    bundle_path = _find_bundle_path(ref, bundles_dir=None)
+    if bundle_path is not None:
+        flows2, manifest = _load_visual_flows_from_bundle(bundle_path)
+        default_id = str(manifest.get("default_entrypoint") or "").strip()
+        selected_id = bundle_flow_id or default_id
+        if not selected_id and flows2:
+            selected_id = next(iter(flows2.keys()))
+        vf = flows2.get(selected_id) if selected_id else None
+        if vf is None:
+            available = ", ".join(sorted(flows2.keys()))
+            raise ValueError(f"Bundle entrypoint '{selected_id}' not found in {bundle_path} (available: {available})")
+        return ResolvedVisualFlow(visual_flow=vf, flows=flows2, flows_dir=bundle_path)
+
     flows_dir_path = Path(flows_dir).expanduser().resolve() if flows_dir else _default_flows_dir().resolve()
     flows = _load_visual_flows(flows_dir_path)
 
@@ -132,7 +350,19 @@ def resolve_visual_flow(flow_ref: str, *, flows_dir: Optional[str]) -> ResolvedV
             matches.append(vf)
 
     if not matches:
-        raise ValueError(f"Flow '{ref}' not found in {flows_dir_path}")
+        bundle_path = _find_bundle_path(ref, bundles_dir=None)
+        if bundle_path is None:
+            raise ValueError(f"Flow '{ref_raw}' not found in {flows_dir_path}")
+        flows2, manifest = _load_visual_flows_from_bundle(bundle_path)
+        default_id = str(manifest.get("default_entrypoint") or "").strip()
+        selected_id = bundle_flow_id or default_id
+        if not selected_id and flows2:
+            selected_id = next(iter(flows2.keys()))
+        vf = flows2.get(selected_id) if selected_id else None
+        if vf is None:
+            available = ", ".join(sorted(flows2.keys()))
+            raise ValueError(f"Bundle entrypoint '{selected_id}' not found in {bundle_path} (available: {available})")
+        return ResolvedVisualFlow(visual_flow=vf, flows=flows2, flows_dir=bundle_path)
     if len(matches) > 1:
         options = ", ".join([f"{getattr(v, 'name', '')} ({getattr(v, 'id', '')})" for v in matches])
         raise ValueError(f"Multiple flows match '{ref}': {options}")

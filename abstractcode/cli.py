@@ -60,7 +60,10 @@ def build_agent_parser() -> argparse.ArgumentParser:
         help=(
             "Agent selector:\n"
             "  - Built-ins: react | codeact | memact\n"
-            "  - Workflow agent: <flow_id> | <flow_name> | </path/to/flow.json>\n"
+            "  - Workflow agent:\n"
+            "      <flow_id> | <flow_name> | </path/to/flow.json>\n"
+            "      <bundle_id>[@version] | </path/to/bundle.flow>\n"
+            "      <bundle_id>[@version]:<flow_id>\n"
             "    (must implement interface 'abstractcode.agent.v1')"
         ),
     )

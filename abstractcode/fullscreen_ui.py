@@ -67,9 +67,6 @@ COMMANDS = [
     ("logs", "Show durable logs (/logs runtime|provider)"),
     ("logs runtime", "Show runtime logs (durable)"),
     ("logs provider", "Show provider wire logs (durable)"),
-    ("log", "Alias for /logs"),
-    ("log runtime", "Alias for /logs runtime"),
-    ("log provider", "Alias for /logs provider"),
     ("flow", "Run AbstractFlow workflows (run/resume/pause/cancel)"),
     ("mouse", "Toggle mouse mode (wheel scroll vs terminal selection)"),
     ("task", "Start a new task (/task <text>)"),
@@ -80,6 +77,7 @@ COMMANDS = [
     ("snapshot save", "Save current state as named snapshot"),
     ("snapshot load", "Load snapshot by name"),
     ("snapshot list", "List available snapshots"),
+    ("agent", "Switch agent (/agent [name]|list|reload)"),
     ("theme", "Switch UI theme (/theme [name]|custom ...)"),
     ("system", "Show/set system prompt override [saved]"),
     ("gpu", "Toggle GPU meter (/gpu on|off|status)"),
@@ -221,6 +219,7 @@ class FullScreenUI:
         on_select: Callable[[str], None]
         close_on_select: bool = True
         max_visible: int = 12
+        anchor_left: Optional[int] = None
         anchor_right: int = 0
         anchor_bottom: int = 2
         open: bool = False
@@ -458,7 +457,22 @@ class FullScreenUI:
             history=self._history,
         )
 
+        # Agent selector (items are populated by the shell).
+        self._agent_selector_items: List[_DropdownItem] = []
+        self._agent_selector_key: str = ""
+
         # Register footer dropdowns.
+        self._dropdowns["agent"] = FullScreenUI._Dropdown(
+            id="agent",
+            caption="Agent : ",
+            get_items=self._agent_dropdown_items,
+            get_current_key=self._current_agent_key,
+            on_select=self._select_agent_from_dropdown,
+            close_on_select=False,
+            max_visible=12,
+            anchor_left=0,
+            anchor_bottom=2,
+        )
         self._dropdowns["theme"] = FullScreenUI._Dropdown(
             id="theme",
             caption="Theme : ",
@@ -1197,17 +1211,20 @@ class FullScreenUI:
             win = self._dropdown_menu_windows.get(did)
             if win is None:
                 continue
-            floats.append(
-                Float(
-                    right=int(getattr(dd, "anchor_right", 0) or 0),
-                    bottom=int(getattr(dd, "anchor_bottom", 2) or 2),
-                    z_index=10,
-                    content=ConditionalContainer(
-                        content=win,
-                        filter=Condition(lambda did=did: self._is_dropdown_open(did)),
-                    ),
-                )
-            )
+            anchor_left = getattr(dd, "anchor_left", None)
+            float_kwargs: Dict[str, Any] = {
+                "bottom": int(getattr(dd, "anchor_bottom", 2) or 2),
+                "z_index": 10,
+                "content": ConditionalContainer(
+                    content=win,
+                    filter=Condition(lambda did=did: self._is_dropdown_open(did)),
+                ),
+            }
+            if isinstance(anchor_left, int):
+                float_kwargs["left"] = int(anchor_left)
+            else:
+                float_kwargs["right"] = int(getattr(dd, "anchor_right", 0) or 0)
+            floats.append(Float(**float_kwargs))
 
         root = FloatContainer(
             content=body,
@@ -1251,6 +1268,18 @@ class FullScreenUI:
                     self._app.invalidate()
             except Exception:
                 pass
+
+    def get_composer_state(self) -> Dict[str, Any]:
+        """Return the current draft input text and pending attachment chips (best-effort)."""
+        try:
+            draft = str(self._input_buffer.text or "")
+        except Exception:
+            draft = ""
+        try:
+            attachments = [str(p) for p in list(getattr(self, "_attachments", None) or []) if str(p).strip()]
+        except Exception:
+            attachments = []
+        return {"draft": draft, "attachments": attachments}
 
     def _remove_attachment_handler(self, rel_path: str) -> Callable[[MouseEvent], None]:
         def _handler(mouse_event: MouseEvent) -> None:
@@ -1403,6 +1432,20 @@ class FullScreenUI:
         """Get formatted status text with optional spinner."""
         text = self._get_status_text()
 
+        # Left-side agent selector dropdown (if configured).
+        agent_dd = (self._dropdowns or {}).get("agent")
+        agent_parts: FormattedText = []
+        if agent_dd is not None:
+            cur = str(agent_dd.get_current_key() or "").strip() or "agent"
+            caret = "▲" if bool(getattr(agent_dd, "open", False)) else "▼"
+            label = f"[{cur} {caret}]"
+            handler = self._dropdown_button_handler(agent_dd.id)
+            agent_parts = [
+                ("class:dropdown-label", f" {agent_dd.caption}", handler),
+                ("class:dropdown-button", f" {label} ", handler),
+                ("class:status-text", " │ "),
+            ]
+
         # If spinner is active, show it prominently
         if self._spinner_active and self._spinner_text:
             spinner_char = self._spinner_frames[self._spinner_frame % len(self._spinner_frames)]
@@ -1432,10 +1475,28 @@ class FullScreenUI:
             return [
                 ("class:spinner", f" {spinner_char} "),
                 *text_parts,
-                ("class:status-text", f"  │  {text}"),
+                ("class:status-text", "  │ "),
+                *agent_parts,
+                ("class:status-text", f"{text}"),
             ]
 
-        return [("class:status-text", f" {text}")]
+        return [*agent_parts, ("class:status-text", f"{text}")]
+
+    def _agent_dropdown_items(self) -> List[_DropdownItem]:
+        return list(getattr(self, "_agent_selector_items", None) or [])
+
+    def _current_agent_key(self) -> str:
+        return str(getattr(self, "_agent_selector_key", "") or "").strip()
+
+    def _select_agent_from_dropdown(self, key: str) -> None:
+        k = str(key or "").strip()
+        if not k:
+            return
+        try:
+            # Queue as a command so ReactShell can handle the switch.
+            self._command_queue.put(SubmittedInput(text=f"/agent {k}", attachments=[]))
+        except Exception:
+            pass
 
     def _theme_dropdown_items(self) -> List[_DropdownItem]:
         out: List[_DropdownItem] = []
@@ -2185,6 +2246,27 @@ class FullScreenUI:
                 self._retint_output(old_theme=old, new_theme=self._theme)
         except Exception:
             pass
+        if self._app and self._app.is_running:
+            self._app.invalidate()
+
+    def set_agent_selector(
+        self,
+        *,
+        current_key: str,
+        items: Sequence[Tuple[str, str, str]],
+    ) -> None:
+        """Update the footer agent selector dropdown (best-effort)."""
+        self._agent_selector_key = str(current_key or "").strip()
+        out: List[_DropdownItem] = []
+        for item in list(items or []):
+            if not isinstance(item, tuple) or len(item) != 3:
+                continue
+            k, label, meta = item
+            key_s = str(k or "").strip()
+            if not key_s:
+                continue
+            out.append(_DropdownItem(key=key_s, label=str(label or ""), meta=str(meta or "")))
+        self._agent_selector_items = out
         if self._app and self._app.is_running:
             self._app.invalidate()
 

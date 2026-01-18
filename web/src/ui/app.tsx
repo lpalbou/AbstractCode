@@ -13,6 +13,7 @@ import { ToolPicker } from "./tool_picker";
 import { Icon, type IconName } from "./icons";
 import { copy_text } from "../lib/clipboard";
 import { build_run_input_data } from "../lib/run_input";
+import { session_memory_owner_run_id } from "../lib/session_memory";
 import {
   clear_active_run_id,
   clear_run_cursor,
@@ -1686,9 +1687,13 @@ function ConsolePage(props: {
 
   const input_ref = useRef<HTMLTextAreaElement | null>(null);
   const chat_scroll_ref = useRef<HTMLDivElement | null>(null);
+  const chat_content_ref = useRef<HTMLDivElement | null>(null);
   const chat_at_bottom_ref = useRef<boolean>(true);
   const [chat_at_bottom, set_chat_at_bottom] = useState<boolean>(true);
+  const scroll_follow_raf_ref = useRef<number | null>(null);
+  const scroll_follow_raf2_ref = useRef<number | null>(null);
   const [attached_files, set_attached_files] = useState<AttachedFile[]>([]);
+  const [attachment_preview, set_attachment_preview] = useState<AttachmentRef | null>(null);
   const pending_files = attached_files.some((f) => f.loading);
   const [file_matches, set_file_matches] = useState<string[]>([]);
   const [file_loading, set_file_loading] = useState(false);
@@ -1982,9 +1987,32 @@ function ConsolePage(props: {
         window.clearTimeout(cursor_flush_timer_ref.current);
         cursor_flush_timer_ref.current = null;
       }
+      if (scroll_follow_raf_ref.current !== null) {
+        window.cancelAnimationFrame(scroll_follow_raf_ref.current);
+        scroll_follow_raf_ref.current = null;
+      }
+      if (scroll_follow_raf2_ref.current !== null) {
+        window.cancelAnimationFrame(scroll_follow_raf2_ref.current);
+        scroll_follow_raf2_ref.current = null;
+      }
       cursor_flush_pending_ref.current = {};
     };
   }, []);
+
+  function schedule_scroll_to_bottom(): void {
+    if (scroll_follow_raf_ref.current !== null || scroll_follow_raf2_ref.current !== null) return;
+    scroll_follow_raf_ref.current = window.requestAnimationFrame(() => {
+      scroll_follow_raf_ref.current = null;
+      scroll_follow_raf2_ref.current = window.requestAnimationFrame(() => {
+        scroll_follow_raf2_ref.current = null;
+        const el = chat_scroll_ref.current;
+        if (!el) return;
+        el.scrollTop = el.scrollHeight;
+        chat_at_bottom_ref.current = true;
+        set_chat_at_bottom(true);
+      });
+    });
+  }
 
   // Smart autoscroll: follow new messages only when the user is already at the bottom.
   useEffect(() => {
@@ -1993,15 +2021,23 @@ function ConsolePage(props: {
     const threshold_px = 80;
     const at_bottom_now = el.scrollTop + el.clientHeight >= el.scrollHeight - threshold_px;
     if (!chat_at_bottom_ref.current && !at_bottom_now) return;
-    // rAF ensures DOM has committed the new message height before we scroll.
-    requestAnimationFrame(() => {
-      const el2 = chat_scroll_ref.current;
-      if (!el2) return;
-      el2.scrollTop = el2.scrollHeight;
-      chat_at_bottom_ref.current = true;
-      set_chat_at_bottom(true);
+    schedule_scroll_to_bottom();
+  }, [props.repl.updated_at]);
+
+  // When message contents expand after the initial render (markdown/layout/images),
+  // keep the chat pinned to bottom only if the user is already following.
+  useEffect(() => {
+    const target = chat_content_ref.current;
+    if (!target) return;
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (!chat_at_bottom_ref.current) return;
+      schedule_scroll_to_bottom();
     });
-  }, [props.repl.messages.length]);
+    ro.observe(target);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function autosize_composer(el: HTMLTextAreaElement | null): void {
     if (!el) return;
@@ -2048,8 +2084,15 @@ function ConsolePage(props: {
       const success = r && typeof r === "object" ? Boolean((r as any).success) : null;
       const error = r && typeof r === "object" ? String((r as any).error || "").trim() : "";
       const output_raw = r && typeof r === "object" ? ((r as any).output ?? (r as any).result ?? null) : null;
-      const output_s = output_raw == null ? "" : typeof output_raw === "string" ? output_raw : safe_json(output_raw);
-      const output_preview = output_s;
+      let output_preview = output_raw == null ? "" : typeof output_raw === "string" ? output_raw : safe_json(output_raw);
+      let rendered_text: string | null = null;
+      if (output_raw && typeof output_raw === "object" && !Array.isArray(output_raw)) {
+        const rendered = (output_raw as any).rendered;
+        if (typeof rendered === "string" && rendered.trim()) {
+          rendered_text = rendered;
+          output_preview = rendered;
+        }
+      }
 
       append_message({
         role: "system",
@@ -2103,7 +2146,17 @@ function ConsolePage(props: {
     set_subworkflow_label("");
 
     const user_ts = now_iso();
-    append_message({ role: "user", content: t, ts: user_ts });
+    const attachments_for_turn = attached_files
+      .filter((f) => !f.loading && !String(f.error || "").trim() && f.attachment && typeof f.attachment === "object")
+      .map((f) => f.attachment as AttachmentRef)
+      .slice(0, 16)
+      .map((a) => ({ ...a }));
+    append_message({
+      role: "user",
+      content: t,
+      ts: user_ts,
+      meta: attachments_for_turn.length ? { attachments: attachments_for_turn } : undefined,
+    });
 
     const attach_errors = attached_files.filter((f) => !f.loading && String(f.error || "").trim());
     if (attach_errors.length) {
@@ -3094,10 +3147,18 @@ function ConsolePage(props: {
               set_chat_at_bottom(at_bottom);
             }}
           >
-            {!props.repl.messages.length ? <div className="muted">Start typing to begin.</div> : null}
-            {props.repl.messages.map((m, idx) => (
-              <ChatMessageCard key={`${m.ts}:${idx}`} m={m} gateway={props.gateway} tool_specs_by_name={tool_specs_by_name} />
-            ))}
+            <div className="repl_chat_content" ref={chat_content_ref}>
+              {!props.repl.messages.length ? <div className="muted">Start typing to begin.</div> : null}
+              {props.repl.messages.map((m, idx) => (
+                <ChatMessageCard
+                  key={`${m.ts}:${idx}`}
+                  m={m}
+                  gateway={props.gateway}
+                  session_id={props.session_id}
+                  tool_specs_by_name={tool_specs_by_name}
+                />
+              ))}
+            </div>
           </div>
           {!chat_at_bottom && props.repl.messages.length ? (
             <button
@@ -3209,15 +3270,42 @@ function ConsolePage(props: {
               const p = String(f.path || "").trim();
               const cls = f.error ? "file_chip error" : f.loading ? "file_chip loading" : "file_chip";
               const icon: IconName = f.error ? "warning" : f.loading ? "loader" : "paperclip";
+              const aid = String((f.attachment as any)?.$artifact || "").trim();
+              const can_preview = !f.loading && !String(f.error || "").trim() && Boolean(aid);
+              const tooltip = f.error ? String(f.error) : can_preview ? `@${p} (click to preview)` : p;
               return (
-                <div key={p} className={cls} title={f.error ? String(f.error) : p}>
+                <div
+                  key={p}
+                  className={cls}
+                  title={tooltip}
+                  role={can_preview ? "button" : undefined}
+                  tabIndex={can_preview ? 0 : undefined}
+                  onClick={can_preview ? () => set_attachment_preview(f.attachment) : undefined}
+                  onKeyDown={
+                    can_preview
+                      ? (e) => {
+                          if (e.key !== "Enter" && e.key !== " ") return;
+                          e.preventDefault();
+                          set_attachment_preview(f.attachment);
+                        }
+                      : undefined
+                  }
+                >
                   <span className="file_chip_icon" aria-hidden="true">
                     <Icon name={icon} size={14} className={f.loading ? "spin" : undefined} />
                   </span>
                   <span className="mono">@{p}</span>
                   {f.loading ? <span className="muted">ingesting…</span> : null}
                   {f.error ? <span className="muted">{String(f.error)}</span> : null}
-                  <button className="chip_remove" type="button" onClick={() => remove_attached_file(p)} aria-label="Remove file">
+                  <button
+                    className="chip_remove"
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      remove_attached_file(p);
+                    }}
+                    aria-label="Remove file"
+                  >
                     ×
                   </button>
                 </div>
@@ -3423,16 +3511,35 @@ function ConsolePage(props: {
           </div>
         </div>
 
+        {attachment_preview ? (
+          <AttachmentPreviewModal
+            gateway={props.gateway}
+            session_id={props.session_id}
+            attachment={attachment_preview}
+            on_close={() => set_attachment_preview(null)}
+          />
+        ) : null}
+
       </div>
 
     </div>
   );
 }
 
-function ChatMessageCard(props: { m: ReplMessage; gateway: GatewayClient; tool_specs_by_name?: Record<string, any> }): React.ReactElement | null {
+function ChatMessageCard(props: {
+  m: ReplMessage;
+  gateway: GatewayClient;
+  session_id: string;
+  tool_specs_by_name?: Record<string, any>;
+}): React.ReactElement | null {
   const m = props.m;
   const meta_obj: any = m.meta && typeof m.meta === "object" ? (m.meta as any) : null;
   const kind = meta_obj && typeof meta_obj._kind === "string" ? String(meta_obj._kind) : "";
+  const attachments = Array.isArray(meta_obj?.attachments) ? (meta_obj.attachments as any[]) : [];
+  const attachment_items: AttachmentRef[] = attachments
+    .filter((a) => a && typeof a === "object" && !Array.isArray(a))
+    .slice(0, 16)
+    .map((a) => ({ ...(a as any) }));
   const repl_meta = meta_obj && meta_obj._repl && typeof meta_obj._repl === "object" ? (meta_obj._repl as any) : null;
   const usage = repl_meta && repl_meta.usage && typeof repl_meta.usage === "object" ? (repl_meta.usage as any) : null;
   const usage_parsed = parse_usage_summary(usage);
@@ -3466,6 +3573,7 @@ function ChatMessageCard(props: { m: ReplMessage; gateway: GatewayClient; tool_s
   const is_digest = m.role === "system" && String(m.title || "").trim() === "Digest";
   const run_id = String(m.run_id || "").trim();
   const [ctx_open, set_ctx_open] = useState(false);
+  const [attachment_open, set_attachment_open] = useState<AttachmentRef | null>(null);
   const workflow_meta = meta_obj && meta_obj.workflow_meta && typeof meta_obj.workflow_meta === "object" ? (meta_obj.workflow_meta as any) : null;
   const inspect_run_id =
     String(workflow_meta?.context_appended_sub_run_id || "").trim() ||
@@ -3514,6 +3622,30 @@ function ChatMessageCard(props: { m: ReplMessage; gateway: GatewayClient; tool_s
       <div className="body markdown">
         <ChatMessageContent text={m.content} renderMarkdown={(markdown) => <MarkdownRenderer markdown={markdown} />} />
       </div>
+      {attachment_items.length ? (
+        <div className="chat_attachments" aria-label="Attachments">
+          {attachment_items.map((a, idx) => {
+            const aid = String((a as any)?.$artifact || "").trim();
+            const source = String((a as any)?.source_path || (a as any)?.filename || "").trim();
+            const label = (source || aid).split("/").pop() || source || aid || "attachment";
+            const title = source ? `@${source}` : aid ? `artifact: ${aid}` : "attachment";
+            const can_preview = Boolean(aid);
+            return (
+              <button
+                key={`${aid || label}:${idx}`}
+                type="button"
+                className="chat_attachment_chip"
+                title={can_preview ? `${title} (click to preview)` : title}
+                onClick={can_preview ? () => set_attachment_open(a) : undefined}
+                disabled={!can_preview}
+              >
+                <Icon name="paperclip" size={14} />
+                <span className="mono chat_attachment_name">{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
       {has_stats ? (
         <div className="chat_stats_bar">
           {run_id ? (
@@ -3567,6 +3699,14 @@ function ChatMessageCard(props: { m: ReplMessage; gateway: GatewayClient; tool_s
           on_close={() => set_ctx_open(false)}
         />
       ) : null}
+      {attachment_open ? (
+        <AttachmentPreviewModal
+          gateway={props.gateway}
+          session_id={props.session_id}
+          attachment={attachment_open}
+          on_close={() => set_attachment_open(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -3579,6 +3719,7 @@ function ContextInspectorModal(props: {
 }): React.ReactElement {
   const [selected_run_id, set_selected_run_id] = useState<string>(props.inspect_run_id);
   const [run_options, set_run_options] = useState<string[]>([]);
+  const [ledger_len_by_run, set_ledger_len_by_run] = useState<Record<string, number>>({});
   const [loading, set_loading] = useState(true);
   const [error, set_error] = useState("");
   const [ledger_items, set_ledger_items] = useState<LedgerRecordItem[]>([]);
@@ -3597,6 +3738,7 @@ function ContextInspectorModal(props: {
     // Reset when the requested run changes (new message / different subrun).
     set_selected_run_id(props.inspect_run_id);
     set_run_options([]);
+    set_ledger_len_by_run({});
   }, [props.inspect_run_id]);
 
   useEffect(() => {
@@ -3651,12 +3793,19 @@ function ContextInspectorModal(props: {
         // Best-effort: expand candidates to include this root run's subruns so Context works
         // even when workflow_meta points to a run with an empty ledger.
         let expanded = base_candidates.slice();
+        let run_lens: Record<string, number> = {};
         try {
           const root = await props.gateway.get_run(props.root_run_id);
           const session_id = String(root?.session_id || "").trim();
           if (session_id) {
             const runs_res = await props.gateway.list_runs({ limit: 500, session_id });
             const runs = Array.isArray((runs_res as any)?.items) ? ((runs_res as any).items as any[]) : [];
+            for (const r of runs) {
+              const rid = String(r?.run_id || "").trim();
+              const ll = r?.ledger_len;
+              if (!rid) continue;
+              if (typeof ll === "number" && Number.isFinite(ll) && ll >= 0) run_lens[rid] = Math.max(0, Math.trunc(ll));
+            }
             const descendants = list_descendants(runs, props.root_run_id);
             expanded = uniq([...base_candidates, ...descendants]);
           }
@@ -3666,6 +3815,7 @@ function ContextInspectorModal(props: {
 
         if (cancelled) return;
         set_run_options(expanded);
+        set_ledger_len_by_run(run_lens);
 
         // Auto-pick a run that actually has LLM/tool activity (so the inspector isn't empty).
         const INTERESTING = new Set(["llm_call", "tool_calls", "ask_user", "answer_user"]);
@@ -3712,10 +3862,15 @@ function ContextInspectorModal(props: {
       const rid = String(run_id || "").trim();
       if (!rid) return [];
       const items: LedgerRecordItem[] = [];
-      let after = 0;
       let safety = 0;
       const page_size = 200;
       const max_items = 2000;
+
+      const total = ledger_len_by_run[rid];
+      let after = 0;
+      if (typeof total === "number" && Number.isFinite(total) && total > max_items) {
+        after = Math.max(0, Math.trunc(total) - max_items);
+      }
 
       while (!cancelled && items.length < max_items && safety < 100) {
         const res = await props.gateway.get_ledger(rid, { after, limit: page_size });
@@ -3749,7 +3904,7 @@ function ContextInspectorModal(props: {
     return () => {
       cancelled = true;
     };
-  }, [props.gateway, selected_run_id]);
+  }, [props.gateway, selected_run_id, ledger_len_by_run[selected_run_id]]);
 
   const trace = useMemo(() => build_agent_trace(ledger_items, { run_id: selected_run_id }), [ledger_items, selected_run_id]);
 
@@ -3820,6 +3975,99 @@ function ContextInspectorModal(props: {
   );
 }
 
+function AttachmentPreviewModal(props: {
+  gateway: GatewayClient;
+  session_id: string;
+  attachment: AttachmentRef;
+  on_close: () => void;
+}): React.ReactElement {
+  const artifact_id = String((props.attachment as any)?.$artifact || "").trim();
+  const source_path = String((props.attachment as any)?.source_path || (props.attachment as any)?.filename || "").trim();
+  const sha256 = String((props.attachment as any)?.sha256 || "").trim();
+  const label = (source_path || artifact_id).split("/").pop() || source_path || artifact_id || "attachment";
+
+  const [loading, set_loading] = useState(true);
+  const [error, set_error] = useState("");
+  const [text, set_text] = useState("");
+
+  useEffect(() => {
+    const on_key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      props.on_close();
+    };
+    window.addEventListener("keydown", on_key);
+    return () => window.removeEventListener("keydown", on_key);
+  }, [props.on_close]);
+
+  useEffect(() => {
+    let cancelled = false;
+    set_loading(true);
+    set_error("");
+    set_text("");
+
+    void (async () => {
+      try {
+        if (!artifact_id) throw new Error("Missing attachment artifact id");
+        const run_id = await session_memory_owner_run_id(props.session_id);
+        const t = await props.gateway.get_run_artifact_text(run_id, artifact_id, { max_bytes: 600_000 });
+        if (cancelled) return;
+        set_text(String(t || ""));
+      } catch (e: any) {
+        if (cancelled) return;
+        set_error(String(e?.message || e || "Failed to load attachment"));
+      } finally {
+        if (!cancelled) set_loading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [props.gateway, props.session_id, artifact_id]);
+
+  return (
+    <div className="modal_overlay" role="dialog" aria-modal="true" aria-label="Attachment preview" onMouseDown={() => props.on_close()}>
+      <div className="modal_card" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="modal_header">
+          <div style={{ minWidth: 0 }}>
+            <div className="modal_title">Attachment</div>
+            <div className="muted mono" style={{ marginTop: 2, overflowWrap: "anywhere" }}>
+              {label}
+              {source_path ? ` • @${source_path}` : ""}
+              {sha256 ? ` • sha=${sha256.slice(0, 8)}…` : ""}
+            </div>
+          </div>
+          <button className="btn mini" type="button" onClick={() => props.on_close()} aria-label="Close attachment preview">
+            <Icon name="x" size={14} />
+          </button>
+        </div>
+        <div className="modal_body">
+          {loading ? (
+            <div className="muted" style={{ marginTop: 12 }}>
+              Loading…
+            </div>
+          ) : error ? (
+            <Notice variant="error" style={{ marginTop: 12 }}>
+              {error}
+              {error.toLowerCase().includes("too large") ? (
+                <>
+                  {" "}
+                  Try using the `open_attachment` tool for a bounded excerpt instead.
+                </>
+              ) : null}
+            </Notice>
+          ) : (
+            <div className="attachment_preview">
+              <MarkdownRenderer markdown={`\`\`\`\n${text}\n\`\`\``} />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ToolBlockCard(props: { meta: any; ts?: string; tool_specs_by_name?: Record<string, any> }): React.ReactElement {
   const t: any = props.meta && typeof props.meta === "object" ? props.meta : {};
   const name = String(t.name || "").trim() || "(unknown tool)";
@@ -3843,6 +4091,8 @@ function ToolBlockCard(props: { meta: any; ts?: string; tool_specs_by_name?: Rec
       : status === "error" || status === "failed"
         ? "tool_badge error"
         : "tool_badge ok";
+  const output_trim = output_preview.trim();
+  const output_is_json = output_trim.startsWith("{") || output_trim.startsWith("[");
 
   return (
     <details className="tool_block">
@@ -3897,7 +4147,7 @@ function ToolBlockCard(props: { meta: any; ts?: string; tool_specs_by_name?: Rec
           <div className="field">
             <label>output</label>
             <div className="tool_json_preview">
-              <MarkdownRenderer markdown={`\`\`\`json\n${output_preview}\n\`\`\``} />
+              <MarkdownRenderer markdown={`\`\`\`${output_is_json ? "json" : ""}\n${output_preview}\n\`\`\``} />
             </div>
           </div>
         ) : null}

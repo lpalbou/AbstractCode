@@ -70,6 +70,15 @@ class _ToolSpec:
     parameters: Dict[str, Any]
 
 
+@dataclass(frozen=True)
+class _BundledAgentTemplate:
+    bundle_id: str
+    bundle_version: str
+    flow_id: str
+    name: str
+    description: str
+
+
 def _now_iso() -> str:
     from datetime import datetime, timezone
 
@@ -204,6 +213,10 @@ class ReactShell:
         self._gpu_last_ok_at: Optional[float] = None
         self._gpu_monitor_thread: Optional[threading.Thread] = None
         self._gpu_monitor_lock = threading.Lock()
+        # Bundled `.flow` agent templates (for TUI selector).
+        self._bundled_agent_templates: List[_BundledAgentTemplate] = []
+        # Current agent selector key (shown in the footer dropdown).
+        self._agent_selector_key: str = agent_lower if agent_lower in ("react", "codeact", "memact") else raw_agent
         # Session-level tool allowlist (None = default/all tools for the agent kind).
         self._allowed_tools: Optional[List[str]] = None
         # Whether to include tool usage examples in the prompted tool section (token-expensive).
@@ -282,19 +295,27 @@ class ReactShell:
             fetch_url,
             self_improve,
         ]
+        # Keep references so we can rebuild agents/toolsets at runtime (e.g. /agent switch).
+        self._default_tools = list(DEFAULT_TOOLS)
+        self._codeact_tools = [execute_python]
+        self._agent_classes = {
+            "react": ReactAgent,
+            "memact": MemActAgent,
+            "codeact": CodeActAgent,
+        }
 
         if self._workflow_agent_ref is not None:
             # Workflow agents use the "safe" default toolset (same as ReAct).
-            self._tools = list(DEFAULT_TOOLS)
+            self._tools = list(self._default_tools)
             agent_cls = None
         elif self._agent_kind == "react":
-            self._tools = list(DEFAULT_TOOLS)
+            self._tools = list(self._default_tools)
             agent_cls = ReactAgent
         elif self._agent_kind == "memact":
-            self._tools = list(DEFAULT_TOOLS)
+            self._tools = list(self._default_tools)
             agent_cls = MemActAgent
         else:
-            self._tools = [execute_python]
+            self._tools = list(self._codeact_tools)
             agent_cls = CodeActAgent
 
         self._tool_specs: Dict[str, _ToolSpec] = {}
@@ -327,6 +348,9 @@ class ReactShell:
         if self._state_file:
             self._config_file = Path(self._state_file).with_suffix(".config.json")
             self._load_config()
+        # Best-effort: discover bundled `.flow` agents for the footer selector.
+        self._refresh_bundled_agent_templates()
+        self._agent_selector_key = self._normalize_agent_selector_key(getattr(self, "_agent_selector_key", "") or "")
 
         # Tool execution: passthrough by default so we can gate by approval in the CLI.
         tool_executor = PassthroughToolExecutor(mode="approval_required")
@@ -419,6 +443,8 @@ class ReactShell:
             color=self._color,
             theme=self._theme,
         )
+        # Populate the footer agent selector (best-effort).
+        self._sync_agent_selector_to_ui()
         # Keep `@file` completion consistent with the shell's workspace policy.
         try:
             setter = getattr(self._ui, "set_workspace_policy", None)
@@ -459,7 +485,7 @@ class ReactShell:
         self._pending_tool_metas: List[Dict[str, Any]] = []
         # Links extracted from the most recent assistant answer (for /links, /open).
         self._last_answer_links: List[str] = []
-        # Keep the last started run id so /log can show traces even after completion.
+        # Keep the last started run id so /logs can show traces even after completion.
         self._last_run_id: Optional[str] = None
         # Status bar cache (token counting can be expensive; avoid per-frame rescans).
         self._status_cache_key: Optional[Tuple[Any, ...]] = None
@@ -504,6 +530,13 @@ class ReactShell:
             return None
         except (KeyError, Exception):
             # Run doesn't exist (completed/cleaned up) or other error
+            return None
+
+    def _safe_get_active_state(self):
+        """Safely get only the *active* run state (no last-run fallback)."""
+        try:
+            return self._agent.get_state()
+        except (KeyError, Exception):
             return None
 
     def _select_messages_for_llm(self, state: Any) -> List[Dict[str, Any]]:
@@ -565,6 +598,9 @@ class ReactShell:
         state: Any,
         messages: List[Dict[str, Any]],
         effective_model: Optional[str] = None,
+        task_text: Optional[str] = None,
+        extra_messages: Optional[List[Dict[str, Any]]] = None,
+        tool_specs: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Estimate the next prompt token usage (best effort).
 
@@ -593,23 +629,27 @@ class ReactShell:
         system_text = ""
         prompt_text = ""
 
-        logic = getattr(self._agent, "logic", None)
-        if (
-            state is not None
-            and logic is not None
-            and hasattr(state, "vars")
-            and isinstance(getattr(state, "vars", None), dict)
-        ):
-            context_ns = state.vars.get("context") if isinstance(state.vars.get("context"), dict) else {}
-            task = str(context_ns.get("task") or "")
-            limits = state.vars.get("_limits") if isinstance(state.vars.get("_limits"), dict) else {}
-            try:
-                iteration = int(limits.get("current_iteration", 0) or 0) + 1
-                max_iterations = int(limits.get("max_iterations", 25) or 25)
-            except Exception:
-                iteration = 1
-                max_iterations = 25
+        vars_ns: Dict[str, Any] = {}
+        if state is not None and hasattr(state, "vars") and isinstance(getattr(state, "vars", None), dict):
+            vars_ns = state.vars
 
+        context_ns = vars_ns.get("context") if isinstance(vars_ns.get("context"), dict) else {}
+        task = str(task_text or context_ns.get("task") or "")
+
+        limits = vars_ns.get("_limits") if isinstance(vars_ns.get("_limits"), dict) else {}
+        try:
+            iteration = int(limits.get("current_iteration", 0) or 0) + 1
+            max_iterations = int(limits.get("max_iterations", self._max_iterations) or self._max_iterations)
+        except Exception:
+            iteration = 1
+            max_iterations = int(self._max_iterations)
+        if max_iterations < 1:
+            max_iterations = 25
+
+        logic = getattr(self._agent, "logic", None)
+        sys_base = ""
+        req_tools = None
+        if logic is not None:
             try:
                 req = logic.build_request(
                     task=task,
@@ -617,37 +657,52 @@ class ReactShell:
                     guidance="",
                     iteration=iteration,
                     max_iterations=max_iterations,
-                    vars=state.vars,
+                    vars=vars_ns,
                 )
                 sys_base = str(getattr(req, "system_prompt", "") or "").strip()
                 prompt_text = str(getattr(req, "prompt", "") or "").strip()
+                req_tools = getattr(req, "tools", None)
             except Exception:
                 sys_base = ""
-                prompt_text = ""
+                prompt_text = task.strip()
+                req_tools = None
 
-            # Apply optional runtime system prompt override/extra (used by /system and delegation).
-            runtime_ns = state.vars.get("_runtime") if isinstance(state.vars.get("_runtime"), dict) else {}
-            override = runtime_ns.get("system_prompt") if isinstance(runtime_ns, dict) else None
-            extra = runtime_ns.get("system_prompt_extra") if isinstance(runtime_ns, dict) else None
-            base_sys = str(override).strip() if isinstance(override, str) and override.strip() else sys_base
-            system_text = base_sys
+        # Apply optional runtime/system prompt overrides.
+        runtime_ns = vars_ns.get("_runtime") if isinstance(vars_ns.get("_runtime"), dict) else {}
+        runtime_override = runtime_ns.get("system_prompt") if isinstance(runtime_ns, dict) else None
+        extra = runtime_ns.get("system_prompt_extra") if isinstance(runtime_ns, dict) else None
 
-            if self._agent_kind == "memact":
-                try:
-                    from abstractruntime.memory.active_memory import render_memact_system_prompt
+        session_override = getattr(self, "_system_prompt_override", None)
+        if isinstance(runtime_override, str) and runtime_override.strip():
+            base_sys = runtime_override.strip()
+        elif isinstance(session_override, str) and session_override.strip():
+            base_sys = session_override.strip()
+        else:
+            base_sys = sys_base
 
-                    mem_prompt = render_memact_system_prompt(state.vars)
-                    if isinstance(mem_prompt, str) and mem_prompt.strip():
-                        system_text = (mem_prompt.strip() + ("\n\n" + base_sys if base_sys else "")).strip()
-                except Exception:
-                    pass
+        system_text = base_sys
 
-            if isinstance(extra, str) and extra.strip():
-                system_text = (system_text.rstrip() + "\n\nAdditional system instructions:\n" + extra.strip()).strip()
+        if self._agent_kind == "memact" and state is not None and isinstance(vars_ns, dict):
+            try:
+                from abstractruntime.memory.active_memory import render_memact_system_prompt
+
+                mem_prompt = render_memact_system_prompt(vars_ns)
+                if isinstance(mem_prompt, str) and mem_prompt.strip():
+                    system_text = (mem_prompt.strip() + ("\n\n" + base_sys if base_sys else "")).strip()
+            except Exception:
+                pass
+
+        if isinstance(extra, str) and extra.strip():
+            system_text = (system_text.rstrip() + "\n\nAdditional system instructions:\n" + extra.strip()).strip()
 
         # Approximate messages by concatenating content with role labels.
+        merged_messages: List[Dict[str, Any]] = []
+        if isinstance(extra_messages, list) and extra_messages:
+            merged_messages.extend([m for m in extra_messages if isinstance(m, dict)])
+        merged_messages.extend(list(messages or []))
+
         text_parts: List[str] = []
-        for m in messages:
+        for m in merged_messages:
             if not isinstance(m, dict):
                 continue
             content = str(m.get("content") or "")
@@ -662,6 +717,27 @@ class ReactShell:
         messages_tokens = estimate_tokens(joined) if joined else 0
         system_tokens = estimate_tokens(system_text) if system_text else 0
         prompt_tokens = estimate_tokens(prompt_text) if prompt_text else 0
+        tools_tokens = 0
+        if tool_specs is None and isinstance(req_tools, list):
+            # Best-effort: convert ToolDefinition objects to dicts so we can estimate token cost.
+            tool_specs0: List[Dict[str, Any]] = []
+            for t in req_tools:
+                to_dict = getattr(t, "to_dict", None)
+                if callable(to_dict):
+                    try:
+                        spec = to_dict()
+                    except Exception:
+                        spec = None
+                    if isinstance(spec, dict):
+                        tool_specs0.append(spec)
+            tool_specs = tool_specs0
+
+        if isinstance(tool_specs, list) and tool_specs:
+            try:
+                raw = json.dumps(tool_specs, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                tools_tokens = estimate_tokens(raw)
+            except Exception:
+                tools_tokens = 0
 
         return {
             "effective_model": effective_model,
@@ -669,18 +745,51 @@ class ReactShell:
             "system_tokens": system_tokens,
             "prompt_tokens": prompt_tokens,
             "messages_tokens": messages_tokens,
-            "tools_tokens": 0,
-            "total_tokens": int(system_tokens) + int(prompt_tokens) + int(messages_tokens),
+            "tools_tokens": tools_tokens,
+            "total_tokens": int(system_tokens) + int(prompt_tokens) + int(messages_tokens) + int(tools_tokens),
         }
 
     def _get_status_text(self) -> str:
         """Generate status text for the status bar."""
         # Keep this fast: the render thread can call this frequently.
-        state = self._safe_get_state()
+        state = self._safe_get_active_state()
 
         effective_model = self._get_effective_model(state)
         messages = self._select_messages_for_llm(state)
         max_tokens = self._resolve_context_max_tokens(state, effective_model=effective_model)
+
+        # Include pending inputs (draft prompt + attachments) in status estimate.
+        draft_text = ""
+        pending_attachments: List[str] = []
+        try:
+            ui = getattr(self, "_ui", None)
+            getter = getattr(ui, "get_composer_state", None) if ui is not None else None
+            if callable(getter):
+                st = getter()
+                if isinstance(st, dict):
+                    draft_text = str(st.get("draft") or "")
+                    raw_att = st.get("attachments")
+                    if isinstance(raw_att, list):
+                        pending_attachments = [str(p).strip() for p in raw_att if isinstance(p, str) and str(p).strip()]
+        except Exception:
+            draft_text = ""
+            pending_attachments = []
+
+        draft_for_tokens = draft_text.strip()
+        if draft_for_tokens.startswith("/"):
+            draft_for_tokens = ""
+
+        sys_override = getattr(self, "_system_prompt_override", None)
+        sys_override_s = str(sys_override or "").strip() if isinstance(sys_override, str) or sys_override is not None else ""
+
+        def _text_sig(s: str) -> tuple[int, str, str]:
+            t = str(s or "")
+            if len(t) <= 96:
+                return (len(t), t, "")
+            return (len(t), t[:48], t[-48:])
+
+        draft_sig = _text_sig(draft_for_tokens)
+        sys_sig = _text_sig(sys_override_s)
 
         # Cache by a cheap signature to avoid rescanning large contexts every frame.
         last = messages[-1] if isinstance(messages, list) and messages else {}
@@ -733,6 +842,12 @@ class ReactShell:
             toolset_id,
             max_tokens,
             self._model,
+            draft_sig,
+            tuple(pending_attachments),
+            sys_sig,
+            tuple(self._allowed_tools) if isinstance(self._allowed_tools, list) else None,
+            bool(getattr(self, "_tool_prompt_examples", False)),
+            str(getattr(self, "_tool_executor_server_id", "") or ""),
             gpu_enabled,
             gpu_key,
             gpu_err_key,
@@ -742,7 +857,92 @@ class ReactShell:
 
         tokens_used_source = "estimate"
         try:
-            est = self._estimate_next_prompt_tokens(state=state, messages=messages, effective_model=effective_model)
+            extra_msgs: List[Dict[str, Any]] = []
+            if pending_attachments:
+                try:
+                    # Best-effort: mirror runtime's injected "Session attachments" system message.
+                    from abstractruntime.integrations.abstractcore.session_attachments import (
+                        render_session_attachments_system_message,
+                    )
+
+                    entries: List[Dict[str, Any]] = []
+                    # Most recent first (match runtime).
+                    for rel in reversed(list(pending_attachments)):
+                        key = normalize_relative_path(rel)
+                        if not key:
+                            continue
+                        cached = self._attachment_ref_cache.get(key)
+                        artifact_id = str(cached.get("$artifact") or "") if isinstance(cached, dict) else ""
+                        sha = str(cached.get("sha256") or "") if isinstance(cached, dict) else ""
+                        ct = str(cached.get("content_type") or "") if isinstance(cached, dict) else ""
+                        fn = str(cached.get("filename") or "") if isinstance(cached, dict) else ""
+                        entry: Dict[str, Any] = {
+                            "handle": key,
+                            "artifact_id": artifact_id,
+                            "filename": fn or key.rsplit("/", 1)[-1],
+                            "sha256": sha,
+                            "content_type": ct,
+                        }
+                        entries.append(entry)
+
+                    msg = render_session_attachments_system_message(entries, max_entries=20, max_chars=4000)
+                    if msg and not (
+                        messages
+                        and isinstance(messages[0], dict)
+                        and messages[0].get("role") == "system"
+                        and isinstance(messages[0].get("content"), str)
+                        and str(messages[0].get("content") or "").strip().startswith("Session attachments")
+                    ):
+                        extra_msgs.append({"role": "system", "content": msg})
+                except Exception:
+                    pass
+
+            tool_specs: Optional[List[Dict[str, Any]]] = None
+            try:
+                # Prefer durable tool_specs if present on the active run.
+                runtime_ns = state.vars.get("_runtime") if state is not None and isinstance(getattr(state, "vars", None), dict) else None
+                if isinstance(runtime_ns, dict):
+                    raw_specs = runtime_ns.get("tool_specs")
+                    if isinstance(raw_specs, list) and raw_specs and all(isinstance(x, dict) for x in raw_specs):
+                        tool_specs = list(raw_specs)
+            except Exception:
+                tool_specs = None
+            if tool_specs is None:
+                try:
+                    logic = getattr(self._agent, "logic", None)
+                    tool_defs = getattr(logic, "tools", None) if logic is not None else None
+                    allow = list(self._allowed_tools) if isinstance(self._allowed_tools, list) else None
+                    if isinstance(tool_defs, list) and tool_defs:
+                        tool_by_name = {t.name: t for t in tool_defs if getattr(t, "name", None)}
+                        ordered = [t.name for t in tool_defs if getattr(t, "name", None)]
+                        if allow is not None:
+                            ordered = [n for n in ordered if str(n) in set(allow)]
+                        built: List[Dict[str, Any]] = []
+                        for name in ordered:
+                            tool = tool_by_name.get(str(name))
+                            if tool is None:
+                                continue
+                            to_dict = getattr(tool, "to_dict", None)
+                            if callable(to_dict):
+                                try:
+                                    spec = to_dict()
+                                except Exception:
+                                    spec = None
+                                if isinstance(spec, dict):
+                                    built.append(spec)
+                        if built:
+                            tool_specs = built
+                except Exception:
+                    tool_specs = None
+
+            est = self._estimate_next_prompt_tokens(
+                state=state,
+                messages=messages,
+                effective_model=effective_model,
+                task_text=draft_for_tokens,
+                extra_messages=extra_msgs,
+                tool_specs=tool_specs,
+            )
             tokens_used_source = str(est.get("source") or "estimate")
             tokens_used = int(est.get("total_tokens") or 0)
         except Exception:
@@ -1451,12 +1651,12 @@ class ReactShell:
             "var",
             "whitelist",
             "blacklist",
-            "log",
             "logs",
             "memorize",
             "recall",
             "copy",
             "mouse",
+            "agent",
             "theme",
             "system",
             "gpu",
@@ -2297,11 +2497,14 @@ class ReactShell:
         if command == "blacklist":
             self._handle_blacklist(arg)
             return False
-        if command in ("log", "logs"):
+        if command == "logs":
             self._handle_log(arg)
             return False
         if command == "mouse":
             self._handle_mouse_toggle()
+            return False
+        if command == "agent":
+            self._handle_agent(arg)
             return False
         if command == "theme":
             self._handle_theme(arg)
@@ -2328,6 +2531,306 @@ class ReactShell:
         self._print(_style(f"Unknown command: /{command}", _C.YELLOW, enabled=self._color))
         self._print(_style("Type /help for commands.", _C.DIM, enabled=self._color))
         return False
+
+    def _default_bundles_dir(self) -> Path:
+        env_candidates = [
+            "ABSTRACTGATEWAY_FLOWS_DIR",
+            "ABSTRACTFLOW_PUBLISH_DIR",
+        ]
+        for name in env_candidates:
+            v = os.getenv(name)
+            if isinstance(v, str) and v.strip():
+                return Path(v.strip()).expanduser()
+
+        candidate = Path("flows") / "bundles"
+        if candidate.exists() and candidate.is_dir():
+            return candidate
+        return Path("flows")
+
+    def _normalize_agent_selector_key(self, raw: str) -> str:
+        s = str(raw or "").strip()
+        if not s:
+            return "react"
+        lower = s.lower()
+        if lower in ("react", "codeact", "memact"):
+            return lower
+
+        # Support "bundle_id:flow_id" (same as the web UI). Avoid Windows drive letters.
+        if ":" in s and not re.match(r"^[A-Za-z]:[\\\\/]", s):
+            left, _right = s.split(":", 1)
+            if left.strip():
+                s = left.strip()
+
+        # If this is a bundle path, prefer manifest.bundle_id.
+        try:
+            p = Path(s).expanduser()
+            if p.exists() and p.is_file() and str(p.suffix or "").lower() == ".flow":
+                try:
+                    from abstractruntime.workflow_bundle import open_workflow_bundle  # type: ignore
+
+                    bid = str(open_workflow_bundle(p).manifest.bundle_id or "").strip()
+                    if bid:
+                        return bid
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        if s.lower().endswith(".flow"):
+            s = s[:-5]
+        if "@" in s:
+            base, _ver = s.split("@", 1)
+            s = base.strip()
+        return s or lower
+
+    def _discover_bundled_agent_templates(self) -> List[_BundledAgentTemplate]:
+        """Best-effort: list bundled `.flow` entrypoints implementing `abstractcode.agent.v1`."""
+        try:
+            from abstractruntime.workflow_bundle import open_workflow_bundle  # type: ignore
+        except Exception:
+            return []
+
+        bundles_dir = self._default_bundles_dir()
+        if not bundles_dir.exists() or not bundles_dir.is_dir():
+            return []
+
+        try:
+            from packaging.version import Version
+        except Exception:  # pragma: no cover
+
+            def Version(v: str) -> Any:  # type: ignore[misc]
+                return v
+
+        best_by_id: Dict[str, Tuple[Any, _BundledAgentTemplate]] = {}
+        for path in sorted(bundles_dir.glob("*.flow")):
+            if not path.is_file():
+                continue
+            try:
+                bundle = open_workflow_bundle(path)
+            except Exception:
+                continue
+            man = bundle.manifest
+            bundle_id = str(getattr(man, "bundle_id", "") or "").strip()
+            if not bundle_id:
+                continue
+            bundle_version = str(getattr(man, "bundle_version", "") or "0.0.0").strip() or "0.0.0"
+
+            eps = []
+            for ep in getattr(man, "entrypoints", None) or []:
+                interfaces = list(getattr(ep, "interfaces", None) or [])
+                if "abstractcode.agent.v1" not in interfaces:
+                    continue
+                eps.append(ep)
+            if not eps:
+                continue
+
+            default_flow_id = str(getattr(man, "default_entrypoint", "") or "").strip()
+            chosen = None
+            if default_flow_id:
+                chosen = next((ep for ep in eps if str(getattr(ep, "flow_id", "") or "").strip() == default_flow_id), None)
+            if chosen is None:
+                chosen = eps[0]
+
+            flow_id = str(getattr(chosen, "flow_id", "") or "").strip()
+            if not flow_id:
+                continue
+
+            tpl = _BundledAgentTemplate(
+                bundle_id=bundle_id,
+                bundle_version=bundle_version,
+                flow_id=flow_id,
+                name=str(getattr(chosen, "name", "") or "").strip() or bundle_id,
+                description=str(getattr(chosen, "description", "") or ""),
+            )
+
+            try:
+                vkey = Version(bundle_version)
+            except Exception:
+                vkey = bundle_version
+
+            prev = best_by_id.get(bundle_id)
+            if prev is None or vkey > prev[0]:
+                best_by_id[bundle_id] = (vkey, tpl)
+
+        out = [tpl for _v, tpl in best_by_id.values()]
+        out.sort(key=lambda t: t.bundle_id)
+        return out
+
+    def _refresh_bundled_agent_templates(self) -> None:
+        self._bundled_agent_templates = self._discover_bundled_agent_templates()
+        self._sync_agent_selector_to_ui()
+
+    def _agent_selector_items_for_ui(self) -> List[Tuple[str, str, str]]:
+        items: List[Tuple[str, str, str]] = [
+            ("react", "react", "builtin"),
+            ("memact", "memact", "builtin"),
+            ("codeact", "codeact", "builtin"),
+        ]
+        for tpl in list(getattr(self, "_bundled_agent_templates", None) or []):
+            bid = str(getattr(tpl, "bundle_id", "") or "").strip()
+            if not bid:
+                continue
+            flow_id = str(getattr(tpl, "flow_id", "") or "").strip()
+            ver = str(getattr(tpl, "bundle_version", "") or "").strip()
+            meta = flow_id
+            if ver:
+                meta = f"{meta} @{ver}" if meta else f"@{ver}"
+            items.append((bid, bid, meta))
+        return items
+
+    def _sync_agent_selector_to_ui(self) -> None:
+        ui = getattr(self, "_ui", None)
+        if ui is None:
+            return
+        try:
+            ui.set_agent_selector(
+                current_key=str(getattr(self, "_agent_selector_key", "") or "").strip(),
+                items=self._agent_selector_items_for_ui(),
+            )
+        except Exception:
+            return
+
+    def _set_agent(self, selector: str) -> None:
+        raw = str(selector or "").strip()
+        if not raw:
+            return
+
+        lower = raw.lower()
+        if lower in ("react", "codeact", "memact"):
+            agent_kind = lower
+            workflow_ref: Optional[str] = None
+        else:
+            agent_kind = raw
+            workflow_ref = raw
+
+        # Choose toolset.
+        agent_cls = None
+        if workflow_ref is not None:
+            tools = list(getattr(self, "_default_tools", []) or [])
+        elif agent_kind == "react":
+            tools = list(getattr(self, "_default_tools", []) or [])
+            agent_cls = getattr(self, "_agent_classes", {}).get("react")
+        elif agent_kind == "memact":
+            tools = list(getattr(self, "_default_tools", []) or [])
+            agent_cls = getattr(self, "_agent_classes", {}).get("memact")
+        else:
+            tools = list(getattr(self, "_codeact_tools", []) or [])
+            agent_cls = getattr(self, "_agent_classes", {}).get("codeact")
+
+        if not tools:
+            raise RuntimeError("No tools configured for agent selection")
+
+        # Rebuild tool metadata + runner.
+        from abstractcore.tools import ToolDefinition
+        from abstractruntime.integrations.abstractcore import MappingToolExecutor
+
+        self._tools = tools
+        self._tool_runner = MappingToolExecutor.from_tools(self._tools)
+
+        tool_specs: Dict[str, _ToolSpec] = {}
+        for t in self._tools:
+            tool_def = getattr(t, "_tool_definition", None) or ToolDefinition.from_function(t)
+            tool_specs[tool_def.name] = _ToolSpec(
+                name=tool_def.name,
+                description=tool_def.description,
+                parameters=dict(tool_def.parameters or {}),
+            )
+        self._tool_specs = tool_specs
+
+        # Filter allowlist against the new toolset (best-effort).
+        if isinstance(getattr(self, "_allowed_tools", None), list):
+            self._allowed_tools = [t for t in self._allowed_tools if t in self._tool_specs]
+
+        # Rebuild agent instance.
+        if workflow_ref is not None:
+            try:
+                from .workflow_agent import WorkflowAgent
+            except Exception as e:
+                raise RuntimeError(f"Workflow agents require AbstractFlow to be installed/importable.\n\n{e}") from e
+
+            self._workflow_agent_ref = workflow_ref
+            self._agent_kind = raw
+            self._agent = WorkflowAgent(
+                runtime=self._runtime,
+                flow_ref=self._workflow_agent_ref,
+                tools=self._tools,
+                on_step=self._on_step,
+                max_iterations=self._max_iterations,
+                max_tokens=self._max_tokens,
+            )
+        else:
+            if agent_cls is None:
+                raise RuntimeError(f"Unknown agent kind: {agent_kind}")
+            self._workflow_agent_ref = None
+            self._agent_kind = agent_kind
+            self._agent = agent_cls(
+                runtime=self._runtime,
+                tools=self._tools,
+                on_step=self._on_step,
+                max_iterations=self._max_iterations,
+                max_tokens=self._max_tokens,
+                plan_mode=self._plan_mode,
+                review_mode=self._review_mode,
+                review_max_rounds=self._review_max_rounds,
+            )
+
+        self._agent_selector_key = self._normalize_agent_selector_key(raw)
+        self._status_cache_key = None
+        self._status_cache_text = ""
+        self._sync_agent_selector_to_ui()
+
+    def _handle_agent(self, raw: str) -> None:
+        import shlex
+
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split() if raw else []
+
+        if not parts:
+            cur = str(getattr(self, "_agent_selector_key", "") or "").strip() or str(getattr(self, "_agent_kind", "") or "")
+            self._print(_style(f"Current agent: {cur or 'react'}", _C.DIM, enabled=self._color))
+            self._print(_style("Usage:", _C.DIM, enabled=self._color))
+            self._print(_style("  /agent list", _C.DIM, enabled=self._color))
+            self._print(_style("  /agent <name|bundle_id|path>", _C.DIM, enabled=self._color))
+            return
+
+        head = str(parts[0] or "").strip().lower()
+        if head in ("list", "ls"):
+            self._refresh_bundled_agent_templates()
+            self._print(_style("\nAgents", _C.CYAN, _C.BOLD, enabled=self._color))
+            self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+            for key, label, meta in self._agent_selector_items_for_ui():
+                if not self._color:
+                    self._print(f"- {label}  {meta}".rstrip())
+                    continue
+                try:
+                    t = getattr(self, "_theme", None)
+                    tn = t.normalized() if isinstance(t, Theme) else theme_from_env().normalized()
+                    name_fg = ansi_fg(tn.primary)
+                    meta_fg = ansi_fg(tn.secondary)
+                except Exception:
+                    name_fg = ""
+                    meta_fg = ""
+                reset = _C.RESET
+                dim = _C.DIM
+                line = f"- {name_fg}{label}{reset}"
+                if meta:
+                    line += f"  {dim}{meta_fg}{meta}{reset}"
+                self._print(line)
+            self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+            return
+
+        if head in ("reload", "refresh"):
+            self._refresh_bundled_agent_templates()
+            self._print(_style("Agent templates reloaded.", _C.DIM, enabled=self._color))
+            return
+
+        # Otherwise: treat the raw arg as a selector and switch (silent on success).
+        try:
+            self._set_agent(raw)
+        except Exception as e:
+            self._print(_style(f"Failed to set agent: {e}", _C.YELLOW, enabled=self._color))
 
     def _handle_theme(self, raw: str) -> None:
         import shlex
@@ -5184,7 +5687,31 @@ class ReactShell:
                 self._print(_style(f"Directory not accessible: {resolved}", _C.YELLOW, enabled=self._color))
                 continue
 
+            # Whitelisting the workspace root is redundant (it's already accessible), and the
+            # default auto-name can shadow a real top-level folder (breaking @file resolution).
+            try:
+                if name is None and resolved.resolve() == self._workspace_root.resolve():
+                    self._print(_style(f"Workspace root already accessible: {resolved}", _C.DIM, enabled=self._color))
+                    continue
+            except Exception:
+                pass
+
             mount = _sanitize_mount_name(name or resolved.name or "mount")
+
+            # Avoid mounts that shadow an existing workspace-relative path segment.
+            # Example: workspace has `mnemosyne/` and user mounts `/.../workspace` with mount name `mnemosyne`,
+            # then `@mnemosyne/...` resolves against the mount instead of the workspace folder.
+            try:
+                candidate = (self._workspace_root / mount)
+                if candidate.exists():
+                    try:
+                        if candidate.resolve() != resolved.resolve():
+                            mount = _sanitize_mount_name(f"{mount}_mount")
+                    except Exception:
+                        mount = _sanitize_mount_name(f"{mount}_mount")
+            except Exception:
+                pass
+
             base = mount
             i = 2
             while mount in existing and existing.get(mount) != resolved:
@@ -5325,7 +5852,7 @@ class ReactShell:
             return
 
         copy_to_clipboard = False
-        # Accept `copy` as either a leading or trailing token (UX: "/log runtime ... copy").
+        # Accept `copy` as either a leading or trailing token (UX: "/logs runtime ... copy").
         if parts and str(parts[0] or "").strip().lower() == "copy":
             copy_to_clipboard = True
             parts = parts[1:]
@@ -5698,7 +6225,7 @@ class ReactShell:
             parts = raw.split() if raw else []
 
         copy_to_clipboard = False
-        # Accept `copy` as either a leading or trailing token (UX: "/log runtime ... copy").
+        # Accept `copy` as either a leading or trailing token (UX: "/logs runtime ... copy").
         if parts and str(parts[0] or "").strip().lower() == "copy":
             copy_to_clipboard = True
             parts = parts[1:]
@@ -6054,7 +6581,7 @@ class ReactShell:
             parts = raw.split() if raw else []
 
         copy_to_clipboard = False
-        # Accept `copy` as either a leading or trailing token (UX: "/log provider --all copy").
+        # Accept `copy` as either a leading or trailing token (UX: "/logs provider --all copy").
         if parts and str(parts[0] or "").strip().lower() == "copy":
             copy_to_clipboard = True
             parts = parts[1:]
@@ -6124,7 +6651,7 @@ class ReactShell:
             if not run_only and isinstance(session_id, str) and session_id.strip() and isinstance(self._runtime.run_store, QueryableRunStore):
                 # Pull a bounded set of runs and filter client-side by session_id.
                 # (QueryableRunStore doesn't expose a session_id filter in v0.1.)
-                # Prefer completeness over speed: /log provider is a debugging tool.
+                # Prefer completeness over speed: /logs provider is a debugging tool.
                 # JsonFileRunStore scans all run_*.json files anyway; a low limit can hide older runs.
                 runs = self._runtime.run_store.list_runs(limit=100000)
                 run_ids = [r.run_id for r in runs if getattr(r, "session_id", None) == session_id]
@@ -6542,6 +7069,7 @@ class ReactShell:
             "                     - /logs provider [copy] [--last|--all] [--json-only] [--save <path>]\n"
             "  /memorize <note>    Store a durable memory note (tags + provenance)\n"
             "  /mouse              Toggle mouse mode (wheel scroll vs terminal selection)\n"
+            "  /agent [name]       Switch agent (/agent list, /agent reload)\n"
             "  /theme [name]       Switch UI theme (/theme list, /theme custom ...)\n"
             "  /system [text]      Show or set system prompt override [saved]\n"
             "  /gpu [on|off]       Toggle host GPU meter (via AbstractGateway)\n"
@@ -6953,6 +7481,10 @@ class ReactShell:
 
         # Reset approval state (clear = full reset)
         self._approve_all_session = False
+
+        # Force status bar recompute (no last-run fallback for token meter).
+        self._status_cache_key = None
+        self._status_cache_text = ""
 
         self._print(_style("Memory cleared. Ready for a fresh start.", _C.GREEN, enabled=self._color))
 
