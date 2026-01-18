@@ -307,6 +307,27 @@ body::before {
   gap: 10px;
 }
 
+.settings_section_divider {
+  height: 1px;
+  background: var(--border-subtle);
+  opacity: 0.8;
+  margin: 16px 0;
+}
+
+.settings_section_header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.settings_section_header h3 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+
 .settings_row2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1430,10 +1451,81 @@ select {
   opacity: 0.7;
 }
 
+.stat_item.clickable {
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--transition-fast);
+}
+
+.stat_item.clickable:hover {
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+.stat_item.clickable:active {
+  transform: translateY(1px);
+}
+
+.stat_item.clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .chat_item.assistant .stat_item {
   background: rgba(125, 211, 252, 0.10);
   border-color: rgba(125, 211, 252, 0.18);
   color: rgba(226, 232, 240, 0.92);
+}
+
+/* ===============================
+   MODALS
+   =============================== */
+
+.modal_overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(0, 0, 0, 0.66);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal_card {
+  width: min(920px, 98vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+}
+
+.modal_header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.modal_title {
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.2px;
+  color: var(--text-primary);
+}
+
+.modal_body {
+  padding: 14px;
+  overflow: auto;
 }
 
 .chat_copy {

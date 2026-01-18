@@ -7,13 +7,26 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
+      "@abstractuic/monitor-flow": resolve(__dirname, "../../abstractuic/monitor-flow/src"),
       "@abstractuic/panel-chat": resolve(__dirname, "../../abstractuic/panel-chat/src"),
       "@abstractutils/monitor-gpu": resolve(__dirname, "../../abstractuic/monitor-gpu/src"),
     },
   },
   server: {
+    host: "0.0.0.0",
+    allowedHosts: true,
+    strictPort: false,
+    cors: true,
     fs: {
       allow: [resolve(__dirname), resolve(__dirname, "../../abstractuic")],
+    },
+    proxy: {
+      "/api": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+        ws: true,
+        secure: false,
+      },
     },
   },
   test: {

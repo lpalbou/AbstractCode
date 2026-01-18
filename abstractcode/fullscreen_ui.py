@@ -28,20 +28,25 @@ from prompt_toolkit.data_structures import Point
 from prompt_toolkit.formatted_text import FormattedText, ANSI
 from prompt_toolkit.formatted_text.utils import to_formatted_text
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout.containers import Float, FloatContainer, HSplit, VSplit, Window
+from prompt_toolkit.layout.containers import Container, ConditionalContainer, Float, FloatContainer, HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 from prompt_toolkit.styles import Style
 
 from .file_mentions import default_workspace_mounts, default_workspace_root, list_workspace_files, search_workspace_files
+from .theme import BUILTIN_THEMES, Theme, ansi_bg, ansi_fg, blend_hex, is_dark, theme_from_env
 
 
 # Command definitions: (command, description)
 COMMANDS = [
     ("help", "Show available commands"),
-    ("tools", "List available tools"),
+    ("mcp", "Configure MCP servers (discovery + execution) [saved]"),
+    ("tools", "List/configure tool allowlist [saved]"),
+    ("executor", "Set default tool executor [saved]"),
+    ("tool-specs", "Show full tool schemas (params)"),
     ("status", "Show current run status"),
     ("history", "Show recent conversation history"),
     ("copy", "Copy messages to clipboard (/copy user|assistant [turn])"),
@@ -56,10 +61,15 @@ COMMANDS = [
     ("expand", "Expand an archived span into view/context"),
     ("recall", "Recall memory spans by query/time/tags"),
     ("vars", "Inspect durable run vars (scratchpad, _runtime, ...)"),
-    ("context", "Show the exact context for the next LLM call"),
     ("whitelist", "Whitelist workspace mounts for this session"),
     ("blacklist", "Blacklist folders/files for this session"),
     ("memorize", "Store a durable memory note"),
+    ("logs", "Show durable logs (/logs runtime|provider)"),
+    ("logs runtime", "Show runtime logs (durable)"),
+    ("logs provider", "Show provider wire logs (durable)"),
+    ("log", "Alias for /logs"),
+    ("log runtime", "Alias for /logs runtime"),
+    ("log provider", "Alias for /logs provider"),
     ("flow", "Run AbstractFlow workflows (run/resume/pause/cancel)"),
     ("mouse", "Toggle mouse mode (wheel scroll vs terminal selection)"),
     ("task", "Start a new task (/task <text>)"),
@@ -70,6 +80,11 @@ COMMANDS = [
     ("snapshot save", "Save current state as named snapshot"),
     ("snapshot load", "Load snapshot by name"),
     ("snapshot list", "List available snapshots"),
+    ("theme", "Switch UI theme (/theme [name]|custom ...)"),
+    ("system", "Show/set system prompt override [saved]"),
+    ("gpu", "Toggle GPU meter (/gpu on|off|status)"),
+    ("links", "List links from last answer"),
+    ("open", "Open a link in your browser (/open N|URL)"),
     ("quit", "Exit"),
     ("exit", "Exit"),
     ("q", "Exit"),
@@ -79,6 +94,12 @@ COMMANDS = [
 class SubmittedInput:
     text: str
     attachments: List[str]
+
+@dataclass(frozen=True)
+class _DropdownItem:
+    key: str
+    label: str
+    meta: str = ""
 
 
 class CommandCompleter(Completer):
@@ -91,18 +112,51 @@ class CommandCompleter(Completer):
         if not text.startswith("/"):
             return
 
-        # Get the text after /
-        cmd_text = text[1:].lower()
+        after = text[1:]
+        if not after:
+            cmd_text = ""
+        else:
+            cmd_text = after.lower()
 
-        for cmd, description in COMMANDS:
-            if cmd.startswith(cmd_text):
-                # Yield completion (what to insert, how far back to go)
-                yield Completion(
-                    cmd,
-                    start_position=-len(cmd_text),
-                    display=f"/{cmd}",
-                    display_meta=description,
-                )
+        # If we're still completing the command itself (no spaces yet), show commands.
+        if " " not in after and "\t" not in after:
+            for cmd, description in COMMANDS:
+                if cmd.startswith(cmd_text):
+                    yield Completion(
+                        cmd,
+                        start_position=-len(cmd_text),
+                        display=f"/{cmd}",
+                        display_meta=description,
+                    )
+            return
+
+        # Subcommand completion for specific commands (best-effort).
+        parts = after.split()
+        if not parts:
+            return
+        cmd = parts[0].lower()
+
+        # /theme <name>
+        if cmd == "theme":
+            # Only complete the first arg (theme name) to keep UX predictable.
+            rest = after[len(parts[0]) :].lstrip()
+            if " " in rest:
+                return
+            prefix = rest.lower()
+            choices = ["list", "custom", *sorted(BUILTIN_THEMES.keys())]
+            for name in choices:
+                if name.startswith(prefix):
+                    meta = "theme"
+                    t = BUILTIN_THEMES.get(name)
+                    if isinstance(t, Theme):
+                        meta = f"{t.primary} / {t.secondary}"
+                    yield Completion(
+                        name,
+                        start_position=-len(rest),
+                        display=name,
+                        display_meta=meta,
+                    )
+            return
 
 class _CommandAndFileCompleter(Completer):
     """Completer for both `/commands` and `@files`."""
@@ -139,6 +193,7 @@ class FullScreenUI:
     """Full-screen chat interface with scrollable history and ANSI color support."""
 
     _MARKER_RE = re.compile(r"\[\[(COPY|SPINNER|FOLD):([^\]]+)\]\]")
+    _URL_RE = re.compile(r"https?://[^\s<>()\]]+")
 
     @dataclass
     class _FoldRegion:
@@ -154,6 +209,96 @@ class FullScreenUI:
         visible_lines: List[str]
         hidden_lines: List[str]
         collapsed: bool = True
+
+    @dataclass
+    class _Dropdown:
+        """Generic dropdown button + menu state (reusable UI component)."""
+
+        id: str
+        caption: str
+        get_items: Callable[[], List[_DropdownItem]]
+        get_current_key: Callable[[], str]
+        on_select: Callable[[str], None]
+        close_on_select: bool = True
+        max_visible: int = 12
+        anchor_right: int = 0
+        anchor_bottom: int = 2
+        open: bool = False
+        index: int = 0
+        scroll: int = 0
+
+    class _MouseCatcher(Container):
+        """Mouse event catcher that doesn't render anything.
+
+        Used as a transparent overlay to close dropdowns when clicking outside,
+        without erasing the underlying UI content.
+        """
+
+        def __init__(self, on_click: Callable[[], None]) -> None:
+            self._on_click = on_click
+
+        def reset(self) -> None:
+            return
+
+        def preferred_width(self, max_available_width: int) -> Dimension:
+            return Dimension()
+
+        def preferred_height(self, width: int, max_available_height: int) -> Dimension:
+            return Dimension()
+
+        def write_to_screen(  # pragma: no cover - UI integration
+            self,
+            screen,
+            mouse_handlers,
+            write_position,
+            parent_style: str,
+            erase_bg: bool,
+            z_index: int | None,
+        ) -> None:
+            def _handler(mouse_event: MouseEvent):
+                if mouse_event.event_type in (MouseEventType.SCROLL_UP, MouseEventType.SCROLL_DOWN):
+                    return NotImplemented
+                if mouse_event.event_type != MouseEventType.MOUSE_UP:
+                    return None
+                try:
+                    self._on_click()
+                except Exception:
+                    pass
+                try:
+                    app = get_app()
+                    if app and app.is_running:
+                        app.invalidate()
+                except Exception:
+                    pass
+                return None
+
+            try:
+                x0 = int(getattr(write_position, "xpos", 0) or 0)
+                y0 = int(getattr(write_position, "ypos", 0) or 0)
+                w = int(getattr(write_position, "width", 0) or 0)
+                h = int(getattr(write_position, "height", 0) or 0)
+            except Exception:
+                return
+
+            if w <= 0 or h <= 0:
+                return
+
+            x1 = x0 + w
+            y1 = y0 + h
+            if x1 <= 0 or y1 <= 0:
+                return
+
+            x0 = max(0, x0)
+            y0 = max(0, y0)
+            x1 = max(x0, x1)
+            y1 = max(y0, y1)
+            try:
+                mouse_handlers.set_mouse_handler_for_range(x0, x1, y0, y1, _handler)
+            except Exception:
+                return
+
+        def get_children(self) -> list[Container]:
+            return []
 
     class _ScrollAwareFormattedTextControl(FormattedTextControl):
         def __init__(
@@ -187,6 +332,7 @@ class FullScreenUI:
         on_fold_toggle: Optional[Callable[[str], None]] = None,
         color: bool = True,
         mouse_support: bool = True,
+        theme: Theme | None = None,
     ):
         """Initialize the full-screen UI.
 
@@ -200,6 +346,12 @@ class FullScreenUI:
         self._color = color
         self._mouse_support_enabled = bool(mouse_support)
         self._running = False
+        self._theme: Theme = (theme or theme_from_env()).normalized()
+
+        # Footer dropdowns (reusable UI component).
+        self._footer_right_padding: int = 2
+        self._dropdowns: Dict[str, FullScreenUI._Dropdown] = {}
+        self._active_dropdown_id: Optional[str] = None
 
         self._on_copy_payload = on_copy_payload
         self._copy_payloads: Dict[str, str] = {}
@@ -304,6 +456,19 @@ class FullScreenUI:
             completer=_CommandAndFileCompleter(ui=self),
             complete_while_typing=True,
             history=self._history,
+        )
+
+        # Register footer dropdowns.
+        self._dropdowns["theme"] = FullScreenUI._Dropdown(
+            id="theme",
+            caption="Theme : ",
+            get_items=self._theme_dropdown_items,
+            get_current_key=self._current_theme_key,
+            on_select=self._select_theme_from_dropdown,
+            close_on_select=False,
+            max_visible=12,
+            anchor_right=int(self._footer_right_padding),
+            anchor_bottom=2,
         )
 
         # Build the layout
@@ -581,13 +746,109 @@ class FullScreenUI:
 
         return _handler
 
+    def _split_url_trailing_punct(self, url: str) -> tuple[str, str]:
+        u = str(url or "")
+        trailing = ""
+        while u and u[-1] in ".,;:)]}":
+            trailing = u[-1] + trailing
+            u = u[:-1]
+        return u, trailing
+
+    def _open_url_handler(self, url: str) -> Callable[[MouseEvent], None]:
+        def _handler(mouse_event: MouseEvent) -> None:
+            if mouse_event.event_type != MouseEventType.MOUSE_UP:
+                return
+            u = str(url or "").strip()
+            if not u.startswith(("http://", "https://")):
+                return
+            try:
+                import webbrowser
+
+                threading.Thread(target=webbrowser.open, args=(u,), kwargs={"new": 2}, daemon=True).start()
+            except Exception:
+                return
+
+        return _handler
+
+    def _linkify_fragments(self, fragments: FormattedText) -> FormattedText:
+        """Make URLs clickable (best-effort) by attaching mouse handlers."""
+        # `ANSI(...)` can yield per-character fragments even without styling.
+        # Coalesce adjacent fragments (same style, no handler) so URL detection can
+        # match across fragment boundaries.
+        coalesced: List[Tuple[Any, ...]] = []
+        buf_style: Any = None
+        buf_parts: List[str] = []
+
+        def _flush() -> None:
+            nonlocal buf_style, buf_parts
+            if buf_parts:
+                coalesced.append((buf_style, "".join(buf_parts)))
+                buf_style = None
+                buf_parts = []
+
+        for frag in fragments:
+            if len(frag) < 2:
+                _flush()
+                coalesced.append(frag)
+                continue
+            style = frag[0]
+            s = frag[1]
+            handler = frag[2] if len(frag) >= 3 else None
+            if handler is not None or not isinstance(s, str):
+                _flush()
+                coalesced.append(frag)
+                continue
+            if buf_style is None:
+                buf_style = style
+                buf_parts = [s]
+                continue
+            if style == buf_style:
+                buf_parts.append(s)
+                continue
+            _flush()
+            buf_style = style
+            buf_parts = [s]
+
+        _flush()
+
+        out: List[Tuple[Any, ...]] = []
+        for frag in coalesced:
+            if len(frag) < 2:
+                out.append(frag)
+                continue
+            style = frag[0]
+            s = frag[1]
+            handler = frag[2] if len(frag) >= 3 else None
+            if handler is not None or not isinstance(s, str) or "http" not in s:
+                out.append(frag)
+                continue
+
+            pos = 0
+            for m in self._URL_RE.finditer(s):
+                if m.start() > pos:
+                    out.append((style, s[pos : m.start()]))
+                raw_url = str(m.group(0) or "")
+                clean, trailing = self._split_url_trailing_punct(raw_url)
+                if clean:
+                    link_style = (str(style) + " " if style else "") + "class:link"
+                    out.append((link_style, clean, self._open_url_handler(clean)))
+                else:
+                    out.append((style, raw_url))
+                if trailing:
+                    out.append((style, trailing))
+                pos = m.end()
+            if pos < len(s):
+                out.append((style, s[pos:]))
+
+        return out
+
     def _format_output_text(self, text: str) -> FormattedText:
         """Convert output text into formatted fragments and attach handlers for copy markers."""
         if not text:
             return to_formatted_text(ANSI(""))
 
         if "[[" not in text:
-            return to_formatted_text(ANSI(text))
+            return self._linkify_fragments(to_formatted_text(ANSI(text)))
 
         def _attach_handler_until_newline(
             fragments: FormattedText, handler: Callable[[MouseEvent], None]
@@ -682,7 +943,7 @@ class FullScreenUI:
                 out.extend(patched)
             else:
                 out.extend(tail_frags)
-        return out
+        return self._linkify_fragments(out)
 
     def _compute_view_params_locked(self) -> Tuple[int, int]:
         """Compute (view_size_lines, margin_lines) for output virtualization."""
@@ -835,6 +1096,7 @@ class FullScreenUI:
         output_window = Window(
             content=self._output_control,
             wrap_lines=True,
+            style="class:output-window",
         )
 
         # Separator line
@@ -852,6 +1114,7 @@ class FullScreenUI:
             content=BufferControl(buffer=self._input_buffer),
             height=3,  # Allow a few lines for input
             wrap_lines=True,
+            style="class:input-window",
         )
 
         # Input prompt label
@@ -859,17 +1122,25 @@ class FullScreenUI:
             content=FormattedTextControl(lambda: [("class:prompt", "> ")]),
             width=2,
             height=1,
+            style="class:input-window",
         )
 
         # Combine input label and input window horizontally
         input_row = VSplit([input_label, input_window])
 
         # Status bar (fixed at bottom)
-        status_bar = Window(
+        status_bar_left = Window(
             content=FormattedTextControl(self._get_status_formatted),
             height=1,
             style="class:status-bar",
         )
+        status_bar_right = Window(
+            content=FormattedTextControl(self._get_footer_right_formatted),
+            height=1,
+            style="class:status-bar",
+            dont_extend_width=True,
+        )
+        status_bar = VSplit([status_bar_left, status_bar_right])
 
         # Help hint bar
         help_bar = Window(
@@ -890,16 +1161,57 @@ class FullScreenUI:
             help_bar,         # Help hints
         ])
 
+        # Dropdown menus (anchored popovers; footer buttons).
+        self._dropdown_menu_windows: Dict[str, Window] = {}
+        for did, dd in (self._dropdowns or {}).items():
+            menu_width, _name_w, _meta_w, menu_height = self._dropdown_menu_metrics(dd)
+            self._dropdown_menu_windows[did] = Window(
+                content=FormattedTextControl(lambda did=did: self._get_dropdown_menu_formatted(did)),
+                wrap_lines=False,
+                width=menu_width,
+                height=menu_height,
+                style="class:dropdown-menu",
+            )
+
+        overlay_container = self._MouseCatcher(self._close_all_dropdowns)
+
         # Wrap in FloatContainer to show completion menu
+        floats: List[Float] = [
+            Float(
+                xcursor=True,
+                ycursor=True,
+                content=CompletionsMenu(max_height=10, scroll_offset=1),
+            ),
+            # Click-outside-to-close overlay (transparent; does not hide content).
+            Float(
+                top=0,
+                right=0,
+                bottom=0,
+                left=0,
+                transparent=True,
+                z_index=5,
+                content=ConditionalContainer(content=overlay_container, filter=Condition(self._any_dropdown_open)),
+            ),
+        ]
+        for did, dd in (self._dropdowns or {}).items():
+            win = self._dropdown_menu_windows.get(did)
+            if win is None:
+                continue
+            floats.append(
+                Float(
+                    right=int(getattr(dd, "anchor_right", 0) or 0),
+                    bottom=int(getattr(dd, "anchor_bottom", 2) or 2),
+                    z_index=10,
+                    content=ConditionalContainer(
+                        content=win,
+                        filter=Condition(lambda did=did: self._is_dropdown_open(did)),
+                    ),
+                )
+            )
+
         root = FloatContainer(
             content=body,
-            floats=[
-                Float(
-                    xcursor=True,
-                    ycursor=True,
-                    content=CompletionsMenu(max_height=10, scroll_offset=1),
-                ),
-            ],
+            floats=floats,
         )
 
         self._layout = Layout(root)
@@ -1125,6 +1437,232 @@ class FullScreenUI:
 
         return [("class:status-text", f" {text}")]
 
+    def _theme_dropdown_items(self) -> List[_DropdownItem]:
+        out: List[_DropdownItem] = []
+        for name in sorted(BUILTIN_THEMES.keys()):
+            t = BUILTIN_THEMES.get(name)
+            meta = f"{t.primary} / {t.secondary}" if isinstance(t, Theme) else ""
+            out.append(_DropdownItem(key=name, label=name, meta=meta))
+        return out
+
+    def _current_theme_key(self) -> str:
+        t = getattr(self, "_theme", None)
+        name = str(getattr(t, "name", "") or "").strip().lower() if isinstance(t, Theme) else ""
+        return name
+
+    def _select_theme_from_dropdown(self, key: str) -> None:
+        n = str(key or "").strip().lower()
+        if not n or n not in BUILTIN_THEMES:
+            return
+        try:
+            # Queue as a command so ReactShell can persist and apply the theme consistently.
+            self._command_queue.put(SubmittedInput(text=f"/theme {n}", attachments=[]))
+        except Exception:
+            pass
+
+    def _any_dropdown_open(self) -> bool:
+        for dd in (self._dropdowns or {}).values():
+            if bool(getattr(dd, "open", False)):
+                return True
+        return False
+
+    def _is_dropdown_open(self, dropdown_id: str) -> bool:
+        dd = (self._dropdowns or {}).get(str(dropdown_id))
+        return bool(getattr(dd, "open", False))
+
+    def _close_all_dropdowns(self) -> None:
+        for dd in (self._dropdowns or {}).values():
+            dd.open = False
+        self._active_dropdown_id = None
+        try:
+            self._input_buffer.cancel_completion()
+        except Exception:
+            try:
+                self._input_buffer.complete_state = None
+            except Exception:
+                pass
+
+    def _active_dropdown(self) -> Optional["FullScreenUI._Dropdown"]:
+        did = str(getattr(self, "_active_dropdown_id", "") or "").strip()
+        if not did:
+            return None
+        dd = (self._dropdowns or {}).get(did)
+        if dd is None or not bool(getattr(dd, "open", False)):
+            return None
+        return dd
+
+    def _dropdown_menu_metrics(self, dd: "FullScreenUI._Dropdown") -> Tuple[int, int, int, int]:
+        items = list(dd.get_items() or [])
+        if not items:
+            return (22, 0, 0, 1)
+        label_w = max((len(str(it.label)) for it in items), default=0)
+        meta_w = max((len(str(it.meta)) for it in items if str(it.meta or "")), default=0)
+        menu_height = min(int(dd.max_visible or 12), max(1, len(items)))
+        # " " + label + "  " + meta + " " (padding)
+        menu_width = 1 + label_w + (2 + meta_w if meta_w else 0) + 1
+        menu_width = max(18, min(90, int(menu_width)))
+        return (int(menu_width), int(label_w), int(meta_w), int(menu_height))
+
+    def _dropdown_set_index(self, dd: "FullScreenUI._Dropdown", index: int) -> None:
+        items = list(dd.get_items() or [])
+        if not items:
+            dd.index = 0
+            dd.scroll = 0
+            return
+        idx = max(0, min(int(index), len(items) - 1))
+        dd.index = idx
+        _w, _label_w, _meta_w, height = self._dropdown_menu_metrics(dd)
+        height = max(1, int(height))
+        scroll = int(getattr(dd, "scroll", 0) or 0)
+        if idx < scroll:
+            scroll = idx
+        elif idx >= scroll + height:
+            scroll = idx - height + 1
+        scroll = max(0, min(scroll, max(0, len(items) - height)))
+        dd.scroll = scroll
+
+    def _toggle_dropdown(self, dropdown_id: str) -> None:
+        if self._pending_blocking_prompt is not None:
+            return
+        did = str(dropdown_id or "").strip()
+        if not did:
+            return
+        dd = (self._dropdowns or {}).get(did)
+        if dd is None:
+            return
+
+        # Only one dropdown open at a time.
+        for other_id, other in (self._dropdowns or {}).items():
+            if other_id != did:
+                other.open = False
+
+        dd.open = not bool(getattr(dd, "open", False))
+        self._active_dropdown_id = did if dd.open else None
+
+        if dd.open:
+            items = list(dd.get_items() or [])
+            cur = str(dd.get_current_key() or "").strip().lower()
+            idx = 0
+            if cur:
+                for i, it in enumerate(items):
+                    if str(it.key).strip().lower() == cur:
+                        idx = i
+                        break
+            self._dropdown_set_index(dd, idx)
+
+        # Avoid overlapping menus.
+        try:
+            self._input_buffer.cancel_completion()
+        except Exception:
+            try:
+                self._input_buffer.complete_state = None
+            except Exception:
+                pass
+
+        if self._app and self._app.is_running:
+            self._app.invalidate()
+
+    def _dropdown_button_handler(self, dropdown_id: str) -> Callable[[MouseEvent], None]:
+        def _handler(mouse_event: MouseEvent) -> None:
+            if mouse_event.event_type != MouseEventType.MOUSE_UP:
+                return
+            self._toggle_dropdown(dropdown_id)
+
+        return _handler
+
+    def _select_active_dropdown_item(self) -> None:
+        dd = self._active_dropdown()
+        if dd is None:
+            return
+        items = list(dd.get_items() or [])
+        if not items:
+            dd.open = False
+            self._active_dropdown_id = None
+            return
+        idx = max(0, min(int(getattr(dd, "index", 0) or 0), len(items) - 1))
+        key = str(items[idx].key)
+        try:
+            dd.on_select(key)
+        except Exception:
+            pass
+        if dd.close_on_select:
+            dd.open = False
+            self._active_dropdown_id = None
+
+    def _dropdown_item_handler(self, dropdown_id: str, index: int) -> Callable[[MouseEvent], None]:
+        def _handler(mouse_event: MouseEvent) -> None:
+            if mouse_event.event_type != MouseEventType.MOUSE_UP:
+                return
+            dd = (self._dropdowns or {}).get(str(dropdown_id))
+            if dd is None:
+                return
+            self._active_dropdown_id = dd.id
+            self._dropdown_set_index(dd, int(index))
+            self._select_active_dropdown_item()
+            if self._app and self._app.is_running:
+                self._app.invalidate()
+
+        return _handler
+
+    def _get_dropdown_menu_formatted(self, dropdown_id: str) -> FormattedText:
+        dd = (self._dropdowns or {}).get(str(dropdown_id))
+        if dd is None:
+            return []
+
+        items = list(dd.get_items() or [])
+        if not items:
+            return [("class:dropdown-menu.item", " (empty) ")]
+
+        cur_key = str(dd.get_current_key() or "").strip().lower()
+        width, label_w, meta_w, height = self._dropdown_menu_metrics(dd)
+        height = max(1, int(height))
+
+        scroll = int(getattr(dd, "scroll", 0) or 0)
+        scroll = max(0, min(scroll, max(0, len(items) - height)))
+        start = scroll
+        end = min(len(items), start + height)
+
+        out: List[Tuple[Any, ...]] = []
+        for idx in range(start, end):
+            it = items[idx]
+            label = str(it.label or "")
+            meta = str(it.meta or "")
+            left = f" {label.ljust(label_w)}"
+            line = f"{left}  {meta.ljust(meta_w)}" if meta_w else left
+            line = line.ljust(width)
+
+            style = "class:dropdown-menu.item"
+            if idx == int(getattr(dd, "index", 0) or 0):
+                style = "class:dropdown-menu.item.selected"
+            if str(it.key).strip().lower() == cur_key:
+                style = (
+                    "class:dropdown-menu.item.current"
+                    if "selected" not in style
+                    else "class:dropdown-menu.item.selected.current"
+                )
+
+            out.append((style, line, self._dropdown_item_handler(dd.id, idx)))
+            if idx != end - 1:
+                out.append(("", "\n"))
+        return out
+
+    def _get_footer_right_formatted(self) -> FormattedText:
+        dd = (self._dropdowns or {}).get("theme")
+        if dd is None:
+            return []
+
+        cur = str(dd.get_current_key() or "").strip() or "theme"
+        caret = "▲" if bool(getattr(dd, "open", False)) else "▼"
+        label = f"[{cur} {caret}]"
+        handler = self._dropdown_button_handler(dd.id)
+
+        pad = " " * max(0, int(getattr(self, "_footer_right_padding", 0) or 0))
+        return [
+            ("class:dropdown-label", f" {dd.caption}", handler),
+            ("class:dropdown-button", f" {label} ", handler),
+            ("", pad),
+        ]
+
     _AT_TOKEN_RE = re.compile(r"(^|\s)@([^\s]*)$")
 
     def _accept_completion(self, event) -> None:
@@ -1185,8 +1723,43 @@ class FullScreenUI:
         """Build key bindings."""
         self._kb = KeyBindings()
 
+        dropdown_open = Condition(self._any_dropdown_open)
+        dropdown_closed = ~dropdown_open
+
+        @self._kb.add("escape", filter=dropdown_open)
+        def dropdown_close(event):
+            self._close_all_dropdowns()
+            event.app.invalidate()
+
+        @self._kb.add("up", filter=dropdown_open)
+        def dropdown_up(event):
+            dd = self._active_dropdown()
+            if dd is None:
+                self._close_all_dropdowns()
+                event.app.invalidate()
+                return
+            idx = int(getattr(dd, "index", 0) or 0)
+            self._dropdown_set_index(dd, idx - 1)
+            event.app.invalidate()
+
+        @self._kb.add("down", filter=dropdown_open)
+        def dropdown_down(event):
+            dd = self._active_dropdown()
+            if dd is None:
+                self._close_all_dropdowns()
+                event.app.invalidate()
+                return
+            idx = int(getattr(dd, "index", 0) or 0)
+            self._dropdown_set_index(dd, idx + 1)
+            event.app.invalidate()
+
+        @self._kb.add("enter", filter=dropdown_open)
+        def dropdown_enter(event):
+            self._select_active_dropdown_item()
+            event.app.invalidate()
+
         # Enter = submit input (but not if completion menu is showing)
-        @self._kb.add("enter", filter=~has_completions)
+        @self._kb.add("enter", filter=~has_completions & dropdown_closed)
         def handle_enter(event):
             text = self._input_buffer.text.strip()
             if text:
@@ -1194,8 +1767,11 @@ class FullScreenUI:
                 self._history.append_string(text)
                 # Clear input
                 self._input_buffer.reset()
-                attachments = list(self._attachments)
-                self._attachments = []
+                # Commands should not consume attachment chips.
+                attachments: List[str] = []
+                if not str(text).lstrip().startswith("/"):
+                    attachments = list(self._attachments)
+                    self._attachments = []
 
                 # If there's a pending blocking prompt, respond to it
                 if self._pending_blocking_prompt is not None:
@@ -1216,12 +1792,34 @@ class FullScreenUI:
                     event.app.invalidate()
 
         # Enter with completions = accept completion (don't submit)
-        @self._kb.add("enter", filter=has_completions)
+        @self._kb.add("enter", filter=has_completions & dropdown_closed)
         def handle_enter_completion(event):
             self._accept_completion(event)
+            # UX: auto-run theme selection when picking a concrete theme name.
+            #
+            # This enables: click footer theme indicator -> arrow -> Enter (no second Enter).
+            try:
+                if self._pending_blocking_prompt is not None:
+                    return
+                txt = str(self._input_buffer.text or "").strip()
+                if not txt.startswith("/theme "):
+                    return
+                parts = txt[1:].split()
+                if len(parts) != 2 or parts[0].lower() != "theme":
+                    return
+                name = parts[1].strip().lower()
+                if not name or name not in BUILTIN_THEMES:
+                    return
+                self._history.append_string(txt)
+                self._input_buffer.reset()
+                self._command_queue.put(SubmittedInput(text=txt, attachments=[]))
+                self.scroll_to_bottom()
+                event.app.invalidate()
+            except Exception:
+                return
 
         # Tab = accept completion
-        @self._kb.add("tab", filter=has_completions)
+        @self._kb.add("tab", filter=has_completions & dropdown_closed)
         def handle_tab_completion(event):
             self._accept_completion(event)
 
@@ -1229,7 +1827,8 @@ class FullScreenUI:
         @self._kb.add(
             "backspace",
             filter=Condition(lambda: (not self._input_buffer.text) and bool(getattr(self, "_attachments", None)))
-            & ~has_completions,
+            & ~has_completions
+            & dropdown_closed,
         )
         def handle_backspace_attachment(event):
             try:
@@ -1239,24 +1838,24 @@ class FullScreenUI:
             event.app.invalidate()
 
         # Up arrow = history previous (when no completions showing)
-        @self._kb.add("up", filter=~has_completions)
+        @self._kb.add("up", filter=~has_completions & dropdown_closed)
         def history_prev(event):
             event.current_buffer.history_backward()
 
         # Down arrow = history next (when no completions showing)
-        @self._kb.add("down", filter=~has_completions)
+        @self._kb.add("down", filter=~has_completions & dropdown_closed)
         def history_next(event):
             event.current_buffer.history_forward()
 
         # Up arrow with completions = navigate completions
-        @self._kb.add("up", filter=has_completions)
+        @self._kb.add("up", filter=has_completions & dropdown_closed)
         def completion_prev(event):
             buff = event.app.current_buffer
             if buff.complete_state:
                 buff.complete_previous()
 
         # Down arrow with completions = navigate completions
-        @self._kb.add("down", filter=has_completions)
+        @self._kb.add("down", filter=has_completions & dropdown_closed)
         def completion_next(event):
             buff = event.app.current_buffer
             if buff.complete_state:
@@ -1506,33 +2105,173 @@ class FullScreenUI:
     def _build_style(self) -> None:
         """Build the style."""
         if self._color:
-            self._style = Style.from_dict({
-                "separator": "#444444",
-                "status-bar": "bg:#1a1a2e #888888",
-                "status-text": "#888888",
-                "attachments-bar": "bg:#1a1a2e #666666",
-                "attachments-label": "#666666",
-                "attachment-chip": "bg:#333333 #dddddd",
-                "attachments-hint": "#555555 italic",
-                "help-bar": "bg:#1a1a2e #666666",
-                "help": "#666666 italic",
-                "prompt": "#00aa00 bold",
-                # Spinner styling
-                "spinner": "#00aaff bold",
-                "spinner-text": "#ffaa00",
-                "spinner-text-highlight": "#ffffff bold",
-                # Completion menu styling
-                "completion-menu": "bg:#1a1a2e #cccccc",
-                "completion-menu.completion": "bg:#1a1a2e #cccccc",
-                "completion-menu.completion.current": "bg:#444444 #ffffff bold",
-                "completion-menu.meta.completion": "bg:#1a1a2e #888888 italic",
-                "completion-menu.meta.completion.current": "bg:#444444 #aaaaaa italic",
-                "copy-button": "bg:#444444 #ffffff bold",
-                "inline-spinner": "#ffaa00 bold",
-                "fold-toggle": "#cccccc bold",
-            })
+            t = self._theme.normalized()
+            surface = t.surface
+            muted = t.muted
+
+            # Derived tokens (keep these subtle; terminals may already have their own theme).
+            dark = is_dark(surface)
+            contrast = "#ffffff" if dark else "#000000"
+            fg = blend_hex(muted, contrast, 0.90)
+            panel_bg = blend_hex(surface, contrast, 0.06 if dark else 0.04)
+            separator = blend_hex(surface, contrast, 0.14 if dark else 0.18)
+            chip_bg = blend_hex(surface, contrast, 0.10 if dark else 0.06)
+            chip_fg = blend_hex(muted, contrast, 0.65 if dark else 0.45)
+            menu_fg = blend_hex(muted, contrast, 0.75 if dark else 0.55)
+            hint_fg = blend_hex(t.secondary, contrast, 0.12 if dark else 0.25)
+            current_bg = blend_hex(surface, t.primary, 0.18 if dark else 0.10)
+            current_fg = "#ffffff" if is_dark(current_bg) else "#000000"
+            status_bg = blend_hex(panel_bg, t.primary, 0.08)
+            copy_bg = blend_hex(surface, t.secondary, 0.55 if dark else 0.18)
+            copy_fg = "#ffffff" if is_dark(copy_bg) else "#000000"
+
+            self._style = Style.from_dict(
+                {
+                    "": f"bg:{surface} {fg}",
+                    "output-window": f"bg:{surface} {fg}",
+                    "input-window": f"bg:{panel_bg} {fg}",
+                    "separator": separator,
+                    "status-bar": f"bg:{status_bg} {menu_fg}",
+                    "status-text": menu_fg,
+                    "attachments-bar": f"bg:{panel_bg} {menu_fg}",
+                    "attachments-label": menu_fg,
+                    "attachment-chip": f"bg:{chip_bg} {chip_fg}",
+                    "attachments-hint": f"{muted} italic",
+                    "help-bar": f"bg:{panel_bg} {hint_fg}",
+                    "help": f"{hint_fg} italic",
+                    "prompt": f"{t.primary} bold",
+                    # Spinner styling
+                    "spinner": f"{t.secondary} bold",
+                    "spinner-text": menu_fg,
+                    "spinner-text-highlight": f"{t.primary} bold",
+                    # Completion menu styling
+                    "completion-menu": f"bg:{surface} {menu_fg}",
+                    "completion-menu.completion": f"bg:{surface} {menu_fg}",
+                    "completion-menu.completion.current": f"bg:{current_bg} {current_fg} bold",
+                    "completion-menu.meta.completion": f"bg:{surface} {hint_fg} italic",
+                    "completion-menu.meta.completion.current": f"bg:{current_bg} {hint_fg} italic",
+                    # Dropdown menus (footer popovers)
+                    "dropdown-label": f"{hint_fg}",
+                    "dropdown-button": f"bg:{copy_bg} {copy_fg} bold",
+                    "dropdown-menu": f"bg:{surface} {menu_fg}",
+                    "dropdown-menu.item": f"bg:{surface} {menu_fg}",
+                    "dropdown-menu.item.current": f"bg:{surface} {t.secondary} bold",
+                    "dropdown-menu.item.selected": f"bg:{current_bg} {current_fg} bold",
+                    "dropdown-menu.item.selected.current": f"bg:{current_bg} {current_fg} bold",
+                    "copy-button": f"bg:{copy_bg} {copy_fg} bold",
+                    "inline-spinner": f"{t.secondary} bold",
+                    "fold-toggle": f"{menu_fg} bold",
+                    "link": f"{t.secondary} underline",
+                }
+            )
         else:
             self._style = Style.from_dict({})
+
+    def set_theme(self, theme: Theme) -> None:
+        """Apply a new theme (best-effort)."""
+        old = getattr(self, "_theme", None)
+        try:
+            self._theme = (theme or theme_from_env()).normalized()
+        except Exception:
+            self._theme = theme_from_env().normalized()
+        self._build_style()
+        try:
+            if self._app is not None:
+                self._app.style = self._style  # type: ignore[assignment]
+        except Exception:
+            pass
+        try:
+            if isinstance(old, Theme):
+                self._retint_output(old_theme=old, new_theme=self._theme)
+        except Exception:
+            pass
+        if self._app and self._app.is_running:
+            self._app.invalidate()
+
+    def _prompt_block_colors(self, theme: Theme) -> tuple[str, str]:
+        t = theme.normalized()
+        bg_target = "#ffffff" if is_dark(t.surface) else "#000000"
+        bg_hex = blend_hex(t.surface, bg_target, 0.08)
+        fg_target = "#ffffff" if is_dark(bg_hex) else "#000000"
+        fg_hex = blend_hex(t.muted, fg_target, 0.90)
+        return (ansi_bg(bg_hex), ansi_fg(fg_hex))
+
+    def _retint_output(self, *, old_theme: Theme, new_theme: Theme) -> None:
+        """Best-effort: recolor existing output lines in-place for the new theme.
+
+        This is intentionally conservative: only swap ANSI sequences that we generate
+        (truecolor accents + prompt blocks), plus a legacy prompt-block fallback.
+        """
+        old_t = old_theme.normalized()
+        new_t = new_theme.normalized()
+
+        old_primary = ansi_fg(old_t.primary)
+        new_primary = ansi_fg(new_t.primary)
+        old_secondary = ansi_fg(old_t.secondary)
+        new_secondary = ansi_fg(new_t.secondary)
+
+        # Derived semantic colors (used by the shell for warnings/errors).
+        old_warning = ansi_fg(blend_hex(old_t.secondary, "#fbbf24", 0.55))
+        new_warning = ansi_fg(blend_hex(new_t.secondary, "#fbbf24", 0.55))
+        old_danger = ansi_fg(blend_hex(old_t.secondary, "#ef4444", 0.55))
+        new_danger = ansi_fg(blend_hex(new_t.secondary, "#ef4444", 0.55))
+
+        old_pb_bg, old_pb_fg = self._prompt_block_colors(old_t)
+        new_pb_bg, new_pb_fg = self._prompt_block_colors(new_t)
+
+        # Legacy truecolor prompt blocks (v1): always blended toward white (dark-theme assumption).
+        old_pb_bg_v1 = ansi_bg(blend_hex(old_t.surface, "#ffffff", 0.08))
+        old_pb_fg_v1 = ansi_fg(blend_hex(old_t.muted, "#ffffff", 0.90))
+
+        # Legacy (pre-theme) prompt block colors (fixed 256-color grey).
+        legacy_pb_bg = "\033[48;5;238m"
+        legacy_pb_fg = "\033[38;5;255m"
+
+        pairs: list[tuple[str, str]] = []
+        for a, b in (
+            (old_primary, new_primary),
+            (old_secondary, new_secondary),
+            (old_warning, new_warning),
+            (old_danger, new_danger),
+            (old_pb_bg, new_pb_bg),
+            (old_pb_fg, new_pb_fg),
+            (old_pb_bg_v1, new_pb_bg),
+            (old_pb_fg_v1, new_pb_fg),
+            (legacy_pb_bg, new_pb_bg),
+            (legacy_pb_fg, new_pb_fg),
+            # Legacy ANSI accents (pre-theme): map them onto the new theme.
+            ("\033[36m", new_primary),        # cyan
+            ("\033[32m", new_primary),        # green
+            ("\033[35m", new_secondary),      # magenta
+            ("\033[38;5;39m", new_secondary), # blue
+            ("\033[33m", new_warning),        # yellow
+            ("\033[38;5;214m", new_warning),  # orange
+            ("\033[31m", new_danger),         # red
+        ):
+            if a and b and a != b:
+                pairs.append((a, b))
+
+        if not pairs:
+            return
+
+        with self._output_lock:
+            changed = False
+            for i, line in enumerate(list(self._output_lines or [])):
+                s = line
+                for a, b in pairs:
+                    if a in s:
+                        s = s.replace(a, b)
+                if s != line:
+                    self._output_lines[i] = s
+                    changed = True
+            if changed:
+                self._output_version += 1
+                self._ensure_view_window_locked()
+
+    def request_refresh(self) -> None:
+        """Trigger a UI refresh (best-effort)."""
+        if self._app and self._app.is_running:
+            self._app.invalidate()
 
     def append_output(self, text: str) -> None:
         """Append text to the output area (thread-safe)."""

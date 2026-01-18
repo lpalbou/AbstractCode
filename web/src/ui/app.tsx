@@ -6,6 +6,7 @@ import { extract_tool_calls_from_wait, extract_wait_from_record } from "../lib/r
 import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types";
 import type { AttachmentRef } from "../lib/types";
 import { ChatMessageContent } from "@abstractuic/panel-chat";
+import { AgentCyclesPanel, build_agent_trace, type LedgerRecordItem } from "@abstractuic/monitor-flow";
 import { registerMonitorGpuWidget } from "@abstractutils/monitor-gpu";
 import { MarkdownRenderer } from "./markdown_renderer";
 import { ToolPicker } from "./tool_picker";
@@ -1204,11 +1205,13 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
         <div className="panel settings_card">
           <div className="settings_card_header">
             <h2>Gateway</h2>
+          </div>
+          <div className="settings_card_header" style={{ marginTop: 6 }}>
+            <div className="muted">Connect once to discover providers/models/tools. Settings are saved locally.</div>
             <span className={`chip ${gateway_connected ? "ok" : gateway_connecting ? "info" : "muted"}`}>
               {gateway_connecting ? "connecting" : gateway_connected ? "connected" : "disconnected"}
             </span>
           </div>
-          <div className="muted">Connect once to discover providers/models/tools. Settings are saved locally.</div>
 
           <div className="field">
             <label>Gateway URL</label>
@@ -1246,6 +1249,74 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
           <div className="field">
             <label>Client id</label>
             <input value={s.client_id} onChange={(e) => props.on_change({ ...s, client_id: e.target.value })} placeholder="abstractcode_web" />
+          </div>
+
+          <div className="settings_section_divider" />
+
+          <div className="settings_section_header">
+            <h3>Workspace</h3>
+            <span className="muted mono">files/tools</span>
+          </div>
+          <div className="muted">Controls what the agent can access via filesystem tools and what appears in @file search.</div>
+
+          <div className="field">
+            <div className="field_label_with_hint">
+              <label>workspace_root</label>
+              <span className="field_hint">Empty = gateway default (typically an isolated per-run workspace)</span>
+            </div>
+            <input
+              className="mono"
+              value={String(s.workspace_root || "")}
+              onChange={(e) => props.on_change({ ...s, workspace_root: e.target.value })}
+              placeholder="/Users/albou/abstractframework"
+            />
+          </div>
+
+          <div className="field">
+            <div className="field_label_with_hint">
+              <label>workspace_access_mode</label>
+              <span className="field_hint">Controls absolute path access</span>
+            </div>
+            <select
+              className="mono"
+              value={String(s.workspace_access_mode || "workspace_only")}
+              onChange={(e) => props.on_change({ ...s, workspace_access_mode: e.target.value })}
+            >
+              <option value="workspace_only">workspace_only</option>
+              <option value="workspace_or_allowed">workspace_or_allowed</option>
+              <option value="all_except_ignored">all_except_ignored</option>
+            </select>
+            <div className="field_hint">
+              workspace_only: absolute paths must stay under workspace_root. workspace_or_allowed: allow additional roots from workspace_allowed_paths.
+            </div>
+          </div>
+
+          <div className="field">
+            <div className="field_label_with_hint">
+              <label>workspace_allowed_paths</label>
+              <span className="field_hint">Newline-separated directories (absolute or relative to workspace_root)</span>
+            </div>
+            <textarea
+              className="mono"
+              rows={3}
+              value={String(s.workspace_allowed_paths || "")}
+              onChange={(e) => props.on_change({ ...s, workspace_allowed_paths: e.target.value })}
+              placeholder={"/Users/albou/projects/mnemosyne\n/Users/albou/abstractframework"}
+            />
+          </div>
+
+          <div className="field">
+            <div className="field_label_with_hint">
+              <label>workspace_ignored_paths</label>
+              <span className="field_hint">Newline-separated paths to block (absolute or relative to workspace_root)</span>
+            </div>
+            <textarea
+              className="mono"
+              rows={3}
+              value={String(s.workspace_ignored_paths || "")}
+              onChange={(e) => props.on_change({ ...s, workspace_ignored_paths: e.target.value })}
+              placeholder={"node_modules\nruntime\nsecret"}
+            />
           </div>
         </div>
 
@@ -1919,12 +1990,15 @@ function ConsolePage(props: {
   useEffect(() => {
     const el = chat_scroll_ref.current;
     if (!el) return;
-    if (!chat_at_bottom_ref.current) return;
+    const threshold_px = 80;
+    const at_bottom_now = el.scrollTop + el.clientHeight >= el.scrollHeight - threshold_px;
+    if (!chat_at_bottom_ref.current && !at_bottom_now) return;
     // rAF ensures DOM has committed the new message height before we scroll.
     requestAnimationFrame(() => {
       const el2 = chat_scroll_ref.current;
       if (!el2) return;
       el2.scrollTop = el2.scrollHeight;
+      chat_at_bottom_ref.current = true;
       set_chat_at_bottom(true);
     });
   }, [props.repl.messages.length]);
@@ -2692,7 +2766,19 @@ function ConsolePage(props: {
     const handle = window.setTimeout(() => {
       void (async () => {
         try {
-          const res = await props.gateway.files_search(q, { limit: 12 });
+          const scope = (() => {
+            const wr = String(props.settings.workspace_root || "").trim();
+            const wm = String(props.settings.workspace_access_mode || "").trim();
+            const wa = String(props.settings.workspace_allowed_paths || "").trim();
+            const wi = String(props.settings.workspace_ignored_paths || "").trim();
+            const enabled = Boolean(wr || wa || wi) || (wm && wm !== "workspace_only");
+            if (!enabled) return undefined;
+            return { workspace_root: wr, workspace_access_mode: wm, workspace_allowed_paths: wa, workspace_ignored_paths: wi };
+          })();
+          const res = await props.gateway.files_search(q, {
+            limit: 12,
+            ...(scope ? { scope } : {}),
+          });
           if (stopped) return;
           const items = Array.isArray(res?.items) ? res.items : [];
           const paths = items
@@ -2861,7 +2947,18 @@ function ConsolePage(props: {
     try {
       const sid = String(props.session_id || "").trim();
       if (!sid) throw new Error("session_id is required");
-      const attachment = await props.gateway.attachments_ingest(sid, p);
+      const scope = (() => {
+        const wr = String(props.settings.workspace_root || "").trim();
+        const wm = String(props.settings.workspace_access_mode || "").trim();
+        const wa = String(props.settings.workspace_allowed_paths || "").trim();
+        const wi = String(props.settings.workspace_ignored_paths || "").trim();
+        const enabled = Boolean(wr || wa || wi) || (wm && wm !== "workspace_only");
+        if (!enabled) return undefined;
+        return { workspace_root: wr, workspace_access_mode: wm, workspace_allowed_paths: wa, workspace_ignored_paths: wi };
+      })();
+      const attachment = await props.gateway.attachments_ingest(sid, p, {
+        ...(scope ? { scope } : {}),
+      });
       set_attached_files((prev) =>
         prev.map((f) => (f.path === p ? { ...f, loading: false, attachment, error: undefined } : f))
       );
@@ -2991,7 +3088,7 @@ function ConsolePage(props: {
             onScroll={(e) => {
               const el = e.currentTarget;
               // Treat "near bottom" as at-bottom so we keep following naturally.
-              const threshold_px = 40;
+              const threshold_px = 80;
               const at_bottom = el.scrollTop + el.clientHeight >= el.scrollHeight - threshold_px;
               chat_at_bottom_ref.current = at_bottom;
               set_chat_at_bottom(at_bottom);
@@ -2999,7 +3096,7 @@ function ConsolePage(props: {
           >
             {!props.repl.messages.length ? <div className="muted">Start typing to begin.</div> : null}
             {props.repl.messages.map((m, idx) => (
-              <ChatMessageCard key={`${m.ts}:${idx}`} m={m} tool_specs_by_name={tool_specs_by_name} />
+              <ChatMessageCard key={`${m.ts}:${idx}`} m={m} gateway={props.gateway} tool_specs_by_name={tool_specs_by_name} />
             ))}
           </div>
           {!chat_at_bottom && props.repl.messages.length ? (
@@ -3332,7 +3429,7 @@ function ConsolePage(props: {
   );
 }
 
-function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<string, any> }): React.ReactElement | null {
+function ChatMessageCard(props: { m: ReplMessage; gateway: GatewayClient; tool_specs_by_name?: Record<string, any> }): React.ReactElement | null {
   const m = props.m;
   const meta_obj: any = m.meta && typeof m.meta === "object" ? (m.meta as any) : null;
   const kind = meta_obj && typeof meta_obj._kind === "string" ? String(meta_obj._kind) : "";
@@ -3367,6 +3464,14 @@ function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<st
   const [copy_state, set_copy_state] = useState<"idle" | "copied" | "failed">("idle");
 
   const is_digest = m.role === "system" && String(m.title || "").trim() === "Digest";
+  const run_id = String(m.run_id || "").trim();
+  const [ctx_open, set_ctx_open] = useState(false);
+  const workflow_meta = meta_obj && meta_obj.workflow_meta && typeof meta_obj.workflow_meta === "object" ? (meta_obj.workflow_meta as any) : null;
+  const inspect_run_id =
+    String(workflow_meta?.context_appended_sub_run_id || "").trim() ||
+    String(workflow_meta?.sub_run_id || "").trim() ||
+    String(workflow_meta?.llm_run_id || "").trim() ||
+    run_id;
   
   if (kind === "tool") {
     return (
@@ -3382,7 +3487,7 @@ function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<st
   }
 
   // Build stats items for assistant messages
-  const has_stats = m.role === "assistant" && (usage_parsed || dur_ms !== null || llm_calls !== null || tool_calls !== null);
+  const has_stats = m.role === "assistant" && (Boolean(run_id) || usage_parsed || dur_ms !== null || llm_calls !== null || tool_calls !== null);
   
   return (
     <div className={`chat_item ${cls}`}>
@@ -3411,6 +3516,17 @@ function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<st
       </div>
       {has_stats ? (
         <div className="chat_stats_bar">
+          {run_id ? (
+            <button
+              className="stat_item clickable"
+              type="button"
+              title="Inspect system prompt, user prompt, and tool calls"
+              onClick={() => set_ctx_open(true)}
+            >
+              <span className="stat_icon">☰</span>
+              context
+            </button>
+          ) : null}
           {usage_parsed ? (
             <span className="stat_item" title="Tokens in/out/total">
               <span className="stat_icon">◈</span>
@@ -3443,6 +3559,263 @@ function ChatMessageCard(props: { m: ReplMessage; tool_specs_by_name?: Record<st
           ) : null}
         </div>
       ) : null}
+      {ctx_open && run_id ? (
+        <ContextInspectorModal
+          gateway={props.gateway}
+          root_run_id={run_id}
+          inspect_run_id={inspect_run_id}
+          on_close={() => set_ctx_open(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ContextInspectorModal(props: {
+  gateway: GatewayClient;
+  root_run_id: string;
+  inspect_run_id: string;
+  on_close: () => void;
+}): React.ReactElement {
+  const [selected_run_id, set_selected_run_id] = useState<string>(props.inspect_run_id);
+  const [run_options, set_run_options] = useState<string[]>([]);
+  const [loading, set_loading] = useState(true);
+  const [error, set_error] = useState("");
+  const [ledger_items, set_ledger_items] = useState<LedgerRecordItem[]>([]);
+
+  useEffect(() => {
+    const on_key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      props.on_close();
+    };
+    window.addEventListener("keydown", on_key);
+    return () => window.removeEventListener("keydown", on_key);
+  }, [props.on_close]);
+
+  useEffect(() => {
+    // Reset when the requested run changes (new message / different subrun).
+    set_selected_run_id(props.inspect_run_id);
+    set_run_options([]);
+  }, [props.inspect_run_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const uniq = (xs: string[]): string[] => {
+      const out: string[] = [];
+      const seen = new Set<string>();
+      for (const x of xs) {
+        const s = String(x || "").trim();
+        if (!s || seen.has(s)) continue;
+        seen.add(s);
+        out.push(s);
+      }
+      return out;
+    };
+
+    const list_descendants = (runs: any[], root_run_id: string): string[] => {
+      const children_by_parent = new Map<string, string[]>();
+      for (const r of runs) {
+        const rid = String(r?.run_id || "").trim();
+        if (!rid) continue;
+        const parent = String(r?.parent_run_id || "").trim();
+        if (!parent) continue;
+        const prev = children_by_parent.get(parent) || [];
+        prev.push(rid);
+        children_by_parent.set(parent, prev);
+      }
+
+      const out: string[] = [];
+      const queue: string[] = [root_run_id];
+      const seen = new Set<string>();
+      while (queue.length && out.length < 500) {
+        const cur = String(queue.shift() || "").trim();
+        if (!cur || seen.has(cur)) continue;
+        seen.add(cur);
+        const kids = children_by_parent.get(cur) || [];
+        for (const k of kids) {
+          const kk = String(k || "").trim();
+          if (!kk || seen.has(kk)) continue;
+          out.push(kk);
+          queue.push(kk);
+        }
+      }
+      return out;
+    };
+
+    void (async () => {
+      try {
+        const base_candidates = uniq([props.inspect_run_id, props.root_run_id]);
+
+        // Best-effort: expand candidates to include this root run's subruns so Context works
+        // even when workflow_meta points to a run with an empty ledger.
+        let expanded = base_candidates.slice();
+        try {
+          const root = await props.gateway.get_run(props.root_run_id);
+          const session_id = String(root?.session_id || "").trim();
+          if (session_id) {
+            const runs_res = await props.gateway.list_runs({ limit: 500, session_id });
+            const runs = Array.isArray((runs_res as any)?.items) ? ((runs_res as any).items as any[]) : [];
+            const descendants = list_descendants(runs, props.root_run_id);
+            expanded = uniq([...base_candidates, ...descendants]);
+          }
+        } catch {
+          // ignore
+        }
+
+        if (cancelled) return;
+        set_run_options(expanded);
+
+        // Auto-pick a run that actually has LLM/tool activity (so the inspector isn't empty).
+        const INTERESTING = new Set(["llm_call", "tool_calls", "ask_user", "answer_user"]);
+        const has_trace_preview = async (run_id: string): Promise<boolean> => {
+          const rid = String(run_id || "").trim();
+          if (!rid) return false;
+          try {
+            const res = await props.gateway.get_ledger(rid, { after: 0, limit: 200 });
+            const page = Array.isArray(res?.items) ? res.items : [];
+            return page.some((rec: any) => INTERESTING.has(String(rec?.effect?.type || "").trim()));
+          } catch {
+            return false;
+          }
+        };
+
+        const ordered = uniq([props.inspect_run_id, props.root_run_id, ...expanded]);
+        let picked = props.inspect_run_id;
+        for (const rid of ordered.slice(0, 12)) {
+          if (await has_trace_preview(rid)) {
+            picked = rid;
+            break;
+          }
+        }
+
+        if (!cancelled) set_selected_run_id(picked);
+      } catch (e: any) {
+        if (cancelled) return;
+        set_run_options(uniq([props.inspect_run_id, props.root_run_id]));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [props.gateway, props.inspect_run_id, props.root_run_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    set_loading(true);
+    set_error("");
+    set_ledger_items([]);
+
+    const fetch_all_ledger = async (run_id: string) => {
+      const rid = String(run_id || "").trim();
+      if (!rid) return [];
+      const items: LedgerRecordItem[] = [];
+      let after = 0;
+      let safety = 0;
+      const page_size = 200;
+      const max_items = 2000;
+
+      while (!cancelled && items.length < max_items && safety < 100) {
+        const res = await props.gateway.get_ledger(rid, { after, limit: page_size });
+        const page = Array.isArray(res?.items) ? res.items : [];
+        const start_cursor = after + 1;
+        for (let i = 0; i < page.length; i++) {
+          items.push({ run_id: rid, cursor: start_cursor + i, record: page[i] as StepRecord });
+        }
+        const next_after = typeof res?.next_after === "number" ? res.next_after : after;
+        if (next_after <= after) break;
+        if (!page.length) break;
+        after = next_after;
+        safety += 1;
+      }
+      return items;
+    };
+
+    void (async () => {
+      try {
+        const ledger_items = await fetch_all_ledger(selected_run_id);
+        if (cancelled) return;
+        set_ledger_items(ledger_items);
+      } catch (e: any) {
+        if (cancelled) return;
+        set_error(String(e?.message || e || "Failed to load context"));
+      } finally {
+        if (!cancelled) set_loading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [props.gateway, selected_run_id]);
+
+  const trace = useMemo(() => build_agent_trace(ledger_items, { run_id: selected_run_id }), [ledger_items, selected_run_id]);
+
+  return (
+    <div
+      className="modal_overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Context inspector"
+      onMouseDown={() => props.on_close()}
+    >
+      <div className="modal_card" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="modal_header">
+          <div style={{ minWidth: 0 }}>
+            <div className="modal_title">Context</div>
+            <div className="muted mono" style={{ marginTop: 2 }}>
+              run_id:{" "}
+              {run_options.length > 1 ? (
+                <select
+                  className="mono"
+                  value={selected_run_id}
+                  onChange={(e) => set_selected_run_id(String(e.target.value || "").trim())}
+                  style={{ maxWidth: 520 }}
+                >
+                  {run_options.map((rid) => (
+                    <option key={rid} value={rid}>
+                      {rid}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                selected_run_id
+              )}
+              {selected_run_id !== props.root_run_id ? (
+                <>
+                  {" "}
+                  (from root {props.root_run_id})
+                </>
+              ) : null}
+            </div>
+          </div>
+          <button className="btn mini" type="button" onClick={() => props.on_close()} aria-label="Close context inspector">
+            <Icon name="x" size={14} />
+          </button>
+        </div>
+
+        <div className="modal_body">
+          {loading ? (
+            <div className="muted" style={{ marginTop: 12 }}>
+              Loading…
+            </div>
+          ) : error ? (
+            <Notice variant="error" style={{ marginTop: 12 }}>
+              {error}
+            </Notice>
+          ) : (
+            <AgentCyclesPanel
+              items={trace.items}
+              title="Agent"
+              subtitle={trace.node_id ? `node_id: ${trace.node_id}` : "Agent trace (LLM/tool calls)."}
+              subRunId={selected_run_id}
+              defaultOpenLatest={true}
+            />
+          )}
+        </div>
+      </div>
     </div>
   );
 }

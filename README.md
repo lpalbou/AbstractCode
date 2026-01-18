@@ -35,6 +35,18 @@ Interaction model:
 - `/spans`, `/expand <span> [--show] [--into-context]` (provenance recall)
 - `/recall [--since ISO] [--until ISO] [--tag k=v] [--q text] [--into-context]`
 - `/snapshot save|load|list`
+- `/theme [name]` (switch UI theme; supports `custom <primary> <secondary> <surface> <muted>`)
+- `/gpu [on|off|status]` (host GPU meter in the footer, via AbstractGateway)
+- `/links`, `/open <N|URL>` (open links from the last answer in your default browser)
+
+Notes:
+- Links are rendered underlined and are clickable when mouse mode is enabled (`/mouse`).
+- Themes can be switched via `/theme ...` and are saved as a durable user preference when persistence is enabled (default).
+- Themes can also be set via env vars: `ABSTRACTCODE_THEME` and `ABSTRACTCODE_THEME_{PRIMARY,SECONDARY,SURFACE,MUTED}`.
+- GPU meter uses AbstractGateway (`/api/gateway/host/metrics/gpu`) and is auto-enabled when a gateway URL/token is configured, or force it with `ABSTRACTCODE_GPU_MONITOR=1`.
+  - URL envs: `ABSTRACTCODE_GATEWAY_URL`, `ABSTRACTGATEWAY_URL`, `ABSTRACTFLOW_GATEWAY_URL`
+  - Token envs: `ABSTRACTCODE_GATEWAY_TOKEN`, `ABSTRACTGATEWAY_AUTH_TOKEN`, `ABSTRACTFLOW_GATEWAY_AUTH_TOKEN`
+  - CLI (not persisted): `abstractcode --gateway-url http://127.0.0.1:8081 --gateway-token <TOKEN>`
 
 ### Persistence
 By default, AbstractCode uses `~/.abstractcode/state.json` and stores the durable data in `~/.abstractcode/state.d/`.

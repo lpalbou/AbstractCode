@@ -102,8 +102,8 @@ def test_help_mentions_history_copy() -> None:
 
     combined = "\n".join(shell._output_lines)
     assert "/history copy" in combined
-    assert "/log runtime" in combined
-    assert "/log provider" in combined
+    assert "/logs runtime" in combined
+    assert "/logs provider" in combined
     assert "/context" not in combined
     assert "/llm" not in combined
 

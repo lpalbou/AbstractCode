@@ -13,6 +13,8 @@
     "strict": true,
     "baseUrl": ".",
     "paths": {
+      "@abstractuic/monitor-flow": ["../../abstractuic/monitor-flow/src/index.ts"],
+      "@abstractuic/monitor-flow/*": ["../../abstractuic/monitor-flow/src/*"],
       "@abstractuic/panel-chat": ["../../abstractuic/panel-chat/src/index.ts"],
       "@abstractuic/panel-chat/*": ["../../abstractuic/panel-chat/src/*"],
       "@abstractutils/monitor-gpu": ["../../abstractuic/monitor-gpu/src/index.d.ts"],

@@ -130,6 +130,22 @@ def build_agent_parser() -> argparse.ArgumentParser:
         help="Run a single prompt and exit (supports @file mentions).",
     )
     parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
+    parser.add_argument(
+        "--gateway-url",
+        default=None,
+        help=(
+            "AbstractGateway base URL (for host metrics like /gpu).\n"
+            "Overrides $ABSTRACTCODE_GATEWAY_URL for this run."
+        ),
+    )
+    parser.add_argument(
+        "--gateway-token",
+        default=None,
+        help=(
+            "AbstractGateway auth token (Bearer) (for host metrics like /gpu).\n"
+            "Overrides $ABSTRACTCODE_GATEWAY_TOKEN for this run (not persisted)."
+        ),
+    )
     return parser
 
 
@@ -589,6 +605,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     args = build_agent_parser().parse_args(argv_list)
     state_file = None if args.no_state else args.state_file
+
+    # Best-effort: pass gateway settings to the TUI via env vars (not persisted).
+    gw_url = getattr(args, "gateway_url", None)
+    if isinstance(gw_url, str) and gw_url.strip():
+        os.environ["ABSTRACTCODE_GATEWAY_URL"] = gw_url.strip()
+    gw_token = getattr(args, "gateway_token", None)
+    if isinstance(gw_token, str) and gw_token.strip():
+        os.environ["ABSTRACTCODE_GATEWAY_TOKEN"] = gw_token.strip()
 
     shell = ReactShell(
         agent=str(args.agent),

@@ -88,7 +88,9 @@ def test_user_prompt_copy_marker_is_separated_from_colored_frame() -> None:
 
     assert lines[-1] == ""
     assert lines[-2].startswith("[[COPY:cid]]")
-    assert lines[-3].startswith("\033[48;5;238m")
+    # Prompt block uses a full-line ANSI background frame; keep this assertion flexible
+    # since themes may use 256-color or truecolor escapes.
+    assert lines[-3].startswith("\033[48;")
 
 
 def test_answer_copy_marker_is_last_in_done_step() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -21,6 +22,7 @@ from .file_mentions import (
 )
 from .fullscreen_ui import FullScreenUI, SubmittedInput
 from .terminal_markdown import TerminalMarkdownRenderer
+from .theme import BUILTIN_THEMES, Theme, ansi_bg, ansi_fg, blend_hex, get_theme, is_dark, theme_from_env
 
 
 def _supports_color() -> bool:
@@ -192,6 +194,16 @@ class ReactShell:
             self._max_tokens = None
         # Enable ANSI colors - fullscreen_ui uses ANSI class to parse escape codes
         self._color = bool(color and _supports_color())
+        self._theme: Theme = theme_from_env().normalized()
+        # Optional user-defined system prompt override (applies to new runs; can be set via /system).
+        self._system_prompt_override: Optional[str] = None
+        # Host/Gateway GPU meter (optional).
+        self._gpu_monitor_enabled: bool = self._gpu_monitor_enabled_from_env()
+        self._gpu_utilization_pct: Optional[float] = None
+        self._gpu_last_error: Optional[str] = None
+        self._gpu_last_ok_at: Optional[float] = None
+        self._gpu_monitor_thread: Optional[threading.Thread] = None
+        self._gpu_monitor_lock = threading.Lock()
         # Session-level tool allowlist (None = default/all tools for the agent kind).
         self._allowed_tools: Optional[List[str]] = None
         # Whether to include tool usage examples in the prompted tool section (token-expensive).
@@ -405,6 +417,7 @@ class ReactShell:
             on_input=self._handle_input,
             on_copy_payload=self._copy_to_clipboard,
             color=self._color,
+            theme=self._theme,
         )
         # Keep `@file` completion consistent with the shell's workspace policy.
         try:
@@ -444,6 +457,8 @@ class ReactShell:
         self._pending_tool_markers: List[str] = []
         # Pending tool call metadata (aligned with tool markers/results).
         self._pending_tool_metas: List[Dict[str, Any]] = []
+        # Links extracted from the most recent assistant answer (for /links, /open).
+        self._last_answer_links: List[str] = []
         # Keep the last started run id so /log can show traces even after completion.
         self._last_run_id: Optional[str] = None
         # Status bar cache (token counting can be expensive; avoid per-frame rescans).
@@ -604,11 +619,18 @@ class ReactShell:
                     max_iterations=max_iterations,
                     vars=state.vars,
                 )
-                system_text = str(getattr(req, "system_prompt", "") or "").strip()
+                sys_base = str(getattr(req, "system_prompt", "") or "").strip()
                 prompt_text = str(getattr(req, "prompt", "") or "").strip()
             except Exception:
-                system_text = ""
+                sys_base = ""
                 prompt_text = ""
+
+            # Apply optional runtime system prompt override/extra (used by /system and delegation).
+            runtime_ns = state.vars.get("_runtime") if isinstance(state.vars.get("_runtime"), dict) else {}
+            override = runtime_ns.get("system_prompt") if isinstance(runtime_ns, dict) else None
+            extra = runtime_ns.get("system_prompt_extra") if isinstance(runtime_ns, dict) else None
+            base_sys = str(override).strip() if isinstance(override, str) and override.strip() else sys_base
+            system_text = base_sys
 
             if self._agent_kind == "memact":
                 try:
@@ -616,9 +638,12 @@ class ReactShell:
 
                     mem_prompt = render_memact_system_prompt(state.vars)
                     if isinstance(mem_prompt, str) and mem_prompt.strip():
-                        system_text = (mem_prompt.strip() + ("\n\n" + system_text if system_text else "")).strip()
+                        system_text = (mem_prompt.strip() + ("\n\n" + base_sys if base_sys else "")).strip()
                 except Exception:
                     pass
+
+            if isinstance(extra, str) and extra.strip():
+                system_text = (system_text.rstrip() + "\n\nAdditional system instructions:\n" + extra.strip()).strip()
 
         # Approximate messages by concatenating content with role labels.
         text_parts: List[str] = []
@@ -683,6 +708,20 @@ class ReactShell:
             except Exception:
                 current_iteration = 0
 
+        gpu_enabled = bool(getattr(self, "_gpu_monitor_enabled", False))
+        gpu_pct = getattr(self, "_gpu_utilization_pct", None)
+        gpu_err = getattr(self, "_gpu_last_error", None)
+        gpu_err_s = str(gpu_err or "").strip() if isinstance(gpu_err, str) or gpu_err is not None else ""
+        gpu_key: Optional[int] = None
+        if isinstance(gpu_pct, (int, float)):
+            try:
+                gpu_key = int(round(float(gpu_pct)))
+            except Exception:
+                gpu_key = None
+        gpu_err_key = ""
+        if gpu_key is None and gpu_err_s:
+            gpu_err_key = gpu_err_s.split(":", 1)[0][:32]
+
         cache_key = (
             getattr(state, "run_id", None) if state is not None else None,
             len(messages),
@@ -694,6 +733,9 @@ class ReactShell:
             toolset_id,
             max_tokens,
             self._model,
+            gpu_enabled,
+            gpu_key,
+            gpu_err_key,
         )
         if self._status_cache_key == cache_key and self._status_cache_text:
             return self._status_cache_text
@@ -715,6 +757,24 @@ class ReactShell:
         pct = (tokens_used / max_tokens) * 100 if max_tokens > 0 else 0.0
         label = "Context" if tokens_used_source == "provider" else "Context(next)"
         status = f"{self._provider} | {self._model} | {label}: {tokens_used:,}/{max_tokens:,} tk ({pct:.0f}%)"
+        if gpu_enabled:
+            if gpu_key is None:
+                if gpu_err_s:
+                    if gpu_err_s.startswith("http_"):
+                        code = gpu_err_s.split(":", 1)[0].replace("http_", "").strip()
+                        status = f"{status} | GPU {code or 'n/a'}"
+                    else:
+                        short = gpu_err_s.split(":", 1)[0].strip()
+                        if len(short) > 12:
+                            short = short[:12] + "…"
+                        status = f"{status} | GPU {short or 'n/a'}"
+                else:
+                    status = f"{status} | GPU n/a"
+            else:
+                try:
+                    status = f"{status} | {self._format_gpu_meter(float(gpu_pct))}"
+                except Exception:
+                    status = f"{status} | GPU n/a"
         self._status_cache_key = cache_key
         self._status_cache_text = status
         return status
@@ -1306,7 +1366,18 @@ class ReactShell:
             return "\n".join(out)
 
         bg = "\033[48;5;238m"
-        fg = "\033[38;5;255m"
+        try:
+            theme = getattr(self, "_theme", None)
+            t = theme.normalized() if isinstance(theme, Theme) else theme_from_env().normalized()
+            bg_target = "#ffffff" if is_dark(t.surface) else "#000000"
+            bg_hex = blend_hex(t.surface, bg_target, 0.08)
+            fg_target = "#ffffff" if is_dark(bg_hex) else "#000000"
+            fg_hex = blend_hex(t.muted, fg_target, 0.90)
+            bg = ansi_bg(bg_hex) or bg
+            fallback_fg = "\033[38;5;255m" if is_dark(bg_hex) else "\033[38;5;0m"
+            fg = ansi_fg(fg_hex) or fallback_fg
+        except Exception:
+            fg = "\033[38;5;255m"
         reset = _C.RESET
 
         def style_full(line_text: str) -> str:
@@ -1353,13 +1424,6 @@ class ReactShell:
         cmd = text.strip()
 
         if cmd.startswith("/"):
-            # Echo commands as-is.
-            copy_id = f"user_{uuid.uuid4().hex}"
-            self._ui.register_copy_payload(copy_id, cmd)
-            ts_text = self._format_timestamp_short(_now_iso())
-            footer = _style(ts_text, _C.DIM, enabled=self._color) if ts_text else ""
-            self._print(self._format_user_prompt_block(cmd, copy_id=copy_id, footer=footer))
-
             should_exit = self._dispatch_command(cmd[1:].strip())
             if should_exit:
                 self._ui.stop()
@@ -1388,10 +1452,16 @@ class ReactShell:
             "whitelist",
             "blacklist",
             "log",
+            "logs",
             "memorize",
             "recall",
             "copy",
             "mouse",
+            "theme",
+            "system",
+            "gpu",
+            "links",
+            "open",
             "flow",
             "history",
             "resume",
@@ -1689,6 +1759,10 @@ class ReactShell:
         answer = "" if answer_text is None else str(answer_text)
         if not answer.strip():
             answer = "(no assistant answer produced yet)"
+        try:
+            self._last_answer_links = self._extract_links(answer)
+        except Exception:
+            self._last_answer_links = []
 
         copy_id = f"assistant_{uuid.uuid4().hex}"
         payload = self._build_answer_copy_payload(answer_text=answer, prompt_text=prompt_text)
@@ -1698,7 +1772,11 @@ class ReactShell:
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
         # Render Markdown for the terminal, but keep copy payload lossless (raw answer).
         try:
-            renderer = TerminalMarkdownRenderer(color=self._color)
+            renderer = TerminalMarkdownRenderer(
+                color=self._color,
+                theme=getattr(self, "_theme", None),
+                width=self._terminal_width(),
+            )
             rendered = renderer.render(answer)
         except Exception:
             rendered = answer
@@ -1774,7 +1852,7 @@ class ReactShell:
         return result.strip()
 
     def _banner(self) -> None:
-        self._print(_style("AbstractCode (MVP)", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("AbstractCode", _C.CYAN, _C.BOLD, enabled=self._color))
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
         self._print(f"Provider: {self._provider}   Model: {self._model}")
         if self._base_url:
@@ -2016,7 +2094,7 @@ class ReactShell:
     def run(self) -> None:
         # Build initial banner text
         banner_lines = []
-        banner_lines.append(_style("AbstractCode (MVP)", _C.CYAN, _C.BOLD, enabled=self._color))
+        banner_lines.append(_style("AbstractCode", _C.CYAN, _C.BOLD, enabled=self._color))
         banner_lines.append(_style("─" * 60, _C.DIM, enabled=self._color))
         banner_lines.append(f"Provider: {self._provider}   Model: {self._model}")
         if self._base_url:
@@ -2031,16 +2109,80 @@ class ReactShell:
         banner_lines.append(_style("Type '/help' for commands.", _C.DIM, enabled=self._color))
         banner_lines.append("")
 
-        # Add tools list to banner
+        # Add tools list to banner (dynamic; mirrors `/tools`).
+        try:
+            if callable(getattr(self, "_maybe_sync_executor_tools", None)):
+                self._maybe_sync_executor_tools()
+        except Exception:
+            pass
+
+        def _param_names(raw: object) -> List[str]:
+            if not isinstance(raw, dict):
+                return []
+            props = raw.get("properties") if isinstance(raw.get("properties"), dict) else None
+            if isinstance(props, dict) and props:
+                return sorted([str(k) for k in props.keys() if isinstance(k, str) and k.strip()])
+            skip = {"type", "properties", "required", "description", "additionalProperties", "$schema", "title"}
+            keys = [str(k) for k in raw.keys() if isinstance(k, str) and k not in skip and k.strip()]
+            return sorted(keys)
+
+        def _available_tools_for_banner() -> List[tuple[str, List[str]]]:
+            out: List[tuple[str, List[str]]] = []
+            logic = getattr(self._agent, "logic", None)
+            tools = getattr(logic, "tools", None) if logic is not None else None
+            if isinstance(tools, list):
+                for t in tools:
+                    name = getattr(t, "name", None)
+                    if not isinstance(name, str) or not name.strip():
+                        continue
+                    params = _param_names(getattr(t, "parameters", None))
+                    if not params:
+                        td = getattr(t, "_tool_definition", None)
+                        params = _param_names(getattr(td, "parameters", None)) if td is not None else []
+                    out.append((name.strip(), params))
+            if not out:
+                for name, spec in sorted((self._tool_specs or {}).items()):
+                    params = sorted((spec.parameters or {}).keys())
+                    out.append((name, params))
+            out.sort(key=lambda x: x[0])
+            return out
+
+        def _fmt_tool_sig(name: str, params: List[str]) -> str:
+            n = str(name or "").strip()
+            ps = [str(p).strip() for p in (params or []) if str(p).strip()]
+            if not self._color:
+                inside = ", ".join(ps)
+                return f"- {n}({inside})"
+            try:
+                t = getattr(self, "_theme", None)
+                tn = t.normalized() if isinstance(t, Theme) else theme_from_env().normalized()
+                name_fg = ansi_fg(tn.primary)
+                param_fg = ansi_fg(tn.secondary)
+            except Exception:
+                name_fg = ""
+                param_fg = ""
+            dim = _C.DIM
+            bold = _C.BOLD
+            reset = _C.RESET
+            parts: List[str] = ["- ", name_fg, bold, n, reset, dim, "(", reset]
+            for i, p in enumerate(ps):
+                if i:
+                    parts.extend([dim, ", ", reset])
+                parts.extend([param_fg, p, reset])
+            parts.extend([dim, ")", reset])
+            return "".join(parts)
+
         banner_lines.append(_style("Available tools", _C.CYAN, _C.BOLD, enabled=self._color))
         banner_lines.append(_style("─" * 60, _C.DIM, enabled=self._color))
-        for name, spec in sorted(self._tool_specs.items()):
-            params = ", ".join(sorted((spec.parameters or {}).keys()))
-            banner_lines.append(f"- {name}({params})")
+        for name, params in _available_tools_for_banner():
+            banner_lines.append(_fmt_tool_sig(name, params))
         banner_lines.append(_style("─" * 60, _C.DIM, enabled=self._color))
 
         if self._state_file:
             self._try_load_state()
+
+        # Optional host GPU meter (polled from AbstractGateway).
+        self._start_gpu_monitor()
 
         # Run the UI loop - this stays in full-screen mode continuously.
         # All input is handled by _handle_input() via the worker thread.
@@ -2155,11 +2297,26 @@ class ReactShell:
         if command == "blacklist":
             self._handle_blacklist(arg)
             return False
-        if command == "log":
+        if command in ("log", "logs"):
             self._handle_log(arg)
             return False
         if command == "mouse":
             self._handle_mouse_toggle()
+            return False
+        if command == "theme":
+            self._handle_theme(arg)
+            return False
+        if command == "system":
+            self._handle_system(arg)
+            return False
+        if command == "gpu":
+            self._handle_gpu(arg)
+            return False
+        if command == "links":
+            self._handle_links(arg)
+            return False
+        if command == "open":
+            self._handle_open(arg)
             return False
         if command == "copy":
             self._handle_copy(arg)
@@ -2172,15 +2329,510 @@ class ReactShell:
         self._print(_style("Type /help for commands.", _C.DIM, enabled=self._color))
         return False
 
+    def _handle_theme(self, raw: str) -> None:
+        import shlex
+
+        try:
+            parts = shlex.split(raw) if raw else []
+        except ValueError:
+            parts = raw.split() if raw else []
+
+        if not parts or (len(parts) == 1 and parts[0].strip().lower() in ("list", "ls")):
+            current = getattr(self, "_theme", None)
+            current_name = str(getattr(current, "name", "") or "tokyo")
+            names = sorted(BUILTIN_THEMES.keys())
+            self._print(_style("\nThemes", _C.CYAN, _C.BOLD, enabled=self._color))
+            self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+            self._print(f"Current: {current_name}")
+            self._print("Available: " + ", ".join(names))
+            self._print(_style("Usage:", _C.DIM, enabled=self._color))
+            self._print(_style("  /theme <name>", _C.DIM, enabled=self._color))
+            self._print(_style("  /theme custom <primary> <secondary> <surface> <muted>", _C.DIM, enabled=self._color))
+            return
+
+        head = str(parts[0] or "").strip().lower()
+        if head == "custom":
+            if len(parts) != 5:
+                self._print(_style("Usage: /theme custom <primary> <secondary> <surface> <muted>", _C.DIM, enabled=self._color))
+                return
+            t = Theme(
+                name="custom",
+                primary=str(parts[1]),
+                secondary=str(parts[2]),
+                surface=str(parts[3]),
+                muted=str(parts[4]),
+            ).normalized()
+        else:
+            t = get_theme(head) if head else None
+            if t is None:
+                self._print(_style(f"Unknown theme: {head}", _C.YELLOW, enabled=self._color))
+                self._print(_style("Try: /theme list", _C.DIM, enabled=self._color))
+                return
+            t = t.normalized()
+
+        self._theme = t
+        try:
+            self._ui.set_theme(t)
+        except Exception:
+            pass
+        # Persist user preference (durable when state_file is enabled).
+        self._save_config()
+        # Intentionally no chat output here: theme changes are reflected in the UI immediately
+        # (footer indicator + full rerender), and /theme is considered a UI command.
+
+    def _handle_system(self, raw: str) -> None:
+        """Show or set the system prompt override for the agent/runtime.
+
+        Usage:
+          /system                 (show)
+          /system <text...>       (set override; applies to new runs and the active run)
+          /system clear           (remove override)
+        """
+        import uuid
+
+        arg = str(raw or "").strip()
+
+        def _apply_to_active_run(value: Optional[str]) -> None:
+            run_id = self._attached_run_id()
+            if run_id is None:
+                return
+            try:
+                state = self._runtime.get_state(run_id)
+            except Exception:
+                state = None
+            if state is None or not hasattr(state, "vars") or not isinstance(state.vars, dict):
+                return
+            runtime_ns = state.vars.get("_runtime")
+            if not isinstance(runtime_ns, dict):
+                runtime_ns = {}
+                state.vars["_runtime"] = runtime_ns
+            if value is None:
+                runtime_ns.pop("system_prompt", None)
+            else:
+                runtime_ns["system_prompt"] = str(value)
+            try:
+                self._runtime.run_store.save(state)
+            except Exception:
+                pass
+            # System prompt affects token estimates shown in the footer.
+            self._status_cache_key = None
+            self._status_cache_text = ""
+
+        if arg.lower() in ("clear", "reset", "off", "default", "none"):
+            self._system_prompt_override = None
+            self._save_config()
+            _apply_to_active_run(None)
+            self._print(_style("System prompt cleared (back to agent default).", _C.DIM, enabled=self._color))
+            return
+
+        if arg:
+            self._system_prompt_override = arg
+            self._save_config()
+            _apply_to_active_run(arg)
+            self._print(_style("System prompt set.", _C.DIM, enabled=self._color))
+            return
+
+        # Show the effective system prompt (active run if available; else session default).
+        state = self._safe_get_state()
+        runtime_override: Optional[str] = None
+        if state is not None and hasattr(state, "vars") and isinstance(getattr(state, "vars", None), dict):
+            runtime_ns = state.vars.get("_runtime") if isinstance(state.vars.get("_runtime"), dict) else {}
+            raw_sys = runtime_ns.get("system_prompt") if isinstance(runtime_ns, dict) else None
+            if isinstance(raw_sys, str) and raw_sys.strip():
+                runtime_override = raw_sys.strip()
+
+        title = "System prompt"
+        prompt_text = ""
+        if runtime_override is not None:
+            title = "System prompt (override)"
+            prompt_text = runtime_override
+        else:
+            session_override = getattr(self, "_system_prompt_override", None)
+            if state is None and isinstance(session_override, str) and session_override.strip():
+                title = "System prompt (default override)"
+                prompt_text = session_override.strip()
+            else:
+                # Best-effort: build the agent-generated system prompt (next call).
+                logic = getattr(self._agent, "logic", None)
+                if logic is not None:
+                    try:
+                        messages = self._select_messages_for_llm(state) if state is not None else []
+                    except Exception:
+                        messages = []
+
+                    iteration = 1
+                    max_iterations = int(getattr(self, "_max_iterations", 25) or 25)
+                    vars_ns: Optional[Dict[str, Any]] = None
+                    if state is not None and hasattr(state, "vars") and isinstance(getattr(state, "vars", None), dict):
+                        vars_ns = state.vars
+                        context_ns = state.vars.get("context") if isinstance(state.vars.get("context"), dict) else {}
+                        limits = state.vars.get("_limits") if isinstance(state.vars.get("_limits"), dict) else {}
+                        try:
+                            cur = int(limits.get("current_iteration", 0) or 0)
+                        except Exception:
+                            cur = 0
+                        try:
+                            max_iterations = int(limits.get("max_iterations", max_iterations) or max_iterations)
+                        except Exception:
+                            max_iterations = max_iterations
+                        if max_iterations < 1:
+                            max_iterations = 1
+                        iteration = max(1, cur + 1)
+                    try:
+                        task_txt = ""
+                        if vars_ns is not None and isinstance(context_ns, dict):
+                            task_txt = str(context_ns.get("task") or "")
+                        req = logic.build_request(
+                            task=task_txt,
+                            messages=list(messages or []),
+                            guidance="",
+                            iteration=iteration,
+                            max_iterations=max_iterations,
+                            vars=vars_ns,
+                        )
+                        prompt_text = str(getattr(req, "system_prompt", "") or "").strip()
+                    except Exception:
+                        prompt_text = ""
+
+        if not prompt_text:
+            self._print(_style("No system prompt available yet. Start a task, then run /system again.", _C.DIM, enabled=self._color))
+            return
+
+        copy_id = f"system_{uuid.uuid4().hex}"
+        self._ui.register_copy_payload(copy_id, prompt_text)
+        self._print(_style(f"\n{title}", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+        self._print(prompt_text)
+        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+        self._print(f"[[COPY:{copy_id}]]")
+
+    def _gpu_monitor_enabled_from_env(self) -> bool:
+        """Return whether the GPU meter should run.
+
+        Defaults to auto:
+        - enabled when a gateway URL/token is configured
+        - can be forced on/off via ABSTRACTCODE_GPU_MONITOR=1/0
+        """
+        v = str(os.getenv("ABSTRACTCODE_GPU_MONITOR", "") or "").strip().lower()
+        if v in ("0", "false", "off", "no"):
+            return False
+        if v in ("1", "true", "on", "yes"):
+            return True
+        return bool(
+            str(os.getenv("ABSTRACTCODE_GATEWAY_URL", "") or "").strip()
+            or str(os.getenv("ABSTRACTFLOW_GATEWAY_URL", "") or "").strip()
+            or str(os.getenv("ABSTRACTGATEWAY_URL", "") or "").strip()
+            or str(os.getenv("ABSTRACTCODE_GATEWAY_TOKEN", "") or "").strip()
+            or str(os.getenv("ABSTRACTGATEWAY_AUTH_TOKEN", "") or "").strip()
+            or str(os.getenv("ABSTRACTFLOW_GATEWAY_AUTH_TOKEN", "") or "").strip()
+            or str(os.getenv("ABSTRACTGATEWAY_AUTH_TOKENS", "") or "").strip()
+            or str(os.getenv("ABSTRACTFLOW_GATEWAY_AUTH_TOKENS", "") or "").strip()
+        )
+
+    def _start_gpu_monitor(self) -> None:
+        """Start the GPU polling thread (best-effort)."""
+        if not bool(getattr(self, "_gpu_monitor_enabled", False)):
+            return
+        try:
+            lock = getattr(self, "_gpu_monitor_lock", None)
+            if lock is None:
+                lock = threading.Lock()
+                self._gpu_monitor_lock = lock
+        except Exception:
+            lock = None
+
+        if lock is None:  # pragma: no cover
+            return
+
+        with lock:
+            t = getattr(self, "_gpu_monitor_thread", None)
+            if t is not None and getattr(t, "is_alive", lambda: False)():
+                return
+            self._gpu_monitor_thread = threading.Thread(target=self._gpu_monitor_loop, daemon=True)
+            self._gpu_monitor_thread.start()
+
+    def _fetch_gateway_gpu_utilization_pct(self, *, timeout_s: float = 0.8) -> tuple[Optional[float], Optional[str]]:
+        """Fetch GPU utilization from AbstractGateway (best-effort)."""
+        try:
+            from urllib.error import HTTPError
+            from urllib.request import Request, urlopen
+        except Exception:  # pragma: no cover
+            return None, "urllib_unavailable"
+
+        try:
+            from .gateway_cli import default_gateway_token, default_gateway_url
+        except Exception:
+            return None, "gateway_cli_unavailable"
+
+        base = str(default_gateway_url() or "").rstrip("/")
+        if not base:
+            return None, "gateway_url_missing"
+        url = f"{base}/api/gateway/host/metrics/gpu"
+        headers = {"Accept": "application/json"}
+        token = default_gateway_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        req = Request(url=url, headers=headers, method="GET")
+        raw = ""
+        try:
+            with urlopen(req, timeout=float(max(0.1, timeout_s))) as resp:
+                raw = resp.read().decode("utf-8")
+        except HTTPError as e:
+            detail = ""
+            try:
+                detail = (e.read().decode("utf-8") or "").strip()
+            except Exception:
+                detail = ""
+            msg = f"http_{e.code}"
+            if detail:
+                msg = f"{msg}: {detail}"
+            return None, msg
+        except Exception as e:
+            return None, f"network_error: {e}"
+
+        try:
+            payload = json.loads(raw) if raw else {}
+        except Exception:
+            payload = {}
+
+        if not isinstance(payload, dict):
+            return None, "invalid_json"
+        if payload.get("supported") is False:
+            reason = payload.get("reason")
+            reason_s = str(reason).strip() if isinstance(reason, str) else ""
+            return None, reason_s or "unsupported"
+
+        def _as_float(x: object) -> Optional[float]:
+            try:
+                v = float(x)  # type: ignore[arg-type]
+            except Exception:
+                return None
+            if v != v:  # NaN
+                return None
+            return v
+
+        direct = _as_float(payload.get("utilization_gpu_pct"))
+        if direct is not None:
+            return max(0.0, min(100.0, direct)), None
+
+        gpus = payload.get("gpus")
+        if isinstance(gpus, list) and gpus:
+            vals: List[float] = []
+            for g in gpus:
+                if not isinstance(g, dict):
+                    continue
+                v = _as_float(g.get("utilization_gpu_pct"))
+                if v is None:
+                    continue
+                vals.append(v)
+            if vals:
+                avg = sum(vals) / max(1, len(vals))
+                return max(0.0, min(100.0, avg)), None
+
+        return None, "missing_utilization"
+
+    def _gpu_monitor_loop(self) -> None:
+        failures = 0
+        last_emitted: Optional[int] = None
+        last_err: Optional[str] = None
+        poll_s = 2.0
+
+        while True:
+            ui = getattr(self, "_ui", None)
+            if ui is not None and bool(getattr(ui, "_shutdown", False)):
+                return
+            if not bool(getattr(self, "_gpu_monitor_enabled", False)):
+                time.sleep(0.5)
+                continue
+
+            pct, err = self._fetch_gateway_gpu_utilization_pct(timeout_s=0.8)
+            updated = False
+            if pct is None:
+                failures += 1
+                err_s = str(err or "unavailable")
+                self._gpu_last_error = err_s
+                if err_s != (last_err or ""):
+                    last_err = err_s
+                    updated = True
+                if getattr(self, "_gpu_utilization_pct", None) is not None:
+                    self._gpu_utilization_pct = None
+                    last_emitted = None
+                    updated = True
+            else:
+                failures = 0
+                self._gpu_last_error = None
+                if last_err is not None:
+                    last_err = None
+                    updated = True
+                self._gpu_last_ok_at = time.time()
+                pct_int = int(round(float(pct)))
+                if last_emitted is None or pct_int != last_emitted:
+                    self._gpu_utilization_pct = float(pct)
+                    last_emitted = pct_int
+                    updated = True
+
+            if updated:
+                try:
+                    self._ui.request_refresh()
+                except Exception:
+                    pass
+
+            sleep_s = poll_s if failures < 3 else min(10.0, poll_s * float(failures))
+            time.sleep(float(sleep_s))
+
+    def _format_gpu_meter(self, pct: float) -> str:
+        p = max(0.0, min(100.0, float(pct)))
+        bar_len = 10
+        filled = int(round((p / 100.0) * bar_len))
+        filled = max(0, min(bar_len, filled))
+        bar = ("█" * filled) + ("░" * (bar_len - filled))
+        return f"GPU {bar} {p:.0f}%"
+
+    def _handle_gpu(self, raw: str) -> None:
+        arg = str(raw or "").strip().lower()
+        if not arg or arg in ("status", "show"):
+            enabled = bool(getattr(self, "_gpu_monitor_enabled", False))
+            pct = getattr(self, "_gpu_utilization_pct", None)
+            meter = self._format_gpu_meter(float(pct)) if isinstance(pct, (int, float)) else "GPU n/a"
+            err = getattr(self, "_gpu_last_error", None)
+            err_s = str(err or "").strip() if err is not None else ""
+            ok_at = getattr(self, "_gpu_last_ok_at", None)
+            age_s = ""
+            if isinstance(ok_at, (int, float)) and ok_at > 0:
+                try:
+                    age_s = f"{max(0, int(time.time() - float(ok_at)))}s ago"
+                except Exception:
+                    age_s = ""
+
+            try:
+                from .gateway_cli import default_gateway_token, default_gateway_url
+
+                gw_url = str(default_gateway_url() or "")
+                has_token = bool(default_gateway_token())
+            except Exception:
+                gw_url = ""
+                has_token = False
+
+            line = f"GPU meter: {'ON' if enabled else 'OFF'}  ({meter})"
+            if age_s:
+                line = f"{line}  (last ok: {age_s})"
+            self._print(_style(line, _C.DIM, enabled=self._color))
+            if gw_url:
+                self._print(_style(f"Gateway: {gw_url}  token: {'set' if has_token else 'missing'}", _C.DIM, enabled=self._color))
+                if not has_token:
+                    self._print(
+                        _style(
+                            "Tip: set a gateway token with --gateway-token or $ABSTRACTGATEWAY_AUTH_TOKEN.",
+                            _C.DIM,
+                            enabled=self._color,
+                        )
+                    )
+            if err_s:
+                self._print(_style(f"Last error: {err_s}", _C.DIM, enabled=self._color))
+            if not enabled:
+                self._print(_style("Enable with: /gpu on", _C.DIM, enabled=self._color))
+            return
+        if arg in ("on", "enable", "enabled", "1", "true"):
+            self._gpu_monitor_enabled = True
+            self._start_gpu_monitor()
+            try:
+                self._ui.request_refresh()
+            except Exception:
+                pass
+            self._print(_style("GPU meter: ON", _C.DIM, enabled=self._color))
+            return
+        if arg in ("off", "disable", "disabled", "0", "false"):
+            self._gpu_monitor_enabled = False
+            self._gpu_utilization_pct = None
+            self._gpu_last_error = None
+            try:
+                self._ui.request_refresh()
+            except Exception:
+                pass
+            self._print(_style("GPU meter: OFF", _C.DIM, enabled=self._color))
+            return
+        self._print(_style("Usage: /gpu [status|on|off]", _C.DIM, enabled=self._color))
+
+    _LINK_RE_MD = re.compile(r"\[[^\]]+\]\((?P<url>[^)\s]+)")
+    _LINK_RE_URL = re.compile(r"(?P<url>https?://[^\s<>()\]]+)")
+
+    def _extract_links(self, text: str) -> List[str]:
+        """Extract URLs (best-effort) from markdown/plain text.
+
+        Returns unique URLs preserving first-seen order.
+        """
+        s = str(text or "")
+        candidates: List[str] = []
+        candidates.extend([m.group("url") for m in self._LINK_RE_MD.finditer(s) if m.group("url")])
+        candidates.extend([m.group("url") for m in self._LINK_RE_URL.finditer(s) if m.group("url")])
+
+        out: List[str] = []
+        seen: set[str] = set()
+        for u in candidates:
+            url = str(u or "").strip()
+            while url and url[-1] in ".,;:)]}":
+                url = url[:-1]
+            if not url.startswith(("http://", "https://")):
+                continue
+            if url in seen:
+                continue
+            seen.add(url)
+            out.append(url)
+        return out
+
+    def _open_url(self, url: str) -> bool:
+        u = str(url or "").strip()
+        if not u.startswith(("http://", "https://")):
+            return False
+        try:
+            import webbrowser
+
+            threading.Thread(target=webbrowser.open, args=(u,), kwargs={"new": 2}, daemon=True).start()
+            return True
+        except Exception:
+            return False
+
+    def _handle_links(self, raw: str) -> None:
+        _ = raw
+        links = list(getattr(self, "_last_answer_links", []) or [])
+        if not links:
+            self._print(_style("No links captured from the last answer.", _C.DIM, enabled=self._color))
+            return
+        self._print(_style("\nLinks (last answer)", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+        for i, u in enumerate(links, start=1):
+            self._print(f"{i}. {u}")
+
+    def _handle_open(self, raw: str) -> None:
+        arg = str(raw or "").strip()
+        if not arg:
+            self._print(_style("Usage: /open <N|URL>", _C.DIM, enabled=self._color))
+            return
+        if arg.isdigit():
+            idx = int(arg)
+            links = list(getattr(self, "_last_answer_links", []) or [])
+            if idx < 1 or idx > len(links):
+                self._print(_style(f"Invalid link index: {idx}", _C.YELLOW, enabled=self._color))
+                self._print(_style("Try: /links", _C.DIM, enabled=self._color))
+                return
+            url = links[idx - 1]
+        else:
+            url = arg
+
+        ok = self._open_url(url)
+        if not ok:
+            self._print(_style(f"Failed to open: {url}", _C.YELLOW, enabled=self._color))
+
     def _handle_log(self, raw: str) -> None:
         """Show durable logs for the current run.
 
-        `/log runtime` is the AbstractRuntime-centric view (step trace, payloads).
-        `/log provider` is the provider wire view (request sent + response received).
+        `/logs runtime` is the AbstractRuntime-centric view (step trace, payloads).
+        `/logs provider` is the provider wire view (request sent + response received).
 
         Usage:
-          /log runtime [copy] [--last] [--json-only] [--save <path>]
-          /log provider [copy] [--last|--all] [--json-only] [--save <path>]
+          /logs runtime [copy] [--last] [--json-only] [--save <path>]
+          /logs provider [copy] [--last|--all] [--json-only] [--save <path>]
         """
         import shlex
 
@@ -2191,8 +2843,8 @@ class ReactShell:
 
         usage = (
             "Usage:\n"
-            "  /log runtime [copy] [--last] [--json-only] [--save <path>]\n"
-            "  /log provider [copy] [--last|--all] [--json-only] [--save <path>]\n"
+            "  /logs runtime [copy] [--last] [--json-only] [--save <path>]\n"
+            "  /logs provider [copy] [--last|--all] [--json-only] [--save <path>]\n"
         )
         if not parts:
             self._print(_style(usage, _C.DIM, enabled=self._color))
@@ -2209,7 +2861,7 @@ class ReactShell:
             self._handle_log_provider(rest_raw)
             return
 
-        self._print(_style(f"Unknown /log kind: {kind}", _C.YELLOW, enabled=self._color))
+        self._print(_style(f"Unknown /logs kind: {kind}", _C.YELLOW, enabled=self._color))
         self._print(_style(usage, _C.DIM, enabled=self._color))
 
     def _append_to_active_context(self, *, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
@@ -2738,6 +3390,43 @@ class ReactShell:
                     self._tool_executor_server_id = None
                 elif isinstance(raw_exec, str) and raw_exec.strip():
                     self._tool_executor_server_id = raw_exec.strip()
+            if "theme" in config:
+                raw_theme = config.get("theme")
+                try:
+                    t: Optional[Theme] = None
+                    if isinstance(raw_theme, str) and raw_theme.strip():
+                        t = get_theme(raw_theme.strip())
+                    elif isinstance(raw_theme, dict):
+                        name = str(raw_theme.get("name") or raw_theme.get("id") or raw_theme.get("theme") or "").strip()
+                        colors = raw_theme.get("colors") if isinstance(raw_theme.get("colors"), dict) else raw_theme
+                        primary = colors.get("primary") if isinstance(colors, dict) else None
+                        secondary = colors.get("secondary") if isinstance(colors, dict) else None
+                        surface = colors.get("surface") if isinstance(colors, dict) else None
+                        muted = colors.get("muted") if isinstance(colors, dict) else None
+                        if any(isinstance(x, str) and str(x).strip() for x in (primary, secondary, surface, muted)):
+                            t = Theme(
+                                name=name or "custom",
+                                primary=str(primary or ""),
+                                secondary=str(secondary or ""),
+                                surface=str(surface or ""),
+                                muted=str(muted or ""),
+                            ).normalized()
+                        elif name:
+                            t = get_theme(name)
+                    if isinstance(t, Theme):
+                        self._theme = t.normalized()
+                except Exception:
+                    pass
+            if "system_prompt" in config or "system" in config:
+                raw_sys = config.get("system_prompt")
+                if raw_sys is None:
+                    raw_sys = config.get("system")
+                if raw_sys is None:
+                    self._system_prompt_override = None
+                elif isinstance(raw_sys, str) and raw_sys.strip():
+                    self._system_prompt_override = raw_sys.strip()
+                else:
+                    self._system_prompt_override = None
             if "mcp_servers" in config:
                 raw = config.get("mcp_servers")
                 if isinstance(raw, dict):
@@ -2817,6 +3506,28 @@ class ReactShell:
 
             config = dict(existing)
             mcp_servers = getattr(self, "_mcp_servers", None)
+            theme_payload: Any = None
+            try:
+                t = getattr(self, "_theme", None)
+                if isinstance(t, Theme):
+                    tn = t.normalized()
+                    key = str(tn.name or "").strip().lower()
+                    base = BUILTIN_THEMES.get(key) if key else None
+                    if isinstance(base, Theme) and base.normalized() == tn:
+                        theme_payload = base.name
+                    else:
+                        theme_payload = {
+                            "name": tn.name,
+                            "colors": {
+                                "primary": tn.primary,
+                                "secondary": tn.secondary,
+                                "surface": tn.surface,
+                                "muted": tn.muted,
+                            },
+                        }
+            except Exception:
+                theme_payload = None
+            sys_override = getattr(self, "_system_prompt_override", None)
             config.update(
                 {
                     "max_tokens": self._max_tokens,
@@ -2829,6 +3540,12 @@ class ReactShell:
                     "tool_prompt_examples": bool(self._tool_prompt_examples),
                     "tool_executor": getattr(self, "_tool_executor_server_id", None),
                     "mcp_servers": dict(mcp_servers or {}) if isinstance(mcp_servers, dict) else {},
+                    "theme": theme_payload,
+                    "system_prompt": (
+                        str(sys_override).strip()
+                        if isinstance(sys_override, str) and str(sys_override).strip()
+                        else None
+                    ),
                 }
             )
             self._config_file.write_text(json.dumps(config, indent=2))
@@ -4589,8 +5306,8 @@ class ReactShell:
         """(Deprecated) Legacy context preview command.
 
         The public `/context` and `/llm` commands were removed in favor of:
-        - `/log runtime`
-        - `/log provider`
+        - `/logs runtime`
+        - `/logs provider`
         """
         import copy
         import shlex
@@ -4628,7 +5345,7 @@ class ReactShell:
             self._print(_style(f"Unknown flag: {p}", _C.YELLOW, enabled=self._color))
             self._print(
                 _style(
-                    "Usage: /log runtime  |  /log provider",
+                    "Usage: /logs runtime  |  /logs provider",
                     _C.DIM,
                     enabled=self._color,
                 )
@@ -4649,7 +5366,7 @@ class ReactShell:
                 "provider": self._provider,
                 "model": self._model,
                 "note": "No active run. This is the current session context that will be included in the next /task.",
-                "tip": "Use /log runtime (or /log provider) to inspect durable LLM/tool call payloads from the last run.",
+                "tip": "Use /logs runtime (or /logs provider) to inspect durable LLM/tool call payloads from the last run.",
                 "session_messages": list(self._agent.session_messages or []),
             }
             if state is not None and hasattr(state, "run_id") and hasattr(state, "status"):
@@ -4969,7 +5686,7 @@ class ReactShell:
         Source of truth: `RunState.vars["_runtime"]["node_traces"]`.
 
         Usage:
-          /log runtime [copy] [--last] [--json-only] [--save <path>]
+          /logs runtime [copy] [--last] [--json-only] [--save <path>]
         """
         import shlex
         import uuid
@@ -4994,7 +5711,7 @@ class ReactShell:
         all_calls = False
         verbatim = False
         save_path: Optional[str] = None
-        usage = "Usage: /log runtime [copy] [--last] [--json-only] [--save <path>]"
+        usage = "Usage: /logs runtime [copy] [--last] [--json-only] [--save <path>]"
         i = 0
         while i < len(parts):
             p = parts[i]
@@ -5325,7 +6042,7 @@ class ReactShell:
         - response: `result.raw_response` (provider JSON response, best-effort preserved)
 
         Usage:
-          /log provider [copy] [--last] [--run] [--json-only] [--save <path>]
+          /logs provider [copy] [--last] [--run] [--json-only] [--save <path>]
         """
         import shlex
         import uuid
@@ -5350,7 +6067,7 @@ class ReactShell:
         run_only = False
         no_tool_defs = False
         save_path: Optional[str] = None
-        usage = "Usage: /log provider [copy] [--last] [--run] [--json-only] [--no-tool-defs] [--save <path>]"
+        usage = "Usage: /logs provider [copy] [--last] [--run] [--json-only] [--no-tool-defs] [--save <path>]"
 
         i = 0
         while i < len(parts):
@@ -5546,7 +6263,7 @@ class ReactShell:
             def _extract_tool_calls(resp_obj: Any) -> list[Any]:
                 """Best-effort tool-call extraction for human-readable logs.
 
-                `/log provider` is intentionally provider-wire oriented, but this line helps
+                `/logs provider` is intentionally provider-wire oriented, but this line helps
                 quickly spot whether the model asked for tools. Not all providers share the
                 OpenAI `choices[0].message.tool_calls` shape (e.g. Anthropic `tool_use` blocks).
                 """
@@ -5819,12 +6536,17 @@ class ReactShell:
             "  /blacklist ...      Block folders/files for this session (overrides whitelist)\n"
             "                     - /blacklist <path...>\n"
             "                     - /blacklist reset\n"
-            "  /log runtime        Show runtime step trace for LLM/tool calls (durable)\n"
-            "                     - /log runtime [copy] [--last] [--json-only] [--save <path>]\n"
-            "  /log provider       Show provider wire request+response (durable)\n"
-            "                     - /log provider [copy] [--last|--all] [--json-only] [--save <path>]\n"
+            "  /logs runtime       Show runtime step trace for LLM/tool calls (durable)\n"
+            "                     - /logs runtime [copy] [--last] [--json-only] [--save <path>]\n"
+            "  /logs provider      Show provider wire request+response (durable)\n"
+            "                     - /logs provider [copy] [--last|--all] [--json-only] [--save <path>]\n"
             "  /memorize <note>    Store a durable memory note (tags + provenance)\n"
             "  /mouse              Toggle mouse mode (wheel scroll vs terminal selection)\n"
+            "  /theme [name]       Switch UI theme (/theme list, /theme custom ...)\n"
+            "  /system [text]      Show or set system prompt override [saved]\n"
+            "  /gpu [on|off]       Toggle host GPU meter (via AbstractGateway)\n"
+            "  /links              List links captured from last answer\n"
+            "  /open <N|URL>       Open a link in your default browser\n"
             "  /flow ...           Run AbstractFlow workflows inside this REPL\n"
             "                     - /flow run <flow_id_or_path> [--verbosity none|default|full] [--key value ...]\n"
             "                     - /flow resume [--verbosity none|default|full] [--wait-until]\n"
@@ -5970,6 +6692,16 @@ class ReactShell:
 
         selected = turns[-limit_int:]
 
+        renderer: Optional[TerminalMarkdownRenderer] = None
+        try:
+            renderer = TerminalMarkdownRenderer(
+                color=self._color,
+                theme=getattr(self, "_theme", None),
+                width=self._terminal_width(),
+            )
+        except Exception:
+            renderer = None
+
         self._print(_style(f"\nHistory (last {len(selected)} interaction(s))", _C.CYAN, _C.BOLD, enabled=self._color))
         self._print(_style("─" * 80, _C.DIM, enabled=self._color))
 
@@ -6002,14 +6734,26 @@ class ReactShell:
                     mid = _get_message_id(msg) or f"system_{uuid.uuid4().hex}"
                     self._ui.register_copy_payload(mid, content)
                     self._print(_style("[system]", _C.DIM, enabled=self._color))
-                    self._print(content)
+                    if renderer is not None:
+                        try:
+                            self._print(renderer.render(content))
+                        except Exception:
+                            self._print(content)
+                    else:
+                        self._print(content)
                     self._print(f"[[COPY:{mid}]] {footer}".rstrip())
                     continue
 
                 # Default: assistant/other roles (no role prefix; rely on styling/structure).
                 mid = _get_message_id(msg) or f"assistant_{uuid.uuid4().hex}"
                 self._ui.register_copy_payload(mid, content)
-                self._print(content)
+                if renderer is not None:
+                    try:
+                        self._print(renderer.render(content))
+                    except Exception:
+                        self._print(content)
+                else:
+                    self._print(content)
                 self._print(f"[[COPY:{mid}]] {footer}".rstrip())
 
         self._print(_style("\n" + "─" * 80, _C.DIM, enabled=self._color))
@@ -6352,6 +7096,14 @@ class ReactShell:
             runtime_ns = {}
             state.vars["_runtime"] = runtime_ns
         runtime_ns["tool_prompt_examples"] = bool(self._tool_prompt_examples)
+        # Apply session system prompt override to new runs (don't clobber an existing run override).
+        sys_override = getattr(self, "_system_prompt_override", None)
+        if (
+            isinstance(sys_override, str)
+            and sys_override.strip()
+            and not (isinstance(runtime_ns.get("system_prompt"), str) and str(runtime_ns.get("system_prompt")).strip())
+        ):
+            runtime_ns["system_prompt"] = sys_override.strip()
 
         # Workspace policy (tool-call scoping): keep it JSON-safe and stable across runs.
         #

@@ -22,11 +22,53 @@ def _env(name: str, fallback: Optional[str] = None) -> Optional[str]:
 
 
 def default_gateway_url() -> str:
-    return str(_env("ABSTRACTCODE_GATEWAY_URL") or "http://127.0.0.1:8080").rstrip("/")
+    # Canonical env vars:
+    # - ABSTRACTGATEWAY_URL (gateway)
+    # - ABSTRACTFLOW_GATEWAY_URL (legacy compatibility)
+    # AbstractCode convention:
+    # - ABSTRACTCODE_GATEWAY_URL
+    candidates = [
+        "ABSTRACTCODE_GATEWAY_URL",
+        "ABSTRACTFLOW_GATEWAY_URL",
+        "ABSTRACTGATEWAY_URL",
+    ]
+    for name in candidates:
+        v = os.getenv(name)
+        if isinstance(v, str) and v.strip():
+            return v.strip().rstrip("/")
+    # AbstractGateway docs default to 8081.
+    return "http://127.0.0.1:8081"
 
 
 def default_gateway_token() -> Optional[str]:
-    return _env("ABSTRACTCODE_GATEWAY_TOKEN", "ABSTRACTGATEWAY_AUTH_TOKEN")
+    # Canonical env vars:
+    # - ABSTRACTGATEWAY_AUTH_TOKEN
+    # - ABSTRACTFLOW_GATEWAY_AUTH_TOKEN (legacy compatibility)
+    # AbstractCode convention:
+    # - ABSTRACTCODE_GATEWAY_TOKEN
+    candidates = [
+        "ABSTRACTCODE_GATEWAY_TOKEN",
+        "ABSTRACTGATEWAY_AUTH_TOKEN",
+        "ABSTRACTFLOW_GATEWAY_AUTH_TOKEN",
+    ]
+    for name in candidates:
+        v = os.getenv(name)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+
+    token_lists = [
+        "ABSTRACTGATEWAY_AUTH_TOKENS",
+        "ABSTRACTFLOW_GATEWAY_AUTH_TOKENS",
+    ]
+    for name in token_lists:
+        raw = os.getenv(name)
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        first = raw.split(",", 1)[0].strip()
+        if first:
+            return first
+
+    return None
 
 
 def _join_url(base_url: str, path: str) -> str:
