@@ -1720,6 +1720,8 @@ function ConsolePage(props: {
   const [active_run_id, set_active_run_id] = useState<string | null>(null);
   const [records, set_records] = useState<LedgerStreamEvent[]>([]);
   const records_ref = useRef<LedgerStreamEvent[]>([]);
+  const repl_messages_ref = useRef<ReplMessage[]>([]);
+  const finalized_run_ref = useRef<string>("");
   const root_run_ref = useRef<string>("");
   const [root_last_record, set_root_last_record] = useState<StepRecord | null>(null);
   const [status_text, set_status_text] = useState<string>("");
@@ -1830,6 +1832,10 @@ function ConsolePage(props: {
   const template_label = repl_template?.name || (repl_template ? `${repl_template.bundle_id}:${repl_template.flow_id}` : "");
 
   useEffect(() => {
+    repl_messages_ref.current = props.repl.messages || [];
+  }, [props.repl.messages]);
+
+  useEffect(() => {
     const rid = String(props.attach_run_id || "").trim();
     if (!rid) return;
     props.on_attach_consumed();
@@ -1840,6 +1846,7 @@ function ConsolePage(props: {
     set_composer("");
     set_error("");
     clear_status();
+    finalized_run_ref.current = "";
     if (rid !== active_run_id) set_active_run_id(rid);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.attach_run_id]);
@@ -2221,6 +2228,7 @@ function ConsolePage(props: {
     set_subworkflow_label("");
 
     const user_ts = now_iso();
+    finalized_run_ref.current = "";
     const attachments_for_turn = attached_files
       .filter((f) => !f.loading && !String(f.error || "").trim() && f.attachment && typeof f.attachment === "object")
       .map((f) => f.attachment as AttachmentRef)
@@ -2284,6 +2292,9 @@ function ConsolePage(props: {
   }
 
   function finish_run_with_response(resp: { response: string; meta: any }, run_id: string): void {
+    const rid = String(run_id || "").trim();
+    if (rid && finalized_run_ref.current === rid) return;
+    if (rid) finalized_run_ref.current = rid;
     const stats = compute_run_stats(records_ref.current);
     const tool_sigs = extract_tool_signatures(records_ref.current);
     const meta_obj: any = {};
@@ -2295,7 +2306,39 @@ function ConsolePage(props: {
       usage: stats.usage,
       tok_s: stats.duration_ms > 0 && stats.usage.total_tokens > 0 ? stats.usage.total_tokens / (stats.duration_ms / 1000) : null,
     };
-    append_message({ role: "assistant", content: resp.response, ts: now_iso(), meta: meta_obj, run_id });
+
+    const resp_text = String(resp.response || "").trim();
+    const existing_msgs = repl_messages_ref.current || [];
+    let last_assistant: ReplMessage | null = null;
+    for (let i = existing_msgs.length - 1; i >= 0; i--) {
+      const m = existing_msgs[i];
+      if (m.role !== "assistant") continue;
+      if (String(m.content || "").trim()) {
+        last_assistant = m;
+        break;
+      }
+    }
+    const already_has_final = Boolean(last_assistant && String(last_assistant.content || "").trim() === resp_text);
+    if (already_has_final) {
+      // When replaying a completed run, multiple end-of-run records may be observed.
+      // Update metadata in-place, but avoid duplicating the assistant message.
+      update_repl((prev) => {
+        const msgs = [...(prev.messages || [])];
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const m = msgs[i];
+          if (m.role !== "assistant") continue;
+          if (String(m.content || "").trim() !== resp_text) continue;
+          const merged_meta: any = m.meta && typeof m.meta === "object" ? { ...(m.meta as any) } : {};
+          if (meta_obj.workflow_meta != null && merged_meta.workflow_meta == null) merged_meta.workflow_meta = meta_obj.workflow_meta;
+          merged_meta._repl = meta_obj._repl;
+          msgs[i] = { ...m, run_id: String(m.run_id || "").trim() ? m.run_id : rid, meta: merged_meta };
+          break;
+        }
+        return { ...prev, messages: msgs.slice(-200), updated_at: now_iso() };
+      });
+    } else {
+      append_message({ role: "assistant", content: resp_text || String(resp.response || ""), ts: now_iso(), meta: meta_obj, run_id: rid });
+    }
 
     const digest_lines: string[] = [];
     digest_lines.push(`**outcome:** completed`);
@@ -2333,6 +2376,9 @@ function ConsolePage(props: {
   }
 
   function finish_run_without_output(outcome: "completed" | "failed" | "cancelled", run_id: string): void {
+    const rid = String(run_id || "").trim();
+    if (rid && finalized_run_ref.current === rid) return;
+    if (rid) finalized_run_ref.current = rid;
     const stats = compute_run_stats(records_ref.current);
     const tool_sigs = extract_tool_signatures(records_ref.current);
 
@@ -2705,8 +2751,10 @@ function ConsolePage(props: {
                     for (const t of resolved) {
                       const p = String(t.prompt || "").trim();
                       if (!p) continue;
-                      for (; cursor < out.length; cursor++) {
-                        const m = out[cursor];
+                      const start_idx = cursor;
+                      let matched_idx = -1;
+                      for (let j = start_idx; j < out.length; j++) {
+                        const m = out[j];
                         if (m.role !== "user") continue;
                         if (String(m.content || "").trim() !== p) continue;
                         const meta_obj: any = m.meta && typeof m.meta === "object" ? m.meta : {};
@@ -2714,9 +2762,12 @@ function ConsolePage(props: {
                         if (!existing.length) meta_obj.attachments = t.attachments.map((a) => ({ ...(a as any) }));
                         m.meta = meta_obj;
                         if (!String(m.run_id || "").trim()) m.run_id = t.run_id;
-                        cursor += 1;
+                        matched_idx = j;
                         break;
                       }
+                      // If not found, do NOT advance the cursor; a missing prompt should not
+                      // prevent later prompts from matching.
+                      if (matched_idx >= 0) cursor = matched_idx + 1;
                     }
                     return out;
                   };

@@ -255,6 +255,7 @@ class ReactShell:
             from abstractcore.tools.abstractignore import AbstractIgnore
             from abstractcore.tools.common_tools import (
                 list_files,
+                skim_folders,
                 search_files,
                 analyze_code,
                 read_file,
@@ -293,6 +294,7 @@ class ReactShell:
         # Default tools for AbstractCode (curated subset for coding tasks)
         DEFAULT_TOOLS = [
             list_files,
+            skim_folders,
             search_files,
             analyze_code,
             read_file,

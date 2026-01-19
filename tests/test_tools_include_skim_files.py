@@ -67,4 +67,4 @@ def test_react_shell_default_tools_include_skim_files(monkeypatch: pytest.Monkey
             names.add(str(getattr(t, "__name__", "") or ""))
 
     assert "skim_files" in names
-
+    assert "skim_folders" in names
