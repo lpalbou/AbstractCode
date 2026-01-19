@@ -489,6 +489,21 @@ function extract_context_messages_from_run_input(raw: any): { role: string; cont
   return out;
 }
 
+function extract_context_attachments_from_run_input(raw: any): AttachmentRef[] {
+  if (!raw || typeof raw !== "object") return [];
+  const v: any = raw;
+  const input = v?.input_data && typeof v.input_data === "object" ? v.input_data : v;
+  const ctx = input?.context;
+  const atts = ctx && typeof ctx === "object" ? (ctx as any).attachments : null;
+  if (!Array.isArray(atts)) return [];
+  const out: AttachmentRef[] = [];
+  for (const a of atts) {
+    if (!a || typeof a !== "object") continue;
+    out.push({ ...(a as any) });
+  }
+  return out;
+}
+
 type WorkflowRef = {
   bundle_id: string; // base bundle id (no @version)
   bundle_version?: string; // optional @version
@@ -2618,6 +2633,103 @@ function ConsolePage(props: {
             if (seeded.length) {
               update_repl((prev) => ({ ...prev, messages: seeded.slice(-200), updated_at: now_iso() }));
             }
+
+            // Best-effort: restore per-turn attachment chips by reading durable run input_data
+            // (History replay should not depend on browser-only state).
+            const sid = String(current_run?.session_id || "").trim();
+            if (sid) {
+              void (async () => {
+                try {
+                  const runs_res = await props.gateway.list_runs({ limit: 500, session_id: sid });
+                  if (stopped) return;
+                  const items = Array.isArray((runs_res as any)?.items) ? ((runs_res as any).items as any[]) : [];
+                  const roots = items
+                    .filter((it) => {
+                      const rr = String(it?.run_id || "").trim();
+                      if (!rr) return false;
+                      return !String(it?.parent_run_id || "").trim();
+                    })
+                    .map((it) => ({
+                      run_id: String(it?.run_id || "").trim(),
+                      created_at: String(it?.created_at || it?.updated_at || "").trim(),
+                      updated_at: String(it?.updated_at || it?.created_at || "").trim(),
+                    }))
+                    .filter((it) => Boolean(it.run_id));
+
+                  roots.sort((a, b) => {
+                    const ta = parse_iso_ms(a.created_at) ?? parse_iso_ms(a.updated_at) ?? 0;
+                    const tb = parse_iso_ms(b.created_at) ?? parse_iso_ms(b.updated_at) ?? 0;
+                    return ta - tb;
+                  });
+
+                  // Bound work: only try to map attachments for a recent run window.
+                  const windowed = roots.slice(-200);
+                  const max_fetch = 120;
+                  const to_fetch = windowed.slice(-max_fetch);
+
+                  type RunTurn = { run_id: string; prompt: string; attachments: AttachmentRef[] };
+                  const turns: Array<RunTurn | null> = new Array(to_fetch.length).fill(null);
+
+                  const fetch_one = async (idx: number): Promise<void> => {
+                    const rr = String(to_fetch[idx]?.run_id || "").trim();
+                    if (!rr) return;
+                    const input = await props.gateway.get_run_input_data(rr).catch(() => null);
+                    if (stopped) return;
+                    const prompt = String(extract_user_prompt_from_run_input(input) || "").trim();
+                    const attachments = extract_context_attachments_from_run_input(input);
+                    if (!prompt || !attachments.length) return;
+                    turns[idx] = { run_id: rr, prompt, attachments };
+                  };
+
+                  // Limited concurrency (remote gateways can be slow).
+                  let i = 0;
+                  const workers = new Array(Math.min(6, to_fetch.length)).fill(0).map(async () => {
+                    while (!stopped && i < to_fetch.length) {
+                      const idx = i;
+                      i += 1;
+                      await fetch_one(idx);
+                    }
+                  });
+                  await Promise.all(workers);
+                  if (stopped) return;
+
+                  const resolved: RunTurn[] = turns.filter((t): t is RunTurn => Boolean(t));
+                  if (!resolved.length) return;
+
+                  const apply_by_prompt = (messages: ReplMessage[]): ReplMessage[] => {
+                    const out = (messages || []).map((m) => ({
+                      ...m,
+                      meta: m.meta && typeof m.meta === "object" ? { ...(m.meta as any) } : m.meta,
+                    }));
+                    let cursor = 0;
+                    for (const t of resolved) {
+                      const p = String(t.prompt || "").trim();
+                      if (!p) continue;
+                      for (; cursor < out.length; cursor++) {
+                        const m = out[cursor];
+                        if (m.role !== "user") continue;
+                        if (String(m.content || "").trim() !== p) continue;
+                        const meta_obj: any = m.meta && typeof m.meta === "object" ? m.meta : {};
+                        const existing = Array.isArray(meta_obj?.attachments) ? (meta_obj.attachments as any[]) : [];
+                        if (!existing.length) meta_obj.attachments = t.attachments.map((a) => ({ ...(a as any) }));
+                        m.meta = meta_obj;
+                        if (!String(m.run_id || "").trim()) m.run_id = t.run_id;
+                        cursor += 1;
+                        break;
+                      }
+                    }
+                    return out;
+                  };
+
+                  update_repl((prev) => {
+                    const next_msgs = apply_by_prompt(prev.messages || []);
+                    return next_msgs === prev.messages ? prev : { ...prev, messages: next_msgs, updated_at: now_iso() };
+                  });
+                } catch {
+                  // best-effort
+                }
+              })();
+            }
           } catch {
             // best-effort
           }
@@ -4035,6 +4147,7 @@ function ContextInspectorModal(props: {
   const [selected_run_id, set_selected_run_id] = useState<string>(props.inspect_run_id);
   const [run_options, set_run_options] = useState<string[]>([]);
   const [ledger_len_by_run, set_ledger_len_by_run] = useState<Record<string, number>>({});
+  const [discovering, set_discovering] = useState(true);
   const [loading, set_loading] = useState(true);
   const [error, set_error] = useState("");
   const [ledger_items, set_ledger_items] = useState<LedgerRecordItem[]>([]);
@@ -4054,10 +4167,12 @@ function ContextInspectorModal(props: {
     set_selected_run_id(props.inspect_run_id);
     set_run_options([]);
     set_ledger_len_by_run({});
+    set_discovering(true);
   }, [props.inspect_run_id]);
 
   useEffect(() => {
     let cancelled = false;
+    set_discovering(true);
 
     const uniq = (xs: string[]): string[] => {
       const out: string[] = [];
@@ -4159,6 +4274,8 @@ function ContextInspectorModal(props: {
       } catch (e: any) {
         if (cancelled) return;
         set_run_options(uniq([props.inspect_run_id, props.root_run_id]));
+      } finally {
+        if (!cancelled) set_discovering(false);
       }
     })();
 
@@ -4222,6 +4339,7 @@ function ContextInspectorModal(props: {
   }, [props.gateway, selected_run_id, ledger_len_by_run[selected_run_id]]);
 
   const trace = useMemo(() => build_agent_trace(ledger_items, { run_id: selected_run_id }), [ledger_items, selected_run_id]);
+  const is_loading = discovering || loading;
 
   return (
     <div
@@ -4268,13 +4386,25 @@ function ContextInspectorModal(props: {
         </div>
 
         <div className="modal_body">
-          {loading ? (
-            <div className="muted" style={{ marginTop: 12 }}>
-              Loading…
+          {is_loading ? (
+            <div className="context_modal_loading">
+              <div className="thinking_line shimmer">
+                <span className="run_spinner" aria-hidden="true" />
+                <span className="thinking_label">Reconstructing context…</span>
+                <span className="thinking_spacer" />
+                <span className="thinking_iters">This can take ~30s over remote gateways</span>
+              </div>
+              <div className="muted" style={{ marginTop: 10, lineHeight: 1.5 }}>
+                Loading agent trace (LLM/tool calls) from the durable ledger…
+              </div>
             </div>
           ) : error ? (
             <Notice variant="error" style={{ marginTop: 12 }}>
               {error}
+            </Notice>
+          ) : !trace.items.length ? (
+            <Notice variant="info" style={{ marginTop: 12 }}>
+              No trace entries found for this run. Try selecting a different <span className="mono">run_id</span> from the dropdown.
             </Notice>
           ) : (
             <AgentCyclesPanel
