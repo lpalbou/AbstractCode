@@ -480,6 +480,9 @@ class ReactShell:
 
         # Pending input for the run loop
         self._pending_input: Optional[str] = None
+        # Async run-loop interrupts (set by UI thread, consumed by run thread).
+        self._pending_conclude_note: Optional[str] = None
+        self._pending_conclude_lock = threading.Lock()
 
         # Per-turn observability (for copy + traceability)
         self._turn_task: Optional[str] = None
@@ -2506,6 +2509,9 @@ class ReactShell:
             return False
         if command == "cancel":
             self._cancel()
+            return False
+        if command == "conclude":
+            self._conclude(arg)
             return False
         if command == "history":
             sub = arg.strip()
@@ -7298,6 +7304,7 @@ class ReactShell:
             "  /resume             Resume the saved/attached run\n"
             "  /pause              Pause the current run (durable)\n"
             "  /cancel             Cancel the current run (durable)\n"
+            "  /conclude [note]    Ask the agent to conclude now (best-effort; no new tools)\n"
             "  /clear              Clear memory and clear the screen\n"
             "  /snapshot save <n>  Save current state as named snapshot\n"
             "  /snapshot load <n>  Load snapshot by name\n"
@@ -7987,6 +7994,87 @@ class ReactShell:
         self._print(_style(f"Cancel requested (run_id={run_id}).", _C.DIM, enabled=self._color))
         self._reset_repeat_guardrails()
 
+    def _consume_pending_conclude_note(self) -> Optional[str]:
+        try:
+            with self._pending_conclude_lock:
+                note = self._pending_conclude_note
+                self._pending_conclude_note = None
+                return note
+        except Exception:
+            return None
+
+    def _apply_conclude_request(self, run_id: str, note: str) -> None:
+        """Best-effort: push a one-shot 'conclude now' instruction into the ReAct inbox."""
+        rid = str(run_id or "").strip()
+        if not rid:
+            return
+        try:
+            state = self._runtime.get_state(rid)
+        except Exception:
+            return
+        if state is None or not hasattr(state, "vars") or not isinstance(state.vars, dict):
+            return
+
+        runtime_ns = state.vars.get("_runtime")
+        if not isinstance(runtime_ns, dict):
+            runtime_ns = {}
+            state.vars["_runtime"] = runtime_ns
+
+        inbox = runtime_ns.get("inbox")
+        if not isinstance(inbox, list):
+            inbox = []
+            runtime_ns["inbox"] = inbox
+
+        extra = str(note or "").strip()
+        msg = (
+            "User requested: CONCLUDE NOW.\n"
+            "- Provide your best final answer using ONLY the information already gathered in this run.\n"
+            "- Do NOT call tools.\n"
+            "- If information is missing, say what is unknown and list the most useful next steps."
+        )
+        if extra:
+            msg = f"{msg}\n\nUser note:\n{extra}"
+        inbox.append({"role": "system", "content": msg})
+
+        # Stronger guardrail: hide tools from the next model call (ReAct reads these from _runtime).
+        runtime_ns["allowed_tools"] = []
+        runtime_ns["tool_specs"] = []
+
+        try:
+            self._runtime.run_store.save(state)
+        except Exception:
+            pass
+
+        # System prompt changes affect token estimates shown in the footer.
+        self._status_cache_key = None
+        self._status_cache_text = ""
+
+    def _conclude(self, raw: str) -> None:
+        if str(getattr(self, "_agent_kind", "") or "") != "react":
+            self._print(_style("/conclude is currently supported for the ReAct agent only.", _C.DIM, enabled=self._color))
+            return
+        run_id = self._attached_run_id()
+        if run_id is None:
+            self._print(_style("No run loaded. Start a task or /resume first.", _C.DIM, enabled=self._color))
+            return
+
+        note = str(raw or "").strip()
+
+        # If a run is currently executing, queue an interrupt for the background thread
+        # (avoids run_store lost-update races during tick/save).
+        if self._run_thread_active():
+            try:
+                with self._pending_conclude_lock:
+                    self._pending_conclude_note = note
+            except Exception:
+                self._pending_conclude_note = note
+            self._print(_style(f"Conclude requested (run_id={run_id}). Will apply on the next step.", _C.DIM, enabled=self._color))
+            return
+
+        # Otherwise apply immediately to the persisted run state; user can /resume.
+        self._apply_conclude_request(run_id, note)
+        self._print(_style(f"Conclude requested (run_id={run_id}). Type '/resume' to continue.", _C.DIM, enabled=self._color))
+
     def _try_load_state(self) -> None:
         try:
             state = self._agent.load_state(self._state_file)  # type: ignore[arg-type]
@@ -8010,6 +8098,9 @@ class ReactShell:
 
     def _run_loop(self, run_id: str) -> None:
         while True:
+            note = self._consume_pending_conclude_note()
+            if note is not None:
+                self._apply_conclude_request(run_id, note)
             state = self._agent.step()
 
             if state.status == self._RunStatus.COMPLETED:

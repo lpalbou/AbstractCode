@@ -57,6 +57,7 @@ COMMANDS = [
     ("resume", "Resume the saved/attached run"),
     ("pause", "Pause the current run (durable)"),
     ("cancel", "Cancel the current run (durable)"),
+    ("conclude", "Ask the agent to conclude now (best-effort; no new tools)"),
     ("clear", "Clear memory and clear the screen"),
     ("compact", "Compress conversation [light|standard|heavy] [--preserve N] [focus...]"),
     ("spans", "List archived conversation spans (from /compact)"),
