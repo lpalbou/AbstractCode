@@ -52,6 +52,8 @@ COMMANDS = [
     ("copy", "Copy messages to clipboard (/copy user|assistant [turn])"),
     ("plan", "Toggle Plan mode (TODO list first) [saved]"),
     ("review", "Toggle Review mode (self-check) [saved]"),
+    ("config", "Configure runtime options [saved]"),
+    ("config check-plan", "Toggle ReAct plan-only retry (default: off) [saved]"),
     ("resume", "Resume the saved/attached run"),
     ("pause", "Pause the current run (durable)"),
     ("cancel", "Cancel the current run (durable)"),
@@ -79,6 +81,8 @@ COMMANDS = [
     ("snapshot list", "List available snapshots"),
     ("agent", "Switch agent (/agent [name]|list|reload)"),
     ("theme", "Switch UI theme (/theme [name]|custom ...)"),
+    ("files", "List pending @file attachments"),
+    ("files-keep", "Keep @file attachments across turns [saved]"),
     ("system", "Show/set system prompt override [saved]"),
     ("gpu", "Toggle GPU meter (/gpu on|off|status)"),
     ("links", "List links from last answer"),
@@ -445,8 +449,11 @@ class FullScreenUI:
         self._workspace_files: List[str] = []
         self._workspace_files_built_at: float = 0.0
         self._workspace_files_ttl_s: float = 2.0
-        # Persistent attachment chips: these are included in context turn-after-turn by default.
+        # Attachment chips:
+        # - When files-keep is OFF (default), chips are consumed on the next user submit.
+        # - When files-keep is ON, chips persist across turns until removed.
         self._attachments: List[str] = []
+        self._files_keep: bool = False
 
         # Input buffer with command completer and history
         self._input_buffer = Buffer(
@@ -1269,6 +1276,15 @@ class FullScreenUI:
             except Exception:
                 pass
 
+    def set_files_keep(self, enabled: bool) -> None:
+        """Set whether attachment chips persist across turns."""
+        self._files_keep = bool(enabled)
+        try:
+            if self._app and self._app.is_running:
+                self._app.invalidate()
+        except Exception:
+            pass
+
     def get_composer_state(self) -> Dict[str, Any]:
         """Return the current draft input text and pending attachment chips (best-effort)."""
         try:
@@ -1832,7 +1848,8 @@ class FullScreenUI:
                 attachments: List[str] = []
                 if not str(text).lstrip().startswith("/"):
                     attachments = list(self._attachments)
-                    self._attachments = []
+                    if not bool(getattr(self, "_files_keep", False)):
+                        self._attachments = []
 
                 # If there's a pending blocking prompt, respond to it
                 if self._pending_blocking_prompt is not None:

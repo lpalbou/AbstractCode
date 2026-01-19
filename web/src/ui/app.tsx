@@ -197,6 +197,34 @@ function compute_run_stats(events: LedgerStreamEvent[]): {
   return out;
 }
 
+function compute_llm_iteration_progress(
+  events: LedgerStreamEvent[],
+  run_id: string
+): { completed: number; in_flight: boolean; current: number } {
+  const rid = String(run_id || "").trim();
+  if (!rid) return { completed: 0, in_flight: false, current: 0 };
+  const by_step = new Map<string, string>();
+  for (const ev of events) {
+    const rec: any = ev?.record;
+    if (!rec || typeof rec !== "object") continue;
+    if (String(rec?.run_id || "").trim() !== rid) continue;
+    const eff_type = String(rec?.effect?.type || "").trim();
+    if (eff_type !== "llm_call") continue;
+    const step_id = String(rec?.step_id || "").trim();
+    if (!step_id) continue;
+    const st = String(rec?.status || "").trim();
+    by_step.set(step_id, st);
+  }
+  let completed = 0;
+  let in_flight = false;
+  for (const st of by_step.values()) {
+    if (st === "completed") completed += 1;
+    else if (st === "started" || st === "waiting") in_flight = true;
+  }
+  const current = completed + (in_flight ? 1 : 0);
+  return { completed, in_flight, current };
+}
+
 function format_duration_short(ms: number): string {
   const v = Number(ms);
   if (!Number.isFinite(v) || v < 0) return "—";
@@ -858,7 +886,7 @@ function SessionsPage(props: {
   }, [props.gateway]);
 
   return (
-    <div className="panel">
+    <div className="panel sessions_page">
       <h2>Sessions</h2>
       <div className="muted">Sessions retrieved from the Gateway (durable runtime source of truth).</div>
 
@@ -1684,10 +1712,12 @@ function ConsolePage(props: {
 
   const [details_open, set_details_open] = useState(false);
   const [resuming, set_resuming] = useState(false);
+  const [cancelling, set_cancelling] = useState(false);
 
   const input_ref = useRef<HTMLTextAreaElement | null>(null);
   const chat_scroll_ref = useRef<HTMLDivElement | null>(null);
   const chat_content_ref = useRef<HTMLDivElement | null>(null);
+  const chat_end_ref = useRef<HTMLDivElement | null>(null);
   const chat_at_bottom_ref = useRef<boolean>(true);
   const [chat_at_bottom, set_chat_at_bottom] = useState<boolean>(true);
   const scroll_follow_raf_ref = useRef<number | null>(null);
@@ -1696,6 +1726,7 @@ function ConsolePage(props: {
   const [attachment_preview, set_attachment_preview] = useState<AttachmentRef | null>(null);
   const pending_files = attached_files.some((f) => f.loading);
   const [file_matches, set_file_matches] = useState<string[]>([]);
+  const [file_match_sizes, set_file_match_sizes] = useState<Record<string, number>>({});
   const [file_loading, set_file_loading] = useState(false);
   const [file_error, set_file_error] = useState("");
 
@@ -1709,6 +1740,7 @@ function ConsolePage(props: {
   const cursor_flush_pending_ref = useRef<Record<string, number>>({});
   const [follow_run_id, set_follow_run_id] = useState<string>("");
   const [subworkflow_label, set_subworkflow_label] = useState<string>("");
+  const [drop_active, set_drop_active] = useState(false);
 
   const wait_state: WaitState | null = useMemo(() => extract_wait_from_record(root_last_record), [root_last_record]);
   const tool_calls_for_wait: ToolCall[] = useMemo(() => extract_tool_calls_from_wait(wait_state), [wait_state]);
@@ -1719,6 +1751,29 @@ function ConsolePage(props: {
   const is_ask_event_wait = wait_reason === "event" && wait_event_name === "abstract.ask";
   const can_user_answer_wait = is_user_wait || is_ask_event_wait;
   const is_working = Boolean(active_run_id) && !wait_state && !resuming && Boolean(status_text.trim());
+  const wait_is_compact = (wait_state && wait_reason === "subworkflow") || (!wait_state && is_working);
+
+  const progress_run_id = useMemo(() => {
+    const rid = String(active_run_id || "").trim();
+    if (wait_reason === "subworkflow") {
+      const fid = String(follow_run_id || "").trim();
+      if (fid) return fid;
+    }
+    return rid;
+  }, [active_run_id, follow_run_id, wait_reason]);
+
+  const iteration_progress = useMemo(() => compute_llm_iteration_progress(records, progress_run_id), [records, progress_run_id]);
+  const max_iterations_ui = useMemo(() => {
+    const v = Number(props.settings.max_iterations);
+    return Number.isFinite(v) && v > 0 ? Math.trunc(v) : 25;
+  }, [props.settings.max_iterations]);
+  const iteration_badge = useMemo(() => {
+    if (!progress_run_id) return "";
+    const max = max_iterations_ui;
+    if (!Number.isFinite(max) || max <= 0) return "";
+    const cur = Math.max(0, Math.trunc(iteration_progress.current || 0));
+    return `(${Math.min(cur, max)}/${max})`;
+  }, [progress_run_id, iteration_progress.current, max_iterations_ui]);
 
   const sub_run_id_for_wait = useMemo(() => {
     if (wait_reason !== "subworkflow") return "";
@@ -2008,6 +2063,11 @@ function ConsolePage(props: {
         const el = chat_scroll_ref.current;
         if (!el) return;
         el.scrollTop = el.scrollHeight;
+        try {
+          chat_end_ref.current?.scrollIntoView({ block: "end" });
+        } catch {
+          // ignore
+        }
         chat_at_bottom_ref.current = true;
         set_chat_at_bottom(true);
       });
@@ -2194,7 +2254,7 @@ function ConsolePage(props: {
         updated_at: now_iso(),
       }));
       set_active_run_id(run_id);
-      set_attached_files([]);
+      if (!props.settings.files_keep) set_attached_files([]);
     } catch (e: any) {
       clear_status();
       set_error(String(e?.message || e || "Failed to start run"));
@@ -2261,35 +2321,27 @@ function ConsolePage(props: {
     const stats = compute_run_stats(records_ref.current);
     const tool_sigs = extract_tool_signatures(records_ref.current);
 
-    const digest_lines: string[] = [];
-    digest_lines.push(`Run ${outcome}.`);
-    digest_lines.push("");
-    digest_lines.push(`**digest:**`);
-    digest_lines.push(`- duration: ${format_duration_short(stats.duration_ms)}`);
-    digest_lines.push(`- llm calls: ${stats.llm_calls}`);
-    digest_lines.push(`- tool calls: ${stats.tool_calls}`);
-    digest_lines.push(
-      stats.usage.total_tokens
-        ? `- tokens: in ${stats.usage.input_tokens} • out ${stats.usage.output_tokens} • total ${stats.usage.total_tokens}`
-        : `- tokens: —`
-    );
-    digest_lines.push(
-      stats.duration_ms > 0 && stats.usage.total_tokens > 0 ? `- speed: ${(stats.usage.total_tokens / (stats.duration_ms / 1000)).toFixed(1)} tok/s` : `- speed: —`
-    );
-    if (tool_sigs.length) {
-      digest_lines.push("");
-      digest_lines.push("**tools used:**");
-      digest_lines.push(...tool_sigs.slice(0, 40).map((s) => `- \`${s}\``));
-      if (tool_sigs.length > 40) digest_lines.push(`- …and ${tool_sigs.length - 40} more`);
-    }
-
     append_message({
       role: "system",
       level: outcome === "failed" ? "error" : outcome === "cancelled" ? "warn" : "info",
-      title: outcome.toUpperCase(),
+      title: "Digest",
       ts: now_iso(),
       run_id,
-      content: digest_lines.join("\n"),
+      content: "",
+      meta: {
+        _kind: "run_digest",
+        digest: {
+          outcome,
+          duration_ms: stats.duration_ms,
+          llm_calls: stats.llm_calls,
+          tool_calls: stats.tool_calls,
+          tokens: stats.usage.total_tokens
+            ? { input: stats.usage.input_tokens, output: stats.usage.output_tokens, total: stats.usage.total_tokens }
+            : null,
+          speed_tok_s: stats.duration_ms > 0 && stats.usage.total_tokens > 0 ? stats.usage.total_tokens / (stats.duration_ms / 1000) : null,
+          tools: tool_sigs.slice(0, 200),
+        },
+      },
     });
     if (load_active_run_id(props.session_id) === run_id) clear_active_run_id(props.session_id);
     clear_run_cursor(run_id);
@@ -2748,6 +2800,26 @@ function ConsolePage(props: {
     }
   }
 
+  async function submit_cancel(): Promise<void> {
+    const rid = String(root_run_ref.current || active_run_id || "").trim();
+    if (!rid) return;
+    set_error("");
+    set_cancelling(true);
+    try {
+      await props.gateway.submit_command({
+        command_id: random_id(),
+        run_id: rid,
+        type: "cancel",
+        payload: {},
+        client_id: props.settings.client_id || "abstractcode_web",
+      });
+    } catch (e: any) {
+      set_error(String(e?.message || e || "cancel failed"));
+    } finally {
+      set_cancelling(false);
+    }
+  }
+
   async function submit_answer(text: string): Promise<void> {
     const t = String(text || "").trim();
     if (!t) return;
@@ -2793,6 +2865,18 @@ function ConsolePage(props: {
   const file_token = useMemo(() => extract_active_token(composer, composer_cursor, "@"), [composer, composer_cursor]);
   const file_query = useMemo(() => String(file_token?.query || "").trim(), [file_token]);
 
+  const format_bytes_short = (n: number | null | undefined): string => {
+    const v = typeof n === "number" && Number.isFinite(n) ? Math.max(0, n) : NaN;
+    if (!Number.isFinite(v)) return "";
+    if (v < 1024) return `${Math.trunc(v)} B`;
+    const kb = v / 1024;
+    if (kb < 1024) return `${Math.max(1, Math.round(kb))} KB`;
+    const mb = kb / 1024;
+    if (mb < 1024) return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
+    const gb = mb / 1024;
+    return `${gb.toFixed(gb < 10 ? 1 : 0)} GB`;
+  };
+
   useEffect(() => {
     set_file_active(0);
   }, [file_query, file_matches.length]);
@@ -2800,6 +2884,7 @@ function ConsolePage(props: {
   useEffect(() => {
     if (!file_token) {
       set_file_matches([]);
+      set_file_match_sizes({});
       set_file_error("");
       set_file_loading(false);
       return;
@@ -2807,6 +2892,7 @@ function ConsolePage(props: {
     const q = file_query;
     if (!q) {
       set_file_matches([]);
+      set_file_match_sizes({});
       set_file_error("");
       set_file_loading(false);
       return;
@@ -2834,14 +2920,22 @@ function ConsolePage(props: {
           });
           if (stopped) return;
           const items = Array.isArray(res?.items) ? res.items : [];
+          const sizes: Record<string, number> = {};
           const paths = items
-            .map((it: any) => String(it?.path || "").trim())
+            .map((it: any) => {
+              const p = String(it?.path || "").trim();
+              const sb = it?.size_bytes;
+              if (p && typeof sb === "number" && Number.isFinite(sb) && sb >= 0) sizes[p] = Math.trunc(sb);
+              return p;
+            })
             .filter(Boolean)
             .slice(0, 12);
           set_file_matches(paths);
+          set_file_match_sizes(sizes);
         } catch (e: any) {
           if (stopped) return;
           set_file_matches([]);
+          set_file_match_sizes({});
           set_file_error(String(e?.message || e || "File search failed"));
         } finally {
           if (!stopped) set_file_loading(false);
@@ -2874,6 +2968,8 @@ function ConsolePage(props: {
           "Commands:",
           "- `/help`",
           "- `/clear`",
+          "- `/files`",
+          "- `/files-keep [on|off]`",
           "- `/sessions`",
           "- `/new`",
           "- `/settings`",
@@ -2883,6 +2979,86 @@ function ConsolePage(props: {
           "- `/max-iterations [n]`",
         ].join("\n")
       );
+      return true;
+    }
+
+    if (cmd === "files") {
+      const included = attached_files.filter((f) => !f.loading && !String(f.error || "").trim() && f.attachment);
+      const excluded = attached_files.filter((f) => f.loading || String(f.error || "").trim() || !f.attachment);
+
+      const lines: string[] = [];
+      lines.push(`files_keep: ${props.settings.files_keep ? "on" : "off"}`);
+      lines.push(`next_run: ${included.length}/${attached_files.length} ok`);
+      if (attached_files.length) {
+        lines.push("");
+        for (const f of attached_files.slice(0, 50)) {
+          const p = String(f.path || "").trim();
+          const st = f.loading ? "loading" : String(f.error || "").trim() ? "error" : f.attachment ? "ok" : "none";
+          const extra = st === "error" ? ` — ${String(f.error || "").trim()}` : "";
+          lines.push(`- @${p}: ${st}${extra}`);
+        }
+      } else {
+        lines.push("next_run: (none)");
+      }
+      if (excluded.length) {
+        lines.push("");
+        lines.push("Only ok files are included in next_run automatically.");
+      }
+
+      try {
+        const run_id = await session_memory_owner_run_id(props.session_id);
+        const res = await props.gateway.list_run_artifacts(run_id, { limit: 200 });
+        const items = Array.isArray(res?.items) ? res.items : [];
+        const attachments = items
+          .filter((it: any) => it && typeof it === "object" && (it as any).tags && typeof (it as any).tags === "object")
+          .filter((it: any) => String((it as any).tags?.kind || "").trim() === "attachment");
+        lines.push("");
+        lines.push(`session: ${attachments.length} attachment(s)`);
+        if (!attachments.length) {
+          lines.push("session: (none)");
+        } else {
+          for (const it of attachments.slice(0, 30)) {
+            const tags: any = (it as any).tags || {};
+            const handle = String(tags.path || tags.source_path || tags.filename || "").trim();
+            const aid = String((it as any).artifact_id || "").trim();
+            const sha = String(tags.sha256 || "").trim();
+            const sha_disp = sha ? `${sha.slice(0, 8)}…` : "";
+            const size = typeof (it as any).size_bytes === "number" ? format_bytes_short((it as any).size_bytes) : "";
+            const meta_bits = [`id=${aid}`].concat(sha_disp ? [`sha=${sha_disp}`] : []).concat(size ? [size] : []).filter(Boolean);
+            lines.push(`- @${handle || aid}${meta_bits.length ? ` (${meta_bits.join(", ")})` : ""}`);
+          }
+          if (attachments.length > 30) lines.push(`- …and ${attachments.length - 30} more`);
+        }
+      } catch (e: any) {
+        lines.push("");
+        lines.push(`session: (failed to load) ${String(e?.message || e || "")}`.trim());
+      }
+
+      if (!attached_files.length && !props.settings.files_keep) {
+        lines.push("");
+        lines.push("Tip: use /files-keep on to pin files across turns (next_run).");
+      }
+      lines.push("");
+      lines.push("Open stored attachments via: open_attachment(handle='@…', start_line=..., end_line=...)");
+
+      say(lines.join("\n"));
+      return true;
+    }
+
+    if (cmd === "files-keep" || cmd === "files_keep" || cmd === "keep-files" || cmd === "keep_files") {
+      if (!args.length) {
+        say(`files_keep: ${props.settings.files_keep ? "on" : "off"}`);
+        return true;
+      }
+      const raw = String(args[0] || "").trim().toLowerCase();
+      const on = raw === "on" || raw === "true" || raw === "1" || raw === "yes";
+      const off = raw === "off" || raw === "false" || raw === "0" || raw === "no";
+      if (!on && !off) {
+        say("Usage: /files-keep on|off");
+        return true;
+      }
+      props.on_settings({ ...props.settings, files_keep: on });
+      say(`files_keep set: ${on ? "on" : "off"}`);
       return true;
     }
 
@@ -3027,6 +3203,45 @@ function ConsolePage(props: {
     }
   }
 
+  async function attach_upload(file: File): Promise<void> {
+    if (!file) return;
+    const sid = String(props.session_id || "").trim();
+    if (!sid) {
+      set_error("session_id is required");
+      return;
+    }
+    const name = String((file as any)?.name || "").trim() || "upload.bin";
+
+    set_attached_files((prev) => {
+      const idx = prev.findIndex((f) => f.path === name);
+      if (idx >= 0) {
+        const next = prev.slice();
+        next[idx] = { ...next[idx], loading: true, error: undefined };
+        return next;
+      }
+      return [...prev, { path: name, attachment: null, loading: true }].slice(-12);
+    });
+
+    try {
+      const attachment = await props.gateway.attachments_upload(sid, file, {
+        filename: name,
+        content_type: String((file as any)?.type || "").trim() || undefined,
+      });
+      set_attached_files((prev) => prev.map((f) => (f.path === name ? { ...f, loading: false, attachment, error: undefined } : f)));
+    } catch (e: any) {
+      const msg = String(e?.message || e || "Upload failed");
+      set_attached_files((prev) => prev.map((f) => (f.path === name ? { ...f, loading: false, error: msg } : f)));
+    }
+  }
+
+  async function attach_uploads(files: File[]): Promise<void> {
+    const list = Array.isArray(files) ? files : [];
+    if (!list.length) return;
+    for (const f of list.slice(0, 8)) {
+      await attach_upload(f);
+    }
+  }
+
   function remove_attached_file(path: string): void {
     const p = String(path || "").trim();
     if (!p) return;
@@ -3075,6 +3290,18 @@ function ConsolePage(props: {
               </span>
               {context_meter.max_tokens ? <span className="pct">{context_meter.pct.toFixed(0)}%</span> : null}
             </div>
+            {active_run_id ? (
+              <button
+                className="btn mini danger"
+                onClick={() => void submit_cancel()}
+                title="Stop / cancel the current run"
+                type="button"
+                disabled={resuming || cancelling}
+              >
+                <Icon name="x" size={14} />
+                {cancelling ? "Stopping…" : "Stop"}
+              </button>
+            ) : null}
             <button
               className="btn mini"
               onClick={() => set_details_open((v) => !v)}
@@ -3147,19 +3374,20 @@ function ConsolePage(props: {
               set_chat_at_bottom(at_bottom);
             }}
           >
-            <div className="repl_chat_content" ref={chat_content_ref}>
-              {!props.repl.messages.length ? <div className="muted">Start typing to begin.</div> : null}
-              {props.repl.messages.map((m, idx) => (
-                <ChatMessageCard
-                  key={`${m.ts}:${idx}`}
-                  m={m}
-                  gateway={props.gateway}
-                  session_id={props.session_id}
-                  tool_specs_by_name={tool_specs_by_name}
-                />
-              ))}
-            </div>
-          </div>
+        <div className="repl_chat_content" ref={chat_content_ref}>
+          {!props.repl.messages.length ? <div className="muted">Start typing to begin.</div> : null}
+          {props.repl.messages.map((m, idx) => (
+            <ChatMessageCard
+              key={`${m.ts}:${idx}`}
+              m={m}
+              gateway={props.gateway}
+              session_id={props.session_id}
+              tool_specs_by_name={tool_specs_by_name}
+            />
+          ))}
+          <div ref={chat_end_ref} />
+        </div>
+      </div>
           {!chat_at_bottom && props.repl.messages.length ? (
             <button
               className="btn scroll_to_bottom"
@@ -3181,7 +3409,7 @@ function ConsolePage(props: {
         </div>
 
         {active_run_id ? (
-          <div className="repl_wait">
+          <div className={wait_is_compact ? "repl_wait compact" : "repl_wait"}>
             {wait_state ? (
               <>
                 {tool_calls_for_wait.length ? (
@@ -3222,43 +3450,32 @@ function ConsolePage(props: {
                   </>
                 ) : can_user_answer_wait ? (
                   <AskForm wait={wait_state} disabled={resuming} on_submit={(val) => submit_answer(val)} />
+                ) : wait_reason === "subworkflow" ? (
+                  <div className="thinking_line shimmer" aria-live="polite" title={wait_key ? `wait_key: ${wait_key}` : undefined}>
+                    <span className="run_spinner" aria-label="working" />
+                    <span className="thinking_label">Thinking…</span>
+                    {iteration_badge ? <span className="thinking_iters mono">{iteration_badge}</span> : null}
+                    <span className="thinking_spacer" />
+                    <span className="muted mono thinking_detail">{subworkflow_label || template_label || "agent"}</span>
+                  </div>
                 ) : (
                   <div className="wait_line shimmer" aria-live="polite" title={wait_key ? `wait_key: ${wait_key}` : undefined}>
                     <span className="mono">Waiting</span>
                     <span className="muted">
                       for{" "}
-                      {wait_reason === "subworkflow"
-                        ? `subworkflow ${subworkflow_label || "subflow"} to complete`
-                        : `${wait_reason || "unknown"}${wait_event_name ? `:${wait_event_name}` : ""}`}
+                      {`${wait_reason || "unknown"}${wait_event_name ? `:${wait_event_name}` : ""}`}
                       …
                     </span>
-                    {wait_reason === "subworkflow" ? (
-                      <button
-                        className="btn mini"
-                        type="button"
-                        onClick={() => {
-                          const sub =
-                            String((wait_state as any)?.details?.sub_run_id || "").trim() ||
-                            (wait_key.startsWith("subworkflow:") ? wait_key.split(":", 2)[1] : "");
-                          if (sub) set_active_run_id(sub);
-                        }}
-                        title="Open the child/subworkflow run"
-                      >
-                        Open
-                      </button>
-                    ) : null}
                   </div>
                 )}
               </>
             ) : is_working ? (
-              <div className="run_working" aria-live="polite">
+              <div className="thinking_line" aria-live="polite">
                 <span className="run_spinner" aria-label="working" />
-                <div style={{ minWidth: 0 }}>
-                  <div className="run_working_title">Working…</div>
-                  <div className="muted mono" style={{ marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {status_text}
-                  </div>
-                </div>
+                <span className="thinking_label">Thinking…</span>
+                {iteration_badge ? <span className="thinking_iters mono">{iteration_badge}</span> : null}
+                <span className="thinking_spacer" />
+                <span className="muted mono thinking_detail">{status_text}</span>
               </div>
             ) : null}
           </div>
@@ -3327,7 +3544,7 @@ function ConsolePage(props: {
                 onClick={() => void attach_file(p, file_token)}
               >
                 <span className="mono">@{p}</span>
-                <span className="muted">attach</span>
+                <span className="muted">{format_bytes_short(file_match_sizes[p]) || "attach"}</span>
               </button>
             ))}
           </div>
@@ -3352,7 +3569,37 @@ function ConsolePage(props: {
         ) : null}
 
         <div className="repl_composer">
-          <div className="repl_input">
+          <div
+            className={drop_active ? "repl_input drop_active" : "repl_input"}
+            onDragEnter={(e) => {
+              try {
+                if (!e.dataTransfer?.types?.includes?.("Files")) return;
+              } catch {
+                // ignore
+              }
+              e.preventDefault();
+              set_drop_active(true);
+            }}
+            onDragOver={(e) => {
+              try {
+                if (!e.dataTransfer?.types?.includes?.("Files")) return;
+                e.dataTransfer.dropEffect = "copy";
+              } catch {
+                // ignore
+              }
+              e.preventDefault();
+              set_drop_active(true);
+            }}
+            onDragLeave={() => set_drop_active(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              set_drop_active(false);
+              const files = Array.from(e.dataTransfer?.files || []);
+              if (!files.length) return;
+              void attach_uploads(files);
+            }}
+          >
             <textarea
               className="mono"
               ref={input_ref}
@@ -3445,15 +3692,15 @@ function ConsolePage(props: {
               </span>
               <span className="composer_dot">•</span>
               <span>
-                <kbd>Shift</kbd> <kbd>Enter</kbd> newline
+                <kbd>Shift</kbd> <kbd>Enter</kbd> nl
               </span>
               <span className="composer_dot">•</span>
               <span>
-                <kbd>/</kbd> commands
+                <kbd>/</kbd> cmd
               </span>
               <span className="composer_dot">•</span>
               <span>
-                <kbd>@</kbd> attach
+                <kbd>@</kbd> files
               </span>
             </div>
           </div>
@@ -3570,7 +3817,7 @@ function ChatMessageCard(props: {
         : "user";
   const [copy_state, set_copy_state] = useState<"idle" | "copied" | "failed">("idle");
 
-  const is_digest = m.role === "system" && String(m.title || "").trim() === "Digest";
+  const is_digest = m.role === "system" && String(m.title || "").trim() === "Digest" && (m.level || "info") === "info";
   const run_id = String(m.run_id || "").trim();
   const [ctx_open, set_ctx_open] = useState(false);
   const [attachment_open, set_attachment_open] = useState<AttachmentRef | null>(null);
@@ -3583,8 +3830,76 @@ function ChatMessageCard(props: {
   
   if (kind === "tool") {
     return (
-      <div className={`chat_item ${cls}`}>
+      <div className="chat_item tool_item">
         <ToolBlockCard meta={meta_obj?.tool} ts={m.ts} tool_specs_by_name={props.tool_specs_by_name} />
+      </div>
+    );
+  }
+
+  if (kind === "run_digest") {
+    const d: any = meta_obj?.digest && typeof meta_obj.digest === "object" ? meta_obj.digest : {};
+    const outcome = String(d?.outcome || "").trim() || String(m.level || "").trim() || "completed";
+    const title = outcome === "failed" ? "Run failed" : outcome === "cancelled" ? "Run cancelled" : "Run completed";
+    const duration_ms = Number.isFinite(Number(d?.duration_ms)) ? Number(d.duration_ms) : 0;
+    const llm_calls2 = Number.isFinite(Number(d?.llm_calls)) ? Number(d.llm_calls) : 0;
+    const tool_calls2 = Number.isFinite(Number(d?.tool_calls)) ? Number(d.tool_calls) : 0;
+    const tokens = d?.tokens && typeof d.tokens === "object" ? d.tokens : null;
+    const speed_tok_s = Number.isFinite(Number(d?.speed_tok_s)) ? Number(d.speed_tok_s) : null;
+    const tools = Array.isArray(d?.tools) ? (d.tools as any[]).map((x) => String(x || "").trim()).filter(Boolean) : [];
+
+    return (
+      <div className={`chat_item ${cls}`}>
+        <div className="chat_header">
+          <div className="chat_avatar" aria-hidden="true">
+            <Icon name={outcome === "failed" ? "error" : outcome === "cancelled" ? "warning" : "info"} size={14} />
+          </div>
+          <span className="chat_role">{title}</span>
+          <span className="chat_header_spacer" />
+          <span className="chat_time">{new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+        </div>
+        <div className="run_digest_card">
+          <div className="run_digest_grid">
+            <div className="run_digest_item">
+              <span className="muted">duration</span>
+              <span className="mono">{format_duration_short(duration_ms)}</span>
+            </div>
+            <div className="run_digest_item">
+              <span className="muted">llm</span>
+              <span className="mono">{llm_calls2}</span>
+            </div>
+            <div className="run_digest_item">
+              <span className="muted">tools</span>
+              <span className="mono">{tool_calls2}</span>
+            </div>
+            <div className="run_digest_item">
+              <span className="muted">tokens</span>
+              <span className="mono">
+                {tokens && typeof tokens?.total === "number" ? `${tokens.total}` : "—"}
+              </span>
+            </div>
+            <div className="run_digest_item">
+              <span className="muted">speed</span>
+              <span className="mono">{speed_tok_s != null ? `${speed_tok_s.toFixed(1)} tok/s` : "—"}</span>
+            </div>
+          </div>
+
+          {tools.length ? (
+            <details className="run_digest_tools">
+              <summary className="run_digest_tools_summary">
+                <span className="mono">tools used</span>
+                <span className="muted">({tools.length})</span>
+              </summary>
+              <div className="run_digest_tools_list">
+                {tools.slice(0, 120).map((t, i) => (
+                  <div key={`${t}:${i}`} className="mono run_digest_tool">
+                    {t}
+                  </div>
+                ))}
+                {tools.length > 120 ? <div className="muted">…and {tools.length - 120} more</div> : null}
+              </div>
+            </details>
+          ) : null}
+        </div>
       </div>
     );
   }
@@ -3946,8 +4261,9 @@ function ContextInspectorModal(props: {
               ) : null}
             </div>
           </div>
-          <button className="btn mini" type="button" onClick={() => props.on_close()} aria-label="Close context inspector">
+          <button className="btn mini modal_close_btn" type="button" onClick={() => props.on_close()} aria-label="Close context inspector">
             <Icon name="x" size={14} />
+            <span className="modal_close_label">Close</span>
           </button>
         </div>
 
@@ -4038,8 +4354,9 @@ function AttachmentPreviewModal(props: {
               {sha256 ? ` • sha=${sha256.slice(0, 8)}…` : ""}
             </div>
           </div>
-          <button className="btn mini" type="button" onClick={() => props.on_close()} aria-label="Close attachment preview">
+          <button className="btn mini modal_close_btn" type="button" onClick={() => props.on_close()} aria-label="Close attachment preview">
             <Icon name="x" size={14} />
+            <span className="modal_close_label">Close</span>
           </button>
         </div>
         <div className="modal_body">
@@ -4085,20 +4402,21 @@ function ToolBlockCard(props: { meta: any; ts?: string; tool_specs_by_name?: Rec
   const [copy_state, set_copy_state] = useState<"idle" | "copied" | "failed">("idle");
 
   const status = pending ? "pending" : error ? "error" : success === false ? "failed" : success === true ? "ok" : "done";
-  const badge_cls =
+  const status_cls =
     status === "pending"
-      ? "tool_badge pending"
+      ? "tool_pending"
       : status === "error" || status === "failed"
-        ? "tool_badge error"
-        : "tool_badge ok";
+        ? "tool_error"
+        : status === "ok"
+          ? "tool_ok"
+          : "tool_done";
   const output_trim = output_preview.trim();
   const output_is_json = output_trim.startsWith("{") || output_trim.startsWith("[");
 
   return (
-    <details className="tool_block">
+    <details className={`tool_block ${status_cls}`}>
       <summary className="tool_summary">
         <div className="tool_left">
-          <span className={badge_cls}>{status}</span>
           <span className="mono tool_sig">{sig}</span>
         </div>
         <div className="tool_right">
@@ -4130,11 +4448,7 @@ function ToolBlockCard(props: { meta: any; ts?: string; tool_specs_by_name?: Rec
       </summary>
 
       <div className="tool_body">
-        {error ? (
-          <Notice variant="error" className="inline">
-            Error: {error}
-          </Notice>
-        ) : null}
+        {error ? <div className="tool_error_text">Error: {error}</div> : null}
         {pending ? <div className="muted">Awaiting approval / execution.</div> : null}
         {call_id ? <div className="muted mono tool_call_id">call_id: {call_id}</div> : null}
         <div className="field">

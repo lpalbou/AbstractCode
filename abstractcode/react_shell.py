@@ -206,6 +206,13 @@ class ReactShell:
         self._theme: Theme = theme_from_env().normalized()
         # Optional user-defined system prompt override (applies to new runs; can be set via /system).
         self._system_prompt_override: Optional[str] = None
+        # ReAct runtime heuristics (configurable).
+        # - check_plan: retry if output looks like "planning" without tool calls (default OFF).
+        self._check_plan: bool = False
+        # Attachment persistence:
+        # - when OFF (default), `@file` chips are consumed for the next user message only.
+        # - when ON, attachment chips persist across turns until removed.
+        self._files_keep: bool = False
         # Host/Gateway GPU meter (optional).
         self._gpu_monitor_enabled: bool = self._gpu_monitor_enabled_from_env()
         self._gpu_utilization_pct: Optional[float] = None
@@ -443,6 +450,13 @@ class ReactShell:
             color=self._color,
             theme=self._theme,
         )
+        # Keep `@file` chips behavior consistent with the saved preference.
+        try:
+            setter = getattr(self._ui, "set_files_keep", None)
+            if callable(setter):
+                setter(bool(getattr(self, "_files_keep", False)))
+        except Exception:
+            pass
         # Populate the footer agent selector (best-effort).
         self._sync_agent_selector_to_ui()
         # Keep `@file` completion consistent with the shell's workspace policy.
@@ -1642,8 +1656,12 @@ class ReactShell:
             "max-messages",
             "max_messages",
             "memory",
+            "files",
+            "files-keep",
+            "files_keep",
             "plan",
             "review",
+            "config",
             "compact",
             "spans",
             "expand",
@@ -1686,20 +1704,24 @@ class ReactShell:
         from .file_mentions import extract_at_file_mentions
 
         cleaned_cmd, mentions = extract_at_file_mentions(cmd)
+        cleaned_cmd_text = str(cleaned_cmd or "").strip()
         paths: List[str] = []
         for p in attachment_paths:
-            norm = normalize_relative_path(p)
+            norm = self._normalize_workspace_attachment_token(p)
             if norm:
                 paths.append(norm)
         mention_paths: List[str] = []
         for m in mentions:
-            norm = normalize_relative_path(m)
+            norm = self._normalize_workspace_attachment_token(m)
             if norm:
                 paths.append(norm)
                 mention_paths.append(norm)
 
-        # Persist manual `@file` mentions into the attachment chips bar.
-        if mention_paths:
+        # Persist manual `@file` mentions into the attachment chips bar when:
+        # - files_keep is enabled (attachments persist across turns), OR
+        # - this is an attachment-only message (used to stage chips for the next prompt).
+        persist_mentions = bool(mention_paths) and (bool(getattr(self, "_files_keep", False)) or not cleaned_cmd_text)
+        if persist_mentions:
             try:
                 adder = getattr(self._ui, "add_attachments", None)
                 if callable(adder):
@@ -1777,7 +1799,7 @@ class ReactShell:
                 attachment_refs.append(dict(ref))
 
         # Attachment-only message: update the session attachments and don't start a run.
-        if not cleaned_cmd and attachment_refs:
+        if not cleaned_cmd_text and attachment_refs:
             joined = ", ".join(
                 [str(a.get("source_path") or a.get("filename") or "?") for a in attachment_refs if isinstance(a, dict)]
             )
@@ -1785,22 +1807,48 @@ class ReactShell:
                 self._print(_style(f"Attachments: {joined}", _C.DIM, enabled=self._color))
             return
 
-        cleaned_cmd = str(cleaned_cmd or "").strip()
-        if not cleaned_cmd:
+        if not cleaned_cmd_text:
             return
 
         # Echo cleaned user prompt (without `@file` mentions).
         copy_id = f"user_{uuid.uuid4().hex}"
-        self._ui.register_copy_payload(copy_id, cleaned_cmd)
+        self._ui.register_copy_payload(copy_id, cleaned_cmd_text)
         ts_text = self._format_timestamp_short(_now_iso())
         footer = _style(ts_text, _C.DIM, enabled=self._color) if ts_text else ""
-        self._print(self._format_user_prompt_block(cleaned_cmd, copy_id=copy_id, footer=footer))
+        self._print(self._format_user_prompt_block(cleaned_cmd_text, copy_id=copy_id, footer=footer))
 
         if newly_added:
             joined = ", ".join(newly_added)
             self._print(_style(f"Attachments: {joined}", _C.DIM, enabled=self._color))
 
-        self._start(cleaned_cmd, attachments=attachment_refs or None)
+        self._start(cleaned_cmd_text, attachments=attachment_refs or None)
+
+    def _normalize_workspace_attachment_token(self, raw_path: str) -> str:
+        """Normalize an `@file` token into a stable virtual path.
+
+        Accepts:
+        - Workspace-relative paths (`docs/readme.md`)
+        - Mount-relative paths (`Desktop/toto.png`)
+        - Absolute paths *under* the workspace root or a configured mount root
+          (`/Users/.../Desktop/toto.png`), which are converted to a mount-relative
+          virtual path when possible.
+        """
+        tok = str(raw_path or "").strip()
+        if not tok:
+            return ""
+        tok = tok.replace("\\", "/")
+        while tok.startswith("./"):
+            tok = tok[2:]
+        try:
+            _p, virt, _mount, _root = resolve_workspace_path(
+                raw_path=tok,
+                workspace_root=self._workspace_root,
+                mounts=dict(self._workspace_mounts or {}),
+            )
+        except Exception:
+            return ""
+        # `virt` is already normalized to a stable "virtual path" grammar; keep it safe.
+        return normalize_relative_path(str(virt or ""))
 
     def _resolve_workspace_file(self, rel_path: str) -> Optional[tuple[Path, str]]:
         rel = normalize_relative_path(rel_path)
@@ -2077,23 +2125,41 @@ class ReactShell:
             # Show the agent's actual "thinking" (rationale) when it is about to act.
             # We only print this for tool-using iterations to avoid duplicating final answers.
             has_tool_calls = bool(data.get("has_tool_calls"))
-            content = str(data.get("content", "") or "")
-            if has_tool_calls and content.strip():
+            if has_tool_calls:
                 import uuid
 
-                text = content.strip()
-                self._turn_trace.append("Thought:\n" + text)
+                it = data.get("iteration", "?")
+                max_it = data.get("max_iterations", "?")
+                content = str(data.get("content", "") or "")
+                reasoning = str(data.get("reasoning", "") or "")
+                text = content.strip() or reasoning.strip()
+
                 fid = f"thought_{uuid.uuid4().hex}"
-                header = _style("Thought", _C.ORANGE, _C.BOLD, enabled=self._color)
-                lines = text.splitlines() or [""]
-                first_line = lines[0].strip()
-                if len(first_line) > 200:
-                    first_line = first_line[:199] + "…"
-                visible = ["", f"[[FOLD:{fid}]]{header}", _style(f"  {first_line}", _C.ORANGE, enabled=self._color)]
-                # Hidden part shows the remaining thought (avoid duplicating the first line).
-                rest = lines[1:] if len(lines) > 1 else []
-                hidden = [_style(f"  {line}" if line else "  ", _C.ORANGE, enabled=self._color) for line in (rest or [""])]
-                hidden.append("")
+                header = _style(f"Cycle {it}/{max_it}", _C.ORANGE, _C.BOLD, enabled=self._color)
+
+                if text:
+                    self._turn_trace.append(f"Cycle {it}/{max_it} thought:\n{text}".rstrip())
+                    lines = text.splitlines() or [""]
+                    first_line = lines[0].strip()
+                    if len(first_line) > 200:
+                        first_line = first_line[:199] + "…"
+                    visible = ["", f"[[FOLD:{fid}]]{header}", _style(f"  {first_line}", _C.ORANGE, enabled=self._color)]
+                    # Hidden part shows the remaining rationale (avoid duplicating the first line).
+                    rest = lines[1:] if len(lines) > 1 else []
+                    hidden = [
+                        _style(f"  {line}" if line else "  ", _C.ORANGE, enabled=self._color)
+                        for line in (rest or [""])
+                    ]
+                    hidden.append("")
+                else:
+                    self._turn_trace.append(f"Cycle {it}/{max_it} thought: (none)")
+                    visible = [
+                        "",
+                        f"[[FOLD:{fid}]]{header}",
+                        _style("  (model returned tool calls without rationale text)", _C.DIM, enabled=self._color),
+                    ]
+                    hidden = [_style("  (no rationale provided)", _C.DIM, enabled=self._color), ""]
+
                 self._ui_append_fold_region(fold_id=fid, visible_lines=visible, hidden_lines=hidden, collapsed=True)
         elif step == "act":
             import uuid
@@ -2425,6 +2491,9 @@ class ReactShell:
         if command == "review":
             self._handle_review(arg)
             return False
+        if command == "config":
+            self._handle_config(arg)
+            return False
         if command == "resume":
             self._resume()
             return False
@@ -2508,6 +2577,12 @@ class ReactShell:
             return False
         if command == "theme":
             self._handle_theme(arg)
+            return False
+        if command == "files":
+            self._handle_files(arg)
+            return False
+        if command in ("files-keep", "files_keep"):
+            self._handle_files_keep(arg)
             return False
         if command == "system":
             self._handle_system(arg)
@@ -3773,6 +3848,122 @@ class ReactShell:
         self._print(_style(f"Review mode set to {status} (max_rounds={self._review_max_rounds}).", _C.DIM, enabled=self._color))
         self._save_config()
 
+    def _handle_config(self, raw: str) -> None:
+        """Configure durable runtime options.
+
+        Usage:
+          /config
+          /config check-plan
+          /config check-plan on|off
+        """
+        text = str(raw or "").strip()
+        if not text:
+            status = "on" if bool(getattr(self, "_check_plan", False)) else "off"
+            self._print(_style("\nConfig", _C.CYAN, _C.BOLD, enabled=self._color))
+            self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+            self._print(f"- check-plan: {status}")
+            self._print(_style("Usage: /config check-plan on|off", _C.DIM, enabled=self._color))
+            return
+
+        parts = text.split()
+        key = str(parts[0] or "").strip().lower()
+        if key in ("check-plan", "check_plan", "checkplan"):
+            if len(parts) < 2:
+                status = "on" if bool(getattr(self, "_check_plan", False)) else "off"
+                self._print(_style(f"check-plan: {status}", _C.DIM, enabled=self._color))
+                return
+
+            value = str(parts[1] or "").strip().lower()
+            if value in ("toggle",):
+                enabled = not bool(getattr(self, "_check_plan", False))
+            elif value in ("on", "true", "1", "yes", "y", "enabled"):
+                enabled = True
+            elif value in ("off", "false", "0", "no", "n", "disabled"):
+                enabled = False
+            else:
+                self._print(_style("Usage: /config check-plan on|off", _C.DIM, enabled=self._color))
+                return
+
+            self._check_plan = bool(enabled)
+            self._save_config()
+
+            rid = self._attached_run_id()
+            if rid is not None:
+                self._sync_tool_prompt_settings_to_run(rid)
+
+            # Invalidate footer cache (small but keeps status reactive).
+            self._status_cache_key = None
+            self._status_cache_text = ""
+
+            status = "on" if self._check_plan else "off"
+            self._print(_style(f"Config set: check-plan={status}", _C.DIM, enabled=self._color))
+            return
+
+        self._print(_style(f"Unknown config key: {key}", _C.YELLOW, enabled=self._color))
+        self._print(_style("Usage: /config check-plan on|off", _C.DIM, enabled=self._color))
+
+    def _handle_files(self, raw: str) -> None:
+        """List pending `@file` attachment chips (files that will be sent with the next prompt)."""
+        if str(raw or "").strip():
+            self._print(_style("Usage: /files", _C.DIM, enabled=self._color))
+            return
+
+        attachments: List[str] = []
+        try:
+            getter = getattr(self._ui, "get_composer_state", None)
+            if callable(getter):
+                state = getter()
+                if isinstance(state, dict) and isinstance(state.get("attachments"), list):
+                    attachments = [str(x) for x in state["attachments"] if isinstance(x, str) and x.strip()]
+        except Exception:
+            attachments = []
+
+        keep_status = "on" if bool(getattr(self, "_files_keep", False)) else "off"
+        self._print(_style("\nFiles", _C.CYAN, _C.BOLD, enabled=self._color))
+        self._print(_style("─" * 60, _C.DIM, enabled=self._color))
+        self._print(_style(f"files-keep: {keep_status}", _C.DIM, enabled=self._color))
+        if not attachments:
+            self._print(_style("(no pending files)", _C.DIM, enabled=self._color))
+            return
+        for rel in attachments:
+            self._print(f"- {rel}")
+        self._print(_style("Tip: click a chip ‘×’ (or Backspace) to remove.", _C.DIM, enabled=self._color))
+
+    def _handle_files_keep(self, raw: str) -> None:
+        """Toggle whether `@file` chips persist across turns."""
+        value = str(raw or "").strip().lower()
+        if not value:
+            status = "ON" if bool(getattr(self, "_files_keep", False)) else "OFF"
+            self._print(_style(f"Files keep: {status}", _C.DIM, enabled=self._color))
+            return
+
+        if value in ("toggle",):
+            enabled = not bool(getattr(self, "_files_keep", False))
+        elif value in ("on", "true", "1", "yes", "y", "enabled"):
+            enabled = True
+        elif value in ("off", "false", "0", "no", "n", "disabled"):
+            enabled = False
+        else:
+            self._print(_style("Usage: /files-keep [on|off]", _C.DIM, enabled=self._color))
+            return
+
+        self._files_keep = bool(enabled)
+        self._save_config()
+
+        try:
+            setter = getattr(self._ui, "set_files_keep", None)
+            if callable(setter):
+                setter(bool(self._files_keep))
+        except Exception:
+            pass
+
+        # Invalidate footer cache (token estimate includes attachments).
+        self._status_cache_key = None
+        self._status_cache_text = ""
+
+        status = "ON" if self._files_keep else "OFF"
+        self._print(_style(f"Files keep set to {status}.", _C.DIM, enabled=self._color))
+
     def _handle_max_tokens(self, raw: str) -> None:
         """Show or set max tokens for context."""
         value = raw.strip()
@@ -3870,6 +4061,16 @@ class ReactShell:
                 self._auto_approve = config["auto_approve"]
             if "plan_mode" in config:
                 self._plan_mode = bool(config["plan_mode"])
+            if "check_plan" in config or "check-plan" in config:
+                raw = config.get("check_plan")
+                if raw is None:
+                    raw = config.get("check-plan")
+                self._check_plan = bool(raw)
+            if "files_keep" in config or "files-keep" in config:
+                raw = config.get("files_keep")
+                if raw is None:
+                    raw = config.get("files-keep")
+                self._files_keep = bool(raw)
             if "review_mode" in config:
                 self._review_mode = bool(config["review_mode"])
             if "review_max_rounds" in config:
@@ -4037,6 +4238,8 @@ class ReactShell:
                     "max_history_messages": getattr(self, "_max_history_messages", -1),
                     "auto_approve": self._auto_approve,
                     "plan_mode": self._plan_mode,
+                    "check_plan": bool(getattr(self, "_check_plan", False)),
+                    "files_keep": bool(getattr(self, "_files_keep", False)),
                     "review_mode": self._review_mode,
                     "review_max_rounds": self._review_max_rounds,
                     "allowed_tools": self._allowed_tools,
@@ -7049,6 +7252,8 @@ class ReactShell:
             "  /review ...         Toggle Review mode (self-check) [saved]\n"
             "                     - /review [on|off] [max_rounds]\n"
             "                     - /review rounds <N>\n"
+            "  /config ...         Configure runtime options [saved]\n"
+            "                     - /config check-plan [on|off]\n"
             "  /max-tokens [N]     Show or set max tokens (-1 = auto) [saved]\n"
             "  /max-messages [N]   Show or set max history messages (-1 = unlimited) [saved]\n"
             "  /memory             Show MemAct Active Memory (MemAct only)\n"
@@ -7071,6 +7276,8 @@ class ReactShell:
             "  /mouse              Toggle mouse mode (wheel scroll vs terminal selection)\n"
             "  /agent [name]       Switch agent (/agent list, /agent reload)\n"
             "  /theme [name]       Switch UI theme (/theme list, /theme custom ...)\n"
+            "  /files              List pending @file attachments\n"
+            "  /files-keep [on|off] Keep @file attachments across turns [saved]\n"
             "  /system [text]      Show or set system prompt override [saved]\n"
             "  /gpu [on|off]       Toggle host GPU meter (via AbstractGateway)\n"
             "  /links              List links captured from last answer\n"
@@ -7628,6 +7835,7 @@ class ReactShell:
             runtime_ns = {}
             state.vars["_runtime"] = runtime_ns
         runtime_ns["tool_prompt_examples"] = bool(self._tool_prompt_examples)
+        runtime_ns["check_plan"] = bool(getattr(self, "_check_plan", False))
         # Apply session system prompt override to new runs (don't clobber an existing run override).
         sys_override = getattr(self, "_system_prompt_override", None)
         if (
