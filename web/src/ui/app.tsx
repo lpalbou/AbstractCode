@@ -13,6 +13,11 @@ import { ToolPicker } from "./tool_picker";
 import { Icon, type IconName } from "./icons";
 import { copy_text } from "../lib/clipboard";
 import { build_run_input_data } from "../lib/run_input";
+import {
+  extract_context_attachments_from_run_input,
+  extract_user_prompt_from_run_input,
+  seed_repl_messages_for_history_open,
+} from "../lib/replay_seed";
 import { session_memory_owner_run_id } from "../lib/session_memory";
 import {
   clear_active_run_id,
@@ -438,70 +443,6 @@ function extract_flow_end_output(rec: StepRecord | null | undefined): { response
     }
   }
   return null;
-}
-
-function extract_user_prompt_from_run_input(raw: any): string | null {
-  if (!raw || typeof raw !== "object") return null;
-  const v: any = raw;
-  const input = v?.input_data && typeof v.input_data === "object" ? v.input_data : v;
-
-  const candidates = [
-    input?.prompt,
-    input?.message,
-    input?.task,
-    input?.context?.task,
-    input?.context?.message,
-  ];
-  for (const c of candidates) {
-    if (typeof c === "string" && c.trim()) return c.trim();
-  }
-
-  const msgs = input?.context?.messages;
-  if (Array.isArray(msgs)) {
-    for (const m of msgs) {
-      if (!m || typeof m !== "object") continue;
-      const role = String((m as any).role || "").trim();
-      const content = (m as any).content;
-      if (role === "user" && typeof content === "string" && content.trim()) return content.trim();
-    }
-  }
-  return null;
-}
-
-function extract_context_messages_from_run_input(raw: any): { role: string; content: string; ts: string }[] {
-  if (!raw || typeof raw !== "object") return [];
-  const v: any = raw;
-  const input = v?.input_data && typeof v.input_data === "object" ? v.input_data : v;
-  const ctx = input?.context;
-  const msgs = ctx && typeof ctx === "object" ? (ctx as any).messages : null;
-  if (!Array.isArray(msgs)) return [];
-
-  const out: { role: string; content: string; ts: string }[] = [];
-  for (const m of msgs) {
-    if (!m || typeof m !== "object") continue;
-    const role = String((m as any).role || "").trim();
-    if (!role) continue;
-    const content = String((m as any).content || "").trim();
-    if (!content) continue;
-    const ts = String((m as any).timestamp || (m as any).ts || "").trim() || now_iso();
-    out.push({ role, content, ts });
-  }
-  return out;
-}
-
-function extract_context_attachments_from_run_input(raw: any): AttachmentRef[] {
-  if (!raw || typeof raw !== "object") return [];
-  const v: any = raw;
-  const input = v?.input_data && typeof v.input_data === "object" ? v.input_data : v;
-  const ctx = input?.context;
-  const atts = ctx && typeof ctx === "object" ? (ctx as any).attachments : null;
-  if (!Array.isArray(atts)) return [];
-  const out: AttachmentRef[] = [];
-  for (const a of atts) {
-    if (!a || typeof a !== "object") continue;
-    out.push({ ...(a as any) });
-  }
-  return out;
 }
 
 type WorkflowRef = {
@@ -1753,6 +1694,7 @@ function ConsolePage(props: {
   const seen_keys_ref = useRef<Set<string>>(new Set());
   const seen_wait_keys_ref = useRef<Set<string>>(new Set());
   const seen_tool_call_ids_ref = useRef<Set<string>>(new Set());
+  const force_full_replay_run_ref = useRef<string>("");
   const cursor_flush_timer_ref = useRef<number | null>(null);
   const cursor_flush_pending_ref = useRef<Record<string, number>>({});
   const [follow_run_id, set_follow_run_id] = useState<string>("");
@@ -1839,6 +1781,7 @@ function ConsolePage(props: {
     const rid = String(props.attach_run_id || "").trim();
     if (!rid) return;
     props.on_attach_consumed();
+    force_full_replay_run_ref.current = rid;
     set_attached_files([]);
     set_file_matches([]);
     set_file_error("");
@@ -2582,6 +2525,12 @@ function ConsolePage(props: {
     root_run_ref.current = rid;
     set_root_last_record(null);
     cursor_by_run_ref.current = { [rid]: load_run_cursor(rid) ?? 0 };
+    if (force_full_replay_run_ref.current === rid) {
+      cursor_by_run_ref.current = { [rid]: 0 };
+      // Ensure we fully rebuild a History-open replay even if a stale cursor exists.
+      save_run_cursor(rid, 0);
+      force_full_replay_run_ref.current = "";
+    }
     seen_keys_ref.current = new Set();
     seen_wait_keys_ref.current = new Set(
       (props.repl.messages || [])
@@ -2649,36 +2598,14 @@ function ConsolePage(props: {
               root_run_id === rid ? Promise.resolve(null) : props.gateway.get_run_input_data(rid).catch(() => null),
             ]);
             if (stopped) return;
-
-            const root_prompt = extract_user_prompt_from_run_input(root_input);
-            const cur_prompt = extract_user_prompt_from_run_input(cur_input);
-
-            // Prefer the root run's context.messages for durable chat history; fall back to the current run.
-            const ctx_msgs_raw =
-              extract_context_messages_from_run_input(root_input).length > 0
-                ? extract_context_messages_from_run_input(root_input)
-                : extract_context_messages_from_run_input(cur_input);
-
-            const seeded: ReplMessage[] = [];
-            for (const m of ctx_msgs_raw) {
-              const role_raw = String(m.role || "").trim().toLowerCase();
-              if (role_raw !== "user" && role_raw !== "assistant") continue;
-              seeded.push({ role: role_raw as any, content: m.content, ts: m.ts });
-            }
-
-            const req_text = String(root_prompt || cur_prompt || "").trim();
-            const last = seeded.length ? seeded[seeded.length - 1] : null;
-            if (req_text && !(last && last.role === "user" && last.content.trim() === req_text)) {
-              seeded.push({ role: "user", content: req_text, ts: now_iso(), run_id: root_run_id });
-            }
-
-            if (root_prompt && cur_prompt && root_prompt.trim() && cur_prompt.trim() && root_prompt.trim() !== cur_prompt.trim()) {
-              seeded.push({ role: "system", level: "info", title: "Enriched prompt", content: cur_prompt.trim(), ts: now_iso(), run_id: rid });
-            }
-
-            if (seeded.length) {
-              update_repl((prev) => ({ ...prev, messages: seeded.slice(-200), updated_at: now_iso() }));
-            }
+            const seeded = seed_repl_messages_for_history_open({
+              root_input,
+              cur_input,
+              root_run_id,
+              run_id: rid,
+              now_iso,
+            });
+            if (seeded.length) update_repl((prev) => ({ ...prev, messages: seeded, updated_at: now_iso() }));
 
             // Best-effort: restore per-turn attachment chips by reading durable run input_data
             // (History replay should not depend on browser-only state).
@@ -2750,20 +2677,50 @@ function ConsolePage(props: {
                     let cursor = 0;
                     for (const t of resolved) {
                       const p = String(t.prompt || "").trim();
-                      if (!p) continue;
-                      const start_idx = cursor;
                       let matched_idx = -1;
-                      for (let j = start_idx; j < out.length; j++) {
-                        const m = out[j];
-                        if (m.role !== "user") continue;
-                        if (String(m.content || "").trim() !== p) continue;
-                        const meta_obj: any = m.meta && typeof m.meta === "object" ? m.meta : {};
-                        const existing = Array.isArray(meta_obj?.attachments) ? (meta_obj.attachments as any[]) : [];
-                        if (!existing.length) meta_obj.attachments = t.attachments.map((a) => ({ ...(a as any) }));
-                        m.meta = meta_obj;
-                        if (!String(m.run_id || "").trim()) m.run_id = t.run_id;
-                        matched_idx = j;
-                        break;
+                      const rr = String(t.run_id || "").trim();
+
+                      // Prefer stable run_id correlation when available.
+                      if (rr) {
+                        for (let j = 0; j < out.length; j++) {
+                          const m = out[j];
+                          if (m.role !== "user") continue;
+                          if (String(m.run_id || "").trim() !== rr) continue;
+                          matched_idx = j;
+                          break;
+                        }
+                      }
+
+                      // Fallback: sequential prompt matching (handles missing run_id).
+                      if (matched_idx < 0 && p) {
+                        const start_idx = cursor;
+                        for (let j = start_idx; j < out.length; j++) {
+                          const m = out[j];
+                          if (m.role !== "user") continue;
+                          if (String(m.content || "").trim() !== p) continue;
+                          matched_idx = j;
+                          break;
+                        }
+                      }
+
+                      if (matched_idx < 0) continue;
+
+                      const m = out[matched_idx];
+                      const meta_obj: any = m.meta && typeof m.meta === "object" ? m.meta : {};
+                      const existing = Array.isArray(meta_obj?.attachments) ? (meta_obj.attachments as any[]) : [];
+                      if (!existing.length) meta_obj.attachments = t.attachments.map((a) => ({ ...(a as any) }));
+                      m.meta = meta_obj;
+                      if (!String(m.run_id || "").trim()) m.run_id = rr || undefined;
+
+                      // Best-effort: also tag the next assistant message with the same run_id,
+                      // so Context is available on replayed turns when possible.
+                      if (rr) {
+                        for (let j = matched_idx + 1; j < out.length; j++) {
+                          const a = out[j];
+                          if (a.role !== "assistant") continue;
+                          if (!String(a.run_id || "").trim()) a.run_id = rr;
+                          break;
+                        }
                       }
                       // If not found, do NOT advance the cursor; a missing prompt should not
                       // prevent later prompts from matching.
