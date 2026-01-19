@@ -13,11 +13,7 @@ import { ToolPicker } from "./tool_picker";
 import { Icon, type IconName } from "./icons";
 import { copy_text } from "../lib/clipboard";
 import { build_run_input_data } from "../lib/run_input";
-import {
-  extract_context_attachments_from_run_input,
-  extract_user_prompt_from_run_input,
-  seed_repl_messages_for_history_open,
-} from "../lib/replay_seed";
+import { seed_repl_messages_from_history_bundle } from "../lib/history_bundle_seed";
 import { session_memory_owner_run_id } from "../lib/session_memory";
 import {
   clear_active_run_id,
@@ -1782,6 +1778,10 @@ function ConsolePage(props: {
     if (!rid) return;
     props.on_attach_consumed();
     force_full_replay_run_ref.current = rid;
+    // Replay should be server-authoritative. Clear local messages so the
+    // RunHistoryBundle seed is always used (prevents stale/duplicated prompts
+    // and missing attachment chips after session switching).
+    update_repl((prev) => ({ ...prev, messages: [], updated_at: now_iso() }));
     set_attached_files([]);
     set_file_matches([]);
     set_file_error("");
@@ -2558,15 +2558,16 @@ function ConsolePage(props: {
         // The original user prompt is typically stored in the root parent run input_data.
         if (!props.repl.messages.length) {
           try {
-            let current_run: any = null;
-            try {
-              current_run = await props.gateway.get_run(rid);
-            } catch {
-              current_run = null;
-            }
+            const bundle = await props.gateway.get_run_history_bundle(rid, {
+              include_subruns: false,
+              include_session: true,
+              session_turn_limit: 200,
+              ledger_mode: "tail",
+              ledger_max_items: 50,
+            });
             if (stopped) return;
 
-            const workflow_id = String(current_run?.workflow_id || "").trim();
+            const workflow_id = String(bundle?.run?.workflow_id || "").trim();
             const ref = parse_workflow_ref(workflow_id);
             if (ref) {
               const match = infer_agent_template_from_workflow_id(workflow_id, templates);
@@ -2577,176 +2578,17 @@ function ConsolePage(props: {
               }));
             }
 
-            // Walk up parent_run_id to find the root run (best-effort).
-            let root_run_id = rid;
-            let parent = String(current_run?.parent_run_id || "").trim();
-            let safety = 0;
-            while (parent && parent !== root_run_id && safety < 10) {
-              root_run_id = parent;
-              safety += 1;
-              try {
-                const pr = await props.gateway.get_run(parent);
-                parent = String(pr?.parent_run_id || "").trim();
-              } catch {
-                break;
-              }
-            }
-            if (stopped) return;
-
-            const [root_input, cur_input] = await Promise.all([
-              props.gateway.get_run_input_data(root_run_id).catch(() => null),
-              root_run_id === rid ? Promise.resolve(null) : props.gateway.get_run_input_data(rid).catch(() => null),
-            ]);
-            if (stopped) return;
-            const seeded = seed_repl_messages_for_history_open({
-              root_input,
-              cur_input,
-              root_run_id,
-              run_id: rid,
-              now_iso,
-            });
+            const seeded = seed_repl_messages_from_history_bundle(bundle, { now_iso });
             if (seeded.length) update_repl((prev) => ({ ...prev, messages: seeded, updated_at: now_iso() }));
-
-            // Best-effort: restore per-turn attachment chips by reading durable run input_data
-            // (History replay should not depend on browser-only state).
-            const sid = String(current_run?.session_id || "").trim();
-            if (sid) {
-              void (async () => {
-                try {
-                  const runs_res = await props.gateway.list_runs({ limit: 500, session_id: sid });
-                  if (stopped) return;
-                  const items = Array.isArray((runs_res as any)?.items) ? ((runs_res as any).items as any[]) : [];
-                  const roots = items
-                    .filter((it) => {
-                      const rr = String(it?.run_id || "").trim();
-                      if (!rr) return false;
-                      return !String(it?.parent_run_id || "").trim();
-                    })
-                    .map((it) => ({
-                      run_id: String(it?.run_id || "").trim(),
-                      created_at: String(it?.created_at || it?.updated_at || "").trim(),
-                      updated_at: String(it?.updated_at || it?.created_at || "").trim(),
-                    }))
-                    .filter((it) => Boolean(it.run_id));
-
-                  roots.sort((a, b) => {
-                    const ta = parse_iso_ms(a.created_at) ?? parse_iso_ms(a.updated_at) ?? 0;
-                    const tb = parse_iso_ms(b.created_at) ?? parse_iso_ms(b.updated_at) ?? 0;
-                    return ta - tb;
-                  });
-
-                  // Bound work: only try to map attachments for a recent run window.
-                  const windowed = roots.slice(-200);
-                  const max_fetch = 120;
-                  const to_fetch = windowed.slice(-max_fetch);
-
-                  type RunTurn = { run_id: string; prompt: string; attachments: AttachmentRef[] };
-                  const turns: Array<RunTurn | null> = new Array(to_fetch.length).fill(null);
-
-                  const fetch_one = async (idx: number): Promise<void> => {
-                    const rr = String(to_fetch[idx]?.run_id || "").trim();
-                    if (!rr) return;
-                    const input = await props.gateway.get_run_input_data(rr).catch(() => null);
-                    if (stopped) return;
-                    const prompt = String(extract_user_prompt_from_run_input(input) || "").trim();
-                    const attachments = extract_context_attachments_from_run_input(input);
-                    if (!prompt || !attachments.length) return;
-                    turns[idx] = { run_id: rr, prompt, attachments };
-                  };
-
-                  // Limited concurrency (remote gateways can be slow).
-                  let i = 0;
-                  const workers = new Array(Math.min(6, to_fetch.length)).fill(0).map(async () => {
-                    while (!stopped && i < to_fetch.length) {
-                      const idx = i;
-                      i += 1;
-                      await fetch_one(idx);
-                    }
-                  });
-                  await Promise.all(workers);
-                  if (stopped) return;
-
-                  const resolved: RunTurn[] = turns.filter((t): t is RunTurn => Boolean(t));
-                  if (!resolved.length) return;
-
-                  const apply_by_prompt = (messages: ReplMessage[]): ReplMessage[] => {
-                    const out = (messages || []).map((m) => ({
-                      ...m,
-                      meta: m.meta && typeof m.meta === "object" ? { ...(m.meta as any) } : m.meta,
-                    }));
-                    let cursor = 0;
-                    for (const t of resolved) {
-                      const p = String(t.prompt || "").trim();
-                      let matched_idx = -1;
-                      const rr = String(t.run_id || "").trim();
-
-                      // Prefer stable run_id correlation when available.
-                      if (rr) {
-                        for (let j = 0; j < out.length; j++) {
-                          const m = out[j];
-                          if (m.role !== "user") continue;
-                          if (String(m.run_id || "").trim() !== rr) continue;
-                          matched_idx = j;
-                          break;
-                        }
-                      }
-
-                      // Fallback: sequential prompt matching (handles missing run_id).
-                      if (matched_idx < 0 && p) {
-                        const start_idx = cursor;
-                        for (let j = start_idx; j < out.length; j++) {
-                          const m = out[j];
-                          if (m.role !== "user") continue;
-                          if (String(m.content || "").trim() !== p) continue;
-                          matched_idx = j;
-                          break;
-                        }
-                      }
-
-                      if (matched_idx < 0) continue;
-
-                      const m = out[matched_idx];
-                      const meta_obj: any = m.meta && typeof m.meta === "object" ? m.meta : {};
-                      const existing = Array.isArray(meta_obj?.attachments) ? (meta_obj.attachments as any[]) : [];
-                      if (!existing.length) meta_obj.attachments = t.attachments.map((a) => ({ ...(a as any) }));
-                      m.meta = meta_obj;
-                      if (!String(m.run_id || "").trim()) m.run_id = rr || undefined;
-
-                      // Best-effort: also tag the next assistant message with the same run_id,
-                      // so Context is available on replayed turns when possible.
-                      if (rr) {
-                        for (let j = matched_idx + 1; j < out.length; j++) {
-                          const a = out[j];
-                          if (a.role !== "assistant") continue;
-                          if (!String(a.run_id || "").trim()) a.run_id = rr;
-                          break;
-                        }
-                      }
-                      // If not found, do NOT advance the cursor; a missing prompt should not
-                      // prevent later prompts from matching.
-                      if (matched_idx >= 0) cursor = matched_idx + 1;
-                    }
-                    return out;
-                  };
-
-                  update_repl((prev) => {
-                    const next_msgs = apply_by_prompt(prev.messages || []);
-                    return next_msgs === prev.messages ? prev : { ...prev, messages: next_msgs, updated_at: now_iso() };
-                  });
-                } catch {
-                  // best-effort
-                }
-              })();
-            }
           } catch {
             // best-effort
           }
         } else {
           // Even when we don't seed messages, try to keep the agent label consistent with the run.
           try {
-            const current_run = await props.gateway.get_run(rid);
+            const bundle = await props.gateway.get_run_history_bundle(rid, { include_subruns: false, include_session: false, ledger_mode: "tail", ledger_max_items: 1 });
             if (stopped) return;
-            const workflow_id = String(current_run?.workflow_id || "").trim();
+            const workflow_id = String(bundle?.run?.workflow_id || "").trim();
             const ref = parse_workflow_ref(workflow_id);
             if (ref) {
               const match = infer_agent_template_from_workflow_id(workflow_id, templates);
@@ -4301,31 +4143,27 @@ function ContextInspectorModal(props: {
     const fetch_all_ledger = async (run_id: string) => {
       const rid = String(run_id || "").trim();
       if (!rid) return [];
-      const items: LedgerRecordItem[] = [];
-      let safety = 0;
-      const page_size = 200;
       const max_items = 2000;
-
-      const total = ledger_len_by_run[rid];
-      let after = 0;
-      if (typeof total === "number" && Number.isFinite(total) && total > max_items) {
-        after = Math.max(0, Math.trunc(total) - max_items);
+      const bundle = await props.gateway.get_run_history_bundle(rid, {
+        include_subruns: false,
+        include_session: false,
+        ledger_mode: "tail",
+        ledger_max_items: max_items,
+      });
+      if (cancelled) return [];
+      const ledgers = bundle?.ledgers && typeof bundle.ledgers === "object" ? (bundle.ledgers as any) : null;
+      const ledger = ledgers && ledgers[rid] && typeof ledgers[rid] === "object" ? (ledgers[rid] as any) : null;
+      const items_raw = Array.isArray(ledger?.items) ? (ledger.items as any[]) : [];
+      const out: LedgerRecordItem[] = [];
+      for (const it of items_raw) {
+        if (!it || typeof it !== "object") continue;
+        const cursor = Number((it as any).cursor);
+        const record = (it as any).record;
+        if (!Number.isFinite(cursor)) continue;
+        if (!record || typeof record !== "object") continue;
+        out.push({ run_id: rid, cursor, record: record as StepRecord });
       }
-
-      while (!cancelled && items.length < max_items && safety < 100) {
-        const res = await props.gateway.get_ledger(rid, { after, limit: page_size });
-        const page = Array.isArray(res?.items) ? res.items : [];
-        const start_cursor = after + 1;
-        for (let i = 0; i < page.length; i++) {
-          items.push({ run_id: rid, cursor: start_cursor + i, record: page[i] as StepRecord });
-        }
-        const next_after = typeof res?.next_after === "number" ? res.next_after : after;
-        if (next_after <= after) break;
-        if (!page.length) break;
-        after = next_after;
-        safety += 1;
-      }
-      return items;
+      return out;
     };
 
     void (async () => {
