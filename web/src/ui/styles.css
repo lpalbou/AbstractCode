@@ -913,6 +913,18 @@ select {
   flex-wrap: wrap;
 }
 
+.session_card .stat_item {
+  padding: 2px 6px;
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(148, 163, 184, 0.18);
+  color: var(--text-muted);
+}
+
+.session_card .stat_icon {
+  font-size: 9px;
+}
+
 .session_card_sep {
   opacity: 0.4;
 }

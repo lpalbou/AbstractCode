@@ -387,6 +387,65 @@ class ReactShell:
         else:
             self._artifact_store = InMemoryArtifactStore()
 
+        # Best-effort: enable AbstractMemory KG effects for workflow agents and memory-enabled flows.
+        #
+        # Without these handlers, VisualFlow nodes like `memory_kg_query` fail at runtime with:
+        # "No effect handler registered for memory_kg_query".
+        extra_effect_handlers: Optional[Dict[Any, Any]] = None
+        try:
+            from abstractmemory import InMemoryTripleStore, LanceDBTripleStore  # type: ignore
+            from abstractmemory.embeddings import AbstractGatewayTextEmbedder  # type: ignore
+            from abstractruntime.core.runtime import utc_now_iso
+            from abstractruntime.integrations.abstractmemory.effect_handlers import build_memory_kg_effect_handlers
+
+            from .gateway_cli import default_gateway_token, default_gateway_url
+        except Exception:
+            extra_effect_handlers = None
+        else:
+            base_dir: Optional[Path] = None
+            mem_dir_raw = (
+                os.getenv("ABSTRACTCODE_MEMORY_DIR")
+                or os.getenv("ABSTRACTMEMORY_DIR")
+                or os.getenv("ABSTRACTFLOW_MEMORY_DIR")
+            )
+            if isinstance(mem_dir_raw, str) and mem_dir_raw.strip():
+                try:
+                    base_dir = Path(mem_dir_raw).expanduser().resolve()
+                except Exception:
+                    base_dir = None
+            if base_dir is None and self._store_dir is not None:
+                base_dir = self._store_dir / "abstractmemory"
+
+            embedder = None
+            embed_provider = (
+                os.getenv("ABSTRACTCODE_EMBEDDING_PROVIDER")
+                or os.getenv("ABSTRACTMEMORY_EMBEDDING_PROVIDER")
+                or os.getenv("ABSTRACTFLOW_EMBEDDING_PROVIDER")
+                or os.getenv("ABSTRACTGATEWAY_EMBEDDING_PROVIDER")
+            )
+            if str(embed_provider or "").strip().lower() not in {"__disabled__", "disabled", "none", "off"}:
+                try:
+                    gateway_url = str(default_gateway_url() or "").strip()
+                    auth_token = default_gateway_token()
+                    if gateway_url:
+                        embedder = AbstractGatewayTextEmbedder(base_url=gateway_url, auth_token=auth_token)
+                except Exception:
+                    embedder = None
+
+            try:
+                if base_dir is None:
+                    store_obj = InMemoryTripleStore(embedder=embedder)
+                else:
+                    base_dir.mkdir(parents=True, exist_ok=True)
+                    store_obj = LanceDBTripleStore(base_dir / "kg", embedder=embedder)
+                extra_effect_handlers = build_memory_kg_effect_handlers(
+                    store=store_obj,
+                    run_store=run_store,
+                    now_iso=utc_now_iso,
+                )
+            except Exception:
+                extra_effect_handlers = None
+
         self._runtime = create_local_runtime(
             provider=self._provider,
             model=self._model,
@@ -395,6 +454,7 @@ class ReactShell:
             ledger_store=ledger_store,
             tool_executor=tool_executor,
             artifact_store=self._artifact_store,
+            extra_effect_handlers=extra_effect_handlers,
         )
         self._runtime.set_artifact_store(self._artifact_store)
 

@@ -740,6 +740,11 @@ type RemoteRunSummary = {
   session_id?: string | null;
   parent_run_id?: string | null;
   ledger_len?: number | null;
+  steps?: number | null;
+  llm_calls?: number | null;
+  tool_calls?: number | null;
+  tokens_total?: number | null;
+  limits?: any;
 };
 
 function SessionsPage(props: {
@@ -772,22 +777,30 @@ function SessionsPage(props: {
     set_loading(true);
     set_error("");
     try {
-      const [tpls, r] = await Promise.all([list_agent_templates(props.gateway), props.gateway.list_runs({ limit: 500 })]);
+      const [tpls, r] = await Promise.all([
+        list_agent_templates(props.gateway),
+        props.gateway.list_runs({ limit: 300, root_only: true, include_ledger_len: false, include_metrics: true }),
+      ]);
       const items = Array.isArray((r as any)?.items) ? (r as any).items : [];
       set_templates(tpls);
       set_page(0);
 
       const allowed_bundles = new Set(tpls.map((t) => t.bundle_id));
       const filtered: RemoteRunSummary[] = items
-        .map((it: any) => ({
-          run_id: String(it?.run_id || "").trim(),
-          workflow_id: typeof it?.workflow_id === "string" ? it.workflow_id : it?.workflow_id ?? null,
-          status: typeof it?.status === "string" ? it.status : it?.status ?? null,
-          created_at: typeof it?.created_at === "string" ? it.created_at : it?.created_at ?? null,
-          updated_at: typeof it?.updated_at === "string" ? it.updated_at : it?.updated_at ?? null,
-          session_id: typeof it?.session_id === "string" ? it.session_id : it?.session_id ?? null,
+	        .map((it: any) => ({
+	          run_id: String(it?.run_id || "").trim(),
+	          workflow_id: typeof it?.workflow_id === "string" ? it.workflow_id : it?.workflow_id ?? null,
+	          status: typeof it?.status === "string" ? it.status : it?.status ?? null,
+	          created_at: typeof it?.created_at === "string" ? it.created_at : it?.created_at ?? null,
+	          updated_at: typeof it?.updated_at === "string" ? it.updated_at : it?.updated_at ?? null,
+	          session_id: typeof it?.session_id === "string" ? it.session_id : it?.session_id ?? null,
           parent_run_id: typeof it?.parent_run_id === "string" ? it.parent_run_id : it?.parent_run_id ?? null,
           ledger_len: typeof it?.ledger_len === "number" ? it.ledger_len : it?.ledger_len ?? null,
+          steps: typeof it?.steps === "number" ? it.steps : it?.steps ?? null,
+          llm_calls: typeof it?.llm_calls === "number" ? it.llm_calls : it?.llm_calls ?? null,
+          tool_calls: typeof it?.tool_calls === "number" ? it.tool_calls : it?.tool_calls ?? null,
+          tokens_total: typeof it?.tokens_total === "number" ? it.tokens_total : it?.tokens_total ?? null,
+          limits: it?.limits ?? null,
         }))
         .filter((it: RemoteRunSummary) => {
           if (!it.run_id) return false;
@@ -944,6 +957,11 @@ function SessionsPage(props: {
           const updated = r.updated_at ? new Date(r.updated_at) : null;
           const created_str = created ? created.toLocaleDateString(undefined, { month: "short", day: "numeric", year: created.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined }) : "—";
           const updated_str = updated ? format_relative_time(updated) : "—";
+          const ctx_used_raw = (r as any)?.tokens_total ?? (r as any)?.limits?.tokens?.estimated_used;
+          const ctx_used = Number.isFinite(Number(ctx_used_raw)) ? Math.max(0, Math.trunc(Number(ctx_used_raw))) : null;
+          const llm_calls2 = Number.isFinite(Number(r.llm_calls)) ? Math.max(0, Math.trunc(Number(r.llm_calls))) : null;
+          const tool_calls2 = Number.isFinite(Number(r.tool_calls)) ? Math.max(0, Math.trunc(Number(r.tool_calls))) : null;
+          const steps2 = Number.isFinite(Number(r.ledger_len)) ? Math.max(0, Math.trunc(Number(r.ledger_len))) : Number.isFinite(Number(r.steps)) ? Math.max(0, Math.trunc(Number(r.steps))) : 0;
           
           return (
             <button
@@ -957,7 +975,28 @@ function SessionsPage(props: {
                 <span className={`session_card_status ${status_info.cls}`}>{status_info.label}</span>
               </div>
               <div className="session_card_stats">
-                <span title="Number of ledger steps">{r.ledger_len ?? 0} steps</span>
+                <span className="stat_item" title="Steps (best-effort)">
+                  <span className="stat_icon">≡</span>
+                  {steps2}
+                </span>
+                {ctx_used !== null ? (
+                  <span className="stat_item" title="Context tokens (estimated)">
+                    <span className="stat_icon">◈</span>
+                    {ctx_used}
+                  </span>
+                ) : null}
+                {llm_calls2 !== null ? (
+                  <span className="stat_item" title="LLM calls">
+                    <span className="stat_icon">◉</span>
+                    {llm_calls2}
+                  </span>
+                ) : null}
+                {tool_calls2 !== null ? (
+                  <span className="stat_item" title="Tool calls">
+                    <span className="stat_icon">⚙</span>
+                    {tool_calls2}
+                  </span>
+                ) : null}
                 <span className="session_card_sep">•</span>
                 <span title="Created date">created {created_str}</span>
                 <span className="session_card_sep">•</span>
@@ -4078,7 +4117,7 @@ function ContextInspectorModal(props: {
           const root = await props.gateway.get_run(props.root_run_id);
           const session_id = String(root?.session_id || "").trim();
           if (session_id) {
-            const runs_res = await props.gateway.list_runs({ limit: 500, session_id });
+            const runs_res = await props.gateway.list_runs({ limit: 500, session_id, include_ledger_len: false, include_metrics: false });
             const runs = Array.isArray((runs_res as any)?.items) ? ((runs_res as any).items as any[]) : [];
             for (const r of runs) {
               const rid = String(r?.run_id || "").trim();
