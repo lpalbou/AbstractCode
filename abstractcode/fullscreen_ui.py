@@ -1450,7 +1450,7 @@ class FullScreenUI:
         text = self._get_status_text()
 
         # Left-side agent selector dropdown (if configured).
-        agent_dd = (self._dropdowns or {}).get("agent")
+        agent_dd = (getattr(self, "_dropdowns", None) or {}).get("agent")
         agent_parts: FormattedText = []
         if agent_dd is not None:
             cur = str(agent_dd.get_current_key() or "").strip() or "agent"

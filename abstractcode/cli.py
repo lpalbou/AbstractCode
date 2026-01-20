@@ -164,6 +164,9 @@ def _run_one_shot_prompt(*, shell: ReactShell, prompt: str) -> int:
     if not text:
         return 0
 
+    def _stderr_print(msg: str) -> None:
+        print(msg, file=sys.stderr)
+
     cleaned, mentions = extract_at_file_mentions(text)
     paths: list[str] = []
     for m in mentions:
@@ -205,6 +208,156 @@ def _run_one_shot_prompt(*, shell: ReactShell, prompt: str) -> int:
 
     approval_state = _ApprovalState()
 
+    def _drive_subworkflow_wait(*, top_run_id: str) -> int:
+        """Drive async subworkflow waits until top run can advance or blocks on a real wait."""
+
+        def _extract_sub_run_id(wait_state: object) -> Optional[str]:
+            details = getattr(wait_state, "details", None)
+            if isinstance(details, dict):
+                sub_run_id = details.get("sub_run_id")
+                if isinstance(sub_run_id, str) and sub_run_id:
+                    return sub_run_id
+            wait_key = getattr(wait_state, "wait_key", None)
+            if isinstance(wait_key, str) and wait_key.startswith("subworkflow:"):
+                return wait_key.split("subworkflow:", 1)[1] or None
+            return None
+
+        def _workflow_for(run_state: object):
+            reg = getattr(shell._runtime, "workflow_registry", None)
+            getter = getattr(reg, "get", None) if reg is not None else None
+            if callable(getter):
+                wf = getter(run_state.workflow_id)
+                if wf is not None:
+                    return wf
+            if getattr(shell._agent.workflow, "workflow_id", None) == run_state.workflow_id:
+                return shell._agent.workflow
+            raise RuntimeError(f"Workflow '{run_state.workflow_id}' not found in runtime registry")
+
+        def _bubble_completion(child_state: object) -> Optional[str]:
+            parent_id = getattr(child_state, "parent_run_id", None)
+            if not isinstance(parent_id, str) or not parent_id:
+                return None
+            parent_state = shell._runtime.get_state(parent_id)
+            parent_wait = getattr(parent_state, "waiting", None)
+            if parent_state.status != RunStatus.WAITING or parent_wait is None:
+                return None
+            if parent_wait.reason != WaitReason.SUBWORKFLOW:
+                return None
+            shell._runtime.resume(
+                workflow=_workflow_for(parent_state),
+                run_id=parent_id,
+                wait_key=None,
+                payload={
+                    "sub_run_id": child_state.run_id,
+                    "output": getattr(child_state, "output", None),
+                    "node_traces": shell._runtime.get_node_traces(child_state.run_id),
+                },
+                max_steps=0,
+            )
+            return parent_id
+
+        # Drive subruns until we either make progress or hit a non-subworkflow wait.
+        for _ in range(200):
+            # Descend to the deepest sub-run referenced by SUBWORKFLOW waits.
+            current_run_id = top_run_id
+            for _ in range(25):
+                cur_state = shell._runtime.get_state(current_run_id)
+                cur_wait = getattr(cur_state, "waiting", None)
+                if cur_state.status != RunStatus.WAITING or cur_wait is None:
+                    break
+                if cur_wait.reason != WaitReason.SUBWORKFLOW:
+                    break
+                next_id = _extract_sub_run_id(cur_wait)
+                if not next_id:
+                    break
+                current_run_id = next_id
+
+            current_state = shell._runtime.get_state(current_run_id)
+
+            # Tick running subruns until they block/complete.
+            if current_state.status == RunStatus.RUNNING:
+                current_state = shell._runtime.tick(
+                    workflow=_workflow_for(current_state),
+                    run_id=current_run_id,
+                    max_steps=100,
+                )
+
+            if current_state.status == RunStatus.RUNNING:
+                continue
+
+            if current_state.status == RunStatus.FAILED:
+                _stderr_print(f"Run failed: {current_state.error or 'Subworkflow failed'}")
+                return 1
+
+            if current_state.status == RunStatus.CANCELLED:
+                _stderr_print("Run cancelled.")
+                return 1
+
+            if current_state.status == RunStatus.WAITING:
+                cur_wait = getattr(current_state, "waiting", None)
+                if cur_wait is None:
+                    break
+                if cur_wait.reason == WaitReason.SUBWORKFLOW:
+                    continue
+
+                if cur_wait.reason == WaitReason.USER:
+                    prompt_text = str(cur_wait.prompt or "Please respond:").strip()
+                    response = input(prompt_text + " ")
+                    shell._runtime.resume(
+                        workflow=_workflow_for(current_state),
+                        run_id=current_run_id,
+                        wait_key=cur_wait.wait_key,
+                        payload={"response": response},
+                    )
+                    continue
+
+                if cur_wait.reason == WaitReason.EVENT:
+                    details = cur_wait.details if isinstance(cur_wait.details, dict) else {}
+                    tool_calls = details.get("tool_calls")
+                    if isinstance(tool_calls, list):
+                        payload = _approve_and_execute(
+                            tool_calls=tool_calls,
+                            tool_runner=shell._tool_runner,
+                            auto_approve=bool(shell._auto_approve),
+                            approval_state=approval_state,
+                            prompt_fn=input,
+                            print_fn=_stderr_print,
+                        )
+                        if payload is None:
+                            _stderr_print("Aborted (tool calls not executed).")
+                            return 1
+                        shell._runtime.resume(
+                            workflow=_workflow_for(current_state),
+                            run_id=current_run_id,
+                            wait_key=cur_wait.wait_key,
+                            payload=payload,
+                        )
+                        continue
+
+                    if isinstance(cur_wait.prompt, str) and cur_wait.prompt.strip() and isinstance(cur_wait.wait_key, str) and cur_wait.wait_key:
+                        response = input(cur_wait.prompt.strip() + " ")
+                        shell._runtime.resume(
+                            workflow=_workflow_for(current_state),
+                            run_id=current_run_id,
+                            wait_key=cur_wait.wait_key,
+                            payload={"response": response},
+                        )
+                        continue
+
+                _stderr_print(f"Run waiting: {cur_wait.reason.value} ({cur_wait.wait_key})")
+                return 2
+
+            if current_state.status != RunStatus.COMPLETED:
+                break
+
+            parent_id = _bubble_completion(current_state)
+            if not parent_id:
+                break
+            if parent_id == top_run_id:
+                break
+
+        return 0
+
     state = None
     while True:
         state = shell._agent.step()
@@ -222,6 +375,12 @@ def _run_one_shot_prompt(*, shell: ReactShell, prompt: str) -> int:
             shell._agent.resume(response)
             continue
 
+        if wait.reason == WaitReason.SUBWORKFLOW:
+            rc = _drive_subworkflow_wait(top_run_id=run_id)
+            if rc != 0:
+                return rc
+            continue
+
         if wait.reason == WaitReason.EVENT:
             details = wait.details or {}
             tool_calls = details.get("tool_calls")
@@ -232,7 +391,7 @@ def _run_one_shot_prompt(*, shell: ReactShell, prompt: str) -> int:
                     auto_approve=bool(shell._auto_approve),
                     approval_state=approval_state,
                     prompt_fn=input,
-                    print_fn=lambda s: print(s, file=sys.stderr),
+                    print_fn=_stderr_print,
                 )
                 if payload is None:
                     print("Aborted (tool calls not executed).", file=sys.stderr)
@@ -263,10 +422,37 @@ def _run_one_shot_prompt(*, shell: ReactShell, prompt: str) -> int:
         print("Run failed: no state produced.", file=sys.stderr)
         return 1
 
+    def _pick_textish(value):
+        if isinstance(value, str):
+            return value.strip()
+        if value is None:
+            return ""
+        if isinstance(value, bool):
+            return str(value).lower()
+        if isinstance(value, (int, float)):
+            return str(value)
+        return ""
+
+    def _extract_answer_text(output):
+        if not isinstance(output, dict):
+            return ""
+        payload = output.get("result") if isinstance(output.get("result"), dict) else output
+        text = _pick_textish(payload.get("response"))
+        if not text:
+            text = (
+                _pick_textish(payload.get("answer"))
+                or _pick_textish(payload.get("message"))
+                or _pick_textish(payload.get("text"))
+                or _pick_textish(payload.get("content"))
+            )
+        if not text and isinstance(output.get("result"), str):
+            text = str(output.get("result") or "").strip()
+        return text
+
     output = getattr(state, "output", None)
-    answer = output.get("answer") if isinstance(output, dict) else None
-    if isinstance(answer, str) and answer.strip():
-        print(answer.strip())
+    answer_text = _extract_answer_text(output)
+    if isinstance(answer_text, str) and answer_text.strip():
+        print(answer_text.strip())
 
     if state.status == RunStatus.COMPLETED:
         return 0
