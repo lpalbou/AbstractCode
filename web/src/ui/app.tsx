@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { GatewayClient } from "../lib/gateway_client";
 import { random_id } from "../lib/ids";
-import { extract_tool_calls_from_wait, extract_wait_from_record } from "../lib/runtime_extractors";
+import { extract_wait_from_record } from "../lib/runtime_extractors";
 import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types";
 import type { AttachmentRef } from "../lib/types";
+import { resolve_blocking_wait } from "../lib/wait_resolution";
 import { ChatMessageContent } from "@abstractuic/panel-chat";
 import { AgentCyclesPanel, build_agent_trace, type LedgerRecordItem } from "@abstractuic/monitor-flow";
 import { registerMonitorGpuWidget } from "@abstractutils/monitor-gpu";
@@ -1736,8 +1737,18 @@ function ConsolePage(props: {
   const [subworkflow_label, set_subworkflow_label] = useState<string>("");
   const [drop_active, set_drop_active] = useState(false);
 
-  const wait_state: WaitState | null = useMemo(() => extract_wait_from_record(root_last_record), [root_last_record]);
-  const tool_calls_for_wait: ToolCall[] = useMemo(() => extract_tool_calls_from_wait(wait_state), [wait_state]);
+  const root_wait_state: WaitState | null = useMemo(() => extract_wait_from_record(root_last_record), [root_last_record]);
+  const root_wait_reason = String(root_wait_state?.reason || "").trim();
+  const root_wait_key = String(root_wait_state?.wait_key || "").trim();
+
+  const resolved_wait = useMemo(
+    () => resolve_blocking_wait({ root_run_id: active_run_id, root_wait: root_wait_state, records }),
+    [active_run_id, records, root_wait_state]
+  );
+  const wait_state: WaitState | null = resolved_wait.wait;
+  const wait_run_id = String(resolved_wait.wait_run_id || "").trim();
+  const tool_calls_for_wait: ToolCall[] = resolved_wait.tool_calls;
+
   const wait_reason = String(wait_state?.reason || "").trim();
   const wait_key = String(wait_state?.wait_key || "").trim();
   const wait_event_name = wait_reason === "event" ? normalize_ui_event_name(event_name_from_wait_key(wait_key)) : "";
@@ -1745,16 +1756,16 @@ function ConsolePage(props: {
   const is_ask_event_wait = wait_reason === "event" && wait_event_name === "abstract.ask";
   const can_user_answer_wait = is_user_wait || is_ask_event_wait;
   const is_working = Boolean(active_run_id) && !wait_state && !resuming && Boolean(status_text.trim());
-  const wait_is_compact = (wait_state && wait_reason === "subworkflow") || (!wait_state && is_working);
+  const wait_is_compact = (root_wait_state && root_wait_reason === "subworkflow") || (!root_wait_state && is_working);
 
   const progress_run_id = useMemo(() => {
     const rid = String(active_run_id || "").trim();
-    if (wait_reason === "subworkflow") {
+    if (root_wait_reason === "subworkflow") {
       const fid = String(follow_run_id || "").trim();
       if (fid) return fid;
     }
     return rid;
-  }, [active_run_id, follow_run_id, wait_reason]);
+  }, [active_run_id, follow_run_id, root_wait_reason]);
 
   const iteration_progress = useMemo(() => compute_llm_iteration_progress(records, progress_run_id), [records, progress_run_id]);
   const max_iterations_ui = useMemo(() => {
@@ -1770,21 +1781,21 @@ function ConsolePage(props: {
   }, [progress_run_id, iteration_progress.current, max_iterations_ui]);
 
   const sub_run_id_for_wait = useMemo(() => {
-    if (wait_reason !== "subworkflow") return "";
-    const from_details = String((wait_state as any)?.details?.sub_run_id || "").trim();
+    if (root_wait_reason !== "subworkflow") return "";
+    const from_details = String((root_wait_state as any)?.details?.sub_run_id || "").trim();
     if (from_details) return from_details;
-    if (wait_key.startsWith("subworkflow:")) return String(wait_key.split(":", 2)[1] || "").trim();
+    if (root_wait_key.startsWith("subworkflow:")) return String(root_wait_key.split(":", 2)[1] || "").trim();
     return "";
-  }, [wait_reason, wait_key, wait_state]);
+  }, [root_wait_reason, root_wait_key, root_wait_state]);
 
   useEffect(() => {
-    if (wait_reason !== "subworkflow") {
+    if (root_wait_reason !== "subworkflow") {
       set_follow_run_id("");
       set_subworkflow_label("");
       return;
     }
     if (sub_run_id_for_wait) set_follow_run_id(sub_run_id_for_wait);
-  }, [wait_reason, sub_run_id_for_wait]);
+  }, [root_wait_reason, sub_run_id_for_wait]);
 
   useEffect(() => {
     if (!sub_run_id_for_wait) return;
@@ -2777,20 +2788,21 @@ function ConsolePage(props: {
   }, [active_run_id, follow_run_id, props.gateway]);
 
   async function submit_resume(payload_obj: any): Promise<void> {
-    if (!active_run_id || !wait_key) return;
+    const rid = String(wait_run_id || active_run_id || "").trim();
+    if (!rid || !wait_key) return;
     set_error("");
     set_resuming(true);
     try {
       await props.gateway.submit_command({
         command_id: random_id(),
-        run_id: active_run_id,
+        run_id: rid,
         type: "resume",
         payload: { wait_key, payload: payload_obj || {} },
         client_id: props.settings.client_id || "abstractcode_web",
       });
       try {
-        const after = Number(cursor_by_run_ref.current[active_run_id] || 0);
-        await append_page(active_run_id, after);
+        const after = Number(cursor_by_run_ref.current[rid] || 0);
+        await append_page(rid, after);
       } catch {
         // ignore
       }

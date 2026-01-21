@@ -658,6 +658,33 @@ def build_gateway_parser() -> argparse.ArgumentParser:
     attach.add_argument("--gateway-token", default=None, help="Gateway auth token (default: $ABSTRACTCODE_GATEWAY_TOKEN)")
     attach.add_argument("--poll-s", type=float, default=0.25, help="Polling interval when following (default: 0.25)")
 
+    kg = sub.add_parser("kg", help="Query/dump the persisted KG (AbstractMemory triple store)")
+    kg.add_argument(
+        "run_id",
+        help="Gateway run_id (or a session_id when using --scope session; CLI retries automatically)",
+    )
+    kg.add_argument("--gateway-url", default=None, help="Gateway base URL (default: $ABSTRACTCODE_GATEWAY_URL)")
+    kg.add_argument("--gateway-token", default=None, help="Gateway auth token (default: $ABSTRACTCODE_GATEWAY_TOKEN)")
+    kg.add_argument("--scope", choices=("run", "session", "global", "all"), default="session", help="KG scope (default: session)")
+    kg.add_argument("--owner-id", default=None, help="Explicit owner_id override (bypasses scope owner resolution)")
+    kg.add_argument("--subject", default=None, help="Filter: exact subject")
+    kg.add_argument("--predicate", default=None, help="Filter: exact predicate")
+    kg.add_argument("--object", dest="object", default=None, help="Filter: exact object")
+    kg.add_argument("--since", default=None, help="Filter: observed_at >= since (ISO 8601 string compare)")
+    kg.add_argument("--until", default=None, help="Filter: observed_at <= until (ISO 8601 string compare)")
+    kg.add_argument("--active-at", dest="active_at", default=None, help="Filter: valid_from/valid_until window intersection")
+    kg.add_argument("--query-text", dest="query_text", default=None, help="Optional semantic query text (requires embedder configured on the store)")
+    kg.add_argument("--min-score", dest="min_score", type=float, default=None, help="Semantic similarity threshold (0..1)")
+    kg.add_argument("--limit", type=int, default=500, help="Max results (default: 500; max: 10000)")
+    kg.add_argument("--order", choices=("asc", "desc"), default="desc", help="Order by observed_at for non-semantic queries (default: desc)")
+    kg.add_argument(
+        "--format",
+        choices=("triples", "jsonl", "json"),
+        default="triples",
+        help="Output format: triples|jsonl|json (default: triples)",
+    )
+    kg.add_argument("--pretty", action="store_true", help="Pretty-print JSON output (json format only)")
+
     return parser
 
 
@@ -667,7 +694,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if argv_list and argv_list[0] == "gateway":
         parser = build_gateway_parser()
         args, unknown = parser.parse_known_args(argv_list[1:])
-        from .gateway_cli import attach_gateway_run_command, run_gateway_flow_command
+        from .gateway_cli import attach_gateway_run_command, query_gateway_kg_command, run_gateway_flow_command
 
         cmd = getattr(args, "command", None)
         if cmd == "run":
@@ -698,6 +725,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 run_id=str(args.run_id),
                 follow=True,
                 poll_s=float(getattr(args, "poll_s", 0.25) or 0.25),
+            )
+            return 0
+
+        if cmd == "kg":
+            if unknown:
+                parser.error(f"Unknown arguments: {' '.join(unknown)}")
+            query_gateway_kg_command(
+                gateway_url=args.gateway_url,
+                gateway_token=args.gateway_token,
+                run_id=str(args.run_id),
+                scope=str(args.scope),
+                owner_id=getattr(args, "owner_id", None),
+                subject=getattr(args, "subject", None),
+                predicate=getattr(args, "predicate", None),
+                object_value=getattr(args, "object", None),
+                since=getattr(args, "since", None),
+                until=getattr(args, "until", None),
+                active_at=getattr(args, "active_at", None),
+                query_text=getattr(args, "query_text", None),
+                min_score=getattr(args, "min_score", None),
+                limit=int(getattr(args, "limit", 500) or 500),
+                order=str(getattr(args, "order", "desc") or "desc"),
+                fmt=str(getattr(args, "format", "triples") or "triples"),
+                pretty=bool(getattr(args, "pretty", False)),
             )
             return 0
 

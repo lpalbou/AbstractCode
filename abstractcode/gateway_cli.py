@@ -170,6 +170,60 @@ class GatewayApi:
             payload=body,
         )
 
+    def kg_query(
+        self,
+        *,
+        run_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        scope: str = "session",
+        owner_id: Optional[str] = None,
+        subject: Optional[str] = None,
+        predicate: Optional[str] = None,
+        object_value: Optional[str] = None,
+        since: Optional[str] = None,
+        until: Optional[str] = None,
+        active_at: Optional[str] = None,
+        query_text: Optional[str] = None,
+        min_score: Optional[float] = None,
+        limit: int = 500,
+        order: str = "desc",
+        timeout_s: float = 60.0,
+    ) -> Dict[str, Any]:
+        body: Dict[str, Any] = {
+            "scope": str(scope or "session").strip().lower() or "session",
+            "limit": int(limit),
+            "order": str(order or "desc").strip().lower() or "desc",
+        }
+        if run_id:
+            body["run_id"] = str(run_id or "").strip()
+        if session_id:
+            body["session_id"] = str(session_id or "").strip()
+        if owner_id:
+            body["owner_id"] = owner_id
+        if subject:
+            body["subject"] = subject
+        if predicate:
+            body["predicate"] = predicate
+        if object_value:
+            body["object"] = object_value
+        if since:
+            body["since"] = since
+        if until:
+            body["until"] = until
+        if active_at:
+            body["active_at"] = active_at
+        if query_text:
+            body["query_text"] = query_text
+        if min_score is not None:
+            body["min_score"] = float(min_score)
+        return _request_json(
+            method="POST",
+            url=_join_url(self.base_url, "/api/gateway/kg/query"),
+            token=self.token,
+            payload=body,
+            timeout_s=float(timeout_s),
+        )
+
 
 def _extract_sub_run_id_from_step(record: Dict[str, Any]) -> Optional[str]:
     if not isinstance(record, dict):
@@ -259,6 +313,131 @@ def attach_gateway_run_command(
         return
 
     _follow_runs(api=api, root_run_id=str(run_id), poll_s=poll_s)
+
+
+def query_gateway_kg_command(
+    *,
+    gateway_url: Optional[str],
+    gateway_token: Optional[str],
+    run_id: str,
+    scope: str = "session",
+    owner_id: Optional[str] = None,
+    subject: Optional[str] = None,
+    predicate: Optional[str] = None,
+    object_value: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    active_at: Optional[str] = None,
+    query_text: Optional[str] = None,
+    min_score: Optional[float] = None,
+    limit: int = 500,
+    order: str = "desc",
+    fmt: str = "triples",
+    pretty: bool = False,
+) -> None:
+    api = GatewayApi(base_url=str(gateway_url or default_gateway_url()), token=gateway_token or default_gateway_token())
+    try:
+        resp = api.kg_query(
+            run_id=str(run_id),
+            scope=str(scope),
+            owner_id=owner_id,
+            subject=subject,
+            predicate=predicate,
+            object_value=object_value,
+            since=since,
+            until=until,
+            active_at=active_at,
+            query_text=query_text,
+            min_score=min_score,
+            limit=int(limit),
+            order=str(order),
+        )
+    except RuntimeError as e:
+        # Convenience: when the user passes a session id (e.g. AbstractCode Web session_id),
+        # the gateway won't find a RunState by that id. Retry as `session_id` for session scope.
+        msg = str(e)
+        is_run_not_found = "Gateway HTTP 404:" in msg and "not found" in msg and "Run '" in msg
+        scope_norm = str(scope or "").strip().lower()
+        if (
+            is_run_not_found
+            and scope_norm in {"session", "all"}
+            and not owner_id
+            and str(run_id or "").strip()
+        ):
+            scope_label = scope_norm or "session"
+            print(
+                f"warning: run '{run_id}' not found; retrying as session_id for scope={scope_label}",
+                file=os.sys.stderr,
+            )
+            resp = api.kg_query(
+                run_id=None,
+                session_id=str(run_id),
+                scope=str(scope),
+                owner_id=owner_id,
+                subject=subject,
+                predicate=predicate,
+                object_value=object_value,
+                since=since,
+                until=until,
+                active_at=active_at,
+                query_text=query_text,
+                min_score=min_score,
+                limit=int(limit),
+                order=str(order),
+            )
+        else:
+            raise
+
+    warnings = resp.get("warnings")
+    if isinstance(warnings, list) and warnings:
+        for w in warnings:
+            if isinstance(w, str) and w.strip():
+                print(f"warning: {w.strip()}", file=os.sys.stderr)
+
+    items = resp.get("items")
+    if not isinstance(items, list):
+        items = []
+
+    fmt2 = str(fmt or "triples").strip().lower() or "triples"
+    if fmt2 == "json":
+        indent = 2 if bool(pretty) else None
+        print(json.dumps(resp, indent=indent, ensure_ascii=False))
+        return
+
+    if fmt2 == "jsonl":
+        for item in items:
+            if isinstance(item, dict):
+                print(json.dumps(item, ensure_ascii=False))
+        return
+
+    # Default: human-readable triples.
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        observed_at = str(item.get("observed_at") or "").strip()
+        subj = str(item.get("subject") or "").strip()
+        pred = str(item.get("predicate") or "").strip()
+        obj = str(item.get("object") or "").strip()
+        scope_v = str(item.get("scope") or "").strip()
+        owner_v = str(item.get("owner_id") or "").strip()
+
+        suffix_parts: list[str] = []
+        if scope_v:
+            suffix_parts.append(f"scope={scope_v}")
+        if owner_v:
+            suffix_parts.append(f"owner_id={owner_v}")
+        conf = item.get("confidence")
+        if isinstance(conf, (int, float)):
+            suffix_parts.append(f"confidence={float(conf):.3f}")
+        attrs = item.get("attributes")
+        if isinstance(attrs, dict):
+            ret = attrs.get("_retrieval")
+            if isinstance(ret, dict) and isinstance(ret.get("score"), (int, float)):
+                suffix_parts.append(f"score={float(ret['score']):.3f}")
+
+        suffix = f" ({', '.join(suffix_parts)})" if suffix_parts else ""
+        ts = f"[{observed_at}] " if observed_at else ""
+        print(f"{ts}{subj} --{pred}--> {obj}{suffix}")
 
 
 def _follow_runs(*, api: GatewayApi, root_run_id: str, poll_s: float) -> None:
