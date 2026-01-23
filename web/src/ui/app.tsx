@@ -572,16 +572,19 @@ export function App(): React.ReactElement {
 
   return (
     <div className="app">
-      <Header
-        route={route}
-        on_nav={(name) => {
-          if (name === "console") set_route({ name: "console", session_id: session.session_id });
-          else set_route({ name });
-        }}
-        monitor_gpu_enabled={gpu_enabled}
-        monitor_gpu_ref={monitor_gpu_ref}
-        gateway_url={settings.gateway_url}
-      />
+      {/* Hide header on console page - ConsolePage renders its own */}
+      {route.name !== "console" ? (
+        <Header
+          route={route}
+          on_nav={(name) => {
+            if (name === "console") set_route({ name: "console", session_id: session.session_id });
+            else set_route({ name });
+          }}
+          monitor_gpu_enabled={gpu_enabled}
+          monitor_gpu_ref={monitor_gpu_ref}
+          gateway_url={settings.gateway_url}
+        />
+      ) : null}
       <div className="content">
         {route.name === "console" ? (
           <ConsolePage
@@ -598,6 +601,10 @@ export function App(): React.ReactElement {
                 return { session_id: sid, state: updater(prev.state) };
               })
             }
+            on_nav={(name) => {
+              if (name === "console") set_route({ name: "console", session_id: session.session_id });
+              else set_route({ name });
+            }}
           />
         ) : null}
         {route.name === "new" ? (
@@ -659,7 +666,7 @@ function Header(props: {
   ];
   
   return (
-    <header className="header">
+    <header className="header header_compact">
       <div className="title">{title}</div>
       <div className="header_right">
         <nav className="nav" role="navigation" aria-label="Main navigation">
@@ -1681,6 +1688,7 @@ function ConsolePage(props: {
   attach_run_id: string | null;
   on_attach_consumed: () => void;
   on_repl: (session_id: string, updater: (prev: ReplState) => ReplState) => void;
+  on_nav: (name: Route["name"]) => void;
 }): React.ReactElement {
   const [templates, set_templates] = useState<AgentTemplate[]>([]);
   const [template_error, set_template_error] = useState("");
@@ -3263,88 +3271,84 @@ function ConsolePage(props: {
 
   return (
     <div className="repl">
-      <div className="panel repl_panel">
-        <div
-          className="repl_meta repl_meta_clickable"
-          role="button"
-          tabIndex={0}
-          title="Back to parent run"
-          onClick={() => {
-            const root = String(root_run_ref.current || "").trim();
-            const cur = String(active_run_id || "").trim();
-            if (root && cur && root !== cur) set_active_run_id(root);
-          }}
-          onKeyDown={(e) => {
-            if (e.key !== "Enter" && e.key !== " ") return;
-            e.preventDefault();
-            const root = String(root_run_ref.current || "").trim();
-            const cur = String(active_run_id || "").trim();
-            if (root && cur && root !== cur) set_active_run_id(root);
-          }}
-        >
-          <div className="repl_meta_info">
-            <div className="repl_meta_item">
-              <span className="repl_meta_label">Agent</span>
-              <span className="repl_meta_value accent">{template_label || "—"}</span>
-            </div>
-            <div className="repl_meta_item">
-              <span className="repl_meta_label">Model</span>
-              <span className="repl_meta_value">
-                {props.settings.provider || "—"}/{props.settings.model || "—"}
-              </span>
-            </div>
-          </div>
-          <div className="repl_actions" onClick={(e) => e.stopPropagation()}>
-            <div className="repl_context_badge" title="Estimated context window usage">
-              <span className="muted">ctx</span>
-              <span className="mono">
-                {context_meter.used.toLocaleString()}
-                {context_meter.max_tokens ? `/${(context_meter.max_tokens / 1000).toFixed(0)}k` : ""}
-              </span>
-              {context_meter.max_tokens ? <span className="pct">{context_meter.pct.toFixed(0)}%</span> : null}
-            </div>
-            {active_run_id ? (
-              <button
-                className="btn mini danger"
-                onClick={() => void submit_cancel()}
-                title="Stop / cancel the current run"
-                type="button"
-                disabled={resuming || cancelling}
-              >
-                <Icon name="x" size={14} />
-                {cancelling ? "Stopping…" : "Stop"}
-              </button>
-            ) : null}
-            <button
-              className="btn mini"
-              onClick={() => set_details_open((v) => !v)}
-              title={details_open ? "Hide run details" : "Show run details"}
-              type="button"
-            >
-              {details_open ? <Icon name="chevronDown" size={14} /> : <Icon name="chevronRight" size={14} />}
-            </button>
-            <button
-              className="btn mini"
-              onClick={() => update_repl(() => reset_repl_state({ template: props.repl.template }, props.session_id))}
-              title="Clear chat history"
-              type="button"
-            >
-              <Icon name="trash" size={14} />
-            </button>
-          </div>
+      {/* Integrated header with navigation + session controls */}
+      <header className="header header_integrated">
+        <div className="title">AbstractCode</div>
+        
+        <div className="repl_context_badge" title="Estimated context window usage">
+          <span className="muted">ctx</span>
+          <span className="mono">
+            {context_meter.used.toLocaleString()}
+            {context_meter.max_tokens ? `/${(context_meter.max_tokens / 1000).toFixed(0)}k` : ""}
+          </span>
+          {context_meter.max_tokens ? <span className="pct">{context_meter.pct.toFixed(0)}%</span> : null}
         </div>
+
+        <nav className="nav" role="navigation" aria-label="Main navigation">
+          <button className="btn" onClick={() => props.on_nav("console")} aria-current="page" title="Chat" type="button">
+            <Icon name="chat" className="nav-icon" />
+            <span className="nav-label">Chat</span>
+          </button>
+          <button className="btn" onClick={() => props.on_nav("new")} title="New" type="button">
+            <Icon name="plus" className="nav-icon" />
+            <span className="nav-label">New</span>
+          </button>
+          <button className="btn" onClick={() => props.on_nav("sessions")} title="History" type="button">
+            <Icon name="history" className="nav-icon" />
+            <span className="nav-label">History</span>
+          </button>
+          <button className="btn" onClick={() => props.on_nav("settings")} title="Settings" type="button">
+            <Icon name="settings" className="nav-icon" />
+            <span className="nav-label">Settings</span>
+          </button>
+          {active_run_id ? (
+            <button
+              className="btn danger"
+              onClick={() => void submit_cancel()}
+              title="Stop / cancel the current run"
+              type="button"
+              disabled={resuming || cancelling}
+            >
+              <Icon name="x" className="nav-icon" />
+              <span className="nav-label">{cancelling ? "Stopping…" : "Stop"}</span>
+            </button>
+          ) : null}
+          <button
+            className="btn"
+            onClick={() => set_details_open((v) => !v)}
+            title="Show session info"
+            type="button"
+          >
+            <Icon name="info" className="nav-icon" />
+            <span className="nav-label" style={{ display: 'none' }}>Info</span>
+          </button>
+        </nav>
+      </header>
+      <div className="panel repl_panel">
 
         {details_open ? (
           <div className="repl_details">
             <div className="repl_details_header">
-              <span className="mono muted">details</span>
-              <button className="btn mini" type="button" onClick={() => set_details_open(false)} title="Close details">
+              <span className="mono muted">Session Info</span>
+              <button className="btn mini" type="button" onClick={() => set_details_open(false)} title="Close info">
                 <Icon name="x" size={14} />
               </button>
             </div>
             <div className="field">
+              <label>agent</label>
+              <input className="mono" readOnly value={template_label || "—"} />
+            </div>
+            <div className="field">
+              <label>model</label>
+              <input className="mono" readOnly value={`${props.settings.provider || "—"}/${props.settings.model || "—"}`} />
+            </div>
+            <div className="field">
               <label>active run id</label>
-              <input className="mono" readOnly value={active_run_id || ""} />
+              <input className="mono" readOnly value={active_run_id || "—"} />
+            </div>
+            <div className="field">
+              <label>session id</label>
+              <input className="mono" readOnly value={props.session_id || "—"} />
             </div>
             <div className="field">
               <label>ledger (latest)</label>
@@ -3765,8 +3769,10 @@ function ConsolePage(props: {
                   await start_turn(v);
                 })();
               }}
+              type="button"
             >
-              Send
+              <Icon name="send" size={16} />
+              <span className="send_btn_label">Send</span>
             </button>
           </div>
         </div>

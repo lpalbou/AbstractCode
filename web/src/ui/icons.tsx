@@ -17,7 +17,8 @@ export type IconName =
   | "x"
   | "chevronDown"
   | "chevronRight"
-  | "trash";
+  | "trash"
+  | "send";
 
 function paths(name: IconName): React.ReactNode {
   switch (name) {
@@ -123,6 +124,13 @@ function paths(name: IconName): React.ReactNode {
           <path d="M6 6l1 16h10l1-16" />
           <path d="M10 11v6" />
           <path d="M14 11v6" />
+        </>
+      );
+    case "send":
+      return (
+        <>
+          <path d="M22 2L11 13" />
+          <path d="M22 2L15 22l-4-9-9-4 20-7z" />
         </>
       );
     default:

@@ -20,7 +20,7 @@ from .file_mentions import (
     normalize_relative_path,
     resolve_workspace_path,
 )
-from .fullscreen_ui import FullScreenUI, SubmittedInput
+from .fullscreen_ui import BLOCKING_PROMPT_CANCEL_TOKEN, FullScreenUI, SubmittedInput
 from .terminal_markdown import TerminalMarkdownRenderer
 from .theme import BUILTIN_THEMES, Theme, ansi_bg, ansi_fg, blend_hex, get_theme, is_dark, theme_from_env
 
@@ -511,6 +511,7 @@ class ReactShell:
             get_status_text=self._get_status_text,
             on_input=self._handle_input,
             on_copy_payload=self._copy_to_clipboard,
+            on_cancel=self._handle_ui_cancel,
             color=self._color,
             theme=self._theme,
         )
@@ -552,7 +553,7 @@ class ReactShell:
         # Session-level attachment refs (workspace-relative path -> artifact-backed ref dict).
         # Avoids re-ingesting the same file every turn when attachments persist.
         self._attachment_ref_cache: Dict[str, Dict[str, Any]] = {}
-        # Workspace file signatures (path -> (size_bytes, mtime_ns)) used to detect file changes.
+        # Attachment file signatures (path -> (size_bytes, mtime_ns)) used to detect file changes.
         self._attachment_sig_cache: Dict[str, Tuple[int, int]] = {}
         # Simple in-session dedup for obviously repeated shell commands.
         self._last_execute_command: Optional[str] = None
@@ -593,6 +594,21 @@ class ReactShell:
     # ---------------------------------------------------------------------
     # UI helpers
     # ---------------------------------------------------------------------
+
+    def _handle_ui_cancel(self) -> None:
+        """Handle an Esc cancel request coming from the full-screen UI."""
+        run_id = self._attached_run_id()
+        if run_id is None:
+            return
+        try:
+            state = self._runtime.get_state(run_id)
+        except Exception:
+            state = None
+
+        status = getattr(state, "status", None) if state is not None else None
+        if status not in (self._RunStatus.RUNNING, self._RunStatus.WAITING):
+            return
+        self._cancel()
 
     def _safe_get_state(self):
         """Safely get agent state, returning None if unavailable.
@@ -949,7 +965,11 @@ class ReactShell:
                     entries: List[Dict[str, Any]] = []
                     # Most recent first (match runtime).
                     for rel in reversed(list(pending_attachments)):
-                        key = normalize_relative_path(rel)
+                        key = str(rel or "").strip()
+                        if not key:
+                            continue
+                        if not key.startswith("/"):
+                            key = normalize_relative_path(key)
                         if not key:
                             continue
                         cached = self._attachment_ref_cache.get(key)
@@ -972,7 +992,9 @@ class ReactShell:
                         and isinstance(messages[0], dict)
                         and messages[0].get("role") == "system"
                         and isinstance(messages[0].get("content"), str)
-                        and str(messages[0].get("content") or "").strip().startswith("Session attachments")
+                        and str(messages[0].get("content") or "")
+                        .strip()
+                        .startswith(("Stored session attachments", "Session attachments"))
                     ):
                         extra_msgs.append({"role": "system", "content": msg})
                 except Exception:
@@ -1774,12 +1796,12 @@ class ReactShell:
         cleaned_cmd_text = str(cleaned_cmd or "").strip()
         paths: List[str] = []
         for p in attachment_paths:
-            norm = self._normalize_workspace_attachment_token(p)
+            norm = self._normalize_attachment_token(p)
             if norm:
                 paths.append(norm)
         mention_paths: List[str] = []
         for m in mentions:
-            norm = self._normalize_workspace_attachment_token(m)
+            norm = self._normalize_attachment_token(m)
             if norm:
                 paths.append(norm)
                 mention_paths.append(norm)
@@ -1803,11 +1825,11 @@ class ReactShell:
         # Ingest missing attachments once; reuse cached refs across turns.
         newly_added: List[str] = []
         if paths:
-            def _workspace_sig(rel: str) -> Optional[Tuple[int, int]]:
-                resolved = self._resolve_workspace_file(rel)
+            def _attachment_sig(key: str) -> Optional[Tuple[int, int]]:
+                resolved = self._resolve_attachment_file(key)
                 if resolved is None:
                     return None
-                p, _virt = resolved
+                p, _source_path = resolved
                 try:
                     st = p.stat()
                     size = int(st.st_size)
@@ -1823,15 +1845,15 @@ class ReactShell:
                     needs_ingest.append(rel)
                     continue
                 cached_sig = self._attachment_sig_cache.get(rel)
-                cur_sig = _workspace_sig(rel)
+                cur_sig = _attachment_sig(rel)
                 if cached_sig is not None and cur_sig is not None and cached_sig != cur_sig:
                     needs_ingest.append(rel)
 
             if needs_ingest:
-                for ref in self._ingest_workspace_attachments(needs_ingest):
+                for ref in self._ingest_attachments(needs_ingest):
                     if not isinstance(ref, dict):
                         continue
-                    key = normalize_relative_path(str(ref.get("source_path") or ""))
+                    key = str(ref.get("source_path") or "").strip()
                     if not key:
                         continue
                     prev = self._attachment_ref_cache.get(key)
@@ -1890,32 +1912,51 @@ class ReactShell:
 
         self._start(cleaned_cmd_text, attachments=attachment_refs or None)
 
-    def _normalize_workspace_attachment_token(self, raw_path: str) -> str:
-        """Normalize an `@file` token into a stable virtual path.
+    def _normalize_attachment_token(self, raw_path: str) -> str:
+        """Normalize an attachment token into a stable key.
 
-        Accepts:
-        - Workspace-relative paths (`docs/readme.md`)
-        - Mount-relative paths (`Desktop/toto.png`)
-        - Absolute paths *under* the workspace root or a configured mount root
-          (`/Users/.../Desktop/toto.png`), which are converted to a mount-relative
-          virtual path when possible.
+        Returns either:
+        - a workspace "virtual path" (`docs/readme.md`, `Desktop/foo.png`), or
+        - a canonical absolute path (`/Users/.../Desktop/foo.png`) for local files outside the workspace.
         """
         tok = str(raw_path or "").strip()
         if not tok:
             return ""
-        tok = tok.replace("\\", "/")
-        while tok.startswith("./"):
-            tok = tok[2:]
+        if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
+            tok = tok[1:-1].strip()
+        if not tok:
+            return ""
+
+        if tok.lower().startswith("file://"):
+            try:
+                from urllib.parse import urlparse, unquote
+
+                parsed = urlparse(tok)
+                tok = unquote(parsed.path) if parsed.scheme == "file" else tok[7:]
+            except Exception:
+                tok = tok[7:]
+            tok = str(tok or "").strip()
+            if not tok:
+                return ""
+
+        tok_ws = tok.replace("\\", "/")
+        while tok_ws.startswith("./"):
+            tok_ws = tok_ws[2:]
+
         try:
             _p, virt, _mount, _root = resolve_workspace_path(
-                raw_path=tok,
+                raw_path=tok_ws,
                 workspace_root=self._workspace_root,
                 mounts=dict(self._workspace_mounts or {}),
             )
+            key = normalize_relative_path(str(virt or ""))
+            if key:
+                return key
         except Exception:
-            return ""
-        # `virt` is already normalized to a stable "virtual path" grammar; keep it safe.
-        return normalize_relative_path(str(virt or ""))
+            pass
+
+        p = self._resolve_local_attachment_file(tok)
+        return str(p) if p is not None else ""
 
     def _resolve_workspace_file(self, rel_path: str) -> Optional[tuple[Path, str]]:
         rel = normalize_relative_path(rel_path)
@@ -1956,6 +1997,46 @@ class ReactShell:
             pass
         return (p, virt)
 
+    def _resolve_local_attachment_file(self, raw_path: str) -> Optional[Path]:
+        tok = str(raw_path or "").strip()
+        if not tok:
+            return None
+        try:
+            p = Path(tok).expanduser()
+            if not p.is_absolute():
+                return None
+            p = p.resolve()
+        except Exception:
+            return None
+
+        blocked = list(self._workspace_blocked_paths or [])
+        for b in blocked:
+            if not isinstance(b, Path):
+                continue
+            try:
+                if p.resolve() == b.resolve():
+                    return None
+                p.resolve().relative_to(b.resolve())
+                return None
+            except Exception:
+                continue
+
+        try:
+            if not p.is_file():
+                return None
+        except Exception:
+            return None
+        return p
+
+    def _resolve_attachment_file(self, token: str) -> Optional[tuple[Path, str]]:
+        key = str(token or "").strip()
+        if not key:
+            return None
+        local = self._resolve_local_attachment_file(key)
+        if local is not None:
+            return (local, str(local))
+        return self._resolve_workspace_file(key)
+
     def _max_attachment_bytes(self) -> int:
         raw = os.environ.get("ABSTRACTCODE_MAX_ATTACHMENT_BYTES") or os.environ.get("ABSTRACTGATEWAY_MAX_ATTACHMENT_BYTES")
         try:
@@ -1975,25 +2056,25 @@ class ReactShell:
             return None
         return None
 
-    def _ingest_workspace_attachments(self, rel_paths: Sequence[str]) -> List[Dict[str, Any]]:
-        """Store workspace files in ArtifactStore and return AttachmentRefs (best-effort)."""
+    def _ingest_attachments(self, paths: Sequence[str]) -> List[Dict[str, Any]]:
+        """Store attachment files in ArtifactStore and return AttachmentRefs (best-effort)."""
         import hashlib
         import mimetypes
 
-        paths: list[str] = [normalize_relative_path(p) for p in (rel_paths or []) if normalize_relative_path(p)]
-        if not paths:
+        keys: list[str] = [str(p or "").strip() for p in (paths or []) if str(p or "").strip()]
+        if not keys:
             return []
 
         max_bytes = self._max_attachment_bytes()
         run_id = self._session_memory_run_id()
         out: List[Dict[str, Any]] = []
 
-        for rel in paths:
-            resolved = self._resolve_workspace_file(rel)
+        for key in keys:
+            resolved = self._resolve_attachment_file(key)
             if resolved is None:
-                self._print(_style(f"Attachment ignored/not found: {rel}", _C.YELLOW, enabled=self._color))
+                self._print(_style(f"Attachment ignored/not found: {key}", _C.YELLOW, enabled=self._color))
                 continue
-            p, virt = resolved
+            p, source_path = resolved
 
             try:
                 size = int(p.stat().st_size)
@@ -2004,7 +2085,7 @@ class ReactShell:
             if size >= 0 and size > max_bytes:
                 self._print(
                     _style(
-                        f"Attachment too large ({size:,} bytes > {max_bytes:,}): {rel}",
+                        f"Attachment too large ({size:,} bytes > {max_bytes:,}): {source_path}",
                         _C.YELLOW,
                         enabled=self._color,
                     )
@@ -2014,26 +2095,27 @@ class ReactShell:
             try:
                 content = p.read_bytes()
             except Exception as e:
-                self._print(_style(f"Attachment read failed: {rel} ({e})", _C.YELLOW, enabled=self._color))
+                self._print(_style(f"Attachment read failed: {source_path} ({e})", _C.YELLOW, enabled=self._color))
                 continue
 
             sha256 = hashlib.sha256(bytes(content)).hexdigest()
             ct = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
             try:
+                source = "local" if str(source_path).startswith("/") else "workspace"
                 meta = self._artifact_store.store(
                     bytes(content),
                     content_type=str(ct),
                     run_id=run_id,
                     tags={
                         "kind": "attachment",
-                        "source": "workspace",
-                        "path": virt,
+                        "source": source,
+                        "path": source_path,
                         "filename": str(p.name),
                         "sha256": sha256,
                     },
                 )
             except Exception as e:
-                self._print(_style(f"Attachment ingest failed: {rel} ({e})", _C.YELLOW, enabled=self._color))
+                self._print(_style(f"Attachment ingest failed: {source_path} ({e})", _C.YELLOW, enabled=self._color))
                 continue
 
             out.append(
@@ -2041,7 +2123,7 @@ class ReactShell:
                     "$artifact": str(meta.artifact_id),
                     "filename": str(p.name),
                     "content_type": str(ct),
-                    "source_path": str(virt),
+                    "source_path": str(source_path),
                     "sha256": sha256,
                     "_sig": {"size_bytes": size, "mtime_ns": mtime_ns},
                 }
@@ -2162,6 +2244,8 @@ class ReactShell:
         This uses blocking_prompt which queues a response and waits for user input.
         """
         result = self._ui.blocking_prompt(message)
+        if result == BLOCKING_PROMPT_CANCEL_TOKEN:
+            return result
         if result:
             self._print(f"  → {result}")
         return result.strip()
@@ -8220,6 +8304,8 @@ class ReactShell:
                         self._agent.session_messages = loaded
                     return
                 response = self._prompt_user(wait.prompt or "Please respond:", wait.choices)
+                if response == BLOCKING_PROMPT_CANCEL_TOKEN:
+                    continue
                 state = self._agent.resume(response)
                 continue
 
@@ -8318,6 +8404,8 @@ class ReactShell:
                         if cur_wait.reason == self._WaitReason.USER:
                             self._ui.clear_spinner()
                             response = self._prompt_user(cur_wait.prompt or "Please respond:", cur_wait.choices)
+                            if response == BLOCKING_PROMPT_CANCEL_TOKEN:
+                                continue
                             self._runtime.resume(
                                 workflow=_workflow_for(current_state),
                                 run_id=current_run_id,
@@ -8334,6 +8422,8 @@ class ReactShell:
                             except Exception:
                                 pass
                             response = self._prompt_user(cur_wait.prompt or "Please respond:", cur_wait.choices)
+                            if response == BLOCKING_PROMPT_CANCEL_TOKEN:
+                                continue
                             self._runtime.resume(
                                 workflow=_workflow_for(current_state),
                                 run_id=current_run_id,
@@ -8350,6 +8440,8 @@ class ReactShell:
                             if payload is None:
                                 self._print(_style("\nLeft run waiting (not resumed).", _C.DIM, enabled=self._color))
                                 return
+                            if isinstance(payload, dict) and payload.get("mode") == "cancelled":
+                                continue
                             self._runtime.resume(
                                 workflow=_workflow_for(current_state),
                                 run_id=current_run_id,
@@ -8393,6 +8485,8 @@ class ReactShell:
                 if payload is None:
                     self._print(_style("\nLeft run waiting (not resumed).", _C.DIM, enabled=self._color))
                     return
+                if isinstance(payload, dict) and payload.get("mode") == "cancelled":
+                    continue
 
                 state = self._runtime.resume(
                     workflow=self._agent.workflow,
@@ -8410,6 +8504,8 @@ class ReactShell:
                 except Exception:
                     pass
                 response = self._prompt_user(wait.prompt or "Please respond:", wait.choices)
+                if response == BLOCKING_PROMPT_CANCEL_TOKEN:
+                    continue
                 state = self._runtime.resume(
                     workflow=self._agent.workflow,
                     run_id=run_id,
@@ -8433,6 +8529,8 @@ class ReactShell:
                 self._print(f"  [{i+1}] {c}")
             while True:
                 raw = self._simple_prompt("Choice (number or text): ")
+                if raw == BLOCKING_PROMPT_CANCEL_TOKEN:
+                    return raw
                 if not raw:
                     continue
                 if raw.isdigit():
@@ -8440,7 +8538,8 @@ class ReactShell:
                     if 0 <= idx < len(choices):
                         return str(choices[idx])
                 return raw
-        return self._simple_prompt(prompt + " ")
+        resp = self._simple_prompt(prompt + " ")
+        return resp if resp == BLOCKING_PROMPT_CANCEL_TOKEN else resp.strip()
 
     def _approve_and_execute(self, tool_calls: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         auto = bool(self._auto_approve or self._approve_all_session)
@@ -8482,9 +8581,12 @@ class ReactShell:
 
                 if not auto and not approve_all:
                     while True:
-                        choice = self._simple_prompt(
+                        choice_raw = self._simple_prompt(
                             f"Approve {name}? [y]es/[n]o/[a]ll/[e]dit/[q]uit: "
-                        ).lower()
+                        ).strip()
+                        if choice_raw == BLOCKING_PROMPT_CANCEL_TOKEN:
+                            return {"mode": "cancelled"}
+                        choice = choice_raw.lower()
                         if choice in ("y", "yes"):
                             break
                         if choice in ("a", "all"):
@@ -8507,6 +8609,8 @@ class ReactShell:
                             return None
                         if choice in ("e", "edit"):
                             edited = self._simple_prompt("New arguments (JSON): ")
+                            if edited == BLOCKING_PROMPT_CANCEL_TOKEN:
+                                return {"mode": "cancelled"}
                             if edited:
                                 try:
                                     new_args = json.loads(edited)
@@ -8528,7 +8632,10 @@ class ReactShell:
 
                 # Additional confirmation for shell execution (skip if auto/approve_all is set)
                 if name == "execute_command" and not auto and not approve_all:
-                    confirm = self._simple_prompt("Type 'run' to execute this command: ").lower()
+                    confirm_raw = self._simple_prompt("Type 'run' to execute this command: ")
+                    if confirm_raw == BLOCKING_PROMPT_CANCEL_TOKEN:
+                        return {"mode": "cancelled"}
+                    confirm = confirm_raw.lower()
                     if confirm != "run":
                         results.append(
                             {

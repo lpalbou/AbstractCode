@@ -36,7 +36,14 @@ from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 from prompt_toolkit.styles import Style
 
-from .file_mentions import default_workspace_mounts, default_workspace_root, list_workspace_files, search_workspace_files
+from .file_mentions import (
+    default_workspace_mounts,
+    default_workspace_root,
+    list_workspace_files,
+    normalize_relative_path,
+    resolve_workspace_path,
+    search_workspace_files,
+)
 from .theme import BUILTIN_THEMES, Theme, ansi_bg, ansi_fg, blend_hex, is_dark, theme_from_env
 
 
@@ -92,6 +99,10 @@ COMMANDS = [
     ("exit", "Exit"),
     ("q", "Exit"),
 ]
+
+# Internal token used to unblock `blocking_prompt()` when the user presses Esc to cancel.
+# This is intentionally unlikely to be typed manually.
+BLOCKING_PROMPT_CANCEL_TOKEN = "__ABSTRACTCODE_UI_CANCEL__"
 
 @dataclass(frozen=True)
 class SubmittedInput:
@@ -334,6 +345,7 @@ class FullScreenUI:
         on_input: Callable[[SubmittedInput], None],
         on_copy_payload: Optional[Callable[[str], bool]] = None,
         on_fold_toggle: Optional[Callable[[str], None]] = None,
+        on_cancel: Optional[Callable[[], None]] = None,
         color: bool = True,
         mouse_support: bool = True,
         theme: Theme | None = None,
@@ -347,6 +359,7 @@ class FullScreenUI:
         """
         self._get_status_text = get_status_text
         self._on_input = on_input
+        self._on_cancel = on_cancel
         self._color = color
         self._mouse_support_enabled = bool(mouse_support)
         self._running = False
@@ -416,6 +429,8 @@ class FullScreenUI:
         # Worker thread
         self._worker_thread: Optional[threading.Thread] = None
         self._shutdown = False
+        # Ctrl+C exit gating (double-press to exit).
+        self._last_ctrl_c_at: Optional[float] = None
 
         # Spinner state for visual feedback during processing
         self._spinner_text: str = ""
@@ -1277,6 +1292,139 @@ class FullScreenUI:
             except Exception:
                 pass
 
+    def _attachment_tokens_from_paste(self, paste: str) -> List[str]:
+        """Return attachment chip tokens for a paste payload, or [] if not path-only."""
+        import shlex
+
+        raw = str(paste or "").strip()
+        if not raw:
+            return []
+
+        raw = raw.replace("\r\n", "\n").replace("\r", "\n")
+        raw = " ".join([ln.strip() for ln in raw.split("\n") if ln.strip()]).strip()
+        if not raw:
+            return []
+
+        tokens: List[str] = []
+        for posix in (True, False):
+            try:
+                tokens = shlex.split(raw, posix=posix)
+            except Exception:
+                tokens = []
+            if tokens:
+                break
+        if not tokens:
+            tokens = raw.split()
+
+        mounts = dict(self._workspace_mounts or {})
+        blocked = list(self._workspace_blocked_paths or [])
+
+        def _is_blocked(path: Path) -> bool:
+            try:
+                resolved = path.resolve()
+            except Exception:
+                resolved = path
+            for b in blocked:
+                if not isinstance(b, Path):
+                    continue
+                try:
+                    br = b.resolve()
+                except Exception:
+                    br = b
+                try:
+                    if resolved == br:
+                        return True
+                    resolved.relative_to(br)
+                    return True
+                except Exception:
+                    continue
+            return False
+
+        out: List[str] = []
+        for tok0 in tokens:
+            tok = str(tok0 or "").strip()
+            if not tok:
+                return []
+            if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
+                tok = tok[1:-1].strip()
+            if not tok:
+                return []
+
+            if tok.lower().startswith("file://"):
+                try:
+                    from urllib.parse import urlparse, unquote
+
+                    parsed = urlparse(tok)
+                    tok = unquote(parsed.path) if parsed.scheme == "file" else tok[7:]
+                except Exception:
+                    tok = tok[7:]
+                tok = str(tok or "").strip()
+                if not tok:
+                    return []
+
+            while tok.startswith("./"):
+                tok = tok[2:]
+
+            # Prefer workspace/mount resolution when possible (stable virtual paths).
+            try:
+                p, virt, mount, _root = resolve_workspace_path(
+                    raw_path=tok,
+                    workspace_root=self._workspace_root,
+                    mounts=mounts,
+                )
+            except Exception:
+                p = None
+
+            if p is not None:
+                if _is_blocked(p):
+                    return []
+                try:
+                    if not p.is_file():
+                        return []
+                except Exception:
+                    return []
+                try:
+                    ign = self._workspace_ignore if mount is None else self._workspace_mount_ignores.get(str(mount))
+                    if ign is not None and ign.is_ignored(p, is_dir=False):
+                        return []
+                except Exception:
+                    pass
+                key = normalize_relative_path(str(virt or ""))
+                if not key:
+                    return []
+                out.append(key)
+                continue
+
+            # Otherwise accept any existing absolute file path (canonicalized).
+            try:
+                p2 = Path(tok).expanduser()
+                if not p2.is_absolute():
+                    return []
+                p2 = p2.resolve()
+            except Exception:
+                return []
+            if _is_blocked(p2):
+                return []
+            try:
+                if not p2.is_file():
+                    return []
+            except Exception:
+                return []
+            out.append(str(p2))
+
+        return out
+
+    def maybe_add_attachments_from_paste(self, paste: str) -> bool:
+        """Try to interpret a paste payload as dropped file path(s).
+
+        Returns True if the paste was consumed (attachments added); otherwise False.
+        """
+        rels = self._attachment_tokens_from_paste(paste)
+        if not rels:
+            return False
+        self.add_attachments(rels)
+        return True
+
     def set_files_keep(self, enabled: bool) -> None:
         """Set whether attachment chips persist across turns."""
         self._files_keep = bool(enabled)
@@ -1940,12 +2088,29 @@ class FullScreenUI:
             if buff.complete_state:
                 buff.complete_next()
 
-        # Ctrl+C = exit
+        @self._kb.add("escape", filter=has_completions & dropdown_closed)
+        def escape_close_completion(event):
+            try:
+                event.current_buffer.cancel_completion()
+            except Exception:
+                try:
+                    event.current_buffer.complete_state = None
+                except Exception:
+                    pass
+            event.app.invalidate()
+
+        @self._kb.add("escape", filter=~has_completions & dropdown_closed)
+        def escape_cancel(event):
+            self.request_cancel()
+            event.app.invalidate()
+
+        # Ctrl+C = clear draft (double-press to exit)
         @self._kb.add("c-c")
         def handle_ctrl_c(event):
-            self._shutdown = True
-            self._command_queue.put(None)  # Signal worker to stop
-            event.app.exit(result=None)
+            if self._ctrl_c_should_exit():
+                self.stop()
+                return
+            event.app.invalidate()
 
         # Ctrl+D = exit (EOF)
         @self._kb.add("c-d")
@@ -2019,6 +2184,19 @@ class FullScreenUI:
         @self._kb.add("c-j")
         def handle_ctrl_j(event):
             self._input_buffer.insert_text("\n")
+
+        # Terminal drag&drop often arrives as a bracketed paste containing file paths.
+        @self._kb.add("<bracketed-paste>", filter=dropdown_closed)
+        def handle_bracketed_paste(event):
+            data = getattr(event, "data", "")
+            if self.maybe_add_attachments_from_paste(str(data or "")):
+                event.app.invalidate()
+                return
+            try:
+                event.current_buffer.insert_text(str(data or ""))
+            except Exception:
+                pass
+            event.app.invalidate()
 
     def _get_total_lines(self) -> int:
         """Get total number of lines in output (thread-safe)."""
@@ -2596,6 +2774,64 @@ class FullScreenUI:
             return ""
         finally:
             self._pending_blocking_prompt = None
+
+    def request_cancel(self) -> None:
+        """Request cancellation (Esc hotkey).
+
+        - Unblocks a pending `blocking_prompt()` by injecting a sentinel token.
+        - Delegates cancellation to the provided `on_cancel` callback when available.
+        """
+        try:
+            q = self._pending_blocking_prompt
+            if q is not None:
+                q.put(BLOCKING_PROMPT_CANCEL_TOKEN)
+        except Exception:
+            pass
+
+        cb = getattr(self, "_on_cancel", None)
+        if callable(cb):
+            try:
+                cb()
+            except Exception:
+                pass
+        else:
+            try:
+                self._command_queue.put(SubmittedInput(text="/cancel", attachments=[]))
+            except Exception:
+                pass
+
+        try:
+            if self._app and self._app.is_running:
+                self._app.invalidate()
+        except Exception:
+            pass
+
+    def _ctrl_c_should_exit(self, *, now: Optional[float] = None) -> bool:
+        """Return True if Ctrl+C should exit; otherwise clears draft or arms exit."""
+        try:
+            t = float(time.monotonic() if now is None else now)
+        except Exception:
+            t = float(time.monotonic())
+
+        try:
+            has_text = bool(str(self._input_buffer.text or ""))
+        except Exception:
+            has_text = False
+
+        if has_text:
+            try:
+                self._input_buffer.reset()
+            except Exception:
+                pass
+            self._last_ctrl_c_at = t
+            return False
+
+        last = self._last_ctrl_c_at
+        if isinstance(last, (int, float)) and (t - float(last)) < 1.2:
+            return True
+
+        self._last_ctrl_c_at = t
+        return False
 
     def stop(self) -> None:
         """Stop the run loop and exit the application."""
