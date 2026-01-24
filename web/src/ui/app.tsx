@@ -1573,8 +1573,10 @@ function NewChatPage(props: { gateway: GatewayClient; repl: ReplState; on_start:
   const [templates, set_templates] = useState<AgentTemplate[]>([]);
   const [loading, set_loading] = useState(false);
   const [reloading_bundles, set_reloading_bundles] = useState(false);
+  const [uploading_bundle, set_uploading_bundle] = useState(false);
   const [error, set_error] = useState("");
   const [selected, set_selected] = useState<AgentTemplate | null>(null);
+  const upload_bundle_input_ref = useRef<HTMLInputElement | null>(null);
 
   const refresh_templates = async (opts?: { preserve_selection?: boolean }): Promise<void> => {
     set_loading(true);
@@ -1607,6 +1609,20 @@ function NewChatPage(props: { gateway: GatewayClient; repl: ReplState; on_start:
       set_error(String(e?.message || e || "Bundle reload failed"));
     } finally {
       set_reloading_bundles(false);
+    }
+  };
+
+  const upload_bundle = async (file: File): Promise<void> => {
+    set_uploading_bundle(true);
+    set_error("");
+    try {
+      await props.gateway.upload_bundle(file, { overwrite: false, reload: true });
+      await refresh_templates({ preserve_selection: true });
+    } catch (e: any) {
+      set_error(String(e?.message || e || "Bundle upload failed"));
+    } finally {
+      set_uploading_bundle(false);
+      if (upload_bundle_input_ref.current) upload_bundle_input_ref.current.value = "";
     }
   };
 
@@ -1676,14 +1692,33 @@ function NewChatPage(props: { gateway: GatewayClient; repl: ReplState; on_start:
       </div>
 
       <div className="actions">
+        <input
+          ref={upload_bundle_input_ref}
+          type="file"
+          accept=".flow"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void upload_bundle(f);
+          }}
+        />
         <button
           className="btn"
           type="button"
-          disabled={loading || reloading_bundles}
+          disabled={loading || reloading_bundles || uploading_bundle}
           onClick={() => void reload_gateway_bundles()}
           title="Reload the gateway’s in-memory .flow bundles (useful after updating bundles on disk)."
         >
           {reloading_bundles ? "Reloading…" : "Reload bundles"}
+        </button>
+        <button
+          className="btn"
+          type="button"
+          disabled={loading || reloading_bundles || uploading_bundle}
+          onClick={() => upload_bundle_input_ref.current?.click()}
+          title="Upload a .flow bundle to the gateway."
+        >
+          {uploading_bundle ? "Uploading…" : "Upload .flow"}
         </button>
         <button className="btn primary" disabled={!selected} onClick={() => start()}>
           Start new chat

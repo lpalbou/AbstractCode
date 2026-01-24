@@ -5,6 +5,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -109,6 +110,72 @@ def _request_json(
             raw = ""
         detail = raw.strip() or str(e)
         raise RuntimeError(f"Gateway HTTP {e.code}: {detail}") from e
+
+
+def _request_multipart(
+    *,
+    url: str,
+    token: Optional[str],
+    fields: Dict[str, str],
+    file_field: str,
+    filename: str,
+    content: bytes,
+    content_type: str = "application/octet-stream",
+    timeout_s: float = 60.0,
+) -> Dict[str, Any]:
+    boundary = uuid.uuid4().hex
+    crlf = b"\r\n"
+    body = bytearray()
+
+    for k, v in (fields or {}).items():
+        body.extend(b"--" + boundary.encode("ascii") + crlf)
+        body.extend(f'Content-Disposition: form-data; name="{k}"'.encode("utf-8"))
+        body.extend(crlf + crlf)
+        body.extend(str(v).encode("utf-8"))
+        body.extend(crlf)
+
+    body.extend(b"--" + boundary.encode("ascii") + crlf)
+    body.extend(f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"'.encode("utf-8"))
+    body.extend(crlf)
+    body.extend(f"Content-Type: {content_type}".encode("utf-8"))
+    body.extend(crlf + crlf)
+    body.extend(bytes(content or b""))
+    body.extend(crlf)
+    body.extend(b"--" + boundary.encode("ascii") + b"--" + crlf)
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    req = Request(url=url, data=bytes(body), headers=headers, method="POST")
+    try:
+        with urlopen(req, timeout=float(timeout_s)) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+    except HTTPError as e:
+        try:
+            raw = e.read().decode("utf-8")
+        except Exception:
+            raw = ""
+        detail = raw.strip() or str(e)
+        raise RuntimeError(f"Gateway HTTP {e.code}: {detail}") from e
+
+
+def _split_bundle_ref(raw: str) -> tuple[str, Optional[str]]:
+    s = str(raw or "").strip()
+    if not s:
+        return ("", None)
+    if "@" not in s:
+        return (s, None)
+    a, b = s.split("@", 1)
+    a = a.strip()
+    b = b.strip() if b.strip() else None
+    if not a:
+        return ("", None)
+    return (a, b)
 
 
 @dataclass(frozen=True)
@@ -227,6 +294,62 @@ class GatewayApi:
             timeout_s=float(timeout_s),
         )
 
+    def list_bundles(self, *, all_versions: bool = False) -> Dict[str, Any]:
+        qs = "all_versions=true" if bool(all_versions) else "all_versions=false"
+        return _request_json(
+            method="GET",
+            url=_join_url(self.base_url, f"/api/gateway/bundles?{qs}"),
+            token=self.token,
+            payload=None,
+        )
+
+    def get_bundle(self, *, bundle_id: str, bundle_version: Optional[str] = None) -> Dict[str, Any]:
+        bid = str(bundle_id or "").strip()
+        if not bid:
+            raise ValueError("bundle_id is required")
+        qs = f"?bundle_version={bundle_version}" if isinstance(bundle_version, str) and bundle_version.strip() else ""
+        return _request_json(
+            method="GET",
+            url=_join_url(self.base_url, f"/api/gateway/bundles/{bid}{qs}"),
+            token=self.token,
+            payload=None,
+        )
+
+    def upload_bundle(self, *, path: str, overwrite: bool = False, reload: bool = True) -> Dict[str, Any]:
+        src = Path(str(path or "").strip()).expanduser().resolve()
+        if not src.exists() or not src.is_file():
+            raise FileNotFoundError(f"Bundle not found: {src}")
+        content = src.read_bytes()
+        return _request_multipart(
+            url=_join_url(self.base_url, "/api/gateway/bundles/upload"),
+            token=self.token,
+            fields={"overwrite": "true" if overwrite else "false", "reload": "true" if reload else "false"},
+            file_field="file",
+            filename=src.name,
+            content=content,
+            content_type="application/octet-stream",
+            timeout_s=60.0,
+        )
+
+    def remove_bundle(self, *, bundle_ref: str, reload: bool = True) -> Dict[str, Any]:
+        bid, ver = _split_bundle_ref(bundle_ref)
+        if not bid:
+            raise ValueError("bundle_ref must be 'bundle_id' or 'bundle_id@version'")
+        qs = []
+        if ver:
+            qs.append(f"bundle_version={ver}")
+        if bool(reload):
+            qs.append("reload=true")
+        else:
+            qs.append("reload=false")
+        q = ("?" + "&".join(qs)) if qs else ""
+        return _request_json(
+            method="DELETE",
+            url=_join_url(self.base_url, f"/api/gateway/bundles/{bid}{q}"),
+            token=self.token,
+            payload=None,
+        )
+
 
 def _extract_sub_run_id_from_step(record: Dict[str, Any]) -> Optional[str]:
     if not isinstance(record, dict):
@@ -334,7 +457,7 @@ def query_gateway_kg_command(
     active_at: Optional[str] = None,
     query_text: Optional[str] = None,
     min_score: Optional[float] = None,
-    limit: int = 500,
+    limit: int = 0,
     order: str = "desc",
     fmt: str = "triples",
     pretty: bool = False,
@@ -344,9 +467,19 @@ def query_gateway_kg_command(
     scope_norm = str(scope or "").strip().lower() or "session"
     if not id_value and not all_owners and scope_norm not in {"global"} and not owner_id:
         raise SystemExit("abstractcode gateway kg: id is required unless using --scope global or --all-owners (or provide --owner-id)")
+
+    run_id_arg: Optional[str] = None
+    session_id_arg: Optional[str] = None
+    if id_value and scope_norm != "global" and not all_owners and not owner_id:
+        # Prefer session_id for session scope (common id shape overlaps with run_ids).
+        if scope_norm == "session":
+            session_id_arg = id_value
+        else:
+            run_id_arg = id_value
     try:
         resp = api.kg_query(
-            run_id=id_value if (id_value and scope_norm != "global" and not all_owners) else None,
+            run_id=run_id_arg,
+            session_id=session_id_arg,
             scope=str(scope_norm),
             owner_id=owner_id,
             all_owners=bool(all_owners),

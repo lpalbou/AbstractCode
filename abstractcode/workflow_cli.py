@@ -1,156 +1,168 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any, Optional
 
 
-def _default_registry_dir() -> Path:
-    from abstractruntime.workflow_bundle import default_workflow_bundles_dir
+def _gateway_api(*, gateway_url: Optional[str], gateway_token: Optional[str]):
+    from .gateway_cli import GatewayApi, default_gateway_token, default_gateway_url
 
-    return default_workflow_bundles_dir()
+    url = str(gateway_url or "").strip() or default_gateway_url()
+    token_raw = str(gateway_token or "").strip()
+    token = token_raw if token_raw else default_gateway_token()
+    return GatewayApi(base_url=url, token=token)
 
 
 def install_workflow_bundle_command(
     *,
     source: str,
-    registry_dir: Optional[str] = None,
+    gateway_url: Optional[str] = None,
+    gateway_token: Optional[str] = None,
     overwrite: bool = False,
     output_json: bool = False,
 ) -> dict[str, Any]:
-    from abstractruntime.workflow_bundle import WorkflowBundleRegistry, WorkflowBundleRegistryError
-
-    reg = WorkflowBundleRegistry(registry_dir or _default_registry_dir())
+    api = _gateway_api(gateway_url=gateway_url, gateway_token=gateway_token)
     try:
-        installed = reg.install(source, overwrite=bool(overwrite))
-    except WorkflowBundleRegistryError as e:
+        resp = api.upload_bundle(path=source, overwrite=bool(overwrite), reload=True)
+    except Exception as e:
         return {"ok": False, "error": str(e)}
 
-    out = {
-        "ok": True,
-        "bundle_id": installed.bundle_id,
-        "bundle_version": installed.bundle_version,
-        "bundle_ref": installed.bundle_ref,
-        "bundle_path": str(installed.path),
-        "sha256": installed.sha256,
-        "registry_dir": str(reg.bundles_dir),
-    }
+    out = dict(resp or {})
+    out.setdefault("gateway_url", str(getattr(api, "base_url", "") or ""))
     if output_json:
         print(json.dumps(out, indent=2, ensure_ascii=False))
     else:
-        print(f"Installed: {installed.bundle_ref} -> {installed.path}")
+        bref = str(out.get("bundle_ref") or "").strip() or str(out.get("bundle_id") or "").strip() or "?"
+        print(f"Installed on gateway: {bref}")
     return out
 
 
 def list_workflow_bundles_command(
     *,
-    registry_dir: Optional[str] = None,
+    gateway_url: Optional[str] = None,
+    gateway_token: Optional[str] = None,
     interface: Optional[str] = None,
     all_versions: bool = False,
     output_json: bool = False,
 ) -> dict[str, Any]:
-    from abstractruntime.workflow_bundle import WorkflowBundleRegistry
+    api = _gateway_api(gateway_url=gateway_url, gateway_token=gateway_token)
+    try:
+        resp = api.list_bundles(all_versions=bool(all_versions))
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
-    reg = WorkflowBundleRegistry(registry_dir or _default_registry_dir())
-    eps = reg.list_entrypoints(interface=interface, latest_only=not bool(all_versions))
-    items = [
-        {
-            "bundle_id": e.bundle_id,
-            "bundle_version": e.bundle_version,
-            "bundle_ref": e.bundle_ref,
-            "workflow_id": e.workflow_id,
-            "flow_id": e.flow_id,
-            "name": e.name,
-            "description": e.description,
-            "interfaces": list(e.interfaces),
-            "default": bool(e.is_default),
-        }
-        for e in eps
-    ]
-    out = {"ok": True, "registry_dir": str(reg.bundles_dir), "count": len(items), "entrypoints": items}
+    bundles_raw = resp.get("items") if isinstance(resp, dict) and isinstance(resp.get("items"), list) else []
+    items: list[dict[str, Any]] = []
+    for b in bundles_raw:
+        if not isinstance(b, dict):
+            continue
+        bid = str(b.get("bundle_id") or "").strip()
+        bver = str(b.get("bundle_version") or "").strip()
+        bref = str(b.get("bundle_ref") or "").strip() or (f"{bid}@{bver}" if bid and bver else bid)
+        eps_raw = b.get("entrypoints") if isinstance(b.get("entrypoints"), list) else []
+        default_fid = str(b.get("default_entrypoint") or "").strip()
+        implied_default = len(eps_raw) == 1
+        for ep in eps_raw:
+            if not isinstance(ep, dict):
+                continue
+            fid = str(ep.get("flow_id") or "").strip()
+            if not fid:
+                continue
+            interfaces = [str(x).strip() for x in list(ep.get("interfaces") or []) if isinstance(x, str) and x.strip()]
+            if interface and interface not in interfaces:
+                continue
+            items.append(
+                {
+                    "bundle_id": bid,
+                    "bundle_version": bver,
+                    "bundle_ref": bref,
+                    "workflow_id": f"{bref}:{fid}" if bref and fid else None,
+                    "flow_id": fid,
+                    "name": str(ep.get("name") or "") or fid,
+                    "description": str(ep.get("description") or "") or "",
+                    "interfaces": interfaces,
+                    "default": bool(implied_default or (default_fid and fid == default_fid)),
+                }
+            )
+
+    items.sort(key=lambda x: (str(x.get("bundle_id") or ""), str(x.get("bundle_version") or ""), str(x.get("flow_id") or "")))
+    out = {"ok": True, "gateway_url": str(getattr(api, "base_url", "") or ""), "count": len(items), "entrypoints": items}
     if output_json:
         print(json.dumps(out, indent=2, ensure_ascii=False))
     else:
         if not items:
-            print(f"No workflows found in {reg.bundles_dir}")
+            print("No workflows found on the gateway.")
         for it in items:
-            name = it.get("name") or it.get("bundle_id") or ""
+            name = it.get("name") or it.get("workflow_id") or ""
             iface = ""
             interfaces = it.get("interfaces") or []
             if isinstance(interfaces, list) and interfaces:
                 iface = f" [{', '.join(interfaces)}]"
             default = " *" if it.get("default") else ""
-            print(f"{it['bundle_ref']}{default}  {name}{iface}")
+            wid = str(it.get("workflow_id") or it.get("bundle_ref") or "")
+            print(f"{wid}{default}  {name}{iface}")
     return out
 
 
 def workflow_bundle_info_command(
     *,
     bundle_ref: str,
-    registry_dir: Optional[str] = None,
+    gateway_url: Optional[str] = None,
+    gateway_token: Optional[str] = None,
     output_json: bool = False,
 ) -> dict[str, Any]:
-    from abstractruntime.workflow_bundle import WorkflowBundleRegistry, WorkflowBundleRegistryError
-
-    reg = WorkflowBundleRegistry(registry_dir or _default_registry_dir())
+    api = _gateway_api(gateway_url=gateway_url, gateway_token=gateway_token)
+    ref = str(bundle_ref or "").strip()
+    if not ref:
+        return {"ok": False, "error": "bundle_ref is required"}
+    bid, ver = (ref.split("@", 1) + [""])[:2] if "@" in ref else (ref, "")
+    ver2 = ver.strip() or None
     try:
-        b = reg.resolve_bundle(bundle_ref)
-    except WorkflowBundleRegistryError as e:
+        resp = api.get_bundle(bundle_id=str(bid).strip(), bundle_version=ver2)
+    except Exception as e:
         return {"ok": False, "error": str(e)}
 
-    man = b.manifest
-    entrypoints = [
-        {
-            "flow_id": str(getattr(ep, "flow_id", "") or ""),
-            "name": str(getattr(ep, "name", "") or ""),
-            "description": str(getattr(ep, "description", "") or ""),
-            "interfaces": list(getattr(ep, "interfaces", None) or []),
-        }
-        for ep in list(getattr(man, "entrypoints", None) or [])
-    ]
-    out = {
-        "ok": True,
-        "registry_dir": str(reg.bundles_dir),
-        "bundle_id": b.bundle_id,
-        "bundle_version": b.bundle_version,
-        "bundle_ref": b.bundle_ref,
-        "bundle_path": str(b.path),
-        "created_at": str(getattr(man, "created_at", "") or ""),
-        "default_entrypoint": str(getattr(man, "default_entrypoint", "") or "") or None,
-        "entrypoints": entrypoints,
-        "flows": dict(getattr(man, "flows", None) or {}),
-        "assets": dict(getattr(man, "assets", None) or {}),
-        "metadata": dict(getattr(man, "metadata", None) or {}),
-    }
+    out = dict(resp or {})
+    out.setdefault("ok", True)
+    out.setdefault("gateway_url", str(getattr(api, "base_url", "") or ""))
     if output_json:
         print(json.dumps(out, indent=2, ensure_ascii=False))
     else:
-        print(f"{b.bundle_ref} ({b.path})")
-        if out.get("default_entrypoint"):
-            print(f"default: {out['default_entrypoint']}")
-        for ep in entrypoints:
-            name = ep.get("name") or ep.get("flow_id") or ""
-            print(f"- {ep.get('flow_id')}  {name}")
+        bref = str(out.get("bundle_ref") or out.get("bundle_id") or "").strip()
+        print(bref or ref)
+        de = out.get("default_entrypoint")
+        if isinstance(de, str) and de.strip():
+            print(f"default: {de.strip()}")
+        eps = out.get("entrypoints") if isinstance(out.get("entrypoints"), list) else []
+        for ep in eps:
+            if not isinstance(ep, dict):
+                continue
+            fid = str(ep.get("flow_id") or "").strip()
+            name = str(ep.get("name") or "").strip() or fid
+            if fid:
+                print(f"- {fid}  {name}")
     return out
 
 
 def remove_workflow_bundle_command(
     *,
     bundle_ref: str,
-    registry_dir: Optional[str] = None,
+    gateway_url: Optional[str] = None,
+    gateway_token: Optional[str] = None,
     output_json: bool = False,
 ) -> dict[str, Any]:
-    from abstractruntime.workflow_bundle import WorkflowBundleRegistry, WorkflowBundleRegistryError
-
-    reg = WorkflowBundleRegistry(registry_dir or _default_registry_dir())
+    api = _gateway_api(gateway_url=gateway_url, gateway_token=gateway_token)
     try:
-        removed = int(reg.remove(bundle_ref))
-    except WorkflowBundleRegistryError as e:
+        resp = api.remove_bundle(bundle_ref=str(bundle_ref or "").strip(), reload=True)
+    except Exception as e:
         return {"ok": False, "error": str(e)}
 
-    out = {"ok": True, "removed": removed, "registry_dir": str(reg.bundles_dir)}
+    out = dict(resp or {})
+    out.setdefault("gateway_url", str(getattr(api, "base_url", "") or ""))
     if output_json:
         print(json.dumps(out, indent=2, ensure_ascii=False))
     else:
-        print(f"Removed {removed} bundle(s) from {reg.bundles_dir}")
+        removed = out.get("removed")
+        bref = str(out.get("bundle_ref") or bundle_ref or "").strip() or "?"
+        print(f"Removed {removed} bundle(s) from gateway for {bref}")
     return out

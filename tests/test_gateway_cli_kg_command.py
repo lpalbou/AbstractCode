@@ -43,7 +43,7 @@ def test_query_gateway_kg_command_builds_request_and_formats_triples(monkeypatch
     gateway_cli.query_gateway_kg_command(
         gateway_url="http://example:8081",
         gateway_token="t",
-        run_id="run-1",
+        run_id="sess-1",
         scope="session",
         subject="ex:person-laurent",
         predicate="rdf:type",
@@ -69,7 +69,7 @@ def test_query_gateway_kg_command_builds_request_and_formats_triples(monkeypatch
     assert called["token"] == "t"
     assert isinstance(called["payload"], dict)
     payload = called["payload"]
-    assert payload["run_id"] == "run-1"
+    assert payload["session_id"] == "sess-1"
     assert payload["scope"] == "session"
     assert payload["subject"] == "ex:person-laurent"
     assert payload["predicate"] == "rdf:type"
@@ -165,9 +165,7 @@ def test_query_gateway_kg_command_all_owners_allows_missing_id(
     assert "run_id" not in payload
 
 
-def test_query_gateway_kg_command_retries_with_session_id_on_run_not_found(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_query_gateway_kg_command_uses_session_id_for_scope_session(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from abstractcode import gateway_cli
 
     calls: list[dict] = []
@@ -178,8 +176,6 @@ def test_query_gateway_kg_command_retries_with_session_id_on_run_not_found(
         assert token == "t"
         assert isinstance(payload, dict)
         calls.append(dict(payload))
-        if payload.get("run_id") == "sess-uuid" and "session_id" not in payload:
-            raise RuntimeError("Gateway HTTP 404: {\"detail\":\"Run 'sess-uuid' not found\"}")
         return {
             "ok": True,
             "scope": "session",
@@ -201,9 +197,9 @@ def test_query_gateway_kg_command_retries_with_session_id_on_run_not_found(
     out, err = capsys.readouterr()
     assert json.loads(out)["ok"] is True
     assert err.strip() == ""
-    assert len(calls) == 2
-    assert calls[0].get("run_id") == "sess-uuid"
-    assert calls[1].get("session_id") == "sess-uuid"
+    assert len(calls) == 1
+    assert calls[0].get("session_id") == "sess-uuid"
+    assert "run_id" not in calls[0]
 
 
 def test_query_gateway_kg_command_retries_with_session_id_for_scope_all_on_run_not_found(

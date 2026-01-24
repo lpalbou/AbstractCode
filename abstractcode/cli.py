@@ -156,30 +156,30 @@ def build_agent_parser() -> argparse.ArgumentParser:
 def build_workflow_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="abstractcode workflow",
-        description="Manage installed WorkflowBundle (.flow) bundles for discovery and reuse.",
+        description="Manage WorkflowBundle (.flow) bundles on an AbstractGateway host (upload/remove/discovery).",
     )
     sub = parser.add_subparsers(dest="command")
 
-    install = sub.add_parser("install", help="Install a .flow bundle into the local registry")
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--gateway-url", default=None, help="Gateway base URL (default: $ABSTRACTCODE_GATEWAY_URL)")
+    common.add_argument("--gateway-token", default=None, help="Gateway auth token (default: $ABSTRACTCODE_GATEWAY_TOKEN)")
+
+    install = sub.add_parser("install", parents=[common], help="Upload/install a .flow bundle onto the gateway")
     install.add_argument("source", help="Path to a .flow file")
-    install.add_argument("--registry-dir", default=None, help="Registry directory containing installed .flow bundles")
     install.add_argument("--overwrite", action="store_true", help="Overwrite if already installed")
     install.add_argument("--json", action="store_true", help="Output JSON")
 
-    ls = sub.add_parser("list", help="List available workflow entrypoints")
-    ls.add_argument("--registry-dir", default=None, help="Registry directory containing installed .flow bundles")
+    ls = sub.add_parser("list", parents=[common], help="List available workflow entrypoints (from gateway bundles)")
     ls.add_argument("--interface", default=None, help="Filter entrypoints by interface id")
     ls.add_argument("--all", action="store_true", help="Include all versions (default: latest only)")
     ls.add_argument("--json", action="store_true", help="Output JSON")
 
-    info = sub.add_parser("info", help="Show details for an installed bundle")
+    info = sub.add_parser("info", parents=[common], help="Show details for an installed bundle")
     info.add_argument("bundle", help="Bundle ref: bundle_id or bundle_id@version")
-    info.add_argument("--registry-dir", default=None, help="Registry directory containing installed .flow bundles")
     info.add_argument("--json", action="store_true", help="Output JSON")
 
-    rm = sub.add_parser("remove", help="Remove an installed bundle (bundle_id or bundle_id@version)")
+    rm = sub.add_parser("remove", parents=[common], help="Remove an installed bundle (bundle_id or bundle_id@version)")
     rm.add_argument("bundle", help="Bundle ref: bundle_id or bundle_id@version")
-    rm.add_argument("--registry-dir", default=None, help="Registry directory containing installed .flow bundles")
     rm.add_argument("--json", action="store_true", help="Output JSON")
 
     return parser
@@ -711,7 +711,7 @@ def build_gateway_parser() -> argparse.ArgumentParser:
     kg.add_argument("--active-at", dest="active_at", default=None, help="Filter: valid_from/valid_until window intersection")
     kg.add_argument("--query-text", dest="query_text", default=None, help="Optional semantic query text (requires embedder configured on the store)")
     kg.add_argument("--min-score", dest="min_score", type=float, default=None, help="Semantic similarity threshold (0..1)")
-    kg.add_argument("--limit", type=int, default=500, help="Max results (default: 500; 0/-1 = unlimited; positive max: 10000)")
+    kg.add_argument("--limit", type=int, default=0, help="Max results (default: 0 = unlimited; -1 = unlimited; positive = limit)")
     kg.add_argument("--order", choices=("asc", "desc"), default="desc", help="Order by observed_at for non-semantic queries (default: desc)")
     kg.add_argument(
         "--format",
@@ -784,7 +784,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 active_at=getattr(args, "active_at", None),
                 query_text=getattr(args, "query_text", None),
                 min_score=getattr(args, "min_score", None),
-                limit=int(getattr(args, "limit", 500)),
+                limit=int(getattr(args, "limit", 0)),
                 order=str(getattr(args, "order", "desc") or "desc"),
                 fmt=str(getattr(args, "format", "triples") or "triples"),
                 pretty=bool(getattr(args, "pretty", False)),
@@ -898,14 +898,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if cmd == "install":
             install_workflow_bundle_command(
                 source=str(args.source),
-                registry_dir=getattr(args, "registry_dir", None),
+                gateway_url=getattr(args, "gateway_url", None),
+                gateway_token=getattr(args, "gateway_token", None),
                 overwrite=bool(getattr(args, "overwrite", False)),
                 output_json=bool(getattr(args, "json", False)),
             )
             return 0
         if cmd == "list":
             list_workflow_bundles_command(
-                registry_dir=getattr(args, "registry_dir", None),
+                gateway_url=getattr(args, "gateway_url", None),
+                gateway_token=getattr(args, "gateway_token", None),
                 interface=getattr(args, "interface", None),
                 all_versions=bool(getattr(args, "all", False)),
                 output_json=bool(getattr(args, "json", False)),
@@ -914,14 +916,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if cmd == "info":
             workflow_bundle_info_command(
                 bundle_ref=str(args.bundle),
-                registry_dir=getattr(args, "registry_dir", None),
+                gateway_url=getattr(args, "gateway_url", None),
+                gateway_token=getattr(args, "gateway_token", None),
                 output_json=bool(getattr(args, "json", False)),
             )
             return 0
         if cmd == "remove":
             remove_workflow_bundle_command(
                 bundle_ref=str(args.bundle),
-                registry_dir=getattr(args, "registry_dir", None),
+                gateway_url=getattr(args, "gateway_url", None),
+                gateway_token=getattr(args, "gateway_token", None),
                 output_json=bool(getattr(args, "json", False)),
             )
             return 0
