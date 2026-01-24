@@ -177,6 +177,7 @@ class GatewayApi:
         session_id: Optional[str] = None,
         scope: str = "session",
         owner_id: Optional[str] = None,
+        all_owners: bool = False,
         subject: Optional[str] = None,
         predicate: Optional[str] = None,
         object_value: Optional[str] = None,
@@ -194,6 +195,8 @@ class GatewayApi:
             "limit": int(limit),
             "order": str(order or "desc").strip().lower() or "desc",
         }
+        if bool(all_owners):
+            body["all_owners"] = True
         if run_id:
             body["run_id"] = str(run_id or "").strip()
         if session_id:
@@ -319,9 +322,10 @@ def query_gateway_kg_command(
     *,
     gateway_url: Optional[str],
     gateway_token: Optional[str],
-    run_id: str,
+    run_id: Optional[str],
     scope: str = "session",
     owner_id: Optional[str] = None,
+    all_owners: bool = False,
     subject: Optional[str] = None,
     predicate: Optional[str] = None,
     object_value: Optional[str] = None,
@@ -336,11 +340,16 @@ def query_gateway_kg_command(
     pretty: bool = False,
 ) -> None:
     api = GatewayApi(base_url=str(gateway_url or default_gateway_url()), token=gateway_token or default_gateway_token())
+    id_value = str(run_id or "").strip() if isinstance(run_id, str) else ""
+    scope_norm = str(scope or "").strip().lower() or "session"
+    if not id_value and not all_owners and scope_norm not in {"global"} and not owner_id:
+        raise SystemExit("abstractcode gateway kg: id is required unless using --scope global or --all-owners (or provide --owner-id)")
     try:
         resp = api.kg_query(
-            run_id=str(run_id),
-            scope=str(scope),
+            run_id=id_value if (id_value and scope_norm != "global" and not all_owners) else None,
+            scope=str(scope_norm),
             owner_id=owner_id,
+            all_owners=bool(all_owners),
             subject=subject,
             predicate=predicate,
             object_value=object_value,
@@ -357,23 +366,19 @@ def query_gateway_kg_command(
         # the gateway won't find a RunState by that id. Retry as `session_id` for session scope.
         msg = str(e)
         is_run_not_found = "Gateway HTTP 404:" in msg and "not found" in msg and "Run '" in msg
-        scope_norm = str(scope or "").strip().lower()
         if (
             is_run_not_found
             and scope_norm in {"session", "all"}
             and not owner_id
-            and str(run_id or "").strip()
+            and not all_owners
+            and id_value
         ):
-            scope_label = scope_norm or "session"
-            print(
-                f"warning: run '{run_id}' not found; retrying as session_id for scope={scope_label}",
-                file=os.sys.stderr,
-            )
             resp = api.kg_query(
                 run_id=None,
-                session_id=str(run_id),
-                scope=str(scope),
+                session_id=str(id_value),
+                scope=str(scope_norm),
                 owner_id=owner_id,
+                all_owners=bool(all_owners),
                 subject=subject,
                 predicate=predicate,
                 object_value=object_value,

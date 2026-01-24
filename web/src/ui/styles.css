@@ -1578,6 +1578,31 @@ select {
   white-space: nowrap;
 }
 
+.chat_attachment_target {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-default);
+  background: rgba(148, 163, 184, 0.08);
+  color: rgba(226, 232, 240, 0.85);
+  flex: 0 0 auto;
+}
+
+.chat_attachment_target.server {
+  border-color: rgba(125, 211, 252, 0.3);
+  background: rgba(125, 211, 252, 0.1);
+  color: rgba(125, 211, 252, 0.95);
+}
+
+.chat_attachment_target.client {
+  border-color: rgba(167, 139, 250, 0.3);
+  background: rgba(167, 139, 250, 0.1);
+  color: rgba(167, 139, 250, 0.95);
+}
+
 /* Stats bar at bottom of assistant messages */
 .chat_stats_bar {
   display: flex;
@@ -2546,6 +2571,30 @@ select {
   color: var(--accent);
 }
 
+.file_chip_target {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-default);
+  color: rgba(226, 232, 240, 0.9);
+  background: rgba(148, 163, 184, 0.1);
+}
+
+.file_chip_target.server {
+  border-color: rgba(125, 211, 252, 0.35);
+  background: rgba(125, 211, 252, 0.14);
+  color: rgba(125, 211, 252, 0.95);
+}
+
+.file_chip_target.client {
+  border-color: rgba(167, 139, 250, 0.35);
+  background: rgba(167, 139, 250, 0.14);
+  color: rgba(167, 139, 250, 0.95);
+}
+
 .file_chip.loading {
   border-color: var(--border-default);
   background: var(--bg-elevated);
@@ -2755,6 +2804,23 @@ kbd {
   max-width: 200px;
 }
 
+.repl_send_row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.attach_btn {
+  padding: 10px 12px;
+  min-height: 48px;
+  width: 48px;
+  border-radius: var(--radius-lg);
+}
+
+.attach_btn_label {
+  display: none;
+}
+
 .repl_send_panel select {
   font-size: 11px;
   padding: 8px 10px;
@@ -2778,6 +2844,13 @@ kbd {
   overflow: hidden;
 }
 
+.send_btn.cancel_btn {
+  background: linear-gradient(135deg, rgba(251, 113, 133, 0.95) 0%, rgba(239, 68, 68, 0.95) 100%);
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 2px 10px rgba(239, 68, 68, 0.22);
+}
+
 .send_btn::before {
   content: '';
   position: absolute;
@@ -2795,6 +2868,11 @@ kbd {
   transform: translateY(-2px);
   box-shadow: 0 6px 24px rgba(125, 211, 252, 0.4);
   background: linear-gradient(135deg, #9ae0fc 0%, #7dd3fc 100%);
+}
+
+.send_btn.cancel_btn:hover:not(:disabled) {
+  box-shadow: 0 6px 26px rgba(239, 68, 68, 0.32);
+  background: linear-gradient(135deg, rgba(251, 113, 133, 1) 0%, rgba(239, 68, 68, 1) 100%);
 }
 
 .send_btn:active:not(:disabled) {
@@ -2851,6 +2929,12 @@ kbd {
     min-width: 80px;
     padding: 10px 16px;
     min-height: 44px;
+  }
+
+  .attach_btn {
+    min-height: 44px;
+    width: 44px;
+    padding: 10px 12px;
   }
   
   .send_btn_label {

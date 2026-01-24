@@ -1887,11 +1887,23 @@ class ReactShell:
             if isinstance(ref, dict):
                 attachment_refs.append(dict(ref))
 
+        def _display_attachment_token(token: str) -> str:
+            t = str(token or "").strip()
+            if not t:
+                return ""
+            norm = t.replace("\\", "/")
+            if norm.startswith("/") or (len(norm) >= 3 and norm[1] == ":" and norm[2] in ("/", "\\")):
+                return norm.rsplit("/", 1)[-1] or t
+            return t
+
+        def _display_attachment_ref(ref: Dict[str, Any]) -> str:
+            filename = str(ref.get("filename") or "").strip()
+            source_path = str(ref.get("source_path") or "").strip()
+            return _display_attachment_token(filename or source_path or "?")
+
         # Attachment-only message: update the session attachments and don't start a run.
         if not cleaned_cmd_text and attachment_refs:
-            joined = ", ".join(
-                [str(a.get("source_path") or a.get("filename") or "?") for a in attachment_refs if isinstance(a, dict)]
-            )
+            joined = ", ".join([_display_attachment_ref(a) for a in attachment_refs if isinstance(a, dict)])
             if joined:
                 self._print(_style(f"Attachments: {joined}", _C.DIM, enabled=self._color))
             return
@@ -1907,7 +1919,7 @@ class ReactShell:
         self._print(self._format_user_prompt_block(cleaned_cmd_text, copy_id=copy_id, footer=footer))
 
         if newly_added:
-            joined = ", ".join(newly_added)
+            joined = ", ".join([_display_attachment_token(k) for k in newly_added if str(k or "").strip()])
             self._print(_style(f"Attachments: {joined}", _C.DIM, enabled=self._color))
 
         self._start(cleaned_cmd_text, attachments=attachment_refs or None)

@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { GatewayClient } from "../lib/gateway_client";
 import { random_id } from "../lib/ids";
 import { extract_wait_from_record } from "../lib/runtime_extractors";
+import { choose_follow_run, infer_subworkflow_follow_kind, type FollowRunKind } from "../lib/subworkflow_follow";
 import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types";
 import type { AttachmentRef } from "../lib/types";
 import { resolve_blocking_wait } from "../lib/wait_resolution";
@@ -102,6 +103,19 @@ function extract_active_token(text: string, cursor: number, token: string): Acti
   // Token ends at whitespace.
   if (/\s/.test(between)) return null;
   return { start: idx, end: cur, query: between };
+}
+
+type FileTarget = "server" | "client";
+
+function parse_file_target_query(raw_query: string): { target: FileTarget; query: string } {
+  const q = String(raw_query || "").trim();
+  if (!q) return { target: "server", query: "" };
+  const lower = q.toLowerCase();
+  if (lower === "client") return { target: "client", query: "" };
+  if (lower.startsWith("client:")) return { target: "client", query: q.slice("client:".length) };
+  if (lower === "server") return { target: "server", query: "" };
+  if (lower.startsWith("server:")) return { target: "server", query: q.slice("server:".length) };
+  return { target: "server", query: q };
 }
 
 function now_iso(): string {
@@ -1717,6 +1731,7 @@ function ConsolePage(props: {
   const [cancelling, set_cancelling] = useState(false);
 
   const input_ref = useRef<HTMLTextAreaElement | null>(null);
+  const upload_input_ref = useRef<HTMLInputElement | null>(null);
   const chat_scroll_ref = useRef<HTMLDivElement | null>(null);
   const chat_content_ref = useRef<HTMLDivElement | null>(null);
   const chat_end_ref = useRef<HTMLDivElement | null>(null);
@@ -1742,8 +1757,38 @@ function ConsolePage(props: {
   const cursor_flush_timer_ref = useRef<number | null>(null);
   const cursor_flush_pending_ref = useRef<Record<string, number>>({});
   const [follow_run_id, set_follow_run_id] = useState<string>("");
+  const follow_run_id_ref = useRef<string>("");
+  const follow_run_kind_ref = useRef<FollowRunKind>("unknown");
   const [subworkflow_label, set_subworkflow_label] = useState<string>("");
   const [drop_active, set_drop_active] = useState(false);
+
+  useEffect(() => {
+    follow_run_id_ref.current = String(follow_run_id || "").trim();
+    if (!follow_run_id_ref.current) follow_run_kind_ref.current = "unknown";
+  }, [follow_run_id]);
+
+  const set_follow_run = (run_id: string, kind: FollowRunKind): void => {
+    const rid = String(run_id || "").trim();
+    if (!rid) return;
+    follow_run_id_ref.current = rid;
+    follow_run_kind_ref.current = kind;
+    set_follow_run_id(rid);
+  };
+
+  const clear_follow_run = (): void => {
+    follow_run_id_ref.current = "";
+    follow_run_kind_ref.current = "unknown";
+    set_follow_run_id("");
+  };
+
+  const maybe_set_follow_run = (run_id: string, kind: FollowRunKind): void => {
+    const prev = { run_id: follow_run_id_ref.current, kind: follow_run_kind_ref.current };
+    const next = choose_follow_run(prev, { run_id, kind });
+    const next_id = String(next.run_id || "").trim();
+    if (!next_id) return;
+    if (next_id === prev.run_id && next.kind === prev.kind) return;
+    set_follow_run(next_id, next.kind);
+  };
 
   const root_wait_state: WaitState | null = useMemo(() => extract_wait_from_record(root_last_record), [root_last_record]);
   const root_wait_reason = String(root_wait_state?.reason || "").trim();
@@ -1798,12 +1843,15 @@ function ConsolePage(props: {
 
   useEffect(() => {
     if (root_wait_reason !== "subworkflow") {
-      set_follow_run_id("");
+      if (follow_run_kind_ref.current !== "user_facing") clear_follow_run();
       set_subworkflow_label("");
       return;
     }
-    if (sub_run_id_for_wait) set_follow_run_id(sub_run_id_for_wait);
-  }, [root_wait_reason, sub_run_id_for_wait]);
+    if (sub_run_id_for_wait) {
+      const kind = infer_subworkflow_follow_kind(root_wait_state);
+      maybe_set_follow_run(sub_run_id_for_wait, kind === "unknown" ? "background" : kind);
+    }
+  }, [root_wait_reason, root_wait_state, sub_run_id_for_wait]);
 
   useEffect(() => {
     if (!sub_run_id_for_wait) return;
@@ -2225,7 +2273,7 @@ function ConsolePage(props: {
     seen_keys_ref.current = new Set();
     seen_wait_keys_ref.current = new Set();
     seen_tool_call_ids_ref.current = new Set();
-    set_follow_run_id("");
+    clear_follow_run();
     set_subworkflow_label("");
 
     const user_ts = now_iso();
@@ -2535,7 +2583,10 @@ function ConsolePage(props: {
         const sub =
           String((w as any)?.details?.sub_run_id || "").trim() ||
           (wk.startsWith("subworkflow:") ? String(wk.split(":", 2)[1] || "").trim() : "");
-        if (sub) set_follow_run_id(sub);
+        if (sub) {
+          const kind = infer_subworkflow_follow_kind(w);
+          maybe_set_follow_run(sub, kind === "unknown" ? "background" : kind);
+        }
       }
 
       if (wk && prompt && (is_user_wait || is_ask_wait) && !is_tool_wait && !seen_wait_keys_ref.current.has(wk)) {
@@ -2600,7 +2651,7 @@ function ConsolePage(props: {
         .map((m) => String((m as any)?.meta?._kind === "tool" ? (m as any)?.meta?.tool?.call_id || "" : "").trim())
         .filter(Boolean)
     );
-    set_follow_run_id("");
+    clear_follow_run();
     set_subworkflow_label("");
 
     if (abort_ref.current) abort_ref.current.abort();
@@ -2885,6 +2936,7 @@ function ConsolePage(props: {
 
   const file_token = useMemo(() => extract_active_token(composer, composer_cursor, "@"), [composer, composer_cursor]);
   const file_query = useMemo(() => String(file_token?.query || "").trim(), [file_token]);
+  const file_target = useMemo(() => parse_file_target_query(file_query), [file_query]);
 
   const format_bytes_short = (n: number | null | undefined): string => {
     const v = typeof n === "number" && Number.isFinite(n) ? Math.max(0, n) : NaN;
@@ -2910,7 +2962,15 @@ function ConsolePage(props: {
       set_file_loading(false);
       return;
     }
-    const q = file_query;
+    const parsed = file_target;
+    if (parsed.target === "client") {
+      set_file_matches([]);
+      set_file_match_sizes({});
+      set_file_error("");
+      set_file_loading(false);
+      return;
+    }
+    const q = String(parsed.query || "").trim();
     if (!q) {
       set_file_matches([]);
       set_file_match_sizes({});
@@ -3016,7 +3076,10 @@ function ConsolePage(props: {
           const p = String(f.path || "").trim();
           const st = f.loading ? "loading" : String(f.error || "").trim() ? "error" : f.attachment ? "ok" : "none";
           const extra = st === "error" ? ` — ${String(f.error || "").trim()}` : "";
-          lines.push(`- @${p}: ${st}${extra}`);
+          const target_raw = String((f.attachment as any)?.target || "").trim().toLowerCase();
+          const target: FileTarget =
+            target_raw === "client" ? "client" : target_raw === "server" ? "server" : p.startsWith("client:") ? "client" : "server";
+          lines.push(`- @${p} (${target}): ${st}${extra}`);
         }
       } else {
         lines.push("next_run: (none)");
@@ -3041,11 +3104,14 @@ function ConsolePage(props: {
           for (const it of attachments.slice(0, 30)) {
             const tags: any = (it as any).tags || {};
             const handle = String(tags.path || tags.source_path || tags.filename || "").trim();
+            const target_tag = String(tags.target || "").trim().toLowerCase();
+            const target: FileTarget =
+              target_tag === "client" ? "client" : target_tag === "server" ? "server" : handle.startsWith("client:") ? "client" : "server";
             const aid = String((it as any).artifact_id || "").trim();
             const sha = String(tags.sha256 || "").trim();
             const sha_disp = sha ? `${sha.slice(0, 8)}…` : "";
             const size = typeof (it as any).size_bytes === "number" ? format_bytes_short((it as any).size_bytes) : "";
-            const meta_bits = [`id=${aid}`].concat(sha_disp ? [`sha=${sha_disp}`] : []).concat(size ? [size] : []).filter(Boolean);
+            const meta_bits = [`target=${target}`, `id=${aid}`].concat(sha_disp ? [`sha=${sha_disp}`] : []).concat(size ? [size] : []).filter(Boolean);
             lines.push(`- @${handle || aid}${meta_bits.length ? ` (${meta_bits.join(", ")})` : ""}`);
           }
           if (attachments.length > 30) lines.push(`- …and ${attachments.length - 30} more`);
@@ -3173,18 +3239,22 @@ function ConsolePage(props: {
     return true;
   }
 
+  function consume_token(token: ActiveToken | null): void {
+    if (!token) return;
+    if (token.start < 0 || token.end < token.start || token.end > composer.length) return;
+    const before = composer.slice(0, token.start);
+    const after = composer.slice(token.end);
+    const next = `${before}${after}`.replace(/\s{2,}/g, " ");
+    set_composer(next);
+    set_composer_cursor(before.length);
+  }
+
   async function attach_file(path: string, token: ActiveToken | null): Promise<void> {
     const p = String(path || "").trim();
     if (!p) return;
 
     // Clear the active @token from the composer (Cursor-style chips instead of inline tags).
-    if (token && token.start >= 0 && token.end >= token.start && token.end <= composer.length) {
-      const before = composer.slice(0, token.start);
-      const after = composer.slice(token.end);
-      const next = `${before}${after}`.replace(/\s{2,}/g, " ");
-      set_composer(next);
-      set_composer_cursor(before.length);
-    }
+    consume_token(token);
     set_file_matches([]);
     set_file_error("");
     set_file_loading(false);
@@ -3224,6 +3294,18 @@ function ConsolePage(props: {
     }
   }
 
+  function attach_client_picker(token: ActiveToken | null): void {
+    consume_token(token);
+    set_file_matches([]);
+    set_file_error("");
+    set_file_loading(false);
+    try {
+      upload_input_ref.current?.click();
+    } catch {
+      // ignore
+    }
+  }
+
   async function attach_upload(file: File): Promise<void> {
     if (!file) return;
     const sid = String(props.session_id || "").trim();
@@ -3232,15 +3314,16 @@ function ConsolePage(props: {
       return;
     }
     const name = String((file as any)?.name || "").trim() || "upload.bin";
+    const handle = `client:${name}`;
 
     set_attached_files((prev) => {
-      const idx = prev.findIndex((f) => f.path === name);
+      const idx = prev.findIndex((f) => f.path === handle);
       if (idx >= 0) {
         const next = prev.slice();
         next[idx] = { ...next[idx], loading: true, error: undefined };
         return next;
       }
-      return [...prev, { path: name, attachment: null, loading: true }].slice(-12);
+      return [...prev, { path: handle, attachment: null, loading: true }].slice(-12);
     });
 
     try {
@@ -3248,10 +3331,10 @@ function ConsolePage(props: {
         filename: name,
         content_type: String((file as any)?.type || "").trim() || undefined,
       });
-      set_attached_files((prev) => prev.map((f) => (f.path === name ? { ...f, loading: false, attachment, error: undefined } : f)));
+      set_attached_files((prev) => prev.map((f) => (f.path === handle ? { ...f, loading: false, attachment, error: undefined } : f)));
     } catch (e: any) {
       const msg = String(e?.message || e || "Upload failed");
-      set_attached_files((prev) => prev.map((f) => (f.path === name ? { ...f, loading: false, error: msg } : f)));
+      set_attached_files((prev) => prev.map((f) => (f.path === handle ? { ...f, loading: false, error: msg } : f)));
     }
   }
 
@@ -3505,6 +3588,8 @@ function ConsolePage(props: {
               const cls = f.error ? "file_chip error" : f.loading ? "file_chip loading" : "file_chip";
               const icon: IconName = f.error ? "warning" : f.loading ? "loader" : "paperclip";
               const aid = String((f.attachment as any)?.$artifact || "").trim();
+              const target_raw = String((f.attachment as any)?.target || "").trim().toLowerCase();
+              const target: FileTarget = target_raw === "client" ? "client" : target_raw === "server" ? "server" : p.startsWith("client:") ? "client" : "server";
               const can_preview = !f.loading && !String(f.error || "").trim() && Boolean(aid);
               const tooltip = f.error ? String(f.error) : can_preview ? `@${p} (click to preview)` : p;
               return (
@@ -3528,6 +3613,7 @@ function ConsolePage(props: {
                   <span className="file_chip_icon" aria-hidden="true">
                     <Icon name={icon} size={14} className={f.loading ? "spin" : undefined} />
                   </span>
+                  <span className={`file_chip_target ${target}`}>{target}</span>
                   <span className="mono">@{p}</span>
                   {f.loading ? <span className="muted">ingesting…</span> : null}
                   {f.error ? <span className="muted">{String(f.error)}</span> : null}
@@ -3550,20 +3636,31 @@ function ConsolePage(props: {
 
         {file_token && file_query ? (
           <div className="cmd_menu">
-            {file_loading ? <div className="cmd_notice muted">Searching files…</div> : null}
-            {file_error ? <div className="cmd_notice error">{file_error}</div> : null}
-            {!file_loading && !file_error && !file_matches.length ? <div className="cmd_notice muted">No matches.</div> : null}
-            {file_matches.map((p, idx) => (
-              <button
-                key={p}
-                className={`cmd_item ${idx === file_active ? "active" : ""}`}
-                type="button"
-                onClick={() => void attach_file(p, file_token)}
-              >
-                <span className="mono">@{p}</span>
-                <span className="muted">{format_bytes_short(file_match_sizes[p]) || "attach"}</span>
+            {file_target.target === "client" ? (
+              <button className="cmd_item active" type="button" onClick={() => attach_client_picker(file_token)}>
+                <span className="mono">@client:</span>
+                <span className="muted">upload from device…</span>
               </button>
-            ))}
+            ) : (
+              <>
+                {file_loading ? <div className="cmd_notice muted">Searching files…</div> : null}
+                {file_error ? <div className="cmd_notice error">{file_error}</div> : null}
+                {!file_loading && !file_error && !file_matches.length ? (
+                  <div className="cmd_notice muted">{file_target.query ? "No matches." : "Type to search workspace files."}</div>
+                ) : null}
+                {file_matches.map((p, idx) => (
+                  <button
+                    key={p}
+                    className={`cmd_item ${idx === file_active ? "active" : ""}`}
+                    type="button"
+                    onClick={() => void attach_file(p, file_token)}
+                  >
+                    <span className="mono">@{p}</span>
+                    <span className="muted">{format_bytes_short(file_match_sizes[p]) || "attach"}</span>
+                  </button>
+                ))}
+              </>
+            )}
           </div>
         ) : null}
 
@@ -3641,6 +3738,13 @@ function ConsolePage(props: {
               disabled={!can_type}
               onKeyDown={(e) => {
                 if (file_token) {
+                  if (file_target.target === "client") {
+                    if (e.key === "Tab") {
+                      e.preventDefault();
+                      attach_client_picker(file_token);
+                      return;
+                    }
+                  }
                   if (e.key === "Escape") {
                     if (file_matches.length || file_error) {
                       e.preventDefault();
@@ -3757,23 +3861,57 @@ function ConsolePage(props: {
                 </option>
               ))}
             </select>
-            <button
-              className="btn primary send_btn"
-              disabled={!can_send || !composer.trim()}
-              onClick={() => {
-                const v = composer;
-                set_composer("");
-                void (async () => {
-                  const handled = await run_command(v);
-                  if (handled) return;
-                  await start_turn(v);
-                })();
-              }}
-              type="button"
-            >
-              <Icon name="send" size={16} />
-              <span className="send_btn_label">Send</span>
-            </button>
+            <div className="repl_send_row">
+              <button
+                className="btn attach_btn"
+                type="button"
+                title="Attach files from this device"
+                aria-label="Attach files from this device"
+                onClick={() => {
+                  try {
+                    upload_input_ref.current?.click();
+                  } catch {
+                    // ignore
+                  }
+                }}
+              >
+                <Icon name="paperclip" size={16} />
+                <span className="attach_btn_label">Attach</span>
+              </button>
+              <button
+                className={`btn ${active_run_id ? "danger cancel_btn" : "primary"} send_btn`}
+                disabled={active_run_id ? cancelling : !can_send || !composer.trim()}
+                onClick={() => {
+                  if (active_run_id) {
+                    void submit_cancel();
+                    return;
+                  }
+                  const v = composer;
+                  set_composer("");
+                  void (async () => {
+                    const handled = await run_command(v);
+                    if (handled) return;
+                    await start_turn(v);
+                  })();
+                }}
+                type="button"
+              >
+                <Icon name={active_run_id ? "x" : "send"} size={16} />
+                <span className="send_btn_label">{active_run_id ? (cancelling ? "Cancelling…" : "Cancel") : "Send"}</span>
+              </button>
+              <input
+                ref={upload_input_ref}
+                type="file"
+                multiple
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const files = Array.from(e.currentTarget.files || []);
+                  e.currentTarget.value = "";
+                  if (!files.length) return;
+                  void attach_uploads(files);
+                }}
+              />
+            </div>
           </div>
         </div>
 
@@ -3961,6 +4099,8 @@ function ChatMessageCard(props: {
           {attachment_items.map((a, idx) => {
             const aid = String((a as any)?.$artifact || "").trim();
             const source = String((a as any)?.source_path || (a as any)?.filename || "").trim();
+            const target_raw = String((a as any)?.target || "").trim().toLowerCase();
+            const target: FileTarget = target_raw === "client" ? "client" : target_raw === "server" ? "server" : source.startsWith("client:") ? "client" : "server";
             const label = (source || aid).split("/").pop() || source || aid || "attachment";
             const title = source ? `@${source}` : aid ? `artifact: ${aid}` : "attachment";
             const can_preview = Boolean(aid);
@@ -3974,6 +4114,7 @@ function ChatMessageCard(props: {
                 disabled={!can_preview}
               >
                 <Icon name="paperclip" size={14} />
+                <span className={`chat_attachment_target ${target}`}>{target}</span>
                 <span className="mono chat_attachment_name">{label}</span>
               </button>
             );

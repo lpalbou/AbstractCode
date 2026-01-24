@@ -470,6 +470,9 @@ class FullScreenUI:
         # - When files-keep is ON, chips persist across turns until removed.
         self._attachments: List[str] = []
         self._files_keep: bool = False
+        # Best-effort: convert pasted/dropped file paths into attachment chips even when
+        # the terminal doesn't emit a bracketed-paste event.
+        self._suppress_attachment_draft_detection: bool = False
 
         # Input buffer with command completer and history
         self._input_buffer = Buffer(
@@ -479,6 +482,10 @@ class FullScreenUI:
             complete_while_typing=True,
             history=self._history,
         )
+        try:
+            self._input_buffer.on_text_changed += self._on_input_buffer_text_changed  # type: ignore[operator]
+        except Exception:
+            pass
 
         # Agent selector (items are populated by the shell).
         self._agent_selector_items: List[_DropdownItem] = []
@@ -1270,7 +1277,11 @@ class FullScreenUI:
             label = str(rel or "").strip()
             if not label:
                 continue
-            parts.append(("class:attachment-chip", f"[{label} ×] ", self._remove_attachment_handler(label)))
+            disp = label
+            disp_norm = disp.replace("\\", "/")
+            if disp_norm.startswith("/") or (len(disp_norm) >= 3 and disp_norm[1] == ":" and disp_norm[2] in ("/", "\\")):
+                disp = disp_norm.rsplit("/", 1)[-1] or disp
+            parts.append(("class:attachment-chip", f"[{disp} ×] ", self._remove_attachment_handler(label)))
         parts.append(("class:attachments-hint", " (Click=remove, Backspace=remove last)"))
         return parts
 
@@ -1292,29 +1303,47 @@ class FullScreenUI:
             except Exception:
                 pass
 
-    def _attachment_tokens_from_paste(self, paste: str) -> List[str]:
-        """Return attachment chip tokens for a paste payload, or [] if not path-only."""
+    def _try_attachment_token(self, token: str) -> Optional[str]:
+        """Return an attachment chip token if the token resolves to an existing file."""
         import shlex
 
-        raw = str(paste or "").strip()
+        raw = str(token or "").strip()
         if not raw:
-            return []
+            return None
 
-        raw = raw.replace("\r\n", "\n").replace("\r", "\n")
-        raw = " ".join([ln.strip() for ln in raw.split("\n") if ln.strip()]).strip()
+        # Common drag&drop/paste forms:
+        # - /abs/path
+        # - ~/abs/path
+        # - file:///abs/path
+        # - /abs/path\\ with\\ spaces
+        # - "/abs/path with spaces"
+        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ("'", '"'):
+            raw = raw[1:-1].strip()
         if not raw:
-            return []
+            return None
 
-        tokens: List[str] = []
-        for posix in (True, False):
+        if raw.lower().startswith("file://"):
             try:
-                tokens = shlex.split(raw, posix=posix)
+                from urllib.parse import urlparse, unquote
+
+                parsed = urlparse(raw)
+                raw = unquote(parsed.path) if parsed.scheme == "file" else raw[7:]
             except Exception:
-                tokens = []
-            if tokens:
-                break
-        if not tokens:
-            tokens = raw.split()
+                raw = raw[7:]
+            raw = str(raw or "").strip()
+            if not raw:
+                return None
+
+        # Best-effort unescape (e.g. "\ " -> " ").
+        try:
+            pieces = shlex.split(raw, posix=True)
+            if len(pieces) == 1:
+                raw = pieces[0]
+        except Exception:
+            pass
+
+        while raw.startswith("./"):
+            raw = raw[2:]
 
         mounts = dict(self._workspace_mounts or {})
         blocked = list(self._workspace_blocked_paths or [])
@@ -1340,79 +1369,128 @@ class FullScreenUI:
                     continue
             return False
 
+        # Prefer workspace/mount resolution when possible (stable virtual paths).
+        try:
+            p, virt, mount, _root = resolve_workspace_path(
+                raw_path=raw,
+                workspace_root=self._workspace_root,
+                mounts=mounts,
+            )
+        except Exception:
+            p = None
+            virt = None
+            mount = None
+
+        if p is not None:
+            if _is_blocked(p):
+                return None
+            try:
+                if not p.is_file():
+                    return None
+            except Exception:
+                return None
+            try:
+                ign = self._workspace_ignore if mount is None else self._workspace_mount_ignores.get(str(mount))
+                if ign is not None and ign.is_ignored(p, is_dir=False):
+                    return None
+            except Exception:
+                pass
+            key = normalize_relative_path(str(virt or ""))
+            return key or None
+
+        # Otherwise accept any existing absolute file path (canonicalized).
+        try:
+            p2 = Path(raw).expanduser()
+            if not p2.is_absolute():
+                return None
+            p2 = p2.resolve()
+        except Exception:
+            return None
+        if _is_blocked(p2):
+            return None
+        try:
+            if not p2.is_file():
+                return None
+        except Exception:
+            return None
+        return str(p2)
+
+    def _attachment_tokens_from_paste(self, paste: str) -> List[str]:
+        """Return attachment chip tokens for a paste payload, or [] if not path-only."""
+        import shlex
+
+        raw = str(paste or "").strip()
+        if not raw:
+            return []
+
+        raw = raw.replace("\r\n", "\n").replace("\r", "\n")
+        raw = " ".join([ln.strip() for ln in raw.split("\n") if ln.strip()]).strip()
+        if not raw:
+            return []
+
+        tokens: List[str] = []
+        for posix in (True, False):
+            try:
+                tokens = shlex.split(raw, posix=posix)
+            except Exception:
+                tokens = []
+            if tokens:
+                break
+        if not tokens:
+            tokens = raw.split()
+
         out: List[str] = []
         for tok0 in tokens:
-            tok = str(tok0 or "").strip()
-            if not tok:
+            key = self._try_attachment_token(str(tok0 or ""))
+            if not key:
                 return []
-            if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
-                tok = tok[1:-1].strip()
-            if not tok:
-                return []
-
-            if tok.lower().startswith("file://"):
-                try:
-                    from urllib.parse import urlparse, unquote
-
-                    parsed = urlparse(tok)
-                    tok = unquote(parsed.path) if parsed.scheme == "file" else tok[7:]
-                except Exception:
-                    tok = tok[7:]
-                tok = str(tok or "").strip()
-                if not tok:
-                    return []
-
-            while tok.startswith("./"):
-                tok = tok[2:]
-
-            # Prefer workspace/mount resolution when possible (stable virtual paths).
-            try:
-                p, virt, mount, _root = resolve_workspace_path(
-                    raw_path=tok,
-                    workspace_root=self._workspace_root,
-                    mounts=mounts,
-                )
-            except Exception:
-                p = None
-
-            if p is not None:
-                if _is_blocked(p):
-                    return []
-                try:
-                    if not p.is_file():
-                        return []
-                except Exception:
-                    return []
-                try:
-                    ign = self._workspace_ignore if mount is None else self._workspace_mount_ignores.get(str(mount))
-                    if ign is not None and ign.is_ignored(p, is_dir=False):
-                        return []
-                except Exception:
-                    pass
-                key = normalize_relative_path(str(virt or ""))
-                if not key:
-                    return []
-                out.append(key)
-                continue
-
-            # Otherwise accept any existing absolute file path (canonicalized).
-            try:
-                p2 = Path(tok).expanduser()
-                if not p2.is_absolute():
-                    return []
-                p2 = p2.resolve()
-            except Exception:
-                return []
-            if _is_blocked(p2):
-                return []
-            try:
-                if not p2.is_file():
-                    return []
-            except Exception:
-                return []
-            out.append(str(p2))
-
+            out.append(key)
         return out
+
+    def _extract_attachment_tokens_from_draft(self, draft: str) -> tuple[str, List[str]]:
+        """Extract dropped file paths embedded in normal text and return (cleaned_text, chips)."""
+        import re
+
+        text = str(draft or "")
+        if not text.strip():
+            return (text, [])
+
+        spans: list[tuple[int, int]] = []
+        chips: list[str] = []
+
+        # Match common drag&drop path forms, including escaped spaces (`\ `).
+        token_re = re.compile(
+            r"""
+            (?P<tok>
+              '(?:file://|/|~)[^']+'
+              | "(?:file://|/|~)[^"]+"
+              | file://(?:\\\s|[^\s])+
+              | [~/](?:\\\s|[^\s])+
+              | [a-zA-Z]:[\\/](?:\\\s|[^\s])+
+            )
+            """,
+            re.VERBOSE,
+        )
+
+        for m in token_re.finditer(text):
+            raw = str(m.group("tok") or "")
+            key = self._try_attachment_token(raw)
+            if not key:
+                continue
+            spans.append(m.span())
+            chips.append(key)
+
+        if not chips:
+            return (text, [])
+
+        cleaned = text
+        for start, end in reversed(spans):
+            cleaned = cleaned[:start] + cleaned[end:]
+
+        # Keep changes minimal: only do whitespace cleanup for single-line drafts.
+        if "\n" not in cleaned:
+            cleaned = re.sub(r"[ \\t]{2,}", " ", cleaned).strip()
+        return (cleaned, chips)
 
     def maybe_add_attachments_from_paste(self, paste: str) -> bool:
         """Try to interpret a paste payload as dropped file path(s).
@@ -1424,6 +1502,53 @@ class FullScreenUI:
             return False
         self.add_attachments(rels)
         return True
+
+    def maybe_add_attachments_from_draft(self) -> bool:
+        """Convert a draft composer text that is only file paths into attachment chips."""
+        try:
+            draft = str(self._input_buffer.text or "")
+        except Exception:
+            draft = ""
+        rels = self._attachment_tokens_from_paste(draft)
+        if rels:
+            self.add_attachments(rels)
+            self._suppress_attachment_draft_detection = True
+            try:
+                self._input_buffer.reset()
+            except Exception:
+                pass
+            finally:
+                self._suppress_attachment_draft_detection = False
+            return True
+
+        cleaned, extracted = self._extract_attachment_tokens_from_draft(draft)
+        if not extracted:
+            return False
+        self.add_attachments(extracted)
+        self._suppress_attachment_draft_detection = True
+        try:
+            self._input_buffer.reset()
+            if cleaned:
+                self._input_buffer.insert_text(cleaned)
+        except Exception:
+            pass
+        finally:
+            self._suppress_attachment_draft_detection = False
+        return True
+
+    def _on_input_buffer_text_changed(self, _buffer: Buffer) -> None:
+        # Avoid interfering with blocking prompts (tool approvals) and avoid re-entrancy when
+        # we clear the buffer ourselves.
+        if self._suppress_attachment_draft_detection:
+            return
+        if getattr(self, "_pending_blocking_prompt", None) is not None:
+            return
+        if self.maybe_add_attachments_from_draft():
+            try:
+                if self._app and self._app.is_running:
+                    self._app.invalidate()
+            except Exception:
+                pass
 
     def set_files_keep(self, enabled: bool) -> None:
         """Set whether attachment chips persist across turns."""

@@ -129,6 +129,42 @@ def test_query_gateway_kg_command_supports_json_and_jsonl(monkeypatch: pytest.Mo
     assert json.loads(lines[1])["subject"] == "ex:b"
 
 
+def test_query_gateway_kg_command_all_owners_allows_missing_id(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from abstractcode import gateway_cli
+
+    called: dict[str, object] = {}
+
+    def _fake_request_json(*, method: str, url: str, token: str | None, payload=None, timeout_s: float = 30.0):  # noqa: ANN001
+        called["method"] = method
+        called["url"] = url
+        called["token"] = token
+        called["payload"] = payload
+        called["timeout_s"] = timeout_s
+        return {"ok": True, "scope": "session", "count": 0, "items": []}
+
+    monkeypatch.setattr(gateway_cli, "_request_json", _fake_request_json)
+
+    gateway_cli.query_gateway_kg_command(
+        gateway_url="http://example:8081",
+        gateway_token="t",
+        run_id=None,
+        scope="session",
+        all_owners=True,
+        limit=0,
+        fmt="json",
+    )
+
+    out, err = capsys.readouterr()
+    assert err.strip() == ""
+    assert json.loads(out)["ok"] is True
+    assert isinstance(called["payload"], dict)
+    payload = called["payload"]
+    assert payload.get("all_owners") is True
+    assert "run_id" not in payload
+
+
 def test_query_gateway_kg_command_retries_with_session_id_on_run_not_found(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -164,7 +200,7 @@ def test_query_gateway_kg_command_retries_with_session_id_on_run_not_found(
 
     out, err = capsys.readouterr()
     assert json.loads(out)["ok"] is True
-    assert "retrying as session_id" in err
+    assert err.strip() == ""
     assert len(calls) == 2
     assert calls[0].get("run_id") == "sess-uuid"
     assert calls[1].get("session_id") == "sess-uuid"
@@ -205,7 +241,7 @@ def test_query_gateway_kg_command_retries_with_session_id_for_scope_all_on_run_n
 
     out, err = capsys.readouterr()
     assert json.loads(out)["ok"] is True
-    assert "retrying as session_id for scope=all" in err
+    assert "warning: run scope omitted (no run_id available)" in err
     assert len(calls) == 2
     assert calls[0].get("scope") == "all"
     assert calls[1].get("scope") == "all"
