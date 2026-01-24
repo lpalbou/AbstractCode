@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import zipfile
 from dataclasses import dataclass
@@ -56,9 +55,11 @@ def _copy_messages(messages: Any) -> List[Dict[str, Any]]:
 
 @dataclass(frozen=True)
 class ResolvedVisualFlow:
-    visual_flow: Any
-    flows: Dict[str, Any]
+    visual_flow: Dict[str, Any]
+    flows: Dict[str, Dict[str, Any]]
     flows_dir: Path
+    bundle_id: Optional[str] = None
+    bundle_version: Optional[str] = None
 
 
 def _default_flows_dir() -> Path:
@@ -72,19 +73,15 @@ def _default_flows_dir() -> Path:
 
 def _default_bundles_dir() -> Path:
     """Best-effort location for `.flow` bundles (WorkflowBundle zips)."""
-    env_candidates = [
-        "ABSTRACTGATEWAY_FLOWS_DIR",  # gateway bundle dir (canonical for bundled flows)
-        "ABSTRACTFLOW_PUBLISH_DIR",  # authoring/publish tooling
-    ]
-    for name in env_candidates:
-        v = os.getenv(name)
-        if isinstance(v, str) and v.strip():
-            return Path(v.strip()).expanduser()
+    try:
+        from abstractruntime.workflow_bundle import default_workflow_bundles_dir  # type: ignore
 
-    candidate = Path("flows") / "bundles"
-    if candidate.exists() and candidate.is_dir():
-        return candidate
-    return Path("flows")
+        return default_workflow_bundles_dir()
+    except Exception:
+        candidate = Path("flows") / "bundles"
+        if candidate.exists() and candidate.is_dir():
+            return candidate
+        return Path("flows")
 
 
 def _is_flow_bundle(path: Path) -> bool:
@@ -99,8 +96,8 @@ def _is_flow_bundle(path: Path) -> bool:
         return False
 
 
-def _load_visual_flows_from_bundle(bundle_path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Load VisualFlow JSON files from a `.flow` zip bundle.
+def _load_visual_flows_from_bundle(bundle_path: Path) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
+    """Load VisualFlow JSON objects from a `.flow` bundle (zip).
 
     Returns: (flows_by_id, manifest_dict)
     """
@@ -112,23 +109,12 @@ def _load_visual_flows_from_bundle(bundle_path: Path) -> Tuple[Dict[str, Any], D
             'Install with: pip install "abstractruntime"'
         ) from e
 
-    try:
-        from abstractflow.visual.models import VisualFlow
-    except Exception as e:  # pragma: no cover
-        raise RuntimeError(
-            "AbstractFlow is required to run VisualFlow workflows.\n"
-            'Install with: pip install "abstractcode[flow]"'
-        ) from e
-
     bundle = open_workflow_bundle(bundle_path)
     man = bundle.manifest
 
     entrypoints: List[Dict[str, Any]] = []
     for ep in getattr(man, "entrypoints", None) or []:
-        try:
-            fid = str(getattr(ep, "flow_id", "") or "").strip()
-        except Exception:
-            fid = ""
+        fid = str(getattr(ep, "flow_id", "") or "").strip()
         if not fid:
             continue
         entrypoints.append(
@@ -148,122 +134,47 @@ def _load_visual_flows_from_bundle(bundle_path: Path) -> Tuple[Dict[str, Any], D
         "flows": dict(getattr(man, "flows", None) or {}),
     }
 
-    flows: Dict[str, Any] = {}
-    for _fid, rel in (getattr(man, "flows", None) or {}).items():
+    flows: Dict[str, Dict[str, Any]] = {}
+    for fid, rel in (getattr(man, "flows", None) or {}).items():
         if not isinstance(rel, str) or not rel.strip():
             continue
         try:
-            raw = bundle.read_text(rel)
-            vf = VisualFlow.model_validate_json(raw)
+            raw = bundle.read_json(rel)
         except Exception:
             continue
-        flows[str(vf.id)] = vf
+        if not isinstance(raw, dict):
+            continue
+        flow_id = str(raw.get("id") or fid or "").strip()
+        if not flow_id:
+            continue
+        flows[flow_id] = raw
     return flows, manifest
 
 
-def _find_bundle_path(bundle_ref: str, *, bundles_dir: Optional[Path] = None) -> Optional[Path]:
-    """Resolve a bundle ref to an on-disk `.flow` path."""
-    ref = str(bundle_ref or "").strip()
-    if not ref:
-        return None
-
-    direct = Path(ref).expanduser()
-    if direct.exists() and direct.is_file():
-        return direct.resolve()
-
-    bundles_dir = (bundles_dir or _default_bundles_dir()).expanduser()
-
-    # If the user passed "foo.flow" (not found), try within the bundles dir.
-    if ref.lower().endswith(".flow"):
-        candidate = (bundles_dir / ref).expanduser()
-        if candidate.exists() and candidate.is_file():
-            return candidate.resolve()
-
-    # Parse "bundle_id@version" (without extension).
-    stem = ref[:-5] if ref.lower().endswith(".flow") else ref
-    base, version = stem, None
-    if "@" in stem:
-        base, version = stem.split("@", 1)
-        base = base.strip()
-        version = version.strip() if version is not None else None
-
-    if not base:
-        return None
-
-    # Exact match first.
-    if version:
-        named = bundles_dir / f"{base}@{version}.flow"
-        if named.exists() and named.is_file():
-            return named.resolve()
-
-    candidates: List[Path] = []
-    alias = bundles_dir / f"{base}.flow"
-    if alias.exists() and alias.is_file():
-        candidates.append(alias)
-    candidates.extend(sorted(bundles_dir.glob(f"{base}@*.flow")))
-    if not candidates:
-        return None
-
-    try:
-        from packaging.version import Version
-    except Exception:  # pragma: no cover
-
-        def Version(v: str) -> Any:  # type: ignore[misc]
-            return v
-
-    best: Optional[Tuple[Any, Path]] = None
-    try:
-        from abstractruntime.workflow_bundle import open_workflow_bundle  # type: ignore
-    except Exception:  # pragma: no cover
-        open_workflow_bundle = None  # type: ignore[assignment]
-
-    for p in candidates:
-        try:
-            if open_workflow_bundle is not None:
-                man = open_workflow_bundle(p).manifest
-                bid = str(getattr(man, "bundle_id", "") or "").strip()
-                bv = str(getattr(man, "bundle_version", "") or "").strip() or "0.0.0"
-            else:  # pragma: no cover
-                _flows, manifest = _load_visual_flows_from_bundle(p)
-                bid = str(manifest.get("bundle_id") or "").strip()
-                bv = str(manifest.get("bundle_version") or "").strip() or "0.0.0"
-        except Exception:
-            continue
-        if bid != base:
-            continue
-        try:
-            vkey = Version(bv)
-        except Exception:
-            vkey = bv
-        if best is None or vkey > best[0]:
-            best = (vkey, p)
-
-    return best[1].resolve() if best else None
-
-
-def _load_visual_flows(flows_dir: Path) -> Dict[str, Any]:
-    try:
-        from abstractflow.visual.models import VisualFlow
-    except Exception as e:  # pragma: no cover
-        raise RuntimeError(
-            "AbstractFlow is required to run VisualFlow workflows.\n"
-            'Install with: pip install "abstractcode[flow]"'
-        ) from e
-
-    flows: Dict[str, Any] = {}
+def _load_visual_flows(flows_dir: Path) -> Dict[str, Dict[str, Any]]:
+    flows: Dict[str, Dict[str, Any]] = {}
     if not flows_dir.exists():
         return flows
     for path in sorted(flows_dir.glob("*.json")):
         try:
-            raw = path.read_text(encoding="utf-8")
-            vf = VisualFlow.model_validate_json(raw)
+            raw = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             continue
-        flows[str(vf.id)] = vf
+        if not isinstance(raw, dict):
+            continue
+        fid = str(raw.get("id") or "").strip()
+        if not fid:
+            continue
+        flows[fid] = raw
     return flows
 
 
-def resolve_visual_flow(flow_ref: str, *, flows_dir: Optional[str]) -> ResolvedVisualFlow:
+def resolve_visual_flow(
+    flow_ref: str,
+    *,
+    flows_dir: Optional[str],
+    require_interface: Optional[str] = None,
+) -> ResolvedVisualFlow:
     """Resolve a VisualFlow by id, name, or path to a `.json` or bundled `.flow` file.
 
     Also accepts bundle refs (by bundle_id), e.g.:
@@ -278,6 +189,14 @@ def resolve_visual_flow(flow_ref: str, *, flows_dir: Optional[str]) -> ResolvedV
     if not ref_raw:
         raise ValueError("flow reference is required (flow id, name, .json/.flow path, or bundle id)")
 
+    def _require_flow_interface(raw: Dict[str, Any]) -> None:
+        if not require_interface:
+            return
+        interfaces = raw.get("interfaces")
+        if isinstance(interfaces, list) and require_interface in interfaces:
+            return
+        raise ValueError(f"Workflow does not implement '{require_interface}'")
+
     ref = ref_raw
     bundle_flow_id: Optional[str] = None
     # Support bundle_id:flow_id (like AbstractCode web). Avoid clobbering Windows drive letters.
@@ -291,6 +210,8 @@ def resolve_visual_flow(flow_ref: str, *, flows_dir: Optional[str]) -> ResolvedV
     flows_dir_path: Path
     if path.exists() and path.is_file() and _is_flow_bundle(path):
         flows, manifest = _load_visual_flows_from_bundle(path)
+        bundle_id = str(manifest.get("bundle_id") or "").strip() or None
+        bundle_version = str(manifest.get("bundle_version") or "").strip() or None
         default_id = str(manifest.get("default_entrypoint") or "").strip()
         selected_id = bundle_flow_id or default_id
         if not selected_id and flows:
@@ -299,75 +220,94 @@ def resolve_visual_flow(flow_ref: str, *, flows_dir: Optional[str]) -> ResolvedV
         if vf is None:
             available = ", ".join(sorted(flows.keys()))
             raise ValueError(f"Bundle entrypoint '{selected_id}' not found in {path} (available: {available})")
-        return ResolvedVisualFlow(visual_flow=vf, flows=flows, flows_dir=path.resolve())
+        # Prefer bundle-level interface markers when present; fall back to flow.interfaces.
+        if require_interface:
+            try:
+                eps = list(manifest.get("entrypoints") or [])
+                ep = next(
+                    (
+                        e
+                        for e in eps
+                        if isinstance(e, dict) and str(e.get("flow_id") or "").strip() == str(selected_id)
+                    ),
+                    None,
+                )
+                if ep is None:
+                    raise ValueError
+                if require_interface not in list(ep.get("interfaces") or []):
+                    raise ValueError
+            except Exception:
+                _require_flow_interface(vf)
+        return ResolvedVisualFlow(
+            visual_flow=vf,
+            flows=flows,
+            flows_dir=path.resolve(),
+            bundle_id=bundle_id,
+            bundle_version=bundle_version,
+        )
 
     if path.exists() and path.is_file():
         try:
-            raw = path.read_text(encoding="utf-8")
+            raw = json.loads(path.read_text(encoding="utf-8"))
         except Exception as e:
             raise ValueError(f"Cannot read flow file: {path}") from e
-
-        try:
-            from abstractflow.visual.models import VisualFlow
-        except Exception as e:  # pragma: no cover
-            raise RuntimeError(
-                "AbstractFlow is required to run VisualFlow workflows.\n"
-                'Install with: pip install "abstractcode[flow]"'
-            ) from e
-
-        vf = VisualFlow.model_validate_json(raw)
+        if not isinstance(raw, dict):
+            raise ValueError(f"Flow JSON must be an object: {path}")
         flows_dir_path = Path(flows_dir).expanduser().resolve() if flows_dir else path.parent.resolve()
         flows = _load_visual_flows(flows_dir_path)
-        flows[str(vf.id)] = vf
-        return ResolvedVisualFlow(visual_flow=vf, flows=flows, flows_dir=flows_dir_path)
+        fid = str(raw.get("id") or "").strip()
+        if fid:
+            flows[fid] = raw
+        _require_flow_interface(raw)
+        return ResolvedVisualFlow(visual_flow=raw, flows=flows, flows_dir=flows_dir_path)
 
-    # Prefer bundled `.flow` agents when a bundle_id matches, even if source VisualFlows exist.
-    bundle_path = _find_bundle_path(ref, bundles_dir=None)
-    if bundle_path is not None:
-        flows2, manifest = _load_visual_flows_from_bundle(bundle_path)
-        default_id = str(manifest.get("default_entrypoint") or "").strip()
-        selected_id = bundle_flow_id or default_id
-        if not selected_id and flows2:
-            selected_id = next(iter(flows2.keys()))
-        vf = flows2.get(selected_id) if selected_id else None
+    # Prefer installed bundle refs when a bundle_id (or entrypoint name) matches.
+    try:
+        from abstractruntime.workflow_bundle import WorkflowBundleRegistry, WorkflowBundleRegistryError  # type: ignore
+
+        reg = WorkflowBundleRegistry(_default_bundles_dir())
+        ep = reg.resolve_entrypoint(ref_raw, interface=require_interface)
+        b = reg.resolve_bundle(ep.bundle_ref)
+        flows2, _manifest = _load_visual_flows_from_bundle(b.path)
+        vf = flows2.get(ep.flow_id)
         if vf is None:
             available = ", ".join(sorted(flows2.keys()))
-            raise ValueError(f"Bundle entrypoint '{selected_id}' not found in {bundle_path} (available: {available})")
-        return ResolvedVisualFlow(visual_flow=vf, flows=flows2, flows_dir=bundle_path)
+            raise ValueError(f"Bundle entrypoint '{ep.flow_id}' not found in {b.path} (available: {available})")
+        return ResolvedVisualFlow(
+            visual_flow=vf,
+            flows=flows2,
+            flows_dir=b.path.resolve(),
+            bundle_id=str(ep.bundle_id),
+            bundle_version=str(ep.bundle_version),
+        )
+    except WorkflowBundleRegistryError:
+        pass
+    except Exception:
+        pass
 
     flows_dir_path = Path(flows_dir).expanduser().resolve() if flows_dir else _default_flows_dir().resolve()
     flows = _load_visual_flows(flows_dir_path)
 
     if ref in flows:
+        _require_flow_interface(flows[ref])
         return ResolvedVisualFlow(visual_flow=flows[ref], flows=flows, flows_dir=flows_dir_path)
 
     # Fall back to exact name match (case-insensitive).
-    matches = []
+    matches: list[Dict[str, Any]] = []
     needle = ref.casefold()
     for vf in flows.values():
-        name = getattr(vf, "name", None)
+        name = vf.get("name")
         if isinstance(name, str) and name.strip() and name.strip().casefold() == needle:
             matches.append(vf)
 
     if not matches:
-        bundle_path = _find_bundle_path(ref, bundles_dir=None)
-        if bundle_path is None:
-            raise ValueError(f"Flow '{ref_raw}' not found in {flows_dir_path}")
-        flows2, manifest = _load_visual_flows_from_bundle(bundle_path)
-        default_id = str(manifest.get("default_entrypoint") or "").strip()
-        selected_id = bundle_flow_id or default_id
-        if not selected_id and flows2:
-            selected_id = next(iter(flows2.keys()))
-        vf = flows2.get(selected_id) if selected_id else None
-        if vf is None:
-            available = ", ".join(sorted(flows2.keys()))
-            raise ValueError(f"Bundle entrypoint '{selected_id}' not found in {bundle_path} (available: {available})")
-        return ResolvedVisualFlow(visual_flow=vf, flows=flows2, flows_dir=bundle_path)
+        raise ValueError(f"Flow '{ref_raw}' not found in {flows_dir_path}")
     if len(matches) > 1:
-        options = ", ".join([f"{getattr(v, 'name', '')} ({getattr(v, 'id', '')})" for v in matches])
+        options = ", ".join([f"{str(v.get('name') or '')} ({str(v.get('id') or '')})" for v in matches])
         raise ValueError(f"Multiple flows match '{ref}': {options}")
 
     vf = matches[0]
+    _require_flow_interface(vf)
     return ResolvedVisualFlow(visual_flow=vf, flows=flows, flows_dir=flows_dir_path)
 
 
@@ -401,12 +341,14 @@ def _workflow_registry() -> Any:
 
 
 def _node_type_str(node: Any) -> str:
+    if isinstance(node, dict):
+        return str(node.get("type") or "")
     t = getattr(node, "type", None)
     return t.value if hasattr(t, "value") else str(t or "")
 
 
 def _subflow_id(node: Any) -> Optional[str]:
-    data = getattr(node, "data", None)
+    data = node.get("data") if isinstance(node, dict) else getattr(node, "data", None)
     if not isinstance(data, dict):
         return None
     sid = data.get("subflowId") or data.get("flowId") or data.get("workflowId") or data.get("workflow_id")
@@ -417,44 +359,103 @@ def _subflow_id(node: Any) -> Optional[str]:
 
 def _compile_visual_flow_tree(
     *,
-    root: Any,
-    flows: Dict[str, Any],
+    root: Dict[str, Any],
+    flows: Dict[str, Dict[str, Any]],
     tools: List[Callable[..., Any]],
     runtime: Runtime,
+    bundle_id: Optional[str] = None,
+    bundle_version: Optional[str] = None,
 ) -> Tuple[WorkflowSpec, Any]:
-    from abstractflow.compiler import compile_flow
-    from abstractflow.visual.agent_ids import visual_react_workflow_id
-    from abstractflow.visual.executor import visual_to_flow
+    from abstractruntime.visualflow_compiler import compile_visualflow
+    from abstractruntime.visualflow_compiler.visual.agent_ids import visual_react_workflow_id
 
     # Collect referenced subflows (cycles are allowed; compile/register each id once).
-    ordered: List[Any] = []
+    ordered_ids: List[str] = []
     seen: set[str] = set()
-    queue: List[str] = [str(getattr(root, "id", "") or "")]
+    queue: List[str] = [str(root.get("id") or "")]
 
     while queue:
         fid = queue.pop(0)
         if not fid or fid in seen:
             continue
-        vf = flows.get(fid)
-        if vf is None:
+        vf_raw = flows.get(fid)
+        if vf_raw is None:
             raise ValueError(f"Subflow '{fid}' not found in loaded flows")
         seen.add(fid)
-        ordered.append(vf)
+        ordered_ids.append(fid)
 
-        for n in getattr(vf, "nodes", []) or []:
+        for n in list(vf_raw.get("nodes") or []):
             if _node_type_str(n) != "subflow":
                 continue
             sid = _subflow_id(n)
             if sid:
                 queue.append(sid)
 
+    bundle_ref = None
+    if isinstance(bundle_id, str) and bundle_id.strip() and isinstance(bundle_version, str) and bundle_version.strip():
+        bundle_ref = f"{bundle_id.strip()}@{bundle_version.strip()}"
+
+    def _namespace(prefix: str, flow_id: str) -> str:
+        return f"{prefix}:{flow_id}"
+
+    def _namespace_visualflow_raw(*, raw: Dict[str, Any], prefix: str, flow_id: str, id_map: Dict[str, str]) -> Dict[str, Any]:
+        def _rewrite(v: Any) -> Any:
+            if isinstance(v, str):
+                s = v.strip()
+                return id_map.get(s) or v
+            if isinstance(v, list):
+                return [_rewrite(x) for x in v]
+            if isinstance(v, dict):
+                return {k: _rewrite(v2) for k, v2 in v.items()}
+            return v
+
+        out_any = _rewrite(raw)
+        out: Dict[str, Any] = dict(out_any) if isinstance(out_any, dict) else dict(raw)
+        out["id"] = id_map.get(flow_id) or _namespace(prefix, flow_id)
+
+        nodes_raw = out.get("nodes")
+        if isinstance(nodes_raw, list):
+            new_nodes: list[Any] = []
+            for n_any in nodes_raw:
+                n = dict(n_any) if isinstance(n_any, dict) else n_any
+                if isinstance(n, dict) and str(n.get("type") or "") == "agent":
+                    node_id = str(n.get("id") or "").strip()
+                    data = n.get("data")
+                    data_d = dict(data) if isinstance(data, dict) else {}
+                    cfg_raw = data_d.get("agentConfig")
+                    cfg = dict(cfg_raw) if isinstance(cfg_raw, dict) else {}
+                    if node_id:
+                        cfg["_react_workflow_id"] = visual_react_workflow_id(flow_id=str(out.get("id") or ""), node_id=node_id)
+                    data_d["agentConfig"] = cfg
+                    n["data"] = data_d
+                new_nodes.append(n)
+            out["nodes"] = new_nodes
+
+        return out
+
     registry = _workflow_registry()
 
     specs_by_id: Dict[str, WorkflowSpec] = {}
-    for vf in ordered:
-        f = visual_to_flow(vf)
-        spec = compile_flow(f)
+    id_map: Dict[str, str] = {}
+    if bundle_ref:
+        id_map = {fid: _namespace(bundle_ref, fid) for fid in ordered_ids}
+
+    compiled_flows: list[Dict[str, Any]] = []
+    for fid in ordered_ids:
+        raw0 = flows.get(fid)
+        if raw0 is None:
+            continue
+        raw = (
+            _namespace_visualflow_raw(raw=raw0, prefix=bundle_ref, flow_id=fid, id_map=id_map)
+            if bundle_ref
+            else dict(raw0)
+        )
+        try:
+            spec = compile_visualflow(raw)
+        except Exception as e:
+            raise RuntimeError(f"Failed compiling VisualFlow '{fid}': {e}") from e
         specs_by_id[str(spec.workflow_id)] = spec
+        compiled_flows.append(raw)
         register = getattr(registry, "register", None)
         if callable(register):
             register(spec)
@@ -463,18 +464,19 @@ def _compile_visual_flow_tree(
 
     # Register per-Agent-node ReAct subworkflows so visual Agent nodes can run.
     agent_nodes: List[Tuple[str, Dict[str, Any]]] = []
-    for vf in ordered:
-        for n in getattr(vf, "nodes", []) or []:
+    for vf in compiled_flows:
+        flow_id = str(vf.get("id") or "").strip()
+        for n in list(vf.get("nodes") or []):
             if _node_type_str(n) != "agent":
                 continue
-            data = getattr(n, "data", None)
+            data = n.get("data") if isinstance(n, dict) else None
             cfg = data.get("agentConfig", {}) if isinstance(data, dict) else {}
             cfg = dict(cfg) if isinstance(cfg, dict) else {}
             wf_id_raw = cfg.get("_react_workflow_id")
             wf_id = (
                 wf_id_raw.strip()
                 if isinstance(wf_id_raw, str) and wf_id_raw.strip()
-                else visual_react_workflow_id(flow_id=vf.id, node_id=n.id)
+                else visual_react_workflow_id(flow_id=flow_id or "unknown", node_id=str((n.get("id") if isinstance(n, dict) else "") or ""))
             )
             agent_nodes.append((wf_id, cfg))
 
@@ -535,12 +537,127 @@ def _compile_visual_flow_tree(
     else:  # pragma: no cover
         raise RuntimeError("Runtime does not support workflow registries (required for subflows/agent nodes).")
 
-    root_id = str(getattr(root, "id", "") or "")
-    root_spec = specs_by_id.get(root_id)
+    root_id = str(root.get("id") or "")
+    root_wid = id_map.get(root_id) if bundle_ref else root_id
+    root_spec = specs_by_id.get(root_wid)
     if root_spec is None:
         # Shouldn't happen because root id was seeded into the queue.
-        raise RuntimeError(f"Root workflow '{root_id}' was not compiled/registered.")
+        raise RuntimeError(f"Root workflow '{root_wid or root_id}' was not compiled/registered.")
     return root_spec, registry
+
+
+def _apply_abstractcode_agent_v1_scaffold(flow: Dict[str, Any], *, include_recommended: bool = True) -> None:
+    """Best-effort: ensure required pins exist for `abstractcode.agent.v1` flows.
+
+    This mirrors the VisualFlow interface scaffold in `abstractflow.visual.interfaces`,
+    but operates directly on raw dict JSON so AbstractCode can run bundles without
+    depending on AbstractFlow.
+    """
+    iid = "abstractcode.agent.v1"
+
+    interfaces = flow.get("interfaces")
+    if not isinstance(interfaces, list):
+        interfaces = []
+        flow["interfaces"] = interfaces
+    if iid not in interfaces:
+        interfaces.append(iid)
+
+    nodes = flow.get("nodes")
+    if not isinstance(nodes, list):
+        return
+
+    def _ensure_node_data(node: Dict[str, Any]) -> Dict[str, Any]:
+        data = node.get("data")
+        if not isinstance(data, dict):
+            data = {}
+            node["data"] = data
+        return data
+
+    def _ensure_pin_list(data: Dict[str, Any], key: str) -> list[dict[str, Any]]:
+        pins_any = data.get(key)
+        if not isinstance(pins_any, list):
+            pins: list[dict[str, Any]] = []
+            data[key] = pins
+            return pins
+        if all(isinstance(p, dict) for p in pins_any):
+            return pins_any  # type: ignore[return-value]
+        filtered: list[dict[str, Any]] = [p for p in pins_any if isinstance(p, dict)]
+        data[key] = filtered
+        return filtered
+
+    def _ensure_pin(pins: list[dict[str, Any]], *, pin_id: str, pin_type: str, label: Optional[str] = None) -> None:
+        if any(isinstance(p.get("id"), str) and p.get("id") == pin_id for p in pins):
+            return
+        pins.append({"id": pin_id, "label": label if isinstance(label, str) else pin_id, "type": pin_type})
+
+    start = next((n for n in nodes if isinstance(n, dict) and str(n.get("type") or "") == "on_flow_start"), None)
+    if isinstance(start, dict):
+        data = _ensure_node_data(start)
+        outs = _ensure_pin_list(data, "outputs")
+        _ensure_pin(outs, pin_id="exec-out", pin_type="execution", label="")
+        _ensure_pin(outs, pin_id="provider", pin_type="provider")
+        _ensure_pin(outs, pin_id="model", pin_type="model")
+        _ensure_pin(outs, pin_id="prompt", pin_type="string")
+        if include_recommended:
+            _ensure_pin(outs, pin_id="tools", pin_type="tools")
+
+    for end in [n for n in nodes if isinstance(n, dict) and str(n.get("type") or "") == "on_flow_end"]:
+        data = _ensure_node_data(end)
+        ins = _ensure_pin_list(data, "inputs")
+        _ensure_pin(ins, pin_id="exec-in", pin_type="execution", label="")
+        _ensure_pin(ins, pin_id="response", pin_type="string")
+        _ensure_pin(ins, pin_id="success", pin_type="boolean")
+        _ensure_pin(ins, pin_id="meta", pin_type="object")
+        if include_recommended:
+            _ensure_pin(ins, pin_id="scratchpad", pin_type="object")
+
+
+def _validate_abstractcode_agent_v1(flow: Dict[str, Any]) -> List[str]:
+    """Minimal contract validation for `abstractcode.agent.v1` workflows (stdlib-only)."""
+    errors: list[str] = []
+    nodes = flow.get("nodes")
+    if not isinstance(nodes, list):
+        return ["Flow.nodes must be a list"]
+
+    def _pins(node: Dict[str, Any], key: str) -> Optional[set[str]]:
+        data = node.get("data")
+        if not isinstance(data, dict):
+            return None
+        pins = data.get(key)
+        if not isinstance(pins, list):
+            return None
+        out: set[str] = set()
+        for p in pins:
+            if not isinstance(p, dict):
+                continue
+            if p.get("type") == "execution":
+                continue
+            pid = p.get("id")
+            if isinstance(pid, str) and pid.strip():
+                out.add(pid.strip())
+        return out
+
+    start = next((n for n in nodes if isinstance(n, dict) and str(n.get("type") or "") == "on_flow_start"), None)
+    if not isinstance(start, dict):
+        errors.append("Missing On Flow Start node (type=on_flow_start)")
+    else:
+        outs = _pins(start, "outputs")
+        required_out = {"prompt", "provider", "model", "tools"}
+        if outs is not None and not required_out.issubset(outs):
+            missing = ", ".join(sorted(required_out - outs))
+            errors.append(f"On Flow Start outputs missing: {missing}")
+
+    end = next((n for n in nodes if isinstance(n, dict) and str(n.get("type") or "") == "on_flow_end"), None)
+    if not isinstance(end, dict):
+        errors.append("Missing On Flow End node (type=on_flow_end)")
+    else:
+        ins = _pins(end, "inputs")
+        required_in = {"response", "success", "meta"}
+        if ins is not None and not required_in.issubset(ins):
+            missing = ", ".join(sorted(required_in - ins))
+            errors.append(f"On Flow End inputs missing: {missing}")
+
+    return errors
 
 
 class WorkflowAgent(BaseAgent):
@@ -572,32 +689,17 @@ class WorkflowAgent(BaseAgent):
         if not self._flow_ref:
             raise ValueError("flow_ref is required")
 
-        resolved = resolve_visual_flow(self._flow_ref, flows_dir=flows_dir)
+        ABSTRACTCODE_AGENT_V1 = "abstractcode.agent.v1"
+        resolved = resolve_visual_flow(self._flow_ref, flows_dir=flows_dir, require_interface=ABSTRACTCODE_AGENT_V1)
         self.visual_flow = resolved.visual_flow
         self.flows = resolved.flows
         self.flows_dir = resolved.flows_dir
+        self._bundle_id = resolved.bundle_id
+        self._bundle_version = resolved.bundle_version
 
-        # Validate interface contract before creating the workflow spec.
-        try:
-            from abstractflow.visual.interfaces import (
-                ABSTRACTCODE_AGENT_V1,
-                apply_visual_flow_interface_scaffold,
-                validate_visual_flow_interface,
-            )
-        except Exception as e:  # pragma: no cover
-            raise RuntimeError(
-                "AbstractFlow is required to validate VisualFlow interfaces.\n"
-                'Install with: pip install "abstractcode[flow]"'
-            ) from e
+        _apply_abstractcode_agent_v1_scaffold(self.visual_flow, include_recommended=True)
 
-        # Authoring UX: keep interface-marked flows scaffolded even if the underlying
-        # JSON was created before the contract expanded (or was edited manually).
-        try:
-            apply_visual_flow_interface_scaffold(self.visual_flow, ABSTRACTCODE_AGENT_V1, include_recommended=True)
-        except Exception:
-            pass
-
-        errors = validate_visual_flow_interface(self.visual_flow, ABSTRACTCODE_AGENT_V1)
+        errors = _validate_abstractcode_agent_v1(self.visual_flow)
         if errors:
             joined = "\n".join([f"- {e}" for e in errors])
             raise ValueError(f"Workflow does not implement '{ABSTRACTCODE_AGENT_V1}':\n{joined}")
@@ -616,7 +718,14 @@ class WorkflowAgent(BaseAgent):
 
     def _create_workflow(self) -> WorkflowSpec:
         tools = list(self.tools or [])
-        spec, _registry = _compile_visual_flow_tree(root=self.visual_flow, flows=self.flows, tools=tools, runtime=self.runtime)
+        spec, _registry = _compile_visual_flow_tree(
+            root=self.visual_flow,
+            flows=self.flows,
+            tools=tools,
+            runtime=self.runtime,
+            bundle_id=self._bundle_id,
+            bundle_version=self._bundle_version,
+        )
         return spec
 
     def start(
@@ -703,11 +812,13 @@ class WorkflowAgent(BaseAgent):
         # Build a stable node_id -> label map for UX (used for status updates).
         try:
             labels: Dict[str, str] = {}
-            for n in getattr(self.visual_flow, "nodes", []) or []:
-                nid = getattr(n, "id", None)
+            for n in list(self.visual_flow.get("nodes") or []):
+                if not isinstance(n, dict):
+                    continue
+                nid = n.get("id")
                 if not isinstance(nid, str) or not nid:
                     continue
-                data = getattr(n, "data", None)
+                data = n.get("data")
                 label = data.get("label") if isinstance(data, dict) else None
                 if isinstance(label, str) and label.strip():
                     labels[nid] = label.strip()
@@ -729,8 +840,10 @@ class WorkflowAgent(BaseAgent):
                 self.on_step(
                     "init",
                     {
-                        "flow_id": str(getattr(self.visual_flow, "id", "") or ""),
-                        "flow_name": str(getattr(self.visual_flow, "name", "") or ""),
+                        "flow_id": str(self.visual_flow.get("id") or ""),
+                        "flow_name": str(self.visual_flow.get("name") or ""),
+                        "bundle_id": self._bundle_id,
+                        "bundle_version": self._bundle_version,
                     },
                 )
             except Exception:
@@ -1049,6 +1162,118 @@ class WorkflowAgent(BaseAgent):
 
             time.sleep(min(0.25, max(0.0, float(remaining))))
 
+    def _auto_drive_subworkflow_wait(self, state: RunState) -> Optional[RunState]:
+        """Best-effort: drive async SUBWORKFLOW waits for non-interactive hosts.
+
+        Visual subflow nodes are compiled into async+wait subworkflow effects so
+        interactive hosts (e.g. web) can stream nested runs. AbstractCode's agent
+        loop expects `step()` to keep progressing without needing an external
+        sub-run driver, so we tick sub-runs and bubble their completions up.
+        """
+        from abstractruntime.core.models import WaitReason
+
+        waiting = getattr(state, "waiting", None)
+        if waiting is None or getattr(waiting, "reason", None) != WaitReason.SUBWORKFLOW:
+            return None
+
+        top_run_id = str(getattr(state, "run_id", "") or "")
+        if not top_run_id:
+            return None
+
+        def _extract_sub_run_id(wait_state: object) -> Optional[str]:
+            details = getattr(wait_state, "details", None)
+            if isinstance(details, dict):
+                sub_run_id = details.get("sub_run_id")
+                if isinstance(sub_run_id, str) and sub_run_id:
+                    return sub_run_id
+            wait_key = getattr(wait_state, "wait_key", None)
+            if isinstance(wait_key, str) and wait_key.startswith("subworkflow:"):
+                return wait_key.split("subworkflow:", 1)[1] or None
+            return None
+
+        def _workflow_for(run_state: object) -> Any:
+            reg = getattr(self.runtime, "workflow_registry", None)
+            getter = getattr(reg, "get", None) if reg is not None else None
+            if callable(getter):
+                wf = getter(getattr(run_state, "workflow_id", ""))
+                if wf is not None:
+                    return wf
+            if getattr(self.workflow, "workflow_id", None) == getattr(run_state, "workflow_id", None):
+                return self.workflow
+            raise RuntimeError(f"Workflow '{getattr(run_state, 'workflow_id', '')}' not found in runtime registry")
+
+        def _bubble_completion(child_state: object) -> Optional[str]:
+            parent_id = getattr(child_state, "parent_run_id", None)
+            if not isinstance(parent_id, str) or not parent_id:
+                return None
+            parent_state = self.runtime.get_state(parent_id)
+            parent_wait = getattr(parent_state, "waiting", None)
+            if parent_state.status != RunStatus.WAITING or parent_wait is None:
+                return None
+            if parent_wait.reason != WaitReason.SUBWORKFLOW:
+                return None
+            self.runtime.resume(
+                workflow=_workflow_for(parent_state),
+                run_id=parent_id,
+                wait_key=None,
+                payload={
+                    "sub_run_id": getattr(child_state, "run_id", None),
+                    "output": getattr(child_state, "output", None),
+                    "node_traces": self.runtime.get_node_traces(getattr(child_state, "run_id", "")),
+                },
+                max_steps=0,
+            )
+            return parent_id
+
+        # Drive subruns until we either make progress or hit a non-subworkflow wait.
+        for _ in range(200):
+            # Descend to the deepest sub-run referenced by SUBWORKFLOW waits.
+            current_run_id = top_run_id
+            for _ in range(25):
+                cur_state = self.runtime.get_state(current_run_id)
+                cur_wait = getattr(cur_state, "waiting", None)
+                if cur_state.status != RunStatus.WAITING or cur_wait is None:
+                    break
+                if cur_wait.reason != WaitReason.SUBWORKFLOW:
+                    break
+                next_id = _extract_sub_run_id(cur_wait)
+                if not next_id:
+                    break
+                current_run_id = next_id
+
+            current_state = self.runtime.get_state(current_run_id)
+
+            # Tick running subruns until they block/complete.
+            if current_state.status == RunStatus.RUNNING:
+                current_state = self.runtime.tick(
+                    workflow=_workflow_for(current_state),
+                    run_id=current_run_id,
+                    max_steps=100,
+                )
+
+            if current_state.status == RunStatus.RUNNING:
+                continue
+
+            if current_state.status in (RunStatus.FAILED, RunStatus.CANCELLED):
+                return current_state
+
+            if current_state.status == RunStatus.WAITING:
+                cur_wait = getattr(current_state, "waiting", None)
+                if cur_wait is None:
+                    break
+                if cur_wait.reason == WaitReason.SUBWORKFLOW:
+                    continue
+                # Blocked on a real wait (USER/EVENT/UNTIL/...): stop auto-driving.
+                return self.runtime.get_state(top_run_id)
+
+            if current_state.status == RunStatus.COMPLETED:
+                parent_id = _bubble_completion(current_state)
+                if parent_id is None:
+                    return self.runtime.get_state(top_run_id)
+                continue
+
+        return self.runtime.get_state(top_run_id)
+
     def step(self) -> RunState:
         if not self._current_run_id:
             raise RuntimeError("No active run. Call start() first.")
@@ -1064,6 +1289,11 @@ class WorkflowAgent(BaseAgent):
             elif advanced is None:
                 # Time passed (or will pass within our polling loop): continue ticking once.
                 state = self.runtime.tick(workflow=self.workflow, run_id=self._current_run_id, max_steps=1)
+
+        if state.status == RunStatus.WAITING:
+            driven = self._auto_drive_subworkflow_wait(state)
+            if isinstance(driven, RunState):
+                state = driven
 
         if state.status == RunStatus.COMPLETED:
             response_text = ""

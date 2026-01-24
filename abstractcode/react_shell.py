@@ -2774,19 +2774,15 @@ class ReactShell:
         return False
 
     def _default_bundles_dir(self) -> Path:
-        env_candidates = [
-            "ABSTRACTGATEWAY_FLOWS_DIR",
-            "ABSTRACTFLOW_PUBLISH_DIR",
-        ]
-        for name in env_candidates:
-            v = os.getenv(name)
-            if isinstance(v, str) and v.strip():
-                return Path(v.strip()).expanduser()
+        try:
+            from abstractruntime.workflow_bundle import default_workflow_bundles_dir  # type: ignore
 
-        candidate = Path("flows") / "bundles"
-        if candidate.exists() and candidate.is_dir():
-            return candidate
-        return Path("flows")
+            return default_workflow_bundles_dir()
+        except Exception:
+            candidate = Path("flows") / "bundles"
+            if candidate.exists() and candidate.is_dir():
+                return candidate
+            return Path("flows")
 
     def _normalize_agent_selector_key(self, raw: str) -> str:
         s = str(raw or "").strip()

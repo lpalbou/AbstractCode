@@ -49,6 +49,7 @@ def build_agent_parser() -> argparse.ArgumentParser:
         epilog=(
             "Workflows:\n"
             "  abstractcode flow --help   Run AbstractFlow workflows from the terminal\n"
+            "  abstractcode workflow --help   Install/list workflow bundles\n"
             "REPL:\n"
             "  Use /flow inside the REPL to run workflows while keeping chat context.\n"
         ),
@@ -149,6 +150,38 @@ def build_agent_parser() -> argparse.ArgumentParser:
             "Overrides $ABSTRACTCODE_GATEWAY_TOKEN for this run (not persisted)."
         ),
     )
+    return parser
+
+
+def build_workflow_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="abstractcode workflow",
+        description="Manage installed WorkflowBundle (.flow) bundles for discovery and reuse.",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    install = sub.add_parser("install", help="Install a .flow bundle into the local registry")
+    install.add_argument("source", help="Path to a .flow file")
+    install.add_argument("--registry-dir", default=None, help="Registry directory containing installed .flow bundles")
+    install.add_argument("--overwrite", action="store_true", help="Overwrite if already installed")
+    install.add_argument("--json", action="store_true", help="Output JSON")
+
+    ls = sub.add_parser("list", help="List available workflow entrypoints")
+    ls.add_argument("--registry-dir", default=None, help="Registry directory containing installed .flow bundles")
+    ls.add_argument("--interface", default=None, help="Filter entrypoints by interface id")
+    ls.add_argument("--all", action="store_true", help="Include all versions (default: latest only)")
+    ls.add_argument("--json", action="store_true", help="Output JSON")
+
+    info = sub.add_parser("info", help="Show details for an installed bundle")
+    info.add_argument("bundle", help="Bundle ref: bundle_id or bundle_id@version")
+    info.add_argument("--registry-dir", default=None, help="Registry directory containing installed .flow bundles")
+    info.add_argument("--json", action="store_true", help="Output JSON")
+
+    rm = sub.add_parser("remove", help="Remove an installed bundle (bundle_id or bundle_id@version)")
+    rm.add_argument("bundle", help="Bundle ref: bundle_id or bundle_id@version")
+    rm.add_argument("--registry-dir", default=None, help="Registry directory containing installed .flow bundles")
+    rm.add_argument("--json", action="store_true", help="Output JSON")
+
     return parser
 
 
@@ -847,6 +880,53 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 0
 
         build_flow_parser().print_help()
+        return 2
+
+    if argv_list and argv_list[0] == "workflow":
+        parser = build_workflow_parser()
+        args, unknown = parser.parse_known_args(argv_list[1:])
+        if unknown:
+            parser.error(f"Unknown arguments: {' '.join(unknown)}")
+        from .workflow_cli import (
+            install_workflow_bundle_command,
+            list_workflow_bundles_command,
+            remove_workflow_bundle_command,
+            workflow_bundle_info_command,
+        )
+
+        cmd = getattr(args, "command", None)
+        if cmd == "install":
+            install_workflow_bundle_command(
+                source=str(args.source),
+                registry_dir=getattr(args, "registry_dir", None),
+                overwrite=bool(getattr(args, "overwrite", False)),
+                output_json=bool(getattr(args, "json", False)),
+            )
+            return 0
+        if cmd == "list":
+            list_workflow_bundles_command(
+                registry_dir=getattr(args, "registry_dir", None),
+                interface=getattr(args, "interface", None),
+                all_versions=bool(getattr(args, "all", False)),
+                output_json=bool(getattr(args, "json", False)),
+            )
+            return 0
+        if cmd == "info":
+            workflow_bundle_info_command(
+                bundle_ref=str(args.bundle),
+                registry_dir=getattr(args, "registry_dir", None),
+                output_json=bool(getattr(args, "json", False)),
+            )
+            return 0
+        if cmd == "remove":
+            remove_workflow_bundle_command(
+                bundle_ref=str(args.bundle),
+                registry_dir=getattr(args, "registry_dir", None),
+                output_json=bool(getattr(args, "json", False)),
+            )
+            return 0
+
+        build_workflow_parser().print_help()
         return 2
 
     args = build_agent_parser().parse_args(argv_list)
