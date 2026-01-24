@@ -294,11 +294,14 @@ class GatewayApi:
             timeout_s=float(timeout_s),
         )
 
-    def list_bundles(self, *, all_versions: bool = False) -> Dict[str, Any]:
-        qs = "all_versions=true" if bool(all_versions) else "all_versions=false"
+    def list_bundles(self, *, all_versions: bool = False, include_deprecated: bool = False) -> Dict[str, Any]:
+        qs = [
+            "all_versions=true" if bool(all_versions) else "all_versions=false",
+            "include_deprecated=true" if bool(include_deprecated) else "include_deprecated=false",
+        ]
         return _request_json(
             method="GET",
-            url=_join_url(self.base_url, f"/api/gateway/bundles?{qs}"),
+            url=_join_url(self.base_url, f"/api/gateway/bundles?{'&'.join(qs)}"),
             token=self.token,
             payload=None,
         )
@@ -348,6 +351,39 @@ class GatewayApi:
             url=_join_url(self.base_url, f"/api/gateway/bundles/{bid}{q}"),
             token=self.token,
             payload=None,
+        )
+
+    def deprecate_bundle(self, *, bundle_id: str, flow_id: Optional[str] = None, reason: Optional[str] = None) -> Dict[str, Any]:
+        bid = str(bundle_id or "").strip()
+        if not bid:
+            raise ValueError("bundle_id is required")
+        payload: Dict[str, Any] = {}
+        fid = str(flow_id or "").strip()
+        if fid:
+            payload["flow_id"] = fid
+        r = str(reason or "").strip()
+        if r:
+            payload["reason"] = r
+        return _request_json(
+            method="POST",
+            url=_join_url(self.base_url, f"/api/gateway/bundles/{bid}/deprecate"),
+            token=self.token,
+            payload=payload,
+        )
+
+    def undeprecate_bundle(self, *, bundle_id: str, flow_id: Optional[str] = None) -> Dict[str, Any]:
+        bid = str(bundle_id or "").strip()
+        if not bid:
+            raise ValueError("bundle_id is required")
+        payload: Dict[str, Any] = {}
+        fid = str(flow_id or "").strip()
+        if fid:
+            payload["flow_id"] = fid
+        return _request_json(
+            method="POST",
+            url=_join_url(self.base_url, f"/api/gateway/bundles/{bid}/undeprecate"),
+            token=self.token,
+            payload=payload,
         )
 
 

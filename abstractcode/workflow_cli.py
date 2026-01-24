@@ -43,11 +43,12 @@ def list_workflow_bundles_command(
     gateway_token: Optional[str] = None,
     interface: Optional[str] = None,
     all_versions: bool = False,
+    include_deprecated: bool = False,
     output_json: bool = False,
 ) -> dict[str, Any]:
     api = _gateway_api(gateway_url=gateway_url, gateway_token=gateway_token)
     try:
-        resp = api.list_bundles(all_versions=bool(all_versions))
+        resp = api.list_bundles(all_versions=bool(all_versions), include_deprecated=bool(include_deprecated))
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -68,6 +69,7 @@ def list_workflow_bundles_command(
             fid = str(ep.get("flow_id") or "").strip()
             if not fid:
                 continue
+            deprecated = bool(ep.get("deprecated") is True)
             interfaces = [str(x).strip() for x in list(ep.get("interfaces") or []) if isinstance(x, str) and x.strip()]
             if interface and interface not in interfaces:
                 continue
@@ -82,6 +84,8 @@ def list_workflow_bundles_command(
                     "description": str(ep.get("description") or "") or "",
                     "interfaces": interfaces,
                     "default": bool(implied_default or (default_fid and fid == default_fid)),
+                    "deprecated": bool(deprecated),
+                    "deprecated_reason": str(ep.get("deprecated_reason") or "") or "",
                 }
             )
 
@@ -99,8 +103,9 @@ def list_workflow_bundles_command(
             if isinstance(interfaces, list) and interfaces:
                 iface = f" [{', '.join(interfaces)}]"
             default = " *" if it.get("default") else ""
+            dep = " (deprecated)" if it.get("deprecated") else ""
             wid = str(it.get("workflow_id") or it.get("bundle_ref") or "")
-            print(f"{wid}{default}  {name}{iface}")
+            print(f"{wid}{default}{dep}  {name}{iface}")
     return out
 
 
@@ -165,4 +170,60 @@ def remove_workflow_bundle_command(
         removed = out.get("removed")
         bref = str(out.get("bundle_ref") or bundle_ref or "").strip() or "?"
         print(f"Removed {removed} bundle(s) from gateway for {bref}")
+    return out
+
+
+def deprecate_workflow_bundle_command(
+    *,
+    bundle_id: str,
+    flow_id: Optional[str] = None,
+    reason: Optional[str] = None,
+    gateway_url: Optional[str] = None,
+    gateway_token: Optional[str] = None,
+    output_json: bool = False,
+) -> dict[str, Any]:
+    api = _gateway_api(gateway_url=gateway_url, gateway_token=gateway_token)
+    bid = str(bundle_id or "").strip()
+    if not bid:
+        return {"ok": False, "error": "bundle_id is required"}
+    try:
+        resp = api.deprecate_bundle(bundle_id=bid, flow_id=flow_id, reason=reason)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    out = dict(resp or {})
+    out.setdefault("gateway_url", str(getattr(api, "base_url", "") or ""))
+    if output_json:
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+    else:
+        fid = str(out.get("flow_id") or "").strip() or "*"
+        print(f"Deprecated on gateway: {bid}:{fid}")
+    return out
+
+
+def undeprecate_workflow_bundle_command(
+    *,
+    bundle_id: str,
+    flow_id: Optional[str] = None,
+    gateway_url: Optional[str] = None,
+    gateway_token: Optional[str] = None,
+    output_json: bool = False,
+) -> dict[str, Any]:
+    api = _gateway_api(gateway_url=gateway_url, gateway_token=gateway_token)
+    bid = str(bundle_id or "").strip()
+    if not bid:
+        return {"ok": False, "error": "bundle_id is required"}
+    try:
+        resp = api.undeprecate_bundle(bundle_id=bid, flow_id=flow_id)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    out = dict(resp or {})
+    out.setdefault("gateway_url", str(getattr(api, "base_url", "") or ""))
+    if output_json:
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+    else:
+        fid = str(out.get("flow_id") or "").strip() or "*"
+        removed = bool(out.get("removed") is True)
+        print(f"Undeprecated on gateway: {bid}:{fid} ({'changed' if removed else 'no-op'})")
     return out

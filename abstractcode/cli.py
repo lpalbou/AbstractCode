@@ -172,6 +172,7 @@ def build_workflow_parser() -> argparse.ArgumentParser:
     ls = sub.add_parser("list", parents=[common], help="List available workflow entrypoints (from gateway bundles)")
     ls.add_argument("--interface", default=None, help="Filter entrypoints by interface id")
     ls.add_argument("--all", action="store_true", help="Include all versions (default: latest only)")
+    ls.add_argument("--include-deprecated", action="store_true", help="Include deprecated workflows")
     ls.add_argument("--json", action="store_true", help="Output JSON")
 
     info = sub.add_parser("info", parents=[common], help="Show details for an installed bundle")
@@ -181,6 +182,17 @@ def build_workflow_parser() -> argparse.ArgumentParser:
     rm = sub.add_parser("remove", parents=[common], help="Remove an installed bundle (bundle_id or bundle_id@version)")
     rm.add_argument("bundle", help="Bundle ref: bundle_id or bundle_id@version")
     rm.add_argument("--json", action="store_true", help="Output JSON")
+
+    dep = sub.add_parser("deprecate", parents=[common], help="Deprecate a workflow bundle on the gateway (hide + block launch)")
+    dep.add_argument("bundle", help="Bundle id (bundle_id)")
+    dep.add_argument("--flow-id", default=None, help="Optional entrypoint flow_id (default: all entrypoints)")
+    dep.add_argument("--reason", default=None, help="Optional reason")
+    dep.add_argument("--json", action="store_true", help="Output JSON")
+
+    undep = sub.add_parser("undeprecate", parents=[common], help="Undeprecate a workflow bundle on the gateway")
+    undep.add_argument("bundle", help="Bundle id (bundle_id)")
+    undep.add_argument("--flow-id", default=None, help="Optional entrypoint flow_id (default: all entrypoints)")
+    undep.add_argument("--json", action="store_true", help="Output JSON")
 
     return parser
 
@@ -888,9 +900,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if unknown:
             parser.error(f"Unknown arguments: {' '.join(unknown)}")
         from .workflow_cli import (
+            deprecate_workflow_bundle_command,
             install_workflow_bundle_command,
             list_workflow_bundles_command,
             remove_workflow_bundle_command,
+            undeprecate_workflow_bundle_command,
             workflow_bundle_info_command,
         )
 
@@ -910,6 +924,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 gateway_token=getattr(args, "gateway_token", None),
                 interface=getattr(args, "interface", None),
                 all_versions=bool(getattr(args, "all", False)),
+                include_deprecated=bool(getattr(args, "include_deprecated", False)),
                 output_json=bool(getattr(args, "json", False)),
             )
             return 0
@@ -924,6 +939,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if cmd == "remove":
             remove_workflow_bundle_command(
                 bundle_ref=str(args.bundle),
+                gateway_url=getattr(args, "gateway_url", None),
+                gateway_token=getattr(args, "gateway_token", None),
+                output_json=bool(getattr(args, "json", False)),
+            )
+            return 0
+
+        if cmd == "deprecate":
+            deprecate_workflow_bundle_command(
+                bundle_id=str(args.bundle),
+                flow_id=getattr(args, "flow_id", None),
+                reason=getattr(args, "reason", None),
+                gateway_url=getattr(args, "gateway_url", None),
+                gateway_token=getattr(args, "gateway_token", None),
+                output_json=bool(getattr(args, "json", False)),
+            )
+            return 0
+
+        if cmd == "undeprecate":
+            undeprecate_workflow_bundle_command(
+                bundle_id=str(args.bundle),
+                flow_id=getattr(args, "flow_id", None),
                 gateway_url=getattr(args, "gateway_url", None),
                 gateway_token=getattr(args, "gateway_token", None),
                 output_json=bool(getattr(args, "json", False)),

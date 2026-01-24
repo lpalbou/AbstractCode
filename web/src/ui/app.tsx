@@ -676,7 +676,6 @@ function Header(props: {
     { name: "console", label: "Chat", icon: "chat" },
     { name: "new", label: "New", icon: "plus" },
     { name: "sessions", label: "History", icon: "history" },
-    { name: "settings", label: "Settings", icon: "settings" },
   ];
   
   return (
@@ -3414,10 +3413,6 @@ function ConsolePage(props: {
           <button className="btn" onClick={() => props.on_nav("sessions")} title="History" type="button">
             <Icon name="history" className="nav-icon" />
             <span className="nav-label">History</span>
-          </button>
-          <button className="btn" onClick={() => props.on_nav("settings")} title="Settings" type="button">
-            <Icon name="settings" className="nav-icon" />
-            <span className="nav-label">Settings</span>
           </button>
           {active_run_id ? (
             <button
