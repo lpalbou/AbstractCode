@@ -253,6 +253,17 @@ function format_duration_short(ms: number): string {
   return `${m}m${rs}s`;
 }
 
+function format_tokens_k(n: number): string {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return "0k";
+  const tok = Math.max(0, Math.trunc(v));
+  const k = tok / 1000;
+  const decimals = tok >= 10_000 ? 0 : 1;
+  let out = k.toFixed(decimals);
+  if (decimals > 0) out = out.replace(/\.0$/, "");
+  return `${out}k`;
+}
+
 function clamp_text(text: string, max_chars: number): string {
   const s = String(text || "");
   if (s.length <= max_chars) return s;
@@ -2987,11 +2998,9 @@ function ConsolePage(props: {
     return { used, max_tokens, pct, text_tokens, file_tokens, file_count: files.length };
   }, [props.repl.messages, composer, attached_files, model_caps]);
 
-  const ctx_max_label = context_meter.max_tokens
-    ? context_meter.max_tokens >= 10_000
-      ? `${(context_meter.max_tokens / 1000).toFixed(0)}k`
-      : context_meter.max_tokens.toLocaleString()
-    : "";
+  const ctx_used_label = format_tokens_k(context_meter.used);
+  const ctx_max_label = context_meter.max_tokens ? format_tokens_k(context_meter.max_tokens) : "";
+  const ctx_badge_label = ctx_max_label ? `${ctx_used_label}/${ctx_max_label}` : ctx_used_label;
 
   const can_type = !active_run_id && !resuming;
   const can_send = can_type && !pending_files;
@@ -3487,64 +3496,39 @@ function ConsolePage(props: {
     <div className="repl">
       <div className="panel repl_frame">
         {/* Integrated header with navigation */}
-        <header className="header header_integrated">
-          <div className="brand" aria-label="AbstractCode">
-            <span className="brand_mark" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <defs>
-                  <linearGradient id="ac_code_grad" x1="4" y1="5" x2="20" y2="19" gradientUnits="userSpaceOnUse">
-                    <stop stopColor="#7dd3fc" />
-                    <stop offset="0.55" stopColor="#60a5fa" />
-                    <stop offset="1" stopColor="#a78bfa" />
-                  </linearGradient>
-                </defs>
-                <path
-                  d="M6.5 16.5H6a3 3 0 0 1-3-3V7A3 3 0 0 1 6 4h12a3 3 0 0 1 3 3v6.5a3 3 0 0 1-3 3H11l-4 4v-4Z"
-                  stroke="url(#ac_code_grad)"
-                  strokeWidth="1.9"
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M9.25 9.5 7.75 12l1.5 2.5"
-                  stroke="rgba(255,255,255,0.92)"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M14.75 9.5 16.25 12l-1.5 2.5"
-                  stroke="rgba(255,255,255,0.92)"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M13.35 9.25 10.65 14.75"
-                  stroke="rgba(255,255,255,0.92)"
-                  strokeWidth="1.55"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M18.25 6.25 18.8 7.7 20.25 8.25 18.8 8.8 18.25 10.25 17.7 8.8 16.25 8.25 17.7 7.7Z"
-                  fill="url(#ac_code_grad)"
-                />
-              </svg>
-            </span>
-            <span className="brand_name">AbstractCode</span>
-          </div>
+	        <header className="header header_integrated">
+	          <div className="brand" aria-label="AbstractCode">
+	            <span className="brand_mark" aria-hidden="true">
+	              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
+	                <path
+	                  d="M7 10 12 17 17 10"
+	                  stroke="currentColor"
+	                  strokeWidth="1.8"
+	                  strokeLinecap="round"
+	                  strokeLinejoin="round"
+	                />
+	                <path d="M7 10h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+	                <circle cx="7" cy="10" r="1.55" fill="currentColor" />
+	                <circle cx="17" cy="10" r="1.55" fill="currentColor" />
+	                <circle cx="12" cy="17" r="1.55" fill="currentColor" />
+	                <path
+	                  d="M12 4.85 13.05 6.9 15.1 7.95 13.05 9 12 11.05 10.95 9 8.9 7.95 10.95 6.9Z"
+	                  fill="currentColor"
+	                />
+	              </svg>
+	            </span>
+	            <span className="brand_name">AbstractCode</span>
+	          </div>
 
-          <div
-            className="repl_context_badge"
-            title={`Estimated next-run context: text≈${context_meter.text_tokens.toLocaleString()} tok; files≈${context_meter.file_tokens.toLocaleString()} tok (${context_meter.file_count} files).`}
-          >
-            <span className="muted">ctx</span>
-            <span className="mono">
-              {context_meter.used.toLocaleString()}
-              {ctx_max_label ? `/${ctx_max_label}` : ""}
-            </span>
-            {context_meter.max_tokens ? <span className="pct">{context_meter.pct.toFixed(0)}%</span> : null}
-          </div>
+	          <div
+	            className="repl_context_badge"
+	            title={`Estimated next-run context: text≈${context_meter.text_tokens.toLocaleString()} tok; files≈${context_meter.file_tokens.toLocaleString()} tok (${context_meter.file_count} files).`}
+	          >
+	            <span className="mono">
+	              {ctx_used_label}
+	              {ctx_max_label ? `/${ctx_max_label}` : ""}
+	            </span>
+	          </div>
 
           <nav className="nav" role="navigation" aria-label="Main navigation">
             <button className="btn" onClick={() => props.on_nav("console")} aria-current="page" title="Chat" type="button">
@@ -3566,6 +3550,7 @@ function ConsolePage(props: {
           </nav>
         </header>
         <div className="repl_panel">
+          <div className="repl_inset">
 
         {template_error ? (
           <Notice
@@ -3601,15 +3586,16 @@ function ConsolePage(props: {
           >
         <div className="repl_chat_content" ref={chat_content_ref}>
           {!props.repl.messages.length ? <div className="muted">Start typing to begin.</div> : null}
-          {props.repl.messages.map((m, idx) => (
-            <ChatMessageCard
-              key={`${m.ts}:${idx}`}
-              m={m}
-              gateway={props.gateway}
-              session_id={props.session_id}
-              tool_specs_by_name={tool_specs_by_name}
-            />
-          ))}
+	          {props.repl.messages.map((m, idx) => (
+	            <ChatMessageCard
+	              key={`${m.ts}:${idx}`}
+	              m={m}
+	              gateway={props.gateway}
+	              session_id={props.session_id}
+	              context_badge_label={ctx_badge_label}
+	              tool_specs_by_name={tool_specs_by_name}
+	            />
+	          ))}
           <div ref={chat_end_ref} />
         </div>
       </div>
@@ -3816,6 +3802,7 @@ function ConsolePage(props: {
           </div>
         ) : null}
 
+          </div>
         <div className="repl_composer">
           <div
             className={drop_active ? "repl_input drop_active" : "repl_input"}
@@ -3847,11 +3834,11 @@ function ConsolePage(props: {
               if (!files.length) return;
               void attach_uploads(files);
             }}
-          >
-            <textarea
-              className="mono"
-              ref={input_ref}
-              value={composer}
+	          >
+	            <textarea
+	              className="mono"
+	              ref={input_ref}
+	              value={composer}
               rows={3}
               onChange={(e) => {
                 set_composer(e.target.value);
@@ -3863,16 +3850,16 @@ function ConsolePage(props: {
                 const pos = typeof el.selectionStart === "number" ? el.selectionStart : el.value.length;
                 set_composer_cursor(pos);
               }}
-              onKeyUp={(e) => {
-                const el = e.currentTarget;
-                const pos = typeof el.selectionStart === "number" ? el.selectionStart : el.value.length;
-                set_composer_cursor(pos);
-              }}
-              placeholder={!can_type ? "Waiting for the current run…" : pending_files ? "Loading attached files…" : "Type a message…"}
-              disabled={!can_type}
-              onKeyDown={(e) => {
-                if (file_token) {
-                  if (file_target.target === "client") {
+	              onKeyUp={(e) => {
+	                const el = e.currentTarget;
+	                const pos = typeof el.selectionStart === "number" ? el.selectionStart : el.value.length;
+	                set_composer_cursor(pos);
+	              }}
+	              placeholder={!can_type ? "Waiting for the current run…" : pending_files ? "Loading attached files…" : "Type a message and use @ to attach files"}
+	              disabled={!can_type}
+	              onKeyDown={(e) => {
+	                if (file_token) {
+	                  if (file_target.target === "client") {
                     if (e.key === "Tab") {
                       e.preventDefault();
                       attach_client_picker(file_token);
@@ -3948,66 +3935,25 @@ function ConsolePage(props: {
                     if (handled) return;
                     await start_turn(v);
                   })();
-                }
-              }}
-            />
-            <div className="composer_hint" aria-hidden="true">
-              <span>
-                <kbd>Enter</kbd> send
-              </span>
-              <span className="composer_dot">•</span>
-              <span>
-                <kbd>Shift</kbd> <kbd>Enter</kbd> nl
-              </span>
-              <span className="composer_dot">•</span>
-              <span>
-                <kbd>/</kbd> cmd
-              </span>
-              <span className="composer_dot">•</span>
-              <span>
-                <kbd>@</kbd> files
-              </span>
-            </div>
-          </div>
-          <div className="repl_send_panel">
-            <select
-              className="mono"
-              value={props.repl.template ? `${props.repl.template.bundle_id}::${props.repl.template.flow_id}` : ""}
-              onChange={(e) => {
-                const raw = String(e.target.value || "").trim();
-                const [bid, fid] = raw.split("::", 2);
-                const bundle_id = String(bid || "").trim();
-                const flow_id = String(fid || "").trim();
-                if (!bundle_id || !flow_id) return;
-                const match = templates.find((t) => t.bundle_id === bundle_id && t.flow_id === flow_id);
-                update_repl((prev) => ({
-                  ...prev,
-                  template: {
-                    bundle_id,
-                    flow_id,
-                    name: match?.name || prev.template?.name || undefined,
-                  },
-                  updated_at: now_iso(),
-                }));
-              }}
-              disabled={templates.length === 0}
-              aria-label="Select agent workflow"
-            >
-              {!props.repl.template ? <option value="">(select agent)</option> : null}
-              {props.repl.template && !templates.some((t) => t.bundle_id === props.repl.template?.bundle_id && t.flow_id === props.repl.template?.flow_id) ? (
-                <option value={`${props.repl.template.bundle_id}::${props.repl.template.flow_id}`}>
-                  {props.repl.template.name || `${props.repl.template.bundle_id}:${props.repl.template.flow_id}`}
-                </option>
-              ) : null}
-              {templates.map((t) => (
-                <option key={`${t.bundle_id}::${t.flow_id}`} value={`${t.bundle_id}::${t.flow_id}`}>
-                  {t.name} • {t.bundle_id}:{t.flow_id}
-                </option>
-              ))}
-            </select>
-            <div className="repl_send_row">
-              <button
-                className="btn attach_btn"
+	                }
+	              }}
+	            />
+	          </div>
+	          <div className="repl_send_panel">
+	            <div className="composer_shortcuts" aria-hidden="true">
+	              <span>
+	                <kbd>Enter</kbd> send
+	              </span>
+	              <span>
+	                <kbd>Shift</kbd> <kbd>Enter</kbd> nl
+	              </span>
+	              <span>
+	                <kbd>/</kbd> cmd
+	              </span>
+	            </div>
+	            <div className="repl_send_row">
+	              <button
+	                className="btn attach_btn"
                 type="button"
                 title="Attach files from this device"
                 aria-label="Attach files from this device"
@@ -4079,6 +4025,7 @@ function ChatMessageCard(props: {
   m: ReplMessage;
   gateway: GatewayClient;
   session_id: string;
+  context_badge_label?: string;
   tool_specs_by_name?: Record<string, any>;
 }): React.ReactElement | null {
   const m = props.m;
@@ -4316,6 +4263,7 @@ function ChatMessageCard(props: {
           gateway={props.gateway}
           root_run_id={run_id}
           inspect_run_id={inspect_run_id}
+          context_badge_label={props.context_badge_label}
           on_close={() => set_ctx_open(false)}
         />
       ) : null}
@@ -4335,6 +4283,7 @@ function ContextInspectorModal(props: {
   gateway: GatewayClient;
   root_run_id: string;
   inspect_run_id: string;
+  context_badge_label?: string;
   on_close: () => void;
 }): React.ReactElement {
   const [selected_run_id, set_selected_run_id] = useState<string>(props.inspect_run_id);
@@ -4538,14 +4487,21 @@ function ContextInspectorModal(props: {
       aria-label="Context inspector"
       onMouseDown={() => props.on_close()}
     >
-      <div className="modal_card" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modal_header">
-          <div style={{ minWidth: 0 }}>
-            <div className="modal_title">Context</div>
-            <div className="muted mono" style={{ marginTop: 2 }}>
-              run_id:{" "}
-              {run_options.length > 1 ? (
-                <select
+	      <div className="modal_card" onMouseDown={(e) => e.stopPropagation()}>
+	        <div className="modal_header">
+	          <div style={{ minWidth: 0 }}>
+	            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+	              <div className="modal_title">Context</div>
+	              {props.context_badge_label ? (
+	                <div className="repl_context_badge modal_ctx_badge" title="Estimated next-run context">
+	                  <span className="mono">{props.context_badge_label}</span>
+	                </div>
+	              ) : null}
+	            </div>
+	            <div className="muted mono" style={{ marginTop: 2 }}>
+	              run_id:{" "}
+	              {run_options.length > 1 ? (
+	                <select
                   className="mono"
                   value={selected_run_id}
                   onChange={(e) => set_selected_run_id(String(e.target.value || "").trim())}
