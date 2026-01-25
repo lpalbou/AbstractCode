@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-import { GatewayClient } from "../lib/gateway_client";
+import { GatewayClient, GatewayHttpError } from "../lib/gateway_client";
 import { random_id } from "../lib/ids";
 import { extract_wait_from_record } from "../lib/runtime_extractors";
 import { choose_follow_run, infer_subworkflow_follow_kind, type FollowRunKind } from "../lib/subworkflow_follow";
@@ -52,6 +52,7 @@ type AttachedFile = {
   attachment: AttachmentRef | null;
   loading: boolean;
   error?: string;
+  size_bytes?: number;
 };
 
 function parse_route(): Route {
@@ -586,20 +587,20 @@ export function App(): React.ReactElement {
 
   return (
     <div className="app">
-      {/* Hide header on console page - ConsolePage renders its own */}
-      {route.name !== "console" ? (
-        <Header
-          route={route}
-          on_nav={(name) => {
-            if (name === "console") set_route({ name: "console", session_id: session.session_id });
-            else set_route({ name });
-          }}
-          monitor_gpu_enabled={gpu_enabled}
-          monitor_gpu_ref={monitor_gpu_ref}
-          gateway_url={settings.gateway_url}
-        />
-      ) : null}
       <div className="content">
+        {/* Hide header on console page - ConsolePage renders its own */}
+        {route.name !== "console" ? (
+          <Header
+            route={route}
+            on_nav={(name) => {
+              if (name === "console") set_route({ name: "console", session_id: session.session_id });
+              else set_route({ name });
+            }}
+            monitor_gpu_enabled={gpu_enabled}
+            monitor_gpu_ref={monitor_gpu_ref}
+            gateway_url={settings.gateway_url}
+          />
+        ) : null}
         {route.name === "console" ? (
           <ConsolePage
             gateway={gateway}
@@ -676,6 +677,7 @@ function Header(props: {
     { name: "console", label: "Chat", icon: "chat" },
     { name: "new", label: "New", icon: "plus" },
     { name: "sessions", label: "History", icon: "history" },
+    { name: "settings", label: "Settings", icon: "settings" },
   ];
   
   return (
@@ -1055,6 +1057,8 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
   const [gateway_connected, set_gateway_connected] = useState(false);
   const [gateway_connecting, set_gateway_connecting] = useState(false);
   const [gateway_error, set_gateway_error] = useState("");
+  const [server_workspace_policy, set_server_workspace_policy] = useState<any>(null);
+  const [server_workspace_policy_error, set_server_workspace_policy_error] = useState("");
   const [providers, set_providers] = useState<any[]>([]);
   const [models, set_models] = useState<string[]>([]);
   const [tools, set_tools] = useState<any[]>([]);
@@ -1078,6 +1082,8 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
     set_gateway_connected(false);
     set_gateway_connecting(false);
     set_gateway_error("");
+    set_server_workspace_policy(null);
+    set_server_workspace_policy_error("");
     set_providers([]);
     set_models([]);
     set_tools([]);
@@ -1092,22 +1098,34 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
   async function connect_gateway(): Promise<void> {
     set_gateway_connecting(true);
     set_gateway_error("");
+    set_server_workspace_policy(null);
+    set_server_workspace_policy_error("");
     set_loading_providers(true);
     set_loading_tools(true);
     set_error_providers("");
     set_error_tools("");
     try {
-      const [prov_res, tool_res] = await Promise.all([props.gateway.discovery_providers(), props.gateway.discovery_tools()]);
+      const [prov_res, tool_res, ws_res] = await Promise.all([
+        props.gateway.discovery_providers(),
+        props.gateway.discovery_tools(),
+        props.gateway.workspace_policy().catch((e: any) => ({ ok: false, error: String(e?.message || e || "Failed to load workspace policy") })),
+      ]);
       const prov_items = Array.isArray(prov_res?.items) ? prov_res.items : [];
       const tool_items = Array.isArray(tool_res?.items) ? tool_res.items : [];
       set_providers(prov_items);
       set_tools(tool_items);
+      if (ws_res && typeof ws_res === "object") {
+        if (ws_res.ok && (ws_res as any).policy) set_server_workspace_policy((ws_res as any).policy);
+        else if ((ws_res as any).error) set_server_workspace_policy_error(String((ws_res as any).error));
+      }
       set_gateway_connected(true);
       // Remember that we were connected for auto-reconnect
       props.on_change({ ...s, gateway_was_connected: true });
     } catch (e: any) {
       set_gateway_error(String(e?.message || e || "Failed to connect to gateway"));
       set_gateway_connected(false);
+      set_server_workspace_policy(null);
+      set_server_workspace_policy_error("");
       set_providers([]);
       set_tools([]);
     } finally {
@@ -1120,6 +1138,8 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
   function disconnect_gateway(): void {
     set_gateway_connected(false);
     set_gateway_error("");
+    set_server_workspace_policy(null);
+    set_server_workspace_policy_error("");
     set_providers([]);
     set_models([]);
     set_tools([]);
@@ -1299,6 +1319,18 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
             <span className="muted mono">files/tools</span>
           </div>
           <div className="muted">Controls what the agent can access via filesystem tools and what appears in @file search.</div>
+          {server_workspace_policy ? (
+            <div className="muted mono" style={{ marginTop: 6 }}>
+              server: overrides={server_workspace_policy.client_workspace_scope_overrides ? "on" : "off"}
+              {Array.isArray(server_workspace_policy.mounts) && server_workspace_policy.mounts.length
+                ? `; mounts=${server_workspace_policy.mounts.map((m: any) => String(m?.name || "").trim()).filter(Boolean).join(", ")}`
+                : ""}
+            </div>
+          ) : server_workspace_policy_error ? (
+            <div className="muted" style={{ marginTop: 6 }}>
+              server: workspace policy unavailable ({server_workspace_policy_error})
+            </div>
+          ) : null}
 
           <div className="field">
             <div className="field_label_with_hint">
@@ -1318,6 +1350,12 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
               <label>workspace_access_mode</label>
               <span className="field_hint">Controls absolute path access</span>
             </div>
+            {(() => {
+              const allowed = Array.isArray(server_workspace_policy?.allowed_access_modes)
+                ? (server_workspace_policy.allowed_access_modes as any[]).map((x) => String(x || "").trim()).filter(Boolean)
+                : null;
+              const allow_all_except_ignored = !allowed || allowed.includes("all_except_ignored");
+              return (
             <select
               className="mono"
               value={String(s.workspace_access_mode || "workspace_only")}
@@ -1325,8 +1363,12 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
             >
               <option value="workspace_only">workspace_only</option>
               <option value="workspace_or_allowed">workspace_or_allowed</option>
-              <option value="all_except_ignored">all_except_ignored</option>
+              <option value="all_except_ignored" disabled={!allow_all_except_ignored}>
+                all_except_ignored{!allow_all_except_ignored ? " (disabled by gateway)" : ""}
+              </option>
             </select>
+              );
+            })()}
             <div className="field_hint">
               workspace_only: absolute paths must stay under workspace_root. workspace_or_allowed: allow additional roots from workspace_allowed_paths.
             </div>
@@ -1760,7 +1802,6 @@ function ConsolePage(props: {
   const [status_text, set_status_text] = useState<string>("");
   const status_timer_ref = useRef<number | null>(null);
 
-  const [details_open, set_details_open] = useState(false);
   const [resuming, set_resuming] = useState(false);
   const [cancelling, set_cancelling] = useState(false);
 
@@ -1780,6 +1821,7 @@ function ConsolePage(props: {
   const [file_match_sizes, set_file_match_sizes] = useState<Record<string, number>>({});
   const [file_loading, set_file_loading] = useState(false);
   const [file_error, set_file_error] = useState("");
+  const file_search_blocked_until_ref = useRef<number>(0);
 
   const abort_ref = useRef<AbortController | null>(null);
   const follow_abort_ref = useRef<AbortController | null>(null);
@@ -1988,17 +2030,6 @@ function ConsolePage(props: {
       stopped = true;
     };
   }, [props.gateway]);
-
-  const context_meter = useMemo(() => {
-    const history = (props.repl.messages || []).filter((m) => m.role === "user" || m.role === "assistant");
-    const joined = history.map((m) => `${m.role}: ${m.content}`).join("\n\n");
-    const next_text = composer.trim() ? `${joined}\n\nuser: ${composer.trim()}` : joined;
-    const used = Math.max(0, Math.ceil(next_text.length / 4));
-    const caps = model_caps && typeof model_caps === "object" ? (model_caps as any).capabilities : null;
-    const max_tokens = caps && typeof caps === "object" ? Number((caps as any).max_tokens ?? 0) : 0;
-    const pct = max_tokens > 0 ? (used / max_tokens) * 100 : 0;
-    return { used, max_tokens: max_tokens > 0 ? max_tokens : null, pct };
-  }, [props.repl.messages, composer, model_caps, attached_files]);
 
   useEffect(() => {
     let stopped = false;
@@ -2933,6 +2964,35 @@ function ConsolePage(props: {
     await submit_resume({ response: t });
   }
 
+  const context_meter = useMemo(() => {
+    const history = (props.repl.messages || []).filter((m) => m.role === "user" || m.role === "assistant");
+    const joined = history.map((m) => `${m.role}: ${m.content}`).join("\n\n");
+    const next_text = composer.trim() ? `${joined}\n\nuser: ${composer.trim()}` : joined;
+    const text_tokens = Math.max(0, Math.ceil(next_text.length / 4));
+
+    const files = (attached_files || []).filter((f) => !String(f.error || "").trim()).slice(0, 16);
+    const unknown_files = files.filter((f) => !(typeof f.size_bytes === "number" && Number.isFinite(f.size_bytes) && f.size_bytes >= 0)).length;
+    const files_bytes = files.reduce((acc, f) => {
+      const sb = typeof f.size_bytes === "number" && Number.isFinite(f.size_bytes) && f.size_bytes >= 0 ? Math.trunc(f.size_bytes) : 0;
+      return acc + sb;
+    }, 0);
+    const file_tokens = Math.ceil(files_bytes / 4) + unknown_files * 256;
+
+    const used = Math.max(0, text_tokens + file_tokens);
+    const caps = model_caps && typeof model_caps === "object" ? (model_caps as any).capabilities : null;
+    const max_tokens_raw = caps && typeof caps === "object" ? Number((caps as any).max_tokens ?? 0) : 0;
+    const max_tokens = Number.isFinite(max_tokens_raw) && max_tokens_raw > 0 ? Math.trunc(max_tokens_raw) : null;
+    const pct = max_tokens ? (used / max_tokens) * 100 : 0;
+
+    return { used, max_tokens, pct, text_tokens, file_tokens, file_count: files.length };
+  }, [props.repl.messages, composer, attached_files, model_caps]);
+
+  const ctx_max_label = context_meter.max_tokens
+    ? context_meter.max_tokens >= 10_000
+      ? `${(context_meter.max_tokens / 1000).toFixed(0)}k`
+      : context_meter.max_tokens.toLocaleString()
+    : "";
+
   const can_type = !active_run_id && !resuming;
   const can_send = can_type && !pending_files;
   const cmd_query = useMemo(() => {
@@ -2989,6 +3049,11 @@ function ConsolePage(props: {
   }, [file_query, file_matches.length]);
 
   useEffect(() => {
+    // When auth/settings change (new GatewayClient instance), allow file search again.
+    file_search_blocked_until_ref.current = 0;
+  }, [props.gateway]);
+
+  useEffect(() => {
     if (!file_token) {
       set_file_matches([]);
       set_file_match_sizes({});
@@ -3014,9 +3079,21 @@ function ConsolePage(props: {
     }
 
     let stopped = false;
+    const now = Date.now();
+    const blocked_until = Number(file_search_blocked_until_ref.current || 0);
+    if (blocked_until > now) {
+      const wait_s = Math.max(1, Math.ceil((blocked_until - now) / 1000));
+      set_file_matches([]);
+      set_file_match_sizes({});
+      set_file_loading(false);
+      set_file_error(`Gateway rate limited; retry in ${wait_s}s.`);
+      return;
+    }
+
     set_file_loading(true);
     set_file_error("");
 
+    const ctrl = new AbortController();
     const handle = window.setTimeout(() => {
       void (async () => {
         try {
@@ -3031,6 +3108,7 @@ function ConsolePage(props: {
           })();
           const res = await props.gateway.files_search(q, {
             limit: 12,
+            signal: ctrl.signal,
             ...(scope ? { scope } : {}),
           });
           if (stopped) return;
@@ -3049,18 +3127,34 @@ function ConsolePage(props: {
           set_file_match_sizes(sizes);
         } catch (e: any) {
           if (stopped) return;
+          if (String(e?.name || "") === "AbortError") return;
           set_file_matches([]);
           set_file_match_sizes({});
+          if (e instanceof GatewayHttpError) {
+            const status = Number((e as any).status || 0);
+            if (status === 401 || status === 403) {
+              file_search_blocked_until_ref.current = Date.now() + 30_000;
+              set_file_error("Unauthorized. Set the Gateway auth token in Settings to search server files.");
+              return;
+            }
+            if (status === 429) {
+              const ra = typeof (e as any).retry_after_s === "number" && Number.isFinite((e as any).retry_after_s) ? Math.max(1, Math.trunc((e as any).retry_after_s)) : 30;
+              file_search_blocked_until_ref.current = Date.now() + ra * 1000;
+              set_file_error(`Gateway rate limited; retry in ${ra}s.`);
+              return;
+            }
+          }
           set_file_error(String(e?.message || e || "File search failed"));
         } finally {
           if (!stopped) set_file_loading(false);
         }
       })();
-    }, 180);
+    }, 240);
 
     return () => {
       stopped = true;
       window.clearTimeout(handle);
+      ctrl.abort();
     };
   }, [props.gateway, file_query, Boolean(file_token)]);
 
@@ -3287,6 +3381,8 @@ function ConsolePage(props: {
     const p = String(path || "").trim();
     if (!p) return;
 
+    const size_bytes = typeof (file_match_sizes as any)?.[p] === "number" && Number.isFinite((file_match_sizes as any)[p]) ? Math.max(0, Math.trunc((file_match_sizes as any)[p])) : undefined;
+
     // Clear the active @token from the composer (Cursor-style chips instead of inline tags).
     consume_token(token);
     set_file_matches([]);
@@ -3295,7 +3391,7 @@ function ConsolePage(props: {
 
     set_attached_files((prev) => {
       if (prev.some((f) => f.path === p)) return prev;
-      return [...prev, { path: p, attachment: null, loading: true }].slice(-12);
+      return [...prev, { path: p, attachment: null, loading: true, size_bytes }].slice(-12);
     });
 
     try {
@@ -3349,15 +3445,16 @@ function ConsolePage(props: {
     }
     const name = String((file as any)?.name || "").trim() || "upload.bin";
     const handle = `client:${name}`;
+    const size_bytes = Number.isFinite(Number((file as any)?.size)) ? Math.max(0, Math.trunc(Number((file as any).size))) : undefined;
 
     set_attached_files((prev) => {
       const idx = prev.findIndex((f) => f.path === handle);
       if (idx >= 0) {
         const next = prev.slice();
-        next[idx] = { ...next[idx], loading: true, error: undefined };
+        next[idx] = { ...next[idx], loading: true, error: undefined, size_bytes };
         return next;
       }
-      return [...prev, { path: handle, attachment: null, loading: true }].slice(-12);
+      return [...prev, { path: handle, attachment: null, loading: true, size_bytes }].slice(-12);
     });
 
     try {
@@ -3388,89 +3485,87 @@ function ConsolePage(props: {
 
   return (
     <div className="repl">
-      {/* Integrated header with navigation + session controls */}
-      <header className="header header_integrated">
-        <div className="title">AbstractCode</div>
-        
-        <div className="repl_context_badge" title="Estimated context window usage">
-          <span className="muted">ctx</span>
-          <span className="mono">
-            {context_meter.used.toLocaleString()}
-            {context_meter.max_tokens ? `/${(context_meter.max_tokens / 1000).toFixed(0)}k` : ""}
-          </span>
-          {context_meter.max_tokens ? <span className="pct">{context_meter.pct.toFixed(0)}%</span> : null}
-        </div>
-
-        <nav className="nav" role="navigation" aria-label="Main navigation">
-          <button className="btn" onClick={() => props.on_nav("console")} aria-current="page" title="Chat" type="button">
-            <Icon name="chat" className="nav-icon" />
-            <span className="nav-label">Chat</span>
-          </button>
-          <button className="btn" onClick={() => props.on_nav("new")} title="New" type="button">
-            <Icon name="plus" className="nav-icon" />
-            <span className="nav-label">New</span>
-          </button>
-          <button className="btn" onClick={() => props.on_nav("sessions")} title="History" type="button">
-            <Icon name="history" className="nav-icon" />
-            <span className="nav-label">History</span>
-          </button>
-          {active_run_id ? (
-            <button
-              className="btn danger"
-              onClick={() => void submit_cancel()}
-              title="Stop / cancel the current run"
-              type="button"
-              disabled={resuming || cancelling}
-            >
-              <Icon name="x" className="nav-icon" />
-              <span className="nav-label">{cancelling ? "Stopping…" : "Stop"}</span>
-            </button>
-          ) : null}
-          <button
-            className="btn"
-            onClick={() => set_details_open((v) => !v)}
-            title="Show session info"
-            type="button"
-          >
-            <Icon name="info" className="nav-icon" />
-            <span className="nav-label" style={{ display: 'none' }}>Info</span>
-          </button>
-        </nav>
-      </header>
-      <div className="panel repl_panel">
-
-        {details_open ? (
-          <div className="repl_details">
-            <div className="repl_details_header">
-              <span className="mono muted">Session Info</span>
-              <button className="btn mini" type="button" onClick={() => set_details_open(false)} title="Close info">
-                <Icon name="x" size={14} />
-              </button>
-            </div>
-            <div className="field">
-              <label>agent</label>
-              <input className="mono" readOnly value={template_label || "—"} />
-            </div>
-            <div className="field">
-              <label>model</label>
-              <input className="mono" readOnly value={`${props.settings.provider || "—"}/${props.settings.model || "—"}`} />
-            </div>
-            <div className="field">
-              <label>active run id</label>
-              <input className="mono" readOnly value={active_run_id || "—"} />
-            </div>
-            <div className="field">
-              <label>session id</label>
-              <input className="mono" readOnly value={props.session_id || "—"} />
-            </div>
-            <div className="field">
-              <label>ledger (latest)</label>
-              <div className="repl_details_json">
-                <MarkdownRenderer markdown={json_fenced(records.map((r) => r.record))} />
-              </div>
-            </div>
+      <div className="panel repl_frame">
+        {/* Integrated header with navigation */}
+        <header className="header header_integrated">
+          <div className="brand" aria-label="AbstractCode">
+            <span className="brand_mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <linearGradient id="ac_code_grad" x1="4" y1="5" x2="20" y2="19" gradientUnits="userSpaceOnUse">
+                    <stop stopColor="#7dd3fc" />
+                    <stop offset="0.55" stopColor="#60a5fa" />
+                    <stop offset="1" stopColor="#a78bfa" />
+                  </linearGradient>
+                </defs>
+                <path
+                  d="M6.5 16.5H6a3 3 0 0 1-3-3V7A3 3 0 0 1 6 4h12a3 3 0 0 1 3 3v6.5a3 3 0 0 1-3 3H11l-4 4v-4Z"
+                  stroke="url(#ac_code_grad)"
+                  strokeWidth="1.9"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M9.25 9.5 7.75 12l1.5 2.5"
+                  stroke="rgba(255,255,255,0.92)"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M14.75 9.5 16.25 12l-1.5 2.5"
+                  stroke="rgba(255,255,255,0.92)"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M13.35 9.25 10.65 14.75"
+                  stroke="rgba(255,255,255,0.92)"
+                  strokeWidth="1.55"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M18.25 6.25 18.8 7.7 20.25 8.25 18.8 8.8 18.25 10.25 17.7 8.8 16.25 8.25 17.7 7.7Z"
+                  fill="url(#ac_code_grad)"
+                />
+              </svg>
+            </span>
+            <span className="brand_name">AbstractCode</span>
           </div>
-        ) : null}
+
+          <div
+            className="repl_context_badge"
+            title={`Estimated next-run context: text≈${context_meter.text_tokens.toLocaleString()} tok; files≈${context_meter.file_tokens.toLocaleString()} tok (${context_meter.file_count} files).`}
+          >
+            <span className="muted">ctx</span>
+            <span className="mono">
+              {context_meter.used.toLocaleString()}
+              {ctx_max_label ? `/${ctx_max_label}` : ""}
+            </span>
+            {context_meter.max_tokens ? <span className="pct">{context_meter.pct.toFixed(0)}%</span> : null}
+          </div>
+
+          <nav className="nav" role="navigation" aria-label="Main navigation">
+            <button className="btn" onClick={() => props.on_nav("console")} aria-current="page" title="Chat" type="button">
+              <Icon name="chat" className="nav-icon" />
+              <span className="nav-label">Chat</span>
+            </button>
+            <button className="btn" onClick={() => props.on_nav("new")} title="New" type="button">
+              <Icon name="plus" className="nav-icon" />
+              <span className="nav-label">New</span>
+            </button>
+            <button className="btn" onClick={() => props.on_nav("sessions")} title="History" type="button">
+              <Icon name="history" className="nav-icon" />
+              <span className="nav-label">History</span>
+            </button>
+            <button className="btn" onClick={() => props.on_nav("settings")} title="Settings" type="button">
+              <Icon name="settings" className="nav-icon" />
+              <span className="nav-label">Settings</span>
+            </button>
+          </nav>
+        </header>
+        <div className="repl_panel">
 
         {template_error ? (
           <Notice
@@ -3664,19 +3759,28 @@ function ConsolePage(props: {
           </div>
         ) : null}
 
-        {file_token && file_query ? (
+        {file_token ? (
           <div className="cmd_menu">
             {file_target.target === "client" ? (
               <button className="cmd_item active" type="button" onClick={() => attach_client_picker(file_token)}>
                 <span className="mono">@client:</span>
                 <span className="muted">upload from device…</span>
               </button>
-            ) : (
+            ) : null}
+
+            {file_target.target !== "client" ? (
+              <button className="cmd_item" type="button" onClick={() => attach_client_picker(file_token)} title="Upload a local file from this device">
+                <span className="mono">@client:</span>
+                <span className="muted">upload from device…</span>
+              </button>
+            ) : null}
+
+            {file_target.target !== "client" ? (
               <>
                 {file_loading ? <div className="cmd_notice muted">Searching files…</div> : null}
                 {file_error ? <div className="cmd_notice error">{file_error}</div> : null}
                 {!file_loading && !file_error && !file_matches.length ? (
-                  <div className="cmd_notice muted">{file_target.query ? "No matches." : "Type to search workspace files."}</div>
+                  <div className="cmd_notice muted">{file_target.query ? "No matches." : "Type to search server files (`@server:…`) or upload (`@client:`)."}</div>
                 ) : null}
                 {file_matches.map((p, idx) => (
                   <button
@@ -3690,7 +3794,7 @@ function ConsolePage(props: {
                   </button>
                 ))}
               </>
-            )}
+            ) : null}
           </div>
         ) : null}
 
@@ -3773,6 +3877,16 @@ function ConsolePage(props: {
                       e.preventDefault();
                       attach_client_picker(file_token);
                       return;
+                    }
+                  }
+                  if (file_target.target !== "client") {
+                    if (e.key === "Tab" && !file_loading && !file_error && !file_matches.length) {
+                      const raw = String(file_target.query || "").trim();
+                      if (raw) {
+                        e.preventDefault();
+                        void attach_file(raw, file_token);
+                        return;
+                      }
                     }
                   }
                   if (e.key === "Escape") {
@@ -3954,6 +4068,7 @@ function ConsolePage(props: {
           />
         ) : null}
 
+      </div>
       </div>
 
     </div>
