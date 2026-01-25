@@ -560,7 +560,7 @@ export function App(): React.ReactElement {
     if (!gpu_enabled) return;
     const el = monitor_gpu_ref.current as any;
     if (el) el.token = settings.auth_token || "";
-  }, [gpu_enabled, settings.auth_token]);
+  }, [gpu_enabled, settings.auth_token, route.name]);
 
   useEffect(() => {
     save_current_repl_session(session_id, repl);
@@ -599,19 +599,6 @@ export function App(): React.ReactElement {
   return (
     <div className="app">
       <div className="content">
-        {/* Hide header on console page - ConsolePage renders its own */}
-        {route.name !== "console" ? (
-          <Header
-            route={route}
-            on_nav={(name) => {
-              if (name === "console") set_route({ name: "console", session_id: session.session_id });
-              else set_route({ name });
-            }}
-            monitor_gpu_enabled={gpu_enabled}
-            monitor_gpu_ref={monitor_gpu_ref}
-            gateway_url={settings.gateway_url}
-          />
-        ) : null}
         {route.name === "console" ? (
           <ConsolePage
             gateway={gateway}
@@ -631,43 +618,66 @@ export function App(): React.ReactElement {
               if (name === "console") set_route({ name: "console", session_id: session.session_id });
               else set_route({ name });
             }}
+            monitor_gpu_enabled={gpu_enabled}
+            monitor_gpu_ref={monitor_gpu_ref}
+            gateway_url={settings.gateway_url}
           />
         ) : null}
-        {route.name === "new" ? (
-          <NewChatPage
-            gateway={gateway}
-            repl={repl}
-            on_start={(t) => {
-              const created = create_new_repl_session(t);
-              pending_console_sid_ref.current = created.session_id;
-              set_session({ session_id: created.session_id, state: created.state });
-            }}
-            on_done={() => {
-              const sid = pending_console_sid_ref.current || session.session_id;
-              pending_console_sid_ref.current = "";
-              set_route({ name: "console", session_id: sid });
-            }}
-          />
-        ) : null}
-        {route.name === "sessions" ? (
-          <SessionsPage
-            gateway={gateway}
-            on_open_session={(session_id, run_id, template) => {
-              const sid = String(session_id || "").trim() || String(run_id || "").trim();
-              if (!sid) return;
-              set_session({ session_id: sid, state: reset_repl_state({ template }, sid) });
-              set_pending_attach({ run_id, template });
-              set_route({ name: "console", session_id: sid });
-            }}
-          />
-        ) : null}
-        {route.name === "settings" ? (
-          <SettingsPage
-            gateway={gateway}
-            settings={settings}
-            on_change={set_settings}
-            on_done={() => set_route({ name: "console", session_id: session.session_id })}
-          />
+        {route.name !== "console" ? (
+          <div className="repl">
+            <div className="panel repl_frame">
+              <Header
+                active={route.name}
+                on_nav={(name) => {
+                  if (name === "console") set_route({ name: "console", session_id: session.session_id });
+                  else set_route({ name });
+                }}
+                monitor_gpu_enabled={gpu_enabled}
+                monitor_gpu_ref={monitor_gpu_ref}
+                gateway_url={settings.gateway_url}
+              />
+              <div className="repl_panel">
+                <div className="repl_inset">
+                  {route.name === "new" ? (
+                    <NewChatPage
+                      gateway={gateway}
+                      repl={repl}
+                      on_start={(t) => {
+                        const created = create_new_repl_session(t);
+                        pending_console_sid_ref.current = created.session_id;
+                        set_session({ session_id: created.session_id, state: created.state });
+                      }}
+                      on_done={() => {
+                        const sid = pending_console_sid_ref.current || session.session_id;
+                        pending_console_sid_ref.current = "";
+                        set_route({ name: "console", session_id: sid });
+                      }}
+                    />
+                  ) : null}
+                  {route.name === "sessions" ? (
+                    <SessionsPage
+                      gateway={gateway}
+                      on_open_session={(session_id, run_id, template) => {
+                        const sid = String(session_id || "").trim() || String(run_id || "").trim();
+                        if (!sid) return;
+                        set_session({ session_id: sid, state: reset_repl_state({ template }, sid) });
+                        set_pending_attach({ run_id, template });
+                        set_route({ name: "console", session_id: sid });
+                      }}
+                    />
+                  ) : null}
+                  {route.name === "settings" ? (
+                    <SettingsPage
+                      gateway={gateway}
+                      settings={settings}
+                      on_change={set_settings}
+                      on_done={() => set_route({ name: "console", session_id: session.session_id })}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </div>
         ) : null}
       </div>
     </div>
@@ -675,29 +685,42 @@ export function App(): React.ReactElement {
 }
 
 function Header(props: {
-  route: Route;
+  active: Route["name"];
   on_nav: (name: Route["name"]) => void;
+  center?: React.ReactNode;
   monitor_gpu_enabled?: boolean;
   monitor_gpu_ref?: React.RefObject<HTMLElement>;
   gateway_url?: string;
 }): React.ReactElement {
-  const r = props.route;
-  const title = r.name === "settings" ? "Settings" : r.name === "new" ? "New Chat" : r.name === "sessions" ? "Sessions" : "AbstractCode";
-  
   const nav_items: { name: Route["name"]; label: string; icon: IconName }[] = [
     { name: "console", label: "Chat", icon: "chat" },
     { name: "new", label: "New", icon: "plus" },
     { name: "sessions", label: "History", icon: "history" },
     { name: "settings", label: "Settings", icon: "settings" },
   ];
-  
+
   return (
-    <header className="header header_compact">
-      <div className="title">{title}</div>
+    <header className="header header_integrated">
+      <div className="brand" aria-label="AbstractCode">
+        <span className="brand_mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M7 10 12 17 17 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M7 10h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            <circle cx="7" cy="10" r="1.55" fill="currentColor" />
+            <circle cx="17" cy="10" r="1.55" fill="currentColor" />
+            <circle cx="12" cy="17" r="1.55" fill="currentColor" />
+            <path d="M12 4.85 13.05 6.9 15.1 7.95 13.05 9 12 11.05 10.95 9 8.9 7.95 10.95 6.9Z" fill="currentColor" />
+          </svg>
+        </span>
+        <span className="brand_name">AbstractCode</span>
+      </div>
+
+      {props.center ? props.center : null}
+
       <div className="header_right">
         <nav className="nav" role="navigation" aria-label="Main navigation">
           {nav_items.map((item) => {
-            const active = r.name === item.name;
+            const active = props.active === item.name;
             return (
               <button
                 key={item.name}
@@ -721,8 +744,8 @@ function Header(props: {
             ref={props.monitor_gpu_ref as any}
             mode="icon"
             history-size="5"
-            tick-ms="1500"
-            base-url={String(props.gateway_url || "")}
+            tick-ms="2000"
+            base-url={String(props.gateway_url || "").trim()}
             title="GPU usage (host)"
             style={
               {
@@ -885,7 +908,7 @@ function SessionsPage(props: {
   }, [props.gateway]);
 
   return (
-    <div className="panel sessions_page">
+    <div className="sessions_page">
       <h2>Sessions</h2>
       <div className="muted">Sessions retrieved from the Gateway (durable runtime source of truth).</div>
 
@@ -1715,7 +1738,7 @@ function NewChatPage(props: { gateway: GatewayClient; repl: ReplState; on_start:
   }
 
   return (
-    <div className="panel">
+    <div className="new_chat_page">
       <h2>Agents</h2>
       <div className="muted">Pick a RunnableFlow workflow (must implement `abstractcode.agent.v1`).</div>
       {loading ? <div className="muted" style={{ marginTop: 10 }}>Loading…</div> : null}
@@ -1790,6 +1813,9 @@ function ConsolePage(props: {
   on_attach_consumed: () => void;
   on_repl: (session_id: string, updater: (prev: ReplState) => ReplState) => void;
   on_nav: (name: Route["name"]) => void;
+  monitor_gpu_enabled?: boolean;
+  monitor_gpu_ref?: React.RefObject<HTMLElement>;
+  gateway_url?: string;
 }): React.ReactElement {
   const [templates, set_templates] = useState<AgentTemplate[]>([]);
   const [template_error, set_template_error] = useState("");
@@ -3495,60 +3521,21 @@ function ConsolePage(props: {
   return (
     <div className="repl">
       <div className="panel repl_frame">
-        {/* Integrated header with navigation */}
-	        <header className="header header_integrated">
-	          <div className="brand" aria-label="AbstractCode">
-	            <span className="brand_mark" aria-hidden="true">
-	              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
-	                <path
-	                  d="M7 10 12 17 17 10"
-	                  stroke="currentColor"
-	                  strokeWidth="1.8"
-	                  strokeLinecap="round"
-	                  strokeLinejoin="round"
-	                />
-	                <path d="M7 10h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-	                <circle cx="7" cy="10" r="1.55" fill="currentColor" />
-	                <circle cx="17" cy="10" r="1.55" fill="currentColor" />
-	                <circle cx="12" cy="17" r="1.55" fill="currentColor" />
-	                <path
-	                  d="M12 4.85 13.05 6.9 15.1 7.95 13.05 9 12 11.05 10.95 9 8.9 7.95 10.95 6.9Z"
-	                  fill="currentColor"
-	                />
-	              </svg>
-	            </span>
-	            <span className="brand_name">AbstractCode</span>
-	          </div>
-
-	          <div
-	            className="repl_context_badge"
-	            title={`Estimated next-run context: text≈${context_meter.text_tokens.toLocaleString()} tok; files≈${context_meter.file_tokens.toLocaleString()} tok (${context_meter.file_count} files).`}
-	          >
-	            <span className="mono">
-	              {ctx_used_label}
-	              {ctx_max_label ? `/${ctx_max_label}` : ""}
-	            </span>
-	          </div>
-
-          <nav className="nav" role="navigation" aria-label="Main navigation">
-            <button className="btn" onClick={() => props.on_nav("console")} aria-current="page" title="Chat" type="button">
-              <Icon name="chat" className="nav-icon" />
-              <span className="nav-label">Chat</span>
-            </button>
-            <button className="btn" onClick={() => props.on_nav("new")} title="New" type="button">
-              <Icon name="plus" className="nav-icon" />
-              <span className="nav-label">New</span>
-            </button>
-            <button className="btn" onClick={() => props.on_nav("sessions")} title="History" type="button">
-              <Icon name="history" className="nav-icon" />
-              <span className="nav-label">History</span>
-            </button>
-            <button className="btn" onClick={() => props.on_nav("settings")} title="Settings" type="button">
-              <Icon name="settings" className="nav-icon" />
-              <span className="nav-label">Settings</span>
-            </button>
-          </nav>
-        </header>
+        <Header
+          active="console"
+          on_nav={props.on_nav}
+          center={
+            <div
+              className="repl_context_badge"
+              title={`Estimated next-run context: text≈${context_meter.text_tokens.toLocaleString()} tok; files≈${context_meter.file_tokens.toLocaleString()} tok (${context_meter.file_count} files).`}
+            >
+              <span className="mono">{ctx_badge_label}</span>
+            </div>
+          }
+          monitor_gpu_enabled={props.monitor_gpu_enabled}
+          monitor_gpu_ref={props.monitor_gpu_ref}
+          gateway_url={props.gateway_url}
+        />
         <div className="repl_panel">
           <div className="repl_inset">
 

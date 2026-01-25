@@ -383,6 +383,15 @@ body::before {
   overflow: auto;
 }
 
+.new_chat_page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
 .settings_grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
