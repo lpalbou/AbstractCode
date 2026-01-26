@@ -14,7 +14,7 @@ import { MarkdownRenderer } from "./markdown_renderer";
 import { ToolPicker } from "./tool_picker";
 import { Icon, type IconName } from "./icons";
 import { copy_text } from "../lib/clipboard";
-import { build_run_input_data } from "../lib/run_input";
+import { build_run_input_data, derive_prompt_cache_key } from "../lib/run_input";
 import { seed_repl_messages_from_history_bundle } from "../lib/history_bundle_seed";
 import { session_memory_owner_run_id } from "../lib/session_memory";
 import {
@@ -1542,7 +1542,7 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
           </div>
 
           <div className="field">
-            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <label className="checkbox_row">
               <input
                 type="checkbox"
                 checked={Boolean(s.use_context)}
@@ -1554,7 +1554,7 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
           </div>
 
           <div className="field">
-            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <label className="checkbox_row">
               <input
                 type="checkbox"
                 checked={Boolean(s.prompt_cache)}
@@ -1563,7 +1563,7 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
               <span>Prompt caching</span>
             </label>
             <div className="field_hint">
-              Session-scoped prefix/KV caching (provider-dependent). Speeds up long repeated contexts after the first turn; stored in gateway memory and model-specific.
+              Session-scoped prefix/KV caching (provider-dependent). First request after enabling “warms” the cache; later turns can reuse it. Manual control: use `/cache` in chat (list/save/load/clear).
             </div>
           </div>
 
@@ -2407,6 +2407,7 @@ function ConsolePage(props: {
         repl_messages: props.repl.messages || [],
         session_id: props.session_id,
         attached_files,
+        template: props.repl.template,
       });
       const run_id = await props.gateway.start_run(props.repl.template.flow_id, input_data, {
         bundle_id: props.repl.template.bundle_id,
@@ -3039,6 +3040,7 @@ function ConsolePage(props: {
     () => [
       { name: "help", desc: "Show available commands" },
       { name: "clear", desc: "Clear chat (keep agent)" },
+      { name: "cache", desc: "Prompt cache (list/load/save/clear)" },
       { name: "sessions", desc: "Open Sessions view" },
       { name: "new", desc: "Start a new chat (pick agent)" },
       { name: "settings", desc: "Open Settings" },
@@ -3209,6 +3211,7 @@ function ConsolePage(props: {
           "Commands:",
           "- `/help`",
           "- `/clear`",
+          "- `/cache [list|save|load|clear]`",
           "- `/files`",
           "- `/files-keep [on|off]`",
           "- `/sessions`",
@@ -3392,6 +3395,147 @@ function ConsolePage(props: {
       }
       props.on_settings({ ...props.settings, max_iterations: Math.trunc(v) });
       say(`max_iterations set: ${Math.trunc(v)}`);
+      return true;
+    }
+
+    if (cmd === "cache") {
+      const provider = String(props.settings.provider || "").trim();
+      const model = String(props.settings.model || "").trim();
+      if (!provider || !model) {
+        say("Set provider + model first (Settings).");
+        return true;
+      }
+      if (!props.repl.template) {
+        say("Pick an agent first (/new).");
+        return true;
+      }
+      const key = derive_prompt_cache_key({
+        namespace: "acode",
+        session_id: String(props.session_id || "").trim(),
+        provider,
+        model,
+        template: props.repl.template,
+      });
+      if (!key) {
+        say("Unable to derive cache key (missing session_id/provider/model/template).");
+        return true;
+      }
+
+      const sub = String(args[0] || "").trim().toLowerCase();
+      const sub_args = args.slice(1);
+
+      if (!sub || sub === "help") {
+        const lines = [
+          "Prompt cache commands:",
+          `- active_key: ${key}`,
+          "- `/cache list`  (show in-memory stats + saved caches)",
+          "- `/cache clear` (clear the active in-memory cache key)",
+          "- `/cache save <name> [--q8]` (save active key to gateway disk; MLX only)",
+          "- `/cache load <name>` (load from gateway disk into active key; MLX only)",
+        ];
+        if (!props.settings.prompt_cache) {
+          lines.push("");
+          lines.push("Note: prompt caching is currently OFF in Settings; runs will not reuse the cache unless enabled.");
+        }
+        say(lines.join("\n"));
+        return true;
+      }
+
+      if (sub === "list") {
+        try {
+          const [stats, saved] = await Promise.all([props.gateway.prompt_cache_stats(provider, model), props.gateway.prompt_cache_saved(provider, model)]);
+          const out: string[] = [];
+          out.push(`active_key: ${key}`);
+          const supported = Boolean((stats as any)?.supported);
+          if (!supported) {
+            out.push(`in_memory: unsupported${(stats as any)?.error ? ` — ${(stats as any).error}` : ""}`);
+          } else {
+            const s0: any = (stats as any)?.stats || {};
+            const keys: string[] = Array.isArray(s0.keys) ? s0.keys.map((x: any) => String(x || "").trim()).filter(Boolean) : [];
+            out.push(`in_memory: entries=${String(s0.entries ?? "")}${typeof s0.max_entries === "number" ? `/${s0.max_entries}` : ""}`);
+            out.push(`in_memory: has_active=${keys.includes(key) ? "yes" : "no"}`);
+          }
+
+          const items: any[] = Array.isArray((saved as any)?.items) ? (saved as any).items : [];
+          out.push(`saved: ${items.length}`);
+          for (const it of items.slice(0, 20)) {
+            const name = String((it as any)?.name || "").trim();
+            if (!name) continue;
+            const tok = (it as any)?.token_count;
+            const tok_s = typeof tok === "number" && Number.isFinite(tok) ? ` (${tok} tok)` : "";
+            const when = String((it as any)?.saved_at || "").trim();
+            out.push(`- ${name}${tok_s}${when ? ` — ${when}` : ""}`);
+          }
+          if (items.length > 20) out.push(`- …and ${items.length - 20} more`);
+          say(out.join("\n"));
+        } catch (e: any) {
+          say(String(e?.message || e || "cache list failed"));
+        }
+        return true;
+      }
+
+      if (sub === "clear") {
+        try {
+          const res = await props.gateway.prompt_cache_clear({ provider, model, key });
+          const ok = Boolean((res as any)?.supported) && Boolean((res as any)?.ok);
+          say(ok ? `Cleared in-memory cache key: ${key}` : `Cache clear failed: ${JSON.stringify(res)}`);
+        } catch (e: any) {
+          say(String(e?.message || e || "cache clear failed"));
+        }
+        return true;
+      }
+
+      if (sub === "save") {
+        const name = String(sub_args[0] || "").trim();
+        if (!name) {
+          say("Usage: /cache save <name> [--q8]");
+          return true;
+        }
+        const q8 = sub_args.some((x) => String(x || "").trim().toLowerCase() === "--q8");
+        try {
+          const res = await props.gateway.prompt_cache_save({ provider, model, name, key, q8 });
+          const ok = Boolean((res as any)?.supported) && Boolean((res as any)?.ok);
+          if (ok) {
+            const meta: any = (res as any)?.meta || {};
+            const tok = meta?.token_count;
+            const tok_s = typeof tok === "number" && Number.isFinite(tok) ? ` (${tok} tok)` : "";
+            say(`Saved cache: ${String((res as any)?.name || name)}${tok_s}`);
+          } else {
+            say(`Cache save failed: ${JSON.stringify(res)}`);
+          }
+        } catch (e: any) {
+          say(String(e?.message || e || "cache save failed"));
+        }
+        return true;
+      }
+
+      if (sub === "load") {
+        const name = String(sub_args[0] || "").trim();
+        if (!name) {
+          say("Usage: /cache load <name>");
+          return true;
+        }
+        try {
+          const res = await props.gateway.prompt_cache_load({ provider, model, name, key, clear_existing: true });
+          const ok = Boolean((res as any)?.supported) && Boolean((res as any)?.ok);
+          if (ok) {
+            say(`Loaded cache '${name}' into key: ${String((res as any)?.key || key)}`);
+          } else {
+            const required = String((res as any)?.required_model || "").trim();
+            const current = String((res as any)?.current_model || "").trim();
+            if (required && current) {
+              say(`Cache model mismatch:\n- cache: ${required}\n- current: ${current}`);
+            } else {
+              say(`Cache load failed: ${JSON.stringify(res)}`);
+            }
+          }
+        } catch (e: any) {
+          say(String(e?.message || e || "cache load failed"));
+        }
+        return true;
+      }
+
+      say(`Unknown cache subcommand: ${sub} (try /cache help)`);
       return true;
     }
 

@@ -730,6 +730,23 @@ label {
   letter-spacing: 0.08em;
 }
 
+.checkbox_row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+input[type="checkbox"] {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent-blue);
+}
+
 .field_label_with_hint {
   display: flex;
   align-items: baseline;
