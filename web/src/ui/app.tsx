@@ -3425,13 +3425,13 @@ function ConsolePage(props: {
       const sub_args = args.slice(1);
 
       if (!sub || sub === "help") {
-        const lines = [
+          const lines = [
           "Prompt cache commands:",
           `- active_key: ${key}`,
           "- `/cache list`  (show in-memory stats + saved caches)",
           "- `/cache clear` (clear the active in-memory cache key)",
-          "- `/cache save <name> [--q8]` (save active key to gateway disk; MLX only)",
-          "- `/cache load <name>` (load from gateway disk into active key; MLX only)",
+          "- `/cache save <name> [--q8]` (save active key to gateway disk; MLX + HF(GGUF). `--q8` is MLX-only)",
+          "- `/cache load <name>` (load from gateway disk into active key; MLX + HF(GGUF))",
         ];
         if (!props.settings.prompt_cache) {
           lines.push("");
