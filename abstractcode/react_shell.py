@@ -207,7 +207,7 @@ class ReactShell:
         # Optional user-defined system prompt override (applies to new runs; can be set via /system).
         self._system_prompt_override: Optional[str] = None
         # ReAct runtime heuristics (configurable).
-        # - check_plan: retry if output looks like "planning" without tool calls (default OFF).
+        # - check_plan: retry if output claims it will act but emits no tool calls (default OFF).
         self._check_plan: bool = False
         # Attachment persistence:
         # - when OFF (default), `@file` chips are consumed for the next user message only.

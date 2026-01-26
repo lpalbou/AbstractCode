@@ -2835,6 +2835,7 @@ select {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  padding: 2px 0;
 }
 
 .repl_input.drop_active textarea {
@@ -2891,11 +2892,12 @@ kbd {
 }
 
 .repl_composer textarea {
-  flex: 0 0 auto;
-  height: 60px;
+  flex: 1 1 auto;
+  height: 100%;
   min-height: 60px;
-  max-height: 180px;
-  resize: vertical;
+  max-height: none;
+  resize: none;
+  overflow-y: auto;
   font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1.5;

@@ -1554,6 +1554,20 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
           </div>
 
           <div className="field">
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={Boolean(s.prompt_cache)}
+                onChange={(e) => props.on_change({ ...s, prompt_cache: Boolean(e.target.checked) })}
+              />
+              <span>Prompt caching</span>
+            </label>
+            <div className="field_hint">
+              Session-scoped prefix/KV caching (provider-dependent). Speeds up long repeated contexts after the first turn; stored in gateway memory and model-specific.
+            </div>
+          </div>
+
+          <div className="field">
             <label>System</label>
             <textarea
               className="mono"
@@ -2271,23 +2285,6 @@ function ConsolePage(props: {
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  function autosize_composer(el: HTMLTextAreaElement | null): void {
-    if (!el) return;
-    try {
-      const style = window.getComputedStyle(el);
-      const max_h = Number.parseFloat(style.maxHeight || "");
-      const cap = Number.isFinite(max_h) ? max_h : 200;
-      el.style.height = "auto";
-      el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
-    } catch {
-      // Best-effort.
-    }
-  }
-
-  useEffect(() => {
-    autosize_composer(input_ref.current);
-  }, [composer]);
 
   function append_tool_blocks_from_effect(rec: StepRecord): void {
     const payload: any = (rec as any)?.effect?.payload;
