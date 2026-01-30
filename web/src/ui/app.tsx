@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { GatewayClient, GatewayHttpError } from "../lib/gateway_client";
 import { random_id } from "../lib/ids";
@@ -34,6 +34,7 @@ import {
   save_run_cursor,
   save_settings,
   Settings,
+  storage_mode,
   switch_current_repl_session,
 } from "../lib/storage";
 
@@ -386,6 +387,16 @@ function is_abstract_tool_result(name: string): boolean {
   return s === "abstract.tool_result";
 }
 
+function is_abstract_audio_transcript(name: string): boolean {
+  const s = normalize_ui_event_name(name);
+  return s === "abstract.audio.transcript";
+}
+
+function is_abstract_voice_tts(name: string): boolean {
+  const s = normalize_ui_event_name(name);
+  return s === "abstract.voice.tts";
+}
+
 function parse_message_payload(payload: any): { level: "info" | "warn" | "error"; title?: string; text: string } | null {
   if (payload == null) return null;
   if (typeof payload === "string") {
@@ -551,15 +562,13 @@ export function App(): React.ReactElement {
     save_settings(settings);
   }, [settings]);
 
-  useEffect(() => {
-    if (!gpu_enabled) return;
-    registerMonitorGpuWidget();
-  }, [gpu_enabled]);
-
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!gpu_enabled) return;
     const el = monitor_gpu_ref.current as any;
     if (el) el.token = settings.auth_token || "";
+    // Register after setting props so the custom element can pick them up during upgrade.
+    // (The monitor-gpu element may be present in the DOM before it's defined.)
+    registerMonitorGpuWidget();
   }, [gpu_enabled, settings.auth_token, route.name]);
 
   useEffect(() => {
@@ -918,13 +927,16 @@ function SessionsPage(props: {
         </button>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", flex: 1, minWidth: 260 }}>
-          <input
-            className="input mono"
-            placeholder="attach run_id…"
-            value={attach_id}
-            onChange={(e) => set_attach_id(e.target.value)}
-            spellCheck={false}
-          />
+	          <input
+	            className="input mono"
+	            placeholder="attach run_id…"
+	            value={attach_id}
+	            onChange={(e) => set_attach_id(e.target.value)}
+	            spellCheck={false}
+	            autoCorrect="off"
+	            autoCapitalize="off"
+	            autoComplete="off"
+	          />
           <button
             className="btn"
             type="button"
@@ -1088,6 +1100,7 @@ function format_relative_time(date: Date): string {
 
 function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_change: (s: Settings) => void; on_done: () => void }): React.ReactElement {
   const s = props.settings;
+  const storage = storage_mode();
   const [gateway_connected, set_gateway_connected] = useState(false);
   const [gateway_connecting, set_gateway_connecting] = useState(false);
   const [gateway_error, set_gateway_error] = useState("");
@@ -1307,6 +1320,13 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
               {gateway_connecting ? "connecting" : gateway_connected ? "connected" : "disconnected"}
             </span>
           </div>
+          {storage !== "localStorage" ? (
+            <Notice variant="warn" className="inline" style={{ marginTop: 10 }}>
+              {storage === "sessionStorage"
+                ? "Browser storage is limited (sessionStorage). Settings persist for this tab but may reset when the tab closes."
+                : "Browser storage is blocked (memory-only). Settings will reset on refresh; check privacy/storage settings."}
+            </Notice>
+          ) : null}
 
           <div className="field">
             <label>Gateway URL</label>
@@ -1413,13 +1433,17 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
               <label>workspace_allowed_paths</label>
               <span className="field_hint">Newline-separated directories (absolute or relative to workspace_root)</span>
             </div>
-            <textarea
-              className="mono"
-              rows={3}
-              value={String(s.workspace_allowed_paths || "")}
-              onChange={(e) => props.on_change({ ...s, workspace_allowed_paths: e.target.value })}
-              placeholder={"/Users/albou/projects/mnemosyne\n/Users/albou/abstractframework"}
-            />
+	            <textarea
+	              className="mono"
+	              rows={3}
+	              value={String(s.workspace_allowed_paths || "")}
+	              onChange={(e) => props.on_change({ ...s, workspace_allowed_paths: e.target.value })}
+	              placeholder={"/Users/albou/projects/mnemosyne\n/Users/albou/abstractframework"}
+	              spellCheck={false}
+	              autoCorrect="off"
+	              autoCapitalize="off"
+	              autoComplete="off"
+	            />
           </div>
 
           <div className="field">
@@ -1427,13 +1451,17 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
               <label>workspace_ignored_paths</label>
               <span className="field_hint">Newline-separated paths to block (absolute or relative to workspace_root)</span>
             </div>
-            <textarea
-              className="mono"
-              rows={3}
-              value={String(s.workspace_ignored_paths || "")}
-              onChange={(e) => props.on_change({ ...s, workspace_ignored_paths: e.target.value })}
-              placeholder={"node_modules\nruntime\nsecret"}
-            />
+	            <textarea
+	              className="mono"
+	              rows={3}
+	              value={String(s.workspace_ignored_paths || "")}
+	              onChange={(e) => props.on_change({ ...s, workspace_ignored_paths: e.target.value })}
+	              placeholder={"node_modules\nruntime\nsecret"}
+	              spellCheck={false}
+	              autoCorrect="off"
+	              autoCapitalize="off"
+	              autoComplete="off"
+	            />
           </div>
         </div>
 
@@ -1569,13 +1597,17 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
 
           <div className="field">
             <label>System</label>
-            <textarea
-              className="mono"
-              rows={3}
-              placeholder="Optional system prompt (high priority instructions)…"
-              value={String(s.system || "")}
-              onChange={(e) => props.on_change({ ...s, system: e.target.value })}
-            />
+	            <textarea
+	              className="mono"
+	              rows={3}
+	              placeholder="Optional system prompt (high priority instructions)…"
+	              value={String(s.system || "")}
+	              onChange={(e) => props.on_change({ ...s, system: e.target.value })}
+	              spellCheck={false}
+	              autoCorrect="off"
+	              autoCapitalize="off"
+	              autoComplete="off"
+	            />
           </div>
 
           <div className="field">
@@ -1583,13 +1615,17 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
               <label>resp_schema</label>
               <span className="field_hint">Optional JSON Schema object (JSON)</span>
             </div>
-            <textarea
-              className="mono"
-              rows={6}
-              placeholder='{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}'
-              value={String(s.resp_schema || "")}
-              onChange={(e) => props.on_change({ ...s, resp_schema: e.target.value })}
-            />
+	            <textarea
+	              className="mono"
+	              rows={6}
+	              placeholder='{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}'
+	              value={String(s.resp_schema || "")}
+	              onChange={(e) => props.on_change({ ...s, resp_schema: e.target.value })}
+	              spellCheck={false}
+	              autoCorrect="off"
+	              autoCapitalize="off"
+	              autoComplete="off"
+	            />
           </div>
         </div>
 
@@ -1867,6 +1903,13 @@ function ConsolePage(props: {
   const scroll_follow_raf2_ref = useRef<number | null>(null);
   const [attached_files, set_attached_files] = useState<AttachedFile[]>([]);
   const [attachment_preview, set_attachment_preview] = useState<AttachmentRef | null>(null);
+  const [voice_draft_audio, set_voice_draft_audio] = useState<AttachmentRef | null>(null);
+  const [voice_ptt_recording, set_voice_ptt_recording] = useState<boolean>(false);
+  const [voice_ptt_busy, set_voice_ptt_busy] = useState<boolean>(false);
+  const voice_ptt_stream_ref = useRef<MediaStream | null>(null);
+  const voice_ptt_recorder_ref = useRef<MediaRecorder | null>(null);
+  const voice_ptt_chunks_ref = useRef<BlobPart[]>([]);
+  const voice_ptt_mime_ref = useRef<string>("");
   const pending_files = attached_files.some((f) => f.loading);
   const [file_matches, set_file_matches] = useState<string[]>([]);
   const [file_match_sizes, set_file_match_sizes] = useState<Record<string, number>>({});
@@ -2382,12 +2425,16 @@ function ConsolePage(props: {
       .map((f) => f.attachment as AttachmentRef)
       .slice(0, 16)
       .map((a) => ({ ...a }));
+    const voice_attachment_for_meta =
+      voice_draft_audio && typeof voice_draft_audio === "object" ? ({ ...(voice_draft_audio as any) } as AttachmentRef) : null;
+    const message_attachments = [...attachments_for_turn, ...(voice_attachment_for_meta ? [voice_attachment_for_meta] : [])].slice(0, 16);
     append_message({
       role: "user",
       content: t,
       ts: user_ts,
-      meta: attachments_for_turn.length ? { attachments: attachments_for_turn } : undefined,
+      meta: message_attachments.length ? { attachments: message_attachments } : undefined,
     });
+    if (voice_attachment_for_meta) set_voice_draft_audio(null);
 
     const attach_errors = attached_files.filter((f) => !f.loading && String(f.error || "").trim());
     if (attach_errors.length) {
@@ -2564,15 +2611,18 @@ function ConsolePage(props: {
     const rec = ev.record as StepRecord;
     const src = String(source_run_id || rec?.run_id || "").trim();
     if (!src) return;
+    const is_session_memory = src.startsWith("session_memory_");
     const key = `${src}:${ev.cursor}`;
     if (seen_keys_ref.current.has(key)) return;
     seen_keys_ref.current.add(key);
     cursor_by_run_ref.current[src] = Math.max(Number(cursor_by_run_ref.current[src] || 0), Number(ev.cursor || 0));
     schedule_cursor_flush(src, cursor_by_run_ref.current[src]);
 
-    records_ref.current = [...records_ref.current, ev].slice(-4000);
-    set_records(records_ref.current);
-    if (src === root_run_ref.current) set_root_last_record(rec);
+    if (!is_session_memory) {
+      records_ref.current = [...records_ref.current, ev].slice(-4000);
+      set_records(records_ref.current);
+      if (src === root_run_ref.current) set_root_last_record(rec);
+    }
 
     const st = String((rec as any)?.status || "").trim();
     const eff_type = String((rec as any)?.effect?.type || "").trim();
@@ -2644,6 +2694,37 @@ function ConsolePage(props: {
           },
         });
       }
+    }
+
+    const pick_attachment = (value: any): any | null => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+      const aid = String((value as any).$artifact || "").trim();
+      if (!aid) return null;
+      return { ...(value as any), $artifact: aid };
+    };
+
+    if (emit && is_abstract_audio_transcript(emit.name)) {
+    }
+
+    if (emit && is_abstract_voice_tts(emit.name)) {
+      const p = emit.payload && typeof emit.payload === "object" ? (emit.payload as any) : null;
+      const text = String(p?.text || "").trim();
+      const request_id = String(p?.request_id || "").trim();
+      const a_audio = pick_attachment(p?.audio_artifact);
+      const attachments = [a_audio].filter(Boolean);
+      append_message({
+        role: "system",
+        level: "info",
+        title: "TTS",
+        content: text,
+        ts: now_iso(),
+        run_id: src,
+        meta: {
+          _kind: "tts_audio",
+          request_id: request_id || undefined,
+          attachments,
+        },
+      });
     }
 
     if (eff_type === "tool_calls" && st === "completed") {
@@ -2721,6 +2802,54 @@ function ConsolePage(props: {
     schedule_cursor_flush(run_id, cursor_by_run_ref.current[run_id]);
     return next;
   };
+
+  const ensure_cursor = (run_id: string): number => {
+    const rid = String(run_id || "").trim();
+    if (!rid) return 0;
+    if (typeof cursor_by_run_ref.current[rid] !== "number") {
+      cursor_by_run_ref.current[rid] = load_run_cursor(rid) ?? 0;
+    }
+    return Number(cursor_by_run_ref.current[rid] || 0);
+  };
+
+  const refresh_session_memory_ledger = async (): Promise<void> => {
+    const rid = await session_memory_owner_run_id(props.session_id);
+    const after = ensure_cursor(rid);
+    await append_page(rid, after);
+  };
+
+  const speak_text = async (text: string): Promise<void> => {
+    const t = String(text || "").trim();
+    if (!t) return;
+    set_error("");
+    try {
+      const run_id = await session_memory_owner_run_id(props.session_id);
+      ensure_cursor(run_id);
+      const res = await props.gateway.voice_tts(run_id, { text: t, request_id: random_id() });
+      await refresh_session_memory_ledger();
+      const a = res?.audio_artifact;
+      if (a && typeof a === "object" && !Array.isArray(a)) {
+        const aid = String((a as any).$artifact || "").trim();
+        const ct = String((a as any).content_type || "").trim();
+        const fn = String((a as any).filename || "").trim() || "tts.wav";
+        if (aid) set_attachment_preview({ ...(a as any), $artifact: aid, filename: fn, content_type: ct || "audio/wav" } as any);
+      }
+    } catch (e: any) {
+      set_error(String(e?.message || e || "TTS failed"));
+    }
+  };
+
+  // Best-effort: also replay the session-memory ledger so durable STT/TTS events
+  // can be rendered when reconnecting from another thin client.
+  useEffect(() => {
+    void (async () => {
+      try {
+        await refresh_session_memory_ledger();
+      } catch {
+        // ignore (session owner run may not exist yet)
+      }
+    })();
+  }, [props.session_id]); // intentionally not depending on active_run_id
 
   useEffect(() => {
     const rid = String(active_run_id || "").trim();
@@ -3430,8 +3559,8 @@ function ConsolePage(props: {
           `- active_key: ${key}`,
           "- `/cache list`  (show in-memory stats + saved caches)",
           "- `/cache clear` (clear the active in-memory cache key)",
-          "- `/cache save <name> [--q8]` (save active key to gateway disk; MLX + HF(GGUF). `--q8` is MLX-only)",
-          "- `/cache load <name>` (load from gateway disk into active key; MLX + HF(GGUF))",
+          "- `/cache save <name> [--q8]` (save active key to gateway disk; MLX + HF(transformers) + HF(GGUF). `--q8` is MLX-only)",
+          "- `/cache load <name>` (load from gateway disk into active key; MLX + HF(transformers) + HF(GGUF))",
         ];
         if (!props.settings.prompt_cache) {
           lines.push("");
@@ -3659,6 +3788,171 @@ function ConsolePage(props: {
     set_attached_files((prev) => prev.filter((f) => f.path !== p));
   }
 
+  const can_voice_ptt =
+    typeof window !== "undefined" &&
+    Boolean((navigator as any)?.mediaDevices?.getUserMedia) &&
+    typeof (window as any).MediaRecorder === "function";
+
+  function stop_voice_ptt_tracks(): void {
+    try {
+      voice_ptt_stream_ref.current?.getTracks?.().forEach((t) => {
+        try {
+          t.stop();
+        } catch {
+          // ignore
+        }
+      });
+    } catch {
+      // ignore
+    }
+    voice_ptt_stream_ref.current = null;
+  }
+
+  useEffect(() => {
+    return () => {
+      try {
+        voice_ptt_recorder_ref.current?.stop?.();
+      } catch {
+        // ignore
+      }
+      voice_ptt_recorder_ref.current = null;
+      stop_voice_ptt_tracks();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function _choose_voice_mime(): string {
+    const MR: any = (window as any).MediaRecorder;
+    const is_supported = (t: string) => {
+      try {
+        return Boolean(MR?.isTypeSupported?.(t));
+      } catch {
+        return false;
+      }
+    };
+    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus", "audio/ogg"];
+    for (const c of candidates) if (is_supported(c)) return c;
+    return "";
+  }
+
+  async function transcribe_voice_blob(blob: Blob, mime: string): Promise<void> {
+    set_error("");
+    if (!blob || !blob.size) return;
+    if (voice_ptt_busy) return;
+    set_voice_ptt_busy(true);
+    try {
+      const sid = String(props.session_id || "").trim();
+      if (!sid) throw new Error("session_id is required");
+      const run_id = await session_memory_owner_run_id(sid);
+
+      const mime_lc = String(mime || blob.type || "").toLowerCase();
+      const ext = mime_lc.includes("mp4") ? "m4a" : mime_lc.includes("ogg") ? "ogg" : mime_lc.includes("wav") ? "wav" : "webm";
+      const file = new File([blob], `recording.${ext}`, { type: mime_lc || "audio/webm" });
+
+      const attachment = await props.gateway.attachments_upload(sid, file, { filename: file.name, content_type: file.type });
+      const res = await props.gateway.audio_transcribe(run_id, { audio_artifact: attachment, request_id: random_id() });
+      try {
+        await refresh_session_memory_ledger();
+      } catch {
+        // ignore
+      }
+
+      const aid = String((attachment as any)?.$artifact || "").trim();
+      if (aid) set_voice_draft_audio({ ...(attachment as any), $artifact: aid } as any);
+
+      const text = String(res?.text || "").trim();
+      if (text) {
+        set_composer((prev) => {
+          const cur = String(prev || "");
+          if (!cur.trim()) return text;
+          return `${cur.trimEnd()}\n${text}`;
+        });
+        window.setTimeout(() => input_ref.current?.focus(), 0);
+      }
+    } catch (e: any) {
+      set_error(String(e?.message || e || "Transcription failed"));
+    } finally {
+      set_voice_ptt_busy(false);
+    }
+  }
+
+  async function start_voice_ptt_recording(): Promise<void> {
+    set_error("");
+    if (!can_voice_ptt) {
+      set_error("Voice recording is not supported in this browser (MediaRecorder/getUserMedia unavailable).");
+      return;
+    }
+    if (voice_ptt_busy) return;
+    if (voice_ptt_recording || voice_ptt_recorder_ref.current) return;
+
+    set_voice_draft_audio(null);
+    voice_ptt_chunks_ref.current = [];
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      voice_ptt_stream_ref.current = stream;
+      const mime = _choose_voice_mime();
+      voice_ptt_mime_ref.current = mime;
+
+      const rec: MediaRecorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      voice_ptt_recorder_ref.current = rec;
+      rec.ondataavailable = (ev: any) => {
+        try {
+          if (ev?.data) voice_ptt_chunks_ref.current.push(ev.data as BlobPart);
+        } catch {
+          // ignore
+        }
+      };
+      rec.onerror = () => {
+        set_error("Recording failed.");
+      };
+      rec.onstop = () => {
+        set_voice_ptt_recording(false);
+        stop_voice_ptt_tracks();
+        voice_ptt_recorder_ref.current = null;
+        try {
+          const b = new Blob(voice_ptt_chunks_ref.current, { type: voice_ptt_mime_ref.current || "" });
+          void transcribe_voice_blob(b, voice_ptt_mime_ref.current);
+        } catch (e: any) {
+          set_error(String(e?.message || e || "Failed to build recording"));
+        }
+      };
+
+      rec.start();
+      set_voice_ptt_recording(true);
+    } catch (e: any) {
+      stop_voice_ptt_tracks();
+      voice_ptt_recorder_ref.current = null;
+      set_voice_ptt_recording(false);
+      const msg = String(e?.message || e || "Failed to access microphone");
+      set_error(msg.toLowerCase().includes("permission") ? `Microphone permission denied: ${msg}` : msg);
+    }
+  }
+
+  function stop_voice_ptt_recording(): void {
+    const rec = voice_ptt_recorder_ref.current;
+    if (!voice_ptt_recording || !rec) return;
+    voice_ptt_recorder_ref.current = null; // idempotency: prevent double-stop on global handlers
+    set_voice_ptt_recording(false);
+    try {
+      rec.stop();
+    } catch (e: any) {
+      set_error(String(e?.message || e || "Failed to stop recording"));
+    }
+  }
+
+  // Robust UX: stop recording on a global pointer-up even if pointer capture fails.
+  useEffect(() => {
+    if (!voice_ptt_recording) return;
+    const on_up = () => stop_voice_ptt_recording();
+    window.addEventListener("pointerup", on_up);
+    window.addEventListener("pointercancel", on_up);
+    return () => {
+      window.removeEventListener("pointerup", on_up);
+      window.removeEventListener("pointercancel", on_up);
+    };
+  }, [voice_ptt_recording]);
+
   return (
     <div className="repl">
       <div className="panel repl_frame">
@@ -3715,14 +4009,15 @@ function ConsolePage(props: {
         <div className="repl_chat_content" ref={chat_content_ref}>
           {!props.repl.messages.length ? <div className="muted">Start typing to begin.</div> : null}
 	          {props.repl.messages.map((m, idx) => (
-	            <ChatMessageCard
-	              key={`${m.ts}:${idx}`}
-	              m={m}
-	              gateway={props.gateway}
-	              session_id={props.session_id}
-	              context_badge_label={ctx_badge_label}
-	              tool_specs_by_name={tool_specs_by_name}
-	            />
+            <ChatMessageCard
+              key={`${m.ts}:${idx}`}
+              m={m}
+              gateway={props.gateway}
+              session_id={props.session_id}
+              context_badge_label={ctx_badge_label}
+              tool_specs_by_name={tool_specs_by_name}
+              on_speak={speak_text}
+            />
 	          ))}
           <div ref={chat_end_ref} />
         </div>
@@ -3820,8 +4115,55 @@ function ConsolePage(props: {
           </div>
         ) : null}
 
-        {attached_files.length ? (
+        {attached_files.length || voice_draft_audio ? (
           <div className="file_chips">
+            {voice_draft_audio ? (
+              (() => {
+                const a: any = voice_draft_audio as any;
+                const aid = String(a?.$artifact || "").trim();
+                const target_raw = String(a?.target || "").trim().toLowerCase();
+                const target: FileTarget = target_raw === "client" ? "client" : target_raw === "server" ? "server" : "client";
+                const p = String(a?.source_path || a?.filename || aid || "voice").trim() || "voice";
+                const can_preview = Boolean(aid);
+                const tooltip = can_preview ? `Voice clip (replay only): @${p}` : `Voice clip: @${p}`;
+                return (
+                  <div
+                    key={`voice:${aid || p}`}
+                    className="file_chip"
+                    title={tooltip}
+                    role={can_preview ? "button" : undefined}
+                    tabIndex={can_preview ? 0 : undefined}
+                    onClick={can_preview ? () => set_attachment_preview(voice_draft_audio) : undefined}
+                    onKeyDown={
+                      can_preview
+                        ? (e) => {
+                            if (e.key !== "Enter" && e.key !== " ") return;
+                            e.preventDefault();
+                            set_attachment_preview(voice_draft_audio);
+                          }
+                        : undefined
+                    }
+                  >
+                    <span className="file_chip_icon" aria-hidden="true">
+                      <Icon name="mic" size={14} />
+                    </span>
+                    <span className={`file_chip_target ${target}`}>voice</span>
+                    <span className="mono">@{p}</span>
+                    <button
+                      className="chip_remove"
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        set_voice_draft_audio(null);
+                      }}
+                      aria-label="Remove voice clip"
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })()
+            ) : null}
             {attached_files.map((f) => {
               const p = String(f.path || "").trim();
               const cls = f.error ? "file_chip error" : f.loading ? "file_chip loading" : "file_chip";
@@ -3963,16 +4305,20 @@ function ConsolePage(props: {
               void attach_uploads(files);
             }}
 	          >
-	            <textarea
-	              className="mono"
-	              ref={input_ref}
-	              value={composer}
-              rows={3}
-              onChange={(e) => {
-                set_composer(e.target.value);
-                const pos = typeof e.target.selectionStart === "number" ? e.target.selectionStart : e.target.value.length;
-                set_composer_cursor(pos);
-              }}
+		            <textarea
+		              className="mono"
+		              ref={input_ref}
+		              value={composer}
+	              rows={3}
+	              spellCheck={false}
+	              autoCorrect="off"
+	              autoCapitalize="off"
+	              autoComplete="off"
+	              onChange={(e) => {
+	                set_composer(e.target.value);
+	                const pos = typeof e.target.selectionStart === "number" ? e.target.selectionStart : e.target.value.length;
+	                set_composer_cursor(pos);
+	              }}
               onClick={(e) => {
                 const el = e.currentTarget;
                 const pos = typeof el.selectionStart === "number" ? el.selectionStart : el.value.length;
@@ -4050,17 +4396,21 @@ function ConsolePage(props: {
                     return;
                   }
                 }
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  if (pending_files) {
-                    set_error("Wait for attached files to finish loading.");
-                    return;
-                  }
-                  const v = composer;
-                  set_composer("");
-                  void (async () => {
-                    const handled = await run_command(v);
-                    if (handled) return;
+	                if (e.key === "Enter" && !e.shiftKey) {
+	                  e.preventDefault();
+	                  if (pending_files) {
+	                    set_error("Wait for attached files to finish loading.");
+	                    return;
+	                  }
+	                  if (voice_ptt_busy) {
+	                    set_error("Wait for transcription to finish.");
+	                    return;
+	                  }
+	                  const v = composer;
+	                  set_composer("");
+	                  void (async () => {
+	                    const handled = await run_command(v);
+	                    if (handled) return;
                     await start_turn(v);
                   })();
 	                }
@@ -4078,12 +4428,52 @@ function ConsolePage(props: {
 	              <span>
 	                <kbd>/</kbd> cmd
 	              </span>
-	            </div>
-	            <div className="repl_send_row">
-	              <button
-	                className="btn attach_btn"
-                type="button"
-                title="Attach files from this device"
+		            </div>
+		            <div className="repl_send_row">
+	                <button
+	                  className={`btn voice_btn${voice_ptt_recording ? " danger" : ""}`}
+	                  type="button"
+	                  title={
+	                    voice_ptt_busy
+	                      ? "Transcribing…"
+	                      : voice_ptt_recording
+	                        ? "Recording… release to transcribe"
+	                        : "Hold to talk (record + transcribe)"
+	                  }
+	                  aria-label={
+	                    voice_ptt_busy
+	                      ? "Voice input (transcribing)"
+	                      : voice_ptt_recording
+	                        ? "Voice input (recording)"
+	                        : "Voice input (hold to record)"
+	                  }
+	                  disabled={voice_ptt_busy}
+	                  onPointerDown={(e) => {
+	                    if (voice_ptt_busy) return;
+	                    e.preventDefault();
+	                    try {
+	                      (e.currentTarget as any)?.setPointerCapture?.(e.pointerId);
+	                    } catch {
+	                      // ignore
+	                    }
+	                    void start_voice_ptt_recording();
+	                  }}
+	                  onPointerUp={(e) => {
+	                    e.preventDefault();
+	                    stop_voice_ptt_recording();
+	                  }}
+	                  onPointerCancel={(e) => {
+	                    e.preventDefault();
+	                    stop_voice_ptt_recording();
+	                  }}
+	                >
+	                  <Icon name={voice_ptt_recording ? "x" : "mic"} size={16} />
+	                  <span className="voice_btn_label">Voice</span>
+	                </button>
+		              <button
+		                className="btn attach_btn"
+	                type="button"
+	                title="Attach files from this device"
                 aria-label="Attach files from this device"
                 onClick={() => {
                   try {
@@ -4096,13 +4486,13 @@ function ConsolePage(props: {
                 <Icon name="paperclip" size={16} />
                 <span className="attach_btn_label">Attach</span>
               </button>
-              <button
-                className={`btn ${active_run_id ? "danger cancel_btn" : "primary"} send_btn`}
-                disabled={active_run_id ? cancelling : !can_send || !composer.trim()}
-                onClick={() => {
-                  if (active_run_id) {
-                    void submit_cancel();
-                    return;
+	              <button
+	                className={`btn ${active_run_id ? "danger cancel_btn" : "primary"} send_btn`}
+	                disabled={voice_ptt_busy || (active_run_id ? cancelling : !can_send || !composer.trim())}
+	                onClick={() => {
+	                  if (active_run_id) {
+	                    void submit_cancel();
+	                    return;
                   }
                   const v = composer;
                   set_composer("");
@@ -4133,17 +4523,17 @@ function ConsolePage(props: {
           </div>
         </div>
 
-        {attachment_preview ? (
-          <AttachmentPreviewModal
-            gateway={props.gateway}
-            session_id={props.session_id}
-            attachment={attachment_preview}
-            on_close={() => set_attachment_preview(null)}
-          />
-        ) : null}
+	        {attachment_preview ? (
+	          <AttachmentPreviewModal
+	            gateway={props.gateway}
+	            session_id={props.session_id}
+	            attachment={attachment_preview}
+	            on_close={() => set_attachment_preview(null)}
+	          />
+	        ) : null}
 
-      </div>
-      </div>
+	      </div>
+	      </div>
 
     </div>
   );
@@ -4155,6 +4545,7 @@ function ChatMessageCard(props: {
   session_id: string;
   context_badge_label?: string;
   tool_specs_by_name?: Record<string, any>;
+  on_speak?: (text: string) => void;
 }): React.ReactElement | null {
   const m = props.m;
   const meta_obj: any = m.meta && typeof m.meta === "object" ? (m.meta as any) : null;
@@ -4298,6 +4689,17 @@ function ChatMessageCard(props: {
         <span className="chat_role">{role_info.label}</span>
         <span className="chat_header_spacer" />
         <span className="chat_time">{new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+        {typeof props.on_speak === "function" && m.role === "assistant" && String(m.content || "").trim() ? (
+          <button
+            className="btn mini chat_speak"
+            onClick={() => props.on_speak?.(String(m.content || ""))}
+            type="button"
+            aria-label="Speak message"
+            title="Speak (TTS)"
+          >
+            <Icon name="speaker" size={14} />
+          </button>
+        ) : null}
         <button
           className={`btn mini chat_copy ${copy_state}`}
           onClick={async () => {
@@ -4703,11 +5105,13 @@ function AttachmentPreviewModal(props: {
   const artifact_id = String((props.attachment as any)?.$artifact || "").trim();
   const source_path = String((props.attachment as any)?.source_path || (props.attachment as any)?.filename || "").trim();
   const sha256 = String((props.attachment as any)?.sha256 || "").trim();
+  const content_type = String((props.attachment as any)?.content_type || "").trim().toLowerCase();
   const label = (source_path || artifact_id).split("/").pop() || source_path || artifact_id || "attachment";
 
   const [loading, set_loading] = useState(true);
   const [error, set_error] = useState("");
   const [text, set_text] = useState("");
+  const [audio_url, set_audio_url] = useState<string>("");
 
   useEffect(() => {
     const on_key = (e: KeyboardEvent) => {
@@ -4721,17 +5125,26 @@ function AttachmentPreviewModal(props: {
 
   useEffect(() => {
     let cancelled = false;
+    let url_to_revoke: string | null = null;
     set_loading(true);
     set_error("");
     set_text("");
+    set_audio_url("");
 
     void (async () => {
       try {
         if (!artifact_id) throw new Error("Missing attachment artifact id");
         const run_id = await session_memory_owner_run_id(props.session_id);
-        const t = await props.gateway.get_run_artifact_text(run_id, artifact_id, { max_bytes: 600_000 });
-        if (cancelled) return;
-        set_text(String(t || ""));
+        if (content_type.startsWith("audio/")) {
+          const { blob } = await props.gateway.get_run_artifact_blob(run_id, artifact_id, { max_bytes: 25_000_000 });
+          if (cancelled) return;
+          url_to_revoke = URL.createObjectURL(blob);
+          set_audio_url(url_to_revoke);
+        } else {
+          const t = await props.gateway.get_run_artifact_text(run_id, artifact_id, { max_bytes: 600_000 });
+          if (cancelled) return;
+          set_text(String(t || ""));
+        }
       } catch (e: any) {
         if (cancelled) return;
         set_error(String(e?.message || e || "Failed to load attachment"));
@@ -4742,8 +5155,13 @@ function AttachmentPreviewModal(props: {
 
     return () => {
       cancelled = true;
+      try {
+        if (url_to_revoke) URL.revokeObjectURL(url_to_revoke);
+      } catch {
+        // ignore
+      }
     };
-  }, [props.gateway, props.session_id, artifact_id]);
+  }, [props.gateway, props.session_id, artifact_id, content_type]);
 
   return (
     <div className="modal_overlay" role="dialog" aria-modal="true" aria-label="Attachment preview" onMouseDown={() => props.on_close()}>
@@ -4777,6 +5195,13 @@ function AttachmentPreviewModal(props: {
                 </>
               ) : null}
             </Notice>
+          ) : audio_url ? (
+            <div className="attachment_preview">
+              <audio controls style={{ width: "100%" }} src={audio_url} />
+              <div className="muted" style={{ marginTop: 10 }}>
+                Playback may require a user gesture (browser autoplay restrictions).
+              </div>
+            </div>
           ) : (
             <div className="attachment_preview">
               <MarkdownRenderer markdown={`\`\`\`\n${text}\n\`\`\``} />

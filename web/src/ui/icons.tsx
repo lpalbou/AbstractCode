@@ -8,6 +8,8 @@ export type IconName =
   | "user"
   | "bot"
   | "paperclip"
+  | "mic"
+  | "speaker"
   | "loader"
   | "info"
   | "warning"
@@ -69,6 +71,23 @@ function paths(name: IconName): React.ReactNode {
     case "paperclip":
       return (
         <path d="M21.44 11.05l-9.19 9.19a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.48" />
+      );
+    case "mic":
+      return (
+        <>
+          <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z" />
+          <path d="M19 11a7 7 0 0 1-14 0" />
+          <path d="M12 18v4" />
+          <path d="M8 22h8" />
+        </>
+      );
+    case "speaker":
+      return (
+        <>
+          <path d="M11 5L6 9H2v6h4l5 4V5z" />
+          <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+          <path d="M18 6a9 9 0 0 1 0 12" />
+        </>
       );
     case "loader":
       return <path d="M21 12a9 9 0 1 1-3.3-6.9" />;
