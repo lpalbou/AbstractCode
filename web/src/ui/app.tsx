@@ -5111,7 +5111,8 @@ function AttachmentPreviewModal(props: {
   const [loading, set_loading] = useState(true);
   const [error, set_error] = useState("");
   const [text, set_text] = useState("");
-  const [audio_url, set_audio_url] = useState<string>("");
+  const [blob_url, set_blob_url] = useState<string>("");
+  const [blob_content_type, set_blob_content_type] = useState<string>("");
 
   useEffect(() => {
     const on_key = (e: KeyboardEvent) => {
@@ -5129,17 +5130,24 @@ function AttachmentPreviewModal(props: {
     set_loading(true);
     set_error("");
     set_text("");
-    set_audio_url("");
+    set_blob_url("");
+    set_blob_content_type("");
 
     void (async () => {
       try {
         if (!artifact_id) throw new Error("Missing attachment artifact id");
         const run_id = await session_memory_owner_run_id(props.session_id);
-        if (content_type.startsWith("audio/")) {
-          const { blob } = await props.gateway.get_run_artifact_blob(run_id, artifact_id, { max_bytes: 25_000_000 });
+        const wants_blob =
+          content_type.startsWith("audio/") ||
+          content_type.startsWith("image/") ||
+          content_type.startsWith("video/") ||
+          content_type === "application/octet-stream";
+        if (wants_blob) {
+          const { blob, content_type: ct2 } = await props.gateway.get_run_artifact_blob(run_id, artifact_id, { max_bytes: 25_000_000 });
           if (cancelled) return;
           url_to_revoke = URL.createObjectURL(blob);
-          set_audio_url(url_to_revoke);
+          set_blob_url(url_to_revoke);
+          set_blob_content_type(String(ct2 || blob.type || content_type || "application/octet-stream").trim().toLowerCase());
         } else {
           const t = await props.gateway.get_run_artifact_text(run_id, artifact_id, { max_bytes: 600_000 });
           if (cancelled) return;
@@ -5163,9 +5171,39 @@ function AttachmentPreviewModal(props: {
     };
   }, [props.gateway, props.session_id, artifact_id, content_type]);
 
+  function ext_for_content_type(ct: string): string {
+    const t = String(ct || "").trim().toLowerCase();
+    if (!t) return "bin";
+    if (t.includes("png")) return "png";
+    if (t.includes("jpeg") || t.includes("jpg")) return "jpg";
+    if (t.includes("webp")) return "webp";
+    if (t.includes("gif")) return "gif";
+    if (t.includes("svg")) return "svg";
+    if (t.includes("mp4")) return "mp4";
+    if (t.includes("webm")) return "webm";
+    if (t.includes("mpeg")) return "mpeg";
+    if (t.includes("wav")) return "wav";
+    if (t.includes("mp3")) return "mp3";
+    if (t.includes("ogg")) return "ogg";
+    if (t.includes("opus")) return "opus";
+    if (t.includes("m4a") || t.includes("mp4")) return "m4a";
+    return "bin";
+  }
+
+  const preview_ct = blob_content_type || content_type;
+  const is_audio = preview_ct.startsWith("audio/");
+  const is_image = preview_ct.startsWith("image/");
+  const is_video = preview_ct.startsWith("video/");
+
+  const download_name = (() => {
+    const base = String(label || "attachment").trim() || "attachment";
+    if (base.includes(".") && base.split(".").pop()) return base;
+    return `${base}.${ext_for_content_type(preview_ct)}`;
+  })();
+
   return (
-    <div className="modal_overlay" role="dialog" aria-modal="true" aria-label="Attachment preview" onMouseDown={() => props.on_close()}>
-      <div className="modal_card" onMouseDown={(e) => e.stopPropagation()}>
+    <div className="modal_overlay" role="dialog" aria-modal="true" aria-label="Attachment preview" onClick={() => props.on_close()}>
+      <div className="modal_card" onClick={(e) => e.stopPropagation()}>
         <div className="modal_header">
           <div style={{ minWidth: 0 }}>
             <div className="modal_title">Attachment</div>
@@ -5173,14 +5211,75 @@ function AttachmentPreviewModal(props: {
               {label}
               {source_path ? ` • @${source_path}` : ""}
               {sha256 ? ` • sha=${sha256.slice(0, 8)}…` : ""}
+              {preview_ct ? ` • ${preview_ct}` : ""}
             </div>
           </div>
-          <button className="btn mini modal_close_btn" type="button" onClick={() => props.on_close()} aria-label="Close attachment preview">
-            <Icon name="x" size={14} />
-            <span className="modal_close_label">Close</span>
-          </button>
+          <div className="modal_header_actions">
+            {blob_url ? (
+              <button
+                className="btn mini"
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  try {
+                    const a = document.createElement("a");
+                    a.href = blob_url;
+                    a.download = download_name;
+                    a.rel = "noopener";
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                  } catch (err: any) {
+                    set_error(String(err?.message || err || "Download failed"));
+                  }
+                }}
+                aria-label="Download attachment"
+                title="Download"
+              >
+                <Icon name="download" size={14} />
+                <span className="modal_close_label">Download</span>
+              </button>
+            ) : null}
+            <button className="btn mini modal_close_btn" type="button" onClick={() => props.on_close()} aria-label="Close attachment preview">
+              <Icon name="x" size={14} />
+              <span className="modal_close_label">Close</span>
+            </button>
+          </div>
         </div>
         <div className="modal_body">
+          <div className="modal_body_actions">
+            {blob_url ? (
+              <button
+                className="btn mini"
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  try {
+                    const a = document.createElement("a");
+                    a.href = blob_url;
+                    a.download = download_name;
+                    a.rel = "noopener";
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                  } catch (err: any) {
+                    set_error(String(err?.message || err || "Download failed"));
+                  }
+                }}
+                aria-label="Download attachment"
+                title="Download"
+              >
+                <Icon name="download" size={14} />
+                <span className="modal_close_label">Download</span>
+              </button>
+            ) : null}
+            <button className="btn mini modal_close_btn" type="button" onClick={() => props.on_close()} aria-label="Close attachment preview">
+              <Icon name="x" size={14} />
+              <span className="modal_close_label">Close</span>
+            </button>
+          </div>
           {loading ? (
             <div className="muted" style={{ marginTop: 12 }}>
               Loading…
@@ -5195,12 +5294,22 @@ function AttachmentPreviewModal(props: {
                 </>
               ) : null}
             </Notice>
-          ) : audio_url ? (
+          ) : blob_url && (is_audio || is_image || is_video) ? (
             <div className="attachment_preview">
-              <audio controls style={{ width: "100%" }} src={audio_url} />
-              <div className="muted" style={{ marginTop: 10 }}>
-                Playback may require a user gesture (browser autoplay restrictions).
-              </div>
+              {is_audio ? <audio controls style={{ width: "100%" }} src={blob_url} /> : null}
+              {is_image ? <img alt={label} src={blob_url} style={{ width: "100%", borderRadius: 10 }} /> : null}
+              {is_video ? <video controls style={{ width: "100%" }} src={blob_url} /> : null}
+              {is_audio || is_video ? (
+                <div className="muted" style={{ marginTop: 10 }}>
+                  Playback may require a user gesture (browser autoplay restrictions).
+                </div>
+              ) : null}
+            </div>
+          ) : blob_url ? (
+            <div className="attachment_preview">
+              <Notice variant="info" style={{ marginTop: 12 }}>
+                This attachment is binary ({preview_ct || "unknown type"}). Use Download to save it locally.
+              </Notice>
             </div>
           ) : (
             <div className="attachment_preview">

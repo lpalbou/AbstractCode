@@ -10,6 +10,7 @@ export type IconName =
   | "paperclip"
   | "mic"
   | "speaker"
+  | "download"
   | "loader"
   | "info"
   | "warning"
@@ -87,6 +88,14 @@ function paths(name: IconName): React.ReactNode {
           <path d="M11 5L6 9H2v6h4l5 4V5z" />
           <path d="M15.5 8.5a5 5 0 0 1 0 7" />
           <path d="M18 6a9 9 0 0 1 0 12" />
+        </>
+      );
+    case "download":
+      return (
+        <>
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <path d="M7 10l5 5 5-5" />
+          <path d="M12 15V3" />
         </>
       );
     case "loader":
