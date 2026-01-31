@@ -1617,6 +1617,18 @@ select {
   color: var(--accent-error);
 }
 
+.chat_item.message.report_bug .chat_avatar {
+  background: rgba(231, 76, 60, 0.10);
+  border-color: rgba(231, 76, 60, 0.25);
+  color: var(--accent-error);
+}
+
+.chat_item.message.report_feature .chat_avatar {
+  background: rgba(39, 174, 96, 0.10);
+  border-color: rgba(39, 174, 96, 0.25);
+  color: var(--accent-success);
+}
+
 .chat_meta {
   flex: 1;
   min-width: 0;
@@ -1986,6 +1998,22 @@ select {
 .chat_item.message.warn {
   background: linear-gradient(135deg, var(--accent-warning-subtle) 0%, rgba(243, 156, 18, 0.05) 100%);
   border: 1px solid rgba(251, 191, 36, 0.25);
+  width: 100%;
+  max-width: 100%;
+  align-self: stretch;
+}
+
+.chat_item.message.report_bug {
+  background: linear-gradient(135deg, rgba(231, 76, 60, 0.10) 0%, rgba(231, 76, 60, 0.04) 100%);
+  border: 1px solid rgba(231, 76, 60, 0.22);
+  width: 100%;
+  max-width: 100%;
+  align-self: stretch;
+}
+
+.chat_item.message.report_feature {
+  background: linear-gradient(135deg, rgba(39, 174, 96, 0.10) 0%, rgba(39, 174, 96, 0.04) 100%);
+  border: 1px solid rgba(39, 174, 96, 0.22);
   width: 100%;
   max-width: 100%;
   align-self: stretch;

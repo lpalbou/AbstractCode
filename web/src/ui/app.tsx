@@ -82,6 +82,16 @@ function safe_json(v: any): string {
   }
 }
 
+function truncate_text(text: string, max_chars: number): string {
+  const s = String(text || "");
+  if (max_chars <= 0) return s;
+  if (s.length <= max_chars) return s;
+  const suffix = `\n… (truncated, ${s.length.toLocaleString()} chars total)`;
+  const keep = Math.max(0, max_chars - suffix.length);
+  if (keep < 200) return s.slice(0, max_chars);
+  return `${s.slice(0, keep).trimEnd()}${suffix}`;
+}
+
 function parse_iso_ms(ts: string): number | null {
   const s = String(ts || "").trim();
   if (!s) return null;
@@ -2366,6 +2376,7 @@ function ConsolePage(props: {
           output_preview = rendered;
         }
       }
+      output_preview = truncate_text(output_preview, 20_000);
 
       append_message({
         role: "system",
@@ -2643,6 +2654,7 @@ function ConsolePage(props: {
       for (const it of items.slice(0, 30)) {
         const tool = String((it as any)?.tool || (it as any)?.name || "").trim();
         const call_id = String((it as any)?.call_id || (it as any)?.id || "").trim();
+        if (call_id && seen_tool_call_ids_ref.current.has(call_id)) continue;
         const args = (it as any)?.arguments ?? (it as any)?.args ?? (it as any)?.params ?? (it as any)?.parameters ?? null;
         append_message({
           role: "system",
@@ -2668,13 +2680,15 @@ function ConsolePage(props: {
       for (const it of items.slice(0, 30)) {
         const tool = String((it as any)?.tool || (it as any)?.name || "").trim();
         const call_id = String((it as any)?.call_id || (it as any)?.id || "").trim();
+        if (call_id && seen_tool_call_ids_ref.current.has(call_id)) continue;
         const args = (it as any)?.arguments ?? (it as any)?.args ?? (it as any)?.params ?? (it as any)?.parameters ?? null;
         const success_raw = (it as any)?.success;
         const success = typeof success_raw === "boolean" ? success_raw : null;
         const err = String((it as any)?.error || "").trim();
         const output_raw = (it as any)?.output ?? (it as any)?.result ?? (it as any)?.response ?? (it as any)?.value ?? null;
         const output_s = output_raw == null ? "" : typeof output_raw === "string" ? output_raw : safe_json(output_raw);
-        const output_preview = output_s;
+        const output_preview = truncate_text(output_s, 20_000);
+        if (call_id) seen_tool_call_ids_ref.current.add(call_id);
         append_message({
           role: "system",
           level: err ? "error" : success === false ? "warn" : "info",
@@ -2897,11 +2911,11 @@ function ConsolePage(props: {
         if (!props.repl.messages.length) {
           try {
             const bundle = await props.gateway.get_run_history_bundle(rid, {
-              include_subruns: false,
+              include_subruns: true,
               include_session: true,
               session_turn_limit: 200,
               ledger_mode: "tail",
-              ledger_max_items: 50,
+              ledger_max_items: 2000,
             });
             if (stopped) return;
 
@@ -2916,7 +2930,17 @@ function ConsolePage(props: {
               }));
             }
 
-            const seeded = seed_repl_messages_from_history_bundle(bundle, { now_iso });
+            const seeded = seed_repl_messages_from_history_bundle(bundle, { now_iso, include_tool_calls_for_run_id: rid });
+            // Ensure replay dedups tool cards when we later replay/stream the ledger.
+            try {
+              seen_tool_call_ids_ref.current = new Set(
+                seeded
+                  .map((m) => String((m as any)?.meta?._kind === "tool" ? (m as any)?.meta?.tool?.call_id || "" : "").trim())
+                  .filter(Boolean)
+              );
+            } catch {
+              // ignore
+            }
             if (seeded.length) update_repl((prev) => ({ ...prev, messages: seeded, updated_at: now_iso() }));
           } catch {
             // best-effort
@@ -3168,6 +3192,7 @@ function ConsolePage(props: {
   const commands = useMemo(
     () => [
       { name: "help", desc: "Show available commands" },
+      { name: "bug", desc: "Report a bug (writes a Markdown report on the gateway)" },
       { name: "clear", desc: "Clear chat (keep agent)" },
       { name: "cache", desc: "Prompt cache (list/load/save/clear)" },
       { name: "sessions", desc: "Open Sessions view" },
@@ -3333,12 +3358,44 @@ function ConsolePage(props: {
     const args = parts.slice(1);
 
     const say = (text: string) => append_message({ role: "system", level: "info", title: "Command", content: text, ts: now_iso() });
+    const say_report = (
+      kind: "report_bug" | "report_feature",
+      title: string,
+      content: string,
+      report?: { path?: string; filename?: string },
+      level?: "info" | "warn" | "error"
+    ) =>
+      append_message({
+        role: "system",
+        level: level || (kind === "report_bug" ? "warn" : "info"),
+        title,
+        content,
+        ts: now_iso(),
+        meta: { _kind: kind, ...(report ? { report } : {}) },
+      });
+
+    const infer_report_run_id = (): string => {
+      const active = String(active_run_id || "").trim();
+      if (active) return active;
+      const root = String(root_run_ref.current || "").trim();
+      if (root) return root;
+      const finalized = String(finalized_run_ref.current || "").trim();
+      if (finalized) return finalized;
+      const msgs = props.repl.messages || [];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const rid = String(msgs[i]?.run_id || "").trim();
+        if (rid) return rid;
+      }
+      return "";
+    };
 
     if (!cmd || cmd === "help") {
       say(
         [
           "Commands:",
           "- `/help`",
+          "- `/bug <description>`",
+          "- `/feature <description>`",
           "- `/clear`",
           "- `/cache [list|save|load|clear]`",
           "- `/files`",
@@ -3352,6 +3409,182 @@ function ConsolePage(props: {
           "- `/max-iterations [n]`",
         ].join("\n")
       );
+      return true;
+    }
+
+    if (cmd === "bug") {
+      const description = args.join(" ").trim();
+      if (!description) {
+        say("Usage: /bug <description>");
+        return true;
+      }
+      const sid = String(props.session_id || "").trim();
+      if (!sid) {
+        say("bug: session_id is required");
+        return true;
+      }
+
+      const template = props.repl.template ? `${props.repl.template.bundle_id}:${props.repl.template.flow_id}` : "";
+      const workflow_id = template;
+      const report_run_id = infer_report_run_id();
+
+      const file_state = attached_files.slice(0, 50).map((f) => {
+        const p = String(f.path || "").trim();
+        const st = f.loading ? "loading" : String(f.error || "").trim() ? "error" : f.attachment ? "ok" : "none";
+        const target_raw = String((f.attachment as any)?.target || "").trim().toLowerCase();
+        const target: FileTarget =
+          target_raw === "client" ? "client" : target_raw === "server" ? "server" : p.startsWith("client:") ? "client" : "server";
+        return {
+          path: p,
+          status: st,
+          target,
+          error: st === "error" ? String(f.error || "").trim() : undefined,
+          artifact_id: String((f.attachment as any)?.$artifact || "").trim() || undefined,
+          filename: String((f.attachment as any)?.filename || "").trim() || undefined,
+          content_type: String((f.attachment as any)?.content_type || "").trim() || undefined,
+          sha256: String((f.attachment as any)?.sha256 || "").trim() || undefined,
+        };
+      });
+
+      try {
+        const res = await props.gateway.bug_report_create({
+          session_id: sid,
+          description,
+          active_run_id: report_run_id || undefined,
+          workflow_id: workflow_id || undefined,
+          client: "abstractcode-web",
+          client_version: String((import.meta as any)?.env?.MODE || "").trim() || undefined,
+          user_agent: String((globalThis as any)?.navigator?.userAgent || "").trim() || undefined,
+          url: String((globalThis as any)?.location?.href || "").trim() || undefined,
+          provider: String(props.settings.provider || "").trim() || undefined,
+          model: String(props.settings.model || "").trim() || undefined,
+          template: template || undefined,
+          context: {
+            wait: wait_state ? { reason: wait_reason || undefined, wait_key: wait_key || undefined } : null,
+            settings: {
+              provider: props.settings.provider,
+              model: props.settings.model,
+              temperature: props.settings.temperature,
+              seed: props.settings.seed,
+              max_iterations: props.settings.max_iterations,
+              prompt_cache: props.settings.prompt_cache,
+              files_keep: props.settings.files_keep,
+            },
+            attachments_next_run: file_state,
+            ui: { status_text: status_text || undefined },
+          },
+        });
+
+        const rel = String((res as any)?.path || "").trim();
+        const filename = String((res as any)?.filename || "").trim();
+        const where = rel || filename || "(unknown)";
+        say_report("report_bug", "Bug report", `Created: ${where}`, { path: rel || undefined, filename: filename || undefined });
+      } catch (e: any) {
+        if (e instanceof GatewayHttpError) {
+          const status = Number((e as any).status || 0);
+          if (status === 401 || status === 403) {
+            say("Bug report failed: unauthorized. Set the Gateway auth token in Settings.");
+            return true;
+          }
+          if (status === 429) {
+            const ra =
+              typeof (e as any).retry_after_s === "number" && Number.isFinite((e as any).retry_after_s)
+                ? Math.max(1, Math.trunc((e as any).retry_after_s))
+                : 30;
+            say(`Bug report failed: rate limited. Retry in ${ra}s.`);
+            return true;
+          }
+        }
+        say(String(e?.message || e || "bug report failed"));
+      }
+      return true;
+    }
+
+    if (cmd === "feature") {
+      const description = args.join(" ").trim();
+      if (!description) {
+        say("Usage: /feature <description>");
+        return true;
+      }
+      const sid = String(props.session_id || "").trim();
+      if (!sid) {
+        say("feature: session_id is required");
+        return true;
+      }
+
+      const template = props.repl.template ? `${props.repl.template.bundle_id}:${props.repl.template.flow_id}` : "";
+      const workflow_id = template;
+      const report_run_id = infer_report_run_id();
+
+      const file_state = attached_files.slice(0, 50).map((f) => {
+        const p = String(f.path || "").trim();
+        const st = f.loading ? "loading" : String(f.error || "").trim() ? "error" : f.attachment ? "ok" : "none";
+        const target_raw = String((f.attachment as any)?.target || "").trim().toLowerCase();
+        const target: FileTarget =
+          target_raw === "client" ? "client" : target_raw === "server" ? "server" : p.startsWith("client:") ? "client" : "server";
+        return {
+          path: p,
+          status: st,
+          target,
+          error: st === "error" ? String(f.error || "").trim() : undefined,
+          artifact_id: String((f.attachment as any)?.$artifact || "").trim() || undefined,
+          filename: String((f.attachment as any)?.filename || "").trim() || undefined,
+          content_type: String((f.attachment as any)?.content_type || "").trim() || undefined,
+          sha256: String((f.attachment as any)?.sha256 || "").trim() || undefined,
+        };
+      });
+
+      try {
+        const res = await props.gateway.feature_report_create({
+          session_id: sid,
+          description,
+          active_run_id: report_run_id || undefined,
+          workflow_id: workflow_id || undefined,
+          client: "abstractcode-web",
+          client_version: String((import.meta as any)?.env?.MODE || "").trim() || undefined,
+          user_agent: String((globalThis as any)?.navigator?.userAgent || "").trim() || undefined,
+          url: String((globalThis as any)?.location?.href || "").trim() || undefined,
+          provider: String(props.settings.provider || "").trim() || undefined,
+          model: String(props.settings.model || "").trim() || undefined,
+          template: template || undefined,
+          context: {
+            wait: wait_state ? { reason: wait_reason || undefined, wait_key: wait_key || undefined } : null,
+            settings: {
+              provider: props.settings.provider,
+              model: props.settings.model,
+              temperature: props.settings.temperature,
+              seed: props.settings.seed,
+              max_iterations: props.settings.max_iterations,
+              prompt_cache: props.settings.prompt_cache,
+              files_keep: props.settings.files_keep,
+            },
+            attachments_next_run: file_state,
+            ui: { status_text: status_text || undefined },
+          },
+        });
+
+        const rel = String((res as any)?.path || "").trim();
+        const filename = String((res as any)?.filename || "").trim();
+        const where = rel || filename || "(unknown)";
+        say_report("report_feature", "Feature request", `Created: ${where}`, { path: rel || undefined, filename: filename || undefined });
+      } catch (e: any) {
+        if (e instanceof GatewayHttpError) {
+          const status = Number((e as any).status || 0);
+          if (status === 401 || status === 403) {
+            say("Feature request failed: unauthorized. Set the Gateway auth token in Settings.");
+            return true;
+          }
+          if (status === 429) {
+            const ra =
+              typeof (e as any).retry_after_s === "number" && Number.isFinite((e as any).retry_after_s)
+                ? Math.max(1, Math.trunc((e as any).retry_after_s))
+                : 30;
+            say(`Feature request failed: rate limited. Retry in ${ra}s.`);
+            return true;
+          }
+        }
+        say(String(e?.message || e || "feature request failed"));
+      }
       return true;
     }
 
@@ -4571,18 +4804,24 @@ function ChatMessageCard(props: {
       icon: m.level === "error" ? "error" : m.level === "warn" ? "warning" : "info",
     },
   };
-  const role_info = role_config[m.role] || role_config.system;
+  let role_info = role_config[m.role] || role_config.system;
+  if (m.role === "system" && kind === "report_bug") role_info = { label: m.title || "Bug report", icon: "warning" };
+  if (m.role === "system" && kind === "report_feature") role_info = { label: m.title || "Feature request", icon: "check" };
   
   const cls =
     m.role === "assistant"
       ? "assistant"
-      : m.role === "system"
-        ? m.level === "error"
-          ? "message error"
-          : m.level === "warn"
-            ? "message warn"
-            : "status"
-        : "user";
+      : m.role === "system" && kind === "report_bug"
+        ? "message report_bug"
+        : m.role === "system" && kind === "report_feature"
+          ? "message report_feature"
+          : m.role === "system"
+            ? m.level === "error"
+              ? "message error"
+              : m.level === "warn"
+                ? "message warn"
+                : "status"
+            : "user";
   const [copy_state, set_copy_state] = useState<"idle" | "copied" | "failed">("idle");
 
   const is_digest = m.role === "system" && String(m.title || "").trim() === "Digest" && (m.level || "info") === "info";
