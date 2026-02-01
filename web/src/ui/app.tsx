@@ -3193,6 +3193,7 @@ function ConsolePage(props: {
     () => [
       { name: "help", desc: "Show available commands" },
       { name: "bug", desc: "Report a bug (writes a Markdown report on the gateway)" },
+      { name: "feature", desc: "Request a feature (writes a Markdown report on the gateway)" },
       { name: "clear", desc: "Clear chat (keep agent)" },
       { name: "cache", desc: "Prompt cache (list/load/save/clear)" },
       { name: "sessions", desc: "Open Sessions view" },
