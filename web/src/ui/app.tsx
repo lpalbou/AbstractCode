@@ -8,7 +8,7 @@ import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types
 import type { AttachmentRef } from "../lib/types";
 import { resolve_blocking_wait } from "../lib/wait_resolution";
 import { ChatMessageContent } from "@abstractuic/panel-chat";
-import { applyTheme, ThemeSelect } from "@abstractuic/ui-kit";
+import { FontScaleSelect, HeaderDensitySelect, ThemeSelect, applyTheme, applyTypography } from "@abstractuic/ui-kit";
 import { AgentCyclesPanel, build_agent_trace, type LedgerRecordItem } from "@abstractuic/monitor-flow";
 import { registerMonitorGpuWidget } from "@abstractutils/monitor-gpu";
 import { MarkdownRenderer } from "./markdown_renderer";
@@ -574,6 +574,10 @@ export function App(): React.ReactElement {
   useLayoutEffect(() => {
     applyTheme(settings.theme);
   }, [settings.theme]);
+
+  useLayoutEffect(() => {
+    applyTypography({ font_scale: settings.font_scale, header_density: settings.header_density });
+  }, [settings.font_scale, settings.header_density]);
 
   useEffect(() => {
     save_settings(settings);
@@ -1354,12 +1358,20 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
       <div className="settings_grid">
         <div className="panel settings_card">
           <div className="settings_card_header">
-            <h2>Theme</h2>
+            <h2>Appearance</h2>
           </div>
-          <div className="muted">Choose a shared AbstractUIC theme (saved locally).</div>
+          <div className="muted">Shared AbstractUIC theme + typography (saved locally).</div>
           <div className="field" style={{ marginTop: 10 }}>
             <label>Theme</label>
             <ThemeSelect value={s.theme} onChange={(theme) => props.on_change({ ...s, theme })} />
+          </div>
+          <div className="field" style={{ marginTop: 10 }}>
+            <label>Font size</label>
+            <FontScaleSelect value={s.font_scale} onChange={(font_scale) => props.on_change({ ...s, font_scale })} />
+          </div>
+          <div className="field" style={{ marginTop: 10 }}>
+            <label>Header size</label>
+            <HeaderDensitySelect value={s.header_density} onChange={(header_density) => props.on_change({ ...s, header_density })} />
           </div>
         </div>
 
@@ -5297,7 +5309,7 @@ function ChatMessageCard(props: {
   );
 }
 
-function ContextInspectorModal(props: {
+export function ContextInspectorModal(props: {
   gateway: GatewayClient;
   root_run_id: string;
   inspect_run_id: string;
@@ -5503,9 +5515,9 @@ function ContextInspectorModal(props: {
       role="dialog"
       aria-modal="true"
       aria-label="Context inspector"
-      onMouseDown={() => props.on_close()}
+      onClick={() => props.on_close()}
     >
-	      <div className="modal_card" onMouseDown={(e) => e.stopPropagation()}>
+	      <div className="modal_card" onClick={(e) => e.stopPropagation()}>
 	        <div className="modal_header">
 	          <div style={{ minWidth: 0 }}>
 	            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -5549,6 +5561,12 @@ function ContextInspectorModal(props: {
         </div>
 
         <div className="modal_body">
+          <div className="modal_body_actions">
+            <button className="btn mini modal_close_btn" type="button" onClick={() => props.on_close()} aria-label="Close context inspector">
+              <Icon name="x" size={14} />
+              <span className="modal_close_label">Close</span>
+            </button>
+          </div>
           {is_loading ? (
             <div className="context_modal_loading">
               <div className="thinking_line shimmer">
