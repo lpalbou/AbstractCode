@@ -8,12 +8,11 @@ import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types
 import type { AttachmentRef } from "../lib/types";
 import { resolve_blocking_wait } from "../lib/wait_resolution";
 import { ChatMessageContent } from "@abstractuic/panel-chat";
-import { FontScaleSelect, HeaderDensitySelect, ThemeSelect, applyTheme, applyTypography } from "@abstractuic/ui-kit";
+import { FontScaleSelect, HeaderDensitySelect, Icon, type IconName, ThemeSelect, applyTheme, applyTypography } from "@abstractuic/ui-kit";
 import { AgentCyclesPanel, build_agent_trace, type LedgerRecordItem } from "@abstractuic/monitor-flow";
 import { registerMonitorGpuWidget } from "@abstractutils/monitor-gpu";
 import { MarkdownRenderer } from "./markdown_renderer";
 import { ToolPicker } from "./tool_picker";
-import { Icon, type IconName } from "./icons";
 import { copy_text } from "../lib/clipboard";
 import { build_run_input_data, derive_prompt_cache_key } from "../lib/run_input";
 import { seed_repl_messages_from_history_bundle } from "../lib/history_bundle_seed";
@@ -1121,12 +1120,17 @@ function format_relative_time(date: Date): string {
 
 function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_change: (s: Settings) => void; on_done: () => void }): React.ReactElement {
   const s = props.settings;
+  const settings_ref = useRef<Settings>(s);
+  useEffect(() => {
+    settings_ref.current = props.settings;
+  }, [props.settings]);
   const storage = storage_mode();
   const [gateway_connected, set_gateway_connected] = useState(false);
   const [gateway_connecting, set_gateway_connecting] = useState(false);
   const [gateway_error, set_gateway_error] = useState("");
   const [server_workspace_policy, set_server_workspace_policy] = useState<any>(null);
   const [server_workspace_policy_error, set_server_workspace_policy_error] = useState("");
+  const [gateway_defaults, set_gateway_defaults] = useState<{ provider: string; model: string }>({ provider: "", model: "" });
   const [providers, set_providers] = useState<any[]>([]);
   const [models, set_models] = useState<string[]>([]);
   const [tools, set_tools] = useState<any[]>([]);
@@ -1152,6 +1156,7 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
     set_gateway_error("");
     set_server_workspace_policy(null);
     set_server_workspace_policy_error("");
+    set_gateway_defaults({ provider: "", model: "" });
     set_providers([]);
     set_models([]);
     set_tools([]);
@@ -1205,6 +1210,23 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
       ]);
       const prov_items = Array.isArray(prov_res?.items) ? prov_res.items : [];
       const tool_items = Array.isArray(tool_res?.items) ? tool_res.items : [];
+
+      const default_provider = String((prov_res as any)?.default_provider || (prov_res as any)?.defaults?.provider || "").trim();
+      const default_model = String((prov_res as any)?.default_model || (prov_res as any)?.defaults?.model || "").trim();
+      set_gateway_defaults({ provider: default_provider, model: default_model });
+
+      // If the currently selected provider is missing/invalid, prefer the gateway-configured default.
+      const provider_names = prov_items.map((p: any) => String(p?.name || "").trim()).filter(Boolean);
+      const current_provider = String(settings_ref.current.provider || "").trim();
+      let next_provider = current_provider;
+      if (!next_provider || !provider_names.includes(next_provider)) {
+        if (default_provider && provider_names.includes(default_provider)) next_provider = default_provider;
+        else next_provider = provider_names[0] || "";
+      }
+      if (next_provider && next_provider !== current_provider) {
+        props.on_change({ ...settings_ref.current, provider: next_provider, model: "" });
+      }
+
       set_providers(prov_items);
       set_tools(tool_items);
       if (ws_res && typeof ws_res === "object") {
@@ -1213,7 +1235,7 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
       }
       set_gateway_connected(true);
       // Remember that we were connected for auto-reconnect
-      props.on_change({ ...s, gateway_was_connected: true });
+      props.on_change({ ...settings_ref.current, gateway_was_connected: true });
     } catch (e: any) {
       set_gateway_error(String(e?.message || e || "Failed to connect to gateway"));
       set_gateway_connected(false);
@@ -1240,7 +1262,7 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
     set_error_models("");
     set_error_tools("");
     // Clear auto-reconnect flag
-    props.on_change({ ...s, gateway_was_connected: false });
+    props.on_change({ ...settings_ref.current, gateway_was_connected: false });
   }
 
   // Provider → models.
@@ -1281,28 +1303,17 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
     };
   }, [gateway_connected, props.gateway, s.provider]);
 
-  // Auto-default provider/model when discovery loads.
-  useEffect(() => {
-    if (!providers.length) return;
-    const current = String(s.provider || "").trim();
-    const names = providers
-      .map((p: any) => String(p?.name || "").trim())
-      .filter(Boolean);
-    if (!names.length) return;
-    if (!current || !names.includes(current)) {
-      props.on_change({ ...s, provider: names[0], model: "" });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [providers]);
-
   useEffect(() => {
     if (!models.length) return;
-    const current = String(s.model || "").trim();
+    const current = String(settings_ref.current.model || "").trim();
+    const current_provider = String(settings_ref.current.provider || "").trim();
+    const preferred =
+      current_provider && gateway_defaults.provider && current_provider === gateway_defaults.provider ? String(gateway_defaults.model || "").trim() : "";
+    const pick = preferred && models.includes(preferred) ? preferred : models[0];
     if (!current || !models.includes(current)) {
-      props.on_change({ ...s, model: models[0] });
+      props.on_change({ ...settings_ref.current, model: pick });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [models]);
+  }, [models, gateway_defaults.provider, gateway_defaults.model]);
 
   // Default tools: select all once when tools are discovered.
   useEffect(() => {
@@ -1310,7 +1321,7 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
     if (s.tools_initialized) return;
     const names = tools.map((t: any) => String(t?.name || "").trim()).filter(Boolean);
     if (!names.length) return;
-    props.on_change({ ...s, tools: names, tools_initialized: true });
+    props.on_change({ ...settings_ref.current, tools: names, tools_initialized: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tools]);
 
@@ -1590,8 +1601,8 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
               <label>Max iterations</label>
               <input
                 value={String(s.max_iterations)}
-                onChange={(e) => props.on_change({ ...s, max_iterations: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : 20 })}
-                placeholder="20"
+                onChange={(e) => props.on_change({ ...s, max_iterations: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : 10 })}
+                placeholder="10"
               />
             </div>
             <div className="field">

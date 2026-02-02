@@ -3249,25 +3249,30 @@ class ReactShell:
     def _gpu_monitor_enabled_from_env(self) -> bool:
         """Return whether the GPU meter should run.
 
-        Defaults to auto:
-        - enabled when a gateway URL/token is configured
-        - can be forced on/off via ABSTRACTCODE_GPU_MONITOR=1/0
+        Default: OFF (opt-in), to avoid constant polling/noisy gateway logs.
+
+        Control via `ABSTRACTCODE_GPU_MONITOR`:
+        - 0/false/off/no  -> disabled
+        - 1/true/on/yes   -> enabled
+        - auto            -> enabled when a gateway URL/token is configured
         """
         v = str(os.getenv("ABSTRACTCODE_GPU_MONITOR", "") or "").strip().lower()
         if v in ("0", "false", "off", "no"):
             return False
         if v in ("1", "true", "on", "yes"):
             return True
-        return bool(
-            str(os.getenv("ABSTRACTCODE_GATEWAY_URL", "") or "").strip()
-            or str(os.getenv("ABSTRACTFLOW_GATEWAY_URL", "") or "").strip()
-            or str(os.getenv("ABSTRACTGATEWAY_URL", "") or "").strip()
-            or str(os.getenv("ABSTRACTCODE_GATEWAY_TOKEN", "") or "").strip()
-            or str(os.getenv("ABSTRACTGATEWAY_AUTH_TOKEN", "") or "").strip()
-            or str(os.getenv("ABSTRACTFLOW_GATEWAY_AUTH_TOKEN", "") or "").strip()
-            or str(os.getenv("ABSTRACTGATEWAY_AUTH_TOKENS", "") or "").strip()
-            or str(os.getenv("ABSTRACTFLOW_GATEWAY_AUTH_TOKENS", "") or "").strip()
-        )
+        if v in ("auto", "detect", "default"):
+            return bool(
+                str(os.getenv("ABSTRACTCODE_GATEWAY_URL", "") or "").strip()
+                or str(os.getenv("ABSTRACTFLOW_GATEWAY_URL", "") or "").strip()
+                or str(os.getenv("ABSTRACTGATEWAY_URL", "") or "").strip()
+                or str(os.getenv("ABSTRACTCODE_GATEWAY_TOKEN", "") or "").strip()
+                or str(os.getenv("ABSTRACTGATEWAY_AUTH_TOKEN", "") or "").strip()
+                or str(os.getenv("ABSTRACTFLOW_GATEWAY_AUTH_TOKEN", "") or "").strip()
+                or str(os.getenv("ABSTRACTGATEWAY_AUTH_TOKENS", "") or "").strip()
+                or str(os.getenv("ABSTRACTFLOW_GATEWAY_AUTH_TOKENS", "") or "").strip()
+            )
+        return False
 
     def _start_gpu_monitor(self) -> None:
         """Start the GPU polling thread (best-effort)."""

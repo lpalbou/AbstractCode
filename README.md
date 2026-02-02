@@ -43,7 +43,9 @@ Notes:
 - Links are rendered underlined and are clickable when mouse mode is enabled (`/mouse`).
 - Themes can be switched via `/theme ...` and are saved as a durable user preference when persistence is enabled (default).
 - Themes can also be set via env vars: `ABSTRACTCODE_THEME` and `ABSTRACTCODE_THEME_{PRIMARY,SECONDARY,SURFACE,MUTED}`.
-- GPU meter uses AbstractGateway (`/api/gateway/host/metrics/gpu`) and is auto-enabled when a gateway URL/token is configured, or force it with `ABSTRACTCODE_GPU_MONITOR=1`.
+- GPU meter uses AbstractGateway (`/api/gateway/host/metrics/gpu`) and is **OFF by default** (opt-in) to avoid constant polling/noisy gateway logs.
+  - Enable for the current session: `/gpu on`
+  - Enable via env: `ABSTRACTCODE_GPU_MONITOR=1` (or `auto` to enable when a gateway URL/token is configured)
   - URL envs: `ABSTRACTCODE_GATEWAY_URL`, `ABSTRACTGATEWAY_URL`, `ABSTRACTFLOW_GATEWAY_URL`
   - Token envs: `ABSTRACTCODE_GATEWAY_TOKEN`, `ABSTRACTGATEWAY_AUTH_TOKEN`, `ABSTRACTFLOW_GATEWAY_AUTH_TOKEN`
   - CLI (not persisted): `abstractcode --gateway-url http://127.0.0.1:8081 --gateway-token <TOKEN>`
