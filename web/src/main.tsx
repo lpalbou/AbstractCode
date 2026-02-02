@@ -1,6 +1,8 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 
+import "@abstractuic/ui-kit/theme.css";
+
 import { App } from "./ui/app";
 import "./ui/styles.css";
 

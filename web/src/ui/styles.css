@@ -1,75 +1,55 @@
-/* AbstractCode Web - Unified AbstractFramework Theme
-   Design: Deep navy theme with sky accent (harmonized with AbstractFlow)
-   Typography: Fira Code for mono, system fonts for UI */
-
-@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&display=swap');
+/* AbstractCode Web: consumes shared AbstractUIC theme tokens (see @abstractuic/ui-kit/theme.css). */
 
 :root {
-  /* Core palette - AbstractFlow harmony */
-  --bg-deep: #1a1a2e;
-  --bg-surface: #16213e;
-  --bg-elevated: #0f3460;
-  --bg-card: rgba(22, 33, 62, 0.88);
-  
-  /* Text hierarchy */
-  --text-primary: #eee;
-  --text-secondary: #aaa;
-  --text-muted: #666;
-  
-  /* Primary accent - Sky blue (readable on navy) */
-  --accent: #7dd3fc;
-  --accent-muted: rgba(125, 211, 252, 0.8);
-  --accent-subtle: rgba(125, 211, 252, 0.12);
-  --accent-glow: rgba(125, 211, 252, 0.2);
-  
-  /* Secondary accents */
-  --accent-blue: #60a5fa;
-  --accent-blue-subtle: rgba(96, 165, 250, 0.15);
-  
-  --accent-success: #27ae60;
-  --accent-success-subtle: rgba(39, 174, 96, 0.15);
-  
-  --accent-warning: #f39c12;
-  --accent-warning-subtle: rgba(243, 156, 18, 0.12);
-  
-  --accent-error: #e74c3c;
-  --accent-error-subtle: rgba(231, 76, 60, 0.12);
-  
+  /* Map existing AbstractCode variables onto AbstractUIC theme tokens */
+  --bg-deep: var(--bg-primary);
+  --bg-surface: var(--bg-secondary);
+  --bg-elevated: var(--bg-tertiary);
+
+  --accent-muted: var(--accent);
+  --accent-glow: var(--accent-subtle);
+
+  --accent-blue: var(--info);
+  --accent-blue-subtle: var(--info-subtle);
+
+  --accent-success: var(--success);
+  --accent-success-subtle: var(--success-subtle);
+
+  --accent-warning: var(--warning);
+  --accent-warning-subtle: var(--warning-subtle);
+
+  --accent-error: var(--error);
+  --accent-error-subtle: var(--error-subtle);
+
+  /* Extra accent used in gradients/badges (intentionally stable across themes) */
   --accent-violet: #a78bfa;
   --accent-violet-subtle: rgba(167, 139, 250, 0.15);
-  
+
   /* Borders & surfaces */
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-default: rgba(255, 255, 255, 0.12);
-  --border-accent: rgba(125, 211, 252, 0.35);
-  
+  --border-subtle: var(--ui-border-1);
+  --border-default: var(--border-default);
+  --border-accent: var(--accent-border);
+
   /* Glass effects */
-  --glass-bg: rgba(22, 33, 62, 0.85);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-highlight: rgba(255, 255, 255, 0.04);
-  
-  /* Typography */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: 'Fira Code', 'Consolas', monospace;
-  
-  /* Sizing */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --glass-bg: var(--bg-card);
+  --glass-border: var(--ui-border-1);
+  --glass-highlight: var(--ui-surface-2);
+
+  /* Extra radii used by AbstractCode */
   --radius-xl: 18px;
   --radius-full: 9999px;
-  
+
   /* Shadows */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.5);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.45);
   --shadow-glow: 0 0 30px var(--accent-glow);
-  
+
   /* Animations */
   --transition-fast: 150ms ease;
   --transition-base: 200ms ease;
   --transition-slow: 300ms ease;
-  
+
   /* Safe areas for iPhone */
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
@@ -115,8 +95,8 @@ body::before {
   right: 0;
   bottom: 0;
   background: 
-    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(125, 211, 252, 0.08) 0%, transparent 50%),
-    radial-gradient(ellipse 60% 40% at 90% 100%, rgba(96, 165, 250, 0.06) 0%, transparent 40%);
+    radial-gradient(ellipse 80% 50% at 20% -10%, var(--accent-subtle) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 40% at 90% 100%, var(--info-subtle) 0%, transparent 40%);
   pointer-events: none;
   z-index: -1;
 }
@@ -294,7 +274,7 @@ body::before {
   background: var(--accent);
   cursor: default;
   font-weight: 600;
-  box-shadow: 0 2px 8px rgba(125, 211, 252, 0.35);
+  box-shadow: 0 2px 8px var(--accent-border);
 }
 
 .nav .btn .nav-icon {
@@ -443,7 +423,7 @@ body::before {
   bottom: 0;
   padding-top: 12px;
   padding-bottom: calc(12px + var(--safe-area-bottom));
-  background: linear-gradient(to top, rgba(10, 14, 25, 0.92) 0%, rgba(10, 14, 25, 0.0) 100%);
+  background: linear-gradient(to top, var(--bg-card) 0%, transparent 100%);
   display: flex;
   justify-content: flex-end;
 }
@@ -463,7 +443,7 @@ body::before {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-full);
   overflow: hidden;
-  background: rgba(15, 23, 42, 0.35);
+  background: var(--ui-overlay-bg);
 }
 
 .seg_btn {
@@ -500,7 +480,7 @@ body::before {
   color: var(--text-secondary);
   padding: 5px 12px;
   border-radius: var(--radius-full);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--ui-surface-2);
   border: 1px solid var(--border-subtle);
   white-space: nowrap;
 }
@@ -510,7 +490,7 @@ body::before {
   margin-top: 12px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  background: rgba(15, 23, 42, 0.35);
+  background: var(--ui-surface-1);
   padding: 12px;
 }
 
@@ -579,7 +559,7 @@ body::before {
 
 .tool_row.checked {
   border-color: var(--border-accent);
-  background: rgba(125, 211, 252, 0.08);
+  background: var(--accent-subtle);
 }
 
 .tool_name {
@@ -592,19 +572,19 @@ body::before {
 
 /* Category-based colors for tool names */
 .tool_row[data-toolset="files"] .tool_name {
-  color: #27ae60;
+  color: var(--success);
 }
 
 .tool_row[data-toolset="web"] .tool_name {
-  color: #3498db;
+  color: var(--info);
 }
 
 .tool_row[data-toolset="system"] .tool_name {
-  color: #f39c12;
+  color: var(--warning);
 }
 
 .tool_row[data-toolset="comms"] .tool_name {
-  color: #9b59b6;
+  color: var(--accent-violet);
 }
 
 .tool_desc {
@@ -660,9 +640,9 @@ h2:not(:first-child) {
   margin-top: 12px;
   padding: 10px 14px;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(243, 156, 18, 0.25);
-  background: rgba(243, 156, 18, 0.08);
-  color: var(--accent-warning);
+  border: 1px solid var(--warning-border);
+  background: var(--warning-subtle);
+  color: var(--warning);
   font-size: 12px;
   display: flex;
   align-items: center;
@@ -681,9 +661,9 @@ h2:not(:first-child) {
   margin-top: 12px;
   padding: 10px 14px;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(231, 76, 60, 0.25);
-  background: rgba(231, 76, 60, 0.08);
-  color: var(--accent-error);
+  border: 1px solid var(--error-border);
+  background: var(--error-subtle);
+  color: var(--error);
   font-size: 12px;
   display: flex;
   align-items: center;
@@ -700,9 +680,9 @@ h2:not(:first-child) {
 
 /* Info variant - less alarming, for informational messages */
 .warn.info {
-  border-color: rgba(96, 165, 250, 0.25);
-  background: rgba(96, 165, 250, 0.08);
-  color: var(--accent-blue);
+  border-color: var(--info-border);
+  background: var(--info-subtle);
+  color: var(--info);
 }
 
 /* Inline error (no margin) */
@@ -984,22 +964,22 @@ select {
 }
 
 .session_card_status.success {
-  background: rgba(39, 174, 96, 0.15);
+  background: var(--accent-success-subtle);
   color: var(--accent-success);
 }
 
 .session_card_status.error {
-  background: rgba(231, 76, 60, 0.15);
+  background: var(--accent-error-subtle);
   color: var(--accent-error);
 }
 
 .session_card_status.warning {
-  background: rgba(243, 156, 18, 0.15);
+  background: var(--accent-warning-subtle);
   color: var(--accent-warning);
 }
 
 .session_card_status.info {
-  background: rgba(125, 211, 252, 0.15);
+  background: var(--accent-subtle);
   color: var(--accent);
 }
 
@@ -1016,8 +996,8 @@ select {
 .session_card .stat_item {
   padding: 2px 6px;
   font-size: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(148, 163, 184, 0.18);
+  background: var(--ui-surface-2);
+  border-color: var(--muted-border);
   color: var(--text-muted);
 }
 
@@ -1083,7 +1063,7 @@ select {
 
 .card.active {
   border-color: var(--border-accent);
-  background: linear-gradient(135deg, var(--accent-subtle) 0%, rgba(125, 211, 252, 0.05) 100%);
+  background: linear-gradient(135deg, var(--accent-subtle) 0%, transparent 100%);
   box-shadow: 0 0 30px var(--accent-glow);
 }
 
@@ -1269,7 +1249,7 @@ select {
 
 .repl_meta_clickable:hover {
   border-color: var(--border-accent);
-  background: rgba(125, 211, 252, 0.04);
+  background: var(--ui-overlay-bg-hover);
 }
 
 .repl_meta_clickable:active {
@@ -1281,7 +1261,7 @@ select {
 }
 
 .repl_meta_clickable:focus-visible {
-  outline: 2px solid rgba(125, 211, 252, 0.55);
+  outline: 2px solid var(--accent-border);
   outline-offset: 2px;
 }
 
@@ -1326,9 +1306,9 @@ select {
   align-items: center;
   gap: 4px;
   padding: 3px 8px;
-  background: rgba(15, 23, 42, 0.25);
+  background: var(--ui-overlay-bg);
   border-radius: var(--radius-full);
-  border: 1px solid rgba(148, 163, 184, 0.22);
+  border: 1px solid var(--muted-border);
   font-size: 10px;
   color: var(--text-secondary);
   appearance: none;
@@ -1341,12 +1321,12 @@ select {
 }
 
 .repl_context_badge.clickable:hover {
-  background: rgba(15, 23, 42, 0.35);
-  border-color: rgba(148, 163, 184, 0.32);
+  background: var(--ui-overlay-bg-hover);
+  border-color: var(--ui-border-2);
 }
 
 .repl_context_badge.clickable:focus-visible {
-  outline: 2px solid rgba(125, 211, 252, 0.55);
+  outline: 2px solid var(--accent-border);
   outline-offset: 2px;
 }
 
@@ -1370,7 +1350,7 @@ select {
   padding: 12px 14px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
-  background: rgba(15, 23, 42, 0.65);
+  background: var(--bg-card);
 }
 
 .repl_details_header {
@@ -1482,9 +1462,9 @@ select {
   bottom: 12px;
   padding: 8px 12px;
   border-radius: var(--radius-full);
-  background: rgba(15, 23, 42, 0.75);
+  background: var(--bg-card);
   border: 1px solid var(--border-default);
-  color: rgba(226, 232, 240, 0.92);
+  color: var(--text-primary);
   box-shadow: var(--shadow-md);
   backdrop-filter: blur(10px) saturate(160%);
   -webkit-backdrop-filter: blur(10px) saturate(160%);
@@ -1493,7 +1473,7 @@ select {
 
 .scroll_to_bottom:hover:not(:disabled) {
   transform: translateY(-1px);
-  background: rgba(15, 23, 42, 0.9);
+  background: var(--bg-card);
   border-color: var(--border-accent);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
@@ -1595,37 +1575,37 @@ select {
 
 .chat_item.assistant .chat_avatar {
   background: var(--accent-subtle);
-  border-color: rgba(125, 211, 252, 0.3);
+  border-color: var(--accent-border);
   color: var(--accent);
 }
 
 .chat_item.status .chat_avatar {
-  background: rgba(96, 165, 250, 0.12);
-  border-color: rgba(96, 165, 250, 0.25);
+  background: var(--info-subtle);
+  border-color: var(--info-border);
   color: var(--accent-blue);
 }
 
 .chat_item.message.warn .chat_avatar {
-  background: rgba(243, 156, 18, 0.10);
-  border-color: rgba(243, 156, 18, 0.25);
+  background: var(--accent-warning-subtle);
+  border-color: var(--warning-border);
   color: var(--accent-warning);
 }
 
 .chat_item.message.error .chat_avatar {
-  background: rgba(231, 76, 60, 0.10);
-  border-color: rgba(231, 76, 60, 0.25);
+  background: var(--accent-error-subtle);
+  border-color: var(--error-border);
   color: var(--accent-error);
 }
 
 .chat_item.message.report_bug .chat_avatar {
-  background: rgba(231, 76, 60, 0.10);
-  border-color: rgba(231, 76, 60, 0.25);
+  background: var(--accent-error-subtle);
+  border-color: var(--error-border);
   color: var(--accent-error);
 }
 
 .chat_item.message.report_feature .chat_avatar {
-  background: rgba(39, 174, 96, 0.10);
-  border-color: rgba(39, 174, 96, 0.25);
+  background: var(--accent-success-subtle);
+  border-color: var(--success-border);
   color: var(--accent-success);
 }
 
@@ -1665,7 +1645,7 @@ select {
   padding: 5px 10px;
   border-radius: var(--radius-full);
   border: 1px solid var(--border-subtle);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--ui-surface-2);
   color: var(--text-secondary);
   cursor: pointer;
   max-width: 100%;
@@ -1674,7 +1654,7 @@ select {
 
 .chat_attachment_chip:hover:not(:disabled) {
   border-color: var(--border-accent);
-  background: rgba(125, 211, 252, 0.10);
+  background: var(--accent-subtle);
   color: var(--text-primary);
 }
 
@@ -1698,15 +1678,15 @@ select {
   padding: 1px 6px;
   border-radius: var(--radius-full);
   border: 1px solid var(--border-default);
-  background: rgba(148, 163, 184, 0.08);
-  color: rgba(226, 232, 240, 0.85);
+  background: var(--ui-surface-2);
+  color: var(--text-secondary);
   flex: 0 0 auto;
 }
 
 .chat_attachment_target.server {
-  border-color: rgba(125, 211, 252, 0.3);
-  background: rgba(125, 211, 252, 0.1);
-  color: rgba(125, 211, 252, 0.95);
+  border-color: var(--info-border);
+  background: var(--info-subtle);
+  color: var(--info);
 }
 
 .chat_attachment_target.client {
@@ -1734,9 +1714,9 @@ select {
   font-family: var(--font-mono);
   color: var(--text-secondary);
   padding: 3px 8px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--ui-surface-2);
   border-radius: var(--radius-full);
-  border: 1px solid rgba(148, 163, 184, 0.22);
+  border: 1px solid var(--muted-border);
   white-space: nowrap;
 }
 
@@ -1766,9 +1746,9 @@ select {
 }
 
 .chat_item.assistant .stat_item {
-  background: rgba(125, 211, 252, 0.10);
-  border-color: rgba(125, 211, 252, 0.18);
-  color: rgba(226, 232, 240, 0.92);
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
+  color: var(--text-primary);
 }
 
 /* ===============================
@@ -1880,82 +1860,64 @@ select {
   background: rgba(255, 255, 255, 0.02);
 }
 
-.chat_copy {
-  opacity: 0;
-  transition: all var(--transition-fast);
-  width: 26px;
-  height: 26px;
+.chat_action_icon {
+  appearance: none;
+  opacity: 0.75;
+  transition: background var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast), transform var(--transition-fast);
+  width: 36px;
+  height: 36px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  border-radius: 6px;
-  border: 1px solid var(--border-subtle);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--text-muted);
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
 }
 
-.chat_item:hover .chat_copy {
+.chat_action_icon svg {
+  display: block;
+}
+
+.chat_action_icon:hover {
   opacity: 1;
-}
-
-.chat_copy:hover {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-primary);
-  border-color: var(--border-default);
+  transform: translateY(-0.5px);
+}
+
+.chat_action_icon:active {
+  transform: translateY(0);
+}
+
+.chat_action_icon:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent-border);
+  outline-offset: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
 }
 
 .chat_copy.copied {
-  background: var(--accent-success);
-  border-color: var(--accent-success);
-  color: #fff;
   opacity: 1;
+  background: var(--success-subtle);
+  color: var(--success);
 }
 
 .chat_copy.failed {
-  background: var(--accent-error);
-  border-color: var(--accent-error);
-  color: #fff;
   opacity: 1;
+  background: var(--error-subtle);
+  color: var(--error);
 }
 
-.chat_speak {
-  opacity: 0;
-  transition: all var(--transition-fast);
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  border-radius: 6px;
-  border: 1px solid var(--border-subtle);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--text-muted);
-}
-
-.chat_item:hover .chat_speak {
+.chat_speak.paused {
   opacity: 1;
+  background: var(--info-subtle);
+  color: var(--info);
 }
 
-.chat_speak:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text-primary);
-  border-color: var(--border-default);
-}
-
-/* Always show copy on mobile (no hover) */
-@media (max-width: 700px) {
-  .chat_copy {
-    opacity: 0.7;
-  }
-
-  .chat_speak {
-    opacity: 0.7;
-  }
-}
 
 .chat_item .body {
   line-height: 1.55;
@@ -1973,8 +1935,8 @@ select {
 /* Assistant messages */
 .chat_item.assistant {
   align-self: flex-start;
-  background: rgba(125, 211, 252, 0.08);
-  border: 1px solid rgba(125, 211, 252, 0.18);
+  background: var(--accent-subtle);
+  border: 1px solid var(--accent-border);
   border-bottom-left-radius: var(--radius-sm);
 }
 
@@ -1988,32 +1950,32 @@ select {
 }
 
 .chat_item.message.error {
-  background: linear-gradient(135deg, var(--accent-error-subtle) 0%, rgba(231, 76, 60, 0.05) 100%);
-  border: 1px solid rgba(251, 113, 133, 0.25);
+  background: linear-gradient(135deg, var(--accent-error-subtle) 0%, transparent 100%);
+  border: 1px solid var(--error-border);
   width: 100%;
   max-width: 100%;
   align-self: stretch;
 }
 
 .chat_item.message.warn {
-  background: linear-gradient(135deg, var(--accent-warning-subtle) 0%, rgba(243, 156, 18, 0.05) 100%);
-  border: 1px solid rgba(251, 191, 36, 0.25);
+  background: linear-gradient(135deg, var(--accent-warning-subtle) 0%, transparent 100%);
+  border: 1px solid var(--warning-border);
   width: 100%;
   max-width: 100%;
   align-self: stretch;
 }
 
 .chat_item.message.report_bug {
-  background: linear-gradient(135deg, rgba(231, 76, 60, 0.10) 0%, rgba(231, 76, 60, 0.04) 100%);
-  border: 1px solid rgba(231, 76, 60, 0.22);
+  background: linear-gradient(135deg, var(--accent-error-subtle) 0%, transparent 100%);
+  border: 1px solid var(--error-border);
   width: 100%;
   max-width: 100%;
   align-self: stretch;
 }
 
 .chat_item.message.report_feature {
-  background: linear-gradient(135deg, rgba(39, 174, 96, 0.10) 0%, rgba(39, 174, 96, 0.04) 100%);
-  border: 1px solid rgba(39, 174, 96, 0.22);
+  background: linear-gradient(135deg, var(--accent-success-subtle) 0%, transparent 100%);
+  border: 1px solid var(--success-border);
   width: 100%;
   max-width: 100%;
   align-self: stretch;
@@ -2624,7 +2586,7 @@ select {
   gap: 16px;
   padding: 16px 18px;
   border: 1px solid var(--border-accent);
-  background: linear-gradient(135deg, var(--accent-subtle) 0%, rgba(125, 211, 252, 0.03) 100%);
+  background: linear-gradient(135deg, var(--accent-subtle) 0%, transparent 100%);
   border-radius: var(--radius-lg);
   position: relative;
   overflow: hidden;
@@ -2697,8 +2659,8 @@ select {
   margin: 0 auto 20px;
   border-radius: 18px;
   background:
-    radial-gradient(circle at 30% 30%, rgba(125, 211, 252, 0.35) 0%, rgba(125, 211, 252, 0.08) 45%, transparent 70%),
-    linear-gradient(135deg, rgba(125, 211, 252, 0.18) 0%, rgba(167, 139, 250, 0.12) 100%);
+    radial-gradient(circle at 30% 30%, var(--accent-border) 0%, var(--accent-subtle) 45%, transparent 70%),
+    linear-gradient(135deg, var(--accent-subtle) 0%, var(--accent-violet-subtle) 100%);
   border: 1px solid var(--border-default);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35), 0 0 30px var(--accent-glow);
   animation: float 3s ease-in-out infinite;
@@ -2781,14 +2743,14 @@ select {
   padding: 2px 7px;
   border-radius: var(--radius-full);
   border: 1px solid var(--border-default);
-  color: rgba(226, 232, 240, 0.9);
-  background: rgba(148, 163, 184, 0.1);
+  color: var(--text-secondary);
+  background: var(--ui-surface-2);
 }
 
 .file_chip_target.server {
-  border-color: rgba(125, 211, 252, 0.35);
-  background: rgba(125, 211, 252, 0.14);
-  color: rgba(125, 211, 252, 0.95);
+  border-color: var(--info-border);
+  background: var(--info-subtle);
+  color: var(--info);
 }
 
 .file_chip_target.client {
@@ -2803,7 +2765,7 @@ select {
 }
 
 .file_chip.error {
-  border-color: rgba(251, 113, 133, 0.35);
+  border-color: var(--error-border);
   background: var(--accent-error-subtle);
 }
 
@@ -2991,9 +2953,9 @@ kbd {
   font-weight: 600;
   padding: 2px 6px;
   border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(15, 23, 42, 0.35);
-  color: rgba(226, 232, 240, 0.88);
+  border: 1px solid var(--muted-border);
+  background: var(--ui-overlay-bg);
+  color: var(--text-primary);
 }
 
 .repl_composer:focus-within {
@@ -3064,11 +3026,11 @@ kbd {
   font-size: 14px;
   font-weight: 600;
   border-radius: var(--radius-lg);
-  background: linear-gradient(135deg, var(--accent) 0%, #60a5fa 100%);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--info) 100%);
   border: none;
-  color: #0a0e19;
+  color: #fff;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-  box-shadow: 0 2px 8px rgba(125, 211, 252, 0.25);
+  box-shadow: 0 2px 8px var(--accent-border);
   transition: all var(--transition-fast);
   gap: 8px;
   position: relative;
@@ -3097,8 +3059,8 @@ kbd {
 
 .send_btn:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 6px 24px rgba(125, 211, 252, 0.4);
-  background: linear-gradient(135deg, #9ae0fc 0%, #7dd3fc 100%);
+  box-shadow: 0 6px 24px var(--accent-border);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--info) 100%);
 }
 
 .send_btn.cancel_btn:hover:not(:disabled) {
@@ -3108,7 +3070,7 @@ kbd {
 
 .send_btn:active:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 3px 12px rgba(125, 211, 252, 0.3);
+  box-shadow: 0 3px 12px var(--accent-border);
 }
 
 .send_btn:disabled {

@@ -8,6 +8,7 @@ import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types
 import type { AttachmentRef } from "../lib/types";
 import { resolve_blocking_wait } from "../lib/wait_resolution";
 import { ChatMessageContent } from "@abstractuic/panel-chat";
+import { applyTheme, ThemeSelect } from "@abstractuic/ui-kit";
 import { AgentCyclesPanel, build_agent_trace, type LedgerRecordItem } from "@abstractuic/monitor-flow";
 import { registerMonitorGpuWidget } from "@abstractutils/monitor-gpu";
 import { MarkdownRenderer } from "./markdown_renderer";
@@ -55,6 +56,8 @@ type AttachedFile = {
   error?: string;
   size_bytes?: number;
 };
+
+type TtsPlaybackStatus = "idle" | "loading" | "playing" | "paused";
 
 function parse_route(): Route {
   const h = String(window.location.hash || "").replace(/^#/, "");
@@ -567,6 +570,10 @@ export function App(): React.ReactElement {
     () => new GatewayClient({ base_url: settings.gateway_url, auth_token: settings.auth_token }),
     [settings.gateway_url, settings.auth_token]
   );
+
+  useLayoutEffect(() => {
+    applyTheme(settings.theme);
+  }, [settings.theme]);
 
   useEffect(() => {
     save_settings(settings);
@@ -1162,6 +1169,31 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
     set_error_providers("");
     set_error_tools("");
     try {
+      const gw_url_raw = String(s.gateway_url || "").trim();
+      if (gw_url_raw) {
+        const lower = gw_url_raw.toLowerCase();
+        if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+          throw new Error("Gateway URL must start with http:// or https:// (or leave it blank to use same origin / dev proxy).");
+        }
+        try {
+          const page_proto = String(window?.location?.protocol || "");
+          if (page_proto === "https:" && lower.startsWith("http://")) {
+            throw new Error("Gateway URL is http:// but this page is https:// (mixed content is blocked). Use https:// or leave Gateway URL blank to use same origin /api proxy.");
+          }
+          const u = new URL(gw_url_raw);
+          const page_host = String(window?.location?.hostname || "").trim().toLowerCase();
+          const gw_host = String(u.hostname || "").trim().toLowerCase();
+          const is_loopback = (h: string) => h === "localhost" || h === "127.0.0.1" || h === "::1";
+          if (is_loopback(gw_host) && page_host && !is_loopback(page_host)) {
+            throw new Error(
+              "Gateway URL points to localhost, which from this device is not your machine. Use the gateway's public URL (e.g. an ngrok https URL) or leave Gateway URL blank to use same origin /api proxy."
+            );
+          }
+        } catch (e: any) {
+          throw new Error(String(e?.message || e || "Invalid Gateway URL"));
+        }
+      }
+
       const [prov_res, tool_res, ws_res] = await Promise.all([
         props.gateway.discovery_providers(),
         props.gateway.discovery_tools(),
@@ -1322,6 +1354,17 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
       <div className="settings_grid">
         <div className="panel settings_card">
           <div className="settings_card_header">
+            <h2>Theme</h2>
+          </div>
+          <div className="muted">Choose a shared AbstractUIC theme (saved locally).</div>
+          <div className="field" style={{ marginTop: 10 }}>
+            <label>Theme</label>
+            <ThemeSelect value={s.theme} onChange={(theme) => props.on_change({ ...s, theme })} />
+          </div>
+        </div>
+
+        <div className="panel settings_card">
+          <div className="settings_card_header">
             <h2>Gateway</h2>
           </div>
           <div className="settings_card_header" style={{ marginTop: 6 }}>
@@ -1339,13 +1382,13 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
           ) : null}
 
           <div className="field">
-            <label>Gateway URL</label>
+            <label>Gateway URL (blank = same origin / dev proxy)</label>
             <div className="row" style={{ marginTop: 0 }}>
               <input
                 style={{ flex: 1, minWidth: 0 }}
                 value={s.gateway_url}
                 onChange={(e) => props.on_change({ ...s, gateway_url: e.target.value })}
-                placeholder="http://127.0.0.1:8080"
+                placeholder="http://127.0.0.1:8081"
               />
               <button
                 className="btn"
@@ -2710,35 +2753,11 @@ function ConsolePage(props: {
       }
     }
 
-    const pick_attachment = (value: any): any | null => {
-      if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-      const aid = String((value as any).$artifact || "").trim();
-      if (!aid) return null;
-      return { ...(value as any), $artifact: aid };
-    };
-
     if (emit && is_abstract_audio_transcript(emit.name)) {
     }
 
     if (emit && is_abstract_voice_tts(emit.name)) {
-      const p = emit.payload && typeof emit.payload === "object" ? (emit.payload as any) : null;
-      const text = String(p?.text || "").trim();
-      const request_id = String(p?.request_id || "").trim();
-      const a_audio = pick_attachment(p?.audio_artifact);
-      const attachments = [a_audio].filter(Boolean);
-      append_message({
-        role: "system",
-        level: "info",
-        title: "TTS",
-        content: text,
-        ts: now_iso(),
-        run_id: src,
-        meta: {
-          _kind: "tts_audio",
-          request_id: request_id || undefined,
-          attachments,
-        },
-      });
+      // Do not render TTS events as chat messages; user-triggered TTS is handled inline via the Speak button.
     }
 
     if (eff_type === "tool_calls" && st === "completed") {
@@ -2832,23 +2851,221 @@ function ConsolePage(props: {
     await append_page(rid, after);
   };
 
-  const speak_text = async (text: string): Promise<void> => {
+  const [tts_playback, set_tts_playback] = useState<{ key: string; status: TtsPlaybackStatus }>({ key: "", status: "idle" });
+  const tts_key_ref = useRef<string>("");
+  const tts_loading_key_ref = useRef<string>("");
+  const tts_ctx_ref = useRef<AudioContext | null>(null);
+  const tts_gain_ref = useRef<GainNode | null>(null);
+  const tts_source_ref = useRef<AudioBufferSourceNode | null>(null);
+  const tts_buffer_ref = useRef<AudioBuffer | null>(null);
+  const tts_offset_ref = useRef<number>(0);
+  const tts_started_at_ref = useRef<number>(0);
+
+  const ensure_tts_webaudio = (): { ctx: AudioContext; gain: GainNode } | null => {
+    try {
+      const w: any = globalThis as any;
+      const Ctx = w?.AudioContext || w?.webkitAudioContext;
+      if (!Ctx) return null;
+      if (!tts_ctx_ref.current) {
+        const ctx: AudioContext = new Ctx();
+        const gain = ctx.createGain();
+        gain.gain.value = 1;
+        gain.connect(ctx.destination);
+        tts_ctx_ref.current = ctx;
+        tts_gain_ref.current = gain;
+      }
+      const ctx = tts_ctx_ref.current;
+      const gain = tts_gain_ref.current;
+      if (!ctx || !gain) return null;
+      // Best-effort resume (call inside the click gesture so Safari/iOS accepts it).
+      try {
+        if (ctx.state === "suspended") void ctx.resume();
+      } catch {
+        // ignore
+      }
+      return { ctx, gain };
+    } catch {
+      return null;
+    }
+  };
+
+  const stop_tts_source = (): void => {
+    const src = tts_source_ref.current;
+    tts_source_ref.current = null;
+    if (!src) return;
+    try {
+      src.onended = null;
+    } catch {
+      // ignore
+    }
+    try {
+      src.stop();
+    } catch {
+      // ignore
+    }
+    try {
+      src.disconnect();
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      stop_tts_source();
+      try {
+        tts_gain_ref.current?.disconnect();
+      } catch {
+        // ignore
+      }
+      try {
+        void tts_ctx_ref.current?.close();
+      } catch {
+        // ignore
+      }
+      tts_ctx_ref.current = null;
+      tts_gain_ref.current = null;
+      tts_buffer_ref.current = null;
+    };
+  }, []);
+
+  const decode_audio = async (ctx: AudioContext, buf: ArrayBuffer): Promise<AudioBuffer> => {
+    const copy = buf.slice(0);
+    const fn: any = (ctx as any).decodeAudioData?.bind(ctx);
+    if (typeof fn !== "function") throw new Error("decodeAudioData not available");
+    try {
+      const maybe = fn(copy);
+      if (maybe && typeof maybe.then === "function") return await maybe;
+    } catch {
+      // fall back to callback-style below
+    }
+    return await new Promise<AudioBuffer>((resolve, reject) => {
+      try {
+        fn(copy, resolve, reject);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  };
+
+  const start_tts_playback = async (key: string, buffer: AudioBuffer, offset: number): Promise<void> => {
+    const engine = ensure_tts_webaudio();
+    if (!engine) throw new Error("TTS playback is not supported in this browser");
+    const { ctx, gain } = engine;
+    try {
+      if (ctx.state === "suspended") await ctx.resume();
+    } catch {
+      // ignore
+    }
+
+    stop_tts_source();
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(gain);
+
+    const dur = Number.isFinite(Number(buffer.duration)) ? Number(buffer.duration) : 0;
+    const off = Math.max(0, Math.min(Number(offset || 0), dur > 0 ? Math.max(0, dur - 0.01) : 0));
+    tts_started_at_ref.current = ctx.currentTime - off;
+    tts_offset_ref.current = off;
+    tts_source_ref.current = source;
+    tts_key_ref.current = key;
+
+    source.onended = () => {
+      if (tts_source_ref.current !== source) return;
+      tts_source_ref.current = null;
+      tts_offset_ref.current = 0;
+      tts_started_at_ref.current = 0;
+      tts_key_ref.current = "";
+      set_tts_playback({ key: "", status: "idle" });
+    };
+
+    try {
+      source.start(0, off);
+      set_tts_playback({ key, status: "playing" });
+    } catch (e: any) {
+      throw new Error(String(e?.message || e || "Failed to start audio playback"));
+    }
+  };
+
+  const toggle_tts = async (msg_key: string, text: string): Promise<void> => {
+    const key = String(msg_key || "").trim();
     const t = String(text || "").trim();
-    if (!t) return;
+    if (!key || !t) return;
+
+    const engine = ensure_tts_webaudio();
+    if (!engine) {
+      set_error("TTS playback is not supported in this browser");
+      return;
+    }
+    const ctx = engine.ctx;
+
+    const is_same = tts_playback.key === key;
+    if (is_same && tts_playback.status === "playing") {
+      const off = Math.max(0, ctx.currentTime - Number(tts_started_at_ref.current || 0));
+      tts_offset_ref.current = off;
+      stop_tts_source();
+      set_tts_playback({ key, status: "paused" });
+      return;
+    }
+    if (is_same && tts_playback.status === "paused") {
+      const buffer = tts_buffer_ref.current;
+      if (buffer) {
+        set_error("");
+        try {
+          await start_tts_playback(key, buffer, tts_offset_ref.current);
+        } catch (e: any) {
+          set_error(String(e?.message || e || "TTS play failed"));
+          set_tts_playback({ key: "", status: "idle" });
+        }
+        return;
+      }
+      // fall through to regenerate if buffer missing
+    }
+    if (is_same && tts_playback.status === "loading") return;
+
+    // Switching to a new message: stop current playback.
+    stop_tts_source();
+    tts_buffer_ref.current = null;
+    tts_offset_ref.current = 0;
+    tts_started_at_ref.current = 0;
+
+    tts_key_ref.current = key;
+    tts_loading_key_ref.current = key;
+    set_tts_playback({ key, status: "loading" });
     set_error("");
+
     try {
       const run_id = await session_memory_owner_run_id(props.session_id);
       ensure_cursor(run_id);
       const res = await props.gateway.voice_tts(run_id, { text: t, request_id: random_id() });
-      await refresh_session_memory_ledger();
+
       const a = res?.audio_artifact;
-      if (a && typeof a === "object" && !Array.isArray(a)) {
-        const aid = String((a as any).$artifact || "").trim();
-        const ct = String((a as any).content_type || "").trim();
-        const fn = String((a as any).filename || "").trim() || "tts.wav";
-        if (aid) set_attachment_preview({ ...(a as any), $artifact: aid, filename: fn, content_type: ct || "audio/wav" } as any);
+      const aid = a && typeof a === "object" && !Array.isArray(a) ? String((a as any).$artifact || "").trim() : "";
+      if (!aid) throw new Error("TTS failed: missing audio artifact");
+
+      const { blob } = await props.gateway.get_run_artifact_blob(run_id, aid, { max_bytes: 25_000_000 });
+      const bytes = await blob.arrayBuffer();
+      if (tts_loading_key_ref.current !== key) return; // stale response
+
+      const buffer = await decode_audio(ctx, bytes);
+      if (tts_loading_key_ref.current !== key) return; // stale response
+      tts_buffer_ref.current = buffer;
+      tts_offset_ref.current = 0;
+
+      await start_tts_playback(key, buffer, 0);
+
+      // Best-effort (do not block playback) - keep the durable voice ledger up to date.
+      try {
+        await refresh_session_memory_ledger();
+      } catch {
+        // ignore
       }
     } catch (e: any) {
+      if (tts_loading_key_ref.current === key) {
+        tts_loading_key_ref.current = "";
+        tts_key_ref.current = "";
+        set_tts_playback({ key: "", status: "idle" });
+      }
       set_error(String(e?.message || e || "TTS failed"));
     }
   };
@@ -4221,9 +4438,19 @@ function ConsolePage(props: {
         {!props.settings.provider.trim() || !props.settings.model.trim() ? (
           <Notice variant="warn">Set provider + model in Settings. (These agent workflows require them.)</Notice>
         ) : null}
-        {!props.settings.gateway_url.trim() ? (
-          <Notice variant="warn">Set a Gateway URL in Settings (or host this app on the same origin as the gateway).</Notice>
-        ) : null}
+        {(() => {
+          const gw = String(props.settings.gateway_url || "").trim();
+          if (gw) return null;
+          try {
+            const o = String(window?.location?.origin || "");
+            const proto = String(window?.location?.protocol || "");
+            const needs_absolute = !o || o === "null" || proto === "file:";
+            if (!needs_absolute) return null;
+          } catch {
+            // ignore
+          }
+          return <Notice variant="warn">Set a Gateway URL in Settings (this page has no same-origin /api proxy).</Notice>;
+        })()}
 
         {error ? <Notice variant="error">{error}</Notice> : null}
 
@@ -4242,17 +4469,22 @@ function ConsolePage(props: {
           >
         <div className="repl_chat_content" ref={chat_content_ref}>
           {!props.repl.messages.length ? <div className="muted">Start typing to begin.</div> : null}
-	          {props.repl.messages.map((m, idx) => (
-            <ChatMessageCard
-              key={`${m.ts}:${idx}`}
-              m={m}
-              gateway={props.gateway}
-              session_id={props.session_id}
-              context_badge_label={ctx_badge_label}
-              tool_specs_by_name={tool_specs_by_name}
-              on_speak={speak_text}
-            />
-	          ))}
+	          {props.repl.messages.map((m, idx) => {
+	            const msg_key = `${m.ts}:${m.role}:${idx}`;
+	            return (
+	              <ChatMessageCard
+	                key={msg_key}
+	                msg_key={msg_key}
+	                m={m}
+	                gateway={props.gateway}
+	                session_id={props.session_id}
+	                context_badge_label={ctx_badge_label}
+	                tool_specs_by_name={tool_specs_by_name}
+	                tts_playback={tts_playback}
+	                on_toggle_tts={toggle_tts}
+	              />
+	            );
+	          })}
           <div ref={chat_end_ref} />
         </div>
       </div>
@@ -4774,16 +5006,20 @@ function ConsolePage(props: {
 }
 
 function ChatMessageCard(props: {
+  msg_key: string;
   m: ReplMessage;
   gateway: GatewayClient;
   session_id: string;
   context_badge_label?: string;
   tool_specs_by_name?: Record<string, any>;
-  on_speak?: (text: string) => void;
+  tts_playback?: { key: string; status: TtsPlaybackStatus };
+  on_toggle_tts?: (msg_key: string, text: string) => void;
 }): React.ReactElement | null {
   const m = props.m;
   const meta_obj: any = m.meta && typeof m.meta === "object" ? (m.meta as any) : null;
   const kind = meta_obj && typeof meta_obj._kind === "string" ? String(meta_obj._kind) : "";
+  // Durable TTS emits are useful for replay, but should not clutter the chat stream.
+  if (kind === "tts_audio") return null;
   const attachments = Array.isArray(meta_obj?.attachments) ? (meta_obj.attachments as any[]) : [];
   const attachment_items: AttachmentRef[] = attachments
     .filter((a) => a && typeof a === "object" && !Array.isArray(a))
@@ -4919,6 +5155,18 @@ function ChatMessageCard(props: {
 
   // Build stats items for assistant messages
   const has_stats = m.role === "assistant" && (Boolean(run_id) || usage_parsed || dur_ms !== null || llm_calls !== null || tool_calls !== null);
+  const can_speak = typeof props.on_toggle_tts === "function" && m.role === "assistant" && String(m.content || "").trim();
+  const tts_status: TtsPlaybackStatus =
+    props.tts_playback && props.tts_playback.key === String(props.msg_key || "").trim() ? props.tts_playback.status : "idle";
+  const speak_icon: IconName = tts_status === "loading" ? "loader" : tts_status === "playing" ? "pause" : "speaker";
+  const speak_title =
+    tts_status === "loading"
+      ? "Generating audio…"
+      : tts_status === "playing"
+        ? "Pause"
+        : tts_status === "paused"
+          ? "Resume"
+          : "Speak (TTS)";
   
   return (
     <div className={`chat_item ${cls}`}>
@@ -4929,19 +5177,19 @@ function ChatMessageCard(props: {
         <span className="chat_role">{role_info.label}</span>
         <span className="chat_header_spacer" />
         <span className="chat_time">{new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-        {typeof props.on_speak === "function" && m.role === "assistant" && String(m.content || "").trim() ? (
+        {can_speak ? (
           <button
-            className="btn mini chat_speak"
-            onClick={() => props.on_speak?.(String(m.content || ""))}
+            className={`chat_action_icon chat_speak ${tts_status}`}
+            onClick={() => props.on_toggle_tts?.(String(props.msg_key || "").trim(), String(m.content || ""))}
             type="button"
-            aria-label="Speak message"
-            title="Speak (TTS)"
+            aria-label={speak_title}
+            title={speak_title}
           >
-            <Icon name="speaker" size={14} />
+            <Icon name={speak_icon} size={22} />
           </button>
         ) : null}
         <button
-          className={`btn mini chat_copy ${copy_state}`}
+          className={`chat_action_icon chat_copy ${copy_state}`}
           onClick={async () => {
             const ok = await copy_text(String(m.content || ""));
             set_copy_state(ok ? "copied" : "failed");
@@ -4950,7 +5198,7 @@ function ChatMessageCard(props: {
           type="button"
           aria-label="Copy message"
         >
-          {copy_state === "copied" ? <Icon name="check" size={14} /> : copy_state === "failed" ? <Icon name="x" size={14} /> : <Icon name="copy" size={14} />}
+          <Icon name="copy" size={22} />
         </button>
       </div>
       <div className="body markdown">

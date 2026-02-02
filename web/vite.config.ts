@@ -9,6 +9,7 @@ export default defineConfig({
     alias: {
       "@abstractuic/monitor-flow": resolve(__dirname, "../../abstractuic/monitor-flow/src"),
       "@abstractuic/panel-chat": resolve(__dirname, "../../abstractuic/panel-chat/src"),
+      "@abstractuic/ui-kit": resolve(__dirname, "../../abstractuic/ui-kit/src"),
       "@abstractutils/monitor-gpu": resolve(__dirname, "../../abstractuic/monitor-gpu/src"),
     },
   },
@@ -22,7 +23,7 @@ export default defineConfig({
     },
     proxy: {
       "/api": {
-        target: "http://localhost:8080",
+        target: "http://localhost:8081",
         changeOrigin: true,
         ws: true,
         secure: false,

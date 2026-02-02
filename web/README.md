@@ -15,5 +15,5 @@ npm run dev
 ```
 
 In the UI:
-- set `Gateway URL` (e.g. `http://127.0.0.1:8080`)
+- set `Gateway URL` (blank = same origin / dev proxy; e.g. `http://127.0.0.1:8081`)
 - set `Auth token` if your gateway requires it
