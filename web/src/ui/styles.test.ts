@@ -30,4 +30,18 @@ describe("AbstractCode Web styles", () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*480px\)\s*\{[\s\S]*\.chat_stats_bar\s*\{[\s\S]*overflow-x:\s*auto;/);
     expect(css).toMatch(/@media\s*\(max-width:\s*480px\)\s*\{[\s\S]*\.chat_stats_bar\s*\{[\s\S]*justify-content:\s*flex-start;/);
   });
+
+  it("uses a desktop-first settings grid layout (appearance above gateway)", () => {
+    const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+    expect(css).toMatch(/\.settings_grid\s*\{[\s\S]*grid-template-areas:\s*[\s\S]*"appearance model"[\s\S]*"gateway model"[\s\S]*"tools tools"/);
+    expect(css).toMatch(/\.settings_card_gateway\s*\{\s*grid-area:\s*gateway;\s*\}/);
+    expect(css).toMatch(/\.settings_card_model\s*\{\s*grid-area:\s*model;\s*\}/);
+    expect(css).toMatch(/\.settings_card_appearance\s*\{\s*grid-area:\s*appearance;\s*\}/);
+    expect(css).toMatch(/\.settings_card_tools\s*\{\s*grid-area:\s*tools;\s*\}/);
+  });
+
+  it("keeps settings single-column order on mobile (appearance → gateway → model)", () => {
+    const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+    expect(css).toMatch(/@media\s*\(max-width:\s*820px\)\s*\{[\s\S]*\.settings_grid\s*\{[\s\S]*grid-template-columns:\s*1fr;[\s\S]*grid-template-areas:\s*[\s\S]*"appearance"[\s\S]*"gateway"[\s\S]*"model"[\s\S]*"tools"/);
+  });
 });

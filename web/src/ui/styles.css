@@ -389,14 +389,19 @@ body::before {
 
 .settings_grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    "appearance model"
+    "gateway model"
+    "tools tools";
   gap: 14px;
   align-items: start;
 }
 
-.settings_card_full {
-  grid-column: 1 / -1;
-}
+.settings_card_gateway { grid-area: gateway; }
+.settings_card_model { grid-area: model; }
+.settings_card_appearance { grid-area: appearance; }
+.settings_card_tools { grid-area: tools; }
 
 .settings_card_header {
   display: flex;
@@ -446,6 +451,11 @@ body::before {
 @media (max-width: 820px) {
   .settings_grid {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "appearance"
+      "gateway"
+      "model"
+      "tools";
   }
   .settings_row2 {
     grid-template-columns: 1fr;

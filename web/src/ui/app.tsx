@@ -8,13 +8,14 @@ import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types
 import type { AttachmentRef } from "../lib/types";
 import { resolve_blocking_wait } from "../lib/wait_resolution";
 import { ChatMessageContent } from "@abstractuic/panel-chat";
-import { FontScaleSelect, HeaderDensitySelect, Icon, type IconName, ThemeSelect, applyTheme, applyTypography } from "@abstractuic/ui-kit";
+import { FontScaleSelect, HeaderDensitySelect, Icon, type IconName, ProviderModelSelect, type ProviderOption, ThemeSelect, applyTheme, applyTypography } from "@abstractuic/ui-kit";
 import { AgentCyclesPanel, build_agent_trace, type LedgerRecordItem } from "@abstractuic/monitor-flow";
 import { registerMonitorGpuWidget } from "@abstractutils/monitor-gpu";
 import { MarkdownRenderer } from "./markdown_renderer";
 import { ToolPicker } from "./tool_picker";
 import { copy_text } from "../lib/clipboard";
 import { build_run_input_data, derive_prompt_cache_key } from "../lib/run_input";
+import { compute_settings_on_gateway_connect } from "../lib/settings_defaults";
 import { seed_repl_messages_from_history_bundle } from "../lib/history_bundle_seed";
 import { session_memory_owner_run_id } from "../lib/session_memory";
 import {
@@ -1215,17 +1216,15 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
       const default_model = String((prov_res as any)?.default_model || (prov_res as any)?.defaults?.model || "").trim();
       set_gateway_defaults({ provider: default_provider, model: default_model });
 
-      // If the currently selected provider is missing/invalid, prefer the gateway-configured default.
-      const provider_names = prov_items.map((p: any) => String(p?.name || "").trim()).filter(Boolean);
-      const current_provider = String(settings_ref.current.provider || "").trim();
-      let next_provider = current_provider;
-      if (!next_provider || !provider_names.includes(next_provider)) {
-        if (default_provider && provider_names.includes(default_provider)) next_provider = default_provider;
-        else next_provider = provider_names[0] || "";
-      }
-      if (next_provider && next_provider !== current_provider) {
-        props.on_change({ ...settings_ref.current, provider: next_provider, model: "" });
-      }
+      // IMPORTANT: compute a single settings update. Multiple `on_change(...)` calls here can race and
+      // overwrite each other because `settings_ref.current` is updated asynchronously by React.
+      const before = settings_ref.current;
+      const { next: next_settings, changed } = compute_settings_on_gateway_connect({
+        current: before,
+        discovered_providers: prov_items,
+        default_provider,
+      });
+      if (changed) props.on_change(next_settings);
 
       set_providers(prov_items);
       set_tools(tool_items);
@@ -1234,8 +1233,6 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
         else if ((ws_res as any).error) set_server_workspace_policy_error(String((ws_res as any).error));
       }
       set_gateway_connected(true);
-      // Remember that we were connected for auto-reconnect
-      props.on_change({ ...settings_ref.current, gateway_was_connected: true });
     } catch (e: any) {
       set_gateway_error(String(e?.message || e || "Failed to connect to gateway"));
       set_gateway_connected(false);
@@ -1325,14 +1322,17 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tools]);
 
-  const provider_options = useMemo(() => {
-    const items = providers
+  const provider_options = useMemo((): ProviderOption[] => {
+    const items: ProviderOption[] = providers
       .map((p: any) => ({
         name: String(p?.name || "").trim(),
-        display_name: String(p?.display_name || p?.displayName || p?.name || "").trim(),
+        display_name: (() => {
+          const v = String(p?.display_name || p?.displayName || "").trim();
+          return v || undefined;
+        })(),
       }))
-      .filter((p: any) => Boolean(p.name));
-    items.sort((a: any, b: any) => a.display_name.localeCompare(b.display_name));
+      .filter((p: ProviderOption) => Boolean(p.name));
+    items.sort((a, b) => a.name.localeCompare(b.name));
     return items;
   }, [providers]);
 
@@ -1367,7 +1367,7 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
   return (
     <div className="settings_page">
       <div className="settings_grid">
-        <div className="panel settings_card">
+        <div className="panel settings_card settings_card_appearance">
           <div className="settings_card_header">
             <h2>Appearance</h2>
           </div>
@@ -1386,7 +1386,7 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
           </div>
         </div>
 
-        <div className="panel settings_card">
+        <div className="panel settings_card settings_card_gateway">
           <div className="settings_card_header">
             <h2>Gateway</h2>
           </div>
@@ -1541,60 +1541,32 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
           </div>
         </div>
 
-        <div className="panel settings_card">
+        <div className="panel settings_card settings_card_model">
           <div className="settings_card_header">
             <h2>Model</h2>
             <span className="muted mono">{gateway_connected ? "discovered" : "connect first"}</span>
           </div>
           <div className="muted">Choose provider/model and runtime parameters.</div>
 
-          <div className="field">
-            <label>Provider</label>
-            <select
-              className="mono"
-              value={s.provider}
-              onChange={(e) => props.on_change({ ...s, provider: e.target.value, model: "" })}
-              disabled={!gateway_connected || loading_providers || !provider_options.length}
-            >
-              {!gateway_connected ? <option value="">(click Connect)</option> : null}
-              {gateway_connected && !provider_options.length ? <option value="">(no providers)</option> : null}
-              {provider_options.map((p) => (
-                <option key={p.name} value={p.name}>
-                  {p.display_name || p.name}
-                </option>
-              ))}
-            </select>
-            {loading_providers ? <div className="muted">Loading providers…</div> : null}
-            {error_providers ? (
-              <Notice variant="error" className="inline">
-                {error_providers}
-              </Notice>
-            ) : null}
-          </div>
-          <div className="field">
-            <label>Model</label>
-            <select
-              className="mono"
-              value={s.model}
-              onChange={(e) => props.on_change({ ...s, model: e.target.value })}
-              disabled={!gateway_connected || !s.provider || loading_models || !models.length}
-            >
-              {!gateway_connected ? <option value="">(click Connect)</option> : null}
-              {!s.provider ? <option value="">(select provider first)</option> : null}
-              {s.provider && !models.length ? <option value="">(no models)</option> : null}
-              {models.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-            {loading_models ? <div className="muted">Loading models…</div> : null}
-            {error_models ? (
-              <Notice variant="error" className="inline">
-                {error_models}
-              </Notice>
-            ) : null}
-          </div>
+          <ProviderModelSelect
+            className="field"
+            selectClassName="mono"
+            providerLabel="Provider"
+            modelLabel="Model"
+            providerPlaceholder={gateway_connected ? "(select)" : "(click Connect)"}
+            modelPlaceholder={!gateway_connected ? "(click Connect)" : s.provider ? "(select)" : "(select provider first)"}
+            provider={s.provider}
+            model={s.model}
+            providers={provider_options}
+            models={models}
+            loadingProviders={loading_providers}
+            loadingModels={loading_models}
+            providerError={error_providers}
+            modelError={error_models}
+            disabled={!gateway_connected}
+            allowGatewayDefault={false}
+            onChange={(next) => props.on_change({ ...s, provider: next.provider, model: next.model })}
+          />
 
           <div className="settings_row2">
             <div className="field">
@@ -1705,7 +1677,7 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
           </div>
         </div>
 
-        <div className="panel settings_card settings_card_full">
+        <div className="panel settings_card settings_card_tools">
           <div className="settings_card_header">
             <h2>Tools</h2>
           </div>
