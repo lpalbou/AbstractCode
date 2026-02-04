@@ -5,9 +5,13 @@ This is the **web version of AbstractCode** (the Python CLI), designed as a **ga
 - renders by replaying/streaming the ledger
 - resumes waits by submitting durable commands
 
+Status:
+- This app currently consumes shared UI components via Vite path aliases to a sibling `abstractuic/` repo.
+- This repo includes a prebuilt `web/dist/` for convenience.
+
 Docs:
-- `docs/web.md`
-- `docs/deployment-web.md`
+- Web overview: [`../docs/web.md`](../docs/web.md)
+- Deployment: [`../docs/deployment-web.md`](../docs/deployment-web.md)
 
 ## Local dev
 ```bash

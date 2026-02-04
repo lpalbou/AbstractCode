@@ -4,6 +4,8 @@ This document covers **how to run AbstractCode** (CLI/TUI) and how its **durabil
 
 Start here: [`docs/getting-started.md`](getting-started.md).
 
+See also: [`docs/faq.md`](faq.md).
+
 Related:
 - Architecture: [`docs/architecture.md`](architecture.md)
 - Workflows: [`docs/workflows.md`](workflows.md)

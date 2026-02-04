@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-02-04
+
 ### Added
 - **Workflow-driven UI events (network-safe)**:
   - Workflows can emit `Emit Event(name="abstract.message")` to show a message/notification in AbstractCode.
@@ -15,8 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `abstract.status` payload supports `duration` (seconds): default `-1` (sticky), `> 0` auto-clears unless superseded.
   - Tool event payloads can be a **single object or a list** (e.g., wire `LLM Call.tool_calls` / `Tool Calls.results` directly into an `Emit Event`).
   - Backward compatibility: `abstractcode.*` remains a deprecated alias accepted by existing hosts.
+- **Documentation refresh for public release**: clearer user-facing docs (`docs/getting-started.md`, `docs/architecture.md`, `docs/cli.md`, `docs/api.md`, `docs/faq.md`) plus `SECURITY.md`, `CONTRIBUTING.md`, and `ACKNOWLEDMENTS.md`.
 
-## [0.3.0] - 2025-01-06
+### Fixed
+- Align package version metadata and `abstractcode.__version__`.
+- `/help` now shows the correct `/gpu [status|on|off]` usage.
+
+## [0.3.0] - 2026-02-03
 
 ### Added
 - **Workflow Agent Support** (`abstractcode/workflow_agent.py`): Run VisualFlow workflows as first-class agents via `abstractcode --agent <flow_id|flow_name|/path/to/flow.json>`
@@ -34,10 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - MCP tools integrated into native tool allowlist
 - **Enhanced History Commands**:
   - `/history copy` command to copy full conversation history to clipboard
-  - `/context` command (deprecated, redirects to `/log runtime` or `/log provider`)
 - **Collapsible Thought/Tool Blocks**: Tool-using iterations now render **Thought** and **Tool Call** as **click-to-toggle** blocks (collapsed by default) with high-signal one-line summary always visible
 - **Spinner Shimmer**: Status bar spinner text has subtle **reflect/shimmer** highlight traversing the entire text so "still working" is obvious without re-rendering scrollback
-- **`/log provider --no-tool-defs`**: Optionally replace provider request `tools` array (full tool definitions) with array of tool names for compact sharing/debugging
+- **`/logs provider --no-tool-defs`**: Optionally replace provider request `tools` array (full tool definitions) with array of tool names for compact sharing/debugging
 - **Terminal Markdown Module** (`abstractcode/terminal_markdown.py`): Dedicated module for rendering Markdown in terminal with newline unescaping
 - **New Test Coverage**:
   - Workflow agent tests (`test_workflow_agent.py`)
@@ -57,10 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `--tags-mode all|any`, repeatable `--user NAME`, and repeatable `--location LOC`
   - Repeating `--tag k=v` now builds multi-value tags (e.g. `--tag person=alice --tag person=bob`)
   - `--into-context` now also rehydrates matching `memory_note` spans as synthetic system message (`[MEMORY NOTE] ...`)
-- **Logging Commands**: Replaced legacy `/context` + `/llm` with `/log runtime` + `/log provider` (no backward compatibility)
-  - `/log provider` now reads from durable ledger and includes **all LLM provider calls in current session** (across runs) unless `--run` is used
-  - `/log provider` renders OpenAI/LMS-style "Received request … Generated prediction …" blocks (no truncation)
-  - `/log runtime ... copy` and `/log provider ... copy` now accept `copy` as trailing token and copy without rendering
+- **Logging Commands**: Replaced legacy `/context` + `/llm` with `/logs runtime` + `/logs provider` (no backward compatibility)
+  - `/logs provider` now reads from durable ledger and includes **all LLM provider calls in current session** (across runs) unless `--run` is used
+  - `/logs provider` renders OpenAI/LMS-style "Received request … Generated prediction …" blocks (no truncation)
+  - `/logs runtime ... copy` and `/logs provider ... copy` now accept `copy` as trailing token and copy without rendering
 - **Verifier (Review) Mode**: Now enabled by default to prevent premature "stops" when model returns incomplete prose without tool calls
   - Added `--no-review` to disable (not recommended)
   - Default `--review-max-rounds` increased to 3
@@ -74,8 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ANSWER Newline Rendering**: Unescape literal `\n` / `\r\n` sequences into real line breaks before terminal Markdown rendering, so multi-line answers display correctly
 - **Web Search Reliability**: Added `ddgs>=9.10.0` as dependency so default `web_search` tool works without manual installs
 - **Native Tools Prompt Accounting**: ReactShell token estimation now excludes full `Tools (session)` Active Memory catalog for **native-tool models**, matching prompt actually sent to OpenAI-compatible servers (e.g. LMStudio)
-- **LLM-Call Payload Observability**: `/log provider` shows verbatim provider request/response (`_provider_request` + `raw_response`), `/log runtime` shows durable runtime step trace for LLM/tool calls
-- **`/log provider` Tool-Call Detection**: Best-effort tool-call summary now detects Anthropic `tool_use` blocks in addition to OpenAI-style `tool_calls`
+- **LLM-Call Payload Observability**: `/logs provider` shows verbatim provider request/response (`_provider_request` + `raw_response`), `/logs runtime` shows durable runtime step trace for LLM/tool calls
+- **`/logs provider` Tool-Call Detection**: Best-effort tool-call summary now detects Anthropic `tool_use` blocks in addition to OpenAI-style `tool_calls`
 - **Repeat Guardrail**: Reset duplicate-tool-call caches on **new runs** and **/cancel**, block `write_file` calls missing `content` to prevent repeated 0‑byte file writes
 - **File Tool CWD Injection**: File tools (read/write/edit) no longer inject `cwd` into UI preview, preventing confusion when relative paths shown
 - **Async Run Controls**: Improved async handling for pause/resume/cancel controls
@@ -83,7 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 - **`/new`, `/reset`**: Removed alias commands (identical to `/clear`). Use `/clear`
-- **Legacy `/context`, `/llm`**: Removed in favor of `/log runtime` and `/log provider`
+- **Legacy `/context`, `/llm`**: Removed in favor of `/logs runtime` and `/logs provider`
 
 ### Technical Details
 - **44 commits**, **30 files changed**: 8,731 insertions, 756 deletions
@@ -93,7 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced ReactShell with MCP client management, executor configuration, and improved token estimation
 
 ### Migration Notes
-- Legacy `/context` and `/llm` commands removed; use `/log runtime` and `/log provider` instead
+- Legacy `/context` and `/llm` commands removed; use `/logs runtime` and `/logs provider` instead
 - Tool prompt examples now off by default; enable with `/tools examples on` if needed
 - Verifier (review) mode now enabled by default; disable with `--no-review` if unwanted
 

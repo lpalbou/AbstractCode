@@ -105,6 +105,10 @@ Details: [`docs/web.md`](web.md) and [`docs/deployment-web.md`](deployment-web.m
 ## Next
 
 - Docs index: [`docs/README.md`](README.md)
+- FAQ (common issues): [`docs/faq.md`](faq.md)
 - CLI/TUI reference (env vars, persistence details, MCP): [`docs/cli.md`](cli.md)
 - Architecture (diagrams): [`docs/architecture.md`](architecture.md)
+- API and integration points: [`docs/api.md`](api.md)
 - Workflow UI events contract: [`docs/ui_events.md`](ui_events.md)
+- Contributing: [`CONTRIBUTING.md`](../CONTRIBUTING.md)
+- Security policy: [`SECURITY.md`](../SECURITY.md)

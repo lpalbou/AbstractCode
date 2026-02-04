@@ -90,9 +90,11 @@ Start here:
 ## Documentation
 
 - Start here: [`docs/getting-started.md`](docs/getting-started.md)
+- FAQ: [`docs/faq.md`](docs/faq.md)
 - Docs index: [`docs/README.md`](docs/README.md)
 - [`docs/architecture.md`](docs/architecture.md)
 - [`docs/cli.md`](docs/cli.md)
+- [`docs/api.md`](docs/api.md)
 - [`docs/workflows.md`](docs/workflows.md)
 - [`docs/ui_events.md`](docs/ui_events.md)
 
@@ -104,6 +106,13 @@ pytest -q
 ruff check .
 black .
 ```
+
+## Project
+
+- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
+- Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Security: [`SECURITY.md`](SECURITY.md)
+- Acknowledgments: [`ACKNOWLEDMENTS.md`](ACKNOWLEDMENTS.md)
 
 ## License
 

@@ -3,20 +3,29 @@
 > AbstractCode is a durable terminal TUI for agentic coding on the Abstract* stack (AbstractAgent + AbstractRuntime + AbstractCore). This repo contains the published Python package (`abstractcode/`) and a separate gateway-first web host UI (`web/`).
 
 Important notes:
-- The pip package is the Python CLI/TUI. The `web/` app is a separate Node/Vite build (see `docs/web.md`).
-- Tools are **approval-gated by default** (see `docs/cli.md`).
-- Local VisualFlow runs via `abstractcode flow ...` require the optional extra `abstractcode[flow]` (see `docs/workflows.md`).
-- `llms-full.txt` contains a single-file snapshot of the core docs.
+- Status: **pre-alpha**, version **0.3.1** (docs last verified: 2026-02-04).
+- Source of truth is the code in `abstractcode/` (and tests in `tests/`). If docs and code disagree, follow the code.
+- For the authoritative in-app command list, use `/help` inside the TUI (implemented in `abstractcode/react_shell.py::_show_help`).
+- The pip package is the Python CLI/TUI. The `web/` app is a separate Node/Vite build (see [docs/web.md](docs/web.md)).
+- Rebuilding `web/` currently requires a sibling `abstractuic/` repo via Vite path aliases; `web/dist/` is included for convenience.
+- Tools are **approval-gated by default** (see [docs/cli.md](docs/cli.md)).
+- Local VisualFlow runs via `abstractcode flow ...` require the optional extra `abstractcode[flow]` (see [docs/workflows.md](docs/workflows.md)).
+- `llms-full.txt` contains a single-file snapshot of the core docs/policies (it does not inline source code).
+- Dev loop: `pytest -q` (tests), `ruff check .` (lint), `black .` (format).
 
 ## Quickstart
 
 - [README.md](README.md): Install + quickstart commands
+- [docs/getting-started.md](docs/getting-started.md): First run + key concepts
+- [llms-full.txt](llms-full.txt): Full snapshot of core docs (offline-friendly)
 
 ## Documentation (start here)
 
 - [Getting started](docs/getting-started.md): Install + first run + key concepts
+- [FAQ](docs/faq.md): Common questions and troubleshooting
 - [Docs index](docs/README.md): Navigation for the documentation set
 - [CLI / TUI reference](docs/cli.md): Commands, persistence, approvals, env vars
+- [API and integration points](docs/api.md): CLI surface, workflow contracts, minimal Python API
 - [Workflows](docs/workflows.md): Local flows, workflow agent mode, gateway control-plane
 - [Architecture](docs/architecture.md): How components fit together (diagrams + code pointers)
 - [Workflow UI events](docs/ui_events.md): `abstract.status` / `abstract.message` / tool UX events
@@ -37,4 +46,7 @@ Important notes:
 ## Optional
 
 - [Changelog](CHANGELOG.md): Release notes
+- [Security policy](SECURITY.md): How to report vulnerabilities responsibly
+- [Contributing](CONTRIBUTING.md): Development setup and PR guidelines
+- [Acknowledgments](ACKNOWLEDMENTS.md): Credits
 - [Tests](tests/): Behavior examples and invariants
