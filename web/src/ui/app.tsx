@@ -2477,12 +2477,13 @@ function ConsolePage(props: {
     const voice_attachment_for_meta =
       voice_draft_audio && typeof voice_draft_audio === "object" ? ({ ...(voice_draft_audio as any) } as AttachmentRef) : null;
     const message_attachments = [...attachments_for_turn, ...(voice_attachment_for_meta ? [voice_attachment_for_meta] : [])].slice(0, 16);
-    append_message({
+    const user_message: ReplMessage = {
       role: "user",
       content: t,
       ts: user_ts,
       meta: message_attachments.length ? { attachments: message_attachments } : undefined,
-    });
+    };
+    append_message(user_message);
     if (voice_attachment_for_meta) set_voice_draft_audio(null);
 
     const attach_errors = attached_files.filter((f) => !f.loading && String(f.error || "").trim());
@@ -2500,7 +2501,9 @@ function ConsolePage(props: {
       const input_data = build_run_input_data({
         prompt: t,
         settings: props.settings,
-        repl_messages: props.repl.messages || [],
+        // Important: include the user message we just appended so context reconstruction
+        // (context.messages) matches what the user sees in the chat UI.
+        repl_messages: [...(props.repl.messages || []), user_message],
         session_id: props.session_id,
         attached_files,
         template: props.repl.template,
@@ -5404,13 +5407,18 @@ export function ContextInspectorModal(props: {
 
         // Auto-pick a run that actually has LLM/tool activity (so the inspector isn't empty).
         const INTERESTING = new Set(["llm_call", "tool_calls", "ask_user", "answer_user"]);
+        const effect_type_of = (item: any): string => {
+          const rec = item && typeof item === "object" ? ((item as any).record ?? item) : null;
+          const eff = rec && typeof rec === "object" ? (rec as any).effect : null;
+          return String(eff?.type || "").trim();
+        };
         const has_trace_preview = async (run_id: string): Promise<boolean> => {
           const rid = String(run_id || "").trim();
           if (!rid) return false;
           try {
             const res = await props.gateway.get_ledger(rid, { after: 0, limit: 200 });
             const page = Array.isArray(res?.items) ? res.items : [];
-            return page.some((rec: any) => INTERESTING.has(String(rec?.effect?.type || "").trim()));
+            return page.some((rec: any) => INTERESTING.has(effect_type_of(rec)));
           } catch {
             return false;
           }
