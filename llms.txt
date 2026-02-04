@@ -9,6 +9,7 @@ Important notes:
 - The pip package is the Python CLI/TUI. The `web/` app is a separate Node/Vite build (see [docs/web.md](docs/web.md)).
 - Rebuilding `web/` currently requires a sibling `abstractuic/` repo via Vite path aliases; `web/dist/` is included for convenience.
 - Tools are **approval-gated by default** (see [docs/cli.md](docs/cli.md)).
+- The web host includes optional voice UX (record/transcribe + TTS playback) when the gateway host has `abstractvoice` installed and capabilities are enabled.
 - Local VisualFlow runs via `abstractcode flow ...` require the optional extra `abstractcode[flow]` (see [docs/workflows.md](docs/workflows.md)).
 - `llms-full.txt` contains a single-file snapshot of the core docs/policies (it does not inline source code).
 - Dev loop: `pytest -q` (tests), `ruff check .` (lint), `black .` (format).
