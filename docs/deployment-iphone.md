@@ -2,6 +2,10 @@
 
 AbstractCode Web is designed to run on iPhone as a **thin host UI** that connects to a **remote** AbstractGateway + AbstractRuntime deployment.
 
+Related:
+- Web app overview: [`docs/web.md`](web.md)
+- Web deployment: [`docs/deployment-web.md`](deployment-web.md)
+
 ## Prerequisites
 
 - A reachable HTTPS endpoint for AbstractGateway (recommended: reverse proxy + TLS).
@@ -23,4 +27,3 @@ AbstractCode Web is designed to run on iPhone as a **thin host UI** that connect
 
 - iOS aggressively suspends background tabs; long-running workflows should be designed to be resumable (ledger replay).
 - File access is always remote (via gateway); the phone does not run local tools in v1.
-

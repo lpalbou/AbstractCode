@@ -5,11 +5,13 @@ This is the **web version of AbstractCode** (the Python CLI), designed as a **ga
 - renders by replaying/streaming the ledger
 - resumes waits by submitting durable commands
 
-Important: the gateway-first **observability UI** moved to `abstractobserver/` (published separately). `abstractcode/web/` is now reserved for the AbstractCode web app.
+Docs:
+- `docs/web.md`
+- `docs/deployment-web.md`
 
 ## Local dev
 ```bash
-cd abstractcode/web
+cd web
 npm install
 npm run dev
 ```

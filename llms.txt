@@ -1,0 +1,40 @@
+# AbstractCode
+
+> AbstractCode is a durable terminal TUI for agentic coding on the Abstract* stack (AbstractAgent + AbstractRuntime + AbstractCore). This repo contains the published Python package (`abstractcode/`) and a separate gateway-first web host UI (`web/`).
+
+Important notes:
+- The pip package is the Python CLI/TUI. The `web/` app is a separate Node/Vite build (see `docs/web.md`).
+- Tools are **approval-gated by default** (see `docs/cli.md`).
+- Local VisualFlow runs via `abstractcode flow ...` require the optional extra `abstractcode[flow]` (see `docs/workflows.md`).
+- `llms-full.txt` contains a single-file snapshot of the core docs.
+
+## Quickstart
+
+- [README.md](README.md): Install + quickstart commands
+
+## Documentation (start here)
+
+- [Getting started](docs/getting-started.md): Install + first run + key concepts
+- [Docs index](docs/README.md): Navigation for the documentation set
+- [CLI / TUI reference](docs/cli.md): Commands, persistence, approvals, env vars
+- [Workflows](docs/workflows.md): Local flows, workflow agent mode, gateway control-plane
+- [Architecture](docs/architecture.md): How components fit together (diagrams + code pointers)
+- [Workflow UI events](docs/ui_events.md): `abstract.status` / `abstract.message` / tool UX events
+- [Web host overview](docs/web.md): Web app status + dev/build notes
+- [Web deployment](docs/deployment-web.md): Run gateway + deploy web UI
+- [iPhone / PWA notes](docs/deployment-iphone.md): Thin-client constraints and setup
+
+## Key code entry points
+
+- [CLI entrypoint](abstractcode/cli.py): argparse + subcommand dispatch
+- [Interactive host](abstractcode/react_shell.py): TUI loop, approvals, MCP integration, persistence
+- [Workflow agent](abstractcode/workflow_agent.py): `abstractcode.agent.v1` VisualFlow agent mode
+- [Local flow runner](abstractcode/flow_cli.py): `abstractcode flow ...` implementation
+- [Gateway client](abstractcode/gateway_cli.py): `/api/gateway/*` HTTP client
+- [Workflow bundle CLI](abstractcode/workflow_cli.py): install/list/remove `.flow` bundles on a gateway
+- [Web gateway client](web/src/lib/gateway_client.ts): browser client for `/api/gateway/*`
+
+## Optional
+
+- [Changelog](CHANGELOG.md): Release notes
+- [Tests](tests/): Behavior examples and invariants

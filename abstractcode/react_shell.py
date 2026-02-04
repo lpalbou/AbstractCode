@@ -7446,7 +7446,7 @@ class ReactShell:
             "  /files              List pending @file attachments\n"
             "  /files-keep [on|off] Keep @file attachments across turns [saved]\n"
             "  /system [text]      Show or set system prompt override [saved]\n"
-            "  /gpu [on|off]       Toggle host GPU meter (via AbstractGateway)\n"
+            "  /gpu [status|on|off] Toggle host GPU meter (via AbstractGateway)\n"
             "  /links              List links captured from last answer\n"
             "  /open <N|URL>       Open a link in your default browser\n"
             "  /flow ...           Run AbstractFlow workflows inside this REPL\n"
