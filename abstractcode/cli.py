@@ -4,9 +4,10 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Optional, Sequence, TYPE_CHECKING
 
-from .react_shell import ReactShell
+if TYPE_CHECKING:  # pragma: no cover
+    from .react_shell import ReactShell
 
 
 def _default_state_file() -> str:
@@ -40,6 +41,70 @@ def _default_max_tokens() -> Optional[int]:
             raise SystemExit("ABSTRACTCODE_MAX_TOKENS must be -1 (auto) or >= 1024.")
         return value
     return -1  # Auto (use model capabilities)
+
+
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return bool(default)
+    val = str(raw).strip().lower()
+    if val in {"1", "true", "yes", "y", "on"}:
+        return True
+    if val in {"0", "false", "no", "n", "off"}:
+        return False
+    return bool(default)
+
+
+def _configure_abstractcode_logging(argv_list: Sequence[str]) -> None:
+    """Silence Python/Structured logs for the interactive TUI (default).
+
+    Rationale: log lines from providers (httpx, AbstractCore providers, etc) break the
+    terminal UI and are noisy. AbstractCode should surface errors in its own UI instead.
+
+    Override:
+      - Set `ABSTRACTCODE_SILENCE_LOGS=0` to keep standard logging.
+    """
+    if any(arg in {"-h", "--help"} for arg in argv_list):
+        # Help should be fast and quiet.
+        try:
+            import logging
+
+            logging.disable(logging.CRITICAL)
+        except Exception:
+            pass
+        return
+
+    if not _env_flag("ABSTRACTCODE_SILENCE_LOGS", default=True):
+        return
+
+    try:
+        import logging
+        from abstractcore.utils import structured_logging
+
+        defaults = structured_logging._get_config_defaults()
+        log_dir = defaults.get("log_dir")
+        file_level = defaults.get("file_level") if log_dir else None
+
+        structured_logging.configure_logging(
+            console_level=None,
+            file_level=file_level,
+            log_dir=log_dir,
+            verbatim_enabled=bool(defaults.get("verbatim_enabled", True)),
+            console_json=bool(defaults.get("console_json", False)),
+            file_json=bool(defaults.get("file_json", True)),
+        )
+
+        # Defensive: if libraries attach their own handlers, keep them quiet.
+        for name in ("httpx", "httpcore", "asyncio", "urllib3"):
+            logging.getLogger(name).setLevel(logging.WARNING)
+    except Exception:
+        # Best-effort: suppress any remaining logging noise.
+        try:
+            import logging
+
+            logging.disable(logging.CRITICAL)
+        except Exception:
+            pass
 
 
 def build_agent_parser() -> argparse.ArgumentParser:
@@ -738,6 +803,7 @@ def build_gateway_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     argv_list = list(argv) if argv is not None else sys.argv[1:]
+    _configure_abstractcode_logging(argv_list)
 
     if argv_list and argv_list[0] == "gateway":
         parser = build_gateway_parser()
@@ -979,6 +1045,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     gw_token = getattr(args, "gateway_token", None)
     if isinstance(gw_token, str) and gw_token.strip():
         os.environ["ABSTRACTCODE_GATEWAY_TOKEN"] = gw_token.strip()
+
+    from .react_shell import ReactShell
 
     shell = ReactShell(
         agent=str(args.agent),
