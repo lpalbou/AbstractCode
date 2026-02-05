@@ -1,13 +1,41 @@
 {
-  "name": "abstractcode-web",
+  "name": "@abstractframework/code",
   "version": "0.1.0",
-  "private": true,
+  "description": "Browser-based coding assistant for AbstractFramework - connects to AbstractGateway for durable agent sessions",
   "type": "module",
+  "author": "Laurent-Philippe Albou",
+  "license": "MIT",
+  "keywords": [
+    "abstractframework",
+    "coding-assistant",
+    "browser",
+    "gateway",
+    "react"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lpalbou/abstractcode.git",
+    "directory": "web"
+  },
+  "homepage": "https://github.com/lpalbou/abstractcode#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "abstractcode-web": "./bin/cli.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md"
+  ],
   "scripts": {
     "dev": "vite --host --port 3002",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "start": "node ./bin/cli.js",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
