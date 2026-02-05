@@ -1471,7 +1471,7 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
               className="mono"
               value={String(s.workspace_root || "")}
               onChange={(e) => props.on_change({ ...s, workspace_root: e.target.value })}
-              placeholder="/Users/albou/abstractframework"
+              placeholder="/path/to/workspace"
             />
           </div>
 
@@ -1514,7 +1514,7 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
 	              rows={3}
 	              value={String(s.workspace_allowed_paths || "")}
 	              onChange={(e) => props.on_change({ ...s, workspace_allowed_paths: e.target.value })}
-	              placeholder={"/Users/albou/projects/mnemosyne\n/Users/albou/abstractframework"}
+              placeholder={"/path/to/project\n/path/to/workspace"}
 	              spellCheck={false}
 	              autoCorrect="off"
 	              autoCapitalize="off"

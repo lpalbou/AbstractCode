@@ -460,6 +460,7 @@ class ReactShell:
 
         # Workspace root for `@file` mentions / attachments.
         self._workspace_root: Path = default_workspace_root()
+        self._workspace_root_source: str = "cwd"
         self._workspace_mounts: Dict[str, Path] = default_workspace_mounts()
         self._workspace_mount_ignores: Dict[str, Any] = {}
         self._workspace_blocked_paths: List[Path] = []
@@ -8020,8 +8021,9 @@ class ReactShell:
         # - Mount roots are expressed as `workspace_allowed_paths` (absolute paths).
         # - Blacklist uses `workspace_ignored_paths` (absolute paths) and always has priority.
         try:
-            if "workspace_root" not in state.vars:
-                state.vars["workspace_root"] = str(self._workspace_root)
+            # Always sync workspace_root so it reflects the current session's root.
+            state.vars["workspace_root"] = str(self._workspace_root)
+            state.vars["workspace_root_source"] = self._workspace_root_source
 
             allowed_paths = [str(p) for p in (self._workspace_mounts or {}).values() if isinstance(p, Path)]
             ignored_paths = [str(p) for p in (self._workspace_blocked_paths or []) if isinstance(p, Path)]
@@ -8239,6 +8241,27 @@ class ReactShell:
             self._print(_style("State load failed:", _C.YELLOW, enabled=self._color) + f" {e}")
             return
         if state is not None:
+            prev_root: Optional[Path] = None
+            try:
+                if isinstance(getattr(state, "vars", None), dict):
+                    raw_prev = state.vars.get("workspace_root")
+                    if isinstance(raw_prev, str) and raw_prev.strip():
+                        prev_root = Path(raw_prev).expanduser().resolve()
+            except Exception:
+                prev_root = None
+            try:
+                current_root = self._workspace_root.resolve()
+            except Exception:
+                current_root = self._workspace_root
+            if prev_root is not None and prev_root != current_root:
+                self._print(
+                    _style(
+                        f"Workspace root changed ({prev_root} -> {current_root}). Previous history not loaded. Use '/resume' to continue.",
+                        _C.YELLOW,
+                        enabled=self._color,
+                    )
+                )
+                return
             messages: Optional[List[Dict[str, Any]]] = None
             loaded = self._messages_from_state(state)
             if loaded:

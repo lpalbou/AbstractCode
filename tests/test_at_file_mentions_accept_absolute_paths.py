@@ -11,8 +11,8 @@ def test_at_file_mentions_accept_absolute_paths_under_mount(monkeypatch, tmp_pat
     desk.mkdir()
     (desk / "toto.png").write_bytes(b"png")
 
-    monkeypatch.setenv("ABSTRACTCODE_WORKSPACE_DIR", str(ws))
     monkeypatch.setenv("ABSTRACTCODE_WORKSPACE_MOUNTS", f"Desktop={desk}")
+    monkeypatch.chdir(ws)
 
     class DummyRuntime:
         def set_artifact_store(self, _store):
@@ -83,8 +83,8 @@ def test_at_file_mentions_accept_absolute_paths_outside_workspace(monkeypatch, t
     outside = tmp_path / "outside.txt"
     outside.write_text("hello")
 
-    monkeypatch.setenv("ABSTRACTCODE_WORKSPACE_DIR", str(ws))
     monkeypatch.delenv("ABSTRACTCODE_WORKSPACE_MOUNTS", raising=False)
+    monkeypatch.chdir(ws)
 
     class DummyRuntime:
         def set_artifact_store(self, _store):

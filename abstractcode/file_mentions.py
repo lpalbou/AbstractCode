@@ -14,16 +14,15 @@ _MOUNT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 def default_workspace_root(*, cwd: Path | None = None) -> Path:
     """Return the workspace root used by AbstractCode for `@file` mentions.
 
-    Preference order:
-    - `ABSTRACTCODE_WORKSPACE_DIR`
-    - `ABSTRACTGATEWAY_WORKSPACE_DIR` (common shared convention)
-    - `cwd` (or `Path.cwd()`)
+    Always uses the current working directory (or the provided `cwd`).
     """
-    raw = os.environ.get("ABSTRACTCODE_WORKSPACE_DIR") or os.environ.get("ABSTRACTGATEWAY_WORKSPACE_DIR")
-    if isinstance(raw, str) and raw.strip():
-        return Path(raw).expanduser().resolve()
     base = cwd if isinstance(cwd, Path) else Path.cwd()
     return base.resolve()
+
+
+def workspace_root_from_env() -> Path | None:
+    """Deprecated: env-based workspace root overrides are not supported."""
+    return None
 
 
 def extract_at_file_mentions(text: str) -> Tuple[str, List[str]]:

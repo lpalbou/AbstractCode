@@ -43,68 +43,21 @@ def _default_max_tokens() -> Optional[int]:
     return -1  # Auto (use model capabilities)
 
 
-def _env_flag(name: str, *, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return bool(default)
-    val = str(raw).strip().lower()
-    if val in {"1", "true", "yes", "y", "on"}:
-        return True
-    if val in {"0", "false", "no", "n", "off"}:
-        return False
-    return bool(default)
-
-
 def _configure_abstractcode_logging(argv_list: Sequence[str]) -> None:
-    """Silence Python/Structured logs for the interactive TUI (default).
+    """Initialize framework logging early (default: ERROR-only).
 
-    Rationale: log lines from providers (httpx, AbstractCore providers, etc) break the
-    terminal UI and are noisy. AbstractCode should surface errors in its own UI instead.
-
-    Override:
-      - Set `ABSTRACTCODE_SILENCE_LOGS=0` to keep standard logging.
+    AbstractCode should rely on the shared framework defaults rather than maintaining
+    a TUI-specific “silence logs” mode. Operators can still raise verbosity by setting
+    AbstractCore logging config/env vars.
     """
-    if any(arg in {"-h", "--help"} for arg in argv_list):
-        # Help should be fast and quiet.
-        try:
-            import logging
-
-            logging.disable(logging.CRITICAL)
-        except Exception:
-            pass
-        return
-
-    if not _env_flag("ABSTRACTCODE_SILENCE_LOGS", default=True):
-        return
-
     try:
-        import logging
-        from abstractcore.utils import structured_logging
-
-        defaults = structured_logging._get_config_defaults()
-        log_dir = defaults.get("log_dir")
-        file_level = defaults.get("file_level") if log_dir else None
-
-        structured_logging.configure_logging(
-            console_level=None,
-            file_level=file_level,
-            log_dir=log_dir,
-            verbatim_enabled=bool(defaults.get("verbatim_enabled", True)),
-            console_json=bool(defaults.get("console_json", False)),
-            file_json=bool(defaults.get("file_json", True)),
-        )
-
-        # Defensive: if libraries attach their own handlers, keep them quiet.
-        for name in ("httpx", "httpcore", "asyncio", "urllib3"):
-            logging.getLogger(name).setLevel(logging.WARNING)
+        # Import triggers AbstractCore structured logging initialization.
+        from abstractcore.utils import structured_logging as _structured_logging  # noqa: F401
     except Exception:
-        # Best-effort: suppress any remaining logging noise.
-        try:
-            import logging
+        # Fallback: ensure Python logging stays quiet by default.
+        import logging
 
-            logging.disable(logging.CRITICAL)
-        except Exception:
-            pass
+        logging.basicConfig(level=logging.ERROR)
 
 
 def build_agent_parser() -> argparse.ArgumentParser:

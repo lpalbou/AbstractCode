@@ -88,7 +88,6 @@ Explain @abstractcode/cli.py and @docs/architecture.md
 
 Workspace resolution:
 - Default workspace root is the current working directory.
-- Override with `ABSTRACTCODE_WORKSPACE_DIR` (or `ABSTRACTGATEWAY_WORKSPACE_DIR` for shared convention).
 - Optional named mounts via `ABSTRACTCODE_WORKSPACE_MOUNTS` (newline-separated `name=/abs/path`).
 
 Size limit:
@@ -129,7 +128,7 @@ Common:
 - `ABSTRACTCODE_MAX_ITERATIONS`, `ABSTRACTCODE_MAX_TOKENS` (CLI defaults)
 
 Workspace/attachments:
-- `ABSTRACTCODE_WORKSPACE_DIR`, `ABSTRACTCODE_WORKSPACE_MOUNTS`
+- `ABSTRACTCODE_WORKSPACE_MOUNTS`
 - `ABSTRACTCODE_MAX_ATTACHMENT_BYTES`
 
 Gateway (for `/gpu` and `abstractcode gateway|workflow` commands):

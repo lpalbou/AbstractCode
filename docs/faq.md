@@ -107,10 +107,8 @@ Evidence:
 
 ### What is the workspace root? Can I mount other directories?
 
-Workspace root precedence:
-- `ABSTRACTCODE_WORKSPACE_DIR`
-- `ABSTRACTGATEWAY_WORKSPACE_DIR` (shared convention)
-- otherwise: current working directory
+Workspace root:
+- Always the current working directory at launch.
 
 Optional mounts:
 - `ABSTRACTCODE_WORKSPACE_MOUNTS` (newline-separated `name=/abs/path`)
@@ -169,4 +167,3 @@ Evidence: `abstractcode/react_shell.py::_handle_gpu()` and `abstractcode/react_s
 `/memory` is MemAct-specific (it shows MemAct “Active Memory”).
 
 Evidence: command list in `abstractcode/react_shell.py::_show_help` and agent wiring in `abstractcode/react_shell.py`.
-

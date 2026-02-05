@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "abstractcode"
-version = "0.3.1"
+version = "0.3.5"
 description = "A clean terminal CLI for multi-agent agentic coding"
 readme = "README.md"
 requires-python = ">=3.10"
