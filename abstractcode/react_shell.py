@@ -458,27 +458,6 @@ class ReactShell:
         )
         self._runtime.set_artifact_store(self._artifact_store)
 
-        # Audio attachments: best-effort STT fallback at LLM-call time.
-        #
-        # AbstractCore normally handles this via its capability registry, but that module may be
-        # optional/missing in some environments. Wrapping the runtime LLM client here ensures
-        # `@audio.wav` behaves like the AbstractCore CLI (transcribe + inject context) when possible.
-        try:
-            from abstractruntime.core.models import EffectType
-            from abstractruntime.integrations.abstractcore.effect_handlers import make_llm_call_handler
-
-            from .media_fallbacks import AudioSttFallbackLLMClient
-
-            llm_client = getattr(self._runtime, "_abstractcore_llm_client", None)
-            if llm_client is not None and callable(getattr(llm_client, "generate", None)):
-                wrapped = AudioSttFallbackLLMClient(llm_client)
-                # Swap the LLM_CALL handler in-place (keeps TOOL_CALLS + extra handlers unchanged).
-                self._runtime._handlers[EffectType.LLM_CALL] = make_llm_call_handler(  # type: ignore[attr-defined]
-                    llm=wrapped, artifact_store=self._artifact_store
-                )
-        except Exception:
-            pass
-
         # Workspace root for `@file` mentions / attachments.
         self._workspace_root: Path = default_workspace_root()
         self._workspace_root_source: str = "cwd"
