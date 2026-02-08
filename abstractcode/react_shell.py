@@ -458,6 +458,27 @@ class ReactShell:
         )
         self._runtime.set_artifact_store(self._artifact_store)
 
+        # Audio attachments: best-effort STT fallback at LLM-call time.
+        #
+        # AbstractCore normally handles this via its capability registry, but that module may be
+        # optional/missing in some environments. Wrapping the runtime LLM client here ensures
+        # `@audio.wav` behaves like the AbstractCore CLI (transcribe + inject context) when possible.
+        try:
+            from abstractruntime.core.models import EffectType
+            from abstractruntime.integrations.abstractcore.effect_handlers import make_llm_call_handler
+
+            from .media_fallbacks import AudioSttFallbackLLMClient
+
+            llm_client = getattr(self._runtime, "_abstractcore_llm_client", None)
+            if llm_client is not None and callable(getattr(llm_client, "generate", None)):
+                wrapped = AudioSttFallbackLLMClient(llm_client)
+                # Swap the LLM_CALL handler in-place (keeps TOOL_CALLS + extra handlers unchanged).
+                self._runtime._handlers[EffectType.LLM_CALL] = make_llm_call_handler(  # type: ignore[attr-defined]
+                    llm=wrapped, artifact_store=self._artifact_store
+                )
+        except Exception:
+            pass
+
         # Workspace root for `@file` mentions / attachments.
         self._workspace_root: Path = default_workspace_root()
         self._workspace_root_source: str = "cwd"
@@ -2069,8 +2090,21 @@ class ReactShell:
             return None
         return None
 
+    def _ingest_workspace_attachments(self, rel_paths: Sequence[str]) -> List[Dict[str, Any]]:
+        """Backward-compatible helper for one-shot prompt mode.
+
+        Note: `rel_paths` should be workspace-relative paths (e.g. from @file mentions).
+        """
+        return self._ingest_attachments(rel_paths)
+
     def _ingest_attachments(self, paths: Sequence[str]) -> List[Dict[str, Any]]:
-        """Store attachment files in ArtifactStore and return AttachmentRefs (best-effort)."""
+        """Store attachment files in ArtifactStore and return AttachmentRefs (best-effort).
+
+        Notes:
+        - Attachments are stored as-is (including audio).
+        - Speech-to-text (STT) is handled by AbstractCore at generation time when `audio_policy`
+          is enabled (see `abstractcore.providers.base`), not at ingest time.
+        """
         import hashlib
         import mimetypes
 
@@ -2113,6 +2147,7 @@ class ReactShell:
 
             sha256 = hashlib.sha256(bytes(content)).hexdigest()
             ct = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
+
             try:
                 source = "local" if str(source_path).startswith("/") else "workspace"
                 meta = self._artifact_store.store(
@@ -2131,16 +2166,15 @@ class ReactShell:
                 self._print(_style(f"Attachment ingest failed: {source_path} ({e})", _C.YELLOW, enabled=self._color))
                 continue
 
-            out.append(
-                {
-                    "$artifact": str(meta.artifact_id),
-                    "filename": str(p.name),
-                    "content_type": str(ct),
-                    "source_path": str(source_path),
-                    "sha256": sha256,
-                    "_sig": {"size_bytes": size, "mtime_ns": mtime_ns},
-                }
-            )
+            base_ref = {
+                "$artifact": str(meta.artifact_id),
+                "filename": str(p.name),
+                "content_type": str(ct),
+                "source_path": str(source_path),
+                "sha256": sha256,
+                "_sig": {"size_bytes": size, "mtime_ns": mtime_ns},
+            }
+            out.append(base_ref)
 
         return out
 

@@ -232,8 +232,18 @@ def _run_one_shot_prompt(*, shell: ReactShell, prompt: str) -> int:
 
     cleaned, mentions = extract_at_file_mentions(text)
     paths: list[str] = []
+    normalize_token = getattr(shell, "_normalize_attachment_token", None)
     for m in mentions:
-        norm = normalize_relative_path(m)
+        # Mirror the interactive TUI behavior:
+        # - accept absolute paths (outside workspace) as local attachments
+        # - prefer mount-relative virtual paths when the file lives under a mount/workspace
+        if callable(normalize_token):
+            try:
+                norm = str(normalize_token(m) or "").strip()
+            except Exception:
+                norm = ""
+        else:
+            norm = normalize_relative_path(m)
         if norm:
             paths.append(norm)
 
@@ -243,9 +253,23 @@ def _run_one_shot_prompt(*, shell: ReactShell, prompt: str) -> int:
 
     attachment_refs = shell._ingest_workspace_attachments(paths) if paths else []
     if attachment_refs:
+        def _display_attachment_token(token: str) -> str:
+            t = str(token or "").strip()
+            if not t:
+                return ""
+            norm = t.replace("\\", "/")
+            if norm.startswith("/") or (len(norm) >= 3 and norm[1] == ":" and norm[2] in ("/", "\\")):
+                return norm.rsplit("/", 1)[-1] or t
+            return t
+
+        def _display_attachment_ref(ref: dict) -> str:
+            filename = str(ref.get("filename") or "").strip()
+            source_path = str(ref.get("source_path") or ref.get("path") or "").strip()
+            return _display_attachment_token(filename or source_path or "?")
+
         joined = ", ".join(
             [
-                str(a.get("source_path") or a.get("filename") or "?")
+                _display_attachment_ref(a)
                 for a in attachment_refs
                 if isinstance(a, dict)
             ]

@@ -42,7 +42,7 @@ pip install -e ".[dev]"
 Ollama (default provider):
 
 ```bash
-abstractcode --provider ollama --model qwen3:1.7b-q4_K_M
+abstractcode --provider ollama --model qwen3:4b
 ```
 
 OpenAI-compatible server (e.g. LM Studio):
