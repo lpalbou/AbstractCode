@@ -19,6 +19,11 @@ The CLI entrypoint is the published script:
 abstractcode --help
 ```
 
+Note: workflow-related subcommands are dispatched by the first argument:
+- `abstractcode flow --help`
+- `abstractcode gateway --help`
+- `abstractcode workflow --help`
+
 Key modes:
 - interactive TUI: `abstractcode ...`
 - one-shot: `abstractcode --prompt "..." ...`
@@ -39,6 +44,14 @@ raise SystemExit(main(["--help"]))
 ```
 
 Evidence: `abstractcode/__init__.py` defines `main(argv=None)` and delegates to `abstractcode/cli.py`.
+
+You can also run the module:
+
+```bash
+python -m abstractcode --help
+```
+
+Evidence: `abstractcode/__main__.py`.
 
 ## 3) Workflow agent contract: `abstractcode.agent.v1`
 
@@ -74,9 +87,11 @@ Evidence: ledger subscription + normalization in `abstractcode/workflow_agent.py
 ## 5) Gateway interaction surface (used by this repo)
 
 This repo includes:
-- a Python gateway client used by `abstractcode gateway ...`: `abstractcode/gateway_cli.py`
+- a Python gateway client used by `abstractcode gateway ...` and `abstractcode workflow ...`: `abstractcode/gateway_cli.py`
 - a browser gateway client used by the web app: `web/src/lib/gateway_client.ts`
 
-Both call gateway endpoints under `/api/gateway/*` (discovery, runs, ledger streaming, file operations, etc.).
+They both call gateway endpoints under `/api/gateway/*`, but with different focus:
+- Python client: runs, ledger polling, durable commands, bundles, KG (`/runs/*`, `/commands`, `/bundles/*`, `/kg/query`)
+- Browser client: discovery + files + streaming views (`/discovery/*`, `/files/*`, `/runs/*`, etc.)
 
 Note: AbstractGateway is a separate component; its full API surface is defined in its own project.

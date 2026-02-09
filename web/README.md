@@ -1,7 +1,7 @@
 # AbstractCode Web (Gateway-First)
 
 This is the **web version of AbstractCode** (the Python CLI), designed as a **gateway-first** host UI:
-- talks only to `abstractgateway` (`/api/gateway/*`)
+- talks only to **AbstractGateway** (`/api/gateway/*`)
 - renders by replaying/streaming the ledger
 - resumes waits by submitting durable commands
 
@@ -12,6 +12,7 @@ Status:
 Docs:
 - Web overview: [`../docs/web.md`](../docs/web.md)
 - Deployment: [`../docs/deployment-web.md`](../docs/deployment-web.md)
+  - Voice features (optional): push-to-talk transcription + TTS (see `../docs/web.md`)
 
 ## Local dev
 ```bash

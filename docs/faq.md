@@ -6,7 +6,7 @@ This page answers common questions from first-time users. For the authoritative 
 
 ## What is AbstractCode?
 
-AbstractCode is a **durable terminal TUI** for running agentic coding sessions on the Abstract* stack:
+AbstractCode is a **durable terminal TUI** for running agentic coding sessions on the AbstractFramework stack:
 - **AbstractRuntime**: durable execution (runs, ledger, waits, artifacts)
 - **AbstractAgent**: built-in agents (`react`, `memact`, `codeact`)
 - **AbstractCore**: provider/model abstraction + tool definitions
@@ -79,6 +79,15 @@ Evidence:
 - Runtime tool executor: `PassthroughToolExecutor(mode=\"approval_required\")` in `abstractcode/react_shell.py`
 - Tool execution: `MappingToolExecutor.from_tools(...)` in `abstractcode/react_shell.py`
 
+## What are Plan and Review modes?
+
+- **Plan mode**: the agent produces a short TODO list before acting (`--plan` or `/plan on`).
+- **Review mode**: the agent runs a self-check pass before concluding (`--review` / `--no-review`, or `/review ...`).
+
+Evidence:
+- CLI flags: `abstractcode/cli.py`
+- TUI commands: `/help` in `abstractcode/react_shell.py::_show_help`
+
 ## How do I restrict which tools the agent may use?
 
 Use `/tools` to manage the allowlist:
@@ -111,7 +120,12 @@ Workspace root:
 - Always the current working directory at launch.
 
 Optional mounts:
-- `ABSTRACTCODE_WORKSPACE_MOUNTS` (newline-separated `name=/abs/path`)
+- `ABSTRACTCODE_WORKSPACE_MOUNTS` (preferred) or `ABSTRACTGATEWAY_WORKSPACE_MOUNTS` (compat)
+  - newline-separated `name=/abs/path`
+
+Session-only mounts:
+- `/whitelist <dir...>` or `/whitelist name=/abs/dir ...`
+- `/blacklist <path...>` and `/blacklist reset`
 
 Evidence: `abstractcode/file_mentions.py::default_workspace_root()` and `abstractcode/file_mentions.py::default_workspace_mounts()`.
 

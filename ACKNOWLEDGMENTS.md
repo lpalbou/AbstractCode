@@ -14,7 +14,7 @@ Declared in `pyproject.toml`:
 
 - `abstractagent` — built-in agents (`react`, `memact`, `codeact`)
 - `abstractruntime` — durable runs, stores, snapshots, and workflow execution
-- `abstractcore[tools]` — tool definitions + the default toolset integration
+- `abstractcore[tools,media]` — provider/model abstraction + tools + rich media handling
 - `prompt_toolkit` — interactive terminal UI (TUI)
 - `ddgs` — DuckDuckGo-backed search backend used by the default `web_search` tool
 
@@ -53,8 +53,9 @@ Declared in `pyproject.toml` (dev/build):
 
 AbstractCode is part of the Abstract* stack and relies on:
 
-- **AbstractCore**
-- **AbstractRuntime**
+- [AbstractFramework](https://github.com/lpalbou/AbstractFramework)
+- [AbstractCore](https://github.com/lpalbou/abstractcore)
+- [AbstractRuntime](https://github.com/lpalbou/abstractruntime)
 - **AbstractAgent**
 - (optional) **AbstractFlow** for local VisualFlow runs (`abstractcode[flow]`)
 - **AbstractUIC** components in the Web UI (via `../../abstractuic/*`)

@@ -1,6 +1,6 @@
 # AbstractCode architecture
 
-> Last verified: 2026-02-04  
+> Last verified: 2026-02-09  
 > Scope: what is implemented in this repo (no roadmap claims).
 
 Start here: [`docs/getting-started.md`](getting-started.md).
@@ -72,6 +72,7 @@ Evidence (implementation):
 ```text
 abstractcode/                 # Python package (published to pip)
   __init__.py                 # console entrypoint: abstractcode:main
+  __main__.py                 # module entrypoint: python -m abstractcode
   cli.py                      # argparse CLI + subcommands (flow/workflow/gateway)
   react_shell.py              # interactive shell + command routing
   fullscreen_ui.py            # prompt_toolkit full-screen UI
@@ -83,7 +84,7 @@ abstractcode/                 # Python package (published to pip)
   flow_cli.py                 # local VisualFlow runner (requires abstractflow extra)
   workflow_agent.py           # run VisualFlow as an agent (abstractcode.agent.v1)
   workflow_cli.py             # manage .flow bundles on a gateway
-  gateway_cli.py              # gateway HTTP client (runs, ledger follow, file ops, KG)
+  gateway_cli.py              # gateway HTTP client (runs, ledger follow, bundles, KG)
 
 web/                          # Web host UI (separate Node/Vite app)
 docs/                         # Documentation for this repo/package

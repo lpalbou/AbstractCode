@@ -1,21 +1,45 @@
 # AbstractCode
 
-Durable terminal TUI for agentic coding on the Abstract* stack (**AbstractAgent + AbstractRuntime + AbstractCore**).
+Durable terminal TUI for agentic coding on the AbstractFramework stack (**AbstractAgent + AbstractRuntime + AbstractCore**).
 
 Status: **pre-alpha** (APIs and UX may change).
 
 Next: [`docs/getting-started.md`](docs/getting-started.md).
 
+## AbstractFramework ecosystem
+
+AbstractCode is part of **AbstractFramework**:
+- [AbstractFramework](https://github.com/lpalbou/AbstractFramework)
+- [AbstractCore](https://github.com/lpalbou/abstractcore) (providers + tools)
+- [AbstractRuntime](https://github.com/lpalbou/abstractruntime) (durable runs)
+
 ## Features
 
 - Interactive TUI (`abstractcode`) with **durable runs** (resume/pause/cancel), snapshots, and logs
 - **Approval-gated tools** by default (with an allowlist you can configure)
-- Built-in agents: `react`, `memact`, `codeact`
+- Built-in agents: `react`, `memact`, `codeact` (from `abstractagent`)
+- Plan + Review modes (`--plan`, `--review`; `/plan`, `/review`)
 - VisualFlow workflows:
   - run locally: `abstractcode flow ...` (optional extra)
   - run as an agent: `abstractcode --agent <flow_ref>`
 - Remote tool execution via **MCP** (`/mcp`, `/executor`)
 - Optional gateway-first Web UI in `web/`
+
+## How it fits together (diagram)
+
+```mermaid
+flowchart LR
+  U[User] --> AC[AbstractCode\n(TUI/CLI host)]
+  AC --> AA[AbstractAgent\n(agent logic)]
+  AC --> AR[AbstractRuntime\n(durable execution)]
+  AR --> CORE[AbstractCore\n(LLM providers + tools)]
+
+  AC -->|approve| TOOLS[Local tools]
+  AC <--> MCP[MCP servers\n(remote tools)]
+
+  WEB[web/\n(browser host)] <--> GW[AbstractGateway\n(/api/gateway/*)]
+  AC -. optional .-> GW
+```
 
 ## Install
 
@@ -42,7 +66,7 @@ pip install -e ".[dev]"
 Ollama (default provider):
 
 ```bash
-abstractcode --provider ollama --model qwen3:4b
+abstractcode --provider ollama --model qwen3:1.7b-q4_K_M
 ```
 
 OpenAI-compatible server (e.g. LM Studio):
@@ -81,7 +105,7 @@ Details: [`docs/workflows.md`](docs/workflows.md).
 
 ## Web UI
 
-The web host lives in `web/` and connects to an `abstractgateway` at `/api/gateway/*`.
+The web host lives in `web/` and connects to an **AbstractGateway** at `/api/gateway/*`.
 
 Start here:
 - [`docs/web.md`](docs/web.md)
@@ -92,6 +116,7 @@ Start here:
 - Start here: [`docs/getting-started.md`](docs/getting-started.md)
 - FAQ: [`docs/faq.md`](docs/faq.md)
 - Docs index: [`docs/README.md`](docs/README.md)
+- Agent-oriented docs: [`llms.txt`](llms.txt) and [`llms-full.txt`](llms-full.txt)
 - [`docs/architecture.md`](docs/architecture.md)
 - [`docs/cli.md`](docs/cli.md)
 - [`docs/api.md`](docs/api.md)

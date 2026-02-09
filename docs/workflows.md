@@ -29,6 +29,11 @@ Run a flow by id (from a flows dir) or by path to a VisualFlow `.json`:
 abstractcode flow run <flow_id_or_path> --flows-dir /path/to/flows --param query="who are you?"
 ```
 
+Other useful commands:
+- `abstractcode flow runs` (list recent runs)
+- `abstractcode flow attach <run_id>` (set the current flow ref)
+- `abstractcode flow emit ...` (advanced: resume a wait_key / emit an event)
+
 Durability:
 - flow run reference file: `~/.abstractcode/flow_state.json` (override with `--flow-state-file` or `ABSTRACTCODE_FLOW_STATE_FILE`)
 - durable stores directory: `~/.abstractcode/flow_state.d/`
@@ -111,6 +116,10 @@ abstractcode workflow list --interface abstractcode.agent.v1
 # Inspect and remove
 abstractcode workflow info my-bundle@1.2.3
 abstractcode workflow remove my-bundle@1.2.3
+
+# (Optional) Deprecate / undeprecate bundles on the gateway (hide + block launch)
+abstractcode workflow deprecate my-bundle --reason "superseded"
+abstractcode workflow undeprecate my-bundle
 ```
 
 Gateway config:

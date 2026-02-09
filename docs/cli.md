@@ -45,9 +45,12 @@ Use `/help` for the full, authoritative list. Common commands:
 - `/status` (current run status)
 - `/logs runtime` and `/logs provider` (durable tracing and provider wire logs)
 - `/tools`, `/mcp`, `/executor` (tool allowlist + MCP servers + where tools execute)
+- `/plan [on|off]` and `/review ...` (response shaping modes)
 - `/snapshot save|load|list` (snapshots)
 - `/flow ...` (run local workflows inside the REPL; requires `abstractcode[flow]`)
 - `/gpu [status|on|off]` (optional gateway GPU meter)
+- `/whitelist ...` and `/blacklist ...` (session workspace mounts / blocks)
+- `/files` and `/files-keep [on|off]` (manage pending `@file` attachments)
 
 ## Tool approvals (default-on)
 
@@ -58,6 +61,14 @@ By default, tool calls are **paused at a durable boundary** and require approval
 Evidence:
 - Runtime tool executor is created as `PassthroughToolExecutor(mode="approval_required")` in `abstractcode/react_shell.py`.
 - Local execution after approval uses `MappingToolExecutor.from_tools(...)` in `abstractcode/react_shell.py`.
+
+## Plan / Review modes
+
+Two optional modes influence how the agent responds:
+- Plan mode: `--plan` (CLI) or `/plan on` (TUI)
+- Review mode: `--review` / `--no-review` (CLI) or `/review ...` (TUI)
+
+Evidence: `abstractcode/cli.py` and `/help` in `abstractcode/react_shell.py::_show_help`.
 
 ## Persistence (durable runs)
 
@@ -88,7 +99,14 @@ Explain @abstractcode/cli.py and @docs/architecture.md
 
 Workspace resolution:
 - Default workspace root is the current working directory.
-- Optional named mounts via `ABSTRACTCODE_WORKSPACE_MOUNTS` (newline-separated `name=/abs/path`).
+- Optional named mounts via:
+  - `ABSTRACTCODE_WORKSPACE_MOUNTS` (preferred)
+  - `ABSTRACTGATEWAY_WORKSPACE_MOUNTS` (compat)
+  (newline-separated `name=/abs/path`).
+
+Session-only mounts/blocks:
+- `/whitelist <dir...>` or `/whitelist name=/abs/dir ...`
+- `/blacklist <path...>` and `/blacklist reset`
 
 Size limit:
 - Default max attachment size is **25 MB**.
@@ -133,6 +151,7 @@ Workspace/attachments:
 
 Gateway (for `/gpu` and `abstractcode gateway|workflow` commands):
 - `ABSTRACTCODE_GATEWAY_URL`, `ABSTRACTCODE_GATEWAY_TOKEN`
+- `ABSTRACTCODE_GPU_MONITOR` (`0|1|auto`)
 
 Themes:
 - `ABSTRACTCODE_THEME`

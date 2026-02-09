@@ -22,6 +22,8 @@ abstractgateway serve --host 127.0.0.1 --port 8081
 Notes:
 - Web UI uses gateway discovery endpoints for dropdowns: providers/models/tools.
 - Web UI uses gateway file endpoints for `@file` mentions: `/api/gateway/files/search` and `/api/gateway/files/read`.
+- Web UI uses gateway attachment endpoints for uploads: `/api/gateway/attachments/upload`.
+- (Optional) Voice features use: `/api/gateway/runs/{run_id}/audio/transcribe` and `/api/gateway/runs/{run_id}/voice/tts`.
 
 ## 2) Run AbstractCode Web (dev)
 

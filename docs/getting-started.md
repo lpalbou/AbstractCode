@@ -1,9 +1,14 @@
 # Getting started
 
-AbstractCode is a **durable terminal TUI** for running agentic coding sessions on the Abstract* stack:
+AbstractCode is a **durable terminal TUI** for running agentic coding sessions on the AbstractFramework stack:
 - **AbstractRuntime** provides durable runs/ledger/waits/artifacts.
 - **AbstractAgent** provides the built-in agents (`react`, `memact`, `codeact`).
 - **AbstractCore** provides provider/model abstraction and tool definitions.
+
+Ecosystem links:
+- [AbstractFramework](https://github.com/lpalbou/AbstractFramework)
+- [AbstractCore](https://github.com/lpalbou/abstractcore)
+- [AbstractRuntime](https://github.com/lpalbou/abstractruntime)
 
 If you landed here directly, skim [`README.md`](../README.md) for an overview.
 
@@ -23,7 +28,7 @@ pip install "abstractcode[flow]"
 
 Evidence:
 - Package deps and extras: `pyproject.toml`
-- CLI entrypoint: `abstractcode/__init__.py` → `abstractcode/cli.py`
+- CLI entrypoints: `abstractcode/__init__.py` and `abstractcode/__main__.py` → `abstractcode/cli.py`
 
 ## 2) Start the interactive TUI
 
@@ -46,6 +51,16 @@ In the app:
 Evidence:
 - Arg parsing: `abstractcode/cli.py`
 - Interactive host: `abstractcode/react_shell.py`
+
+## 2b) Plan / Review modes (optional)
+
+AbstractCode supports two UX modes that affect how the agent responds:
+- **Plan mode**: the agent outputs a TODO plan before acting (`--plan` or `/plan on`)
+- **Review mode**: the agent self-checks before concluding (`--review` / `--no-review`, or `/review ...`)
+
+Evidence:
+- CLI flags: `abstractcode/cli.py`
+- TUI commands: `abstractcode/react_shell.py::_show_help`
 
 ## 3) Approvals, tools, and files
 
@@ -71,6 +86,12 @@ Explain @abstractcode/cli.py and @docs/architecture.md
 Evidence:
 - Mention parsing + workspace roots/mounts: `abstractcode/file_mentions.py`
 - Attachment ingestion to ArtifactStore: `abstractcode/react_shell.py::_ingest_attachments()`
+
+Workspace mounts (optional):
+- `ABSTRACTCODE_WORKSPACE_MOUNTS` (preferred)
+- `ABSTRACTGATEWAY_WORKSPACE_MOUNTS` (compat)
+
+Format: newline-separated `name=/abs/path` entries.
 
 ## 4) Persistence (durable runs)
 

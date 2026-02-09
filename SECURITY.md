@@ -16,8 +16,8 @@ Include as much of the following as you can:
 - steps to reproduce (or a PoC)
 - logs/error output if relevant
 - whether you discovered it in a default configuration
+- whether it also affects upstream components (AbstractCore / AbstractRuntime / AbstractAgent), if known
 
 ## Coordinated disclosure
 
 We’ll acknowledge receipt and work with you on a coordinated timeline for a fix and release. If you need a specific credit line in release notes, mention it in your report.
-
