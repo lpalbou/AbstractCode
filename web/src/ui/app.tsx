@@ -496,7 +496,7 @@ type WorkflowRef = {
   bundle_id: string; // base bundle id (no @version)
   bundle_version?: string; // optional @version
   flow_id: string;
-  kind: "bundle" | "visual_react";
+  kind: "bundle" | "visual_react" | "visual_event";
 };
 
 function split_bundle_ref(bundle_id: string): { base: string; version: string } {
@@ -515,16 +515,31 @@ function parse_workflow_ref(workflow_id: string): WorkflowRef | null {
     const { base, version } = split_bundle_ref(bundle_id_raw);
     if (base && flow_id?.trim()) return { bundle_id: base, bundle_version: version || undefined, flow_id: flow_id.trim(), kind: "bundle" };
   }
-  const prefix = "visual_react_agent_";
-  if (wid.startsWith(prefix)) {
+
+  const parse_visual = (prefix: string, kind: WorkflowRef["kind"]): WorkflowRef | null => {
+    if (!wid.startsWith(prefix)) return null;
     const rest = wid.slice(prefix.length);
-    const parts = rest.split("_");
-    if (parts.length >= 2) {
-      const bundle_id = String(parts[0] || "").trim();
-      const flow_id = String(parts[1] || "").trim();
-      if (bundle_id && flow_id) return { bundle_id, flow_id, kind: "visual_react" };
-    }
-  }
+    const parts = rest.split("_").map((p) => String(p || "").trim()).filter(Boolean);
+    if (parts.length < 3) return null;
+
+    const bundle_id = parts[0] || "";
+    // visual_* workflow ids embed the original flow_id right before the final node id token.
+    // Example:
+    // - visual_react_agent_<bundle>_<ver...>_<flow>_node-llm
+    // - visual_event_listener_<bundle>_<ver...>_<flow>_node-event
+    const flow_id = parts[parts.length - 2] || "";
+    if (!bundle_id || !flow_id) return null;
+
+    const ver_tokens = parts.slice(1, Math.max(1, parts.length - 2));
+    const bundle_version = ver_tokens.length && ver_tokens.every((t) => /^[0-9]+$/.test(t)) ? ver_tokens.join(".") : undefined;
+    return { bundle_id, bundle_version, flow_id, kind };
+  };
+
+  const react_ref = parse_visual("visual_react_agent_", "visual_react");
+  if (react_ref) return react_ref;
+  const event_ref = parse_visual("visual_event_listener_", "visual_event");
+  if (event_ref) return event_ref;
+
   return null;
 }
 
@@ -866,13 +881,12 @@ function SessionsPage(props: {
     try {
       const [tpls, r] = await Promise.all([
         list_agent_templates(props.gateway),
-        props.gateway.list_runs({ limit: 300, root_only: true, include_ledger_len: false, include_metrics: true }),
+        props.gateway.list_runs({ limit: 500, root_only: false, include_ledger_len: false, include_metrics: true }),
       ]);
       const items = Array.isArray((r as any)?.items) ? (r as any).items : [];
       set_templates(tpls);
       set_page(0);
 
-      const allowed_bundles = new Set(tpls.map((t) => t.bundle_id));
       const filtered: RemoteRunSummary[] = items
 	        .map((it: any) => ({
 	          run_id: String(it?.run_id || "").trim(),
@@ -895,9 +909,11 @@ function SessionsPage(props: {
           const ref = parse_workflow_ref(wid);
           if (!ref) return false;
           if (ref.kind === "visual_react") return false;
-          if (!allowed_bundles.has(ref.bundle_id)) return false;
-          // Sessions view is user-facing; hide internal child runs (subflows, listeners, etc).
-          if (String(it.parent_run_id || "").trim()) return false;
+
+          // Sessions view is user-facing.
+          // - Show root runs.
+          // - Also show event-listener children (they represent durable "sessions" for event-driven transports like Telegram).
+          if (String(it.parent_run_id || "").trim() && ref.kind !== "visual_event") return false;
           return true;
         });
 
@@ -1222,7 +1238,9 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
       const { next: next_settings, changed } = compute_settings_on_gateway_connect({
         current: before,
         discovered_providers: prov_items,
+        discovered_tools: tool_items,
         default_provider,
+        default_model,
       });
       if (changed) props.on_change(next_settings);
 
@@ -2263,6 +2281,108 @@ function ConsolePage(props: {
     save_active_run_id(sid, msg_rid);
     set_active_run_id(msg_rid);
   }, [active_run_id, props.session_id, props.repl.messages]);
+
+  // Remote/thin-client attach:
+  // - When opening a session that wasn't created from this browser (e.g. Telegram), local storage won't
+  //   have an active run id. Discover a durable run for this session via the gateway.
+  // - If the session has a visual_event_listener root run, always attach to it so the session stays live.
+  const auto_attach_sid_ref = useRef<string>("");
+  const auto_attach_event_root_ref = useRef<string>("");
+
+  useEffect(() => {
+    const sid = String(props.session_id || "").trim();
+    if (!sid) return;
+
+    const msg_count = Array.isArray(props.repl.messages) ? props.repl.messages.length : 0;
+    const cached_event_root = auto_attach_sid_ref.current === sid ? String(auto_attach_event_root_ref.current || "").trim() : "";
+
+    const attach_to = (rid: string) => {
+      const run_id = String(rid || "").trim();
+      if (!run_id) return;
+      force_full_replay_run_ref.current = run_id;
+      update_repl((prev) => ({ ...prev, messages: [], updated_at: now_iso() }));
+      set_attached_files([]);
+      set_file_matches([]);
+      set_file_error("");
+      set_file_loading(false);
+      set_composer("");
+      set_error("");
+      clear_status();
+      finalized_run_ref.current = "";
+      save_active_run_id(sid, run_id);
+      if (run_id !== active_run_id) set_active_run_id(run_id);
+    };
+
+    // If we've already discovered an event-root for this session, ensure we stay attached to it.
+    if (cached_event_root) {
+      if (active_run_id !== cached_event_root) attach_to(cached_event_root);
+      return;
+    }
+
+    // If we've already checked this session and found no event-root, keep local state intact when we
+    // already have something to display/stream.
+    if (auto_attach_sid_ref.current === sid) {
+      if (active_run_id) return;
+      if (msg_count) return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await props.gateway.list_runs({ limit: 500, session_id: sid, include_ledger_len: false, include_metrics: false });
+        if (cancelled) return;
+        const items = Array.isArray((res as any)?.items) ? ((res as any).items as any[]) : [];
+
+        const time_of = (it: any): number => {
+          const updated_at = typeof it?.updated_at === "string" ? it.updated_at : "";
+          const created_at = typeof it?.created_at === "string" ? it.created_at : "";
+          return parse_iso_ms(updated_at || created_at || "") ?? 0;
+        };
+
+        let event_root = "";
+        let event_t = 0;
+        let root_best = "";
+        let root_t = 0;
+
+        for (const it of items) {
+          const rid = String(it?.run_id || "").trim();
+          if (!rid) continue;
+          const wid = String(it?.workflow_id || "").trim();
+          const parent = String(it?.parent_run_id || "").trim();
+          const t = time_of(it);
+
+          if (wid.startsWith("visual_event_listener_") && t >= event_t) {
+            event_t = t;
+            event_root = rid;
+          }
+          if (!parent && t >= root_t && wid && !wid.startsWith("__")) {
+            root_t = t;
+            root_best = rid;
+          }
+        }
+
+        auto_attach_sid_ref.current = sid;
+        auto_attach_event_root_ref.current = event_root;
+
+        if (event_root) {
+          if (active_run_id !== event_root) attach_to(event_root);
+          return;
+        }
+
+        // Only auto-attach to a non-event run when the console has no local history yet.
+        if (!active_run_id && !msg_count) {
+          const chosen = root_best;
+          if (chosen) attach_to(chosen);
+        }
+      } catch {
+        // ignore (gateway may be offline/unreachable)
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [props.gateway, props.session_id, props.repl.messages, active_run_id]);
 
   function clear_status(): void {
     set_status_text("");
