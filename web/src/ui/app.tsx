@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { GatewayClient, GatewayHttpError } from "../lib/gateway_client";
 import { random_id } from "../lib/ids";
@@ -25,6 +26,7 @@ import {
   load_active_run_id,
   load_current_repl_session,
   load_run_cursor,
+  load_session_tool_approve_all,
   load_settings,
   ReplMessage,
   ReplState,
@@ -33,6 +35,7 @@ import {
   save_active_run_id,
   save_current_repl_session,
   save_run_cursor,
+  save_session_tool_approve_all,
   save_settings,
   Settings,
   storage_mode,
@@ -831,6 +834,30 @@ function Notice(props: {
       <div className="notice_content">{props.children}</div>
     </div>
   );
+}
+
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode; render_fallback: (error: unknown) => React.ReactNode },
+  { error: unknown | null }
+> {
+  state: { error: unknown | null } = { error: null };
+
+  static getDerivedStateFromError(error: unknown): { error: unknown } {
+    return { error };
+  }
+
+  componentDidCatch(error: unknown): void {
+    try {
+      console.error("UI render error", error);
+    } catch {
+      // ignore
+    }
+  }
+
+  render(): React.ReactNode {
+    if (this.state.error) return this.props.render_fallback(this.state.error);
+    return this.props.children;
+  }
 }
 
 type RemoteRunSummary = {
@@ -1958,6 +1985,23 @@ function ConsolePage(props: {
   const [resuming, set_resuming] = useState(false);
   const [cancelling, set_cancelling] = useState(false);
 
+  const [dismissed_wait_key, set_dismissed_wait_key] = useState<string>("");
+
+  const [approve_all_tools_for_session, set_approve_all_tools_for_session] = useState<boolean>(() => load_session_tool_approve_all(props.session_id));
+  const auto_approved_wait_keys_ref = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    set_approve_all_tools_for_session(load_session_tool_approve_all(props.session_id));
+    auto_approved_wait_keys_ref.current = new Set();
+    set_dismissed_wait_key("");
+  }, [props.session_id]);
+
+  const set_session_tool_approve_all = (enabled: boolean): void => {
+    const on = Boolean(enabled);
+    set_approve_all_tools_for_session(on);
+    save_session_tool_approve_all(props.session_id, on);
+  };
+
   const input_ref = useRef<HTMLTextAreaElement | null>(null);
   const upload_input_ref = useRef<HTMLInputElement | null>(null);
   const chat_scroll_ref = useRef<HTMLDivElement | null>(null);
@@ -2044,8 +2088,18 @@ function ConsolePage(props: {
   const is_user_wait = wait_reason === "user";
   const is_ask_event_wait = wait_reason === "event" && wait_event_name === "abstract.ask";
   const can_user_answer_wait = is_user_wait || is_ask_event_wait;
+  const wait_is_dismissed = Boolean(wait_state && wait_key && dismissed_wait_key === wait_key);
   const is_working = Boolean(active_run_id) && !wait_state && !resuming && Boolean(status_text.trim());
   const wait_is_compact = (root_wait_state && root_wait_reason === "subworkflow") || (!root_wait_state && is_working);
+
+  useEffect(() => {
+    if (!dismissed_wait_key) return;
+    if (!wait_state) {
+      set_dismissed_wait_key("");
+      return;
+    }
+    if (wait_key && dismissed_wait_key !== wait_key) set_dismissed_wait_key("");
+  }, [dismissed_wait_key, wait_state, wait_key]);
 
   const progress_run_id = useMemo(() => {
     const rid = String(active_run_id || "").trim();
@@ -3436,15 +3490,17 @@ function ConsolePage(props: {
 
   async function submit_resume(payload_obj: any): Promise<void> {
     const rid = String(wait_run_id || active_run_id || "").trim();
-    if (!rid || !wait_key) return;
+    const wk = String(wait_key || "").trim();
+    if (!rid || !wk) return;
     set_error("");
     set_resuming(true);
+    set_dismissed_wait_key(wk);
     try {
       await props.gateway.submit_command({
         command_id: random_id(),
         run_id: rid,
         type: "resume",
-        payload: { wait_key, payload: payload_obj || {} },
+        payload: { wait_key: wk, payload: payload_obj || {} },
         client_id: props.settings.client_id || "abstractcode_web",
       });
       try {
@@ -3455,10 +3511,21 @@ function ConsolePage(props: {
       }
     } catch (e: any) {
       set_error(String(e?.message || e || "resume failed"));
+      set_dismissed_wait_key((prev) => (prev === wk ? "" : prev));
     } finally {
       set_resuming(false);
     }
   }
+
+  useEffect(() => {
+    if (!approve_all_tools_for_session) return;
+    if (!wait_state || !wait_key) return;
+    if (!tool_calls_for_wait.length) return;
+    if (resuming) return;
+    if (auto_approved_wait_keys_ref.current.has(wait_key)) return;
+    auto_approved_wait_keys_ref.current.add(wait_key);
+    void submit_resume({ approved: true });
+  }, [approve_all_tools_for_session, wait_state, wait_key, tool_calls_for_wait.length, resuming]);
 
   async function submit_cancel(): Promise<void> {
     const rid = String(root_run_ref.current || active_run_id || "").trim();
@@ -4630,11 +4697,24 @@ function ConsolePage(props: {
           <div className={wait_is_compact ? "repl_wait compact" : "repl_wait"}>
             {wait_state ? (
               <>
-                {tool_calls_for_wait.length ? (
+                {wait_is_dismissed ? (
+                  <div className="thinking_line shimmer" aria-live="polite" title={wait_key ? `wait_key: ${wait_key}` : undefined}>
+                    <span className="run_spinner" aria-label="working" />
+                    <span className="thinking_label">{approve_all_tools_for_session ? "Auto-approving…" : "Resuming…"}</span>
+                    {iteration_badge ? <span className="thinking_iters mono">{iteration_badge}</span> : null}
+                    <span className="thinking_spacer" />
+                    <span className="muted mono thinking_detail">
+                      {status_text || (tool_calls_for_wait.length ? `${tool_calls_for_wait.length} tool(s)` : "")}
+                    </span>
+                  </div>
+                ) : tool_calls_for_wait.length ? (
                   <>
-                    <div className="wait_line shimmer" aria-live="polite">
+                    <div className="wait_line shimmer" aria-live="polite" title={wait_key ? `wait_key: ${wait_key}` : undefined}>
                       <span className="mono">Waiting</span>
                       <span className="muted">for approval to run tools…</span>
+                      {iteration_badge ? <span className="thinking_iters mono">{iteration_badge}</span> : null}
+                      <span className="thinking_spacer" />
+                      {status_text ? <span className="muted mono thinking_detail">{status_text}</span> : null}
                     </div>
                     <div className="muted">Approve to run these tools.</div>
                     <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -4658,12 +4738,40 @@ function ConsolePage(props: {
                       })}
                     </div>
                     <div className="actions">
-                      <button className="btn primary" disabled={resuming} onClick={() => submit_resume({ approved: true })}>
-                        Approve + resume
+                      <button
+                        className="btn"
+                        disabled={resuming}
+                        onClick={() => {
+                          set_session_tool_approve_all(true);
+                          void submit_resume({ approved: true });
+                        }}
+                        title="Approve this and automatically approve future tool requests in this session"
+                      >
+                        Approve All
                       </button>
-                      <button className="btn" disabled={resuming} onClick={() => submit_resume({ approved: false, reason: "Denied by user" })}>
+                      <button className="btn primary" disabled={resuming} onClick={() => submit_resume({ approved: true })} title="Approve only this tool batch">
+                        Approve Once
+                      </button>
+                      <button
+                        className="btn"
+                        disabled={resuming}
+                        onClick={() => submit_resume({ approved: false, reason: "Denied by user" })}
+                        title="Deny this tool batch"
+                      >
                         Deny
                       </button>
+                    </div>
+                    <div className="muted" style={{ marginTop: 8, lineHeight: 1.4 }}>
+                      {approve_all_tools_for_session ? (
+                        <>
+                          Session tool approval is enabled.{" "}
+                          <button className="btn mini" type="button" onClick={() => set_session_tool_approve_all(false)} disabled={resuming}>
+                            Turn off
+                          </button>
+                        </>
+                      ) : (
+                        "Approve All enables auto-approval for this session."
+                      )}
                     </div>
                   </>
                 ) : can_user_answer_wait ? (
@@ -5620,7 +5728,7 @@ export function ContextInspectorModal(props: {
   const trace = useMemo(() => build_agent_trace(ledger_items, { run_id: selected_run_id }), [ledger_items, selected_run_id]);
   const is_loading = discovering || loading;
 
-  return (
+  const modal = (
     <div
       className="modal_overlay"
       role="dialog"
@@ -5699,18 +5807,29 @@ export function ContextInspectorModal(props: {
               No trace entries found for this run. Try selecting a different <span className="mono">run_id</span> from the dropdown.
             </Notice>
           ) : (
-            <AgentCyclesPanel
-              items={trace.items}
-              title="Agent"
-              subtitle={trace.node_id ? `node_id: ${trace.node_id}` : "Agent trace (LLM/tool calls)."}
-              subRunId={selected_run_id}
-              defaultOpenLatest={true}
-            />
+            <ErrorBoundary
+              render_fallback={(e) => (
+                <Notice variant="error" style={{ marginTop: 12 }}>
+                  Context inspector crashed while rendering this trace: {String((e as any)?.message || e || "Unknown error")}
+                </Notice>
+              )}
+            >
+              <AgentCyclesPanel
+                items={trace.items}
+                title="Agent"
+                subtitle={trace.node_id ? `node_id: ${trace.node_id}` : "Agent trace (LLM/tool calls)."}
+                subRunId={selected_run_id}
+                defaultOpenLatest={true}
+              />
+            </ErrorBoundary>
           )}
         </div>
       </div>
     </div>
   );
+
+  if (typeof document === "undefined") return modal;
+  return createPortal(modal, document.body);
 }
 
 function AttachmentPreviewModal(props: {
@@ -5818,7 +5937,7 @@ function AttachmentPreviewModal(props: {
     return `${base}.${ext_for_content_type(preview_ct)}`;
   })();
 
-  return (
+  const modal = (
     <div className="modal_overlay" role="dialog" aria-modal="true" aria-label="Attachment preview" onClick={() => props.on_close()}>
       <div className="modal_card" onClick={(e) => e.stopPropagation()}>
         <div className="modal_header">
@@ -5937,6 +6056,9 @@ function AttachmentPreviewModal(props: {
       </div>
     </div>
   );
+
+  if (typeof document === "undefined") return modal;
+  return createPortal(modal, document.body);
 }
 
 function ToolBlockCard(props: { meta: any; ts?: string; tool_specs_by_name?: Record<string, any> }): React.ReactElement {

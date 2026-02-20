@@ -106,6 +106,7 @@ const KEY_CURRENT_SESSION = "abstractcode.current_session_id.v1";
 const KEY_SESSION_PREFIX = "abstractcode.session.v1:";
 const KEY_ACTIVE_RUN_PREFIX = "abstractcode.active_run_id.v1:";
 const KEY_RUN_CURSOR_PREFIX = "abstractcode.run_cursor.v1:";
+const KEY_SESSION_TOOL_APPROVE_ALL_PREFIX = "abstractcode.session_tool_approve_all.v1:";
 
 function _safe_parse<T>(raw: string | null, fallback: T): T {
   try {
@@ -317,6 +318,27 @@ export function clear_active_run_id(session_id: string): void {
   }
 }
 
+export function load_session_tool_approve_all(session_id: string): boolean {
+  const sid = String(session_id || "").trim();
+  if (!sid) return false;
+  const st = _store();
+  const raw = String(st.getItem(`${KEY_SESSION_TOOL_APPROVE_ALL_PREFIX}${sid}`) || "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
+export function save_session_tool_approve_all(session_id: string, enabled: boolean): void {
+  const sid = String(session_id || "").trim();
+  if (!sid) return;
+  const st = _store();
+  const key = `${KEY_SESSION_TOOL_APPROVE_ALL_PREFIX}${sid}`;
+  try {
+    if (enabled) st.setItem(key, "1");
+    else st.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
 export function load_run_cursor(run_id: string): number | null {
   const rid = String(run_id || "").trim();
   if (!rid) return null;
@@ -350,4 +372,3 @@ export function clear_run_cursor(run_id: string): void {
     // ignore
   }
 }
-

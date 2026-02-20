@@ -1785,6 +1785,7 @@ select {
   inset: 0;
   z-index: 1200;
   background: rgba(0, 0, 0, 0.66);
+  color: var(--text-primary, #eee);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1797,10 +1798,10 @@ select {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--glass-bg);
+  background: var(--glass-bg, rgba(0, 0, 0, 0.22));
   backdrop-filter: blur(18px) saturate(160%);
   -webkit-backdrop-filter: blur(18px) saturate(160%);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
 }
