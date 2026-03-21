@@ -89,6 +89,12 @@ def build_agent_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provider", default="ollama", help="LLM provider (e.g. ollama, openai)")
     parser.add_argument("--model", default="qwen3:1.7b-q4_K_M", help="Model name")
     parser.add_argument(
+        "--prompt-cache",
+        default=os.getenv("ABSTRACTCODE_PROMPT_CACHE", "auto"),
+        choices=["auto", "on", "off"],
+        help="Prompt caching: auto|on|off (default: auto; enables when the provider supports it).",
+    )
+    parser.add_argument(
         "--base-url",
         default=os.getenv("ABSTRACTCODE_BASE_URL"),
         help="Provider base URL (e.g. http://localhost:1234/v1). Also supports ABSTRACTCODE_BASE_URL.",
@@ -1029,6 +1035,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         agent=str(args.agent),
         provider=args.provider,
         model=args.model,
+        prompt_cache=str(getattr(args, "prompt_cache", "auto") or "auto"),
         base_url=getattr(args, "base_url", None),
         state_file=state_file,
         auto_approve=bool(args.auto_approve),

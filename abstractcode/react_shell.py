@@ -162,6 +162,7 @@ class ReactShell:
         agent: str,
         provider: str,
         model: str,
+        prompt_cache: str = "auto",
         base_url: Optional[str] = None,
         state_file: Optional[str],
         auto_approve: bool,
@@ -237,6 +238,16 @@ class ReactShell:
         #
         # Backwards compatible: {"url": "...", "headers": {...}} implies streamable_http.
         self._mcp_servers: Dict[str, Dict[str, Any]] = {}
+
+        # Prompt caching (best-effort): auto|on|off.
+        #
+        # - auto (default): enable when the provider supports caching.
+        # - on: force enable (provider may still ignore).
+        # - off: disable (forces prompt_cache_key=None per call).
+        raw_cache = str(prompt_cache or "").strip().lower() or "auto"
+        if raw_cache not in {"auto", "on", "off"}:
+            raw_cache = "auto"
+        self._prompt_cache_mode: str = raw_cache
         # Optional session-wide default tool executor (MCP server_id). When set, the
         # tool allowlist can be mapped to `mcp::<server_id>::...` names so tools run
         # on the selected remote machine by default.
@@ -1737,6 +1748,7 @@ class ReactShell:
         lower = cmd.lower()
         if lower in (
             "help",
+            "cache",
             "tools",
             "status",
             "auto-accept",
@@ -2646,6 +2658,9 @@ class ReactShell:
             return False
         if command in ("tools", "tool", "toolset"):
             self._handle_tools(arg)
+            return False
+        if command == "cache":
+            self._handle_cache(arg)
             return False
         if command == "mcp":
             self._handle_mcp(arg)
@@ -4312,6 +4327,13 @@ class ReactShell:
                     self._system_prompt_override = raw_sys.strip()
                 else:
                     self._system_prompt_override = None
+            if "prompt_cache" in config or "prompt-cache" in config:
+                raw_cache = config.get("prompt_cache")
+                if raw_cache is None:
+                    raw_cache = config.get("prompt-cache")
+                mode = str(raw_cache or "").strip().lower() or "auto"
+                if mode in {"auto", "on", "off"}:
+                    self._prompt_cache_mode = mode
             if "mcp_servers" in config:
                 raw = config.get("mcp_servers")
                 if isinstance(raw, dict):
@@ -4425,6 +4447,7 @@ class ReactShell:
                     "review_max_rounds": self._review_max_rounds,
                     "allowed_tools": self._allowed_tools,
                     "tool_prompt_examples": bool(self._tool_prompt_examples),
+                    "prompt_cache": str(getattr(self, "_prompt_cache_mode", "auto") or "auto"),
                     "tool_executor": getattr(self, "_tool_executor_server_id", None),
                     "mcp_servers": dict(mcp_servers or {}) if isinstance(mcp_servers, dict) else {},
                     "theme": theme_payload,
@@ -4674,6 +4697,63 @@ class ReactShell:
                 self._print(_style(f"     {desc.strip()}", _C.DIM, enabled=self._color))
         self._print(_style("─" * 60, _C.DIM, enabled=self._color))
         self._print(_style("Tip: /tools only list_files read_file write_file", _C.DIM, enabled=self._color))
+
+    def _handle_cache(self, raw: str) -> None:
+        """Show or toggle prompt caching (best-effort).
+
+        Usage:
+          /cache
+          /cache auto|on|off
+        """
+        value = str(raw or "").strip().lower()
+        if value and value not in {"auto", "on", "off"}:
+            self._print(_style("Usage: /cache [auto|on|off]", _C.DIM, enabled=self._color))
+            return
+
+        if value:
+            self._prompt_cache_mode = value
+            rid = self._attached_run_id()
+            if rid:
+                self._sync_tool_prompt_settings_to_run(rid)
+            self._save_config()
+            self._print(_style(f"✅ Prompt cache set to {value}.", _C.GREEN, enabled=self._color))
+            return
+
+        mode = str(getattr(self, "_prompt_cache_mode", "auto") or "auto").strip().lower() or "auto"
+        if mode not in {"auto", "on", "off"}:
+            mode = "auto"
+
+        enabled = mode == "on"
+        if mode == "auto":
+            supports = False
+            try:
+                client = getattr(self._runtime, "_abstractcore_llm_client", None)
+                getter = getattr(client, "get_provider_instance", None) if client is not None else None
+                if callable(getter):
+                    prov = getter(provider=str(self._provider), model=str(self._model))
+                    fn = getattr(prov, "supports_prompt_cache", None)
+                    if callable(fn):
+                        supports = bool(fn())
+            except Exception:
+                supports = False
+            enabled = supports
+
+        cache_key = None
+        try:
+            state = self._safe_get_state()
+            if state is not None and hasattr(state, "vars") and isinstance(state.vars, dict):
+                runtime_ns = state.vars.get("_runtime") if isinstance(state.vars.get("_runtime"), dict) else {}
+                pc = runtime_ns.get("prompt_cache") if isinstance(runtime_ns, dict) else None
+                if isinstance(pc, dict):
+                    cache_key = pc.get("key")
+        except Exception:
+            cache_key = None
+
+        status = "enabled" if enabled else "disabled"
+        details = f"mode={mode} ({status})"
+        if isinstance(cache_key, str) and cache_key.strip():
+            details += f" key={cache_key.strip()}"
+        self._print(_style(f"Prompt cache: {details}", _C.DIM, enabled=self._color))
 
     def _handle_mcp(self, raw: str) -> None:
         """Configure and sync MCP servers for tool discovery/execution.
@@ -7419,6 +7499,8 @@ class ReactShell:
             "                     - /tools only <name...>\n"
             "                     - /tools enable <name...>\n"
             "                     - /tools disable <name...>\n"
+            "  /cache              Show/toggle prompt caching [saved]\n"
+            "                     - /cache auto|on|off\n"
             "  /executor           Set default tool executor [saved]\n"
             "                     - /executor status\n"
             "                     - /executor list\n"
@@ -8026,6 +8108,50 @@ class ReactShell:
             and not (isinstance(runtime_ns.get("system_prompt"), str) and str(runtime_ns.get("system_prompt")).strip())
         ):
             runtime_ns["system_prompt"] = sys_override.strip()
+
+        # Prompt caching (best-effort): configure runtime prompt_cache injector.
+        #
+        # This sets a stable per-session cache key so LLM calls across different workflow nodes
+        # can still reuse the same prefix cache when supported by the provider/backend.
+        try:
+            mode = str(getattr(self, "_prompt_cache_mode", "auto") or "auto").strip().lower() or "auto"
+            if mode not in {"auto", "on", "off"}:
+                mode = "auto"
+
+            enabled = False
+            if mode == "on":
+                enabled = True
+            elif mode == "off":
+                enabled = False
+            else:
+                supports = False
+                try:
+                    client = getattr(self._runtime, "_abstractcore_llm_client", None)
+                    getter = getattr(client, "get_provider_instance", None) if client is not None else None
+                    if callable(getter):
+                        prov = getter(provider=str(self._provider), model=str(self._model))
+                        fn = getattr(prov, "supports_prompt_cache", None)
+                        if callable(fn):
+                            supports = bool(fn())
+                except Exception:
+                    supports = False
+                enabled = supports
+
+            if not enabled:
+                runtime_ns["prompt_cache"] = False
+            else:
+                import hashlib
+
+                sid_raw = getattr(state, "session_id", None)
+                sid = str(sid_raw or "").strip()
+                if sid:
+                    raw = f"v1|{sid}|{str(self._provider).strip().lower()}|{str(self._model).strip()}"
+                    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+                    runtime_ns["prompt_cache"] = {"enabled": True, "namespace": "acode", "key": f"acode:{digest}"}
+                else:
+                    runtime_ns["prompt_cache"] = True
+        except Exception:
+            pass
 
         # Workspace policy (tool-call scoping): keep it JSON-safe and stable across runs.
         #

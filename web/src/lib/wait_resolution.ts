@@ -24,19 +24,21 @@ export function resolve_blocking_wait(args: {
   const sub_run_id = sub_from_details || sub_from_key;
   if (!sub_run_id) return { wait: root_wait, wait_run_id: root_run_id, tool_calls: extract_tool_calls_from_wait(root_wait) };
 
-  // Prefer the newest WAITING record in the subrun (if present).
+  // Use the newest record from the subrun to determine wait state.
   for (let i = records.length - 1; i >= 0; i--) {
     const ev = records[i];
     const rec: any = ev?.record as any;
     const rid = String(rec?.run_id || "").trim();
     if (rid !== sub_run_id) continue;
     const st = String(rec?.status || "").trim();
-    if (st !== "waiting") continue;
-    const w = extract_wait_from_record(rec);
-    if (!w) continue;
-    return { wait: w, wait_run_id: sub_run_id, tool_calls: extract_tool_calls_from_wait(w) };
+    if (st === "waiting") {
+      const w = extract_wait_from_record(rec);
+      if (!w) continue;
+      return { wait: w, wait_run_id: sub_run_id, tool_calls: extract_tool_calls_from_wait(w) };
+    }
+    // The subrun has progressed past waiting; clear the blocking wait.
+    return { wait: null, wait_run_id: sub_run_id, tool_calls: [] };
   }
 
   return { wait: root_wait, wait_run_id: root_run_id, tool_calls: extract_tool_calls_from_wait(root_wait) };
 }
-

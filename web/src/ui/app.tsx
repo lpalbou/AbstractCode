@@ -26,6 +26,7 @@ import {
   load_active_run_id,
   load_current_repl_session,
   load_run_cursor,
+  load_session_workspace_root,
   load_session_tool_approve_all,
   load_settings,
   ReplMessage,
@@ -35,6 +36,7 @@ import {
   save_active_run_id,
   save_current_repl_session,
   save_run_cursor,
+  save_session_workspace_root,
   save_session_tool_approve_all,
   save_settings,
   Settings,
@@ -2611,6 +2613,56 @@ function ConsolePage(props: {
     }
   }
 
+  async function resolve_effective_workspace_root(): Promise<string> {
+    const explicit = String(props.settings.workspace_root || "").trim();
+    if (explicit) return explicit;
+
+    const sid = String(props.session_id || "").trim();
+    if (!sid) return "";
+
+    const pinned = load_session_workspace_root(sid);
+    if (pinned) return pinned;
+
+    const try_pin_from_run = async (run_id: string): Promise<string> => {
+      const rid = String(run_id || "").trim();
+      if (!rid) return "";
+      try {
+        const run = await props.gateway.get_run(rid);
+        const wr = String((run as any)?.vars?.workspace_root || "").trim();
+        if (!wr) return "";
+        save_session_workspace_root(sid, wr);
+        return wr;
+      } catch {
+        return "";
+      }
+    };
+
+    // Prefer a run_id we already have locally (cheap + deterministic).
+    const msgs = Array.isArray(props.repl.messages) ? props.repl.messages : [];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const rid = String((msgs[i] as any)?.run_id || "").trim();
+      if (!rid) continue;
+      const wr = await try_pin_from_run(rid);
+      if (wr) return wr;
+      break;
+    }
+
+    // Fallback: ask the gateway for recent root runs in this session and pin the first one that has a workspace_root.
+    try {
+      const res = await props.gateway.list_runs({ session_id: sid, root_only: true, limit: 50, include_ledger_len: false });
+      const items = Array.isArray((res as any)?.items) ? (res as any).items : [];
+      for (const it of items.slice(0, 10)) {
+        const rid = String((it as any)?.run_id || (it as any)?.id || "").trim();
+        const wr = await try_pin_from_run(rid);
+        if (wr) return wr;
+      }
+    } catch {
+      // ignore
+    }
+
+    return "";
+  }
+
   async function start_turn(text: string): Promise<void> {
     const t = String(text || "").trim();
     if (!t) return;
@@ -2682,6 +2734,8 @@ function ConsolePage(props: {
         attached_files,
         template: props.repl.template,
       });
+      const workspace_root = await resolve_effective_workspace_root();
+      if (workspace_root) (input_data as any).workspace_root = workspace_root;
       const run_id = await props.gateway.start_run(props.repl.template.flow_id, input_data, {
         bundle_id: props.repl.template.bundle_id,
         session_id: String(props.session_id || "").trim() || undefined,
@@ -2700,6 +2754,18 @@ function ConsolePage(props: {
       }));
       set_active_run_id(run_id);
       if (!props.settings.files_keep) set_attached_files([]);
+
+      // If we didn't specify one, the gateway created a workspace_root for this run.
+      // Persist it so subsequent turns in the same session reuse the same workspace.
+      if (!workspace_root) {
+        try {
+          const run = await props.gateway.get_run(run_id);
+          const wr = String((run as any)?.vars?.workspace_root || "").trim();
+          if (wr) save_session_workspace_root(props.session_id, wr);
+        } catch {
+          // ignore
+        }
+      }
     } catch (e: any) {
       clear_status();
       set_error(String(e?.message || e || "Failed to start run"));
@@ -3689,7 +3755,8 @@ function ConsolePage(props: {
       void (async () => {
         try {
           const scope = (() => {
-            const wr = String(props.settings.workspace_root || "").trim();
+            const session_wr = load_session_workspace_root(props.session_id);
+            const wr = String(props.settings.workspace_root || "").trim() || session_wr;
             const wm = String(props.settings.workspace_access_mode || "").trim();
             const wa = String(props.settings.workspace_allowed_paths || "").trim();
             const wi = String(props.settings.workspace_ignored_paths || "").trim();
@@ -4339,7 +4406,8 @@ function ConsolePage(props: {
       const sid = String(props.session_id || "").trim();
       if (!sid) throw new Error("session_id is required");
       const scope = (() => {
-        const wr = String(props.settings.workspace_root || "").trim();
+        const session_wr = load_session_workspace_root(props.session_id);
+        const wr = String(props.settings.workspace_root || "").trim() || session_wr;
         const wm = String(props.settings.workspace_access_mode || "").trim();
         const wa = String(props.settings.workspace_allowed_paths || "").trim();
         const wi = String(props.settings.workspace_ignored_paths || "").trim();

@@ -107,6 +107,7 @@ const KEY_SESSION_PREFIX = "abstractcode.session.v1:";
 const KEY_ACTIVE_RUN_PREFIX = "abstractcode.active_run_id.v1:";
 const KEY_RUN_CURSOR_PREFIX = "abstractcode.run_cursor.v1:";
 const KEY_SESSION_TOOL_APPROVE_ALL_PREFIX = "abstractcode.session_tool_approve_all.v1:";
+const KEY_SESSION_WORKSPACE_ROOT_PREFIX = "abstractcode.session_workspace_root.v1:";
 
 function _safe_parse<T>(raw: string | null, fallback: T): T {
   try {
@@ -333,6 +334,27 @@ export function save_session_tool_approve_all(session_id: string, enabled: boole
   const key = `${KEY_SESSION_TOOL_APPROVE_ALL_PREFIX}${sid}`;
   try {
     if (enabled) st.setItem(key, "1");
+    else st.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
+export function load_session_workspace_root(session_id: string): string {
+  const sid = String(session_id || "").trim();
+  if (!sid) return "";
+  const st = _store();
+  return String(st.getItem(`${KEY_SESSION_WORKSPACE_ROOT_PREFIX}${sid}`) || "").trim();
+}
+
+export function save_session_workspace_root(session_id: string, workspace_root: string): void {
+  const sid = String(session_id || "").trim();
+  const wr = String(workspace_root || "").trim();
+  if (!sid) return;
+  const st = _store();
+  const key = `${KEY_SESSION_WORKSPACE_ROOT_PREFIX}${sid}`;
+  try {
+    if (wr) st.setItem(key, wr);
     else st.removeItem(key);
   } catch {
     // ignore
