@@ -4723,20 +4723,17 @@ class ReactShell:
         if mode not in {"auto", "on", "off"}:
             mode = "auto"
 
+        def _caps_value(obj: Any, name: str, default: Any = None) -> Any:
+            if isinstance(obj, dict):
+                return obj.get(name, default)
+            return getattr(obj, name, default)
+
+        caps = None
         enabled = mode == "on"
+        if mode in {"auto", "on"}:
+            caps = self._prompt_cache_capabilities()
         if mode == "auto":
-            supports = False
-            try:
-                client = getattr(self._runtime, "_abstractcore_llm_client", None)
-                getter = getattr(client, "get_provider_instance", None) if client is not None else None
-                if callable(getter):
-                    prov = getter(provider=str(self._provider), model=str(self._model))
-                    fn = getattr(prov, "supports_prompt_cache", None)
-                    if callable(fn):
-                        supports = bool(fn())
-            except Exception:
-                supports = False
-            enabled = supports
+            enabled = bool(_caps_value(caps, "supported", False) if caps is not None else False)
 
         cache_key = None
         try:
@@ -4751,9 +4748,66 @@ class ReactShell:
 
         status = "enabled" if enabled else "disabled"
         details = f"mode={mode} ({status})"
+        caps_mode = str(_caps_value(caps, "mode", "") or "").strip()
+        if caps_mode:
+            details += f" provider_mode={caps_mode}"
+        if caps is not None:
+            ops: list[str] = []
+            for op_name, label in (
+                ("supports_update", "update"),
+                ("supports_fork", "fork"),
+                ("supports_prepare_modules", "modules"),
+            ):
+                if bool(_caps_value(caps, op_name, False)):
+                    ops.append(label)
+            if ops:
+                details += f" ops={','.join(ops)}"
         if isinstance(cache_key, str) and cache_key.strip():
             details += f" key={cache_key.strip()}"
         self._print(_style(f"Prompt cache: {details}", _C.DIM, enabled=self._color))
+
+    def _prompt_cache_capabilities(self) -> Any:
+        """Best-effort prompt-cache capability lookup via the runtime LLM client.
+
+        Prefer the runtime-level prompt-cache contract when available. Fall back to
+        direct provider introspection only for older runtimes that do not yet expose it.
+        """
+        client = getattr(self._runtime, "_abstractcore_llm_client", None)
+        if client is None:
+            return None
+
+        cap_getter = getattr(client, "get_prompt_cache_capabilities", None)
+        if callable(cap_getter):
+            try:
+                info = cap_getter(provider=str(self._provider), model=str(self._model))
+            except TypeError:
+                try:
+                    info = cap_getter()
+                except Exception:
+                    info = None
+            except Exception:
+                info = None
+            if isinstance(info, dict):
+                caps = info.get("capabilities")
+                if isinstance(caps, dict):
+                    return caps
+                return info
+            if info is not None:
+                return info
+
+        getter = getattr(client, "get_provider_instance", None)
+        if callable(getter):
+            try:
+                prov = getter(provider=str(self._provider), model=str(self._model))
+                cap_getter = getattr(prov, "get_prompt_cache_capabilities", None)
+                if callable(cap_getter):
+                    return cap_getter()
+                fn = getattr(prov, "supports_prompt_cache", None)
+                if callable(fn) and bool(fn()):
+                    return {"supported": True, "mode": "keyed"}
+            except Exception:
+                return None
+        return None
 
     def _handle_mcp(self, raw: str) -> None:
         """Configure and sync MCP servers for tool discovery/execution.
@@ -8118,24 +8172,19 @@ class ReactShell:
             if mode not in {"auto", "on", "off"}:
                 mode = "auto"
 
+            def _caps_value(obj: Any, name: str, default: Any = None) -> Any:
+                if isinstance(obj, dict):
+                    return obj.get(name, default)
+                return getattr(obj, name, default)
+
             enabled = False
             if mode == "on":
                 enabled = True
             elif mode == "off":
                 enabled = False
             else:
-                supports = False
-                try:
-                    client = getattr(self._runtime, "_abstractcore_llm_client", None)
-                    getter = getattr(client, "get_provider_instance", None) if client is not None else None
-                    if callable(getter):
-                        prov = getter(provider=str(self._provider), model=str(self._model))
-                        fn = getattr(prov, "supports_prompt_cache", None)
-                        if callable(fn):
-                            supports = bool(fn())
-                except Exception:
-                    supports = False
-                enabled = supports
+                caps = self._prompt_cache_capabilities()
+                enabled = bool(_caps_value(caps, "supported", False) if caps is not None else False)
 
             if not enabled:
                 runtime_ns["prompt_cache"] = False

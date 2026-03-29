@@ -53,6 +53,21 @@ python -m abstractcode --help
 
 Evidence: `abstractcode/__main__.py`.
 
+## 2b) Prompt caching
+
+AbstractCode exposes prompt caching via the CLI/TUI (`--prompt-cache` and `/cache`). Internally it is configured through run vars and injected into LLM call params:
+
+- Run vars: `run.vars["_runtime"]["prompt_cache"]`
+  - `false`: disable injection
+  - `true`: enable injection (key is derived from session/run metadata)
+  - `{"enabled": true, "key": "mykey"}`: enable and force a specific `prompt_cache_key`
+
+- LLM params: `prompt_cache_key`
+  - If a caller explicitly sets `prompt_cache_key` in params, that value wins and runtime injection is skipped.
+  - Passing `prompt_cache_key=None`/empty disables caching for that call.
+
+Local-control-plane note: when the selected backend reports prompt-cache module support, the runtime maintains a 3-compartment cache (`system | tools | history`) using AbstractCore’s prompt-cache control plane (`prepare_modules` / `fork` / `update`). For GGUF this depends on the current model's llama.cpp chat format having an exact cached renderer; otherwise the backend remains keyed-only.
+
 ## 3) Workflow agent contract: `abstractcode.agent.v1`
 
 AbstractCode can run a VisualFlow workflow as an agent:

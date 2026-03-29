@@ -157,6 +157,42 @@ Evidence:
 - Passthrough executor: `abstractcode/react_shell.py` (`PassthroughToolExecutor(mode="approval_required")`)
 - Local executor: `abstractcode/react_shell.py` (`MappingToolExecutor.from_tools(...)`)
 
+## Prompt caching (best-effort)
+
+AbstractCode can enable prompt caching to reduce repeated *prefill* work (improves TTFT for long, stable prefixes).
+
+### Toggle surface
+
+- CLI: `--prompt-cache auto|on|off` (default: `auto`) / `ABSTRACTCODE_PROMPT_CACHE`
+- TUI: `/cache auto|on|off`
+
+In `auto`, AbstractCode enables caching only when the runtime AbstractCore LLM client reports prompt-cache support via `get_prompt_cache_capabilities(...)`.
+
+### How it works (local runtime)
+
+1) AbstractCode stores the policy in run vars: `run.vars["_runtime"]["prompt_cache"]` (bool or object).
+2) AbstractRuntime injects a `prompt_cache_key` into each LLM call (unless the caller explicitly set one).
+3) The local AbstractCore client uses that key to maintain caches:
+
+- Builds immutable prefix caches for `system` and `tools` via `provider.prompt_cache_prepare_modules(...)`.
+- Forks the final prefix cache into the per-session key via `provider.prompt_cache_fork(...)`.
+- Appends new history messages incrementally via `provider.prompt_cache_update(...)`.
+- Rebuilds the per-session history cache if the history diverges (edits/truncation), while reusing the prefix caches when possible.
+
+This yields a 3-compartment cache layout: `system | tools | history` — changing one compartment doesn’t require rebuilding the others.
+
+### Provider support
+
+- Backends that report `mode=local_control_plane`: full module/fork/update caching.
+- Today that includes MLX and GGUF models whose llama.cpp chat format can be rendered exactly for cached prefixes (currently `chatml-function-calling` and `llama-3`).
+- Backends that report `mode=keyed`: stable per-session cache keys, but no local module/fork/update control plane.
+- Remote APIs: `prompt_cache_key` is forwarded when applicable, and remote prompt-cache control-plane access depends on the configured `/acore/prompt_cache/*` surface.
+
+Evidence:
+- Policy + key wiring: `abstractcode/react_shell.py`
+- Injection: `abstractruntime/src/abstractruntime/integrations/abstractcore/effect_handlers.py`
+- Module caching logic: `abstractruntime/src/abstractruntime/integrations/abstractcore/llm_client.py`
+
 ## Workflow-driven UX events
 
 Workflows can emit `emit_event` effects (ledger-backed) to request host UX updates:

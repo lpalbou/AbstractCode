@@ -81,6 +81,21 @@ Inside the app:
 - tool approvals: `/auto-accept` (or start with `--auto-approve`)
 - attach files with `@path/to/file` in your prompt
 
+## Prompt caching (best-effort)
+
+AbstractCode defaults to `--prompt-cache auto`, which enables prompt caching when the runtime LLM client reports prompt-cache support via the AbstractCore capability contract (reduces repeated *prefill* work and can improve time-to-first-token).
+
+Toggle:
+- CLI: `--prompt-cache auto|on|off` (or `ABSTRACTCODE_PROMPT_CACHE=auto|on|off`)
+- TUI: `/cache auto|on|off`
+
+Provider notes:
+- `mlx`: full in-process KV caching with a 3-compartment cache: `system | tools | history`.
+- `huggingface` + GGUF (llama.cpp): same 3-compartment cache when AbstractCore can render the model's llama.cpp chat format exactly for caching (currently `chatml-function-calling` and `llama-3`); otherwise it falls back to stable keyed `LlamaRAMCache` reuse.
+- Remote APIs: `prompt_cache_key` is forwarded where applicable (server-managed; semantics vary by provider).
+
+Details: [`docs/architecture.md`](docs/architecture.md) and [`docs/faq.md`](docs/faq.md).
+
 ## Persistence (durable runs)
 
 Default paths:

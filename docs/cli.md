@@ -45,6 +45,7 @@ Use `/help` for the full, authoritative list. Common commands:
 - `/status` (current run status)
 - `/logs runtime` and `/logs provider` (durable tracing and provider wire logs)
 - `/tools`, `/mcp`, `/executor` (tool allowlist + MCP servers + where tools execute)
+- `/cache auto|on|off` (session-scoped prompt caching; default `auto` enables when supported)
 - `/plan [on|off]` and `/review ...` (response shaping modes)
 - `/snapshot save|load|list` (snapshots)
 - `/flow ...` (run local workflows inside the REPL; requires `abstractcode[flow]`)
@@ -142,6 +143,7 @@ Evidence: `abstractcode/react_shell.py::_gpu_monitor_enabled_from_env()` and `ab
 Common:
 - `ABSTRACTCODE_AGENT` (default agent selector; same as `--agent`)
 - `ABSTRACTCODE_BASE_URL` (provider base URL; same as `--base-url`)
+- `ABSTRACTCODE_PROMPT_CACHE` (`auto|on|off`; same as `--prompt-cache`)
 - `ABSTRACTCODE_STATE_FILE` (default state file)
 - `ABSTRACTCODE_MAX_ITERATIONS`, `ABSTRACTCODE_MAX_TOKENS` (CLI defaults)
 

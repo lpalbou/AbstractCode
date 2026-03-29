@@ -4275,9 +4275,23 @@ function ConsolePage(props: {
 
       if (sub === "list") {
         try {
-          const [stats, saved] = await Promise.all([props.gateway.prompt_cache_stats(provider, model), props.gateway.prompt_cache_saved(provider, model)]);
+          const [caps, stats, saved] = await Promise.all([
+            props.gateway.prompt_cache_capabilities(provider, model),
+            props.gateway.prompt_cache_stats(provider, model),
+            props.gateway.prompt_cache_saved(provider, model),
+          ]);
           const out: string[] = [];
           out.push(`active_key: ${key}`);
+          if (Boolean((caps as any)?.supported)) {
+            const c0: any = (caps as any)?.capabilities || {};
+            const ops: string[] = [];
+            if (Boolean(c0?.supports_update)) ops.push("update");
+            if (Boolean(c0?.supports_fork)) ops.push("fork");
+            if (Boolean(c0?.supports_prepare_modules)) ops.push("modules");
+            out.push(`capabilities: mode=${String(c0?.mode || "unknown")}${ops.length ? ` ops=${ops.join(",")}` : ""}`);
+          } else {
+            out.push(`capabilities: unsupported${(caps as any)?.error ? ` — ${(caps as any).error}` : ""}`);
+          }
           const supported = Boolean((stats as any)?.supported);
           if (!supported) {
             out.push(`in_memory: unsupported${(stats as any)?.error ? ` — ${(stats as any).error}` : ""}`);

@@ -88,6 +88,23 @@ Evidence:
 - CLI flags: `abstractcode/cli.py`
 - TUI commands: `/help` in `abstractcode/react_shell.py::_show_help`
 
+## Is prompt caching enabled by default? How do I toggle it?
+
+Yes — the default is `--prompt-cache auto`, which enables caching when the runtime LLM client reports prompt-cache support.
+
+Toggle:
+- CLI: `--prompt-cache auto|on|off` (or `ABSTRACTCODE_PROMPT_CACHE=...`)
+- TUI: `/cache auto|on|off`
+
+Which providers benefit most:
+- `mlx`: full in-process KV caching with compartmentalized caches (`system | tools | history`)
+- `huggingface` + GGUF (llama.cpp): compartmentalized caching when the model's llama.cpp chat format has an exact cached renderer, otherwise keyed `LlamaRAMCache` reuse
+- Remote APIs: `prompt_cache_key` is forwarded when supported (server-managed)
+
+Notes:
+- HuggingFace *transformers* models do not currently support prompt caching (GGUF-only).
+- If you want fully cold runs while iterating on prompts, use `--prompt-cache off`.
+
 ## How do I restrict which tools the agent may use?
 
 Use `/tools` to manage the allowlist:

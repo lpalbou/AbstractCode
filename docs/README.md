@@ -14,6 +14,8 @@ AbstractCode is part of the **AbstractFramework** ecosystem:
 - Project overview + install + quickstart: [`README.md`](../README.md)
 - Agent-oriented docs: [`llms.txt`](../llms.txt) and [`llms-full.txt`](../llms-full.txt)
 - Architecture (with diagrams): [`docs/architecture.md`](architecture.md)
+- Prompt caching: [`docs/architecture.md`](architecture.md) and [`docs/faq.md`](faq.md)
+
 - CLI/TUI reference (commands, persistence, env): [`docs/cli.md`](cli.md)
 - API and integration points: [`docs/api.md`](api.md)
 - Workflows (VisualFlow + bundles + gateway): [`docs/workflows.md`](workflows.md)

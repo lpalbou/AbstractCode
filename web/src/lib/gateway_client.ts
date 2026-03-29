@@ -551,6 +551,16 @@ export class GatewayClient {
     return await r.json();
   }
 
+  async prompt_cache_capabilities(provider: string, model: string): Promise<any> {
+    const prov = String(provider || "").trim();
+    const mod = String(model || "").trim();
+    if (!prov || !mod) throw new Error("prompt_cache_capabilities: provider and model are required");
+    const url = _join(this._cfg.base_url, `/api/gateway/prompt_cache/capabilities?provider=${encodeURIComponent(prov)}&model=${encodeURIComponent(mod)}`);
+    const r = await fetch(url, { headers: { ..._auth_headers(this._cfg.auth_token) } });
+    if (!r.ok) return await _throw_http(r, "prompt_cache_capabilities failed");
+    return await r.json();
+  }
+
   async prompt_cache_saved(provider: string, model: string): Promise<any> {
     const prov = String(provider || "").trim();
     const mod = String(model || "").trim();

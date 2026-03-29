@@ -62,6 +62,20 @@ Evidence:
 - CLI flags: `abstractcode/cli.py`
 - TUI commands: `abstractcode/react_shell.py::_show_help`
 
+## 2c) Prompt caching (optional)
+
+By default, AbstractCode runs with `--prompt-cache auto`. In this mode it enables prompt caching when the runtime LLM client reports prompt-cache support through the AbstractCore capability contract.
+
+Controls:
+- CLI: `--prompt-cache auto|on|off` (or `ABSTRACTCODE_PROMPT_CACHE=auto|on|off`)
+- TUI: `/cache auto|on|off`
+
+Implementation notes (local runtime):
+- For providers with full in-process cache backends (currently `mlx`), the runtime builds a compartmentalized cache: `system | tools | history`. Appending to history updates only the history cache; changing system or tools rebuilds only the affected prefix.
+- For HuggingFace GGUF (llama.cpp), the same compartmentalized path is used when the current chat format has an exact cached renderer; otherwise caching falls back to keyed `LlamaRAMCache` reuse.
+
+If you’re iterating on prompts and want fully cold runs, start with `--prompt-cache off`.
+
 ## 3) Approvals, tools, and files
 
 ### Tool approvals (default-on)
