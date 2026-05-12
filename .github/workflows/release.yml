@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish-npm:
+    name: Publish web package to npm
+    runs-on: ubuntu-latest
+    environment: npm
+    defaults:
+      run:
+        working-directory: abstractcode/web
+    steps:
+      - name: Check out AbstractCode
+        uses: actions/checkout@v4
+        with:
+          path: abstractcode
+
+      - name: Check out AbstractUIC
+        uses: actions/checkout@v4
+        with:
+          repository: lpalbou/AbstractUIC
+          path: abstractuic
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+          cache-dependency-path: abstractcode/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Validate npm package contents
+        run: npm pack --dry-run
+
+      - name: Validate tag version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)." >&2
+            exit 1
+          fi
+
+      - name: Publish package
+        run: npm publish --access public --provenance

@@ -1,6 +1,6 @@
 {
   "name": "@abstractframework/code",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Browser-based coding assistant for AbstractFramework - connects to AbstractGateway for durable agent sessions",
   "type": "module",
   "author": "Laurent-Philippe Albou",
@@ -14,10 +14,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/lpalbou/abstractcode.git",
+    "url": "https://github.com/lpalbou/AbstractCode.git",
     "directory": "web"
   },
-  "homepage": "https://github.com/lpalbou/abstractcode#readme",
+  "homepage": "https://github.com/lpalbou/AbstractCode#readme",
   "publishConfig": {
     "access": "public"
   },

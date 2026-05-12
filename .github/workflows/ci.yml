@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test-build:
+    name: Test and build web package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: abstractcode/web
+    steps:
+      - name: Check out AbstractCode
+        uses: actions/checkout@v4
+        with:
+          path: abstractcode
+
+      - name: Check out AbstractUIC
+        uses: actions/checkout@v4
+        with:
+          repository: lpalbou/AbstractUIC
+          path: abstractuic
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: abstractcode/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Validate npm package contents
+        run: npm pack --dry-run

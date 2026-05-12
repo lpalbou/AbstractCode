@@ -1,4 +1,4 @@
-/* AbstractCode Web: consumes shared AbstractUIC theme tokens (see @abstractuic/ui-kit/theme.css). */
+/* AbstractCode Web: consumes shared AbstractUIC theme tokens (see @abstractframework/ui-kit/theme.css). */
 
 :root {
   /* Map existing AbstractCode variables onto AbstractUIC theme tokens */

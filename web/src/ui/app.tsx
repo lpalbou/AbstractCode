@@ -8,10 +8,10 @@ import { choose_follow_run, infer_subworkflow_follow_kind, type FollowRunKind } 
 import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types";
 import type { AttachmentRef } from "../lib/types";
 import { resolve_blocking_wait } from "../lib/wait_resolution";
-import { ChatMessageContent } from "@abstractuic/panel-chat";
-import { FontScaleSelect, HeaderDensitySelect, Icon, type IconName, ProviderModelSelect, type ProviderOption, ThemeSelect, applyTheme, applyTypography } from "@abstractuic/ui-kit";
-import { AgentCyclesPanel, build_agent_trace, type LedgerRecordItem } from "@abstractuic/monitor-flow";
-import { registerMonitorGpuWidget } from "@abstractutils/monitor-gpu";
+import { ChatMessageContent } from "@abstractframework/panel-chat";
+import { FontScaleSelect, HeaderDensitySelect, Icon, type IconName, ProviderModelSelect, type ProviderOption, ThemeSelect, applyTheme, applyTypography } from "@abstractframework/ui-kit";
+import { AgentCyclesPanel, build_agent_trace, type LedgerRecordItem } from "@abstractframework/monitor-flow";
+import { registerMonitorGpuWidget } from "@abstractframework/monitor-gpu";
 import { MarkdownRenderer } from "./markdown_renderer";
 import { ToolPicker } from "./tool_picker";
 import { copy_text } from "../lib/clipboard";

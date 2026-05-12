@@ -7,10 +7,10 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      "@abstractuic/monitor-flow": resolve(__dirname, "../../abstractuic/monitor-flow/src"),
-      "@abstractuic/panel-chat": resolve(__dirname, "../../abstractuic/panel-chat/src"),
-      "@abstractuic/ui-kit": resolve(__dirname, "../../abstractuic/ui-kit/src"),
-      "@abstractutils/monitor-gpu": resolve(__dirname, "../../abstractuic/monitor-gpu/src"),
+      "@abstractframework/monitor-flow": resolve(__dirname, "../../abstractuic/monitor-flow/src"),
+      "@abstractframework/panel-chat": resolve(__dirname, "../../abstractuic/panel-chat/src"),
+      "@abstractframework/ui-kit": resolve(__dirname, "../../abstractuic/ui-kit/src"),
+      "@abstractframework/monitor-gpu": resolve(__dirname, "../../abstractuic/monitor-gpu/src"),
     },
   },
   server: {
