@@ -664,7 +664,7 @@ class WorkflowAgent(BaseAgent):
     """Run a VisualFlow workflow as a RunnableFlow in AbstractCode.
 
     Contract: the workflow must declare `interfaces: ["abstractcode.agent.v1"]` and expose:
-    - On Flow Start output pins (required): `provider` (provider), `model` (model), `prompt` (string)
+    - On Flow Start output pins (required): `provider` (provider_text/provider), `model` (model), `prompt` (string)
     - On Flow End input pins (required): `response` (string), `success` (boolean), `meta` (object)
     """
 

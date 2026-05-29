@@ -5,7 +5,7 @@
 > Recommended: use `llms.txt` as the index when link-fetching is available; use `llms-full.txt` for offline/single-file context.
 > Generated from the files listed below. Relative Markdown links are normalized to repo-root paths.
 > If you update docs/policies, regenerate this file.
-> Last generated: 2026-02-09
+> Last generated: 2026-05-29
 
 Files included (source):
 - `README.md`
@@ -13,7 +13,6 @@ Files included (source):
 - `CHANGELOD.md`
 - `CONTRIBUTING.md`
 - `SECURITY.md`
-- `ACKNOWLEDMENTS.md`
 - `ACKNOWLEDGMENTS.md`
 - `docs/getting-started.md`
 - `docs/README.md`
@@ -114,6 +113,21 @@ Inside the app:
 - tool approvals: `/auto-accept` (or start with `--auto-approve`)
 - attach files with `@path/to/file` in your prompt
 
+## Prompt caching (best-effort)
+
+AbstractCode defaults to `--prompt-cache auto`, which enables prompt caching when the runtime LLM client reports prompt-cache support via the AbstractCore capability contract (reduces repeated *prefill* work and can improve time-to-first-token).
+
+Toggle:
+- CLI: `--prompt-cache auto|on|off` (or `ABSTRACTCODE_PROMPT_CACHE=auto|on|off`)
+- TUI: `/cache auto|on|off`
+
+Provider notes:
+- `mlx`: full in-process KV caching with a 3-compartment cache: `system | tools | history`.
+- `huggingface` + GGUF (llama.cpp): same 3-compartment cache when AbstractCore can render the model's llama.cpp chat format exactly for caching (currently `chatml-function-calling` and `llama-3`); otherwise it falls back to stable keyed `LlamaRAMCache` reuse.
+- Remote APIs: `prompt_cache_key` is forwarded where applicable (server-managed; semantics vary by provider).
+
+Details: [`docs/architecture.md`](docs/architecture.md) and [`docs/faq.md`](docs/faq.md).
+
 ## Persistence (durable runs)
 
 Default paths:
@@ -170,7 +184,7 @@ black .
 - Changelog: [`CHANGELOG.md`](CHANGELOG.md)
 - Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Security: [`SECURITY.md`](SECURITY.md)
-- Acknowledgments: [`ACKNOWLEDMENTS.md`](ACKNOWLEDMENTS.md)
+- Acknowledgments: [`ACKNOWLEDGMENTS.md`](ACKNOWLEDGMENTS.md)
 
 ## License
 
@@ -189,6 +203,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-05-29
+
+### Changed
+- Raised AbstractFramework dependency floors to the current released Core, Runtime, Agent, and Flow versions.
+- Aligned the web package release version with the Python package so one release tag publishes both surfaces.
+- Updated the workflow agent contract wording for provider pins to match the provider-text/provider taxonomy.
+
+### Fixed
+- Added the dedicated web favicon asset referenced by the browser host.
+- Expanded CI/release coverage so Python and web package gates run before publishing.
+
 ## [0.3.1] - 2026-02-04
 
 ### Added
@@ -199,7 +224,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `abstract.status` payload supports `duration` (seconds): default `-1` (sticky), `> 0` auto-clears unless superseded.
   - Tool event payloads can be a **single object or a list** (e.g., wire `LLM Call.tool_calls` / `Tool Calls.results` directly into an `Emit Event`).
   - Backward compatibility: `abstractcode.*` remains a deprecated alias accepted by existing hosts.
-- **Documentation refresh for public release**: clearer user-facing docs (`docs/getting-started.md`, `docs/architecture.md`, `docs/cli.md`, `docs/api.md`, `docs/faq.md`) plus `SECURITY.md`, `CONTRIBUTING.md`, and `ACKNOWLEDMENTS.md`.
+- **Documentation refresh for public release**: clearer user-facing docs (`docs/getting-started.md`, `docs/architecture.md`, `docs/cli.md`, `docs/api.md`, `docs/faq.md`) plus `SECURITY.md`, `CONTRIBUTING.md`, and `ACKNOWLEDGMENTS.md`.
 
 ### Fixed
 - Align package version metadata and `abstractcode.__version__`.
@@ -576,7 +601,7 @@ We’ll acknowledge receipt and work with you on a coordinated timeline for a fi
 
 ---
 
-<!-- FILE: ACKNOWLEDMENTS.md -->
+<!-- FILE: ACKNOWLEDGMENTS.md -->
 
 # Acknowledgments
 
@@ -641,17 +666,6 @@ AbstractCode is part of the Abstract* stack and relies on:
 - **AbstractUIC** components in the Web UI (via `../../abstractuic/*`)
 
 Thank you to all contributors and the broader open-source community.
-
----
-
-<!-- FILE: ACKNOWLEDGMENTS.md -->
-
-# Acknowledgments
-
-This repository’s acknowledgments are maintained in [`ACKNOWLEDMENTS.md`](ACKNOWLEDMENTS.md).
-
-This file exists only as a convenience for common spelling and external references.
-
 
 ---
 
@@ -720,6 +734,20 @@ AbstractCode supports two UX modes that affect how the agent responds:
 Evidence:
 - CLI flags: `abstractcode/cli.py`
 - TUI commands: `abstractcode/react_shell.py::_show_help`
+
+## 2c) Prompt caching (optional)
+
+By default, AbstractCode runs with `--prompt-cache auto`. In this mode it enables prompt caching when the runtime LLM client reports prompt-cache support through the AbstractCore capability contract.
+
+Controls:
+- CLI: `--prompt-cache auto|on|off` (or `ABSTRACTCODE_PROMPT_CACHE=auto|on|off`)
+- TUI: `/cache auto|on|off`
+
+Implementation notes (local runtime):
+- For providers with full in-process cache backends (currently `mlx`), the runtime builds a compartmentalized cache: `system | tools | history`. Appending to history updates only the history cache; changing system or tools rebuilds only the affected prefix.
+- For HuggingFace GGUF (llama.cpp), the same compartmentalized path is used when the current chat format has an exact cached renderer; otherwise caching falls back to keyed `LlamaRAMCache` reuse.
+
+If you’re iterating on prompts and want fully cold runs, start with `--prompt-cache off`.
 
 ## 3) Approvals, tools, and files
 
@@ -813,6 +841,8 @@ AbstractCode is part of the **AbstractFramework** ecosystem:
 - Project overview + install + quickstart: [`README.md`](README.md)
 - Agent-oriented docs: [`llms.txt`](llms.txt) and [`llms-full.txt`](llms-full.txt)
 - Architecture (with diagrams): [`docs/architecture.md`](docs/architecture.md)
+- Prompt caching: [`docs/architecture.md`](docs/architecture.md) and [`docs/faq.md`](docs/faq.md)
+
 - CLI/TUI reference (commands, persistence, env): [`docs/cli.md`](docs/cli.md)
 - API and integration points: [`docs/api.md`](docs/api.md)
 - Workflows (VisualFlow + bundles + gateway): [`docs/workflows.md`](docs/workflows.md)
@@ -829,7 +859,7 @@ AbstractCode is part of the **AbstractFramework** ecosystem:
 - Changelog: [`CHANGELOG.md`](CHANGELOG.md)
 - Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Security: [`SECURITY.md`](SECURITY.md)
-- Acknowledgments: [`ACKNOWLEDMENTS.md`](ACKNOWLEDMENTS.md)
+- Acknowledgments: [`ACKNOWLEDGMENTS.md`](ACKNOWLEDGMENTS.md)
 
 ---
 
@@ -994,6 +1024,42 @@ Evidence:
 - Passthrough executor: `abstractcode/react_shell.py` (`PassthroughToolExecutor(mode="approval_required")`)
 - Local executor: `abstractcode/react_shell.py` (`MappingToolExecutor.from_tools(...)`)
 
+## Prompt caching (best-effort)
+
+AbstractCode can enable prompt caching to reduce repeated *prefill* work (improves TTFT for long, stable prefixes).
+
+### Toggle surface
+
+- CLI: `--prompt-cache auto|on|off` (default: `auto`) / `ABSTRACTCODE_PROMPT_CACHE`
+- TUI: `/cache auto|on|off`
+
+In `auto`, AbstractCode enables caching only when the runtime AbstractCore LLM client reports prompt-cache support via `get_prompt_cache_capabilities(...)`.
+
+### How it works (local runtime)
+
+1) AbstractCode stores the policy in run vars: `run.vars["_runtime"]["prompt_cache"]` (bool or object).
+2) AbstractRuntime injects a `prompt_cache_key` into each LLM call (unless the caller explicitly set one).
+3) The local AbstractCore client uses that key to maintain caches:
+
+- Builds immutable prefix caches for `system` and `tools` via `provider.prompt_cache_prepare_modules(...)`.
+- Forks the final prefix cache into the per-session key via `provider.prompt_cache_fork(...)`.
+- Appends new history messages incrementally via `provider.prompt_cache_update(...)`.
+- Rebuilds the per-session history cache if the history diverges (edits/truncation), while reusing the prefix caches when possible.
+
+This yields a 3-compartment cache layout: `system | tools | history` — changing one compartment doesn’t require rebuilding the others.
+
+### Provider support
+
+- Backends that report `mode=local_control_plane`: full module/fork/update caching.
+- Today that includes MLX and GGUF models whose llama.cpp chat format can be rendered exactly for cached prefixes (currently `chatml-function-calling` and `llama-3`).
+- Backends that report `mode=keyed`: stable per-session cache keys, but no local module/fork/update control plane.
+- Remote APIs: `prompt_cache_key` is forwarded when applicable, and remote prompt-cache control-plane access depends on the configured `/acore/prompt_cache/*` surface.
+
+Evidence:
+- Policy + key wiring: `abstractcode/react_shell.py`
+- Injection: `abstractruntime/src/abstractruntime/integrations/abstractcore/effect_handlers.py`
+- Module caching logic: `abstractruntime/src/abstractruntime/integrations/abstractcore/llm_client.py`
+
 ## Workflow-driven UX events
 
 Workflows can emit `emit_event` effects (ledger-backed) to request host UX updates:
@@ -1058,6 +1124,7 @@ Use `/help` for the full, authoritative list. Common commands:
 - `/status` (current run status)
 - `/logs runtime` and `/logs provider` (durable tracing and provider wire logs)
 - `/tools`, `/mcp`, `/executor` (tool allowlist + MCP servers + where tools execute)
+- `/cache auto|on|off` (session-scoped prompt caching; default `auto` enables when supported)
 - `/plan [on|off]` and `/review ...` (response shaping modes)
 - `/snapshot save|load|list` (snapshots)
 - `/flow ...` (run local workflows inside the REPL; requires `abstractcode[flow]`)
@@ -1155,6 +1222,7 @@ Evidence: `abstractcode/react_shell.py::_gpu_monitor_enabled_from_env()` and `ab
 Common:
 - `ABSTRACTCODE_AGENT` (default agent selector; same as `--agent`)
 - `ABSTRACTCODE_BASE_URL` (provider base URL; same as `--base-url`)
+- `ABSTRACTCODE_PROMPT_CACHE` (`auto|on|off`; same as `--prompt-cache`)
 - `ABSTRACTCODE_STATE_FILE` (default state file)
 - `ABSTRACTCODE_MAX_ITERATIONS`, `ABSTRACTCODE_MAX_TOKENS` (CLI defaults)
 
@@ -1230,6 +1298,21 @@ python -m abstractcode --help
 ```
 
 Evidence: `abstractcode/__main__.py`.
+
+## 2b) Prompt caching
+
+AbstractCode exposes prompt caching via the CLI/TUI (`--prompt-cache` and `/cache`). Internally it is configured through run vars and injected into LLM call params:
+
+- Run vars: `run.vars["_runtime"]["prompt_cache"]`
+  - `false`: disable injection
+  - `true`: enable injection (key is derived from session/run metadata)
+  - `{"enabled": true, "key": "mykey"}`: enable and force a specific `prompt_cache_key`
+
+- LLM params: `prompt_cache_key`
+  - If a caller explicitly sets `prompt_cache_key` in params, that value wins and runtime injection is skipped.
+  - Passing `prompt_cache_key=None`/empty disables caching for that call.
+
+Local-control-plane note: when the selected backend reports prompt-cache module support, the runtime maintains a 3-compartment cache (`system | tools | history`) using AbstractCore’s prompt-cache control plane (`prepare_modules` / `fork` / `update`). For GGUF this depends on the current model's llama.cpp chat format having an exact cached renderer; otherwise the backend remains keyed-only.
 
 ## 3) Workflow agent contract: `abstractcode.agent.v1`
 
@@ -1367,6 +1450,23 @@ Evidence:
 Evidence:
 - CLI flags: `abstractcode/cli.py`
 - TUI commands: `/help` in `abstractcode/react_shell.py::_show_help`
+
+## Is prompt caching enabled by default? How do I toggle it?
+
+Yes — the default is `--prompt-cache auto`, which enables caching when the runtime LLM client reports prompt-cache support.
+
+Toggle:
+- CLI: `--prompt-cache auto|on|off` (or `ABSTRACTCODE_PROMPT_CACHE=...`)
+- TUI: `/cache auto|on|off`
+
+Which providers benefit most:
+- `mlx`: full in-process KV caching with compartmentalized caches (`system | tools | history`)
+- `huggingface` + GGUF (llama.cpp): compartmentalized caching when the model's llama.cpp chat format has an exact cached renderer, otherwise keyed `LlamaRAMCache` reuse
+- Remote APIs: `prompt_cache_key` is forwarded when supported (server-managed)
+
+Notes:
+- HuggingFace *transformers* models do not currently support prompt caching (GGUF-only).
+- If you want fully cold runs while iterating on prompts, use `--prompt-cache off`.
 
 ## How do I restrict which tools the agent may use?
 

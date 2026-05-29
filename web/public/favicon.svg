@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <defs>
+    <linearGradient id="af_core" x1="7" y1="7" x2="25" y2="25" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3b82f6" />
+      <stop offset="0.33" stop-color="#10b981" />
+      <stop offset="0.66" stop-color="#6366f1" />
+      <stop offset="1" stop-color="#a855f7" />
+    </linearGradient>
+    <linearGradient id="af_orbit" x1="8" y1="10" x2="24" y2="22" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#60a5fa" stop-opacity="0.95" />
+      <stop offset="1" stop-color="#14b8a6" stop-opacity="0.95" />
+    </linearGradient>
+    <radialGradient id="af_dot" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(16 10) rotate(45) scale(3)">
+      <stop offset="0" stop-color="#e0f2fe" />
+      <stop offset="1" stop-color="#60a5fa" />
+    </radialGradient>
+  </defs>
+
+  <rect width="32" height="32" rx="7" fill="#0b1220" />
+
+  <circle cx="16" cy="16" r="7" fill="url(#af_core)" />
+  <circle cx="13.3" cy="13.4" r="2.3" fill="#ffffff" opacity="0.14" />
+
+  <g transform="rotate(-18 16 16)">
+    <ellipse cx="16" cy="16" rx="11.5" ry="5.5" fill="none" stroke="url(#af_orbit)" stroke-width="2.2" opacity="0.92" />
+    <circle cx="16" cy="10" r="1.6" fill="url(#af_dot)" />
+    <circle cx="27.5" cy="16" r="1.6" fill="url(#af_dot)" />
+  </g>
+</svg>
+

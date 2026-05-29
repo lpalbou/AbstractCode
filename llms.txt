@@ -9,7 +9,7 @@ To regenerate `llms-full.txt`, run: `python scripts/generate_llms_full.py`
 Format reference: https://llmstxt.org/
 
 Important notes (evidence-first):
-- Status: **pre-alpha**, version **0.3.6** (see `pyproject.toml` and `abstractcode/__init__.py`). Docs last verified: **2026-02-09**.
+- Status: **pre-alpha**, version **0.3.7** (see `pyproject.toml` and `abstractcode/__init__.py`). Docs last verified: **2026-05-29**.
 - Source of truth is the code in `abstractcode/` and executable invariants in `tests/`. If docs and code disagree, follow the code/tests.
 - Authoritative in-app command list: `/help` (implemented in `abstractcode/react_shell.py::_show_help`).
 - Tools are approval-gated by default (wired via `PassthroughToolExecutor(mode="approval_required")` in `abstractcode/react_shell.py`).
@@ -55,8 +55,7 @@ Dev loop:
 
 - [CONTRIBUTING.md](CONTRIBUTING.md): Development setup + PR guidelines
 - [SECURITY.md](SECURITY.md): Responsible disclosure process
-- [ACKNOWLEDMENTS.md](ACKNOWLEDMENTS.md): Dependency credits (canonical spelling in this repo)
-- [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md): Spelling alias (redirect)
+- [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md): Dependency credits
 - [CHANGELOG.md](CHANGELOG.md): Release notes
 - [CHANGELOD.md](CHANGELOD.md): Typo alias (redirect)
 - [llms-full.txt](llms-full.txt): Offline snapshot of core docs/policies (no code)

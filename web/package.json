@@ -1,6 +1,6 @@
 {
   "name": "@abstractframework/code",
-  "version": "0.1.3",
+  "version": "0.3.7",
   "description": "Browser-based coding assistant for AbstractFramework - connects to AbstractGateway for durable agent sessions",
   "type": "module",
   "author": "Laurent-Philippe Albou",

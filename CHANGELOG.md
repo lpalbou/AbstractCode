@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-05-29
+
+### Changed
+- Raised AbstractFramework dependency floors to the current released Core, Runtime, Agent, and Flow versions.
+- Aligned the web package release version with the Python package so one release tag publishes both surfaces.
+- Updated the workflow agent contract wording for provider pins to match the provider-text/provider taxonomy.
+
+### Fixed
+- Added the dedicated web favicon asset referenced by the browser host.
+- Expanded CI/release coverage so Python and web package gates run before publishing.
+
 ## [0.3.1] - 2026-02-04
 
 ### Added
@@ -17,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `abstract.status` payload supports `duration` (seconds): default `-1` (sticky), `> 0` auto-clears unless superseded.
   - Tool event payloads can be a **single object or a list** (e.g., wire `LLM Call.tool_calls` / `Tool Calls.results` directly into an `Emit Event`).
   - Backward compatibility: `abstractcode.*` remains a deprecated alias accepted by existing hosts.
-- **Documentation refresh for public release**: clearer user-facing docs (`docs/getting-started.md`, `docs/architecture.md`, `docs/cli.md`, `docs/api.md`, `docs/faq.md`) plus `SECURITY.md`, `CONTRIBUTING.md`, and `ACKNOWLEDMENTS.md`.
+- **Documentation refresh for public release**: clearer user-facing docs (`docs/getting-started.md`, `docs/architecture.md`, `docs/cli.md`, `docs/api.md`, `docs/faq.md`) plus `SECURITY.md`, `CONTRIBUTING.md`, and `ACKNOWLEDGMENTS.md`.
 
 ### Fixed
 - Align package version metadata and `abstractcode.__version__`.

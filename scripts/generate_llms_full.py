@@ -13,7 +13,6 @@ DEFAULT_SOURCES: list[str] = [
     "CHANGELOD.md",
     "CONTRIBUTING.md",
     "SECURITY.md",
-    "ACKNOWLEDMENTS.md",
     "ACKNOWLEDGMENTS.md",
     "docs/getting-started.md",
     "docs/README.md",

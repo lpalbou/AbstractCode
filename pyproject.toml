@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "abstractcode"
-version = "0.3.6"
+version = "0.3.7"
 description = "A clean terminal CLI for multi-agent agentic coding"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -42,9 +42,9 @@ classifiers = [
 ]
 
 dependencies = [
-    "abstractagent>=0.3.1",
-    "abstractruntime>=0.4.2",
-    "abstractcore[tools,media]>=2.11.8",
+    "abstractagent>=0.3.9",
+    "abstractruntime>=0.4.25",
+    "abstractcore[tools,media]>=2.13.30",
     # Needed for reliable `web_search` (DuckDuckGo search backend) used by the default toolset.
     "ddgs>=9.10.0,<10.0.0",
     "prompt_toolkit>=3.0.0",
@@ -58,7 +58,7 @@ dev = [
     "ruff>=0.1.0",
 ]
 flow = [
-    "abstractflow>=0.3.7",
+    "abstractflow>=0.3.16",
 ]
 
 [project.urls]

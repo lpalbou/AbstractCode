@@ -9,7 +9,7 @@ Email: contact@abstractcore.ai
 Website: https://abstractcore.ai
 """
 
-__version__ = "0.3.6"
+__version__ = "0.3.7"
 __author__ = "Laurent-Philippe Albou"
 __email__ = "contact@abstractcore.ai"
 __license__ = "MIT"
