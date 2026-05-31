@@ -5,7 +5,7 @@
 > Recommended: use `llms.txt` as the index when link-fetching is available; use `llms-full.txt` for offline/single-file context.
 > Generated from the files listed below. Relative Markdown links are normalized to repo-root paths.
 > If you update docs/policies, regenerate this file.
-> Last generated: 2026-05-29
+> Last generated: 2026-05-31
 
 Files included (source):
 - `README.md`
@@ -202,6 +202,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.3.8] - 2026-05-31
+
+### Changed
+- Raised AbstractFramework dependency floors to Core `>=2.13.31`, Runtime `>=0.4.26`, Agent `>=0.3.10`, and Flow `>=0.3.17`.
+- Aligned the web package release version with the Python package.
+
+### Fixed
+- Hosted web mode now follows the Gateway URL/session policy used by Flow so remote browser clients cannot turn the app into a user-directed Gateway proxy.
 
 ## [0.3.7] - 2026-05-29
 
@@ -1902,7 +1911,8 @@ npm run dev
 
 Open `http://127.0.0.1:3002/` and set:
 - `Gateway URL`: `http://127.0.0.1:8081`
-- `Auth token`: `dev-token` (if configured)
+- `Gateway user` and that user's `Gateway token` when Gateway user auth is
+  enabled
 
 ## 3) Build + host (static)
 
@@ -1911,9 +1921,19 @@ cd web
 npm run build
 ```
 
-Deploy `web/dist/` with any static file server.
+Deploy `web/dist/` behind the packaged web server or a reverse proxy that
+routes same-origin `/api/...` to Gateway.
 
-If you serve the web app on the **same origin** as the gateway, you can set `Gateway URL` to empty and rely on same-origin `/api/gateway/*` routing.
+In hosted user-auth mode, AbstractCode Web exchanges the Gateway user token for
+an app-scoped browser session and strips bearer tokens from saved browser
+settings. Direct bearer-token mode is retained for local development when no
+Gateway user is configured. When the web UI is served from a non-local
+hostname, the server-configured Gateway URL is authoritative; browser-supplied
+Gateway URL changes are rejected unless
+`ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` is enabled behind your own
+access control. If a reverse proxy rewrites `Host`, set
+`ABSTRACTCODE_TRUST_PROXY_HEADERS=1` only when the proxy strips
+client-supplied forwarded headers.
 
 ---
 
@@ -1932,7 +1952,7 @@ Related:
 - A reachable HTTPS endpoint for AbstractGateway (recommended: reverse proxy + TLS).
 - The AbstractCode Web static site hosted over HTTPS.
 - Gateway configured with:
-  - `ABSTRACTGATEWAY_AUTH_TOKEN` (recommended)
+  - Gateway user auth for hosted access
   - `ABSTRACTGATEWAY_ALLOWED_ORIGINS` including your web host origin (exact host recommended for prod).
 
 ## Steps
@@ -1940,7 +1960,7 @@ Related:
 1) Open the AbstractCode Web URL in Safari.
 2) Go to `Settings`:
    - set `Gateway URL` to your gateway URL (e.g. `https://gateway.example.com`)
-   - set `Auth token` if required
+   - set `Gateway user` and that user's `Gateway token`
 3) (Optional) Add to Home Screen:
    - Safari → Share → Add to Home Screen
 
@@ -1948,5 +1968,11 @@ Related:
 
 - iOS aggressively suspends background tabs; long-running workflows should be designed to be resumable (ledger replay).
 - File access is always remote (via gateway); the phone does not run local tools in v1.
+- The Gateway token is exchanged for an app-scoped browser session and is not
+  persisted in browser settings.
+- On non-local hosted UI hostnames, the server-configured Gateway URL is
+  authoritative. Browser-supplied Gateway URL changes are rejected unless
+  `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` is enabled behind your
+  own access control.
 
 ---

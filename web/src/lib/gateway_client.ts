@@ -14,8 +14,19 @@ function _join(base_url: string, path: string): string {
 
 function _auth_headers(token?: string): Record<string, string> {
   const t = (token || "").trim();
-  if (!t) return {};
-  return { Authorization: `Bearer ${t}` };
+  const out: Record<string, string> = {};
+  if (t) out.Authorization = `Bearer ${t}`;
+  try {
+    const csrf = document.cookie
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith("abstractcode_gateway_csrf="))
+      ?.slice("abstractcode_gateway_csrf=".length);
+    if (csrf) out["X-AbstractCode-CSRF"] = decodeURIComponent(csrf);
+  } catch {
+    // non-browser tests
+  }
+  return out;
 }
 
 function _retry_after_s(resp: Response): number | undefined {

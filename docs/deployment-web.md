@@ -35,7 +35,8 @@ npm run dev
 
 Open `http://127.0.0.1:3002/` and set:
 - `Gateway URL`: `http://127.0.0.1:8081`
-- `Auth token`: `dev-token` (if configured)
+- `Gateway user` and that user's `Gateway token` when Gateway user auth is
+  enabled
 
 ## 3) Build + host (static)
 
@@ -44,6 +45,16 @@ cd web
 npm run build
 ```
 
-Deploy `web/dist/` with any static file server.
+Deploy `web/dist/` behind the packaged web server or a reverse proxy that
+routes same-origin `/api/...` to Gateway.
 
-If you serve the web app on the **same origin** as the gateway, you can set `Gateway URL` to empty and rely on same-origin `/api/gateway/*` routing.
+In hosted user-auth mode, AbstractCode Web exchanges the Gateway user token for
+an app-scoped browser session and strips bearer tokens from saved browser
+settings. Direct bearer-token mode is retained for local development when no
+Gateway user is configured. When the web UI is served from a non-local
+hostname, the server-configured Gateway URL is authoritative; browser-supplied
+Gateway URL changes are rejected unless
+`ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` is enabled behind your own
+access control. If a reverse proxy rewrites `Host`, set
+`ABSTRACTCODE_TRUST_PROXY_HEADERS=1` only when the proxy strips
+client-supplied forwarded headers.

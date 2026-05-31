@@ -9,12 +9,21 @@ To regenerate `llms-full.txt`, run: `python scripts/generate_llms_full.py`
 Format reference: https://llmstxt.org/
 
 Important notes (evidence-first):
-- Status: **pre-alpha**, version **0.3.7** (see `pyproject.toml` and `abstractcode/__init__.py`). Docs last verified: **2026-05-29**.
+- Status: **pre-alpha**, version **0.3.8** (see `pyproject.toml` and `abstractcode/__init__.py`). Docs last verified: **2026-05-31**.
 - Source of truth is the code in `abstractcode/` and executable invariants in `tests/`. If docs and code disagree, follow the code/tests.
 - Authoritative in-app command list: `/help` (implemented in `abstractcode/react_shell.py::_show_help`).
 - Tools are approval-gated by default (wired via `PassthroughToolExecutor(mode="approval_required")` in `abstractcode/react_shell.py`).
 - The pip package is the Python CLI/TUI. The `web/` app is a separate Node/Vite build (see [docs/web.md](docs/web.md)).
 - Rebuilding `web/` requires a sibling `abstractuic/` repo via Vite path aliases (`web/vite.config.ts`); `web/dist/` is included for convenience.
+- AbstractCode Web hosted mode signs in with Gateway URL, Gateway user, and
+  that user's token, exchanges the token server-side for an app-scoped Gateway
+  browser session, and strips bearer tokens from saved browser settings. Direct
+  bearer-token mode remains for local development. On non-local hosted UI
+  hostnames, the server-configured Gateway URL is authoritative and
+  browser-supplied Gateway URL changes are rejected unless
+  `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` is enabled behind access
+  control. Forwarded host headers are trusted only when
+  `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` or `ABSTRACTGATEWAY_TRUST_PROXY_HEADERS=1`.
 - Web voice UX exists (push-to-talk transcription + TTS playback) when the connected gateway exposes the endpoints used by `web/src/lib/gateway_client.ts` (`/audio/transcribe`, `/voice/tts`).
 - Local VisualFlow runs via `abstractcode flow ...` require `abstractcode[flow]` (see [docs/workflows.md](docs/workflows.md)).
 

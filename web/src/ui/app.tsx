@@ -587,8 +587,12 @@ export function App(): React.ReactElement {
   const session_id = session.session_id;
 
   const gateway = useMemo(
-    () => new GatewayClient({ base_url: settings.gateway_url, auth_token: settings.auth_token }),
-    [settings.gateway_url, settings.auth_token]
+    () =>
+      new GatewayClient({
+        base_url: settings.gateway_auth_mode === "session" ? "" : settings.gateway_url,
+        auth_token: settings.gateway_auth_mode === "session" ? "" : settings.auth_token,
+      }),
+    [settings.gateway_auth_mode, settings.gateway_url, settings.auth_token]
   );
 
   useLayoutEffect(() => {
@@ -606,11 +610,11 @@ export function App(): React.ReactElement {
   useLayoutEffect(() => {
     if (!gpu_enabled) return;
     const el = monitor_gpu_ref.current as any;
-    if (el) el.token = settings.auth_token || "";
+    if (el) el.token = settings.gateway_auth_mode === "direct" ? settings.auth_token || "" : "";
     // Register after setting props so the custom element can pick them up during upgrade.
     // (The monitor-gpu element may be present in the DOM before it's defined.)
     registerMonitorGpuWidget();
-  }, [gpu_enabled, settings.auth_token, route.name]);
+  }, [gpu_enabled, settings.auth_token, settings.gateway_auth_mode, route.name]);
 
   useEffect(() => {
     save_current_repl_session(session_id, repl);
@@ -1186,16 +1190,21 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
   const [error_providers, set_error_providers] = useState("");
   const [error_models, set_error_models] = useState("");
   const [error_tools, set_error_tools] = useState("");
+  const ignore_next_gateway_reset_ref = useRef(false);
 
   // Auto-connect if previously connected
   useEffect(() => {
-    if (s.gateway_was_connected && s.gateway_url && !gateway_connected && !gateway_connecting) {
+    if (s.gateway_was_connected && (s.gateway_url || s.gateway_auth_mode === "session") && !gateway_connected && !gateway_connecting) {
       void connect_gateway();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
+    if (ignore_next_gateway_reset_ref.current) {
+      ignore_next_gateway_reset_ref.current = false;
+      return;
+    }
     // Reset state on gateway URL/token change
     set_gateway_connected(false);
     set_gateway_connecting(false);
@@ -1213,6 +1222,39 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
     set_error_models("");
     set_error_tools("");
   }, [props.gateway]);
+
+  async function sign_in_gateway_session(): Promise<any> {
+    const gateway_user = String(settings_ref.current.gateway_user || "").trim();
+    const gateway_token = String(settings_ref.current.auth_token || "").trim();
+    if (!gateway_user) {
+      throw new Error("Gateway user is required for hosted sign-in.");
+    }
+    if (!gateway_token) {
+      const response = await fetch("/api/connection/gateway", { headers: { Accept: "application/json" } });
+      const payload = await response.json().catch(async () => ({ detail: await response.text().catch(() => "") }));
+      const principal = payload?.gateway?.principal || payload?.principal || {};
+      const existing_user = String(principal?.user_id || "").trim();
+      if (response.ok && payload?.ok !== false && existing_user === gateway_user) {
+        return payload;
+      }
+      throw new Error("Gateway token is required to create a browser session.");
+    }
+    const response = await fetch("/api/connection/gateway", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        gateway_url: String(settings_ref.current.gateway_url || "").trim(),
+        gateway_user_id: gateway_user,
+        gateway_token,
+        persist: settings_ref.current.gateway_remember !== false,
+      }),
+    });
+    const payload = await response.json().catch(async () => ({ detail: await response.text().catch(() => "") }));
+    if (!response.ok || payload?.ok === false) {
+      throw new Error(String(payload?.detail || payload?.error || `Gateway sign-in failed (${response.status})`));
+    }
+    return payload;
+  }
 
   async function connect_gateway(): Promise<void> {
     set_gateway_connecting(true);
@@ -1249,10 +1291,16 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
         }
       }
 
+      const wants_session = Boolean(String(s.gateway_user || "").trim());
+      const gateway_for_connect = wants_session ? new GatewayClient({ base_url: "", auth_token: "" }) : props.gateway;
+      if (wants_session) {
+        await sign_in_gateway_session();
+      }
+
       const [prov_res, tool_res, ws_res] = await Promise.all([
-        props.gateway.discovery_providers(),
-        props.gateway.discovery_tools(),
-        props.gateway.workspace_policy().catch((e: any) => ({ ok: false, error: String(e?.message || e || "Failed to load workspace policy") })),
+        gateway_for_connect.discovery_providers(),
+        gateway_for_connect.discovery_tools(),
+        gateway_for_connect.workspace_policy().catch((e: any) => ({ ok: false, error: String(e?.message || e || "Failed to load workspace policy") })),
       ]);
       const prov_items = Array.isArray(prov_res?.items) ? prov_res.items : [];
       const tool_items = Array.isArray(tool_res?.items) ? tool_res.items : [];
@@ -1271,7 +1319,13 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
         default_provider,
         default_model,
       });
-      if (changed) props.on_change(next_settings);
+      const auth_next = wants_session
+        ? { ...next_settings, gateway_auth_mode: "session" as const, auth_token: "", gateway_was_connected: true }
+        : { ...next_settings, gateway_auth_mode: "direct" as const, gateway_was_connected: true };
+      if (changed || auth_next.gateway_auth_mode !== before.gateway_auth_mode || auth_next.auth_token !== before.auth_token || !before.gateway_was_connected) {
+        ignore_next_gateway_reset_ref.current = true;
+        props.on_change(auth_next);
+      }
 
       set_providers(prov_items);
       set_tools(tool_items);
@@ -1306,7 +1360,8 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
     set_error_models("");
     set_error_tools("");
     // Clear auto-reconnect flag
-    props.on_change({ ...settings_ref.current, gateway_was_connected: false });
+    void fetch("/api/connection/gateway", { method: "DELETE" }).catch(() => undefined);
+    props.on_change({ ...settings_ref.current, auth_token: "", gateway_was_connected: false });
   }
 
   // Provider → models.
@@ -1438,7 +1493,7 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
             <h2>Gateway</h2>
           </div>
           <div className="settings_card_header" style={{ marginTop: 6 }}>
-            <div className="muted">Connect once to discover providers/models/tools. Settings are saved locally.</div>
+            <div className="muted">Hosted sign-in uses a Gateway browser session. The token is not saved in browser storage.</div>
             <span className={`chip ${gateway_connected ? "ok" : gateway_connecting ? "info" : "muted"}`}>
               {gateway_connecting ? "connecting" : gateway_connected ? "connected" : "disconnected"}
             </span>
@@ -1476,13 +1531,34 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
             ) : null}
           </div>
           <div className="field">
-            <label>Auth token</label>
+            <label>Gateway user</label>
+            <input
+              value={s.gateway_user}
+              onChange={(e) => props.on_change({ ...s, gateway_user: e.target.value, gateway_auth_mode: "session" })}
+              placeholder="user id for hosted sign-in"
+            />
+          </div>
+          <div className="field">
+            <label>Gateway token</label>
             <input
               type="password"
               value={s.auth_token}
               onChange={(e) => props.on_change({ ...s, auth_token: e.target.value })}
-              placeholder="Bearer token (optional)"
+              placeholder={s.gateway_user.trim() ? "user token for sign-in" : "optional direct dev token"}
             />
+            <span className="field_hint">
+              Enter a user id to sign in with a Gateway browser session. Leave user blank only for local direct-token development.
+            </span>
+          </div>
+          <div className="field">
+            <label>Remember browser session</label>
+            <select
+              value={s.gateway_remember ? "on" : "off"}
+              onChange={(e) => props.on_change({ ...s, gateway_remember: e.target.value === "on" })}
+            >
+              <option value="on">On</option>
+              <option value="off">Off</option>
+            </select>
           </div>
           <div className="field">
             <label>Client id</label>
@@ -2675,11 +2751,6 @@ function ConsolePage(props: {
       set_error("Pick an agent in New.");
       return;
     }
-    if (!props.settings.provider.trim() || !props.settings.model.trim()) {
-      set_error("Set provider + model in Settings.");
-      return;
-    }
-
     set_error("");
     clear_status();
     records_ref.current = [];
@@ -4703,7 +4774,7 @@ function ConsolePage(props: {
           </Notice>
         ) : null}
         {!props.settings.provider.trim() || !props.settings.model.trim() ? (
-          <Notice variant="warn">Set provider + model in Settings. (These agent workflows require them.)</Notice>
+          <Notice variant="info">Provider/model will use Gateway defaults. Set an override in Settings only when needed.</Notice>
         ) : null}
         {(() => {
           const gw = String(props.settings.gateway_url || "").trim();

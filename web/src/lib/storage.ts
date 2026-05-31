@@ -3,6 +3,9 @@ import { random_id } from "./ids";
 export type Settings = {
   gateway_url: string;
   auth_token: string;
+  gateway_user: string;
+  gateway_auth_mode: "session" | "direct";
+  gateway_remember: boolean;
   gateway_was_connected: boolean;
 
   theme: string;
@@ -123,6 +126,9 @@ function _default_settings(): Settings {
   return {
     gateway_url: "",
     auth_token: "",
+    gateway_user: "",
+    gateway_auth_mode: "session",
+    gateway_remember: true,
     gateway_was_connected: false,
 
     theme: "dark",
@@ -164,6 +170,9 @@ export function load_settings(): Settings {
   const out: Settings = { ...base, ...(parsed as any) };
   out.gateway_url = String(out.gateway_url || "");
   out.auth_token = String(out.auth_token || "");
+  out.gateway_user = String((out as any).gateway_user || "");
+  out.gateway_auth_mode = (out as any).gateway_auth_mode === "direct" ? "direct" : "session";
+  out.gateway_remember = (out as any).gateway_remember === false ? false : true;
   out.gateway_was_connected = Boolean((out as any).gateway_was_connected);
   out.theme = String(out.theme || base.theme);
   out.font_scale = String(out.font_scale || base.font_scale);
@@ -192,7 +201,8 @@ export function load_settings(): Settings {
 export function save_settings(s: Settings): void {
   const st = _store();
   try {
-    st.setItem(KEY_SETTINGS, JSON.stringify(s));
+    const persisted: Settings = { ...s, auth_token: "" };
+    st.setItem(KEY_SETTINGS, JSON.stringify(persisted));
   } catch {
     // ignore
   }

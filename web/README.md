@@ -23,4 +23,14 @@ npm run dev
 
 In the UI:
 - set `Gateway URL` (blank = same origin / dev proxy; e.g. `http://127.0.0.1:8081`)
-- set `Auth token` if your gateway requires it
+- in hosted user-auth mode, set `Gateway user` and that user's `Gateway token`
+
+When a Gateway user is provided, the web server exchanges the token for a
+Gateway browser session and stores only app-scoped session cookies. The raw
+token is not persisted in browser settings. Direct bearer-token mode is kept for
+local development only. When the web UI is served from a non-local hostname,
+the server-configured Gateway URL is authoritative; browser-supplied Gateway URL
+changes are rejected unless `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1`
+is set behind your own access control. If a reverse proxy rewrites `Host`, set
+`ABSTRACTCODE_TRUST_PROXY_HEADERS=1` only when the proxy strips client-supplied
+forwarded headers.

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-05-31
+
+### Changed
+- Raised AbstractFramework dependency floors to Core `>=2.13.31`, Runtime `>=0.4.26`, Agent `>=0.3.10`, and Flow `>=0.3.17`.
+- Aligned the web package release version with the Python package.
+
+### Fixed
+- Hosted web mode now follows the Gateway URL/session policy used by Flow so remote browser clients cannot turn the app into a user-directed Gateway proxy.
+
 ## [0.3.7] - 2026-05-29
 
 ### Changed
