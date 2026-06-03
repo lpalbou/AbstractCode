@@ -31,7 +31,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Check out AbstractUIC shared packages
-        run: git clone --depth 1 https://github.com/lpalbou/AbstractUIC.git ../abstractuic
+        working-directory: .
+        run: git clone --depth 1 https://github.com/lpalbou/AbstractUIC.git "$GITHUB_WORKSPACE/../abstractuic"
 
       - name: Set up Node
         uses: actions/setup-node@v4
