@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-06-03
+
+### Changed
+- Raised AbstractFramework dependency floors to Core `>=2.13.32`, Runtime `>=0.4.27`, Agent `>=0.3.11`, and Flow `>=0.3.18`.
+- Aligned the web package release version with the Python package.
+
 ## [0.3.8] - 2026-05-31
 
 ### Changed
