@@ -1,0 +1,85 @@
+name: Release Web
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Web package version to publish, with or without leading v"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release-web-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-npm:
+    name: Validate and publish @abstractframework/code
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@abstractframework/code
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Check out AbstractCode
+        uses: actions/checkout@v4
+
+      - name: Check out AbstractUIC shared packages
+        run: git clone --depth 1 https://github.com/lpalbou/AbstractUIC.git ../abstractuic
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Validate release version
+        env:
+          RELEASE_INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const rawVersion = process.env.RELEASE_INPUT_VERSION || '';
+          const version = rawVersion.startsWith('v') ? rawVersion.slice(1) : rawVersion;
+          if (!/^\d+\.\d+\.\d+(?:[a-zA-Z0-9.-]+)?$/.test(version)) {
+            throw new Error(`Invalid release version: ${rawVersion}`);
+          }
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          if (pkg.version !== version) {
+            throw new Error(`Input version ${version} does not match web/package.json version ${pkg.version}`);
+          }
+          const changelog = fs.readFileSync('../CHANGELOG.md', 'utf8');
+          if (!changelog.includes(`## [${version}] - `)) {
+            throw new Error(`CHANGELOG.md has no entry for ${version}`);
+          }
+          NODE
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Validate npm package contents
+        run: npm pack --dry-run
+
+      - name: Publish
+        run: |
+          PKG_NAME="$(node -p "require('./package.json').name")"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if npm view "${PKG_NAME}@${PKG_VERSION}" version >/dev/null 2>&1; then
+            echo "${PKG_NAME}@${PKG_VERSION} is already published; skipping."
+          else
+            npm publish --access public --provenance
+          fi
