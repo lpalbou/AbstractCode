@@ -14,7 +14,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/lpalbou/AbstractCode.git",
+    "url": "git+https://github.com/lpalbou/AbstractCode.git",
     "directory": "web"
   },
   "homepage": "https://github.com/lpalbou/AbstractCode#readme",
@@ -22,7 +22,7 @@
     "access": "public"
   },
   "bin": {
-    "abstractcode-web": "./bin/cli.js"
+    "abstractcode-web": "bin/cli.js"
   },
   "files": [
     "dist",
