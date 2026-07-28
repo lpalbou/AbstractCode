@@ -133,6 +133,7 @@ def _smoke_needle() -> str:
     return ""
 
 
+def _count_tree(root: Path) -> tuple[int, int]:
     if not root.is_dir():
         return 0, 0
     n = b = 0

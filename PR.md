@@ -1,9 +1,9 @@
-# PR: Smoke OK
+# PR: smoke-ok
 
 Branch: smoke-ok
 
 ## Goal
-Produce the exact requested response text, "smoke-ok", without making any code or file changes.
+Return exactly the text "smoke-ok" as requested, without any additional explanation, formatting, or code changes.
 
 ## Verification
 - gates: green

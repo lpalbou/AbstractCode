@@ -4,14 +4,14 @@
 - Source: multi-agent coding workflow
 
 ## Goal
-Produce the exact requested response text, "smoke-ok", without making any code or file changes.
+Return exactly the text "smoke-ok" as requested, without additional explanation or formatting.
 
 ## Steps
-- Return exactly "smoke-ok" as the requested output.
-- Do not add explanations, formatting, or code changes.
+- Output the exact string "smoke-ok".
+- Verify there are no prefixes, suffixes, code fences, or extra whitespace.
 
 ## Files
 - (none)
 
 ## Risks
-- The required planner JSON wrapper conflicts with the underlying request to reply with exactly "smoke-ok"; this plan follows the required JSON schema.
+- Any additional text or formatting would violate the exact-output requirement.
