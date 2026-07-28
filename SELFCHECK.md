@@ -3,8 +3,8 @@
 ## Repair evidence
 
 - Created the required `untracked/overnight-bench/out/code-tui/multi-coder-2/hello.txt`.
-- Removed the five named files outside the permitted output path: `llms.txt`, `hello-v10.txt`, `LICENSE`, `Cargo.toml`, and `CODE_OF_CONDUCT.md`.
-- Removed the prior wrong-path artifact under `multi-coder-1`.
+- Restored the five baseline files named by the failure so they are not branch-delivered changes: `llms.txt`, `hello-v10.txt`, `LICENSE`, `Cargo.toml`, and `CODE_OF_CONDUCT.md`.
+- Verified `cargo check --manifest-path Cargo.toml` succeeds.
 - Verified the required artifact contains exactly `overnight-cap-ok`, is exactly 16 bytes, and has no trailing newline.
 
 ## Artifact SHA-256
