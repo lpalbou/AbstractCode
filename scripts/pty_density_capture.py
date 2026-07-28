@@ -25,7 +25,6 @@ Exit: 0 pass, 1 fail, 2 config error.
 import fcntl
 import os
 import pty
-import re
 import select
 import struct
 import sys

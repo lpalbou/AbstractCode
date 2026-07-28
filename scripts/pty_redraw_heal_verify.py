@@ -53,7 +53,6 @@ _sys.exit(3)
 import fcntl
 import os
 import pty
-import re
 import select
 import struct
 import sys

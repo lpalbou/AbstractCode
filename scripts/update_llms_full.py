@@ -5,8 +5,8 @@ Run from the repository root after any docs change:
     python3 scripts/update_llms_full.py
 """
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 INCLUDED = [
     "README.md",
