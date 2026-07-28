@@ -35,7 +35,7 @@ use crate::discovery::{
     default_text_route, mcp_from_response, models_from_provider_models, providers_from_discovery,
     skills_from_response, tools_from_discovery, workflows_with_interface, GOAL_INTERFACE_V1,
 };
-use crate::gateway::{GatewayClient, GwError};
+use crate::gateway::{GatewayClient, GwError, GwResult};
 use crate::run_input::{build_input_data, StartOpts};
 use crate::store::{CacheInfo, Conn, ImageEntry, Phase, SessionTotals, Store, Workflow};
 use crate::transcript::{FoldEffect, Item, PendingWait};
@@ -376,6 +376,10 @@ struct Runner {
     catalog_attempted: bool,
     catalog_loaded: bool,
     catalog_preference: (Option<String>, Option<String>),
+    /// Lazy probe: `None` until first session-bloc fetch; `false` after
+    /// a 404 (pre-ship gateways keep the N-bundle fallback for the rest
+    /// of this runner's life).
+    session_bloc_available: Option<bool>,
 }
 
 pub fn spawn(
@@ -403,6 +407,7 @@ pub fn spawn(
                     catalog_attempted: false,
                     catalog_loaded: false,
                     catalog_preference: (None, None),
+                    session_bloc_available: None,
                 };
                 while let Ok(cmd) = rx.recv() {
                     if matches!(cmd, Cmd::Shutdown) {
@@ -1135,6 +1140,33 @@ impl Runner {
         }
     }
 
+    /// Session-history bloc route when present; `None` means fall back to
+    /// per-run `history_bundle` fan-out (404 caches unavailable).
+    fn fetch_session_bloc(
+        &mut self,
+        session_id: &str,
+        before: Option<&str>,
+        limit: usize,
+    ) -> Option<GwResult<Value>> {
+        if self.session_bloc_available == Some(false) {
+            return None;
+        }
+        match self
+            .client
+            .session_history_bloc(session_id, before, limit)
+        {
+            Ok(v) => {
+                self.session_bloc_available = Some(true);
+                Some(Ok(v))
+            }
+            Err(e) if e.status == Some(404) => {
+                self.session_bloc_available = Some(false);
+                None
+            }
+            Err(e) => Some(Err(e)),
+        }
+    }
+
     fn probe_attach(&mut self, session_id: &str, replay_turns: usize) {
         let store = self.store;
         // The idle strip says what this window is doing — the whole
@@ -1225,10 +1257,10 @@ impl Runner {
             })
             .collect();
         let bloc_start = prior.len().saturating_sub(replay_turns);
-        let older_count = bloc_start;
+        let mut older_count = bloc_start;
         // The history cursor: created_at of the oldest turn the bloc
         // restores — /history streams turns strictly BEFORE it.
-        let history_cursor = prior
+        let mut history_cursor = prior
             .get(bloc_start)
             .and_then(|r| r.get("created_at").and_then(Value::as_str))
             .map(str::to_string);
@@ -1238,35 +1270,55 @@ impl Runner {
             });
         }
         if replay_turns > 0 {
-            for run in prior.iter().skip(bloc_start) {
-                let rid = run.get("run_id").and_then(Value::as_str).unwrap_or("");
-                match self.client.history_bundle(rid, false, 0) {
-                    Ok(bundle) => {
-                        let failed = matches!(
-                            run.get("status").and_then(Value::as_str).unwrap_or(""),
-                            "failed" | "cancelled"
-                        );
-                        if rehydrate_run_into(&mut fold, rid, &bundle, failed, &mut effects) {
-                            replayed += 1;
-                        }
+            let mut used_bloc = false;
+            if let Some(bloc_result) = self.fetch_session_bloc(session_id, None, replay_turns) {
+                match bloc_result {
+                    Ok(bloc) => {
+                        used_bloc = true;
+                        older_count = bloc
+                            .get("older_remaining")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0) as usize;
+                        history_cursor = bloc
+                            .get("cursor_after")
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
+                        let (r, f) = fold_session_bloc_turns(&mut fold, &bloc, &mut effects);
+                        replayed += r;
+                        failed_restores += f;
                     }
                     Err(e) => {
-                        // A silently skipped turn left an unmarked hole
-                        // mid-transcript (adversary P1-4): mark it — WITH
-                        // THE CAUSE (replay-integrity audit: the 10 MiB
-                        // reader-cap error was in hand here and thrown
-                        // away; the operator saw a cause-less marker and
-                        // could not know his biggest turns were being
-                        // deterministically dropped). Error item: stays
-                        // visible in the clean view, never folds into
-                        // chat_messages.
                         fold.push_item(Item::Error {
                             text: format!(
-                                "one prior turn could not be restored — run {}: {e}",
-                                &rid[..rid.len().min(8)]
+                                "session history bloc could not be restored from the gateway ({e})"
                             ),
                         });
                         failed_restores += 1;
+                    }
+                }
+            }
+            if !used_bloc {
+                for run in prior.iter().skip(bloc_start) {
+                    let rid = run.get("run_id").and_then(Value::as_str).unwrap_or("");
+                    match self.client.history_bundle(rid, false, 0) {
+                        Ok(bundle) => {
+                            let failed = matches!(
+                                run.get("status").and_then(Value::as_str).unwrap_or(""),
+                                "failed" | "cancelled"
+                            );
+                            if rehydrate_run_into(&mut fold, rid, &bundle, failed, &mut effects) {
+                                replayed += 1;
+                            }
+                        }
+                        Err(e) => {
+                            fold.push_item(Item::Error {
+                                text: format!(
+                                    "one prior turn could not be restored — run {}: {e}",
+                                    &rid[..rid.len().min(8)]
+                                ),
+                            });
+                            failed_restores += 1;
+                        }
                     }
                 }
             }
@@ -1357,6 +1409,66 @@ impl Runner {
     /// the boot bloc.
     fn load_history(&mut self, session_id: &str, before: &str, count: usize) {
         let store = self.store;
+        let limit = count.max(1);
+        if let Some(bloc_result) = self.fetch_session_bloc(session_id, Some(before), limit) {
+            match bloc_result {
+                Ok(bloc) => {
+                    let remaining = bloc
+                        .get("older_remaining")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as usize;
+                    let new_cursor = bloc
+                        .get("cursor_after")
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
+                    let mut scratch = crate::transcript::Fold::new();
+                    scratch.set_agent_workflows(self.agent_workflow_ids.iter().cloned());
+                    let mut effects: Vec<FoldEffect> = Vec::new();
+                    let (streamed, failed) =
+                        fold_session_bloc_turns(&mut scratch, &bloc, &mut effects);
+                    if streamed == 0 && failed == 0 {
+                        let probed = session_id.to_string();
+                        self.post(move || apply_history_none_older(&store, &probed));
+                        return;
+                    }
+                    let probed_session = session_id.to_string();
+                    let scratch_session = scratch.session;
+                    self.post(move || {
+                        if store.session_id.with_untracked(|s| *s != probed_session) {
+                            return;
+                        }
+                        store
+                            .fold
+                            .update(|f| prepend_history_items(f, scratch.items, remaining));
+                        store.totals.update(|t| {
+                            t.input_tokens += scratch_session.input_tokens;
+                            t.output_tokens += scratch_session.output_tokens;
+                            t.total_tokens += scratch_session.total_tokens;
+                            t.runs += scratch_session.runs;
+                        });
+                        store.history_cursor.set(new_cursor.clone());
+                        store.older_turns.set(remaining);
+                        store.history_loading.set(false);
+                        let fail_note = if failed > 0 {
+                            format!(" ({failed} could not be restored — errors name the cause)")
+                        } else {
+                            String::new()
+                        };
+                        store.notify(format!(
+                            "streamed {streamed} earlier turn(s){fail_note} — {remaining} more on the gateway"
+                        ));
+                    });
+                    send_fetch_effects(&self.tx, effects);
+                    return;
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    let probed = session_id.to_string();
+                    self.post(move || apply_history_list_failure(&store, &probed, &msg));
+                    return;
+                }
+            }
+        }
         let v = match self.client.list_runs(session_id, 200) {
             Ok(v) => v,
             Err(e) => {
@@ -2817,6 +2929,59 @@ pub fn downscale_for_transcript(
     bitmap.resize_bilinear(nw, nh)
 }
 
+/// Fold every turn embedded in a session-history bloc response (gateway
+/// `GET /sessions/{id}/history/bloc`) through the same rehydration path
+/// as per-run `history_bundle` fetches. Returns (replayed, failed).
+fn fold_session_bloc_turns(
+    fold: &mut crate::transcript::Fold,
+    bloc: &Value,
+    effects_out: &mut Vec<FoldEffect>,
+) -> (usize, usize) {
+    let mut replayed = 0usize;
+    let mut failed = 0usize;
+    if let Some(warnings) = bloc.get("warnings").and_then(Value::as_array) {
+        for w in warnings {
+            let text = w
+                .as_str()
+                .or_else(|| w.get("message").and_then(Value::as_str))
+                .or_else(|| w.get("code").and_then(Value::as_str))
+                .unwrap_or("partial history");
+            fold.push_item(Item::Info {
+                text: format!("session history note: {text}"),
+            });
+        }
+    }
+    let turns = bloc
+        .get("turns")
+        .and_then(Value::as_array)
+        .map(|a| a.as_slice())
+        .unwrap_or(&[]);
+    for turn in turns {
+        let rid = turn.get("run_id").and_then(Value::as_str).unwrap_or("");
+        if rid.is_empty() {
+            continue;
+        }
+        let run_failed = matches!(
+            turn.get("status").and_then(Value::as_str).unwrap_or(""),
+            "failed" | "cancelled"
+        );
+        let Some(bundle) = turn.get("bundle") else {
+            fold.push_item(Item::Error {
+                text: format!(
+                    "one prior turn had no bundle — run {}",
+                    &rid[..rid.len().min(8)]
+                ),
+            });
+            failed += 1;
+            continue;
+        };
+        if rehydrate_run_into(fold, rid, bundle, run_failed, effects_out) {
+            replayed += 1;
+        }
+    }
+    (replayed, failed)
+}
+
 /// Fold one prior run tree (a `history_bundle`) into `fold` as a full-detail
 /// turn: the user's prompt card, then the tree's ledgers root-first through
 /// the normal fold (cycles, tool cards, answers — identical to the live
@@ -3502,6 +3667,39 @@ mod tests {
             .expect("tool card folded from the enveloped record");
         assert_eq!(tool.0, "read_file");
         assert_eq!(tool.1, crate::transcript::ToolStatus::Ok);
+    }
+
+    #[test]
+    fn fold_session_bloc_turns_rehydrates_each_embedded_bundle() {
+        let bundle = json!({
+            "input_data": {"prompt": "turn one"},
+            "ledgers": {
+                "r1": {"run_id": "r1", "total": 1, "items": [
+                    {"run_id": "r1", "node_id": "a", "status": "completed",
+                     "effect": {"type": "answer_user", "payload": {"text": "one"}},
+                     "result": {"output": "one"}}
+                ]}
+            }
+        });
+        let bloc = json!({
+            "cursor_after": "2026-07-28T08:00:00Z",
+            "older_remaining": 2,
+            "warnings": ["ledger tail truncated"],
+            "turns": [
+                {"run_id": "r1", "status": "completed", "bundle": bundle},
+                {"run_id": "r2", "status": "failed"}
+            ]
+        });
+        let mut fold = crate::transcript::Fold::new();
+        let mut fx = Vec::new();
+        let (replayed, failed) = fold_session_bloc_turns(&mut fold, &bloc, &mut fx);
+        assert_eq!(replayed, 1);
+        assert_eq!(failed, 1);
+        assert!(fold.items.iter().any(|i| matches!(i, Item::User { .. })));
+        assert!(fold
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Info { text } if text.contains("truncated"))));
     }
 
     #[test]

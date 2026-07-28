@@ -662,6 +662,29 @@ impl GatewayClient {
         self.get_json(&path)
     }
 
+    /// One session-history bloc: up to `limit` root turns strictly before
+    /// an optional ISO `created_at` cursor, each carrying its replay
+    /// `history_bundle` inline. Replaces the N sequential
+    /// `/runs/{id}/history_bundle` fan-out the boot and `/history` blocs
+    /// used to pay (gateway `session_history_bloc`, 2026-07-28).
+    pub fn session_history_bloc(
+        &self,
+        session_id: &str,
+        before: Option<&str>,
+        limit: usize,
+    ) -> GwResult<Value> {
+        let mut path = format!(
+            "/sessions/{}/history/bloc?detail=replay&limit={}",
+            url_encode(session_id),
+            limit.max(1)
+        );
+        if let Some(b) = before.filter(|s| !s.is_empty()) {
+            path.push_str("&before=");
+            path.push_str(&url_encode(b));
+        }
+        self.get_json(&path)
+    }
+
     /// The run's original input_data (prompt, context, …).
     pub fn input_data(&self, run_id: &str) -> GwResult<Value> {
         self.get_json(&format!("/runs/{}/input_data", url_encode(run_id)))
@@ -980,6 +1003,24 @@ mod tests {
         assert_eq!(url_encode("run-1_2.3~x"), "run-1_2.3~x");
         assert_eq!(url_encode("a b/c"), "a%20b%2Fc");
         assert_eq!(url_encode("é"), "%C3%A9");
+    }
+
+    #[test]
+    fn session_history_bloc_path_builds_cursor_and_limit() {
+        let session = "sess/a";
+        let with_before = format!(
+            "/sessions/{}/history/bloc?detail=replay&limit=5&before={}",
+            url_encode(session),
+            url_encode("2026-07-28T06:00:00Z")
+        );
+        assert!(with_before.contains("limit=5"));
+        assert!(with_before.contains("before=2026-07-28T06%3A00%3A00Z"));
+        let no_before = format!(
+            "/sessions/{}/history/bloc?detail=replay&limit=3",
+            url_encode("acode-test")
+        );
+        assert!(no_before.contains("limit=3"));
+        assert!(!no_before.contains("before="));
     }
 
     #[test]
