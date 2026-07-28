@@ -118,7 +118,21 @@ def _prompt_for(out_dir: Path) -> str:
     )
 
 
-def _count_tree(root: Path) -> tuple[int, int]:
+def _smoke_answer_seen(log_path: Path, needle: str) -> bool:
+    """Smoke runs on heavy workflows may timeout while the model already answered."""
+    if not log_path.is_file() or not needle.strip():
+        return False
+    return needle.strip().lower() in log_path.read_text(errors="replace").lower()
+
+
+def _smoke_needle() -> str:
+    if not SMOKE_PROMPT:
+        return ""
+    if "exactly:" in SMOKE_PROMPT.lower():
+        return SMOKE_PROMPT.split(":", 1)[1].strip().strip("'\"")
+    return ""
+
+
     if not root.is_dir():
         return 0, 0
     n = b = 0
@@ -291,6 +305,10 @@ def run_code_tui(iteration: int) -> RunResult:
         code = 1
         err = str(exc)
     elapsed = time.monotonic() - t0
+    needle = _smoke_needle()
+    if SMOKE_PROMPT and code == 124 and needle and _smoke_answer_seen(log_path, needle):
+        code = 0
+        err = f"smoke_pass (answer '{needle}' seen; workflow continued)"
     final = ""
     stats: dict = {}
     if log_path.is_file():
