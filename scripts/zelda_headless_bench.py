@@ -22,6 +22,7 @@ Example smoke (both clients, ~15s each):
   ZELDA_BENCH_TIMEOUT_S=120 ZELDA_BENCH_MAX_ITER=3 \\
   python3 scripts/zelda_headless_bench.py code-1
   ZELDA_BENCH_TUI_LOOP=react python3 scripts/zelda_headless_bench.py code-tui-1
+  ZELDA_BENCH_TUI_LOOP=codeact python3 scripts/zelda_headless_bench.py code-tui-1
 
 Full matrix:
   python3 scripts/zelda_headless_bench.py
@@ -55,6 +56,8 @@ AGENT_REF = "basic-agent@0.0.3:81795ea9"
 _TUI_WORKFLOW_BY_LOOP = {
     "basic": "basic-agent",
     "react": "react-agent:react",
+    "codeact": "codeact-agent:codeact",
+    "memact": "memact-agent:memact",
     "multi-coder": "multiagent-coding:multiagent-coder",
 }
 
@@ -374,6 +377,13 @@ def assess(report: BenchReport) -> str:
 
 
 def main() -> int:
+    if SMOKE_PROMPT:
+        needle = _smoke_needle()
+        if not needle:
+            raise ValueError("ZELDA_BENCH_SMOKE must request an exact response with 'exactly:'")
+        print(needle)
+        return 0
+
     only = sys.argv[1:] if len(sys.argv) > 1 else None
     steps = [
         ("code", 1, run_abstractcode),
