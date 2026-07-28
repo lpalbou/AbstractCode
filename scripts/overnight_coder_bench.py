@@ -49,6 +49,14 @@ _TUI_WORKFLOW = {
     "multi-coder": "multiagent-coding:multiagent-coder",
 }
 
+# abstractcode `--agent` must use bundle:flow for multi-flow gateway bundles.
+_CODE_AGENT = {
+    "react": "react",
+    "multi-coder": "multiagent-coding:multiagent-coder",
+}
+
+SMOKE_NEEDLE = "overnight-smoke-ok"
+
 
 @dataclass
 class RunResult:
@@ -124,10 +132,13 @@ def _run_subprocess(
     log_path: Path,
     timeout: int,
     cwd: Path | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> tuple[int, str, float]:
     t0 = time.monotonic()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     env = _clean_env(os.environ)
+    if extra_env:
+        env.update(extra_env)
     try:
         with log_path.open("w") as log:
             proc = subprocess.run(
@@ -145,6 +156,27 @@ def _run_subprocess(
         return 1, str(exc), round(time.monotonic() - t0, 2)
 
 
+def _log_has_smoke(log_path: Path, needle: str = SMOKE_NEEDLE) -> bool:
+    if not log_path.is_file():
+        return False
+    text = log_path.read_text(errors="replace")
+    if needle.lower() in text.lower():
+        return True
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        part = ev.get("part") if isinstance(ev.get("part"), dict) else {}
+        if part.get("type") == "text":
+            if needle.lower() in str(part.get("text", "")).lower():
+                return True
+    return False
+
+
 def _cap_prompt(out_dir: Path) -> str:
     return (
         f"Create the file {out_dir.resolve()}/hello.txt whose entire content is exactly:\n"
@@ -154,7 +186,7 @@ def _cap_prompt(out_dir: Path) -> str:
 
 
 def run_abstractcode(mode: str, iteration: int, tier: str, prompt: str, timeout: int) -> RunResult:
-    agent = "react" if mode == "react" else mode
+    agent = _CODE_AGENT.get(mode, mode)
     out_dir = OUT_ROOT / "out" / "code" / f"{mode}-{iteration}"
     out_dir.mkdir(parents=True, exist_ok=True)
     log_path = BENCH_ROOT / "logs" / f"code-{mode}-{iteration}-{tier}.jsonl"
@@ -188,7 +220,7 @@ def run_abstractcode(mode: str, iteration: int, tier: str, prompt: str, timeout:
         hello = out_dir / "hello.txt"
         ok = ok and hello.is_file() and CAP_MARKER in hello.read_text(errors="replace")
     elif tier == "readiness":
-        ok = ok and "overnight-smoke-ok" in log_path.read_text(errors="replace").lower()
+        ok = ok and _log_has_smoke(log_path)
     return RunResult(
         client="code",
         mode=mode,
@@ -249,7 +281,7 @@ def run_code_tui(mode: str, iteration: int, tier: str, prompt: str, timeout: int
         hello = out_dir / "hello.txt"
         ok = ok and hello.is_file() and CAP_MARKER in hello.read_text(errors="replace")
     elif tier == "readiness":
-        ok = ok and "overnight-smoke-ok" in log_path.read_text(errors="replace").lower()
+        ok = ok and _log_has_smoke(log_path)
     return RunResult(
         client="code-tui",
         mode=mode,
@@ -272,20 +304,33 @@ def run_codex(iteration: int, tier: str, prompt: str, timeout: int) -> RunResult
     out_dir.mkdir(parents=True, exist_ok=True)
     log_path = BENCH_ROOT / "logs" / f"codex-{iteration}-{tier}.log"
     started = _utc_now()
+    provider_key = "bench8317"
     cmd = [
         "codex",
         "exec",
         "-C",
         str(REPO_ROOT),
         "-c",
+        (
+            f'model_providers.{provider_key}={{name="Bench8317",'
+            f'base_url="{BASE_URL}",env_key="OPENAI_API_KEY"}}'
+        ),
+        "-c",
         f'model="{MODEL}"',
         "-c",
-        f'model_provider="{PROVIDER}"',
+        f'model_provider="{provider_key}"',
+        "-c",
+        'model_reasoning_effort="auto"',
         prompt,
     ]
-    code, err, elapsed = _run_subprocess(cmd, log_path, timeout)
+    code, err, elapsed = _run_subprocess(
+        cmd,
+        log_path,
+        timeout,
+        extra_env={"OPENAI_API_KEY": "bench"},
+    )
     fc, tb = _count_tree(out_dir)
-    ok = code == 0 and "overnight-smoke-ok" in log_path.read_text(errors="replace").lower()
+    ok = code == 0 and _log_has_smoke(log_path)
     return RunResult(
         client="codex",
         mode="exec",
@@ -319,8 +364,7 @@ def run_opencode(iteration: int, tier: str, prompt: str, timeout: int) -> RunRes
     ]
     code, err, elapsed = _run_subprocess(cmd, log_path, timeout)
     fc, tb = _count_tree(out_dir)
-    text = log_path.read_text(errors="replace").lower() if log_path.is_file() else ""
-    ok = code == 0 and "overnight-smoke-ok" in text
+    ok = code == 0 and _log_has_smoke(log_path)
     return RunResult(
         client="opencode",
         mode="run",
@@ -346,39 +390,14 @@ def run_pi(iteration: int, tier: str, prompt: str, timeout: int) -> RunResult:
     cmd = [
         "pi",
         "--provider",
-        "openai",
+        "bench8317",
         "--model",
         MODEL,
-        "--api-key",
-        "bench",
         prompt,
     ]
-    env = _clean_env(os.environ)
-    env["OPENAI_BASE_URL"] = BASE_URL
-    t0 = time.monotonic()
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with log_path.open("w") as log:
-            proc = subprocess.run(
-                cmd,
-                cwd=str(REPO_ROOT),
-                env=env,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                timeout=timeout + 30,
-            )
-        code = proc.returncode
-        err = ""
-    except subprocess.TimeoutExpired:
-        code = 124
-        err = "timeout"
-    except Exception as exc:  # noqa: BLE001
-        code = 1
-        err = str(exc)
-    elapsed = round(time.monotonic() - t0, 2)
+    code, err, elapsed = _run_subprocess(cmd, log_path, timeout)
     fc, tb = _count_tree(out_dir)
-    text = log_path.read_text(errors="replace").lower() if log_path.is_file() else ""
-    ok = code == 0 and "overnight-smoke-ok" in text
+    ok = code == 0 and _log_has_smoke(log_path)
     return RunResult(
         client="pi",
         mode="one-shot",
@@ -396,12 +415,13 @@ def run_pi(iteration: int, tier: str, prompt: str, timeout: int) -> RunResult:
     )
 
 
-def _scenarios_readiness() -> list[tuple[str, str, int]]:
+def _scenarios_readiness(external_only: bool = False) -> list[tuple[str, str, int]]:
     rows: list[tuple[str, str, int]] = []
     for it in range(1, RETRIES + 1):
-        rows.append(("code", "react", it))
-        rows.append(("code-tui", "basic", it))
-        rows.append(("code-tui", "react", it))
+        if not external_only:
+            rows.append(("code", "react", it))
+            rows.append(("code-tui", "basic", it))
+            rows.append(("code-tui", "react", it))
         rows.append(("codex", "exec", it))
         rows.append(("opencode", "run", it))
         rows.append(("pi", "one-shot", it))
@@ -421,10 +441,10 @@ def _scenarios_capability() -> list[tuple[str, str, int]]:
     return rows
 
 
-def run_tier(tier: str) -> BenchReport:
+def run_tier(tier: str, *, external_only: bool = False) -> BenchReport:
     report = BenchReport(tier=tier, started_at=_utc_now())
     if tier == "readiness":
-        scenarios = _scenarios_readiness()
+        scenarios = _scenarios_readiness(external_only=external_only)
         prompt = SMOKE_PROMPT
         timeout = SMOKE_TIMEOUT_S
     else:
@@ -483,6 +503,9 @@ def main(argv: list[str]) -> int:
     if cmd == "readiness":
         run_tier("readiness")
         return 0
+    if cmd == "external-readiness":
+        run_tier("readiness", external_only=True)
+        return 0
     if cmd == "capability":
         run_tier("capability")
         return 0
@@ -490,7 +513,10 @@ def main(argv: list[str]) -> int:
         run_tier("readiness")
         run_tier("capability")
         return 0
-    print(f"unknown command {cmd!r} — use readiness|capability|all", file=sys.stderr)
+    print(
+        f"unknown command {cmd!r} — use readiness|external-readiness|capability|all",
+        file=sys.stderr,
+    )
     return 2
 
 

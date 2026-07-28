@@ -4,17 +4,16 @@
 - Source: multi-agent coding workflow
 
 ## Goal
-Create the single requested file at the existing destination path with byte-for-byte content `overnight-cap-ok`, with no trailing newline or other characters, and make no changes anywhere else.
+Create the requested hello.txt artifact at the existing destination with byte-for-byte content equal to overnight-cap-ok, exactly 16 bytes with no trailing newline, while making no other filesystem changes.
 
 ## Steps
-- Write exactly `overnight-cap-ok` to `/Users/albou/tmp/abstractframework/abstractcode-tui/untracked/overnight-bench/out/code-tui/multi-coder-1/hello.txt` without appending a newline.
-- Verify that the file exists and its complete content is exactly 16 bytes matching `overnight-cap-ok`.
-- Confirm that no other file or directory was created, changed, or removed.
+- Write the 16-byte string overnight-cap-ok directly to /Users/albou/tmp/abstractframework/abstractcode-tui/untracked/overnight-bench/out/code-tui/multi-coder-2/hello.txt without appending a newline.
+- Verify that the target file contains exactly overnight-cap-ok, is exactly 16 bytes long, and that no temporary, backup, or other files were created.
 
 ## Files
-- /Users/albou/tmp/abstractframework/abstractcode-tui/untracked/overnight-bench/out/code-tui/multi-coder-1/hello.txt
+- /Users/albou/tmp/abstractframework/abstractcode-tui/untracked/overnight-bench/out/code-tui/multi-coder-2/hello.txt
 
 ## Risks
-- A writing method may append a trailing newline, violating the exact-content requirement.
-- Using temporary, backup, log, or metadata files could violate the instruction not to write anywhere else.
-- Writing to a similar benchmark output directory instead of the exact `multi-coder-1` destination would fail the task.
+- A text-writing method may append a trailing newline, causing the required byte-for-byte check to fail.
+- An editor or atomic-write mechanism may create temporary or backup files, violating the requirement not to write anywhere else.
+- Using an incorrect or relative path could modify a location other than the specified target.
