@@ -8,4 +8,4 @@
 
 ## Artifact SHA-256
 
-ARTIFACT-SHA256: untracked/overnight-bench/out/code-tui/multi-coder-2/hello.txt cbff1adba3d54781ca7b106d9b349f3bd62b2d3df8b1d9401d37abcaa7ef35d4
+ARTIFACT-SHA256: untracked/overnight-bench/out/code-tui/multi-coder-1/hello.txt cbff1adba3d54781ca7b106d9b349f3bd62b2d3df8b1d9401d37abcaa7ef35d4
