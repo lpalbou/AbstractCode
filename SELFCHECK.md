@@ -2,7 +2,7 @@
 
 ## Repair evidence
 
-- Removed the five unrelated delivered files named by the failure: `llms.txt`, `hello-v10.txt`, `Cargo.toml`, `CODE_OF_CONDUCT.md`, and `LICENSE`.
+- Removed the five unrelated delivered files named by the current failure: `PR.md`, `README.md`, `llms-full.txt`, `Cargo.lock`, and `CHANGELOG.md`.
 - Verified all five paths are absent.
 - Verified the requested target is exactly 16 bytes, contains `overnight-cap-ok`, and has no trailing newline.
 
