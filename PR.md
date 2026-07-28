@@ -3,7 +3,7 @@
 Branch: smoke-ok
 
 ## Goal
-Return exactly the text "smoke-ok" as requested, without any additional explanation, formatting, or code changes.
+Return exactly the text "smoke-ok" as requested, without additional explanation or formatting.
 
 ## Verification
 - gates: green
