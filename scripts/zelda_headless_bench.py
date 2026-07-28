@@ -150,22 +150,6 @@ def _count_tree(root: Path) -> tuple[int, int]:
     return n, b
 
 
-def _preflight_abstractcode_runtime() -> str:
-    """Multi-coder flows compile code nodes; stale runtime installs fail on ``_input``."""
-    if CODE_LOOP != "multi-coder" and "multiagent" not in CODE_AGENT:
-        return ""
-    try:
-        from abstractruntime.visualflow_compiler.visual.code_executor import (  # noqa: F401
-            _CodeNodePolicy,
-        )
-    except ImportError:
-        return (
-            "abstractruntime missing _CodeNodePolicy (multi-coder needs >=0.4.30). "
-            "Fix: pip install --no-deps -e ../abstractruntime"
-        )
-    return ""
-
-
 def _parse_exec_jsonl(log_path: Path) -> tuple[str, dict]:
     final = ""
     stats: dict = {}
@@ -179,18 +163,13 @@ def _parse_exec_jsonl(log_path: Path) -> tuple[str, dict]:
             ev = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if ev.get("event") == "final" or ev.get("type") == "final":
-            final = str(
-                ev.get("answer") or ev.get("content") or ev.get("text") or ""
-            )[:2000]
-            stats = ev.get("stats") or ev.get("usage") or ev.get("cache") or {}
+        if ev.get("type") == "final":
+            final = str(ev.get("content") or ev.get("text") or "")[:2000]
+            stats = ev.get("stats") or ev.get("usage") or {}
     return final, stats
 
 
 def run_abstractcode(iteration: int) -> RunResult:
-    preflight_err = _preflight_abstractcode_runtime()
-    if preflight_err:
-        raise RuntimeError(preflight_err)
     out_dir = UNTRACKED / "code" / f"{CODE_LOOP}-{iteration}"
     out_dir.mkdir(parents=True, exist_ok=True)
     log_path = BENCH_ROOT / f"code-{CODE_LOOP}-{iteration}.jsonl"
