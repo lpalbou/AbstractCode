@@ -377,13 +377,6 @@ def assess(report: BenchReport) -> str:
 
 
 def main() -> int:
-    if SMOKE_PROMPT:
-        needle = _smoke_needle()
-        if not needle:
-            raise ValueError("ZELDA_BENCH_SMOKE must request an exact response with 'exactly:'")
-        print(needle)
-        return 0
-
     only = sys.argv[1:] if len(sys.argv) > 1 else None
     steps = [
         ("code", 1, run_abstractcode),
@@ -398,19 +391,31 @@ def main() -> int:
     BENCH_ROOT.mkdir(parents=True, exist_ok=True)
     for _label, iteration, fn in steps:
         client = fn.__name__.replace("run_", "").replace("abstractcode", "code")
-        print(f"=== {client} iter {iteration} ===", flush=True)
+        if not SMOKE_PROMPT:
+            print(f"=== {client} iter {iteration} ===", flush=True)
         result = fn(iteration)
         report.runs.append(result)
         partial = BENCH_ROOT / "report.partial.json"
         partial.write_text(json.dumps({"runs": [asdict(r) for r in report.runs]}, indent=2))
-        print(json.dumps(asdict(result), indent=2), flush=True)
+        if not SMOKE_PROMPT:
+            print(json.dumps(asdict(result), indent=2), flush=True)
     report.assessment = assess(report)
     (BENCH_ROOT / "assessment.md").write_text(report.assessment)
     (BENCH_ROOT / "report.json").write_text(
         json.dumps({"runs": [asdict(r) for r in report.runs], "assessment": report.assessment}, indent=2)
     )
+    succeeded = bool(report.runs) and all(r.exit_code == 0 for r in report.runs)
+    if SMOKE_PROMPT:
+        needle = _smoke_needle()
+        answered = bool(needle) and all(
+            needle.lower() in r.final_snippet.lower() for r in report.runs
+        )
+        if succeeded and answered:
+            print(needle)
+            return 0
+        return 1
     print(report.assessment)
-    return 0 if all(r.exit_code == 0 for r in report.runs) else 1
+    return 0 if succeeded else 1
 
 
 if __name__ == "__main__":
