@@ -93,7 +93,26 @@ Connection: `~/.abstractcode/gateway.json` (shared with the Python CLI).
 Preferences (theme, workflow, route, session, tool/skill selections, recent
 sessions): `~/.abstractcode-tui/prefs.json`.
 
+**Why did my queued prompt not start?**
+The queue only advances after the current run **succeeds** — a failure or a
+cancel pauses it (running the follow-up anyway would build on a turn that
+never finished). It also always restores **paused** after a relaunch or a
+session switch: a restore never auto-starts work. Open `/queue` and press
+`r` to resume; the strip shows `N queued (paused — /queue resumes)`
+whenever prompts are waiting on you.
+
+**How do I stop the constant approval prompts?**
+Set the permissions level: `/permissions write` auto-approves proven
+read-only tools plus workspace file writes (the runtime clamps those to the
+run's workspace); `/permissions all` auto-approves everything. Be clear-eyed
+about `all`: it auto-approves **arbitrary shell commands and network
+egress**, and it is sticky per session (and seeds new ones) — use it on
+gateways whose workspace and tools you trust, not as a reflex. Finer
+control: in `/tools`, `p` pins one tool `auto` (always approves, even above
+the level) or `ask` (always prompts, even below it — pins gate even at
+`all`). The approval modal's `A` sets `all` for the session.
+
 **Why deny by default in `exec`?**
 Unattended runs should not mutate a machine because nobody was there to say
-no. `--approve-all` is the explicit opt-in; denials carry an explanation the
+no. `--permissions all` is the explicit opt-in; denials carry an explanation the
 model sees, so it finishes as best it can without the tool.

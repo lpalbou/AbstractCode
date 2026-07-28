@@ -1,0 +1,12 @@
+{
+ "run_id": "65faf119-c8e6-4c1e-8666-ac47142804dc",
+ "status": "completed",
+ "output": {
+  "ok": true,
+  "turns": 1,
+  "close_reason": "closed",
+  "reflection_notices": [],
+  "closed_by": "operator",
+  "close_note": "abstractcode-tui cycle-2 live gate"
+ }
+}

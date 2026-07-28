@@ -1,0 +1,61 @@
+{
+ "run_id": "b0a1c2d3-e4f5-4678-9abc-def012345678",
+ "reply": "Hello \u2014 connectivity confirmed. The door works.",
+ "turn_n": 1,
+ "status": "waiting",
+ "turn_id": "turn-0001",
+ "tools_ran": [
+  "search_memory"
+ ],
+ "memories": [
+  {
+   "graph_id": "ex:memory-1",
+   "record_id": "row-1",
+   "kind": "episode",
+   "title": "a prior door check",
+   "admission": "stimulus",
+   "digest": "the operator ran a connectivity check through the visit door",
+   "tokens": 42,
+   "global_count": 3,
+   "born_at": "2026-07-18T11:00:00+00:00",
+   "origin": "lived conversation"
+  },
+  {
+   "graph_id": "ex:memory-2",
+   "record_id": "row-2",
+   "kind": "value",
+   "title": "care in checking",
+   "admission": "self",
+   "digest": "verify the doors before trusting them",
+   "tokens": 18,
+   "global_count": 0,
+   "born_at": "2026-07-15T00:00:00+00:00",
+   "origin": "identity"
+  }
+ ],
+ "memories_in_context": 2,
+ "records_formed": [
+  "ex:memory-90"
+ ],
+ "diary_entries": [
+  {
+   "entry_id": "diary_00aa",
+   "visibility": "private"
+  }
+ ],
+ "notices": [],
+ "participants": [
+  "person:admin",
+  "entity:doorcheck"
+ ],
+ "system_prompt": "(byte-stable head omitted from fixture)",
+ "tool_details": [
+  {
+   "name": "search_memory",
+   "arg": "{\"query\": \"door check\"}",
+   "success": true,
+   "result": "3 results: the prior checks, grouped by origin"
+  }
+ ],
+ "files": []
+}

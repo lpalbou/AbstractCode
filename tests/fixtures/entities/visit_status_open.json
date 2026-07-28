@@ -1,0 +1,9 @@
+{
+ "open": true,
+ "run_id": "b0a1c2d3-e4f5-4678-9abc-def012345678",
+ "session_id": "visit-doorcheck-a1b2c3d4",
+ "visit_id": "visit-9f8e7d6c",
+ "turn_n": 12,
+ "status": "waiting",
+ "workflow_arm": "react"
+}

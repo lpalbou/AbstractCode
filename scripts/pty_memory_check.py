@@ -20,7 +20,6 @@ import secrets
 import select
 import signal
 import struct
-import subprocess
 import sys
 import termios
 import time

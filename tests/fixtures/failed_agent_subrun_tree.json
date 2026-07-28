@@ -1,0 +1,1539 @@
+{
+ "note": "Captured live 2026-07-23 from gateway runs. basic-agent@0.0.3 tree whose AGENT subrun failed (LMStudio model unloaded) at cycle 1; the wrapper root resumed past the failure onto the eternal status poller (node-5) and stays waiting forever. The turn must conclude FAILED from the agent subrun terminal status.",
+ "root_run_id": "76fc3fcb-d3a2-4501-9284-9ab969f03a45",
+ "agent_run_id": "9c5cad22-2a22-43fa-9047-9370b2f9b73f",
+ "agent_run_status": "failed",
+ "root_run_status": "waiting",
+ "ledgers": {
+  "76fc3fcb-d3a2-4501-9284-9ab969f03a45": [
+   {
+    "run_id": "76fc3fcb-d3a2-4501-9284-9ab969f03a45",
+    "step_id": "5f651cd0-21a5-422b-a24f-92a05caa9575",
+    "node_id": "node-4",
+    "status": "started",
+    "effect": {
+     "type": "start_subworkflow",
+     "payload": {
+      "type": "start_subworkflow",
+      "workflow_id": "basic-agent@0.0.3:15f19f7f",
+      "vars": {
+       "state": "Thinking..."
+      },
+      "async": true,
+      "wait": true,
+      "resume_to_node": "node-2"
+     },
+     "result_key": "_temp.effects.node-4"
+    },
+    "result": null,
+    "error": null,
+    "started_at": "2026-07-22T08:03:43.032352+00:00",
+    "ended_at": null,
+    "actor_id": "gateway",
+    "session_id": "acode-ptysmoke-1784707419",
+    "attempt": 1,
+    "idempotency_key": "03efe932d9de8bee5e32967fcce409d0",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "76fc3fcb-d3a2-4501-9284-9ab969f03a45",
+    "step_id": "5f651cd0-21a5-422b-a24f-92a05caa9575",
+    "node_id": "node-4",
+    "status": "waiting",
+    "effect": {
+     "type": "start_subworkflow",
+     "payload": {
+      "type": "start_subworkflow",
+      "workflow_id": "basic-agent@0.0.3:15f19f7f",
+      "vars": {
+       "state": "Thinking..."
+      },
+      "async": true,
+      "wait": true,
+      "resume_to_node": "node-2"
+     },
+     "result_key": "_temp.effects.node-4"
+    },
+    "result": {
+     "wait": {
+      "reason": "subworkflow",
+      "wait_key": "subworkflow:eee5ff82-cc78-49f3-b55b-94d7026aa23a",
+      "until": null,
+      "resume_to_node": "node-2",
+      "result_key": "_temp.effects.node-4",
+      "prompt": null,
+      "choices": null,
+      "allow_free_text": true,
+      "details": {
+       "sub_run_id": "eee5ff82-cc78-49f3-b55b-94d7026aa23a",
+       "sub_workflow_id": "basic-agent@0.0.3:15f19f7f",
+       "async": true,
+       "include_traces": false
+      }
+     }
+    },
+    "error": null,
+    "started_at": "2026-07-22T08:03:43.032352+00:00",
+    "ended_at": "2026-07-22T08:03:43.034878+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-ptysmoke-1784707419",
+    "attempt": 1,
+    "idempotency_key": "03efe932d9de8bee5e32967fcce409d0",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "76fc3fcb-d3a2-4501-9284-9ab969f03a45",
+    "step_id": "06e2cd48-9803-44cf-81ab-55f407277024",
+    "node_id": "node-4",
+    "status": "completed",
+    "effect": {
+     "type": "resume",
+     "payload": {
+      "wait_reason": "subworkflow",
+      "wait_key": "subworkflow:eee5ff82-cc78-49f3-b55b-94d7026aa23a",
+      "resume_to_node": "node-2",
+      "result_key": "_temp.effects.node-4",
+      "payload": {
+       "sub_run_id": "eee5ff82-cc78-49f3-b55b-94d7026aa23a",
+       "output": {
+        "success": true,
+        "result": {
+         "until": "2026-07-22T08:03:43.913433+00:00",
+         "ready": true
+        }
+       }
+      }
+     },
+     "result_key": null
+    },
+    "result": {
+     "resumed": true
+    },
+    "error": null,
+    "started_at": "2026-07-22T08:03:43.982605+00:00",
+    "ended_at": "2026-07-22T08:03:43.982614+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-ptysmoke-1784707419",
+    "attempt": 1,
+    "idempotency_key": null,
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "76fc3fcb-d3a2-4501-9284-9ab969f03a45",
+    "step_id": "2e3029a9-b25c-4fc2-81c0-fcefc5d0699c",
+    "node_id": "node-2",
+    "status": "started",
+    "effect": {
+     "type": "start_subworkflow",
+     "payload": {
+      "workflow_id": "visual_react_agent_basic-agent_0_0_3_81795ea9_node-2",
+      "vars": {
+       "context": {
+        "task": "Create a file named pty-proof.txt containing exactly 'pty smoke', then confirm you are done.",
+        "messages": []
+       },
+       "scratchpad": {
+        "iteration": 0,
+        "max_iterations": 50
+       },
+       "_runtime": {
+        "inbox": [],
+        "provider": "lmstudio",
+        "model": "qwen/qwen3.6-35b-a3b",
+        "allowed_tools": [
+         "edit_file",
+         "analyze_code",
+         "execute_command",
+         "fetch_url",
+         "list_files",
+         "read_file",
+         "search_files",
+         "web_search",
+         "write_file"
+        ]
+       },
+       "_temp": {},
+       "_limits": {
+        "max_iterations": 50,
+        "current_iteration": 0,
+        "max_tokens": 262144,
+        "max_output_tokens": 81920,
+        "max_input_tokens": null,
+        "estimated_tokens_used": 0,
+        "max_history_messages": -1,
+        "warn_iterations_pct": 80,
+        "warn_tokens_pct": 80
+       }
+      },
+      "async": true,
+      "wait": true,
+      "include_traces": true
+     },
+     "result_key": "_temp.agent.node-2.sub"
+    },
+    "result": null,
+    "error": null,
+    "started_at": "2026-07-22T08:03:44.269704+00:00",
+    "ended_at": null,
+    "actor_id": "gateway",
+    "session_id": "acode-ptysmoke-1784707419",
+    "attempt": 1,
+    "idempotency_key": "12284f045bd23b2706975c5426c7ec0a",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "76fc3fcb-d3a2-4501-9284-9ab969f03a45",
+    "step_id": "2e3029a9-b25c-4fc2-81c0-fcefc5d0699c",
+    "node_id": "node-2",
+    "status": "waiting",
+    "effect": {
+     "type": "start_subworkflow",
+     "payload": {
+      "workflow_id": "visual_react_agent_basic-agent_0_0_3_81795ea9_node-2",
+      "vars": {
+       "context": {
+        "task": "Create a file named pty-proof.txt containing exactly 'pty smoke', then confirm you are done.",
+        "messages": []
+       },
+       "scratchpad": {
+        "iteration": 0,
+        "max_iterations": 50
+       },
+       "_runtime": {
+        "inbox": [],
+        "provider": "lmstudio",
+        "model": "qwen/qwen3.6-35b-a3b",
+        "allowed_tools": [
+         "edit_file",
+         "analyze_code",
+         "execute_command",
+         "fetch_url",
+         "list_files",
+         "read_file",
+         "search_files",
+         "web_search",
+         "write_file"
+        ],
+        "tool_support": "native",
+        "supports_native_tools": true,
+        "tool_support_model": "ornith-1.0-35b"
+       },
+       "_temp": {},
+       "_limits": {
+        "max_iterations": 50,
+        "current_iteration": 0,
+        "max_tokens": 262144,
+        "max_output_tokens": 81920,
+        "max_input_tokens": null,
+        "estimated_tokens_used": 0,
+        "max_history_messages": -1,
+        "warn_iterations_pct": 80,
+        "warn_tokens_pct": 80
+       }
+      },
+      "async": true,
+      "wait": true,
+      "include_traces": true
+     },
+     "result_key": "_temp.agent.node-2.sub"
+    },
+    "result": {
+     "wait": {
+      "reason": "subworkflow",
+      "wait_key": "subworkflow:9c5cad22-2a22-43fa-9047-9370b2f9b73f",
+      "until": null,
+      "resume_to_node": "node-2",
+      "result_key": "_temp.agent.node-2.sub",
+      "prompt": null,
+      "choices": null,
+      "allow_free_text": true,
+      "details": {
+       "sub_run_id": "9c5cad22-2a22-43fa-9047-9370b2f9b73f",
+       "sub_workflow_id": "visual_react_agent_basic-agent_0_0_3_81795ea9_node-2",
+       "async": true,
+       "include_traces": true
+      }
+     }
+    },
+    "error": null,
+    "started_at": "2026-07-22T08:03:44.269704+00:00",
+    "ended_at": "2026-07-22T08:03:44.275731+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-ptysmoke-1784707419",
+    "attempt": 1,
+    "idempotency_key": "12284f045bd23b2706975c5426c7ec0a",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "76fc3fcb-d3a2-4501-9284-9ab969f03a45",
+    "step_id": "404119e4-d7fd-49d7-85ea-c23c407f8e27",
+    "node_id": "node-2",
+    "status": "completed",
+    "effect": {
+     "type": "resume",
+     "payload": {
+      "wait_reason": "subworkflow",
+      "wait_key": "subworkflow:9c5cad22-2a22-43fa-9047-9370b2f9b73f",
+      "resume_to_node": "node-2",
+      "result_key": "_temp.agent.node-2.sub",
+      "payload": {
+       "sub_run_id": "9c5cad22-2a22-43fa-9047-9370b2f9b73f",
+       "output": {
+        "result": null,
+        "success": false,
+        "error": "LMStudio API error (400): {\"error\": \"Model unloaded.\"}"
+       },
+       "node_traces": {
+        "reason": {
+         "node_id": "reason",
+         "steps": [
+          {
+           "ts": "2026-07-22T08:04:13.718967+00:00",
+           "node_id": "reason",
+           "status": "failed",
+           "idempotency_key": "23baaba3bbc0d5076927ed1f5809309e",
+           "reused_prior_result": false,
+           "effect": {
+            "type": "llm_call",
+            "payload": {
+             "prompt": "",
+             "messages": [
+              {
+               "role": "user",
+               "content": "<runtime_metadata>{\"display\":\"[2026-07-22 10:03:44]\",\"local_datetime\":\"2026-07-22T10:03:44+02:00\"}</runtime_metadata>\nCreate a file named pty-proof.txt containing exactly 'pty smoke', then confirm you are done.\n\n[loop] iteration 1 of 50."
+              }
+             ],
+             "tools": [
+              {
+               "name": "edit_file",
+               "description": "Surgically edit a text file via small find/replace (literal/regex) or a single-file unified diff patch.",
+               "parameters": {
+                "file_path": {
+                 "type": "string"
+                },
+                "pattern": {
+                 "type": "string"
+                },
+                "replacement": {
+                 "type": "string",
+                 "default": null
+                },
+                "use_regex": {
+                 "type": "boolean",
+                 "default": false
+                },
+                "max_replacements": {
+                 "type": "integer",
+                 "default": null
+                },
+                "start_line": {
+                 "type": "integer",
+                 "default": null
+                },
+                "end_line": {
+                 "type": "integer",
+                 "default": null
+                },
+                "preview_only": {
+                 "type": "boolean",
+                 "default": false
+                }
+               },
+               "when_to_use": "Use for small, precise edits. Prefer search_files \u2192 read_file \u2192 edit_file with a small unique pattern; for whole-file rewrites, use write_file().",
+               "examples": [
+                {
+                 "description": "Surgical one-line replacement (safe default: exactly one unique match)",
+                 "arguments": {
+                  "file_path": "config.py",
+                  "pattern": "debug = False",
+                  "replacement": "debug = True"
+                 }
+                },
+                {
+                 "description": "Update function definition using regex",
+                 "arguments": {
+                  "file_path": "script.py",
+                  "pattern": "def old_function\\\\([^)]*\\\\):",
+                  "replacement": "def new_function(param1, param2):",
+                  "use_regex": true
+                 }
+                },
+                {
+                 "description": "Replace ALL occurrences (explicit opt-in), previewing first",
+                 "arguments": {
+                  "file_path": "test.py",
+                  "pattern": "OldClass",
+                  "replacement": "NewClass",
+                  "preview_only": true,
+                  "max_replacements": -1
+                 }
+                }
+               ],
+               "tags": [
+                "mutating"
+               ]
+              },
+              {
+               "name": "analyze_code",
+               "description": "Return a compact outline + diagnostics for a code file (Python/JavaScript/HTML/R) to guide precise edits.",
+               "parameters": {
+                "file_path": {
+                 "type": "string"
+                },
+                "language": {
+                 "type": "string",
+                 "default": null
+                }
+               },
+               "when_to_use": "Use before editing to locate the right block quickly; then read_file(start_line/end_line) around that block instead of re-reading the whole file.",
+               "examples": [
+                {
+                 "description": "Outline a Python file",
+                 "arguments": {
+                  "file_path": "src/app.py"
+                 }
+                },
+                {
+                 "description": "Outline a JavaScript file",
+                 "arguments": {
+                  "file_path": "web/app.js"
+                 }
+                },
+                {
+                 "description": "Outline an HTML file",
+                 "arguments": {
+                  "file_path": "templates/index.html"
+                 }
+                }
+               ]
+              },
+              {
+               "name": "execute_command",
+               "description": "Execute shell commands safely with security controls and platform detection",
+               "parameters": {
+                "command": {
+                 "type": "string"
+                },
+                "working_directory": {
+                 "type": "string",
+                 "default": null
+                },
+                "timeout": {
+                 "type": "integer",
+                 "default": 300
+                },
+                "capture_output": {
+                 "type": "boolean",
+                 "default": true
+                },
+                "require_confirmation": {
+                 "type": "boolean",
+                 "default": false
+                },
+                "allow_dangerous": {
+                 "type": "boolean",
+                 "default": false
+                }
+               },
+               "when_to_use": "When you need to run system commands, shell scripts, or interact with command-line tools",
+               "examples": [
+                {
+                 "description": "List current directory contents",
+                 "arguments": {
+                  "command": "ls -la"
+                 }
+                },
+                {
+                 "description": "Search for a pattern in files (grep)",
+                 "arguments": {
+                  "command": "grep -R \"ActiveContextPolicy\" -n abstractruntime/src/abstractruntime | head"
+                 }
+                },
+                {
+                 "description": "Safe mode with confirmation",
+                 "arguments": {
+                  "command": "rm temp_file.txt",
+                  "require_confirmation": true
+                 }
+                }
+               ],
+               "tags": [
+                "mutating"
+               ]
+              },
+              {
+               "name": "fetch_url",
+               "description": "Fetch a URL and parse common content types (HTML/JSON/text); supports previews and basic metadata.",
+               "parameters": {
+                "url": {
+                 "type": "string"
+                },
+                "method": {
+                 "type": "string",
+                 "default": "GET"
+                },
+                "headers": {
+                 "type": "object",
+                 "default": null
+                },
+                "data": {
+                 "type": "string",
+                 "default": null
+                },
+                "timeout": {
+                 "type": "integer",
+                 "default": 45
+                },
+                "include_binary_preview": {
+                 "type": "boolean",
+                 "default": false
+                },
+                "keep_links": {
+                 "type": "boolean",
+                 "default": true
+                },
+                "user_agent": {
+                 "type": "string",
+                 "default": "AbstractCore-FetchTool/1.0 (+https://github.com/lpalbou/abstractcore)"
+                },
+                "include_full_content": {
+                 "type": "boolean",
+                 "default": true
+                }
+               },
+               "when_to_use": "Use to retrieve and analyze a URL after you know it is worth opening. Prefer skim_url first for a faster, smaller preview. For shorter outputs, set include_full_content=False or keep_links=False.",
+               "examples": [
+                {
+                 "description": "Fetch and parse HTML webpage",
+                 "arguments": {
+                  "url": "https://example.com/article.html"
+                 }
+                },
+                {
+                 "description": "Fetch JSON API response",
+                 "arguments": {
+                  "url": "https://api.github.com/repos/python/cpython",
+                  "headers": {
+                   "Accept": "application/json"
+                  }
+                 }
+                },
+                {
+                 "description": "Fetch binary content with metadata",
+                 "arguments": {
+                  "url": "https://example.com/document.pdf",
+                  "include_binary_preview": true
+                 }
+                }
+               ],
+               "tags": [
+                "write",
+                "remote_write"
+               ]
+              },
+              {
+               "name": "list_files",
+               "description": "List files/directories by name/path using glob patterns (case-insensitive). Does NOT search file contents; head_limit defaults to 10 results.",
+               "parameters": {
+                "directory_path": {
+                 "type": "string",
+                 "default": "."
+                },
+                "pattern": {
+                 "type": "string",
+                 "default": "*"
+                },
+                "recursive": {
+                 "type": "boolean",
+                 "default": false
+                },
+                "include_hidden": {
+                 "type": "boolean",
+                 "default": false
+                },
+                "head_limit": {
+                 "type": "integer",
+                 "default": 10
+                }
+               },
+               "when_to_use": "Use to find files by filename/path; prefer narrow patterns like '*.py|*.md' (avoid '*') and raise head_limit if needed. For file contents, use search_files().",
+               "examples": [
+                {
+                 "description": "List Python + Markdown files in current directory",
+                 "arguments": {
+                  "directory_path": ".",
+                  "pattern": "*.py|*.md"
+                 }
+                },
+                {
+                 "description": "Find all Python files recursively",
+                 "arguments": {
+                  "directory_path": ".",
+                  "pattern": "*.py",
+                  "recursive": true
+                 }
+                },
+                {
+                 "description": "Find docs/config files recursively",
+                 "arguments": {
+                  "directory_path": ".",
+                  "pattern": "*.md|*.yml|*.yaml|*.json",
+                  "recursive": true
+                 }
+                }
+               ]
+              },
+              {
+               "name": "read_file",
+               "description": "Read a text file (line-numbered). Oversized reads return a labeled PARTIAL chunk plus the exact continuation call (start_char).",
+               "parameters": {
+                "file_path": {
+                 "type": "string"
+                },
+                "start_line": {
+                 "type": "integer",
+                 "default": 1
+                },
+                "end_line": {
+                 "type": "integer",
+                 "default": null
+                },
+                "start_char": {
+                 "type": "integer",
+                 "default": null
+                }
+               },
+               "when_to_use": "Use to inspect exact file contents. For code, prefer analyze_code first. Prefer bounded reads; if line numbers are unknown, use search_files() first. For huge/minified files, follow the #TRUNCATION notice's start_char continuation.",
+               "examples": [
+                {
+                 "description": "Read entire file (small files; oversized returns a labeled partial chunk)",
+                 "arguments": {
+                  "file_path": "README.md"
+                 }
+                },
+                {
+                 "description": "Read specific line range",
+                 "arguments": {
+                  "file_path": "src/main.py",
+                  "start_line": 10,
+                  "end_line": 25
+                 }
+                },
+                {
+                 "description": "Continue a truncated read from a character offset (minified/huge files)",
+                 "arguments": {
+                  "file_path": "dist/bundle.min.js",
+                  "start_char": 120000
+                 }
+                }
+               ]
+              },
+              {
+               "name": "search_files",
+               "description": "Search inside file contents for a regex pattern (case-insensitive) and return matching lines with line numbers.",
+               "parameters": {
+                "pattern": {
+                 "type": "string"
+                },
+                "path": {
+                 "type": "string",
+                 "default": "."
+                },
+                "file_pattern": {
+                 "type": "string",
+                 "default": "*"
+                },
+                "head_limit": {
+                 "type": "integer",
+                 "default": 10
+                },
+                "max_hits": {
+                 "type": "integer",
+                 "default": 8
+                },
+                "multiline": {
+                 "type": "boolean",
+                 "default": false
+                },
+                "include_hidden": {
+                 "type": "boolean",
+                 "default": false
+                }
+               },
+               "when_to_use": "Use to locate where something appears across files; returns up to max_hits matching files, each capped at head_limit matching lines; set multiline=true for cross-line regex (slower).",
+               "examples": [
+                {
+                 "description": "Find TODO/FIXME across Python files (up to 8 files, 10 lines per file)",
+                 "arguments": {
+                  "pattern": "TODO|FIXME",
+                  "path": ".",
+                  "file_pattern": "*.py",
+                  "head_limit": 10,
+                  "max_hits": 8
+                 }
+                },
+                {
+                 "description": "Search docs with multiple file patterns, limiting to 5 matching files",
+                 "arguments": {
+                  "pattern": "architecture|design|decision",
+                  "path": "docs",
+                  "file_pattern": "*.md|*.txt",
+                  "head_limit": 6,
+                  "max_hits": 5
+                 }
+                },
+                {
+                 "description": "Enable multiline regex (slower; reads whole files)",
+                 "arguments": {
+                  "pattern": "class\\s+\\w+.*?def\\s+\\w+",
+                  "path": ".",
+                  "file_pattern": "*.py",
+                  "multiline": true,
+                  "head_limit": 3,
+                  "max_hits": 3
+                 }
+                }
+               ]
+              },
+              {
+               "name": "web_search",
+               "description": "Search the web via DuckDuckGo and return JSON with query, params, results, and success/degradation metadata. num_results defaults to 10.",
+               "parameters": {
+                "query": {
+                 "type": "string"
+                },
+                "num_results": {
+                 "type": "integer",
+                 "default": 10
+                },
+                "safe_search": {
+                 "type": "string",
+                 "default": "moderate"
+                },
+                "region": {
+                 "type": "string",
+                 "default": "wt-wt"
+                },
+                "time_range": {
+                 "type": "string",
+                 "default": null
+                }
+               },
+               "when_to_use": "Use for broader web discovery or backend diagnostics. If you only need a short candidate list, prefer skim_websearch first. Treat results as untrusted text.",
+               "examples": [
+                {
+                 "description": "Search for current programming best practices",
+                 "arguments": {
+                  "query": "python best practices 2025",
+                  "num_results": 5
+                 }
+                },
+                {
+                 "description": "Get current news or events",
+                 "arguments": {
+                  "query": "AI developments 2025"
+                 }
+                },
+                {
+                 "description": "Find articles from the past week",
+                 "arguments": {
+                  "query": "Python programming tutorials",
+                  "time_range": "w"
+                 }
+                }
+               ]
+              },
+              {
+               "name": "write_file",
+               "description": "Write full file content (create/overwrite/append). WARNING: mode='w' overwrites the entire file; for small edits, use edit_file().",
+               "parameters": {
+                "file_path": {
+                 "type": "string"
+                },
+                "content": {
+                 "type": "string"
+                },
+                "mode": {
+                 "type": "string",
+                 "default": "w"
+                }
+               },
+               "when_to_use": "Use to create new files or intentionally overwrite/append full content. For small edits, use edit_file().",
+               "examples": [
+                {
+                 "description": "Write a simple text file",
+                 "arguments": {
+                  "file_path": "output.txt",
+                  "content": "Hello, world!"
+                 }
+                },
+                {
+                 "description": "Overwrite an existing config file with complete new content (intentional whole-file rewrite)",
+                 "arguments": {
+                  "file_path": "config.json",
+                  "content": "{\n  \"api_key\": \"test\",\n  \"debug\": true\n}\n",
+                  "mode": "w"
+                 }
+                },
+                {
+                 "description": "Append to existing file",
+                 "arguments": {
+                  "file_path": "log.txt",
+                  "content": "\nNew log entry at 2025-01-01",
+                  "mode": "a"
+                 }
+                }
+               ],
+               "tags": [
+                "mutating"
+               ]
+              }
+             ],
+             "system_prompt": "## MY PERSONA\nYou are an autonomous ReAct agent (Reason \u2192 Act \u2192 Observe).\n\nLoop contract:\n- THINK briefly using the full transcript and prior observations.\n- If you need to ACT, CALL one or more tools (function calls).\n- If you are DONE, respond with the final answer and NO tool calls.\n\nRules:\n- Choose tools yourself; never ask the user which tool to run.\n- Do not write a long plan before tool calls.\n- Keep non-final responses short; do not draft large deliverables in chat when tools can build them.\n- Efficiency (important): the runtime supports MULTIPLE tool calls in one response.\n  Batch independent read-only tool calls to reduce iterations.\n  Example: read multiple files/ranges or run multiple searches in one response.\n  If reading nearby ranges of the same file, prefer ONE call with a wider range.\n  Only split tool calls across turns when later calls depend on earlier outputs; do NOT batch side-effectful tools (write_file/edit_file/execute_command/send_email/send_whatsapp_message/send_telegram_message/send_telegram_artifact, and any mcp:: tool \u2014 treat MCP tools as side-effectful).\n- When context is getting large, use delegate_agent(task, context, tools) to offload an independent subtask with minimal context.\n- Keep tool call arguments small and valid; avoid embedding huge blobs (large file contents / giant JSON) directly in arguments.\n- Attachments:\n  - If you see an 'Active attachments' message or inline 'Content from <file>' blocks, treat those attachments as already available in-context.\n    Do NOT call tools just to re-open/read them.\n  - If you see 'Stored session attachments', those may not be included in the current call.\n    Only if you truly need it, use the attachment-open tool with artifact_id and a bounded line range.\n  - Never use filesystem tools on attachment filenames/paths; use the attachment-open tool instead.\n- For fetch_url: use include_full_content=False for shorter previews; set keep_links=False to strip links when not needed.\n- For large files, create a small skeleton first, then refine via multiple smaller edits/tool calls.\n- Use tool outputs as evidence; do not claim actions without tool outputs.\n- Continue iterating until the task is complete.",
+             "provider": "lmstudio",
+             "model": "qwen/qwen3.6-35b-a3b",
+             "params": {
+              "temperature": 0.2
+             }
+            },
+            "result_key": "_temp.llm_response"
+           },
+           "duration_ms": 28973.180749919266,
+           "error": "LMStudio API error (400): {\"error\": \"Model unloaded.\"}"
+          }
+         ],
+         "updated_at": "2026-07-22T08:04:13.719100+00:00"
+        }
+       }
+      }
+     },
+     "result_key": null
+    },
+    "result": {
+     "resumed": true
+    },
+    "error": null,
+    "started_at": "2026-07-22T08:04:14.014916+00:00",
+    "ended_at": "2026-07-22T08:04:14.014937+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-ptysmoke-1784707419",
+    "attempt": 1,
+    "idempotency_key": null,
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "76fc3fcb-d3a2-4501-9284-9ab969f03a45",
+    "step_id": "67beea84-da4f-4295-ac20-cfd1b3807321",
+    "node_id": "node-5",
+    "status": "started",
+    "effect": {
+     "type": "start_subworkflow",
+     "payload": {
+      "type": "start_subworkflow",
+      "workflow_id": "basic-agent@0.0.3:15f19f7f",
+      "vars": {
+       "state": "Done",
+       "post_delay": 3
+      },
+      "async": true,
+      "wait": true,
+      "resume_to_node": "end"
+     },
+     "result_key": "_temp.effects.node-5"
+    },
+    "result": null,
+    "error": null,
+    "started_at": "2026-07-22T08:04:14.644826+00:00",
+    "ended_at": null,
+    "actor_id": "gateway",
+    "session_id": "acode-ptysmoke-1784707419",
+    "attempt": 1,
+    "idempotency_key": "e02287f5af6b63c0f11860d48700e2ef",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "76fc3fcb-d3a2-4501-9284-9ab969f03a45",
+    "step_id": "67beea84-da4f-4295-ac20-cfd1b3807321",
+    "node_id": "node-5",
+    "status": "waiting",
+    "effect": {
+     "type": "start_subworkflow",
+     "payload": {
+      "type": "start_subworkflow",
+      "workflow_id": "basic-agent@0.0.3:15f19f7f",
+      "vars": {
+       "state": "Done",
+       "post_delay": 3
+      },
+      "async": true,
+      "wait": true,
+      "resume_to_node": "end"
+     },
+     "result_key": "_temp.effects.node-5"
+    },
+    "result": {
+     "wait": {
+      "reason": "subworkflow",
+      "wait_key": "subworkflow:97b4dde0-a125-4e8f-bed3-e8732c4054d1",
+      "until": null,
+      "resume_to_node": "end",
+      "result_key": "_temp.effects.node-5",
+      "prompt": null,
+      "choices": null,
+      "allow_free_text": true,
+      "details": {
+       "sub_run_id": "97b4dde0-a125-4e8f-bed3-e8732c4054d1",
+       "sub_workflow_id": "basic-agent@0.0.3:15f19f7f",
+       "async": true,
+       "include_traces": false
+      }
+     }
+    },
+    "error": null,
+    "started_at": "2026-07-22T08:04:14.644826+00:00",
+    "ended_at": "2026-07-22T08:04:14.647684+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-ptysmoke-1784707419",
+    "attempt": 1,
+    "idempotency_key": "e02287f5af6b63c0f11860d48700e2ef",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   }
+  ],
+  "9c5cad22-2a22-43fa-9047-9370b2f9b73f": [
+   {
+    "run_id": "9c5cad22-2a22-43fa-9047-9370b2f9b73f",
+    "step_id": "457cca6f-29ae-415a-a63d-38e2e04ee887",
+    "node_id": "reason",
+    "status": "started",
+    "effect": {
+     "type": "llm_call",
+     "payload": {
+      "prompt": "",
+      "messages": [
+       {
+        "role": "user",
+        "content": "<runtime_metadata>{\"display\":\"[2026-07-22 10:03:44]\",\"local_datetime\":\"2026-07-22T10:03:44+02:00\"}</runtime_metadata>\nCreate a file named pty-proof.txt containing exactly 'pty smoke', then confirm you are done.\n\n[loop] iteration 1 of 50."
+       }
+      ],
+      "tools": [
+       {
+        "name": "edit_file",
+        "description": "Surgically edit a text file via small find/replace (literal/regex) or a single-file unified diff patch.",
+        "parameters": {
+         "file_path": {
+          "type": "string"
+         },
+         "pattern": {
+          "type": "string"
+         },
+         "replacement": {
+          "type": "string",
+          "default": null
+         },
+         "use_regex": {
+          "type": "boolean",
+          "default": false
+         },
+         "max_replacements": {
+          "type": "integer",
+          "default": null
+         },
+         "start_line": {
+          "type": "integer",
+          "default": null
+         },
+         "end_line": {
+          "type": "integer",
+          "default": null
+         },
+         "preview_only": {
+          "type": "boolean",
+          "default": false
+         }
+        },
+        "when_to_use": "Use for small, precise edits. Prefer search_files \u2192 read_file \u2192 edit_file with a small unique pattern; for whole-file rewrites, use write_file().",
+        "examples": [
+         {
+          "description": "Surgical one-line replacement (safe default: exactly one unique match)",
+          "arguments": {
+           "file_path": "config.py",
+           "pattern": "debug = False",
+           "replacement": "debug = True"
+          }
+         },
+         {
+          "description": "Update function definition using regex",
+          "arguments": {
+           "file_path": "script.py",
+           "pattern": "def old_function\\\\([^)]*\\\\):",
+           "replacement": "def new_function(param1, param2):",
+           "use_regex": true
+          }
+         },
+         {
+          "description": "Replace ALL occurrences (explicit opt-in), previewing first",
+          "arguments": {
+           "file_path": "test.py",
+           "pattern": "OldClass",
+           "replacement": "NewClass",
+           "preview_only": true,
+           "max_replacements": -1
+          }
+         }
+        ],
+        "tags": [
+         "mutating"
+        ]
+       },
+       {
+        "name": "analyze_code",
+        "description": "Return a compact outline + diagnostics for a code file (Python/JavaScript/HTML/R) to guide precise edits.",
+        "parameters": {
+         "file_path": {
+          "type": "string"
+         },
+         "language": {
+          "type": "string",
+          "default": null
+         }
+        },
+        "when_to_use": "Use before editing to locate the right block quickly; then read_file(start_line/end_line) around that block instead of re-reading the whole file.",
+        "examples": [
+         {
+          "description": "Outline a Python file",
+          "arguments": {
+           "file_path": "src/app.py"
+          }
+         },
+         {
+          "description": "Outline a JavaScript file",
+          "arguments": {
+           "file_path": "web/app.js"
+          }
+         },
+         {
+          "description": "Outline an HTML file",
+          "arguments": {
+           "file_path": "templates/index.html"
+          }
+         }
+        ]
+       },
+       {
+        "name": "execute_command",
+        "description": "Execute shell commands safely with security controls and platform detection",
+        "parameters": {
+         "command": {
+          "type": "string"
+         },
+         "working_directory": {
+          "type": "string",
+          "default": null
+         },
+         "timeout": {
+          "type": "integer",
+          "default": 300
+         },
+         "capture_output": {
+          "type": "boolean",
+          "default": true
+         },
+         "require_confirmation": {
+          "type": "boolean",
+          "default": false
+         },
+         "allow_dangerous": {
+          "type": "boolean",
+          "default": false
+         }
+        },
+        "when_to_use": "When you need to run system commands, shell scripts, or interact with command-line tools",
+        "examples": [
+         {
+          "description": "List current directory contents",
+          "arguments": {
+           "command": "ls -la"
+          }
+         },
+         {
+          "description": "Search for a pattern in files (grep)",
+          "arguments": {
+           "command": "grep -R \"ActiveContextPolicy\" -n abstractruntime/src/abstractruntime | head"
+          }
+         },
+         {
+          "description": "Safe mode with confirmation",
+          "arguments": {
+           "command": "rm temp_file.txt",
+           "require_confirmation": true
+          }
+         }
+        ],
+        "tags": [
+         "mutating"
+        ]
+       },
+       {
+        "name": "fetch_url",
+        "description": "Fetch a URL and parse common content types (HTML/JSON/text); supports previews and basic metadata.",
+        "parameters": {
+         "url": {
+          "type": "string"
+         },
+         "method": {
+          "type": "string",
+          "default": "GET"
+         },
+         "headers": {
+          "type": "object",
+          "default": null
+         },
+         "data": {
+          "type": "string",
+          "default": null
+         },
+         "timeout": {
+          "type": "integer",
+          "default": 45
+         },
+         "include_binary_preview": {
+          "type": "boolean",
+          "default": false
+         },
+         "keep_links": {
+          "type": "boolean",
+          "default": true
+         },
+         "user_agent": {
+          "type": "string",
+          "default": "AbstractCore-FetchTool/1.0 (+https://github.com/lpalbou/abstractcore)"
+         },
+         "include_full_content": {
+          "type": "boolean",
+          "default": true
+         }
+        },
+        "when_to_use": "Use to retrieve and analyze a URL after you know it is worth opening. Prefer skim_url first for a faster, smaller preview. For shorter outputs, set include_full_content=False or keep_links=False.",
+        "examples": [
+         {
+          "description": "Fetch and parse HTML webpage",
+          "arguments": {
+           "url": "https://example.com/article.html"
+          }
+         },
+         {
+          "description": "Fetch JSON API response",
+          "arguments": {
+           "url": "https://api.github.com/repos/python/cpython",
+           "headers": {
+            "Accept": "application/json"
+           }
+          }
+         },
+         {
+          "description": "Fetch binary content with metadata",
+          "arguments": {
+           "url": "https://example.com/document.pdf",
+           "include_binary_preview": true
+          }
+         }
+        ],
+        "tags": [
+         "write",
+         "remote_write"
+        ]
+       },
+       {
+        "name": "list_files",
+        "description": "List files/directories by name/path using glob patterns (case-insensitive). Does NOT search file contents; head_limit defaults to 10 results.",
+        "parameters": {
+         "directory_path": {
+          "type": "string",
+          "default": "."
+         },
+         "pattern": {
+          "type": "string",
+          "default": "*"
+         },
+         "recursive": {
+          "type": "boolean",
+          "default": false
+         },
+         "include_hidden": {
+          "type": "boolean",
+          "default": false
+         },
+         "head_limit": {
+          "type": "integer",
+          "default": 10
+         }
+        },
+        "when_to_use": "Use to find files by filename/path; prefer narrow patterns like '*.py|*.md' (avoid '*') and raise head_limit if needed. For file contents, use search_files().",
+        "examples": [
+         {
+          "description": "List Python + Markdown files in current directory",
+          "arguments": {
+           "directory_path": ".",
+           "pattern": "*.py|*.md"
+          }
+         },
+         {
+          "description": "Find all Python files recursively",
+          "arguments": {
+           "directory_path": ".",
+           "pattern": "*.py",
+           "recursive": true
+          }
+         },
+         {
+          "description": "Find docs/config files recursively",
+          "arguments": {
+           "directory_path": ".",
+           "pattern": "*.md|*.yml|*.yaml|*.json",
+           "recursive": true
+          }
+         }
+        ]
+       },
+       {
+        "name": "read_file",
+        "description": "Read a text file (line-numbered). Oversized reads return a labeled PARTIAL chunk plus the exact continuation call (start_char).",
+        "parameters": {
+         "file_path": {
+          "type": "string"
+         },
+         "start_line": {
+          "type": "integer",
+          "default": 1
+         },
+         "end_line": {
+          "type": "integer",
+          "default": null
+         },
+         "start_char": {
+          "type": "integer",
+          "default": null
+         }
+        },
+        "when_to_use": "Use to inspect exact file contents. For code, prefer analyze_code first. Prefer bounded reads; if line numbers are unknown, use search_files() first. For huge/minified files, follow the #TRUNCATION notice's start_char continuation.",
+        "examples": [
+         {
+          "description": "Read entire file (small files; oversized returns a labeled partial chunk)",
+          "arguments": {
+           "file_path": "README.md"
+          }
+         },
+         {
+          "description": "Read specific line range",
+          "arguments": {
+           "file_path": "src/main.py",
+           "start_line": 10,
+           "end_line": 25
+          }
+         },
+         {
+          "description": "Continue a truncated read from a character offset (minified/huge files)",
+          "arguments": {
+           "file_path": "dist/bundle.min.js",
+           "start_char": 120000
+          }
+         }
+        ]
+       },
+       {
+        "name": "search_files",
+        "description": "Search inside file contents for a regex pattern (case-insensitive) and return matching lines with line numbers.",
+        "parameters": {
+         "pattern": {
+          "type": "string"
+         },
+         "path": {
+          "type": "string",
+          "default": "."
+         },
+         "file_pattern": {
+          "type": "string",
+          "default": "*"
+         },
+         "head_limit": {
+          "type": "integer",
+          "default": 10
+         },
+         "max_hits": {
+          "type": "integer",
+          "default": 8
+         },
+         "multiline": {
+          "type": "boolean",
+          "default": false
+         },
+         "include_hidden": {
+          "type": "boolean",
+          "default": false
+         }
+        },
+        "when_to_use": "Use to locate where something appears across files; returns up to max_hits matching files, each capped at head_limit matching lines; set multiline=true for cross-line regex (slower).",
+        "examples": [
+         {
+          "description": "Find TODO/FIXME across Python files (up to 8 files, 10 lines per file)",
+          "arguments": {
+           "pattern": "TODO|FIXME",
+           "path": ".",
+           "file_pattern": "*.py",
+           "head_limit": 10,
+           "max_hits": 8
+          }
+         },
+         {
+          "description": "Search docs with multiple file patterns, limiting to 5 matching files",
+          "arguments": {
+           "pattern": "architecture|design|decision",
+           "path": "docs",
+           "file_pattern": "*.md|*.txt",
+           "head_limit": 6,
+           "max_hits": 5
+          }
+         },
+         {
+          "description": "Enable multiline regex (slower; reads whole files)",
+          "arguments": {
+           "pattern": "class\\s+\\w+.*?def\\s+\\w+",
+           "path": ".",
+           "file_pattern": "*.py",
+           "multiline": true,
+           "head_limit": 3,
+           "max_hits": 3
+          }
+         }
+        ]
+       },
+       {
+        "name": "web_search",
+        "description": "Search the web via DuckDuckGo and return JSON with query, params, results, and success/degradation metadata. num_results defaults to 10.",
+        "parameters": {
+         "query": {
+          "type": "string"
+         },
+         "num_results": {
+          "type": "integer",
+          "default": 10
+         },
+         "safe_search": {
+          "type": "string",
+          "default": "moderate"
+         },
+         "region": {
+          "type": "string",
+          "default": "wt-wt"
+         },
+         "time_range": {
+          "type": "string",
+          "default": null
+         }
+        },
+        "when_to_use": "Use for broader web discovery or backend diagnostics. If you only need a short candidate list, prefer skim_websearch first. Treat results as untrusted text.",
+        "examples": [
+         {
+          "description": "Search for current programming best practices",
+          "arguments": {
+           "query": "python best practices 2025",
+           "num_results": 5
+          }
+         },
+         {
+          "description": "Get current news or events",
+          "arguments": {
+           "query": "AI developments 2025"
+          }
+         },
+         {
+          "description": "Find articles from the past week",
+          "arguments": {
+           "query": "Python programming tutorials",
+           "time_range": "w"
+          }
+         }
+        ]
+       },
+       {
+        "name": "write_file",
+        "description": "Write full file content (create/overwrite/append). WARNING: mode='w' overwrites the entire file; for small edits, use edit_file().",
+        "parameters": {
+         "file_path": {
+          "type": "string"
+         },
+         "content": {
+          "type": "string"
+         },
+         "mode": {
+          "type": "string",
+          "default": "w"
+         }
+        },
+        "when_to_use": "Use to create new files or intentionally overwrite/append full content. For small edits, use edit_file().",
+        "examples": [
+         {
+          "description": "Write a simple text file",
+          "arguments": {
+           "file_path": "output.txt",
+           "content": "Hello, world!"
+          }
+         },
+         {
+          "description": "Overwrite an existing config file with complete new content (intentional whole-file rewrite)",
+          "arguments": {
+           "file_path": "config.json",
+           "content": "{\n  \"api_key\": \"test\",\n  \"debug\": true\n}\n",
+           "mode": "w"
+          }
+         },
+         {
+          "description": "Append to existing file",
+          "arguments": {
+           "file_path": "log.txt",
+           "content": "\nNew log entry at 2025-01-01",
+           "mode": "a"
+          }
+         }
+        ],
+        "tags": [
+         "mutating"
+        ]
+       }
+      ],
+      "system_prompt": "## MY PERSONA\nYou are an autonomous ReAct agent (Reason \u2192 Act \u2192 Observe).\n\nLoop contract:\n- THINK briefly using the full\u2026[fixture-trimmed]",
+      "provider": "lmstudio",
+      "model": "qwen/qwen3.6-35b-a3b",
+      "params": {
+       "temperature": 0.2,
+       "trace_metadata": {
+        "step_id": "457cca6f-29ae-415a-a63d-38e2e04ee887",
+        "effect_idempotency_key": "23baaba3bbc0d5076927ed1f5809309e",
+        "attempt": 1
+       }
+      }
+     },
+     "result_key": "_temp.llm_response"
+    },
+    "result": null,
+    "error": null,
+    "started_at": "2026-07-22T08:03:44.749782+00:00",
+    "ended_at": null,
+    "actor_id": "gateway",
+    "session_id": "acode-ptysmoke-1784707419",
+    "attempt": 1,
+    "idempotency_key": "23baaba3bbc0d5076927ed1f5809309e",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "9c5cad22-2a22-43fa-9047-9370b2f9b73f",
+    "step_id": "457cca6f-29ae-415a-a63d-38e2e04ee887",
+    "node_id": "reason",
+    "status": "failed",
+    "effect": {
+     "type": "llm_call",
+     "payload": {
+      "prompt": "",
+      "messages": [
+       {
+        "role": "user",
+        "content": "<runtime_metadata>{\"display\":\"[2026-07-22 10:03:44]\",\"local_datetime\":\"2026-07-22T10:03:44+02:00\"}</runtime_metadata>\nCreate a file named pty-proof.txt containing exactly 'pty smoke', then confirm you are done.\n\n[loop] iteration 1 of 50."
+       }
+      ],
+      "tools": {
+       "$slim": {
+        "v": 1,
+        "kind": "started_payload_field",
+        "step_id": "457cca6f-29ae-415a-a63d-38e2e04ee887",
+        "sha256": "73551061c3227ccefc5398988525dcf47c69aaf3a49a41b6e210a26c9b564926",
+        "bytes": 9265,
+        "field": "tools"
+       }
+      },
+      "system_prompt": "## MY PERSONA\nYou are an autonomous ReAct agent (Reason \u2192 Act \u2192 Observe).\n\nLoop contract:\n- THINK briefly using the full\u2026[fixture-trimmed]",
+      "provider": "lmstudio",
+      "model": "qwen/qwen3.6-35b-a3b",
+      "params": {
+       "temperature": 0.2,
+       "trace_metadata": {
+        "step_id": "457cca6f-29ae-415a-a63d-38e2e04ee887",
+        "effect_idempotency_key": "23baaba3bbc0d5076927ed1f5809309e",
+        "attempt": 1,
+        "run_id": "9c5cad22-2a22-43fa-9047-9370b2f9b73f",
+        "workflow_id": "visual_react_agent_basic-agent_0_0_3_81795ea9_node-2",
+        "node_id": "reason",
+        "actor_id": "gateway",
+        "session_id": "acode-ptysmoke-1784707419",
+        "parent_run_id": "76fc3fcb-d3a2-4501-9284-9ab969f03a45"
+       }
+      }
+     },
+     "result_key": "_temp.llm_response"
+    },
+    "result": null,
+    "error": "LMStudio API error (400): {\"error\": \"Model unloaded.\"}",
+    "started_at": "2026-07-22T08:03:44.749782+00:00",
+    "ended_at": "2026-07-22T08:04:13.717667+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-ptysmoke-1784707419",
+    "attempt": 1,
+    "idempotency_key": "23baaba3bbc0d5076927ed1f5809309e",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "9c5cad22-2a22-43fa-9047-9370b2f9b73f",
+    "step_id": "a1893df5-915f-47b3-a3d3-d7aae6df2908",
+    "node_id": "reason",
+    "status": "completed",
+    "effect": {
+     "type": "emit_event",
+     "payload": {
+      "name": "abstract.status",
+      "scope": "session",
+      "payload": {
+       "text": "failed"
+      }
+     },
+     "result_key": null
+    },
+    "result": {
+     "emitted": true,
+     "name": "abstract.status",
+     "payload": {
+      "text": "failed"
+     }
+    },
+    "error": null,
+    "started_at": "2026-07-22T08:04:13.727021+00:00",
+    "ended_at": "2026-07-22T08:04:13.727043+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-ptysmoke-1784707419",
+    "attempt": 1,
+    "idempotency_key": "system:terminal_status:failed",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   }
+  ]
+ }
+}

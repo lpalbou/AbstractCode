@@ -5,10 +5,16 @@
 > runs durably on the gateway; this binary starts runs, streams their
 > ledgers live (SSE with a polling fallback), renders reasoning cycles,
 > tool cards that update in place, markdown answers and generated images,
-> resolves tool-approval and ask-user waits through focus-trapped modals,
-> steers the agent mid-run, and keeps a durable session whose history the
-> gateway replays server-side. One crate, three dependencies (abstracttui,
-> ureq, serde_json). MIT licensed.
+> resolves tool-approval and ask-user waits through focus-trapped modals
+> (with a persisted read/write/all auto-approval tier plus per-tool pins),
+> steers the agent mid-run, queues follow-up prompts, attaches files to
+> prompts (`/attach`, a file browser, or drag & drop onto the terminal —
+> uploaded at send as `context.attachments`), and keeps a durable
+> session whose history the gateway replays server-side. It also talks
+> with gateway-hosted summoned entities: `@name` opens a durable visit
+> with its own transcript and header chip (turns are non-interruptible,
+> rendered honestly). One crate, three dependencies (abstracttui, ureq,
+> serde_json). MIT licensed.
 
 ## Core docs
 
@@ -17,15 +23,20 @@
   Python `abstractcode` CLI.
 - [Getting started](docs/getting-started.md): Install to first run —
   `login`, `doctor`, the first approval, steering, sessions, workflows,
-  workspaces, themes, and headless one-shots.
+  workspaces, themes, working with entities, approval tiers, and headless
+  one-shots.
 - [Architecture](docs/architecture.md): The thin-client design — threading
   contract (UI thread owns signals; a worker owns HTTP; WakeHandle posts),
   the ledger fold, SSE/polling transports, wait resolution, module map,
   testing model, honest limits.
-- [Reference](docs/api.md): Every CLI option and env var, slash commands,
-  key bindings, transcript glyph vocabulary, exec exit codes.
+- [Reference](docs/api.md): Every CLI option and env var, slash commands
+  (including `@name`, `/entities`, `/task`, `/end`, `/queue`, `/goal`,
+  `/permissions`, `/workspace`, `/attach`, `/export`, `/context`, `/gpu`,
+  `/redraw`), key bindings (incl. `Ctrl+L` repaint, `Ctrl+J` newline,
+  `Ctrl+O` drop-undo, `?` reference), per-modal keys, transcript glyph
+  vocabulary, attachments custody rules, exec exit codes.
 - [FAQ](docs/faq.md): Durability, workspace policy, token stats, steering
-  semantics, parallel sessions.
+  semantics, queue pause semantics, approval tiers, parallel sessions.
 - [Troubleshooting](docs/troubleshooting.md): Symptom → cause → fix for
   connection, auth, catalog, provider, workspace, and rendering issues.
 - [Documentation index](docs/README.md): One-line map of every page.
@@ -35,7 +46,13 @@
 - [Changelog](CHANGELOG.md): Release history (0.1.0 was the first release —
   and the first application built on AbstractTUI; 0.2.0 is the engine-0.2.0
   adoption wave: Feed transcript, multiline composer + completion, in-app
-  selection/copy, engine follow-tail and intervals).
+  selection/copy, engine follow-tail and intervals; 0.3.0 is the
+  control-and-collaboration wave: prompt queue, /goal client half,
+  @entity conversations, tiered tool approvals, /workspace scope; 0.4.0
+  is the conclusion + presence wave: offloaded/failed-answer conclusion
+  fixes, header facts + instrument footer, /context declared window,
+  /gpu meter, Ctrl+L//redraw screen recovery — engine-owned full redraw
+  + redraw-on-focus-gained since abstracttui 0.2.6).
 - [Contributing](CONTRIBUTING.md): Build/test gates, the layering rules
   (signal ownership, pure protocol layer, replay-safe fold), which test to
   write for which change.

@@ -11,6 +11,11 @@ pub struct Args {
     pub gateway: Option<String>,
     pub token: Option<String>,
     pub session: Option<String>,
+    /// `--resume` — reopen the LAST session instead of starting fresh
+    /// (operator ruling 2026-07-26: launch starts a NEW session by
+    /// default; continuity is explicit, via this flag, `--session`, or
+    /// the in-app `/sessions` picker).
+    pub resume: bool,
     pub workflow: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
@@ -19,9 +24,34 @@ pub struct Args {
     pub workspace_mode: Option<String>,
     pub theme: Option<String>,
     pub max_iterations: u32,
+    /// Operator-declared model context window in tokens (CTX-0);
+    /// 0 = not declared. Session-scoped; `/context` persists.
+    pub max_tokens: u64,
     /// Prior turns replayed in full detail at boot (0 disables).
     pub replay_turns: usize,
-    pub approve_all: bool,
+    /// `--reasoning <none|minimal|low|medium|high|xhigh|auto>` — reasoning
+    /// effort override for the session route (first-citizen directive).
+    /// Validated at parse; empty = gateway default.
+    pub reasoning: Option<String>,
+    /// `--ungated` — run a gating-capable workflow (the multi-agent
+    /// coder) unattended, skipping its human-approval pauses
+    /// (`gating_mode=auto`). REFUSED unless `--permissions` is also set
+    /// on the same command line: ungated + unattended is exactly when an
+    /// unwatched tool could run, so the operator must choose the tool
+    /// posture explicitly (never a silent default).
+    pub ungated: bool,
+    /// `--permissions <read|write|all>` — the tool-permission level for
+    /// this invocation (validated at parse; c5028 consolidation). `None`
+    /// = the persisted prefs level applies.
+    pub permissions: Option<String>,
+    /// `--require-approval <name[,name]>` — per-tool ask pins for this
+    /// invocation (repeatable, accumulated). In headless exec an
+    /// ask-pinned tool DENIES (no interactive user); the TUI prompts.
+    pub require_approval: Vec<String>,
+    /// `exec --attach <path>` — files uploaded to the gateway before the
+    /// run starts, riding as `context.attachments` (repeatable). Any
+    /// failure exits 1 BEFORE `runs/start` — nothing spent.
+    pub attach: Vec<String>,
     pub timeout_secs: u64,
     pub show_caps: bool,
     pub show_help: bool,
@@ -42,20 +72,51 @@ USAGE:
 OPTIONS:
   --gateway <URL>         gateway base url (default: login store or http://127.0.0.1:8080)
   --token <TOKEN>         bearer token (default: env or login store)
-  --session <ID>          durable session id (default: last used / minted)
+  --session <ID>          durable session id (default: a fresh session)
+  --resume                reopen the last session (also: --continue)
+  --reasoning <LEVEL>     reasoning effort: none|minimal|low|medium|high|xhigh|auto
+  --ungated               run a gating-capable workflow unattended (skips its
+                          human approval pauses); requires --permissions
   --workflow <B[:F]>      agent workflow bundle[:flow] (default: saved or basic-agent)
   --provider <NAME>       provider override (default: gateway defaults)
   --model <NAME>          model override
   --workspace <PATH>      workspace root for tools (default: current directory)
   --no-workspace          do not send a workspace root
-  --workspace-mode <M>    workspace access mode (e.g. all_except_ignored)
+  --workspace-mode <M>    workspace access mode: workspace_only |
+                          workspace_or_allowed | all_except_ignored
+                          (default: server-managed; /workspace edits + persists)
   --theme <ID>            start theme (26 built-in; /theme lists them)
   --max-iterations <N>    agent iteration budget (default: 50)
+  --max-tokens <N>        declare the model's context window in tokens
+                          (e.g. 262144 or 262k) — drives the ctx N/M (%)
+                          meter and rides runs as _limits.max_tokens;
+                          /context <tokens> sets + persists it
+                          (aliases: --context, --context-window)
   --replay-turns <N>      prior turns replayed in full at boot (default: 20; 0 disables)
-  --approve-all           exec: auto-approve tool calls (default: deny)
+  --permissions <LEVEL>   tool permissions for this invocation: read | write | all
+                          (all = every tool auto-approves; per-tool 'ask' pins and
+                          gateway-disabled tools still gate)
+  --require-approval <T>  gate these tools regardless of level (comma-separated,
+                          repeatable); headless exec DENIES them, the TUI prompts
+  --attach <PATH>         exec: attach a file to the prompt (repeatable; uploads
+                          to the gateway before the run starts, exits 1 on failure)
   --timeout <SECS>        exec: give up after SECS (default: 900)
   -h, --help              this help
   -V, --version           version
+
+CONFIG (prefs.json — the TUI writes it; headless `exec` reads the SAME file):
+  tool_approval.accepted_tier   read | write | all — tool batches at-or-below
+                                auto-approve; above it the TUI prompts and
+                                exec DENIES (naming the rule). /permissions.
+  tool_approval.overrides       {{"tool_name": "auto"|"ask"}} per-tool pins.
+  workspace_mode                access mode sent with runs (/workspace).
+  workspace_allowed             extra allowlisted roots sent as
+                                workspace_allowed_paths (/workspace).
+  context_window                operator-declared model context window in
+                                tokens (/context; 0 = undeclared) — drives
+                                the footer's ctx used/window (%) meter.
+  The gateway enforces workspace policy server-side; it may clamp client
+  paths to operator-controlled roots.
 
 ENVIRONMENT:
   ABSTRACTCODE_GATEWAY_URL / ABSTRACTFLOW_GATEWAY_URL / ABSTRACTGATEWAY_URL
@@ -96,6 +157,17 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
             "--gateway" | "--gateway-url" => args.gateway = Some(take(a)?),
             "--token" => args.token = Some(take(a)?),
             "--session" => args.session = Some(take(a)?),
+            "--resume" | "--continue" => args.resume = true,
+            "--ungated" | "--no-gate" | "--auto" => args.ungated = true,
+            "--reasoning" | "--thinking" => {
+                let v = take(a)?.trim().to_ascii_lowercase();
+                if !crate::config::valid_reasoning_level(&v) {
+                    return Err(format!(
+                        "--reasoning takes none|minimal|low|medium|high|xhigh|auto (got {v:?})"
+                    ));
+                }
+                args.reasoning = Some(v);
+            }
             "--workflow" | "--agent" => args.workflow = Some(take(a)?),
             "--provider" => args.provider = Some(take(a)?),
             "--model" => args.model = Some(take(a)?),
@@ -109,6 +181,11 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
                     .parse::<u32>()
                     .map_err(|_| format!("--max-iterations: not a number: {v}"))?;
             }
+            "--max-tokens" | "--context" | "--context-window" => {
+                let v = take(a)?;
+                args.max_tokens = crate::config::parse_token_count(&v)
+                    .ok_or_else(|| format!("{a}: not a token count: {v} (try 262144 or 262k)"))?;
+            }
             "--replay-turns" => {
                 let v = take(a)?;
                 args.replay_turns = v
@@ -116,7 +193,34 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
                     .map_err(|_| format!("--replay-turns: not a number: {v}"))?
                     .min(100);
             }
-            "--approve-all" | "--auto-approve" => args.approve_all = true,
+            "--permissions" | "--permission" => {
+                let v = take(a)?;
+                if crate::tool_policy::Tier::parse(&v).is_none() {
+                    return Err(format!(
+                        "--permissions: unknown level {v:?} — expected read, write, or all"
+                    ));
+                }
+                args.permissions = Some(v);
+            }
+            "--require-approval" => {
+                let v = take(a)?;
+                args.require_approval.extend(
+                    v.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty()),
+                );
+            }
+            "--attach" => args.attach.push(take(a)?),
+            // Removed spellings TEACH the replacement (hard error, never
+            // a silent alias: the semantics changed — the level persists
+            // pins, where the old flag silently bypassed them).
+            "--approve-all" | "--auto-approve" => {
+                return Err(
+                    "--approve-all was removed — use --permissions all (per-tool 'ask' \
+                     pins still gate; --require-approval <names> adds gates)"
+                        .to_string(),
+                );
+            }
             "--timeout" => {
                 let v = take(a)?;
                 args.timeout_secs = v
@@ -245,7 +349,7 @@ pub fn doctor(args: &Args) -> i32 {
     if auth_ok {
         match client.list_bundles() {
             Ok(v) => {
-                let flows = crate::runner::agent_workflows_from_bundles(&v);
+                let flows = crate::discovery::agent_workflows_from_bundles(&v);
                 // An empty agent catalog is DEGRADED, not healthy: the TUI
                 // cannot start a run without an agent.v1 entrypoint.
                 catalog_ok = !flows.is_empty();
@@ -287,16 +391,87 @@ mod tests {
         let args = parse(&[]).unwrap();
         assert!(args.subcommand.is_none());
         assert_eq!(args.max_iterations, 50);
+        assert_eq!(args.max_tokens, 0, "window undeclared by default");
 
-        let argv: Vec<String> = ["exec", "do things", "--approve-all", "--model", "m1"]
+        let argv: Vec<String> = ["exec", "do things", "--permissions", "all", "--model", "m1"]
             .iter()
             .map(|s| s.to_string())
             .collect();
         let args = parse(&argv).unwrap();
         assert_eq!(args.subcommand.as_deref(), Some("exec"));
         assert_eq!(args.prompt.as_deref(), Some("do things"));
-        assert!(args.approve_all);
+        assert_eq!(args.permissions.as_deref(), Some("all"));
         assert_eq!(args.model.as_deref(), Some("m1"));
+    }
+
+    #[test]
+    fn permissions_flag_validates_and_removed_spellings_teach() {
+        // Valid levels parse; garbage refuses AT PARSE with the three
+        // levels named (never a silent misconfiguration at run time).
+        let ok = parse(&[
+            "exec".into(),
+            "x".into(),
+            "--permissions".into(),
+            "write".into(),
+        ])
+        .unwrap();
+        assert_eq!(ok.permissions.as_deref(), Some("write"));
+        let err = parse(&[
+            "exec".into(),
+            "x".into(),
+            "--permissions".into(),
+            "yolo".into(),
+        ])
+        .unwrap_err();
+        assert!(
+            err.contains("read, write, or all"),
+            "refusal teaches the levels: {err}"
+        );
+        // --require-approval accumulates across repeats + comma lists.
+        let args = parse(&[
+            "exec".into(),
+            "x".into(),
+            "--require-approval".into(),
+            "write_file,execute_command".into(),
+            "--require-approval".into(),
+            "fetch_url".into(),
+        ])
+        .unwrap();
+        assert_eq!(
+            args.require_approval,
+            vec!["write_file", "execute_command", "fetch_url"]
+        );
+        // The removed flag TEACHES its replacement (hard error — the
+        // semantics changed: pins gate even at all, where the old flag
+        // silently bypassed them).
+        let err = parse(&["exec".into(), "x".into(), "--approve-all".into()]).unwrap_err();
+        assert!(
+            err.contains("--permissions all"),
+            "removed spelling teaches: {err}"
+        );
+    }
+
+    #[test]
+    fn ungated_flag_parses_all_spellings_and_defaults_off() {
+        assert!(!parse(&[]).unwrap().ungated, "gated is the default");
+        for flag in ["--ungated", "--no-gate", "--auto"] {
+            assert!(
+                parse(&[flag.to_string()]).unwrap().ungated,
+                "{flag} arms ungated"
+            );
+        }
+    }
+
+    #[test]
+    fn resume_flag_parses_both_spellings_and_defaults_off() {
+        // Operator ruling 2026-07-26: launch = fresh session; --resume
+        // (or --continue) is the explicit continuity act.
+        let a = parse(&[]).unwrap();
+        assert!(!a.resume, "fresh session is the default posture");
+        for flag in ["--resume", "--continue"] {
+            let a = parse(&[flag.to_string()]).unwrap();
+            assert!(a.resume, "{flag} arms resume");
+        }
     }
 
     #[test]
@@ -304,6 +479,46 @@ mod tests {
         assert!(parse(&["--frobnicate".to_string()]).is_err());
         assert!(parse(&["frobnicate".to_string()]).is_err());
         assert!(parse(&["--model".to_string()]).is_err());
+    }
+
+    #[test]
+    fn parse_max_tokens_accepts_counts_and_refuses_junk() {
+        let argv: Vec<String> = ["--max-tokens", "262k"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(parse(&argv).unwrap().max_tokens, 262_000);
+        let argv: Vec<String> = ["--max-tokens", "262144"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(parse(&argv).unwrap().max_tokens, 262_144);
+        let argv: Vec<String> = ["--max-tokens", "lots"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(parse(&argv).is_err(), "junk refuses loudly");
+        // Aliases: the /context spelling and the prefs-key spelling both
+        // land on the same declaration; errors name the flag AS TYPED.
+        let argv: Vec<String> = ["--context-window", "128k"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(parse(&argv).unwrap().max_tokens, 128_000);
+        let argv: Vec<String> = ["--context", "32768"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(parse(&argv).unwrap().max_tokens, 32_768);
+        let argv: Vec<String> = ["--context-window", "lots"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let err = parse(&argv).unwrap_err();
+        assert!(
+            err.contains("--context-window"),
+            "the error names the flag as typed: {err}"
+        );
     }
 
     #[test]

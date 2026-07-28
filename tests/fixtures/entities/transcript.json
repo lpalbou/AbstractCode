@@ -1,0 +1,36 @@
+{
+ "run_id": "b0a1c2d3-e4f5-4678-9abc-def012345678",
+ "session_id": "visit-doorcheck-a1b2c3d4",
+ "visit_id": "visit-9f8e7d6c",
+ "status": "waiting",
+ "turn_n": 12,
+ "participants": [
+  "person:admin",
+  "entity:doorcheck"
+ ],
+ "turns": [
+  {
+   "role": "user",
+   "content": "(present with you: person:admin)\n\nMEMORIES (what this moment reminds you of; each dated [YYYY-MM-DD] - newer dates are more recent; [rN] = how strongly this moment called it, r1 strongest):\n- [r3] [episode #ddf0e348 2026-07-15 - lived conversation] exchange: Hello Doorcheck. Two small things: first, please search your memory for anything about your own recent days.\n- [r12] [diary #26220500 2026-07-22 - your diary act] Diary entry (note) \u2014 2026-07-22: TUI build connectivity check. Grounded in time.\n(a digest is a handle, not the memory itself - to reread a moment's full words, use the read_memory tool with its #tag; several records from 'your own reflection' about one thing are ONE origin retold, not independent evidence)\n(as_of_seq=223)\n\nhow are the doors today?"
+  },
+  {
+   "role": "assistant",
+   "content": "All checks green so far.",
+   "tool_details": [
+    {
+     "name": "diary_list",
+     "success": true,
+     "result": "2 entries"
+    }
+   ]
+  },
+  {
+   "role": "user",
+   "content": "one more check please"
+  },
+  {
+   "role": "assistant",
+   "content": "Done \u2014 the gate answers."
+  }
+ ]
+}

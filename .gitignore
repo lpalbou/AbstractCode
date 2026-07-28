@@ -1,3 +1,6 @@
 /target
 untracked/
 *.crate
+.cursor/
+__pycache__/
+.cg_rounds/

@@ -113,3 +113,103 @@ fn restore_counts_slimmed_tool_calls_and_holds_no_wait() {
     assert_eq!(fold.stats.tool_calls, 3);
     assert!(fold.stats.llm_calls >= 2);
 }
+
+/// Runtime R4 (2026-07-25): the bundle's in-band `warnings[]` names
+/// every degradation the export survived — the client renders them as
+/// Info lines AHEAD of the fold (the operator's no-silent-failing
+/// ruling, both halves). Schema-tolerant (objects with kind/detail,
+/// bare strings), capped, and a ledger-less bundle still surfaces
+/// them.
+#[test]
+fn server_bundle_warnings_render_ahead_and_survive_ledgerless_bundles() {
+    // Object + string shapes, on a bundle with one trivial ledger.
+    let bundle = serde_json::json!({
+        "root_run_id": "root",
+        "warnings": [
+            {"kind": "ledger_tail_window", "detail": "run root: 2500 total, window carried 2000"},
+            "torn_rows_skipped: 3",
+        ],
+        "ledgers": {
+            "root": {"run_id": "root", "total": 1, "items": [
+                {"cursor": 1, "record": {"run_id": "root", "node_id": "end",
+                    "status": "completed", "result": {"output": {"response": "done"}}}}
+            ]}
+        }
+    });
+    let mut fold = Fold::new();
+    fold.begin_run("root");
+    let mut fx = Vec::new();
+    rehydrate_run_into(&mut fold, "root", &bundle, false, &mut fx);
+    let infos: Vec<&String> = fold
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Info { text } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        infos
+            .iter()
+            .any(|t| t.contains("ledger_tail_window") && t.contains("2000")),
+        "object warning renders kind + detail: {infos:?}"
+    );
+    assert!(
+        infos.iter().any(|t| t.contains("torn_rows_skipped")),
+        "bare-string warning renders: {infos:?}"
+    );
+    // Warnings precede the folded answer (ahead of the transcript).
+    let first_warning = fold
+        .items
+        .iter()
+        .position(|i| matches!(i, Item::Info { text } if text.contains("history export")))
+        .expect("warning rendered");
+    let answer = fold
+        .items
+        .iter()
+        .position(|i| matches!(i, Item::Assistant { .. }))
+        .expect("answer folded");
+    assert!(first_warning < answer, "warnings render AHEAD of the fold");
+
+    // Ledger-less bundle: warnings still surface (the early return
+    // must not swallow them).
+    let bare = serde_json::json!({
+        "root_run_id": "root",
+        "warnings": [{"kind": "subtree_discovery_failed", "detail": "walk aborted"}]
+    });
+    let mut fold2 = Fold::new();
+    fold2.begin_run("root");
+    let mut fx2 = Vec::new();
+    rehydrate_run_into(&mut fold2, "root", &bare, false, &mut fx2);
+    assert!(
+        fold2
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Info { text } if text.contains("subtree_discovery_failed"))),
+        "ledger-less bundles surface warnings too"
+    );
+
+    // Cap: 9 warnings render 6 + an honest remainder line.
+    let many: Vec<Value> = (0..9)
+        .map(|i| Value::String(format!("warning {i}")))
+        .collect();
+    let capped = serde_json::json!({
+        "root_run_id": "root",
+        "warnings": many,
+        "ledgers": {}
+    });
+    let mut fold3 = Fold::new();
+    fold3.begin_run("root");
+    let mut fx3 = Vec::new();
+    rehydrate_run_into(&mut fold3, "root", &capped, false, &mut fx3);
+    let shown = fold3
+        .items
+        .iter()
+        .filter(|i| matches!(i, Item::Info { text } if text.contains("history export")))
+        .count();
+    assert_eq!(shown, 7, "6 warnings + the +3-more line");
+    assert!(fold3
+        .items
+        .iter()
+        .any(|i| matches!(i, Item::Info { text } if text.contains("+3 more"))));
+}
