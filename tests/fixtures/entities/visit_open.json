@@ -1,0 +1,12 @@
+{
+ "run_id": "b0a1c2d3-e4f5-4678-9abc-def012345678",
+ "visit_id": "visit-9f8e7d6c",
+ "session_id": "visit-doorcheck-a1b2c3d4",
+ "participants": [
+  "person:admin",
+  "entity:doorcheck"
+ ],
+ "prelude_warnings": [
+  "#FALLBACK vector channel unavailable for this home"
+ ]
+}

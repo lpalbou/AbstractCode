@@ -17,16 +17,24 @@
 //! - [`runner`]: the worker thread owning every HTTP call and stream.
 //! - [`ui`]: AbstractTUI views (chrome, transcript, modals).
 //! - [`cli`], [`exec`]: argument parsing, doctor/login, headless one-shots.
+//! - [`export`]: `/export` renderers (archival markdown + SFT JSONL).
 
 pub mod cli;
 pub mod commands;
 pub mod config;
+pub mod convo;
+pub mod discovery;
+pub mod entities;
 pub mod exec;
+pub mod export;
 pub mod gateway;
+pub mod mention;
+pub mod paths;
 pub mod protocol;
 pub mod run_input;
 pub mod runner;
 pub mod store;
+pub mod tool_policy;
 pub mod transcript;
 pub mod ui;
 
@@ -72,6 +80,20 @@ pub fn run_cli(argv: &[String]) -> i32 {
     }
 }
 
+/// Boot-time render policy, extracted so a test can pin it (the
+/// adversary's P2-4: the opt-in lived only inside `run_tui`, which no
+/// headless test executes — deleting it was caught by nothing).
+///
+/// Auto-heal on focus regain (0.2.6, our 0299 ask 2): an externally
+/// cleared screen (Cmd+K, `printf '\033c'`) fixes itself at the next
+/// focus round-trip — this replaces the old ~5s chrome heartbeat
+/// entirely. Ctrl+L / /redraw remain the explicit verbs; terminals
+/// without DEC 1004 focus reporting (tmux without `focus-events on`)
+/// only get those, which docs/troubleshooting.md says honestly.
+fn apply_boot_render_policy() {
+    abstracttui::app::set_redraw_on_focus_gained(true);
+}
+
 fn run_tui(args: &cli::Args) -> i32 {
     if !abstracttui::term::have_tty() {
         eprintln!("abstractcode-tui: needs an interactive terminal (use `exec` for headless runs)");
@@ -99,12 +121,23 @@ fn run_tui(args: &cli::Args) -> i32 {
         .trim_end_matches('/')
         .to_string();
 
-    // Session: flag > saved > minted. A fresh mint is saved immediately so
-    // the next launch continues the same conversation.
+    // Session: explicit `--session` > explicit `--resume` (last saved)
+    // > a FRESH mint. Launch starts a NEW conversation by default
+    // (operator ruling 2026-07-26: "launching code-tui should start on
+    // a new session and not automatically reattach to the last one");
+    // continuity is always an explicit act — the flags here or the
+    // in-app `/sessions` picker. The minted id is still saved so
+    // `--resume` and the picker know what "last" was.
     let session_id = args
         .session
         .clone()
-        .or_else(|| prefs.session_id.clone())
+        .or_else(|| {
+            if args.resume {
+                prefs.session_id.clone()
+            } else {
+                None
+            }
+        })
         .unwrap_or_else(config::mint_session_id);
     prefs.session_id = Some(session_id.clone());
     prefs.touch_session(&session_id, None);
@@ -145,6 +178,21 @@ fn run_tui(args: &cli::Args) -> i32 {
         .clone()
         .or_else(|| prefs.model.clone())
         .unwrap_or_default();
+    // Reasoning effort: flag > pair-coupled pref (a persisted effort
+    // applies only under the provider/model it was saved with — a
+    // route change resets it, the first-citizen coupling rule).
+    let reasoning = args
+        .reasoning
+        .clone()
+        .unwrap_or_else(|| config::coupled_reasoning(&prefs, &provider, &model));
+    // Operator-declared context window (CTX-0): flag (session-scoped) >
+    // persisted /context declaration. 0 = undeclared (honest absolute
+    // ctx display; no `_limits` on the wire).
+    let context_window = if args.max_tokens > 0 {
+        args.max_tokens
+    } else {
+        prefs.context_window
+    };
     let max_iterations = args.max_iterations;
     let args_replay_turns = args.replay_turns;
 
@@ -154,32 +202,90 @@ fn run_tui(args: &cli::Args) -> i32 {
     let mut app = App::new(Size::new(120, 36));
     // Engine screen-text selection (0.2.0, the feature filed as 0270):
     // left-drag paints a selection over the rendered text, release (or
-    // Enter/c/Ctrl+C) copies via OSC 52, Esc/click clears. Always-on:
-    // left-drag has no other meaning in this app, and wheel scrolling is
-    // untouched by it. Native terminal selection stays one Shift/Option
-    // drag away (the engine's troubleshooting doc has the matrix).
+    // Enter/c/Ctrl+C) copies via OSC 52, Esc/click clears. Always on —
+    // since abstracttui 0.2.8 (our first-app/0285) the selection layer
+    // claims a gesture only once it DRAGS, so plain clicks pass through
+    // to buttons everywhere, modals included; this boot enable is the
+    // ONLY writer (the open_modal/close_modal suspend toggles the app
+    // carried while 0285 was open are deleted). Native terminal
+    // selection stays one Shift/Option drag away (the engine's
+    // troubleshooting doc has the matrix).
     abstracttui::app::selection::selection().set_enabled(true);
+    apply_boot_render_policy();
     let overlays = app.overlays();
     let quitter = app.quitter();
+    // Ctrl+L must survive an OPEN MODAL (HDR-2a): see
+    // `ui::register_global_actions` for the routing rationale.
+    ui::register_global_actions(&app.actions());
+    // The actions handle rides into root() for the Ctrl+C clear-or-quit
+    // registration (needs the composer state, which exists only there).
+    let actions = app.actions();
     let (tx, rx) = mpsc::channel::<runner::Cmd>();
     let shutdown_tx = tx.clone();
     let mut rx_slot = Some(rx);
 
+    // Queue quit-echo mirror (courtesy): the queue PERSISTS per session
+    // (prefs write-through) and restores PAUSED on the next launch — the
+    // quit line says so where the user can still read it (post-teardown
+    // stderr; an in-altscreen eprintln is invisible). Mirrored
+    // continuously because signals die with the app's reactive root and
+    // cannot be read after run() returns.
+    let queue_echo: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+    let queue_echo_ui = queue_echo.clone();
+    // Quit-outcome echo (quit-modal design §3.6): the run/quit state at
+    // teardown, mirrored continuously (signals die with the reactive
+    // root). `None` = quit was silent (idle) — no line.
+    let quit_echo: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    let quit_echo_ui = quit_echo.clone();
+
     let mount_result = app.mount(move |cx| {
         let store = store::Store::create(cx);
         cx.provide_context(store);
+        cx.effect(move || {
+            let texts: Vec<String> = store
+                .queue
+                .with(|q| q.iter().map(|p| ui::queue_preview(&p.text)).collect());
+            *queue_echo_ui.borrow_mut() = texts;
+        });
+        cx.effect(move || {
+            let state = store.quit_state.get();
+            let phase = store.phase.get();
+            let run_id = store.run_id.get();
+            // The ack-quit path posts its own line: a Delivering state
+            // that the sequencer resolved with quitter.quit() means the
+            // verb was CONFIRMED — mirror the acked wording. The
+            // sequencer clears verb_ack on match, so "Delivering at
+            // teardown with no ack" reads as not-confirmed (quit-anyway).
+            *quit_echo_ui.borrow_mut() = ui::quit::quit_echo_line(&state, phase, &run_id);
+        });
         store.session_id.set(session_id.clone());
         store.provider.set(provider.clone());
         store.model.set(model.clone());
+        store.reasoning.set(reasoning.clone());
+        store.context_window.set(context_window);
         if let Some(details) = show_details_pref {
             store.show_details.set(details);
         }
-        // Persisted capability selections (the /tools + /skills pickers).
-        store.disabled_tools.set(prefs.disabled_tools.clone());
+        // Persisted skill selection (global; the /skills picker).
         store.selected_skills.set(prefs.skills.clone());
+        // Entity roster: last-good cache loads instantly ('@' completion +
+        // /entities work offline); one async refresh follows below.
+        let (cached_roster, roster_as_of) = entities::load_cached_roster();
+        store.entities.set(cached_roster);
+        store.entities_as_of.set(roster_as_of);
+        // Tools-modal config is STICKY PER SESSION (operator ask): the ONE
+        // slot authority (`ui::seed_tool_pref_signals`) seeds the signals;
+        // camera-default-off arms via the pending flag and fires when the
+        // inventory loads (the tools-load effect — no ctx exists yet here).
+        let _fresh = ui::seed_tool_pref_signals(store, &prefs, &session_id);
+        // Live workspace scope (seeded from flags/prefs; /workspace edits).
+        // The signal is the ONE authority — UiCtx carries no copy.
+        store.workspace_mode.set(workspace_mode.unwrap_or_default());
+        store.workspace_allowed.set(prefs.workspace_allowed.clone());
 
         let wake = abstracttui::reactive::wake_handle();
         let rx = rx_slot.take().expect("mount runs once");
+        let ui_client = client.clone();
         runner::spawn(client.clone(), wake, store, tx.clone(), rx);
 
         // Boot sequence: probe, load the catalog (+ saved workflow), and
@@ -191,6 +297,11 @@ fn run_tui(args: &cli::Args) -> i32 {
         });
         let _ = tx.send(runner::Cmd::LoadTools);
         let _ = tx.send(runner::Cmd::LoadSkills);
+        // MCP registry at boot (HDR-1/REST-1): the header + footer carry
+        // `mcp N` — without this load the count existed only after /mcp
+        // was opened once. One cheap GET.
+        let _ = tx.send(runner::Cmd::LoadMcp);
+        let _ = tx.send(runner::Cmd::LoadEntities);
         let _ = tx.send(runner::Cmd::ProbeAttach {
             session_id: attach_session.clone(),
             replay_turns: args_replay_turns,
@@ -204,11 +315,11 @@ fn run_tui(args: &cli::Args) -> i32 {
 
         let ctx = ui::UiCtx {
             tx,
+            client: ui_client.clone(),
             overlays: overlays.clone(),
             quitter: quitter.clone(),
             prefs: Rc::new(RefCell::new(prefs)),
             workspace_root,
-            workspace_mode,
             max_iterations,
             replay_turns: args_replay_turns,
             gateway_label,
@@ -217,7 +328,19 @@ fn run_tui(args: &cli::Args) -> i32 {
             dismissed_wait: Rc::new(RefCell::new(None)),
             wait_modal_for: Rc::new(RefCell::new(None)),
         };
-        ui::root(cx, store, ctx)
+        // Cycle-2 queue persistence: restore this session's stash PAUSED
+        // (a restore never auto-starts — the one rule tying quit/reopen
+        // and session switches together), plus the recorded goal (its
+        // strip label; `wire_goal` restores `finish_on_root_only` when
+        // the reattach probe lands on the goal run).
+        ui::restore_session_queue(store, &ctx, &session_id);
+        let goal = ctx
+            .prefs
+            .borrow()
+            .session_goal(&session_id)
+            .map(|(text, run_id)| store::GoalState { text, run_id });
+        store.goal.set(goal);
+        ui::root(cx, store, ctx, &actions)
     });
     if let Err(e) = mount_result {
         eprintln!("abstractcode-tui: mount failed: {e:?}");
@@ -229,11 +352,59 @@ fn run_tui(args: &cli::Args) -> i32 {
     // Stop the worker + any live streams before leaving (the process would
     // reap them anyway; being explicit keeps shutdown race-free).
     let _ = shutdown_tx.send(runner::Cmd::Shutdown);
+    // Queue persistence honesty (cycle-2: REVERSED from drop-on-quit —
+    // the queue is saved per session by write-through): a courtesy line
+    // where the user can still read it (post-teardown stderr).
+    {
+        let leftover = queue_echo.borrow();
+        if !leftover.is_empty() {
+            eprintln!(
+                "abstractcode-tui: {} queued prompt(s) saved with this session — they restore PAUSED on the next launch (/queue then r resumes):",
+                leftover.len()
+            );
+            for text in leftover.iter() {
+                eprintln!("  · {text}");
+            }
+        }
+    }
+    // Quit-outcome honesty (quit-modal design §3.6; audit P1: the
+    // mirror existed but was never READ — a successful pause-then-quit
+    // exited with no confirmation at all). One line, post-teardown,
+    // where the user can still read it.
+    if let Some(line) = quit_echo.borrow().as_ref() {
+        eprintln!("abstractcode-tui: {line}");
+    }
     match outcome {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("abstractcode-tui: {e:?}");
             1
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The focus-gained auto-heal opt-in is load-bearing boot policy
+    /// (it REPLACED the deleted ~5s chrome heartbeat): pin that the
+    /// boot policy actually sets the engine flag, so removing the call
+    /// can never ship silently. Thread-local state — asserted in the
+    /// same thread that applies it.
+    #[test]
+    fn boot_render_policy_opts_into_focus_gained_redraw() {
+        assert!(
+            !abstracttui::app::redraw_on_focus_gained(),
+            "engine default is OFF (the opt-in below is what ships it)"
+        );
+        super::apply_boot_render_policy();
+        assert!(
+            abstracttui::app::redraw_on_focus_gained(),
+            "boot policy enables the focus-gained auto-heal"
+        );
+        // Restore the thread-local (the engine suites' discipline):
+        // harmless today — each test runs on a fresh thread — but a
+        // future same-thread sibling asserting the default must not
+        // inherit an ordering dependency.
+        abstracttui::app::set_redraw_on_focus_gained(false);
     }
 }

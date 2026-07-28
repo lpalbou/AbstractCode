@@ -1,0 +1,797 @@
+{
+ "_provenance": "distilled 2026-07-23 from LIVE gateway run c61e4ac9-ec35-4eb2-bc0c-03f9025c8f8a (basic-agent@0.0.3, created 2026-07-22T04:28) \u2014 the maintainer's 5h 'never finishes' run. The agent subrun 0f2d487c completed at 04:31:33 with result.output REPLACED by the runtime ledger offloader ({'$artifact': ...}, output >256KB); the root stayed waiting on the status-poller subflow. Payload messages/tools/system prompts trimmed; the done record is verbatim.",
+ "root_run_id": "c61e4ac9-ec35-4eb2-bc0c-03f9025c8f8a",
+ "agent_run_id": "0f2d487c-7453-463d-835a-1912f00cab39",
+ "poller_run_id": "8fe2acc9-5d1d-4ea6-8087-a894cfdfd333",
+ "artifact_id": "e3b19ad9e42a2b725048bab40138f975",
+ "ledgers": {
+  "c61e4ac9-ec35-4eb2-bc0c-03f9025c8f8a": [
+   {
+    "run_id": "c61e4ac9-ec35-4eb2-bc0c-03f9025c8f8a",
+    "step_id": "6b2d7d51-941e-495e-9a68-af33a35447da",
+    "node_id": "node-2",
+    "status": "started",
+    "effect": {
+     "type": "start_subworkflow",
+     "payload": {
+      "workflow_id": "visual_react_agent_basic-agent_0_0_3_81795ea9_node-2",
+      "vars": "[fixture-trim]",
+      "async": true,
+      "wait": true,
+      "include_traces": true
+     }
+    },
+    "result": null,
+    "error": null,
+    "started_at": "2026-07-22T04:28:24.788646+00:00",
+    "ended_at": null,
+    "actor_id": "gateway",
+    "session_id": "acode-9bb411808263",
+    "attempt": 1,
+    "idempotency_key": "e90a8822a73f698a3b1be67b48dbe4b7",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "c61e4ac9-ec35-4eb2-bc0c-03f9025c8f8a",
+    "step_id": "6b2d7d51-941e-495e-9a68-af33a35447da",
+    "node_id": "node-2",
+    "status": "waiting",
+    "effect": {
+     "type": "start_subworkflow",
+     "payload": {
+      "workflow_id": "visual_react_agent_basic-agent_0_0_3_81795ea9_node-2",
+      "vars": "[fixture-trim]",
+      "async": true,
+      "wait": true,
+      "include_traces": true
+     }
+    },
+    "result": {
+     "wait": {
+      "reason": "subworkflow",
+      "wait_key": "subworkflow:0f2d487c-7453-463d-835a-1912f00cab39",
+      "until": null,
+      "resume_to_node": "node-2",
+      "result_key": "_temp.agent.node-2.sub",
+      "prompt": null,
+      "choices": null,
+      "allow_free_text": true,
+      "details": {
+       "sub_run_id": "0f2d487c-7453-463d-835a-1912f00cab39",
+       "sub_workflow_id": "visual_react_agent_basic-agent_0_0_3_81795ea9_node-2",
+       "async": true,
+       "include_traces": true
+      }
+     }
+    },
+    "error": null,
+    "started_at": "2026-07-22T04:28:24.788646+00:00",
+    "ended_at": "2026-07-22T04:28:24.792859+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-9bb411808263",
+    "attempt": 1,
+    "idempotency_key": "e90a8822a73f698a3b1be67b48dbe4b7",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "c61e4ac9-ec35-4eb2-bc0c-03f9025c8f8a",
+    "step_id": "70224bbe-c752-4bca-b123-a07a8aa021d5",
+    "node_id": "node-2",
+    "status": "completed",
+    "effect": {
+     "type": "resume",
+     "payload": {
+      "wait_reason": "subworkflow",
+      "wait_key": "subworkflow:0f2d487c-7453-463d-835a-1912f00cab39",
+      "resume_to_node": "node-2",
+      "result_key": "_temp.agent.node-2.sub",
+      "payload": "[fixture-trim: resume payload copy of the subrun output]"
+     }
+    },
+    "result": {
+     "resumed": true
+    },
+    "error": null,
+    "started_at": "2026-07-22T04:31:33.281696+00:00",
+    "ended_at": "2026-07-22T04:31:33.281704+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-9bb411808263",
+    "attempt": 1,
+    "idempotency_key": null,
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "c61e4ac9-ec35-4eb2-bc0c-03f9025c8f8a",
+    "step_id": "4eb4222a-c21d-445d-be03-2745ad156e3a",
+    "node_id": "node-2",
+    "status": "completed",
+    "effect": {
+     "type": "resume",
+     "payload": {
+      "wait_reason": "subworkflow",
+      "wait_key": "subworkflow:0f2d487c-7453-463d-835a-1912f00cab39",
+      "resume_to_node": "node-2",
+      "result_key": "_temp.agent.node-2.sub",
+      "payload": "[fixture-trim: resume payload copy of the subrun output]"
+     }
+    },
+    "result": {
+     "resumed": true
+    },
+    "error": null,
+    "started_at": "2026-07-22T04:31:33.310284+00:00",
+    "ended_at": "2026-07-22T04:31:33.310295+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-9bb411808263",
+    "attempt": 1,
+    "idempotency_key": null,
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "c61e4ac9-ec35-4eb2-bc0c-03f9025c8f8a",
+    "step_id": "a018cf82-691f-4b54-8fb8-6c7bcb01c1c0",
+    "node_id": "node-5",
+    "status": "started",
+    "effect": {
+     "type": "start_subworkflow",
+     "payload": {
+      "type": "start_subworkflow",
+      "workflow_id": "basic-agent@0.0.3:15f19f7f",
+      "vars": {
+       "state": "Done",
+       "post_delay": 3
+      },
+      "async": true,
+      "wait": true,
+      "resume_to_node": "end"
+     }
+    },
+    "result": null,
+    "error": null,
+    "started_at": "2026-07-22T04:31:33.674509+00:00",
+    "ended_at": null,
+    "actor_id": "gateway",
+    "session_id": "acode-9bb411808263",
+    "attempt": 1,
+    "idempotency_key": "b4fdff7869b9647a3192bd4b3cfe7284",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "c61e4ac9-ec35-4eb2-bc0c-03f9025c8f8a",
+    "step_id": "a018cf82-691f-4b54-8fb8-6c7bcb01c1c0",
+    "node_id": "node-5",
+    "status": "waiting",
+    "effect": {
+     "type": "start_subworkflow",
+     "payload": {
+      "type": "start_subworkflow",
+      "workflow_id": "basic-agent@0.0.3:15f19f7f",
+      "vars": {
+       "state": "Done",
+       "post_delay": 3
+      },
+      "async": true,
+      "wait": true,
+      "resume_to_node": "end"
+     }
+    },
+    "result": {
+     "wait": {
+      "reason": "subworkflow",
+      "wait_key": "subworkflow:8fe2acc9-5d1d-4ea6-8087-a894cfdfd333",
+      "until": null,
+      "resume_to_node": "end",
+      "result_key": "_temp.effects.node-5",
+      "prompt": null,
+      "choices": null,
+      "allow_free_text": true,
+      "details": {
+       "sub_run_id": "8fe2acc9-5d1d-4ea6-8087-a894cfdfd333",
+       "sub_workflow_id": "basic-agent@0.0.3:15f19f7f",
+       "async": true,
+       "include_traces": false
+      }
+     }
+    },
+    "error": null,
+    "started_at": "2026-07-22T04:31:33.674509+00:00",
+    "ended_at": "2026-07-22T04:31:33.675748+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-9bb411808263",
+    "attempt": 1,
+    "idempotency_key": "b4fdff7869b9647a3192bd4b3cfe7284",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "c61e4ac9-ec35-4eb2-bc0c-03f9025c8f8a",
+    "step_id": "bf2cf783-cb02-4796-86a0-62ed18e52649",
+    "node_id": "node-5",
+    "status": "completed",
+    "effect": {
+     "type": "emit_event",
+     "payload": {
+      "name": "abstract.status",
+      "scope": "session",
+      "payload": {
+       "text": "cancelled"
+      }
+     }
+    },
+    "result": {
+     "emitted": true,
+     "name": "abstract.status",
+     "payload": {
+      "text": "cancelled"
+     }
+    },
+    "error": null,
+    "started_at": "2026-07-22T09:28:54.485211+00:00",
+    "ended_at": "2026-07-22T09:28:54.485225+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-9bb411808263",
+    "attempt": 1,
+    "idempotency_key": "system:terminal_status:cancelled",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   }
+  ],
+  "0f2d487c-7453-463d-835a-1912f00cab39": [
+   {
+    "run_id": "0f2d487c-7453-463d-835a-1912f00cab39",
+    "step_id": "a64167cc-74ab-4169-a7ab-fbee643eb1ac",
+    "node_id": "reason",
+    "status": "started",
+    "effect": {
+     "type": "llm_call",
+     "payload": {
+      "prompt": "",
+      "messages": [
+       {
+        "role": "user",
+        "content": "[trimmed for fixture]"
+       }
+      ],
+      "tools": [],
+      "system_prompt": "[trimmed]",
+      "provider": "endpoint:airelay",
+      "model": "gpt-5.6-sol",
+      "params": {
+       "temperature": 0.2,
+       "trace_metadata": {
+        "step_id": "a64167cc-74ab-4169-a7ab-fbee643eb1ac",
+        "effect_idempotency_key": "2f179e391a36a85d4d87164c603b4a81",
+        "attempt": 1
+       }
+      }
+     }
+    },
+    "result": null,
+    "error": null,
+    "started_at": "2026-07-22T04:28:25.594107+00:00",
+    "ended_at": null,
+    "actor_id": "gateway",
+    "session_id": "acode-9bb411808263",
+    "attempt": 1,
+    "idempotency_key": "2f179e391a36a85d4d87164c603b4a81",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "0f2d487c-7453-463d-835a-1912f00cab39",
+    "step_id": "a64167cc-74ab-4169-a7ab-fbee643eb1ac",
+    "node_id": "reason",
+    "status": "completed",
+    "effect": {
+     "type": "llm_call",
+     "payload": {
+      "prompt": "",
+      "messages": [
+       {
+        "role": "user",
+        "content": "[trimmed for fixture]"
+       }
+      ],
+      "tools": {
+       "$slim": {
+        "v": 1,
+        "kind": "started_payload_field",
+        "step_id": "a64167cc-74ab-4169-a7ab-fbee643eb1ac",
+        "sha256": "2513494ee8da433f686624bbb9fd760c5f5cd11f27d8c1ddf8f84695466f67df",
+        "bytes": 9892,
+        "field": "tools"
+       }
+      },
+      "system_prompt": "[trimmed]",
+      "provider": "endpoint:airelay",
+      "model": "gpt-5.6-sol",
+      "params": {
+       "temperature": 0.2,
+       "trace_metadata": {
+        "step_id": "a64167cc-74ab-4169-a7ab-fbee643eb1ac",
+        "effect_idempotency_key": "2f179e391a36a85d4d87164c603b4a81",
+        "attempt": 1,
+        "run_id": "0f2d487c-7453-463d-835a-1912f00cab39",
+        "workflow_id": "visual_react_agent_basic-agent_0_0_3_81795ea9_node-2",
+        "node_id": "reason",
+        "actor_id": "gateway",
+        "session_id": "acode-9bb411808263",
+        "parent_run_id": "c61e4ac9-ec35-4eb2-bc0c-03f9025c8f8a"
+       }
+      }
+     }
+    },
+    "result": {
+     "content": null,
+     "reasoning": null,
+     "data": null,
+     "raw_response": "[fixture-trim]",
+     "tool_calls": [
+      {
+       "name": "list_files",
+       "arguments": {
+        "directory_path": "/Users/albou/Desktop",
+        "pattern": "game.js",
+        "recursive": true,
+        "include_hidden": false,
+        "head_limit": 20
+       },
+       "call_id": "call_Wdn2ohgduEN2YgoQz94LltL7"
+      },
+      {
+       "name": "list_files",
+       "arguments": {
+        "directory_path": "/Users/albou/Desktop",
+        "pattern": "index.html",
+        "recursive": true,
+        "include_hidden": false,
+        "head_limit": 20
+       },
+       "call_id": "call_faS2knDi0fzpsuk9Vwsg6Hrj"
+      },
+      {
+       "name": "list_files",
+       "arguments": {
+        "directory_path": "/Users/albou/Desktop",
+        "pattern": "bug-no-ship.png",
+        "recursive": false,
+        "include_hidden": false,
+        "head_limit": 10
+       },
+       "call_id": "call_cTYXJYLllSzflszbasjDsniy"
+      }
+     ],
+     "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 2314,
+      "prompt_tokens": 0,
+      "completion_tokens": 0
+     },
+     "model": "gpt-5.6-sol",
+     "finish_reason": "tool_calls",
+     "metadata": "[fixture-trim]",
+     "trace_id": "70278ebf-13c8-48b2-8c66-eca6876b1a82",
+     "gen_time": 4246.4
+    },
+    "error": null,
+    "started_at": "2026-07-22T04:28:25.594107+00:00",
+    "ended_at": "2026-07-22T04:28:31.268419+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-9bb411808263",
+    "attempt": 1,
+    "idempotency_key": "2f179e391a36a85d4d87164c603b4a81",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "0f2d487c-7453-463d-835a-1912f00cab39",
+    "step_id": "317ca0b5-5d6c-471a-9030-e09230bc3645",
+    "node_id": "act",
+    "status": "started",
+    "effect": {
+     "type": "tool_calls",
+     "payload": {
+      "tool_calls": [
+       {
+        "name": "list_files",
+        "arguments": {
+         "directory_path": "/Users/albou/Desktop",
+         "pattern": "game.js",
+         "recursive": true,
+         "include_hidden": false,
+         "head_limit": 20
+        },
+        "call_id": "call_Wdn2ohgduEN2YgoQz94LltL7",
+        "runtime_call_id": "rtcall_0bea43a2ec718987abcbc4f37beb115c_1"
+       },
+       {
+        "name": "list_files",
+        "arguments": {
+         "directory_path": "/Users/albou/Desktop",
+         "pattern": "index.html",
+         "recursive": true,
+         "include_hidden": false,
+         "head_limit": 20
+        },
+        "call_id": "call_faS2knDi0fzpsuk9Vwsg6Hrj",
+        "runtime_call_id": "rtcall_0bea43a2ec718987abcbc4f37beb115c_2"
+       },
+       {
+        "name": "list_files",
+        "arguments": {
+         "directory_path": "/Users/albou/Desktop",
+         "pattern": "bug-no-ship.png",
+         "recursive": false,
+         "include_hidden": false,
+         "head_limit": 10
+        },
+        "call_id": "call_cTYXJYLllSzflszbasjDsniy",
+        "runtime_call_id": "rtcall_0bea43a2ec718987abcbc4f37beb115c_3"
+       }
+      ],
+      "allowed_tools": [
+       "analyze_code",
+       "edit_file",
+       "execute_command",
+       "[fixture-trim: 7 more]"
+      ],
+      "act_seq": 1
+     }
+    },
+    "result": null,
+    "error": null,
+    "started_at": "2026-07-22T04:28:31.578063+00:00",
+    "ended_at": null,
+    "actor_id": "gateway",
+    "session_id": "acode-9bb411808263",
+    "attempt": 1,
+    "idempotency_key": "0bea43a2ec718987abcbc4f37beb115c",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "0f2d487c-7453-463d-835a-1912f00cab39",
+    "step_id": "317ca0b5-5d6c-471a-9030-e09230bc3645",
+    "node_id": "act",
+    "status": "completed",
+    "effect": {
+     "type": "tool_calls",
+     "payload": {
+      "tool_calls": [
+       {
+        "name": "list_files",
+        "arguments": {
+         "directory_path": "/Users/albou/Desktop",
+         "pattern": "game.js",
+         "recursive": true,
+         "include_hidden": false,
+         "head_limit": 20
+        },
+        "call_id": "call_Wdn2ohgduEN2YgoQz94LltL7",
+        "runtime_call_id": "rtcall_0bea43a2ec718987abcbc4f37beb115c_1"
+       },
+       {
+        "name": "list_files",
+        "arguments": {
+         "directory_path": "/Users/albou/Desktop",
+         "pattern": "index.html",
+         "recursive": true,
+         "include_hidden": false,
+         "head_limit": 20
+        },
+        "call_id": "call_faS2knDi0fzpsuk9Vwsg6Hrj",
+        "runtime_call_id": "rtcall_0bea43a2ec718987abcbc4f37beb115c_2"
+       },
+       {
+        "name": "list_files",
+        "arguments": {
+         "directory_path": "/Users/albou/Desktop",
+         "pattern": "bug-no-ship.png",
+         "recursive": false,
+         "include_hidden": false,
+         "head_limit": 10
+        },
+        "call_id": "call_cTYXJYLllSzflszbasjDsniy",
+        "runtime_call_id": "rtcall_0bea43a2ec718987abcbc4f37beb115c_3"
+       }
+      ],
+      "allowed_tools": [
+       "analyze_code",
+       "edit_file",
+       "execute_command",
+       "[fixture-trim: 7 more]"
+      ],
+      "act_seq": 1
+     }
+    },
+    "result": {
+     "mode": "executed",
+     "results": [
+      {
+       "call_id": "call_Wdn2ohgduEN2YgoQz94LltL7",
+       "runtime_call_id": "rtcall_0bea43a2ec718987abcbc4f37beb115c_1",
+       "name": "list_files",
+       "success": false,
+       "output": null,
+       "error": "Path escapes workspace_root: '/Users/albou/Desktop' \u2014 if you meant a file inside the workspace, retry with a path relative to '/Users/albou/tmp/abstractframewor\u2026[fixture-trim]"
+      },
+      {
+       "call_id": "call_faS2knDi0fzpsuk9Vwsg6Hrj",
+       "runtime_call_id": "rtcall_0bea43a2ec718987abcbc4f37beb115c_2",
+       "name": "list_files",
+       "success": false,
+       "output": null,
+       "error": "Path escapes workspace_root: '/Users/albou/Desktop' \u2014 if you meant a file inside the workspace, retry with a path relative to '/Users/albou/tmp/abstractframewor\u2026[fixture-trim]"
+      },
+      {
+       "call_id": "call_cTYXJYLllSzflszbasjDsniy",
+       "runtime_call_id": "rtcall_0bea43a2ec718987abcbc4f37beb115c_3",
+       "name": "list_files",
+       "success": false,
+       "output": null,
+       "error": "Path escapes workspace_root: '/Users/albou/Desktop' \u2014 if you meant a file inside the workspace, retry with a path relative to '/Users/albou/tmp/abstractframewor\u2026[fixture-trim]"
+      }
+     ]
+    },
+    "error": null,
+    "started_at": "2026-07-22T04:28:31.578063+00:00",
+    "ended_at": "2026-07-22T04:28:31.591438+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-9bb411808263",
+    "attempt": 1,
+    "idempotency_key": "0bea43a2ec718987abcbc4f37beb115c",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "0f2d487c-7453-463d-835a-1912f00cab39",
+    "step_id": "c4a1988c-5bdf-45ba-a667-abfcdaab698c",
+    "node_id": "reason",
+    "status": "started",
+    "effect": {
+     "type": "llm_call",
+     "payload": {
+      "prompt": "",
+      "messages": [
+       {
+        "role": "user",
+        "content": "[trimmed for fixture]"
+       }
+      ],
+      "tools": [],
+      "system_prompt": "[trimmed]",
+      "provider": "endpoint:airelay",
+      "model": "gpt-5.6-sol",
+      "params": {
+       "temperature": 0.2,
+       "trace_metadata": {
+        "step_id": "c4a1988c-5bdf-45ba-a667-abfcdaab698c",
+        "effect_idempotency_key": "39dd2bbee1760b09bee11b17468cc3e1",
+        "attempt": 1
+       }
+      }
+     }
+    },
+    "result": null,
+    "error": null,
+    "started_at": "2026-07-22T04:31:25.589904+00:00",
+    "ended_at": null,
+    "actor_id": "gateway",
+    "session_id": "acode-9bb411808263",
+    "attempt": 1,
+    "idempotency_key": "39dd2bbee1760b09bee11b17468cc3e1",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "0f2d487c-7453-463d-835a-1912f00cab39",
+    "step_id": "c4a1988c-5bdf-45ba-a667-abfcdaab698c",
+    "node_id": "reason",
+    "status": "completed",
+    "effect": {
+     "type": "llm_call",
+     "payload": {
+      "prompt": "",
+      "messages": {
+       "$slim": {
+        "v": 1,
+        "kind": "started_payload_field",
+        "step_id": "c4a1988c-5bdf-45ba-a667-abfcdaab698c",
+        "sha256": "37ec256d8ae772fe54048c585af57bcd0a5dadde5cb2cbcbfbefdf3418b387e1",
+        "bytes": 88417,
+        "field": "messages"
+       }
+      },
+      "tools": {
+       "$slim": {
+        "v": 1,
+        "kind": "started_payload_field",
+        "step_id": "c4a1988c-5bdf-45ba-a667-abfcdaab698c",
+        "sha256": "2513494ee8da433f686624bbb9fd760c5f5cd11f27d8c1ddf8f84695466f67df",
+        "bytes": 9892,
+        "field": "tools"
+       }
+      },
+      "system_prompt": "[trimmed]",
+      "provider": "endpoint:airelay",
+      "model": "gpt-5.6-sol",
+      "params": {
+       "temperature": 0.2,
+       "trace_metadata": {
+        "step_id": "c4a1988c-5bdf-45ba-a667-abfcdaab698c",
+        "effect_idempotency_key": "39dd2bbee1760b09bee11b17468cc3e1",
+        "attempt": 1,
+        "run_id": "0f2d487c-7453-463d-835a-1912f00cab39",
+        "workflow_id": "visual_react_agent_basic-agent_0_0_3_81795ea9_node-2",
+        "node_id": "reason",
+        "actor_id": "gateway",
+        "session_id": "acode-9bb411808263",
+        "parent_run_id": "c61e4ac9-ec35-4eb2-bc0c-03f9025c8f8a"
+       }
+      }
+     }
+    },
+    "result": {
+     "content": "You were right. I tested the game myself in **headless Google Chrome**, including automatically entering a mission and firing.\n\nThe ship was technically rendered, but its palette and invulnerability f",
+     "reasoning": null,
+     "data": null,
+     "raw_response": {
+      "id": "resp_025291f42dda5a5c016a6047a08d1081989977007a5c1768ec",
+      "object": "chat.completion",
+      "created": 1784694688,
+      "model": "gpt-5.6-sol",
+      "choices": [
+       {
+        "index": 0,
+        "message": {
+         "role": "assistant",
+         "content": "You were right. I tested the game myself in **headless Google Chrome**, including automatically entering a mission and firing.\n\nThe ship was technically rendere\u2026[fixture-trim]"
+        },
+        "finish_reason": "stop"
+       }
+      ],
+      "usage": {
+       "input_tokens": 34771,
+       "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 16896
+       },
+       "output_tokens": 192,
+       "output_tokens_details": {
+        "reasoning_tokens": 0
+       },
+       "total_tokens": 34963
+      }
+     },
+     "tool_calls": null,
+     "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 34963,
+      "prompt_tokens": 0,
+      "completion_tokens": 0
+     },
+     "model": "gpt-5.6-sol",
+     "finish_reason": "stop",
+     "metadata": "[fixture-trim]",
+     "trace_id": "99d90dde-adce-4443-9b59-0549aac6d826",
+     "gen_time": 7326.5
+    },
+    "error": null,
+    "started_at": "2026-07-22T04:31:25.589904+00:00",
+    "ended_at": "2026-07-22T04:31:32.945108+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-9bb411808263",
+    "attempt": 1,
+    "idempotency_key": "39dd2bbee1760b09bee11b17468cc3e1",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "0f2d487c-7453-463d-835a-1912f00cab39",
+    "step_id": "d87a739e-2a6e-4aff-a2db-86dc75b0ccd1",
+    "node_id": "done",
+    "status": "completed",
+    "effect": null,
+    "result": {
+     "completed": true,
+     "output": {
+      "$artifact": "e3b19ad9e42a2b725048bab40138f975"
+     }
+    },
+    "error": null,
+    "started_at": "2026-07-22T04:31:33.096610+00:00",
+    "ended_at": "2026-07-22T04:31:33.096882+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-9bb411808263",
+    "attempt": 1,
+    "idempotency_key": null,
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   },
+   {
+    "run_id": "0f2d487c-7453-463d-835a-1912f00cab39",
+    "step_id": "768fe762-07a4-48d8-a637-e8b3775fa29a",
+    "node_id": "done",
+    "status": "completed",
+    "effect": {
+     "type": "emit_event",
+     "payload": {
+      "name": "abstract.status",
+      "scope": "session",
+      "payload": {
+       "text": "completed"
+      }
+     }
+    },
+    "result": {
+     "emitted": true,
+     "name": "abstract.status",
+     "payload": {
+      "text": "completed"
+     }
+    },
+    "error": null,
+    "started_at": "2026-07-22T04:31:33.107712+00:00",
+    "ended_at": "2026-07-22T04:31:33.107719+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-9bb411808263",
+    "attempt": 1,
+    "idempotency_key": "system:terminal_status:completed",
+    "prev_hash": null,
+    "record_hash": null,
+    "signature": null
+   }
+  ],
+  "8fe2acc9-5d1d-4ea6-8087-a894cfdfd333": [
+   {
+    "run_id": "8fe2acc9-5d1d-4ea6-8087-a894cfdfd333",
+    "step_id": "p1",
+    "node_id": "node-9",
+    "status": "started",
+    "effect": {
+     "type": "wait_until",
+     "payload": {}
+    },
+    "result": null
+   },
+   {
+    "run_id": "8fe2acc9-5d1d-4ea6-8087-a894cfdfd333",
+    "step_id": "p1",
+    "node_id": "node-9",
+    "status": "waiting",
+    "effect": {
+     "type": "wait_until",
+     "payload": {}
+    },
+    "result": {
+     "wait": {
+      "reason": "until",
+      "until": "2026-07-22T22:20:09Z",
+      "wait_key": "until:x"
+     }
+    }
+   }
+  ]
+ }
+}

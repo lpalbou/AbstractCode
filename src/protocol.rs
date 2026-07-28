@@ -80,8 +80,10 @@ pub fn wait_prompt(wait: &Value) -> String {
     s(wait, "prompt")
 }
 
-/// Tool calls embedded in a wait (`details.tool_calls`, with the
-/// evidence-list fallback used by the reference clients).
+/// Tool calls embedded in a wait — both keys are runtime-written fields
+/// on the SAME details assembly (effect_handlers.py TOOL_CALLS wait
+/// branch): `details.tool_calls` always; `details.tool_calls_for_evidence`
+/// when pre-executed/blocked calls were split out of the approval batch.
 pub fn tool_calls_from_wait(wait: &Value) -> Vec<Value> {
     let details = match wait.get("details") {
         Some(d) if d.is_object() => d,
@@ -95,6 +97,19 @@ pub fn tool_calls_from_wait(wait: &Value) -> Vec<Value> {
     Vec::new()
 }
 
+/// Every branch is a runtime-minted contract, not a text heuristic
+/// (verified against abstractruntime source, 2026-07-23):
+/// - `details.mode == "approval_required"` is the CANONICAL discriminator
+///   — the wait details are assembled as `{mode, tool_calls, executor?}`
+///   (integrations/abstractcore/effect_handlers.py, TOOL_CALLS wait
+///   branch), and the runtime's own resume path keys on exactly this
+///   check (core/runtime.py, thin-client approval resume).
+/// - the `tool_approval:` wait-key prefix is the ApprovalToolExecutor's
+///   key factory (`f"tool_approval:{uuid4().hex}"`,
+///   integrations/abstractcore/tool_executor.py).
+/// - `details.executor.kind == "tool_approval"` is the executor's own
+///   detail dict (`{"kind": "tool_approval", ...}`), nested under
+///   `executor` by the same effect-handler assembly.
 pub fn is_tool_approval_wait(wait: &Value) -> bool {
     let wk = wait_key(wait).to_lowercase();
     if wk.starts_with("tool_approval") {
@@ -115,8 +130,76 @@ pub fn is_tool_approval_wait(wait: &Value) -> bool {
     false
 }
 
+// ---------------------------------------------------------------------------
+// Subworkflow spawns (the parent ledger's declaration of its child)
+// ---------------------------------------------------------------------------
+
+/// The facts a parent's subworkflow WAIT record declares about its child
+/// — the structural currency for answer-source binding (the ledger knows
+/// which workflow the child runs; nothing needs to be inferred from the
+/// child's later behavior).
+///
+/// Field sources (abstractruntime core/runtime.py,
+/// `_handle_start_subworkflow` — identical on the sync and async wait
+/// shapes; live-verified against gateway run 76fc3fcb… 2026-07-23):
+/// - `sub_run_id`: `result.wait.details.sub_run_id` / the wait-key form.
+/// - `workflow_id`: `result.wait.details.sub_workflow_id`, with
+///   `effect.payload.workflow_id` as the belt — the handler REQUIRES the
+///   payload field ("start_subworkflow requires payload.workflow_id"),
+///   so every spawn record carries it even where the details predate
+///   `sub_workflow_id`. Empty only on pre-contract ledgers.
+/// - `wrap_as_tool_result`: stamped into the wait details when the child
+///   runs in TOOL MODE (`delegate_agent` and friends): such a child is a
+///   tool observation for its parent BY CONTRACT — never the parent's
+///   answer source. Load-bearing exclusion: a delegate child runs its
+///   PARENT'S OWN workflow id (abstractagent react_runtime.py,
+///   delegate_agent payload), so without this flag a root-level agent's
+///   delegate would look answer-shaped by workflow id alone.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubworkflowSpawn {
+    pub sub_run_id: String,
+    pub workflow_id: String,
+    pub wrap_as_tool_result: bool,
+}
+
+/// Read the spawn declaration off a subworkflow WAIT record. `None` when
+/// the record is not a subworkflow wait carrying a child run id.
+pub fn subworkflow_spawn(rec: &Value) -> Option<SubworkflowSpawn> {
+    let wait = extract_wait(rec)?;
+    let sub_run_id = subworkflow_run_id(wait)?;
+    let details = wait.get("details").filter(|d| d.is_object());
+    let payload = if effect_type(rec) == "start_subworkflow" {
+        rec.get("effect")
+            .and_then(|e| e.get("payload"))
+            .filter(|p| p.is_object())
+    } else {
+        None
+    };
+    let workflow_id = details
+        .map(|d| s(d, "sub_workflow_id"))
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            payload
+                .map(|p| s(p, "workflow_id"))
+                .filter(|v| !v.is_empty())
+        })
+        .unwrap_or_default();
+    let wrap_as_tool_result = details
+        .and_then(|d| d.get("wrap_as_tool_result"))
+        .or_else(|| payload.and_then(|p| p.get("wrap_as_tool_result")))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    Some(SubworkflowSpawn {
+        sub_run_id,
+        workflow_id,
+        wrap_as_tool_result,
+    })
+}
+
 /// Sub-run id for a `subworkflow` wait: `details.sub_run_id`, else the
-/// `subworkflow:<id>` wait-key form.
+/// `subworkflow:<id>` wait-key form — both minted by the runtime's
+/// `_handle_start_subworkflow` (`wait_key=f"subworkflow:{sub_run_id}"`,
+/// abstractruntime core/runtime.py, sync + async wait sites).
 pub fn subworkflow_run_id(wait: &Value) -> Option<String> {
     if !wait_reason(wait).eq_ignore_ascii_case("subworkflow") {
         return None;
@@ -138,9 +221,10 @@ pub fn subworkflow_run_id(wait: &Value) -> Option<String> {
 }
 
 /// Event name from a wait key. The canonical runtime shape is
-/// `evt:{scope}:{scope_id}:{name}` (the name may itself contain dots and
-/// colons never appear in names) — the NAME is everything after the third
-/// colon. Live example: `evt:run:<run_id>:abstract.status`.
+/// `evt:{scope}:{scope_id}:{name}` (minted by ONE function:
+/// abstractruntime `core/event_keys.py` — the name may itself contain
+/// dots and colons never appear in names) — the NAME is everything after
+/// the third colon. Live example: `evt:run:<run_id>:abstract.status`.
 pub fn event_name_from_wait_key(wk: &str) -> String {
     let wk = wk.trim();
     if let Some(rest) = wk.strip_prefix("evt:") {
@@ -374,6 +458,18 @@ pub fn status_text_from_payload(payload: Option<&Value>) -> String {
 pub struct FlowOutput {
     pub response: String,
     pub meta: Option<Value>,
+    /// Set when the flow's final output (or its text key) was OFFLOADED
+    /// by the runtime's ledger offloader: outputs over the inline cap
+    /// (256 KB default) are replaced at persist time with
+    /// `{"$artifact": id}`, and the read surface deliberately serves the
+    /// ref unresolved (abstractruntime 0067-M: rehydrating list() was a
+    /// 113x read amplification). Live consequence before this field: a
+    /// heavy agent turn's final answer (answer + messages + scratchpad >
+    /// 256 KB) folded as NOTHING — `finished` never flipped and the
+    /// composer stayed captured for hours (run c61e4ac9…/0f2d487c…,
+    /// 2026-07-22 — the maintainer's "never finishes" P0). The client
+    /// must fetch `/runs/{run}/artifacts/{id}/content` for the words.
+    pub offload_artifact: Option<String>,
 }
 
 fn pick_textish(v: Option<&Value>) -> String {
@@ -383,6 +479,142 @@ fn pick_textish(v: Option<&Value>) -> String {
         Some(Value::Bool(b)) => b.to_string(),
         _ => String::new(),
     }
+}
+
+/// The conventional flow-output text keys, in precedence order — THE
+/// PROTOCOL CONTRACT for reading answer text out of a flow output, kept
+/// deliberately as a documented ladder because the ledger genuinely
+/// lacks a structural discriminator here: `result.output` is the flow's
+/// AUTHORED output object, passed verbatim by the runtime's completion
+/// writers (`_append_completion_record` call sites serialize
+/// `run.output` untouched). The abstractagent ReAct workflow declares
+/// `{"answer", "report", "iterations", "outcome", …}` (react_runtime.py
+/// done/max_iterations nodes — `answer` is its text key), while wrapper
+/// bundles author their own shapes; nothing in `abstractcode.agent.v1`
+/// pins an output text key (recorded as a contract ask —
+/// docs/roadmap/conformance-ledger-asks.md).
+///
+/// "report" is LAST deliberately: agent flows emit {answer, report}
+/// (answer wins), but wrapper bundles like coding-agent/coder end with
+/// {report, passed, delivered, …} and NO conventional text key — the
+/// report IS the turn's answer there (live run b7d86e08…, 2026-07-22;
+/// without it the fold never saw a final answer and the turn only
+/// concluded via the terminal-status poll, silently).
+const OUTPUT_TEXT_KEYS: [&str; 6] = ["answer", "response", "message", "text", "content", "report"];
+
+/// Inline text from a flow-output OBJECT: the conventional keys in
+/// precedence order, then ONE wrapper level down — the runtime's
+/// resume/job completion records wrap the real output as
+/// `{"success": true, "result": …}` (runtime.py `_append_completion_record`
+/// call sites), so `output.result` is tried as a string or as an object
+/// carrying the same conventional keys.
+fn output_inline_text(out0: &Value) -> String {
+    let flat = OUTPUT_TEXT_KEYS
+        .iter()
+        .map(|k| pick_textish(out0.get(*k)))
+        .find(|v| !v.is_empty())
+        .unwrap_or_default();
+    if !flat.is_empty() {
+        return flat;
+    }
+    match out0.get("result") {
+        Some(Value::String(s)) => s.trim().to_string(),
+        Some(v) if v.is_object() => OUTPUT_TEXT_KEYS
+            .iter()
+            .map(|k| pick_textish(v.get(*k)))
+            .find(|t| !t.is_empty())
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+/// The artifact id when `v` is the runtime offloader's ref shape
+/// (`{"$artifact": id}`; extra keys tolerated — mirrors the runtime's
+/// own `is_artifact_ref`, which checks key presence only).
+fn offload_ref_id(v: &Value) -> Option<String> {
+    let id = v.as_object()?.get("$artifact")?.as_str()?.trim();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_string())
+    }
+}
+
+/// The offloaded-answer artifact id of a flow-output object: the whole
+/// output replaced (`output == {"$artifact": id}` — the live c61e4ac9
+/// shape), a conventional text key replaced (a >256 KB answer alone), or
+/// the one-level `result` wrapper replaced.
+fn output_offload_artifact(out0: &Value) -> Option<String> {
+    if let Some(id) = offload_ref_id(out0) {
+        return Some(id);
+    }
+    for k in OUTPUT_TEXT_KEYS {
+        if let Some(v) = out0.get(k) {
+            if let Some(id) = offload_ref_id(v) {
+                return Some(id);
+            }
+        }
+    }
+    if let Some(res) = out0.get("result") {
+        if let Some(id) = offload_ref_id(res) {
+            return Some(id);
+        }
+    }
+    None
+}
+
+/// True for a run-COMPLETION record: the runtime's terminal ledger write
+/// carries `result.completed == true` (`_append_completion_record`, all
+/// three call sites — normal flow end, job completion, resume
+/// completion). No other record kind writes that key (`resume` results
+/// say `{"resumed": true}`, `wait_until` says `{"ready": true}`, emits
+/// say `{"emitted": true}`), so this is the key-independent "the run
+/// itself ended" signal — the fold's honest fallback when the final
+/// output carries no recognizable text.
+pub fn is_flow_end_record(rec: &Value) -> bool {
+    record_status(rec) == "completed"
+        && rec
+            .get("result")
+            .and_then(|r| r.get("completed"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+}
+
+/// True when a completed record's `result.output` is the RUN'S OWN final
+/// output — the answer-eligibility gate.
+///
+/// The runtime's terminal writer (`_append_completion_record`) appends
+/// with `effect=None` and stamps `result.completed == true`; that marker
+/// is authoritative. But EFFECT records can also complete carrying a
+/// `result.output`: a SYNC `start_subworkflow`'s completion result is
+/// `{"sub_run_id": …, "output": <the CHILD's output>}` (core/runtime.py
+/// `_handle_start_subworkflow`, completed branch) — the child's words on
+/// the parent's ledger, which must never read as the parent's final
+/// answer (the parent keeps executing after it). Acceptance:
+/// - the completion marker → the run's own end, always;
+/// - no marker: accepted when `output` is present and the result does
+///   NOT self-identify as a subworkflow effect result (`sub_run_id`) —
+///   a labeled `#FALLBACK` for distilled captures and ledgers that
+///   predate the marker (reference-client parity; every LIVE flow end
+///   checked on this gateway carries the marker, 2026-07-23).
+pub fn is_run_output_record(rec: &Value) -> bool {
+    if record_status(rec) != "completed" {
+        return false;
+    }
+    let result = match rec.get("result") {
+        Some(r) if r.is_object() => r,
+        _ => return false,
+    };
+    if result
+        .get("completed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    // #FALLBACK: pre-marker terminal shape (completed + output, not an
+    // effect result that names a child run).
+    result.get("output").is_some() && result.get("sub_run_id").is_none()
 }
 
 /// Extract the flow-end response from a record (`result.output` as string or
@@ -397,16 +629,21 @@ pub fn extract_flow_output(rec: &Value) -> Option<FlowOutput> {
         return Some(FlowOutput {
             response,
             meta: None,
+            offload_artifact: None,
         });
     }
     if !out0.is_object() {
         return None;
     }
-    let msg = ["answer", "response", "message", "text", "content"]
-        .iter()
-        .map(|k| pick_textish(out0.get(*k)))
-        .find(|v| !v.is_empty())
-        .unwrap_or_default();
+    let msg = output_inline_text(out0);
+    // Inline text wins; the offload ref is only consulted when the record
+    // carries no readable words (the offloader replaces either the whole
+    // output or individual oversized leaves).
+    let offload_artifact = if msg.is_empty() {
+        output_offload_artifact(out0)
+    } else {
+        None
+    };
     let mut meta = out0
         .get("meta")
         .filter(|m| m.is_object())
@@ -457,13 +694,56 @@ pub fn extract_flow_output(rec: &Value) -> Option<FlowOutput> {
         }
     }
     let has_meta = meta.as_object().map(|m| !m.is_empty()).unwrap_or(false);
-    if msg.is_empty() && !has_meta {
+    if msg.is_empty() && !has_meta && offload_artifact.is_none() {
         return None;
     }
     Some(FlowOutput {
         response: msg,
         meta: if has_meta { Some(meta) } else { None },
+        offload_artifact,
     })
+}
+
+/// Extract the answer TEXT from a fetched offloaded-output artifact
+/// (`/runs/{run}/artifacts/{id}/content`). The offloader stores either
+/// the serialized output subtree (`kind=json`, content-type
+/// application/json) or a bare oversized string leaf (`kind=text`,
+/// text/plain) — so the bytes are tried as JSON first (string value or
+/// an object read through the SAME text-key precedence as a live flow
+/// output), then served as plain text. Returns None only for
+/// undecodable bytes or a JSON object with no readable text — callers
+/// label that honestly instead of inventing.
+pub fn answer_text_from_artifact(bytes: &[u8], content_type: &str) -> Option<String> {
+    let text = String::from_utf8_lossy(bytes);
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let looks_json = content_type.to_ascii_lowercase().contains("json")
+        || trimmed.starts_with('{')
+        || trimmed.starts_with('[')
+        || trimmed.starts_with('"');
+    if looks_json {
+        if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
+            match &v {
+                Value::String(s) => {
+                    let s = s.trim();
+                    if !s.is_empty() {
+                        return Some(s.to_string());
+                    }
+                }
+                obj if obj.is_object() => {
+                    let msg = output_inline_text(obj);
+                    if !msg.is_empty() {
+                        return Some(msg);
+                    }
+                    return None; // an object with no readable text: label, never invent
+                }
+                _ => {}
+            }
+        }
+    }
+    Some(trimmed.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -530,6 +810,20 @@ pub fn parse_usage(usage: &Value) -> UsageDelta {
     .map(|k| as_u64(usage.get(*k)))
     .find(|v| *v > 0)
     .unwrap_or(0);
+    // Raw provider blocks nest cache hits one level down: the Responses
+    // API reports `input_tokens_details.cached_tokens`, Chat Completions
+    // `prompt_tokens_details.cached_tokens` (live ledger, coder run
+    // 0312b41d…: {"input_tokens_details": {"cached_tokens": 2560}, …}).
+    let cached = if cached > 0 {
+        cached
+    } else {
+        ["input_tokens_details", "prompt_tokens_details"]
+            .iter()
+            .filter_map(|k| usage.get(*k))
+            .map(|d| as_u64(d.get("cached_tokens")))
+            .find(|v| *v > 0)
+            .unwrap_or(0)
+    };
     UsageDelta {
         input_tokens: input,
         output_tokens: output,
@@ -556,15 +850,45 @@ pub fn model_from_record(rec: &Value) -> Option<String> {
 
 /// Usage from a completed llm_call record (`result.usage | token_usage |
 /// tokens`, with the nested `result.output.*` fallback the web client uses).
+///
+/// SPLITLESS REPAIR (live coder run 0312b41d…, gpt-5.6-sol via a proxy):
+/// some provider paths normalize usage to `{input: 0, output: 0,
+/// total: N}` while the SAME record's `result.raw_response.usage` carries
+/// the provider's real split (`{"input_tokens": 2904, "output_tokens":
+/// 276, …}`). When the normalized block parses splitless, the raw block
+/// on the record fills the split — numbers from the provider's own usage
+/// receipt on the same ledger record, never an estimate. Absent/`$slim`'d
+/// raw stays splitless-honest (the total-only display path).
 pub fn usage_from_record(rec: &Value) -> Option<UsageDelta> {
     if effect_type(rec) != "llm_call" || record_status(rec) != "completed" {
         return None;
     }
     let result = rec.get("result")?;
+    let repair = |u: UsageDelta| -> UsageDelta {
+        if u.input_tokens > 0 || u.output_tokens > 0 {
+            return u;
+        }
+        match raw_response_usage(result) {
+            Some(raw) if raw.input_tokens > 0 || raw.output_tokens > 0 => UsageDelta {
+                input_tokens: raw.input_tokens,
+                output_tokens: raw.output_tokens,
+                // The normalized total is already the fold's honest
+                // number when present; the raw total backfills a
+                // zero-total block.
+                total_tokens: if u.total_tokens > 0 {
+                    u.total_tokens
+                } else {
+                    raw.total_tokens
+                },
+                cached_tokens: u.cached_tokens.max(raw.cached_tokens),
+            },
+            _ => u,
+        }
+    };
     for key in ["usage", "token_usage", "tokens"] {
         if let Some(u) = result.get(key) {
             if u.is_object() {
-                return Some(parse_usage(u));
+                return Some(repair(parse_usage(u)));
             }
         }
     }
@@ -572,12 +896,60 @@ pub fn usage_from_record(rec: &Value) -> Option<UsageDelta> {
         for key in ["usage", "token_usage", "tokens"] {
             if let Some(u) = out.get(key) {
                 if u.is_object() {
-                    return Some(parse_usage(u));
+                    return Some(repair(parse_usage(u)));
                 }
             }
         }
     }
     Some(UsageDelta::default())
+}
+
+/// The provider's own usage block from `result.raw_response` — served as
+/// an object or as a JSON-string body depending on the provider path
+/// (both shapes live-verified). None when absent, `$slim`'d, or
+/// unparseable — callers keep the normalized numbers.
+fn raw_response_usage(result: &Value) -> Option<UsageDelta> {
+    let raw = result.get("raw_response")?;
+    let usage_owned: Value;
+    let usage: &Value = match raw {
+        Value::Object(_) => raw.get("usage")?,
+        Value::String(body) => {
+            let parsed: Value = serde_json::from_str(body).ok()?;
+            usage_owned = parsed.get("usage")?.clone();
+            &usage_owned
+        }
+        _ => return None,
+    };
+    if usage.is_object() {
+        Some(parse_usage(usage))
+    } else {
+        None
+    }
+}
+
+/// Generation time of a completed llm_call in MILLISECONDS
+/// (`result.gen_time` — the abstractcore contract: "Generation time in
+/// milliseconds", types.py). None when absent or non-positive.
+pub fn gen_time_ms_from_record(rec: &Value) -> Option<f64> {
+    if effect_type(rec) != "llm_call" || record_status(rec) != "completed" {
+        return None;
+    }
+    let t = rec.get("result")?.get("gen_time")?.as_f64()?;
+    if t > 0.0 {
+        Some(t)
+    } else {
+        None
+    }
+}
+
+/// A record's own `started_at` as epoch milliseconds (via
+/// [`parse_rfc3339_utc`]). None when the record carries no parseable
+/// timestamp — callers must treat that as "unknown", never "now".
+pub fn started_at_epoch_ms(rec: &Value) -> Option<u64> {
+    let raw = rec.get("started_at").and_then(Value::as_str)?;
+    let st = parse_rfc3339_utc(raw)?;
+    let dur = st.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(dur.as_millis() as u64)
 }
 
 // ---------------------------------------------------------------------------
@@ -608,6 +980,86 @@ pub fn cycle_result_from_record(rec: &Value) -> Option<CycleResult> {
         return None;
     }
     Some(CycleResult { content, reasoning })
+}
+
+// ---------------------------------------------------------------------------
+// Timestamps
+// ---------------------------------------------------------------------------
+
+/// Parse a gateway RFC3339 timestamp ("2026-07-22T11:00:53.600081+00:00",
+/// "…Z", offset ±HH:MM) into a `SystemTime`. Sub-second precision is
+/// dropped (elapsed displays are whole seconds). Returns None on any
+/// malformed input — callers fall back to "now" honestly.
+///
+/// Hand-rolled on purpose: the crate's dependency budget has no chrono,
+/// and the only consumer is run-elapsed back-dating on reattach.
+pub fn parse_rfc3339_utc(s: &str) -> Option<std::time::SystemTime> {
+    let s = s.trim();
+    let bytes = s.as_bytes();
+    if bytes.len() < 19 || bytes[4] != b'-' || bytes[7] != b'-' || bytes[13] != b':' {
+        return None;
+    }
+    let num = |r: std::ops::Range<usize>| -> Option<i64> { s.get(r)?.parse::<i64>().ok() };
+    let year = num(0..4)?;
+    let month = num(5..7)?;
+    let day = num(8..10)?;
+    // 'T' or ' ' separator both appear in the wild.
+    if !matches!(bytes[10], b'T' | b't' | b' ') {
+        return None;
+    }
+    let hour = num(11..13)?;
+    let minute = num(14..16)?;
+    let second = num(17..19)?;
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || !(0..24).contains(&hour)
+        || !(0..60).contains(&minute)
+        || !(0..61).contains(&second)
+    {
+        return None;
+    }
+    // Skip fractional seconds; then parse the offset.
+    let mut idx = 19;
+    if bytes.get(idx) == Some(&b'.') {
+        idx += 1;
+        while bytes.get(idx).map(u8::is_ascii_digit).unwrap_or(false) {
+            idx += 1;
+        }
+    }
+    let offset_secs: i64 = match bytes.get(idx) {
+        Some(b'Z') | Some(b'z') => 0,
+        Some(sign @ (b'+' | b'-')) => {
+            let oh = num(idx + 1..idx + 3)?;
+            // "+HH:MM" and "+HHMM" both occur.
+            let om_start = if bytes.get(idx + 3) == Some(&b':') {
+                idx + 4
+            } else {
+                idx + 3
+            };
+            let om = num(om_start..om_start + 2)?;
+            let total = oh * 3600 + om * 60;
+            if *sign == b'+' {
+                total
+            } else {
+                -total
+            }
+        }
+        None => 0, // naive timestamps read as UTC (gateway convention)
+        _ => return None,
+    };
+    // Days-from-civil (Howard Hinnant): civil date -> days since epoch.
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400; // [0, 399]
+    let mp = (month + 9) % 12; // Mar=0 … Feb=11
+    let doy = (153 * mp + 2) / 5 + day - 1; // [0, 365]
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
+    let days = era * 146097 + doe - 719468;
+    let unix = days * 86_400 + hour * 3600 + minute * 60 + second - offset_secs;
+    if unix < 0 {
+        return None;
+    }
+    Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(unix as u64))
 }
 
 /// Error text from a failed record.
@@ -756,6 +1208,157 @@ mod tests {
     }
 
     #[test]
+    fn flow_output_offloaded_shapes() {
+        // The runtime ledger offloader replaces oversized outputs with
+        // {"$artifact": id} — whole-output (the live c61e4ac9 shape),
+        // per-key leaf, or the resume {"result": …} wrapper. Inline text
+        // always wins over a ref.
+        let whole = json!({"result": {"completed": true,
+            "output": {"$artifact": "e3b19ad9e42a2b725048bab40138f975"}}});
+        let out = extract_flow_output(&whole).unwrap();
+        assert!(out.response.is_empty());
+        assert_eq!(
+            out.offload_artifact.as_deref(),
+            Some("e3b19ad9e42a2b725048bab40138f975")
+        );
+
+        let leaf = json!({"result": {"output": {
+            "answer": {"$artifact": "leafart"}, "iterations": 3}}});
+        assert_eq!(
+            extract_flow_output(&leaf)
+                .unwrap()
+                .offload_artifact
+                .as_deref(),
+            Some("leafart")
+        );
+
+        let wrapped = json!({"result": {"output": {
+            "success": true, "result": {"$artifact": "wrapart"}}}});
+        assert_eq!(
+            extract_flow_output(&wrapped)
+                .unwrap()
+                .offload_artifact
+                .as_deref(),
+            Some("wrapart")
+        );
+
+        // Inline text wins: no fetch when readable words exist.
+        let both = json!({"result": {"output": {
+            "answer": "inline words", "report": {"$artifact": "ignored"}}}});
+        let out = extract_flow_output(&both).unwrap();
+        assert_eq!(out.response, "inline words");
+        assert!(out.offload_artifact.is_none());
+    }
+
+    #[test]
+    fn flow_output_reads_the_result_wrapper_text() {
+        // Resume/job completion records wrap the real output as
+        // {"success": true, "result": …} (runtime.py completion writers).
+        let s = json!({"result": {"output": {"success": true, "result": "plain words"}}});
+        assert_eq!(extract_flow_output(&s).unwrap().response, "plain words");
+        let o = json!({"result": {"output": {"success": true,
+            "result": {"answer": "nested answer"}}}});
+        assert_eq!(extract_flow_output(&o).unwrap().response, "nested answer");
+    }
+
+    #[test]
+    fn flow_end_record_detection() {
+        // Only the runtime's completion writers stamp result.completed.
+        let done = json!({"status": "completed", "node_id": "done",
+            "result": {"completed": true, "output": {"x": 1}}});
+        assert!(is_flow_end_record(&done));
+        let resume = json!({"status": "completed", "result": {"resumed": true}});
+        assert!(!is_flow_end_record(&resume));
+        let wait_until = json!({"status": "completed", "result": {"ready": true, "until": "t"}});
+        assert!(!is_flow_end_record(&wait_until));
+        let emit = json!({"status": "completed", "result": {"emitted": true}});
+        assert!(!is_flow_end_record(&emit));
+        let waiting = json!({"status": "waiting", "result": {"completed": true}});
+        assert!(!is_flow_end_record(&waiting), "status gates the marker");
+    }
+
+    #[test]
+    fn answer_text_from_artifact_shapes() {
+        // The live artifact content shape: the serialized output object.
+        let obj = br#"{"answer": "the real words", "report": "task: x", "iterations": 12}"#;
+        assert_eq!(
+            answer_text_from_artifact(obj, "application/json").as_deref(),
+            Some("the real words")
+        );
+        // A bare JSON string leaf (kind=text offload of a string value
+        // serialized as JSON) and plain text both read as the words.
+        assert_eq!(
+            answer_text_from_artifact(br#""quoted words""#, "application/json").as_deref(),
+            Some("quoted words")
+        );
+        assert_eq!(
+            answer_text_from_artifact(b"plain text answer", "text/plain").as_deref(),
+            Some("plain text answer")
+        );
+        // An object with no readable text is honest None (label, never invent).
+        assert!(answer_text_from_artifact(br#"{"blob": [1,2,3]}"#, "application/json").is_none());
+        assert!(answer_text_from_artifact(b"   ", "text/plain").is_none());
+    }
+
+    #[test]
+    fn flow_output_report_is_the_answer_fallback() {
+        // coding-agent/coder end outputs carry {report, passed, …} and NO
+        // conventional text key (live run b7d86e08…) — the report IS the
+        // answer there. A conventional key still wins when present.
+        let coder_end = json!({"result": {"output": {
+            "report": "# Coding agent result\n\nStatus: DELIVERED",
+            "passed": false, "delivered": true, "success": false,
+            "rounds_used": 1, "open_failures": [], "artifacts": []}}});
+        let out = extract_flow_output(&coder_end).unwrap();
+        assert!(out.response.starts_with("# Coding agent result"));
+        assert_eq!(out.meta.as_ref().unwrap()["report"], out.response);
+
+        let with_answer = json!({"result": {"output": {"answer": "A", "report": "B"}}});
+        assert_eq!(extract_flow_output(&with_answer).unwrap().response, "A");
+    }
+
+    #[test]
+    fn rfc3339_parsing_variants() {
+        use std::time::{Duration, UNIX_EPOCH};
+        // The gateway's own created_at shape (epoch cross-checked with
+        // python datetime: 2026-07-22T11:00:53Z = 1784718053).
+        let t = parse_rfc3339_utc("2026-07-22T11:00:53.600081+00:00").unwrap();
+        assert_eq!(
+            t.duration_since(UNIX_EPOCH).unwrap(),
+            Duration::from_secs(1_784_718_053)
+        );
+        // Z suffix, no fraction.
+        assert_eq!(
+            parse_rfc3339_utc("2026-07-22T11:00:53Z").unwrap(),
+            UNIX_EPOCH + Duration::from_secs(1_784_718_053)
+        );
+        // A +02:00 offset lands 2h EARLIER in UTC.
+        assert_eq!(
+            parse_rfc3339_utc("2026-07-22T13:00:53+02:00").unwrap(),
+            UNIX_EPOCH + Duration::from_secs(1_784_718_053)
+        );
+        // Epoch sanity + leap-year date.
+        assert_eq!(
+            parse_rfc3339_utc("1970-01-01T00:00:00Z").unwrap(),
+            UNIX_EPOCH
+        );
+        assert_eq!(
+            parse_rfc3339_utc("2024-02-29T00:00:00Z").unwrap(),
+            UNIX_EPOCH + Duration::from_secs(1_709_164_800)
+        );
+        // Malformed inputs answer None, never panic.
+        for bad in [
+            "",
+            "yesterday",
+            "2026-13-01T00:00:00Z",
+            "2026-07-22",
+            "2026-07-22T25:00:00Z",
+        ] {
+            assert!(parse_rfc3339_utc(bad).is_none(), "{bad:?} must not parse");
+        }
+    }
+
+    #[test]
     fn usage_parsing_variants() {
         let a = parse_usage(&json!({"input_tokens": 10, "output_tokens": 3}));
         assert_eq!(a.total_tokens, 13);
@@ -807,5 +1410,274 @@ mod tests {
             "nested"
         );
         assert_eq!(error_from_record(&json!({})), "step failed");
+    }
+
+    #[test]
+    fn splitless_usage_repairs_from_raw_response_object_and_string() {
+        // Live ledger shape (coder run 0312b41d…, gpt-5.6-sol via proxy):
+        // the NORMALIZED usage block is splitless while the SAME record's
+        // raw_response.usage carries the provider's real split.
+        let rec_obj = json!({
+            "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {
+                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 3180,
+                           "prompt_tokens": 0, "completion_tokens": 0},
+                "raw_response": {"usage": {
+                    "input_tokens": 2904,
+                    "input_tokens_details": {"cache_write_tokens": 0, "cached_tokens": 0},
+                    "output_tokens": 276,
+                    "output_tokens_details": {"reasoning_tokens": 69},
+                    "total_tokens": 3180}}}});
+        let u = usage_from_record(&rec_obj).unwrap();
+        assert_eq!(u.input_tokens, 2904);
+        assert_eq!(u.output_tokens, 276);
+        assert_eq!(u.total_tokens, 3180);
+
+        // raw_response can arrive as a JSON STRING body (both shapes are
+        // live-verified on this gateway).
+        let rec_str = json!({
+            "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {
+                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 100},
+                "raw_response":
+                    "{\"usage\": {\"prompt_tokens\": 60, \"completion_tokens\": 40}}"}});
+        let u = usage_from_record(&rec_str).unwrap();
+        assert_eq!(u.input_tokens, 60);
+        assert_eq!(u.output_tokens, 40);
+        assert_eq!(u.total_tokens, 100, "normalized total is kept when present");
+
+        // Absent / $slim'd / unparseable raw stays splitless-honest.
+        let rec_slim = json!({
+            "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {
+                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 500},
+                "raw_response": {"$slim": {"v": 1}}}});
+        let u = usage_from_record(&rec_slim).unwrap();
+        assert_eq!(
+            (u.input_tokens, u.output_tokens, u.total_tokens),
+            (0, 0, 500)
+        );
+
+        // A NORMAL split is never touched by the raw block (repair is
+        // splitless-only — the normalized numbers stay authoritative).
+        let rec_split = json!({
+            "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+                "raw_response": {"usage": {"input_tokens": 999, "output_tokens": 999}}}});
+        let u = usage_from_record(&rec_split).unwrap();
+        assert_eq!((u.input_tokens, u.output_tokens), (10, 5));
+    }
+
+    #[test]
+    fn nested_cached_tokens_details_are_read() {
+        // Responses-API spelling: input_tokens_details.cached_tokens.
+        let u = parse_usage(&json!({
+            "input_tokens": 7975, "output_tokens": 307,
+            "input_tokens_details": {"cache_write_tokens": 0, "cached_tokens": 2560}}));
+        assert_eq!(u.cached_tokens, 2560);
+        // Chat-Completions spelling: prompt_tokens_details.cached_tokens.
+        let u = parse_usage(&json!({
+            "prompt_tokens": 100, "completion_tokens": 10,
+            "prompt_tokens_details": {"cached_tokens": 64}}));
+        assert_eq!(u.cached_tokens, 64);
+        // The flat normalized key still wins when present.
+        let u = parse_usage(&json!({
+            "input_tokens": 10, "cached_input_tokens": 4,
+            "input_tokens_details": {"cached_tokens": 99}}));
+        assert_eq!(u.cached_tokens, 4);
+    }
+
+    #[test]
+    fn gen_time_and_started_at_extraction() {
+        // gen_time is MILLISECONDS (abstractcore types.py contract).
+        let rec = json!({
+            "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {"gen_time": 7203.6}});
+        assert_eq!(gen_time_ms_from_record(&rec), Some(7203.6));
+        // Non-positive / absent / non-llm answer None.
+        let zero = json!({"status": "completed",
+            "effect": {"type": "llm_call", "payload": {}}, "result": {"gen_time": 0.0}});
+        assert_eq!(gen_time_ms_from_record(&zero), None);
+        let tool = json!({"status": "completed",
+            "effect": {"type": "tool_calls", "payload": {}}, "result": {"gen_time": 5.0}});
+        assert_eq!(gen_time_ms_from_record(&tool), None);
+
+        // started_at → epoch ms (whole-second precision by the parser).
+        let rec = json!({"started_at": "2026-07-22T11:00:53.600081+00:00"});
+        assert_eq!(started_at_epoch_ms(&rec), Some(1_784_718_053_000));
+        assert_eq!(started_at_epoch_ms(&json!({})), None);
+        assert_eq!(started_at_epoch_ms(&json!({"started_at": "junk"})), None);
+    }
+
+    #[test]
+    fn splitless_repair_edge_shapes_stay_honest() {
+        // Cycle-2 review, attack surface 4 — the repair must never invent
+        // and never overwrite. (a) A MALFORMED raw_response JSON string
+        // keeps the normalized numbers (no panic, no partial parse).
+        let malformed = json!({
+            "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {
+                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 500},
+                "raw_response": "{\"usage\": {\"input_tokens\": 60, "}});
+        let u = usage_from_record(&malformed).unwrap();
+        assert_eq!(
+            (u.input_tokens, u.output_tokens, u.total_tokens),
+            (0, 0, 500),
+            "unparseable raw stays splitless-honest"
+        );
+        // (b) A raw block that is ITSELF splitless (total only) repairs
+        // nothing — a raw total is not a split.
+        let raw_total_only = json!({
+            "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {
+                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 500},
+                "raw_response": {"usage": {"total_tokens": 480}}}});
+        let u = usage_from_record(&raw_total_only).unwrap();
+        assert_eq!(
+            (u.input_tokens, u.output_tokens, u.total_tokens),
+            (0, 0, 500),
+            "the normalized total is never displaced by a splitless raw"
+        );
+        // (c) A PARTIAL normalized split (input > 0, output == 0 — a
+        // legitimately empty response) is a REAL split: a disagreeing raw
+        // block must not overwrite it (the repair is 0/0-only).
+        let partial_split = json!({
+            "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {
+                "usage": {"input_tokens": 500, "output_tokens": 0},
+                "raw_response": {"usage": {"input_tokens": 9999, "output_tokens": 777}}}});
+        let u = usage_from_record(&partial_split).unwrap();
+        assert_eq!(
+            (u.input_tokens, u.output_tokens),
+            (500, 0),
+            "a real (partial) split is never overwritten by raw numbers"
+        );
+        // (d) The mirror partial (output > 0, input == 0) holds too.
+        let out_only = json!({
+            "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {
+                "usage": {"input_tokens": 0, "output_tokens": 42},
+                "raw_response": {"usage": {"input_tokens": 9999, "output_tokens": 777}}}});
+        let u = usage_from_record(&out_only).unwrap();
+        assert_eq!((u.input_tokens, u.output_tokens), (0, 42));
+        // (e) A raw_response that parses to a NON-object answers None
+        // inside the repair path and the normalized numbers stand.
+        let raw_scalar = json!({
+            "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {
+                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 9},
+                "raw_response": "\"just a string\""}});
+        let u = usage_from_record(&raw_scalar).unwrap();
+        assert_eq!((u.input_tokens, u.output_tokens, u.total_tokens), (0, 0, 9));
+    }
+
+    #[test]
+    fn subworkflow_spawn_reads_the_parents_declaration() {
+        // The REAL live shape (gateway run 76fc3fcb…, node-2 waiting
+        // record): details carry sub_run_id + sub_workflow_id.
+        let live = json!({
+            "run_id": "root", "node_id": "node-2", "status": "waiting",
+            "effect": {"type": "start_subworkflow", "payload": {
+                "workflow_id": "visual_react_agent_basic-agent_0_0_3_81795ea9_node-2",
+                "async": true, "wait": true}},
+            "result": {"wait": {"reason": "subworkflow",
+                "wait_key": "subworkflow:9c5cad22",
+                "details": {"sub_run_id": "9c5cad22",
+                    "sub_workflow_id": "visual_react_agent_basic-agent_0_0_3_81795ea9_node-2",
+                    "async": true}}}});
+        let spawn = subworkflow_spawn(&live).unwrap();
+        assert_eq!(spawn.sub_run_id, "9c5cad22");
+        assert_eq!(
+            spawn.workflow_id,
+            "visual_react_agent_basic-agent_0_0_3_81795ea9_node-2"
+        );
+        assert!(!spawn.wrap_as_tool_result);
+
+        // Details lacking sub_workflow_id: the effect payload's REQUIRED
+        // workflow_id is the belt.
+        let payload_belt = json!({
+            "run_id": "root", "status": "waiting",
+            "effect": {"type": "start_subworkflow",
+                        "payload": {"workflow_id": "bundle@1.0.0:flow9"}},
+            "result": {"wait": {"reason": "subworkflow",
+                "wait_key": "subworkflow:sub1",
+                "details": {"sub_run_id": "sub1"}}}});
+        let spawn = subworkflow_spawn(&payload_belt).unwrap();
+        assert_eq!(spawn.workflow_id, "bundle@1.0.0:flow9");
+
+        // TOOL MODE (delegate_agent shape): wrap_as_tool_result rides the
+        // details (runtime stamps it) — and the payload as the belt.
+        let tool_mode = json!({
+            "run_id": "agent", "status": "waiting",
+            "effect": {"type": "start_subworkflow", "payload": {
+                "workflow_id": "visual_react_agent_x_node-1",
+                "wrap_as_tool_result": true, "tool_name": "delegate_agent"}},
+            "result": {"wait": {"reason": "subworkflow",
+                "wait_key": "subworkflow:d1",
+                "details": {"sub_run_id": "d1",
+                    "sub_workflow_id": "visual_react_agent_x_node-1",
+                    "wrap_as_tool_result": true}}}});
+        assert!(subworkflow_spawn(&tool_mode).unwrap().wrap_as_tool_result);
+
+        // Pre-contract record (no declaration anywhere): empty workflow
+        // id, not tool-wrapped — the fold's cycle #FALLBACK covers it.
+        let bare = json!({
+            "run_id": "root", "status": "waiting",
+            "result": {"wait": {"reason": "subworkflow",
+                "wait_key": "subworkflow:old1",
+                "details": {"sub_run_id": "old1"}}}});
+        let spawn = subworkflow_spawn(&bare).unwrap();
+        assert!(spawn.workflow_id.is_empty());
+        assert!(!spawn.wrap_as_tool_result);
+
+        // A non-subworkflow wait is None.
+        let ask = json!({
+            "run_id": "root", "status": "waiting",
+            "result": {"wait": {"reason": "user", "wait_key": "ask1"}}});
+        assert!(subworkflow_spawn(&ask).is_none());
+    }
+
+    #[test]
+    fn run_output_record_classification() {
+        // The runtime's terminal marker is authoritative.
+        let terminal = json!({"status": "completed",
+            "result": {"completed": true, "output": {"answer": "x"}}});
+        assert!(is_run_output_record(&terminal));
+        // Marker without an output field is still the run's own end
+        // (the no-readable-answer conclusion path needs it).
+        let bare_end = json!({"status": "completed", "result": {"completed": true}});
+        assert!(is_run_output_record(&bare_end));
+        // #FALLBACK: pre-marker terminal shape (distilled captures /
+        // older ledgers) — completed + output, no self-identification
+        // as an effect result.
+        let legacy = json!({"status": "completed", "node_id": "end",
+            "result": {"output": {"answer": "y"}}});
+        assert!(is_run_output_record(&legacy));
+        // A SYNC start_subworkflow completion carries the CHILD's output
+        // ({"sub_run_id", "output"} — runtime.py) and must NOT read as
+        // the parent's own answer.
+        let sync_spawn = json!({"status": "completed",
+            "effect": {"type": "start_subworkflow", "payload": {"workflow_id": "w"}},
+            "result": {"sub_run_id": "child1", "output": {"answer": "child words"}}});
+        assert!(!is_run_output_record(&sync_spawn));
+        // Non-terminal results (resume/wait_until/emit) and non-completed
+        // statuses never qualify.
+        assert!(!is_run_output_record(
+            &json!({"status": "completed", "result": {"resumed": true}})
+        ));
+        assert!(!is_run_output_record(
+            &json!({"status": "waiting", "result": {"completed": true}})
+        ));
     }
 }

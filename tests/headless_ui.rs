@@ -4,6 +4,16 @@
 //! The worker thread is replaced by a dummy command channel; ledger records
 //! come from the live-captured fixture, applied to the store between frames
 //! exactly as posted closures would apply them.
+//!
+//! Background-thread wake posts DO reach this harness: `Driver::turn()`
+//! runs `reactive::drain_posted()` first every frame, so a closure posted
+//! from any thread lands on the next `h.turn()`. The one panic path these
+//! tests cannot drive is `gateway::entities::spawn_named` with a panicking
+//! body — the fn is private and no public entry takes an injectable body;
+//! its end-to-end proof (panic → catch_unwind → wake.post → drain →
+//! notice + guarded fold) lives as a unit test beside it
+//! (`panic_fold_travels_the_wake_queue_end_to_end`), pumping the SAME
+//! `drain_posted()` the driver calls.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -48,6 +58,7 @@ fn harness() -> Harness {
     let ctx_out = ctx_slot.clone();
     let prefs = Rc::new(RefCell::new(Prefs::default()));
     let prefs_for_ctx = prefs.clone();
+    let actions = app.actions();
     app.mount(move |cx| {
         let store = Store::create(cx);
         *store_out.borrow_mut() = Some(store);
@@ -60,11 +71,11 @@ fn harness() -> Harness {
         });
         let ctx = UiCtx {
             tx,
+            client: abstractcode_tui::gateway::GatewayClient::new("http://127.0.0.1:1", None),
             overlays: overlays.clone(),
             quitter: quitter.clone(),
             prefs: prefs_for_ctx.clone(),
             workspace_root: Some("/tmp/ws".into()),
-            workspace_mode: None,
             max_iterations: 50,
             replay_turns: 20,
             gateway_label: "127.0.0.1:8080".into(),
@@ -74,12 +85,22 @@ fn harness() -> Harness {
             wait_modal_for: Rc::new(RefCell::new(None)),
         };
         *ctx_out.borrow_mut() = Some((ctx.clone(), cx));
-        ui::root(cx, store, ctx)
+        ui::root(cx, store, ctx, &actions)
     })
     .expect("mount");
     let mut term = CaptureTerm::new(size);
     let cfg = RunConfig {
         probe: false,
+        // Fixed capabilities, never env detection: the host's TERM/
+        // COLORTERM must not steer what these tests assert (the engine's
+        // own rule for RunConfig.caps). Truecolor also makes inks emit as
+        // exact RGB, so style assertions can read theme tokens back from
+        // the modeled screen (the diff-tint test below).
+        caps: Some(abstracttui::term::Capabilities::with(|c| {
+            c.truecolor = true;
+            c.colors_256 = true;
+            c.unicode_ok = true;
+        })),
         ..RunConfig::default()
     };
     let driver = Driver::new(&mut app, &mut term, cfg).expect("driver");
@@ -122,6 +143,24 @@ impl Harness {
             }
         }
         None
+    }
+
+    /// Leave the animated splash (push a conversation item + settle):
+    /// tests that assert BYTE-IDLE must not run on the splash screen —
+    /// its shimmer ticker legitimately emits every ~150ms, so an idle
+    /// assert races the timer (caught live: the Ctrl+L both-bindings
+    /// pin failed once-in-many runs). Emission-asserting tests need it
+    /// too, the other way around: a shimmer tick must never masquerade
+    /// as the emission under test.
+    fn leave_splash(&mut self) {
+        self.store.fold.update(|f| {
+            f.push_item(abstractcode_tui::transcript::Item::User {
+                text: "settle".into(),
+            });
+        });
+        for _ in 0..3 {
+            self.turn();
+        }
     }
 
     /// Send a bare Escape and let the parser's 30ms ESC-disambiguation
@@ -169,6 +208,171 @@ fn boots_to_empty_state_with_composer() {
     assert!(screen.contains("/help"), "key legend:\n{screen}");
 }
 
+/// The splash (IDLE-2): the half-block logotype renders at boot, the
+/// whole block is vertically CENTERED (operator ask, 2026-07-23 — the
+/// old top-anchor put the first content row at pane row ~2), and the
+/// shimmer animation exists ONLY while the splash is visible — the
+/// byte channel is the observable (glyphs never move; only inks do),
+/// and after the first conversation item the ticker cancels so the
+/// idle app returns to zero emissions.
+#[test]
+fn splash_logo_centers_and_animates_only_while_visible() {
+    let mut h = harness();
+    let screen = h.turn();
+    assert!(
+        screen.contains("▄▀█"),
+        "half-block logotype renders at boot:\n{screen}"
+    );
+    let logo_row = screen
+        .lines()
+        .position(|l| l.contains("▄▀█"))
+        .expect("logo row");
+    assert!(
+        logo_row >= 4,
+        "centered block starts well below the header (row {logo_row}):\n{screen}"
+    );
+    // Animation while visible: settle to byte-idle, then poll bounded
+    // (refinement pass: ~0.7% of frame transitions are zero-delta —
+    // shimmer in its dark zone + pulse at an extremum rounding to the
+    // same ink — so ONE sampled frame could legitimately emit nothing;
+    // any two consecutive frames cannot).
+    for _ in 0..4 {
+        h.turn();
+    }
+    let mut emitted_any = false;
+    for _ in 0..10 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let t = h.driver.turn(&mut h.app, &mut h.term).expect("turn");
+        emitted_any |= t.emitted;
+        if emitted_any {
+            break;
+        }
+    }
+    assert!(emitted_any, "the splash shimmer re-emits while visible");
+    // Conversation starts: the splash predicate flips, the ticker
+    // cancels, and the app is byte-idle again even across a tick period.
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::User {
+            text: "first task".into(),
+        })
+    });
+    for _ in 0..6 {
+        h.turn();
+    }
+    std::thread::sleep(std::time::Duration::from_millis(220));
+    let mut emitted_after = false;
+    for _ in 0..2 {
+        let t = h.driver.turn(&mut h.app, &mut h.term).expect("turn");
+        emitted_after |= t.emitted;
+    }
+    assert!(
+        !emitted_after,
+        "no splash emissions after conversation starts (ticker cancelled)"
+    );
+}
+
+/// Short panes degrade HONESTLY (refinement-pass P1, the 0240 class):
+/// at 72×20 the content block is taller than the pane — the fix pins
+/// every content row at shrink(0.0) with the outer column clipping, so
+/// bottom rows drop WHOLE. The defective build overprinted card rows
+/// ("sessionce…" interleavings) and silently downgraded the logo while
+/// keeping less important rows.
+#[test]
+fn splash_short_pane_clips_whole_rows_and_keeps_the_logo() {
+    abstracttui::app::set_theme_by_id("abstract-dark");
+    let size = Size::new(72, 20);
+    let mut app = App::new(size);
+    let overlays = app.overlays();
+    let quitter = app.quitter();
+    let (tx, _rx) = mpsc::channel::<Cmd>();
+    let actions = app.actions();
+    app.mount(move |cx| {
+        let store = Store::create(cx);
+        store.session_id.set("acode-probe-session".into());
+        store.workflow.set(Workflow {
+            bundle_id: "basic-agent".into(),
+            flow_id: "81795ea9".into(),
+            name: "basic-agent".into(),
+            description: String::new(),
+        });
+        store.fold.update(|f| {
+            f.push_item(abstractcode_tui::transcript::Item::Info {
+                text: "session acode-probe-session · durable memory lives on the gateway".into(),
+            });
+            f.push_item(abstractcode_tui::transcript::Item::Info {
+                text: "workspace: gateway-managed — files land in the gateway's workspace".into(),
+            });
+        });
+        let ctx = UiCtx {
+            tx,
+            client: abstractcode_tui::gateway::GatewayClient::new("http://127.0.0.1:1", None),
+            overlays: overlays.clone(),
+            quitter: quitter.clone(),
+            prefs: Rc::new(RefCell::new(Prefs::default())),
+            workspace_root: Some("/tmp/ws".into()),
+            max_iterations: 50,
+            replay_turns: 20,
+            gateway_label: "127.0.0.1:8080".into(),
+            modal: Rc::new(RefCell::new(None)),
+            modal_epoch: cx.signal(0u64),
+            dismissed_wait: Rc::new(RefCell::new(None)),
+            wait_modal_for: Rc::new(RefCell::new(None)),
+        };
+        ui::root(cx, store, ctx, &actions)
+    })
+    .expect("mount");
+    let mut term = CaptureTerm::new(size);
+    let cfg = RunConfig {
+        probe: false,
+        caps: Some(abstracttui::term::Capabilities::with(|c| {
+            c.truecolor = true;
+            c.colors_256 = true;
+            c.unicode_ok = true;
+        })),
+        ..RunConfig::default()
+    };
+    let mut driver = Driver::new(&mut app, &mut term, cfg).expect("driver");
+    let mut screen = String::new();
+    for _ in 0..3 {
+        driver.turn(&mut app, &mut term).expect("turn");
+        screen = term.screen().to_text();
+    }
+    // The logo survives (last casualty, never the first).
+    assert!(
+        screen.contains("▄▀█"),
+        "logotype renders on the short pane:\n{screen}"
+    );
+    // No flex-shrink overprint: every card LABEL that renders as a
+    // line's first word is followed by whitespace (the defective build
+    // fused a crushed row's label with the surviving row's tail —
+    // "sessionce", "skillsyce"). Chrome rows that legitimately start
+    // with these words ("session <id> · no runs yet") pass the same
+    // rule, so the check is structural, not screen-shape-brittle.
+    let labels = [
+        "version",
+        "workflow",
+        "route",
+        "cwd",
+        "workspace",
+        "session",
+        "gateway",
+        "skills",
+        "mcp",
+        "context",
+    ];
+    for row in screen.lines() {
+        let trimmed = row.trim_start();
+        for label in labels {
+            if let Some(rest) = trimmed.strip_prefix(label) {
+                assert!(
+                    rest.is_empty() || rest.starts_with(char::is_whitespace),
+                    "card label {label:?} fused with overprinted text: {row:?}\n{screen}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn typing_a_prompt_sends_start_and_renders_user_card() {
     let mut h = harness();
@@ -176,6 +380,10 @@ fn typing_a_prompt_sends_start_and_renders_user_card() {
     h.type_text("write a haiku");
     h.turn();
     h.press_enter();
+    // Two pumps: the feed's first mount discovers its width during draw
+    // and syncs the measured extent one frame later (engine contract —
+    // the custom body block paints from the settled geometry).
+    h.turn();
     let screen = h.turn();
     assert!(screen.contains("you"), "user card header:\n{screen}");
     assert!(screen.contains("write a haiku"), "prompt text:\n{screen}");
@@ -316,7 +524,7 @@ fn slash_theme_switches_live() {
     h.turn();
     h.press_enter();
     h.turn();
-    h.turn(); // deferred focus_composer lands on the rebuilt input
+    h.turn(); // the theme rebuild settles (autofocus re-fires on the new tree)
     assert_eq!(abstracttui::app::current_theme().id, "nord");
     // And an unknown theme stays put with a notice queued.
     h.type_text("/theme not-a-theme");
@@ -569,6 +777,19 @@ fn model_stage_two_stays_interactive_when_an_approval_lands_behind_the_picker() 
         "stage 2 selection applies — no zombie modal layer ate the keys:\n{screen}"
     );
 
+    // Stage 3 (the reasoning dial, first-citizen third axis) now covers
+    // the parked wait — SAME zombie-layer contract as stage 1 -> 2: the
+    // replacement must leave the list live, and closing it must let the
+    // parked prompt return. Row 0 = gateway default closes the picker.
+    let screen = h.turn();
+    assert!(
+        screen.contains("reasoning —"),
+        "stage 3 opens after the model choice:\n{screen}"
+    );
+    h.press_enter();
+    h.turn();
+    h.turn();
+
     // And the parked approval prompt comes back, still answerable.
     let screen = h.turn();
     assert!(
@@ -641,6 +862,106 @@ fn model_picker_defaults_row_and_empty_provider_apply_without_stage_two() {
         !screen.contains("models —"),
         "no stage 2 for a model-less provider:\n{screen}"
     );
+}
+
+/// The /workflow picker through the shared picker shell: browse never
+/// selects; SPACE activates (engine 0.2.1 — Enter is pinned by the
+/// model/sessions tests through the same shell); the choice persists.
+#[test]
+fn workflow_picker_selects_and_persists_on_activation() {
+    let mut h = harness();
+    h.turn();
+    h.store.workflows.set(vec![
+        Workflow {
+            bundle_id: "basic-agent".into(),
+            flow_id: "81795ea9".into(),
+            name: "basic-agent".into(),
+            description: String::new(),
+        },
+        Workflow {
+            bundle_id: "coder".into(),
+            flow_id: "flow-2".into(),
+            name: "coder".into(),
+            description: "writes code".into(),
+        },
+    ]);
+    h.type_text("/workflow");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(screen.contains("agent workflow"), "picker opens:\n{screen}");
+    assert!(screen.contains("writes code"), "descriptions:\n{screen}");
+    // Arrow to the second workflow: browsing must not select.
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    assert_eq!(
+        h.store.workflow.get_untracked().bundle_id,
+        "basic-agent",
+        "browsing selects nothing"
+    );
+    // SPACE chooses too (engine 0.2.1: List activation is Enter, Space,
+    // or click-on-selected — Space has no toggle meaning in a
+    // single-select List); Enter is pinned by the model/sessions tests
+    // through the same shared picker shell.
+    h.type_text(" ");
+    h.turn();
+    h.turn(); // deferred modal close
+    let screen = h.turn();
+    let picked = h.store.workflow.get_untracked();
+    assert_eq!(picked.bundle_id, "coder");
+    assert_eq!(picked.flow_id, "flow-2");
+    assert!(
+        !screen.contains("agent workflow —"),
+        "picker closed after choosing:\n{screen}"
+    );
+    let prefs = h.prefs.borrow();
+    assert_eq!(
+        prefs.bundle_id.as_deref(),
+        Some("coder"),
+        "choice persisted"
+    );
+    assert_eq!(prefs.flow_id.as_deref(), Some("flow-2"));
+}
+
+/// /workflow refetches the catalog at open (the /tools //skills //mcp
+/// Load*-before-open pattern): the boot's LoadCatalog was the only load a
+/// healthy session ever ran, so a long-lived TUI pinned the launch-time
+/// snapshot and entrypoints registered after launch never appeared
+/// (operator incident 2026-07-25). The preference mirrors saved prefs —
+/// the boot's own source — so `load_catalog` re-resolves the same
+/// selection and never clobbers the user's.
+#[test]
+fn workflow_picker_open_refetches_the_catalog() {
+    let mut h = harness();
+    h.turn();
+    {
+        let mut p = h.prefs.borrow_mut();
+        p.bundle_id = Some("basic-agent".into());
+        p.flow_id = Some("81795ea9".into());
+    }
+    h.store.workflows.set(vec![Workflow {
+        bundle_id: "basic-agent".into(),
+        flow_id: "81795ea9".into(),
+        name: "basic-agent".into(),
+        description: String::new(),
+    }]);
+    while h.rx.try_recv().is_ok() {} // isolate the gesture's own commands
+    h.type_text("/workflow");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(screen.contains("agent workflow"), "picker opens:\n{screen}");
+    match h.rx.try_recv() {
+        Ok(Cmd::LoadCatalog {
+            preferred_bundle,
+            preferred_flow,
+        }) => {
+            assert_eq!(preferred_bundle.as_deref(), Some("basic-agent"));
+            assert_eq!(preferred_flow.as_deref(), Some("81795ea9"));
+        }
+        other => panic!("expected LoadCatalog at /workflow open, got {other:?}"),
+    }
+    assert!(h.rx.try_recv().is_err(), "exactly one refetch per open");
 }
 
 #[test]
@@ -728,16 +1049,19 @@ fn tools_selector_toggles_and_start_carries_allowlist() {
             name: "read_file".into(),
             description: "Read a file".into(),
             toolset: "files".into(),
+            ..Default::default()
         },
         abstractcode_tui::store::ToolInfo {
             name: "web_search".into(),
             description: "Search the web".into(),
             toolset: "web".into(),
+            ..Default::default()
         },
         abstractcode_tui::store::ToolInfo {
             name: "write_file".into(),
             description: "Write a file".into(),
             toolset: "files".into(),
+            ..Default::default()
         },
     ]);
     h.type_text("/tools");
@@ -745,7 +1069,7 @@ fn tools_selector_toggles_and_start_carries_allowlist() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("gateway tools — 3 available (untouched"),
+        screen.contains("gateway tools — 3 available · untouched"),
         "tools modal title:\n{screen}"
     );
     assert!(screen.contains("[✓] read_file"), "checked rows:\n{screen}");
@@ -754,7 +1078,7 @@ fn tools_selector_toggles_and_start_carries_allowlist() {
     h.type_text(" ");
     let screen = h.turn();
     assert!(
-        screen.contains("2 on / 1 off (explicit allowlist"),
+        screen.contains("2 on / 1 off · explicit allowlist"),
         "toggle reflected:\n{screen}"
     );
     assert!(screen.contains("[ ] read_file"), "unchecked row:\n{screen}");
@@ -783,8 +1107,438 @@ fn tools_selector_toggles_and_start_carries_allowlist() {
     }
 }
 
+/// Per-CATEGORY toggle (operator ask 2026-07-23): `c` flips every
+/// grantable tool in the cursor's toolset on/off in one keystroke, and
+/// leaves other categories untouched.
 #[test]
-fn approve_all_auto_resumes_later_batches_until_toggled_off() {
+fn tools_category_toggle_flips_a_whole_toolset() {
+    let mut h = harness();
+    h.turn();
+    h.store.tools.set(vec![
+        abstractcode_tui::store::ToolInfo {
+            name: "read_file".into(),
+            description: "Read a file".into(),
+            toolset: "files".into(),
+            ..Default::default()
+        },
+        abstractcode_tui::store::ToolInfo {
+            name: "write_file".into(),
+            description: "Write a file".into(),
+            toolset: "files".into(),
+            ..Default::default()
+        },
+        abstractcode_tui::store::ToolInfo {
+            name: "web_search".into(),
+            description: "Search the web".into(),
+            toolset: "web".into(),
+            ..Default::default()
+        },
+    ]);
+    h.type_text("/tools");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    // Cursor starts at the first tool (read_file, toolset "files"). `c`
+    // turns the WHOLE files category off (both files tools on → off).
+    h.type_text("c");
+    h.turn();
+    let disabled = h.store.disabled_tools.get_untracked();
+    assert!(
+        disabled.contains(&"read_file".to_string()) && disabled.contains(&"write_file".to_string()),
+        "the whole files category is off: {disabled:?}"
+    );
+    assert!(
+        !disabled.contains(&"web_search".to_string()),
+        "the web category is untouched: {disabled:?}"
+    );
+    // `c` again turns the files category back on.
+    h.type_text("c");
+    h.turn();
+    let disabled = h.store.disabled_tools.get_untracked();
+    assert!(
+        !disabled.contains(&"read_file".to_string())
+            && !disabled.contains(&"write_file".to_string()),
+        "the files category is back on: {disabled:?}"
+    );
+}
+
+/// Camera tools are OFF by default for a fresh session (operator ask
+/// 2026-07-23: privacy). The seed fires once the inventory loads for a
+/// session with no saved slot, disables the camera toolset's grantable
+/// names, leaves everything else on, and is one-shot.
+#[test]
+fn camera_tools_seed_off_for_a_fresh_session() {
+    let mut h = harness();
+    h.turn();
+    // A fresh session arms the seed at boot (lib.rs); the harness bypasses
+    // boot, so arm it the same way.
+    h.store.camera_seed_pending.set(true);
+    h.store.tools.set(vec![
+        abstractcode_tui::store::ToolInfo {
+            name: "read_file".into(),
+            description: "Read a file".into(),
+            toolset: "files".into(),
+            ..Default::default()
+        },
+        abstractcode_tui::store::ToolInfo {
+            name: "camera_open".into(),
+            description: "Turn a camera on".into(),
+            toolset: "camera".into(),
+            ..Default::default()
+        },
+        abstractcode_tui::store::ToolInfo {
+            name: "camera_capture_photo".into(),
+            description: "Take a photo".into(),
+            toolset: "camera".into(),
+            ..Default::default()
+        },
+    ]);
+    h.turn(); // the wire_camera_default_off effect fires on the inventory change
+    let disabled = h.store.disabled_tools.get_untracked();
+    assert!(
+        disabled.contains(&"camera_open".to_string())
+            && disabled.contains(&"camera_capture_photo".to_string()),
+        "camera tools seeded off by default: {disabled:?}"
+    );
+    assert!(
+        !disabled.contains(&"read_file".to_string()),
+        "non-camera tools stay on: {disabled:?}"
+    );
+    assert!(
+        !h.store.camera_seed_pending.get_untracked(),
+        "the seed is one-shot (flag consumed)"
+    );
+}
+
+/// Full-catalog surfacing (tool-tiers item H; this seat's c4555
+/// commitment): a row the gateway serves `enabled: false` is VISIBLE
+/// with its gate, never grantable — Space refuses with a notice naming
+/// the gate, `p` refuses a pin, the title counts it separately, and a
+/// customized run allowlist excludes it. Also pins the stale-pref
+/// state (cycle-2 adversary P1-2): a persisted user-disabled name
+/// whose row is NOW served-disabled counts NOWHERE — the title says
+/// "untouched" AND the run sends no allowlist (the two surfaces share
+/// one effective-disabled predicate; the divergence silently widened
+/// the agent's tool set past the workflow's baked pin).
+#[test]
+fn served_disabled_tools_render_with_gate_and_are_never_grantable() {
+    let mut h = harness();
+    h.turn();
+    // Stale pref: the user disabled send_email BEFORE the gateway's
+    // gate turned it off; the name persists in prefs/disabled_tools.
+    h.store.disabled_tools.set(vec!["send_email".into()]);
+    h.store.tools.set(vec![
+        abstractcode_tui::store::ToolInfo {
+            name: "send_email".into(),
+            description: "Send an email".into(),
+            toolset: "comms".into(),
+            served_disabled: true,
+            enable_gate: "ABSTRACT_ENABLE_COMMS_TOOLS".into(),
+            why_disabled: "registered but disabled on this gateway".into(),
+            ..Default::default()
+        },
+        abstractcode_tui::store::ToolInfo {
+            name: "read_file".into(),
+            description: "Read a file".into(),
+            toolset: "files".into(),
+            ..Default::default()
+        },
+        abstractcode_tui::store::ToolInfo {
+            name: "write_file".into(),
+            description: "Write a file".into(),
+            toolset: "files".into(),
+            ..Default::default()
+        },
+    ]);
+    // The stale pref alone must NOT flip the run into allowlist mode:
+    // a served-disabled row cannot run either way, so "untouched"
+    // (workflow defaults, tools=None) is the truth both surfaces state.
+    h.type_text("stale pref probe");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start { opts, .. }) => {
+            assert_eq!(
+                opts.tools, None,
+                "a stale user-disable on a served-disabled row keeps workflow defaults"
+            );
+        }
+        other => panic!("expected Cmd::Start, got {:?}", other.map(|_| "cmd")),
+    }
+    // Reset the run state so the modal flow below starts clean.
+    h.store.phase.set(Phase::Idle);
+    h.type_text("/tools");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    // "(untouched:" is the discriminating prefix vs the "explicit
+    // allowlist" branch; the full phrase ellipsizes at the modal width
+    // now that the gated segment shares the title row.
+    assert!(
+        screen.contains("· untouched"),
+        "title agrees with the wire: stale pref on a gated row is not a customization:\n{screen}"
+    );
+    // Visible with the gate; counted separately from the grantable pool.
+    assert!(
+        screen.contains("2 available · 1 gated off server-side"),
+        "gated count in the title:\n{screen}"
+    );
+    assert!(
+        screen
+            .contains("send_email  [disabled on this gateway — gate: ABSTRACT_ENABLE_COMMS_TOOLS]"),
+        "disabled row renders its gate:\n{screen}"
+    );
+    // Cursor row 0 is send_email (comms sorts before files): Space
+    // refuses — the user disabled-set is UNCHANGED (the stale pref
+    // stays; no new mutation), a toast names the gate.
+    h.type_text(" ");
+    h.turn();
+    assert_eq!(
+        h.store.disabled_tools.get_untracked(),
+        vec!["send_email".to_string()],
+        "Space on a served-disabled row never mutates the selection"
+    );
+    // `p` refuses a pin for the same reason.
+    h.type_text("p");
+    h.turn();
+    assert!(
+        h.store.tool_overrides.get_untracked().is_empty(),
+        "no pin lands on a served-disabled row"
+    );
+    // Disable read_file (cursor down to it) to flip into allowlist mode:
+    // the explicit allowlist must exclude the served-disabled row.
+    h.term.push_input(b"\x1b[B"); // Down → read_file
+    h.turn();
+    h.type_text(" ");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.turn(); // modal close settles
+    h.type_text("do the thing");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start { opts, .. }) => {
+            assert_eq!(
+                opts.tools,
+                Some(vec!["write_file".to_string()]),
+                "allowlist excludes served-disabled rows AND the user-disabled one"
+            );
+        }
+        other => panic!("expected Cmd::Start, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+/// `n` (all off) scopes to the GRANTABLE rows: served-disabled names are
+/// a server fact, not a client selection — parking them in the user's
+/// disabled set would persist stale names past a gate flip (cycle-2
+/// adversary coverage gap (a)).
+#[test]
+fn all_off_excludes_served_disabled_rows_from_the_user_set() {
+    let mut h = harness();
+    h.turn();
+    h.store.tools.set(vec![
+        abstractcode_tui::store::ToolInfo {
+            name: "send_email".into(),
+            description: "Send an email".into(),
+            toolset: "comms".into(),
+            served_disabled: true,
+            enable_gate: "ABSTRACT_ENABLE_COMMS_TOOLS".into(),
+            ..Default::default()
+        },
+        abstractcode_tui::store::ToolInfo {
+            name: "read_file".into(),
+            description: "Read a file".into(),
+            toolset: "files".into(),
+            ..Default::default()
+        },
+        abstractcode_tui::store::ToolInfo {
+            name: "write_file".into(),
+            description: "Write a file".into(),
+            toolset: "files".into(),
+            ..Default::default()
+        },
+    ]);
+    h.type_text("/tools");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.type_text("n");
+    h.turn();
+    let mut disabled = h.store.disabled_tools.get_untracked();
+    disabled.sort();
+    assert_eq!(
+        disabled,
+        vec!["read_file".to_string(), "write_file".to_string()],
+        "n disables every GRANTABLE tool and never parks a served-disabled name"
+    );
+}
+
+/// The approval card names a served-disabled call's state + gate
+/// (cycle-2 adversary P2-1): a disabled call reaching a wait is the
+/// defense-in-depth lane, and a bare tier line would imply an
+/// approvability the gateway will refuse.
+#[test]
+fn approval_modal_names_the_gate_on_a_served_disabled_call() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.tools.set(vec![abstractcode_tui::store::ToolInfo {
+        name: "send_email".into(),
+        description: "Send an email".into(),
+        toolset: "comms".into(),
+        served_disabled: true,
+        enable_gate: "ABSTRACT_ENABLE_COMMS_TOOLS".into(),
+        ..Default::default()
+    }]);
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &approval_record(
+                "s-disabled",
+                "tool_approval:disabled",
+                serde_json::json!([{"name": "send_email",
+                    "arguments": {"to": "x@y.z", "subject": "hi"}}]),
+            ),
+        );
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("disabled on this gateway"),
+        "the card states the disabled fact:\n{screen}"
+    );
+    assert!(
+        screen.contains("ABSTRACT_ENABLE_COMMS_TOOLS"),
+        "the card names the gate:\n{screen}"
+    );
+}
+
+/// item 4: `p` in the /tools modal cycles a per-tool approval pin
+/// (none → auto → ask → none), renders it, persists it, and the pin
+/// reaches the run-start policy expansion (auto lifts above the tier,
+/// ask force-asks below it).
+#[test]
+fn tools_modal_pins_cycle_persist_and_reach_the_start_policy() {
+    let mut h = harness();
+    h.turn();
+    h.store.tools.set(vec![
+        abstractcode_tui::store::ToolInfo {
+            name: "read_file".into(),
+            description: "Read a file".into(),
+            toolset: "files".into(),
+            ..Default::default()
+        },
+        abstractcode_tui::store::ToolInfo {
+            name: "fetch_url".into(),
+            description: "Fetch a URL".into(),
+            toolset: "web".into(),
+            ..Default::default()
+        },
+    ]);
+    // read tier by default.
+    h.type_text("/tools");
+    h.turn();
+    h.press_enter();
+    h.turn();
+
+    // Cursor on read_file (row 0): p → auto, rendered + persisted. Only
+    // read_file is pinned, so the [pin:auto] marker uniquely names it.
+    h.type_text("p");
+    let screen = h.turn();
+    assert!(
+        screen.contains("read_file") && screen.contains("[pin:auto]"),
+        "auto pin rendered:\n{screen}"
+    );
+    assert_eq!(
+        h.prefs.borrow().tool_overrides,
+        vec![("read_file".to_string(), "auto".to_string())]
+    );
+    // p again → ask.
+    h.type_text("p");
+    let screen = h.turn();
+    assert!(screen.contains("[pin:ask]"), "ask pin rendered:\n{screen}");
+    assert_eq!(
+        h.store.tool_overrides.get_untracked(),
+        vec![("read_file".to_string(), "ask".to_string())]
+    );
+    // p a third time → NONE: the wrap closes the full none→auto→ask→none
+    // round trip headlessly (cycle-2 left this leg to a unit test) — the
+    // marker disappears from the render and the persisted override clears.
+    h.type_text("p");
+    let screen = h.turn();
+    assert!(
+        !screen.contains("[pin:"),
+        "cleared pin renders no marker:\n{screen}"
+    );
+    assert!(
+        h.store.tool_overrides.get_untracked().is_empty(),
+        "cleared pin leaves no override: {:?}",
+        h.store.tool_overrides.get_untracked()
+    );
+    assert!(
+        h.prefs.borrow().tool_overrides.is_empty(),
+        "cleared pin is not persisted"
+    );
+    // Two more presses land read_file back on ask for the policy leg below.
+    h.type_text("p");
+    h.turn();
+    h.type_text("p");
+    let screen = h.turn();
+    assert!(screen.contains("[pin:ask]"), "back on ask:\n{screen}");
+    // Move to fetch_url (row 1) and pin it auto.
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    h.type_text("p");
+    h.turn();
+    assert!(h
+        .store
+        .tool_overrides
+        .get_untracked()
+        .contains(&("fetch_url".to_string(), "auto".to_string())));
+
+    // Close and start: read_file is ask-pinned (force-ask), fetch_url is
+    // auto-pinned (lifts above the read tier).
+    h.press_enter();
+    h.turn();
+    h.turn();
+    h.type_text("go");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start { opts, .. }) => {
+            let auto = &opts.tool_policy.auto_approve_tools;
+            assert!(
+                auto.contains(&"fetch_url".to_string()),
+                "auto pin: {auto:?}"
+            );
+            assert!(
+                !auto.contains(&"read_file".to_string()),
+                "ask pin: {auto:?}"
+            );
+            assert_eq!(
+                opts.tool_policy.require_approval_tools,
+                vec!["read_file".to_string()]
+            );
+        }
+        other => panic!("expected Start, got {:?}", other.map(|_| "cmd")),
+    }
+
+    // The full none→auto→ask→none wrap was closed in-modal above (the
+    // third `p` press); the unit test pins the same cycle at the fold.
+}
+
+#[test]
+fn approve_all_sets_permissions_all_and_covers_later_batches() {
+    // The c5028 consolidation: 'A' approves the batch AND sets the
+    // PERSISTED permissions level to `all` (the old ephemeral blanket is
+    // deleted — its ask-pin bypass, disabled-clamp bypass and empty-batch
+    // holes died with it). `/permissions read` restores prompting.
     let mut h = harness();
     h.turn();
     let store = h.store;
@@ -802,7 +1556,7 @@ fn approve_all_auto_resumes_later_batches_until_toggled_off() {
         })
     };
 
-    // First batch prompts; 'A' approves it AND arms auto-approve.
+    // First batch prompts; 'A' approves it AND sets permissions: all.
     store.fold.update(|f| {
         let _ = f.apply(
             "root",
@@ -811,19 +1565,34 @@ fn approve_all_auto_resumes_later_batches_until_toggled_off() {
     });
     let screen = h.turn();
     assert!(
-        screen.contains("approve all (A)"),
+        screen.contains("approve all (A"),
         "approve-all affordance visible:\n{screen}"
     );
     h.type_text("A");
     h.turn();
     h.turn(); // deferred modal close lands
     match h.find_cmd(|c| matches!(c, Cmd::Resume { .. })) {
-        Some(Cmd::Resume { approved, .. }) => assert_eq!(approved, Some(true)),
+        Some(Cmd::Resume {
+            approved, payload, ..
+        }) => {
+            assert_eq!(approved, Some(true));
+            // R3 (c5028): the HUMAN gesture stamps approved_by: user.
+            assert_eq!(
+                payload.get("approved_by").and_then(|v| v.as_str()),
+                Some("user"),
+                "human clicks are ledger-distinguishable: {payload}"
+            );
+        }
         other => panic!("expected Resume, got {:?}", other.map(|_| "cmd")),
     }
-    assert!(store.auto_approve.get_untracked(), "auto-approve armed");
+    assert_eq!(
+        store.accepted_tier.get_untracked(),
+        "all",
+        "A sets the persisted level"
+    );
 
-    // Second batch: NO modal, auto-resumed.
+    // Second batch: NO modal, policy-resumed — and the resume payload
+    // names the POLICY as the approver (R3).
     store.fold.update(|f| {
         let _ = f.apply(
             "root",
@@ -833,24 +1602,32 @@ fn approve_all_auto_resumes_later_batches_until_toggled_off() {
     let screen = h.turn();
     assert!(
         !screen.contains("approve (a)"),
-        "no prompt modal while auto-approve is on:\n{screen}"
+        "no prompt modal at permissions all:\n{screen}"
     );
     match h.find_cmd(|c| matches!(c, Cmd::Resume { .. })) {
         Some(Cmd::Resume {
-            wait_key, approved, ..
+            wait_key,
+            approved,
+            payload,
+            ..
         }) => {
             assert_eq!(wait_key, "tool_approval:k2");
             assert_eq!(approved, Some(true));
+            assert_eq!(
+                payload.get("approved_by").and_then(|v| v.as_str()),
+                Some("policy"),
+                "policy auto-clicks are ledger-distinguishable: {payload}"
+            );
         }
         other => panic!("expected auto Resume, got {:?}", other.map(|_| "cmd")),
     }
 
-    // /auto turns it off; the next batch prompts again.
-    h.type_text("/auto");
+    // /permissions read restores prompting for the next batch.
+    h.type_text("/permissions read");
     h.turn();
     h.press_enter();
     h.turn();
-    assert!(!store.auto_approve.get_untracked(), "auto-approve off");
+    assert_eq!(store.accepted_tier.get_untracked(), "read");
     store.fold.update(|f| {
         let _ = f.apply(
             "root",
@@ -860,7 +1637,7 @@ fn approve_all_auto_resumes_later_batches_until_toggled_off() {
     let screen = h.turn();
     assert!(
         screen.contains("approve (a)"),
-        "prompting resumes after /auto off:\n{screen}"
+        "prompting resumes at permissions read:\n{screen}"
     );
 }
 
@@ -878,6 +1655,7 @@ fn tools_selector_windows_long_lists_with_overflow_markers() {
             name: format!("tool_{i:02}"),
             description: "does things".into(),
             toolset: if i < 15 { "files".into() } else { "web".into() },
+            ..Default::default()
         });
     }
     h.store.tools.set(tools);
@@ -982,6 +1760,7 @@ fn pending_wait_survives_covering_modals_and_defers_visibly() {
         name: "read_file".into(),
         description: "Read".into(),
         toolset: "files".into(),
+        ..Default::default()
     }]);
     let (cx, ctx) = (h.cx, h.ctx.clone());
     abstractcode_tui::ui::modals::open_tools(cx, store, &ctx);
@@ -1039,6 +1818,7 @@ fn stale_disabled_tools_never_underflow_or_force_allowlist_mode() {
         name: "read_file".into(),
         description: "Read".into(),
         toolset: "files".into(),
+        ..Default::default()
     }]);
     h.store.disabled_tools.set(vec![
         "gone_tool_a".into(),
@@ -1050,7 +1830,7 @@ fn stale_disabled_tools_never_underflow_or_force_allowlist_mode() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("1 available (untouched"),
+        screen.contains("1 available · untouched"),
         "stale-only disabled counts as untouched, no underflow:\n{screen}"
     );
     // A run start with stale-only disabled sends NO allowlist.
@@ -1187,9 +1967,17 @@ fn details_command_immediately_rerenders_mixed_content() {
         !screen.contains("result-plugh-lines"),
         "tool result preview collapsed:\n{screen}"
     );
+    // Operator ruling 2026-07-26: the clean view STILL SHOWS the tool
+    // was called (header) — it drops the DETAIL (args + result body),
+    // never the card. `execute_command` stays; its `cargo test` arg
+    // preview and result body are gone.
     assert!(
-        !screen.contains("execute_command"),
-        "finished-OK tool cards fold entirely in the clean view:\n{screen}"
+        screen.contains("execute_command"),
+        "finished-OK tool CALLS stay visible in the clean view (no detail):\n{screen}"
+    );
+    assert!(
+        !screen.contains("cargo test"),
+        "the argument preview is dropped as detail in the clean view:\n{screen}"
     );
     assert!(
         screen.contains("broken_tool") && screen.contains("exploded"),
@@ -1343,44 +2131,41 @@ fn help_modal_opens_and_closes() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("/session [id]"),
+        screen.contains("/sessions [id]"),
         "help modal lists commands:\n{screen}"
     );
     h.press_escape();
     h.turn(); // deferred close lands
     let screen = h.turn();
     assert!(
-        !screen.contains("/session [id]"),
+        !screen.contains("/sessions [id]"),
         "help closed on Esc:\n{screen}"
     );
 }
 
 /// Feed order = fold order across a MID-LIST visibility flip (the sync
-/// contract's rebuild seam): in the clean view a running tool card is
-/// visible, later items render after it; when it completes OK it folds
-/// away (mid-list flip -> rebuild), and toggling details back on must
-/// re-insert it at its FOLD position, never at the feed tail.
+/// contract's rebuild seam). Tools are now ALWAYS visible (operator
+/// ruling), so the details-gated element that still flips mid-list is a
+/// THINKING card: hidden in the clean view, it appears BETWEEN its
+/// neighbors when details turn on — never at the feed tail (feed order
+/// is push order; a tail-appended key would misplace it).
 #[test]
 fn feed_order_survives_mid_list_visibility_flips() {
     let mut h = harness();
     h.turn();
     let store = h.store;
-    store.show_details.set(false); // clean view
+    store.show_details.set(false); // clean view: thinking hidden
     store.fold.update(|f| f.begin_run("root"));
     store.fold.update(|f| {
         f.push_item(abstractcode_tui::transcript::Item::User {
             text: "AAA-question".into(),
         });
-        // A running tool: visible even in the clean view.
-        let _ = f.apply(
-            "root",
-            &serde_json::json!({"run_id": "root", "node_id": "act", "status": "started",
-                "effect": {"type": "tool_calls",
-                            "payload": {"tool_calls": [{"name": "zz_marker_tool", "call_id": "c1"}]}}}),
-        );
-    });
-    h.turn();
-    store.fold.update(|f| {
+        // A thinking card between the two visible items: hidden now.
+        f.push_item(abstractcode_tui::transcript::Item::Thinking {
+            iteration: 1,
+            content: "zz_marker_think".into(),
+            reasoning: String::new(),
+        });
         f.push_item(abstractcode_tui::transcript::Item::Assistant {
             text: "BBB-update".into(),
             final_answer: false,
@@ -1390,41 +2175,31 @@ fn feed_order_survives_mid_list_visibility_flips() {
     let screen = h.turn();
     let pos = |s: &str, needle: &str| s.find(needle).unwrap_or(usize::MAX);
     assert!(
-        pos(&screen, "AAA-question") < pos(&screen, "zz_marker_tool")
-            && pos(&screen, "zz_marker_tool") < pos(&screen, "BBB-update"),
-        "initial order user < tool < update:\n{screen}"
-    );
-
-    // The tool completes OK: mid-list visibility flips false in the
-    // clean view — the card must disappear, order of the rest intact.
-    store.fold.update(|f| {
-        let _ = f.apply(
-            "root",
-            &serde_json::json!({"run_id": "root", "node_id": "act", "status": "completed",
-                "effect": {"type": "tool_calls",
-                            "payload": {"tool_calls": [{"name": "zz_marker_tool", "call_id": "c1"}]}},
-                "result": {"results": [{"call_id": "c1", "success": true, "output": "fine"}]}}),
-        );
-    });
-    let screen = h.turn();
-    assert!(
-        !screen.contains("zz_marker_tool"),
-        "finished-OK card folds in the clean view:\n{screen}"
+        !screen.contains("zz_marker_think"),
+        "thinking hidden in the clean view:\n{screen}"
     );
     assert!(
         pos(&screen, "AAA-question") < pos(&screen, "BBB-update"),
-        "remaining order intact:\n{screen}"
+        "initial order user < update (thinking folded):\n{screen}"
     );
 
-    // Details back on: the card must come back BETWEEN its neighbors
-    // (feed order is push order — a tail-appended key would render it
-    // after BBB-update).
+    // Details ON: the thinking card flips visible mid-list — it must
+    // land BETWEEN its neighbors, never at the feed tail.
     h.term.push_input(&[0x04]); // Ctrl+D
     let screen = h.turn();
     assert!(
-        pos(&screen, "AAA-question") < pos(&screen, "zz_marker_tool")
-            && pos(&screen, "zz_marker_tool") < pos(&screen, "BBB-update"),
-        "restored order user < tool < update:\n{screen}"
+        pos(&screen, "AAA-question") < pos(&screen, "zz_marker_think")
+            && pos(&screen, "zz_marker_think") < pos(&screen, "BBB-update"),
+        "restored order user < thinking < update:\n{screen}"
+    );
+
+    // Details OFF again: back to the folded order, rest intact.
+    h.term.push_input(&[0x04]);
+    let screen = h.turn();
+    assert!(
+        !screen.contains("zz_marker_think")
+            && pos(&screen, "AAA-question") < pos(&screen, "BBB-update"),
+        "re-folded, order intact:\n{screen}"
     );
 }
 
@@ -1488,8 +2263,12 @@ fn truncation_drains_keep_the_feed_in_sync_with_fold_order() {
         "tail shows the newest item after the equal-length drain:\n{screen}"
     );
     // Scroll to the very top: the notice renders first, then the oldest
-    // SURVIVOR — never a dropped item under a stale key.
-    for _ in 0..9 {
+    // SURVIVOR — never a dropped item under a stale key. 13 batches:
+    // body-carrying cards are 3 rows since the rich-header adoption
+    // (header · blank · body — the engine's block rhythm, matching the
+    // assistant card's long-standing shape), so 500 items ≈ 2000 rows;
+    // 13×20 PageUps × 10 rows covers it with margin.
+    for _ in 0..13 {
         let presses: Vec<u8> = b"\x1b[5~".repeat(20);
         h.term.push_input(&presses);
         h.turn();
@@ -1543,7 +2322,9 @@ fn truncation_drains_keep_the_feed_in_sync_with_fold_order() {
         screen.contains(&format!("item-{:04}", MAX_ITEMS + 2 * TRUNCATE_CHUNK + 1)),
         "tail shows the newest item after the shrink-observed drain:\n{screen}"
     );
-    for _ in 0..9 {
+    // 13 batches: 3-row cards since the rich-header adoption (see the
+    // phase-B scroll above).
+    for _ in 0..13 {
         let presses: Vec<u8> = b"\x1b[5~".repeat(20);
         h.term.push_input(&presses);
         h.turn();
@@ -1687,6 +2468,68 @@ fn session_switch_while_scrolled_up_shows_the_new_transcript() {
     );
 }
 
+/// Assistant ```diff fences tint through the ENGINE (0.2.1: Feed
+/// markdown fences route fence labels to `text::DiffLexer`; no app
+/// code). Proven at the pixel level: added/removed lines carry the
+/// theme's ok/error inks and context lines the body ink — read back
+/// from the modeled VT screen, not from text. The needles are ASCII,
+/// so screen columns map 1:1 to `to_text` character positions.
+#[test]
+fn assistant_diff_fences_tint_added_and_removed_lines() {
+    let mut h = harness();
+    h.turn();
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+            text: "Patch:\n\n```diff\n+added-marker line\n-removed-marker line\n unchanged-marker line\n```\n"
+                .into(),
+            final_answer: true,
+        });
+    });
+    // Two pumps: the feed discovers its width at draw and typesets on
+    // the following frame (engine geometry contract).
+    h.turn();
+    let screen_text = h.turn();
+    assert!(
+        screen_text.contains("+added-marker line"),
+        "diff fence rendered:\n{screen_text}"
+    );
+
+    // Ink of the needle's first cell on the modeled screen.
+    let ink_of = |h: &Harness, needle: &str| -> abstracttui::prelude::Rgba {
+        let screen = h.term.screen();
+        let size = screen.size();
+        for y in 0..size.h {
+            let row: String = (0..size.w)
+                .map(|x| {
+                    screen
+                        .cell(x, y)
+                        .map(|c| c.ch())
+                        .filter(|ch| *ch != '\0')
+                        .unwrap_or(' ')
+                })
+                .collect();
+            if let Some(col) = row.find(needle) {
+                let cell = screen.cell(col as i32, y).expect("cell in range");
+                return cell.paint.fg.unwrap_or_else(|| {
+                    panic!("needle {needle:?} has no explicit ink at {col},{y}")
+                });
+            }
+        }
+        panic!("needle {needle:?} not on the modeled screen:\n{screen_text}");
+    };
+
+    let t = abstracttui::app::current_theme().tokens;
+    let added = ink_of(&h, "+added-marker");
+    let removed = ink_of(&h, "-removed-marker");
+    let context = ink_of(&h, "unchanged-marker");
+    assert_eq!(added, t.ok, "added lines wear the theme's ok ink");
+    assert_eq!(removed, t.error, "removed lines wear the theme's error ink");
+    assert_eq!(context, t.text, "context lines keep the body ink");
+    assert_ne!(added, context, "added ink differs from context");
+    assert_ne!(removed, context, "removed ink differs from context");
+    assert_ne!(added, removed, "added and removed inks differ");
+}
+
 /// The '/' completion must stay closed inside a command draft's ARGUMENTS:
 /// "/steer fix /s" is a fully-typed command whose argument happens to
 /// contain a slash token — Enter must SUBMIT it, not rewrite the argument
@@ -1751,7 +2594,7 @@ fn slash_completion_offers_partials_and_never_hijacks_prompts() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("/session [id]"),
+        screen.contains("/sessions [id]"),
         "first Enter submitted the command (help open):\n{screen}"
     );
     h.press_escape();
@@ -1773,4 +2616,5790 @@ fn slash_completion_offers_partials_and_never_hijacks_prompts() {
         Ok(_) => panic!("expected a Start for the prompt, got another command"),
         Err(e) => panic!("expected a Start for the prompt, got {e:?}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Tool-approval tier policy (bug (a), 2026-07-22): persisted gradation —
+// batches at-or-below the accepted tier resume without a prompt.
+// ---------------------------------------------------------------------------
+
+fn approval_record(step: &str, key: &str, calls: serde_json::Value) -> Value {
+    serde_json::json!({
+        "run_id": "root", "node_id": "act", "status": "waiting", "step_id": step,
+        "effect": {"type": "tool_calls", "payload": {"tool_calls": calls}},
+        "result": {"wait": {"reason": "user", "wait_key": key,
+            "details": {"mode": "approval_required", "tool_calls": calls}}}
+    })
+}
+
+#[test]
+fn tier_policy_auto_approves_at_or_below_and_prompts_above() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    store.accepted_tier.set("write".into());
+
+    // A write-tier batch under an accepted "write" tier: NO modal, the
+    // wait resumes approved.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &approval_record(
+                "s1",
+                "tool_approval:k1",
+                serde_json::json!([{"name": "write_file",
+                                    "arguments": {"path": "a.rs", "content": "x"}}]),
+            ),
+        );
+    });
+    let screen = h.turn();
+    assert!(
+        !screen.contains("approve (a)"),
+        "no prompt for an at-tier batch:\n{screen}"
+    );
+    match h.find_cmd(|c| matches!(c, Cmd::Resume { .. })) {
+        Some(Cmd::Resume {
+            wait_key, approved, ..
+        }) => {
+            assert_eq!(wait_key, "tool_approval:k1");
+            assert_eq!(approved, Some(true));
+        }
+        other => panic!("expected tier auto Resume, got {:?}", other.map(|_| "cmd")),
+    }
+    // (The old session-blanket signal is deleted — the permissions level
+    // is the ONE admission; nothing else to assert here.)
+
+    // An above-tier batch (shell) STILL prompts, and the modal names both
+    // sides of the decision.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &approval_record(
+                "s2",
+                "tool_approval:k2",
+                serde_json::json!([{"name": "execute_command",
+                                    "arguments": {"command": "cargo build", "cwd": "/tmp/proj"}}]),
+            ),
+        );
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("approve (a)"),
+        "above-tier batch prompts:\n{screen}"
+    );
+    assert!(
+        screen.contains("permissions: write") && screen.contains("needs: all"),
+        "the modal names accepted vs needed level:\n{screen}"
+    );
+}
+
+#[test]
+fn readonly_batches_auto_approve_at_the_default_read_tier() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    // No level configured: "" reads as the strictest ("read") — read-only
+    // batches still flow without a prompt. (The former proven-git member
+    // of this batch left with the retired client proof, c5057: git
+    // approval is the runtime refiner's job now, server-side.)
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &approval_record(
+                "s1",
+                "tool_approval:k1",
+                serde_json::json!([
+                    {"name": "read_file", "arguments": {"path": "a.rs"}},
+                    {"name": "list_files", "arguments": {"path": "."}}
+                ]),
+            ),
+        );
+    });
+    let screen = h.turn();
+    assert!(
+        !screen.contains("approve (a)"),
+        "read-only batch auto-approves at read level:\n{screen}"
+    );
+    match h.find_cmd(|c| matches!(c, Cmd::Resume { .. })) {
+        Some(Cmd::Resume { approved, .. }) => assert_eq!(approved, Some(true)),
+        other => panic!("expected auto Resume, got {:?}", other.map(|_| "cmd")),
+    }
+
+    // The same batch with a WRITE call mixed in prompts (one above-tier
+    // call prompts the whole batch).
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &approval_record(
+                "s2",
+                "tool_approval:k2",
+                serde_json::json!([
+                    {"name": "read_file", "arguments": {"path": "a.rs"}},
+                    {"name": "write_file", "arguments": {"path": "b.rs", "content": "y"}}
+                ]),
+            ),
+        );
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("approve (a)"),
+        "mixed batch with a write prompts at read tier:\n{screen}"
+    );
+}
+
+/// facts #1: the START payload carries the server-side tool policy the
+/// runtime honors with NO wait round-trip — expanded from the accepted
+/// tier over the live inventory, with per-tool pins riding both ways.
+#[test]
+fn start_carries_server_side_tool_policy_expanded_from_the_tier() {
+    let mut h = harness();
+    h.turn();
+    h.store.tools.set(vec![
+        abstractcode_tui::store::ToolInfo {
+            name: "read_file".into(),
+            description: "Read".into(),
+            toolset: "files".into(),
+            ..Default::default()
+        },
+        abstractcode_tui::store::ToolInfo {
+            name: "write_file".into(),
+            description: "Write".into(),
+            toolset: "files".into(),
+            ..Default::default()
+        },
+        abstractcode_tui::store::ToolInfo {
+            name: "execute_command".into(),
+            description: "Shell".into(),
+            toolset: "system".into(),
+            ..Default::default()
+        },
+        abstractcode_tui::store::ToolInfo {
+            name: "fetch_url".into(),
+            description: "Fetch".into(),
+            toolset: "web".into(),
+            ..Default::default()
+        },
+    ]);
+    // write tier + an auto pin on fetch_url + an ask pin on read_file.
+    h.store.accepted_tier.set("write".into());
+    h.store.tool_overrides.set(vec![
+        ("fetch_url".into(), "auto".into()),
+        ("read_file".into(), "ask".into()),
+    ]);
+
+    h.type_text("build it");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start { opts, .. }) => {
+            let auto = &opts.tool_policy.auto_approve_tools;
+            // write_file rides by tier; fetch_url by the auto pin.
+            assert!(auto.contains(&"write_file".to_string()), "{auto:?}");
+            assert!(auto.contains(&"fetch_url".to_string()), "{auto:?}");
+            // read_file is ask-pinned: excluded from auto, force-asked.
+            assert!(!auto.contains(&"read_file".to_string()), "{auto:?}");
+            // execute_command needs tier all (no per-call args at start).
+            assert!(!auto.contains(&"execute_command".to_string()), "{auto:?}");
+            assert_eq!(
+                opts.tool_policy.require_approval_tools,
+                vec!["read_file".to_string()]
+            );
+        }
+        other => panic!("expected Start, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+/// The empty-inventory case (facts #1): no inventory loaded yet → no
+/// server-side policy rides the start (the client-side belt still gates).
+#[test]
+fn start_sends_no_tool_policy_when_inventory_is_empty() {
+    let mut h = harness();
+    h.turn();
+    h.store.accepted_tier.set("all".into());
+    // tools signal is empty by default.
+    h.type_text("go");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start { opts, .. }) => {
+            assert!(
+                opts.tool_policy.is_empty(),
+                "empty inventory sends no policy: {:?}",
+                opts.tool_policy
+            );
+        }
+        other => panic!("expected Start, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+#[test]
+fn tools_tier_command_sets_persists_and_refuses_garbage() {
+    let mut h = harness();
+    h.turn();
+    h.type_text("/tools tier write");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(h.store.accepted_tier.get_untracked(), "write");
+    assert_eq!(h.prefs.borrow().tool_accepted_tier, "write");
+
+    // Unknown spellings refuse loudly and change nothing.
+    h.type_text("/tools tier yolo");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(h.store.accepted_tier.get_untracked(), "write");
+    assert_eq!(h.prefs.borrow().tool_accepted_tier, "write");
+}
+
+#[test]
+fn raising_the_tier_resolves_an_open_approval_prompt() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &approval_record(
+                "s1",
+                "tool_approval:k1",
+                serde_json::json!([{"name": "write_file",
+                                    "arguments": {"path": "a.rs", "content": "x"}}]),
+            ),
+        );
+    });
+    let screen = h.turn();
+    assert!(screen.contains("approve (a)"), "prompt up:\n{screen}");
+
+    // The user raises the accepted tier (e.g. via /tools tier from a
+    // deferred prompt, or the tools modal's `t`): the pending wait
+    // re-decides immediately — nothing at-or-below the tier ever asks.
+    store.accepted_tier.set("write".into());
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        !screen.contains("approve (a)"),
+        "prompt resolved by the tier change:\n{screen}"
+    );
+    match h.find_cmd(|c| matches!(c, Cmd::Resume { .. })) {
+        Some(Cmd::Resume { approved, .. }) => assert_eq!(approved, Some(true)),
+        other => panic!("expected Resume, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Approval modal rendering (bug (b), 2026-07-22): human-readable cards.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn approval_modal_renders_readable_cards_with_command_first_class() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &approval_record(
+                "s1",
+                "tool_approval:k1",
+                serde_json::json!([
+                    {"name": "execute_command",
+                     "arguments": {"command": "cargo test --lib", "cwd": "/tmp/proj"}},
+                    {"name": "write_file",
+                     "arguments": {"path": "src/a.rs", "content": "fn a() {}\n// two\n// three"}}
+                ]),
+            ),
+        );
+    });
+    let screen = h.turn();
+    // The command string is the thing being approved: first-class.
+    assert!(
+        screen.contains("$ cargo test --lib"),
+        "command shown first-class:\n{screen}"
+    );
+    // Params as key/value rows (values unquoted), not a JSON dump. The
+    // negative is scoped to PRETTY-JSON spacing (`"key": `): the
+    // transcript's compact args preview behind the modal legitimately
+    // contains `"cwd":"…"` — only the modal's f-mode prints pretty JSON.
+    assert!(screen.contains("cwd") && screen.contains("/tmp/proj"));
+    assert!(
+        !screen.contains("\"cwd\": \""),
+        "default view is NOT pretty JSON:\n{screen}"
+    );
+    // Batches of 2+ get per-call separation + intent summaries.
+    assert!(
+        screen.contains("call 1/2") && screen.contains("call 2/2"),
+        "per-call separators:\n{screen}"
+    );
+    assert!(
+        screen.contains("write src/a.rs"),
+        "write_file intent summary:\n{screen}"
+    );
+    // Multi-line content is honest about what it hides.
+    assert!(
+        screen.contains("(+2 more lines)"),
+        "multiline marker:\n{screen}"
+    );
+    // The truncation note points at the CLIENT surface (`f`), never at
+    // the ledger (operator ruling 2026-07-26).
+    assert!(
+        screen.contains("values shortened — f shows the full JSON"),
+        "shortened note names the f toggle:\n{screen}"
+    );
+    assert!(!screen.contains("ledger"), "no ledger pointer:\n{screen}");
+
+    // `f` flips to the full JSON (and back).
+    h.type_text("f");
+    let screen = h.turn();
+    assert!(
+        screen.contains("\"command\": \"cargo test --lib\""),
+        "full JSON behind f:\n{screen}"
+    );
+    h.type_text("f");
+    let screen = h.turn();
+    assert!(
+        screen.contains("$ cargo test --lib"),
+        "f toggles back to cards:\n{screen}"
+    );
+
+    // The keys still work over the new body: approve resumes.
+    h.type_text("a");
+    h.turn();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Resume { .. })) {
+        Some(Cmd::Resume { approved, .. }) => assert_eq!(approved, Some(true)),
+        other => panic!("expected Resume, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+/// The standing rulings around UNRECOGNIZED tool names (no gateway class,
+/// no client table entry — the fabricated `browser_probe` tell) under the
+/// consolidated permissions level (c5028; the /auto blanket whose
+/// unrecognized clamp this test used to pin is DELETED — the clamp had
+/// no lane left to gate):
+/// - below `all`, an unrecognized name classifies All (fail closed) and
+///   PROMPTS — never a silent auto-approval;
+/// - at `all`, it DOES auto-approve (the 2026-07-22 maintainer ruling:
+///   "nothing is ever asked at the top tier" — a deliberate, disclosed
+///   choice, not a blind blanket).
+#[test]
+fn unrecognized_tool_prompts_below_all_and_clears_at_all() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.accepted_tier.set("write".into());
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &approval_record(
+                "s1",
+                "tool_approval:k1",
+                serde_json::json!([{"name": "browser_probe", "arguments": {"target": "x"}}]),
+            ),
+        );
+    });
+    let screen = h.turn();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Resume { .. })).is_none(),
+        "an unrecognized tool never auto-resumes below `all`"
+    );
+    assert!(
+        screen.contains("tool approval"),
+        "the prompt surfaces instead:\n{screen}"
+    );
+
+    // Raising to `all` re-decides the OPEN prompt immediately (tracked
+    // read) and the unrecognized call auto-approves — the ruled
+    // deliberate choice.
+    store.accepted_tier.set("all".into());
+    h.turn();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Resume { .. })) {
+        Some(Cmd::Resume { approved, .. }) => assert_eq!(approved, Some(true)),
+        other => panic!(
+            "at `all` the unrecognized call clears, got {:?}",
+            other.map(|_| "cmd")
+        ),
+    }
+}
+
+/// Locate the first screen cell where `needle` starts: (row, col),
+/// 0-based cells. Cols count CHARS (one cell per char on these ASCII
+/// screens) so the result can feed 1-based SGR mouse coordinates.
+fn locate(screen: &str, needle: &str) -> Option<(usize, usize)> {
+    for (row, line) in screen.lines().enumerate() {
+        if let Some(byte_col) = line.find(needle) {
+            return Some((row, line[..byte_col].chars().count()));
+        }
+    }
+    None
+}
+
+/// Shift+A ("approve all") has TWO wire spellings and both must fire
+/// (live P0, 2026-07-23): legacy terminals bake the shift into the char
+/// (byte 0x41 → Char('A'), no mods) — the spelling the original chord
+/// matched — while kitty-protocol terminals report the BASE key identity
+/// plus the modifier (Char('a') + SHIFT; the engine keeps identity 'a'
+/// even when the shifted alternate is reported). On kitty wires the
+/// chord was a DEAD KEY: the user pressed Shift+A, nothing fired, and
+/// every later batch prompted again ("why does it keep asking"). This
+/// drives the kitty spelling end-to-end: approve-all fires, permissions
+/// set to `all` (c5028), and the NEXT batch auto-resumes without a
+/// prompt.
+#[test]
+fn approve_all_fires_on_the_kitty_shift_a_spelling_and_covers_the_next_batch() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &approval_record(
+                "s1",
+                "tool_approval:k1",
+                serde_json::json!([{"name": "write_file", "arguments": {"path": "a.txt"}}]),
+            ),
+        );
+    });
+    let screen = h.turn();
+    assert!(screen.contains("tool approval"), "prompt up:\n{screen}");
+
+    // The kitty keyboard protocol spelling of Shift+A: CSI 97;2 u
+    // (unicode 'a', mods 2 = shift).
+    h.term.push_input(b"\x1b[97;2u");
+    h.turn();
+    h.turn();
+    assert_eq!(
+        store.accepted_tier.get_untracked(),
+        "all",
+        "approve-all sets the persisted permissions level (c5028)"
+    );
+    match h.find_cmd(|c| matches!(c, Cmd::Resume { .. })) {
+        Some(Cmd::Resume { approved, .. }) => assert_eq!(approved, Some(true)),
+        other => panic!("expected Resume, got {:?}", other.map(|_| "cmd")),
+    }
+
+    // The user's actual complaint: the NEXT batch must not prompt.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &approval_record(
+                "s2",
+                "tool_approval:k2",
+                serde_json::json!([{"name": "execute_command", "arguments": {"command": "ls"}}]),
+            ),
+        );
+    });
+    let screen = h.turn();
+    h.turn();
+    assert!(
+        !h.ctx.modal_open(),
+        "second batch auto-resumes without a prompt:\n{screen}"
+    );
+    match h.find_cmd(|c| matches!(c, Cmd::Resume { .. })) {
+        Some(Cmd::Resume {
+            approved, wait_key, ..
+        }) => {
+            assert_eq!(approved, Some(true));
+            assert_eq!(wait_key, "tool_approval:k2");
+        }
+        other => panic!("expected second Resume, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+/// Buttons must be CLICKABLE while a modal is open WITH select mode on
+/// (live P0, 2026-07-23: approve / approve all / deny ignored the
+/// mouse). Root cause was the engine's screen-text selection layer
+/// owning every left Down/Up ahead of overlay routing — filed as
+/// first-app/0285 and FIXED at the engine in abstracttui 0.2.8: the
+/// layer claims a gesture only once it DRAGS, so a plain click passes
+/// through to the button. This app's interim workaround (open_modal
+/// disabled select mode, close_modal re-enabled) is deleted; the test
+/// now pins the engine truth end-to-end: select mode STAYS ENABLED
+/// while the modal is up and a real SGR left click still fires the
+/// approve button through the enabled layer.
+#[test]
+fn approval_buttons_are_clickable_with_select_mode_on() {
+    let mut h = harness();
+    h.turn();
+    // Boot behavior: select mode ON (production arms it in run_tui,
+    // which the harness bypasses — arm it the same way here).
+    abstracttui::app::selection::selection().set_enabled(true);
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &approval_record(
+                "s1",
+                "tool_approval:k1",
+                serde_json::json!([{"name": "write_file", "arguments": {"path": "a.txt"}}]),
+            ),
+        );
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("approve (a)"),
+        "prompt with buttons:\n{screen}"
+    );
+    assert!(
+        abstracttui::app::selection::selection().enabled(),
+        "select mode STAYS enabled while a modal is open (0.2.8 click-through)"
+    );
+
+    // A real SGR left click (press + release) on the approve button's
+    // label cells. SGR coordinates are 1-based.
+    let (row, col) = locate(&screen, "approve (a)").expect("approve button on screen");
+    let (x, y) = (col + 3 + 1, row + 1);
+    h.term.push_input(format!("\x1b[<0;{x};{y}M").as_bytes());
+    h.turn();
+    h.term.push_input(format!("\x1b[<0;{x};{y}m").as_bytes());
+    h.turn();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Resume { .. })) {
+        Some(Cmd::Resume { approved, .. }) => assert_eq!(approved, Some(true)),
+        other => panic!(
+            "expected Resume from the CLICK, got {:?}",
+            other.map(|_| "cmd")
+        ),
+    }
+    assert!(!h.ctx.modal_open(), "modal closed by the click");
+    assert!(
+        abstracttui::app::selection::selection().enabled(),
+        "select mode still enabled after the modal closes (single boot writer)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Workspace scope UX (bug (d), 2026-07-22): /workspace modal + run wiring.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn workspace_modal_edits_mode_and_allowed_paths_persistently() {
+    let mut h = harness();
+    h.turn();
+    h.type_text("/workspace");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        screen.contains("workspace — mode: server-managed"),
+        "modal opens on the honest default:\n{screen}"
+    );
+    assert!(screen.contains("/tmp/ws"), "root shown:\n{screen}");
+    assert!(
+        screen.contains("GATEWAY enforces workspace policy"),
+        "server-clamp honesty note:\n{screen}"
+    );
+
+    // ↓↓ to workspace_or_allowed, Space selects + persists.
+    h.term.push_input(b"\x1b[B\x1b[B");
+    h.turn();
+    h.type_text(" ");
+    let screen = h.turn();
+    assert!(
+        screen.contains("workspace — mode: workspace_or_allowed"),
+        "mode applied:\n{screen}"
+    );
+    assert_eq!(
+        h.store.workspace_mode.get_untracked(),
+        "workspace_or_allowed"
+    );
+    assert_eq!(
+        h.prefs.borrow().workspace_mode.as_deref(),
+        Some("workspace_or_allowed")
+    );
+
+    // Tab to the path input; typed path lands on Enter + persists.
+    h.term.push_input(b"\t");
+    h.turn();
+    h.type_text("/srv/data");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(screen.contains("/srv/data"), "added path listed:\n{screen}");
+    assert_eq!(
+        h.store.workspace_allowed.get_untracked(),
+        vec!["/srv/data".to_string()]
+    );
+    assert_eq!(
+        h.prefs.borrow().workspace_allowed,
+        vec!["/srv/data".to_string()]
+    );
+
+    // Esc closes; the next run start carries the scope.
+    h.press_escape();
+    h.turn();
+    h.turn();
+    h.type_text("do something");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start { opts, .. }) => {
+            assert_eq!(opts.workspace_mode.as_deref(), Some("workspace_or_allowed"));
+            assert_eq!(opts.workspace_allowed, vec!["/srv/data".to_string()]);
+        }
+        other => panic!("expected Start, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+#[test]
+fn adding_an_allowed_path_auto_picks_the_mode_that_uses_it() {
+    let mut h = harness();
+    h.turn();
+    h.type_text("/workspace");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    // Straight to the input (mode untouched = server-managed): adding a
+    // path silently doing nothing would be the dishonest outcome — the
+    // modal switches to workspace_or_allowed and says so.
+    h.term.push_input(b"\t");
+    h.turn();
+    h.type_text("/opt/shared");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(
+        h.store.workspace_mode.get_untracked(),
+        "workspace_or_allowed",
+        "allowed paths only function in workspace_or_allowed — auto-picked"
+    );
+    assert_eq!(
+        h.store.workspace_allowed.get_untracked(),
+        vec!["/opt/shared".to_string()]
+    );
+}
+
+/// bug (d): a path entry with a trailing slash normalizes to the bare
+/// form (so a later bare add dedups against it), and a relative path is
+/// REFUSED honestly (never silently sent — the gateway resolves paths on
+/// its own host, where a relative path is meaningless).
+#[test]
+fn workspace_path_entry_normalizes_and_refuses_relative() {
+    let mut h = harness();
+    h.turn();
+    h.type_text("/workspace");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\t");
+    h.turn();
+    // Trailing slash: stored WITHOUT it.
+    h.type_text("/srv/data/");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(
+        h.store.workspace_allowed.get_untracked(),
+        vec!["/srv/data".to_string()],
+        "trailing slash normalized off"
+    );
+    // The bare form is now a duplicate (dedup keys on the normal form).
+    h.type_text("/srv/data");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(
+        h.store.workspace_allowed.get_untracked(),
+        vec!["/srv/data".to_string()],
+        "bare form dedups against the trailing-slash form"
+    );
+    // A relative path is refused — the list is unchanged.
+    h.type_text("relative/dir");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(
+        h.store.workspace_allowed.get_untracked(),
+        vec!["/srv/data".to_string()],
+        "relative path refused, list unchanged"
+    );
+    // The refusal is honest (a toast notice naming why — the toast is an
+    // async overlay, so assert on the notice queue, not the frame text).
+    assert!(
+        h.store
+            .notices
+            .get_untracked()
+            .iter()
+            .any(|n| n.contains("not absolute")),
+        "the refusal says why: {:?}",
+        h.store.notices.get_untracked()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Queue / steer model (plan item 1, docs/design/plan-interaction-model.md)
+// ---------------------------------------------------------------------------
+
+/// Simulate the runner's terminal post: the fold finished, phase Idle,
+/// outcome in the mailbox — exactly the closure `post_records`/`finish`
+/// posts on the UI thread, in the SAME order (outcome BEFORE phase: each
+/// signal write flushes effects synchronously, and the drain effect keys
+/// on "phase Idle" — the ordering contract documented in runner.rs).
+fn simulate_terminal(
+    store: abstractcode_tui::store::Store,
+    outcome: abstractcode_tui::store::RunOutcome,
+) {
+    store.last_outcome.set(outcome);
+    store.run_started.set(None);
+    store.phase.set(Phase::Idle);
+}
+
+#[test]
+fn queue_enter_steers_while_slash_queue_enqueues() {
+    // The steer-vs-queue split: Enter keeps steering (latency-sensitive
+    // intent stays zero-friction); /queue is the FIFO lane. Steering
+    // needs a CYCLING target (cycle-2): the fixture provides one.
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| {
+        f.begin_run("root");
+        // A cycling subrun marks the steer target (root-targeted steers
+        // are never folded on wrapper bundles).
+        let rec = serde_json::json!({"run_id": "sub9", "node_id": "reason", "status": "started",
+                                      "effect": {"type": "llm_call", "payload": {}}});
+        let _ = f.apply("sub9", &rec);
+    });
+    h.turn();
+
+    h.type_text("steer this");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(
+        h.find_cmd(
+            |c| matches!(c, Cmd::Steer { run_id, text } if text == "steer this" && run_id == "sub9")
+        )
+        .is_some(),
+        "plain Enter while running steers the cycling run"
+    );
+    assert_eq!(store.queue.with_untracked(|q| q.len()), 0);
+
+    h.type_text("/queue build the docs");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(
+        store.queue.with_untracked(|q| q.len()),
+        1,
+        "/queue <text> enqueues"
+    );
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Steer { .. })).is_none(),
+        "/queue never steers"
+    );
+    // Discoverability: the strip names the queued count.
+    let screen = h.turn();
+    assert!(
+        screen.contains("1 queued"),
+        "activity strip shows the queue count:\n{screen}"
+    );
+}
+
+#[test]
+fn running_pre_cycle_submit_buffers_and_delivers_on_the_first_cycle() {
+    // The cycle-2 generalization: a plain submit while Running with NO
+    // cycling target yet must BUFFER (a root-targeted steer is silently
+    // never folded on wrapper bundles), then deliver into the CYCLING
+    // subrun once the first reason-cycle record lands.
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    h.turn();
+
+    h.type_text("hurry it up");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Steer { .. })).is_none(),
+        "no cycling target yet: nothing may be sent"
+    );
+    let ps = store.pending_steer.get_untracked().expect("buffered");
+    assert!(!ps.armed_while_starting, "armed while Running");
+    assert_eq!(ps.armed_at_root, "root");
+
+    // The agent subrun is discovered and cycles: delivery fires INTO IT.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &serde_json::json!({"run_id": "root", "status": "waiting",
+                "result": {"wait": {"reason": "subworkflow", "wait_key": "subworkflow:agent1",
+                                     "details": {"sub_run_id": "agent1"}}}}),
+        );
+        let _ = f.apply(
+            "agent1",
+            &serde_json::json!({"run_id": "agent1", "node_id": "reason", "status": "started",
+                "effect": {"type": "llm_call", "payload": {}}}),
+        );
+    });
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Steer { .. })) {
+        Some(Cmd::Steer { run_id, text }) => {
+            assert_eq!(run_id, "agent1", "delivered to the CYCLING subrun");
+            assert_eq!(text, "hurry it up");
+        }
+        other => panic!("expected Cmd::Steer, got {:?}", other.map(|_| "cmd")),
+    }
+    assert!(store.pending_steer.get_untracked().is_none());
+    let screen = h.turn();
+    assert!(
+        screen.contains("hurry it up"),
+        "the steer card renders:\n{screen}"
+    );
+}
+
+#[test]
+fn buffered_steer_never_fires_on_a_stale_previous_run_cycle() {
+    // The exact race the buffer exists for (cycle-2 identity predicate):
+    // text armed during Starting reads the PREVIOUS run's fold — its
+    // still-set cycling target must NOT satisfy delivery; only the NEW
+    // tree's first cycle (after begin_run changed the root) may.
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    // Run A lives in the fold with a cycling target.
+    store.fold.update(|f| {
+        f.begin_run("rootA");
+        let _ = f.apply(
+            "subA",
+            &serde_json::json!({"run_id": "subA", "node_id": "reason", "status": "started",
+                "effect": {"type": "llm_call", "payload": {}}}),
+        );
+    });
+    // A new start is in flight; the runner has not posted begin_run yet.
+    store.phase.set(Phase::Starting);
+    h.turn();
+
+    h.type_text("guidance for run B");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Steer { .. })).is_none(),
+        "run A's stale cycling target must not receive run B's guidance"
+    );
+    assert!(store.pending_steer.get_untracked().is_some(), "still held");
+
+    // The runner's Ok post lands (run_id -> phase -> begin_run order).
+    store.run_id.set("rootB".into());
+    store.phase.set(Phase::Running);
+    store.fold.update(|f| f.begin_run("rootB"));
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Steer { .. })).is_none(),
+        "begin_run cleared the cycling target: still no delivery"
+    );
+    assert!(store.pending_steer.get_untracked().is_some());
+
+    // Run B's first cycle: NOW it delivers, into B's cycling run.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "agentB",
+            &serde_json::json!({"run_id": "agentB", "node_id": "reason", "status": "started",
+                "effect": {"type": "llm_call", "payload": {}}}),
+        );
+    });
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Steer { .. })) {
+        Some(Cmd::Steer { run_id, text }) => {
+            assert_eq!(run_id, "agentB");
+            assert_eq!(text, "guidance for run B");
+        }
+        other => panic!("expected Cmd::Steer, got {:?}", other.map(|_| "cmd")),
+    }
+    assert!(store.pending_steer.get_untracked().is_none());
+}
+
+#[test]
+fn buffered_steer_disposes_visibly_when_the_run_ends_without_a_cycle() {
+    // Disposal half 2 (cycle-2): armed while Running, the run finishes
+    // before any cycle → Info card, never a silent drop (the Error card
+    // is reserved for starts that never began a run).
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    h.turn();
+    h.type_text("too late");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(store.pending_steer.get_untracked().is_some());
+    // The run concludes with no cycle ever landing.
+    store.fold.update(|f| f.run_terminal("completed"));
+    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Success);
+    h.turn();
+    assert!(store.pending_steer.get_untracked().is_none());
+    let screen = h.turn();
+    assert!(
+        screen.contains("steer arrived after the run finished") && screen.contains("too late"),
+        "info card carries the words:\n{screen}"
+    );
+}
+
+#[test]
+fn queue_drains_next_as_a_new_run_with_the_prior_answer_in_context() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    // Run A: user card + final answer land in the fold (as the live
+    // stream would fold them).
+    store.phase.set(Phase::Running);
+    store.run_id.set("rootA".into());
+    store.fold.update(|f| {
+        f.begin_run("rootA");
+        f.push_item(abstractcode_tui::transcript::Item::User {
+            text: "first task".into(),
+        });
+        let rec = serde_json::json!({"run_id": "rootA", "node_id": "end", "status": "completed",
+                                      "result": {"output": {"answer": "first answer"}}});
+        let _ = f.apply("rootA", &rec);
+    });
+    h.turn();
+    // Queue B while A is still running: nothing starts yet.
+    h.type_text("/queue second task");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none());
+
+    // A finishes successfully (the runner's finished_now post). The
+    // dequeue is a DEFERRED job (after ZERO): give it a turn.
+    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Success);
+    h.turn();
+    h.turn();
+    // The drain started B as a NEW run whose context carries A's turn
+    // (StartOpts built at drain time — chat_messages reads the fold).
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start { prompt, opts, .. }) => {
+            assert_eq!(prompt, "second task");
+            assert_eq!(
+                opts.messages,
+                vec![
+                    ("user".to_string(), "first task".to_string()),
+                    ("assistant".to_string(), "first answer".to_string())
+                ],
+                "drain-time context carries the just-finished answer"
+            );
+        }
+        other => panic!("expected Cmd::Start, got {:?}", other.map(|_| "cmd")),
+    }
+    assert_eq!(store.queue.with_untracked(|q| q.len()), 0, "item popped");
+    assert_eq!(store.phase.get_untracked(), Phase::Starting);
+}
+
+#[test]
+fn queue_halts_on_failure_and_cancel_and_resumes_explicitly() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    h.turn();
+    h.type_text("/queue held work");
+    h.turn();
+    h.press_enter();
+    h.turn();
+
+    // The run FAILS: queue pauses, items kept, nothing starts.
+    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Failed);
+    h.turn();
+    h.turn();
+    assert!(store.queue_paused.get_untracked(), "failure pauses");
+    assert_eq!(store.queue.with_untracked(|q| q.len()), 1, "items kept");
+    assert!(h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none());
+    let screen = h.turn();
+    assert!(
+        screen.contains("paused"),
+        "the strip says the queue is paused:\n{screen}"
+    );
+
+    // Explicit resume (the modal's `r`): the head drains (deferred job).
+    store.queue_paused.set(false);
+    h.turn();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { prompt, .. } if prompt == "held work"))
+            .is_some(),
+        "explicit resume drains the head"
+    );
+}
+
+#[test]
+fn queue_manual_run_while_paused_proceeds_without_resuming() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.queue_paused.set(true);
+    store.queue.update(|q| {
+        q.push(abstractcode_tui::store::QueuedPrompt {
+            id: 99,
+            text: "parked".into(),
+        })
+    });
+    h.turn();
+
+    h.type_text("manual task");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { prompt, .. } if prompt == "manual task"))
+            .is_some(),
+        "manual runs proceed while the queue is paused"
+    );
+    // Its SUCCESS still does not auto-resume (explicit resume only).
+    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Success);
+    h.turn();
+    h.turn();
+    assert!(store.queue_paused.get_untracked(), "no auto-resume");
+    assert_eq!(store.queue.with_untracked(|q| q.len()), 1, "items held");
+    assert!(h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none());
+}
+
+#[test]
+fn queue_start_refusal_restores_the_item_and_pauses() {
+    // Cycle-2 REVERSAL (was: popped-and-lost): a queued start that cannot
+    // even be SENT (dead worker channel — the synchronously observable
+    // shape) must RESTORE the item at head and pause. Nothing was spent;
+    // `r` retries the same item.
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    // Kill the command loop (drop the receiver).
+    let (_dummy_tx, dummy_rx) = mpsc::channel::<Cmd>();
+    drop(_dummy_tx);
+    let dead = std::mem::replace(&mut h.rx, dummy_rx);
+    drop(dead);
+
+    store.queue.update(|q| {
+        q.push(abstractcode_tui::store::QueuedPrompt {
+            id: 1,
+            text: "will not start".into(),
+        });
+        q.push(abstractcode_tui::store::QueuedPrompt {
+            id: 2,
+            text: "second".into(),
+        });
+    });
+    h.turn();
+    h.turn();
+    assert!(store.queue_paused.get_untracked(), "refused start pauses");
+    assert_eq!(
+        store.queue.with_untracked(|q| q.len()),
+        2,
+        "the refused item is RESTORED at head — nothing was spent"
+    );
+    assert_eq!(
+        store.queue.with_untracked(|q| q[0].text.clone()),
+        "will not start",
+        "head order preserved for the retry"
+    );
+}
+
+#[test]
+fn queue_http_start_failure_restores_at_head_and_pauses() {
+    // The ASYNC start-failure shape: the runner's Err post writes
+    // RunOutcome::Failed + phase Idle WITHOUT begin_run — the fold root
+    // never changed, which is how the drain knows the start itself
+    // failed (restore) rather than the run failing mid-flight (spent).
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.queue.update(|q| {
+        q.push(abstractcode_tui::store::QueuedPrompt {
+            id: 1,
+            text: "gateway will refuse this".into(),
+        });
+        q.push(abstractcode_tui::store::QueuedPrompt {
+            id: 2,
+            text: "second".into(),
+        });
+    });
+    h.turn();
+    h.turn();
+    // The drain dequeued + sent the start (worker alive in this test).
+    assert!(
+        h.find_cmd(
+            |c| matches!(c, Cmd::Start { prompt, .. } if prompt == "gateway will refuse this")
+        )
+        .is_some(),
+        "the drain started the head item"
+    );
+    assert_eq!(store.queue.with_untracked(|q| q.len()), 1, "head popped");
+    assert_eq!(store.phase.get_untracked(), Phase::Starting);
+
+    // The runner's Err post: outcome BEFORE phase; begin_run never ran.
+    store
+        .last_outcome
+        .set(abstractcode_tui::store::RunOutcome::Failed);
+    store.phase.set(Phase::Idle);
+    h.turn();
+    assert!(store.queue_paused.get_untracked(), "start failure pauses");
+    assert_eq!(
+        store
+            .queue
+            .with_untracked(|q| q.iter().map(|p| p.text.clone()).collect::<Vec<_>>()),
+        vec!["gateway will refuse this".to_string(), "second".to_string()],
+        "the failed-start item is restored AT HEAD"
+    );
+
+    // Contrast: a run that BEGAN (root changed) and then failed is spent —
+    // resume, let it start, begin the run, then fail it.
+    store.queue_paused.set(false);
+    h.turn();
+    h.turn();
+    assert!(h
+        .find_cmd(
+            |c| matches!(c, Cmd::Start { prompt, .. } if prompt == "gateway will refuse this")
+        )
+        .is_some());
+    store.run_id.set("rootX".into());
+    store.fold.update(|f| f.begin_run("rootX"));
+    store.phase.set(Phase::Running);
+    h.turn();
+    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Failed);
+    h.turn();
+    assert_eq!(
+        store
+            .queue
+            .with_untracked(|q| q.iter().map(|p| p.text.clone()).collect::<Vec<_>>()),
+        vec!["second".to_string()],
+        "a run that began and failed is SPENT (transcript keeps the evidence)"
+    );
+    assert!(store.queue_paused.get_untracked());
+}
+
+#[test]
+fn queue_client_refusal_without_workflow_keeps_the_item() {
+    // Readiness is checked BEFORE dequeuing (cycle-2 guard): no workflow
+    // selected → pause with the item KEPT, and the reason names the fix.
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store
+        .workflow
+        .set(abstractcode_tui::store::Workflow::default());
+    store.queue.update(|q| {
+        q.push(abstractcode_tui::store::QueuedPrompt {
+            id: 1,
+            text: "workflowless".into(),
+        })
+    });
+    h.turn();
+    h.turn();
+    assert!(store.queue_paused.get_untracked(), "refusal pauses");
+    assert_eq!(
+        store.queue.with_untracked(|q| q.len()),
+        1,
+        "the item was never dequeued"
+    );
+    assert!(h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none());
+    assert!(
+        store
+            .notices
+            .get_untracked()
+            .iter()
+            .any(|n| n.contains("/workflow")),
+        "the strip notice names the reason"
+    );
+}
+
+#[test]
+fn queue_drain_holds_while_a_wait_is_pending_and_resumes_after() {
+    // Cycle-2 guard: waits CAN arm after `finished` (helper subrun asks
+    // have no finished gate) — a drain-started run would begin_run-wipe
+    // the prompt and orphan the wait. The drain holds while
+    // fold.pending_wait is some and RE-FIRES when the wait resolves
+    // (fold-tracking is load-bearing: resolution is a fold change with
+    // no phase change).
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    h.turn();
+    h.type_text("/queue next chapter");
+    h.turn();
+    h.press_enter();
+    h.turn();
+
+    // A helper subrun's ask arms a wait; the answer already landed.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "helper",
+            &serde_json::json!({"run_id": "helper", "status": "waiting", "step_id": "s1",
+                "result": {"wait": {"reason": "user", "wait_key": "user:helper:ask",
+                                     "prompt": "Deploy too?"}}}),
+        );
+    });
+    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Success);
+    h.turn();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none(),
+        "the drain holds while a wait is pending"
+    );
+    assert_eq!(store.queue.with_untracked(|q| q.len()), 1, "item held");
+    assert!(
+        !store.queue_paused.get_untracked(),
+        "held, not paused — it resumes by itself when the wait resolves"
+    );
+
+    // The wait resolves (answered through the modal path): the drain
+    // re-fires off the fold change alone.
+    store.fold.update(|f| {
+        let wait = f.pending_wait.clone().expect("wait pending");
+        f.wait_answered(&wait.wait_key, &wait.step_id);
+    });
+    h.turn();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { prompt, .. } if prompt == "next chapter"))
+            .is_some(),
+        "wait resolution re-fires the drain"
+    );
+}
+
+#[test]
+fn queue_refused_under_entity_focus_and_hints_stay_agent_scoped() {
+    // The queue is AGENT-LANE ONLY (cycle-2 composition section): /queue
+    // under entity focus refuses toward the held-draft lane; queue hints
+    // never render under entity focus (the strip belongs to the visit).
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.queue.update(|q| {
+        q.push(abstractcode_tui::store::QueuedPrompt {
+            id: 7,
+            text: "agent work".into(),
+        })
+    });
+    store.queue_paused.set(true); // hold it so the drain leaves it alone
+    store
+        .focus
+        .set(abstractcode_tui::convo::Focus::Entity("castor".into()));
+    h.turn();
+
+    h.type_text("/queue do something");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(
+        store.queue.with_untracked(|q| q.len()),
+        1,
+        "/queue under entity focus enqueues NOTHING"
+    );
+    assert!(
+        store
+            .notices
+            .get_untracked()
+            .iter()
+            .any(|n| n.contains("queue is agent-lane")),
+        "the refusal points at the held-draft lane"
+    );
+    let screen = h.turn();
+    assert!(
+        !screen.contains("queued"),
+        "queue hints are Agent-focus-scoped:\n{screen}"
+    );
+
+    // Back under agent focus the hint returns.
+    store.focus.set(abstractcode_tui::convo::Focus::Agent);
+    let screen = h.turn();
+    assert!(
+        screen.contains("1 queued"),
+        "agent focus shows the queue hint again:\n{screen}"
+    );
+}
+
+#[test]
+fn queue_drain_runs_regardless_of_focus() {
+    // The plan's composition rule: only the /queue SURFACE is
+    // agent-scoped — the agent lane keeps executing in the background
+    // while the user looks at an entity visit.
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.queue.update(|q| {
+        q.push(abstractcode_tui::store::QueuedPrompt {
+            id: 1,
+            text: "background agent work".into(),
+        })
+    });
+    store
+        .focus
+        .set(abstractcode_tui::convo::Focus::Entity("castor".into()));
+    h.turn();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { prompt, .. } if prompt == "background agent work"))
+            .is_some(),
+        "the drain fires under entity focus"
+    );
+}
+
+#[test]
+fn queue_starting_phase_submit_buffers_and_delivers_on_the_new_trees_cycle() {
+    // Wrapper-bundle-shaped delivery (divergence b): text buffered during
+    // Starting delivers on the NEW tree's first reason-cycle record, INTO
+    // the cycling subrun — never on the run id alone (root-targeted
+    // guidance is never folded on wrapper bundles).
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Starting);
+    h.turn();
+
+    h.type_text("use the staging config");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let ps = store.pending_steer.get_untracked().expect("buffered");
+    assert!(ps.armed_while_starting);
+    assert_eq!(
+        ps.text, "use the staging config",
+        "Starting-phase submit buffers instead of dropping"
+    );
+    assert!(h.find_cmd(|c| matches!(c, Cmd::Steer { .. })).is_none());
+
+    // The runner's Ok post (run_id -> phase -> begin_run): STILL no
+    // delivery — the tree has no cycling target yet.
+    store.run_id.set("rootB".into());
+    store.phase.set(Phase::Running);
+    store.fold.update(|f| f.begin_run("rootB"));
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Steer { .. })).is_none(),
+        "run id alone must not deliver (nothing drains root guidance)"
+    );
+
+    // The wrapper bundle discovers the agent SUBRUN, which cycles: the
+    // buffer delivers into IT.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "rootB",
+            &serde_json::json!({"run_id": "rootB", "status": "waiting",
+                "result": {"wait": {"reason": "subworkflow", "wait_key": "subworkflow:agentB",
+                                     "details": {"sub_run_id": "agentB"}}}}),
+        );
+        let _ = f.apply(
+            "agentB",
+            &serde_json::json!({"run_id": "agentB", "node_id": "reason", "status": "started",
+                "effect": {"type": "llm_call", "payload": {}}}),
+        );
+    });
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Steer { .. })) {
+        Some(Cmd::Steer { run_id, text }) => {
+            assert_eq!(run_id, "agentB", "delivered to the CYCLING subrun");
+            assert_eq!(text, "use the staging config");
+        }
+        other => panic!("expected Cmd::Steer, got {:?}", other.map(|_| "cmd")),
+    }
+    assert!(store.pending_steer.get_untracked().is_none());
+    let screen = h.turn();
+    assert!(
+        screen.contains("use the staging config"),
+        "the steer card renders:\n{screen}"
+    );
+}
+
+#[test]
+fn queue_starting_phase_buffer_error_cards_when_the_start_fails() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Starting);
+    h.turn();
+    h.type_text("guidance for a run that dies");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    // The start FAILS (the runner's Err post flips the phase back; the
+    // fold root never changed — the "no new run began" signature).
+    store.phase.set(Phase::Idle);
+    h.turn();
+    assert!(store.pending_steer.get_untracked().is_none());
+    let screen = h.turn();
+    assert!(
+        screen.contains("guidance not delivered"),
+        "the buffered text surfaces as an error card:\n{screen}"
+    );
+    assert!(
+        screen.contains("guidance for a run that dies"),
+        "the user's words are preserved in the card:\n{screen}"
+    );
+}
+
+#[test]
+fn queue_stashes_on_session_switch_and_restores_paused() {
+    // Cycle-2 REVERSAL (was: cleared with drop echoes): the queue is
+    // STASHED per session (write-through already made it durable) and the
+    // target session's stash loads PAUSED — a restore never auto-starts.
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    store.queue.update(|q| {
+        q.push(abstractcode_tui::store::QueuedPrompt {
+            id: 1,
+            text: "queued one".into(),
+        });
+        q.push(abstractcode_tui::store::QueuedPrompt {
+            id: 2,
+            text: "queued two".into(),
+        });
+    });
+    h.turn();
+    // Write-through filed the queue under the CURRENT session already.
+    assert_eq!(
+        h.prefs.borrow().session_queue("acode-test-session"),
+        vec!["queued one".to_string(), "queued two".to_string()],
+        "every mutation writes through to the session slot"
+    );
+
+    abstractcode_tui::ui::switch_session(store, &h.ctx, "acode-other-session");
+    h.turn();
+    assert_eq!(
+        store.queue.with_untracked(|q| q.len()),
+        0,
+        "the new session starts with its own (empty) stash"
+    );
+    assert_eq!(
+        h.prefs.borrow().session_queue("acode-test-session"),
+        vec!["queued one".to_string(), "queued two".to_string()],
+        "the old session's stash SURVIVES the switch"
+    );
+    let screen = h.turn();
+    assert!(
+        screen.contains("stashed with session"),
+        "the stash is echoed visibly:\n{screen}"
+    );
+
+    // Switching BACK restores the stash PAUSED; nothing auto-starts.
+    abstractcode_tui::ui::switch_session(store, &h.ctx, "acode-test-session");
+    h.turn();
+    h.turn();
+    assert_eq!(
+        store
+            .queue
+            .with_untracked(|q| q.iter().map(|p| p.text.clone()).collect::<Vec<_>>()),
+        vec!["queued one".to_string(), "queued two".to_string()],
+        "the stash restores in order"
+    );
+    assert!(store.queue_paused.get_untracked(), "restores PAUSED");
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none(),
+        "a restore NEVER auto-starts"
+    );
+    assert!(
+        store
+            .notices
+            .get_untracked()
+            .iter()
+            .any(|n| n.contains("restored (paused")),
+        "the restore says so (toast lane)"
+    );
+}
+
+#[test]
+fn queue_boot_restore_loads_paused_and_never_starts() {
+    // The quit/reopen half of the same rule (lib.rs calls
+    // restore_session_queue at mount): a pre-seeded prefs slot loads
+    // PAUSED with a visible notice; the drain never fires.
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    h.prefs
+        .borrow_mut()
+        .set_session_queue("acode-test-session", &["saved task".to_string()]);
+    abstractcode_tui::ui::restore_session_queue(store, &h.ctx, "acode-test-session");
+    h.turn();
+    h.turn();
+    assert_eq!(
+        store
+            .queue
+            .with_untracked(|q| q.iter().map(|p| p.text.clone()).collect::<Vec<_>>()),
+        vec!["saved task".to_string()]
+    );
+    assert!(store.queue_paused.get_untracked(), "boot restore is PAUSED");
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none(),
+        "restore never auto-starts"
+    );
+    assert!(
+        store
+            .notices
+            .get_untracked()
+            .iter()
+            .any(|n| n.contains("restored (paused")),
+        "the restore announces itself"
+    );
+}
+
+#[test]
+fn queue_modal_removes_reorders_resumes_and_pops_to_composer() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    // Held queue (paused) so the drain effect leaves the items alone.
+    store.queue_paused.set(true);
+    store.queue.update(|q| {
+        for (id, text) in [(1u64, "alpha task"), (2, "beta task"), (3, "gamma task")] {
+            q.push(abstractcode_tui::store::QueuedPrompt {
+                id,
+                text: text.into(),
+            });
+        }
+    });
+    h.turn();
+
+    h.type_text("/queue");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        screen.contains("prompt queue — 3 waiting") && screen.contains("PAUSED"),
+        "manager opens with the paused state:\n{screen}"
+    );
+    assert!(screen.contains("1. alpha task"), "rows render:\n{screen}");
+
+    // x removes the selected head.
+    h.type_text("x");
+    let screen = h.turn();
+    assert!(
+        !screen.contains("alpha task") && screen.contains("1. beta task"),
+        "x removes the selected item:\n{screen}"
+    );
+    // d moves beta below gamma (cursor follows the item).
+    h.type_text("d");
+    h.turn();
+    assert_eq!(
+        store
+            .queue
+            .with_untracked(|q| q.iter().map(|p| p.id).collect::<Vec<_>>()),
+        vec![3, 2],
+        "d reorders downward"
+    );
+    // u moves it back up.
+    h.type_text("u");
+    h.turn();
+    assert_eq!(
+        store
+            .queue
+            .with_untracked(|q| q.iter().map(|p| p.id).collect::<Vec<_>>()),
+        vec![2, 3],
+        "u reorders upward"
+    );
+
+    // e pops the selected item into the composer and closes the modal.
+    h.type_text("e");
+    h.turn();
+    h.turn(); // composer_seed effect drains into the TextAreaState
+    let screen = h.turn();
+    assert_eq!(
+        store.queue.with_untracked(|q| q.len()),
+        1,
+        "popped item left the queue"
+    );
+    assert!(
+        screen.contains("beta task"),
+        "popped text seeds the composer draft:\n{screen}"
+    );
+    assert!(
+        !screen.contains("prompt queue —"),
+        "modal closed after e:\n{screen}"
+    );
+
+    // r resumes a paused queue (reopen the manager first). The composer
+    // still holds the popped draft — Esc clears it so "/queue" is the
+    // whole submission, not an append.
+    h.press_escape();
+    h.type_text("/queue");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.type_text("r");
+    h.turn();
+    assert!(!store.queue_paused.get_untracked(), "r resumes");
+    h.turn();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { prompt, .. } if prompt == "gamma task"))
+            .is_some(),
+        "resume drains the held item (deferred job)"
+    );
+}
+
+#[test]
+fn queue_composer_placeholder_swaps_while_running() {
+    // REST-1 moved the key legend behind `?` — the phase teaching lives
+    // in the composer placeholder, which HDR-2c made visible while
+    // FOCUSED (it was dead pixels: the engine paints its own
+    // placeholder only unfocused and the composer autofocuses).
+    let mut h = harness();
+    let screen = h.turn();
+    assert!(
+        screen.contains("describe a task — Enter sends"),
+        "idle placeholder teaches send:\n{screen}"
+    );
+    h.store.phase.set(Phase::Running);
+    h.store.run_id.set("root".into());
+    let screen = h.turn();
+    assert!(
+        screen.contains("Enter steers the run") && screen.contains("/queue"),
+        "running placeholder teaches steer + /queue:\n{screen}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Ctrl+J newline (plan item 2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ctrl_j_inserts_newline_at_caret_without_submitting() {
+    // Ctrl+J arrives as the LF byte (0x0a) on the legacy wire — the C0
+    // arm decodes it to Ctrl+Char('j') and the ENGINE's TextArea edit
+    // model inserts at the caret under every submit policy (abstracttui
+    // 0.2.2, our 0295 ask; the app-side shortcut is deleted). The
+    // submitted prompt proves the caret position: mid-draft insertion
+    // yields "a\nb", an end-append would yield "ab".
+    let mut h = harness();
+    h.turn();
+    h.type_text("ab");
+    h.turn();
+    h.term.push_input(b"\x1b[D"); // Left: caret between 'a' and 'b'
+    h.turn();
+    h.term.push_input(&[0x0a]); // Ctrl+J
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none(),
+        "Ctrl+J never submits"
+    );
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start { prompt, .. }) => {
+            assert_eq!(prompt, "a\nb", "newline landed AT THE CARET");
+        }
+        other => panic!("expected Cmd::Start, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+#[test]
+fn alt_enter_still_inserts_newline_and_plain_enter_submits() {
+    // ESC+CR (the legacy alt+Enter encoding) inserts a newline via the
+    // engine's SubmitPolicy; plain CR submits. Both must keep working
+    // beside the new Ctrl+J chord.
+    let mut h = harness();
+    h.turn();
+    h.type_text("cd");
+    h.turn();
+    h.term.push_input(b"\x1b\r"); // Alt+Enter (one chunk: no ESC timeout)
+    h.turn();
+    h.type_text("ef");
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none(),
+        "Alt+Enter never submits"
+    );
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start { prompt, .. }) => {
+            assert_eq!(prompt, "cd\nef", "Alt+Enter inserted the newline");
+        }
+        other => panic!("expected Cmd::Start, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GFM tables in agent answers (free on 0.2.3+: Feed markdown items
+// typeset the doc vocabulary)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn assistant_answer_tables_typeset_instead_of_raw_pipes() {
+    // Assistant bodies are FeedBlock::Markdown; since abstracttui 0.2.3
+    // Feed markdown items parse through `md::parse_doc`, so a pipe
+    // table renders as a TABLE (cells typeset, delimiter row consumed)
+    // instead of the raw `| a | b |` text that read as broken.
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::User {
+            text: "compare".into(),
+        });
+        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+            text: "Here:\n\n| crate | tests |\n| --- | --- |\n| abstracttui | 1660 |\n".into(),
+            final_answer: true,
+        });
+    });
+    // Two pumps: first feed mount discovers width at draw; the measured
+    // extent syncs on the following frame (engine geometry contract).
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("crate") && screen.contains("abstracttui") && screen.contains("1660"),
+        "table cells render:\n{screen}"
+    );
+    assert!(
+        !screen.contains("| crate |") && !screen.contains("| --- |"),
+        "raw pipe source never renders (the table is typeset):\n{screen}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// /goal (plan item 3 — client half; dark until the flow seat publishes)
+// ---------------------------------------------------------------------------
+
+fn seed_goal_workflow(store: abstractcode_tui::store::Store) {
+    store
+        .goal_workflows
+        .set(vec![abstractcode_tui::store::Workflow {
+            bundle_id: "goal-agent".into(),
+            flow_id: "goal-loop".into(),
+            name: "goal-loop".into(),
+            description: String::new(),
+        }]);
+}
+
+#[test]
+fn goal_dark_notice_when_no_goal_workflows_exist() {
+    // The bundle is flow-seat-owned and unpublished: /goal ships DARK
+    // behind catalog discovery, with the honest notice naming the
+    // interface — never a fake start.
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    h.type_text("/goal make it green");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none());
+    assert!(store.goal.get_untracked().is_none());
+    assert!(
+        store
+            .notices
+            .get_untracked()
+            .iter()
+            .any(|n| n.contains("abstractcode.goal.v1")),
+        "the dark notice names the interface"
+    );
+    // Bare /goal with no active goal says so too.
+    h.type_text("/goal");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(store
+        .notices
+        .get_untracked()
+        .iter()
+        .any(|n| n.contains("no active goal")));
+}
+
+#[test]
+fn goal_start_refused_while_a_run_is_active() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    seed_goal_workflow(store);
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    h.turn();
+    h.type_text("/goal ship it");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none(),
+        "no goal start over a live run"
+    );
+    assert!(store.goal.get_untracked().is_none());
+    assert!(store
+        .notices
+        .get_untracked()
+        .iter()
+        .any(|n| n.contains("a run is active")));
+}
+
+#[test]
+fn goal_start_binds_the_run_and_sets_finish_on_root_only() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    seed_goal_workflow(store);
+    h.turn();
+
+    h.type_text("/goal make the suite green");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    // The start rides the GOAL workflow with the goal input contract.
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start {
+            prompt,
+            flow_id,
+            bundle_id,
+            opts,
+            ..
+        }) => {
+            assert_eq!(flow_id, "goal-loop");
+            assert_eq!(bundle_id, "goal-agent");
+            assert_eq!(prompt, "make the suite green");
+            assert_eq!(
+                opts.goal,
+                Some(("make the suite green".to_string(), 8)),
+                "goal + the pref-default max_cycles ride StartOpts"
+            );
+        }
+        other => panic!("expected Cmd::Start, got {:?}", other.map(|_| "cmd")),
+    }
+    assert_eq!(store.phase.get_untracked(), Phase::Starting);
+    let pending = store.goal.get_untracked().expect("goal armed");
+    assert!(pending.run_id.is_empty(), "unbound until Running");
+
+    // The runner's Ok post: the goal binds to the run that reaches
+    // Running (starts are phase-serialized) and the fold flag arms.
+    store.run_id.set("goalrun".into());
+    store.phase.set(Phase::Running);
+    store.fold.update(|f| f.begin_run("goalrun"));
+    h.turn();
+    let bound = store.goal.get_untracked().expect("still armed");
+    assert_eq!(bound.run_id, "goalrun", "bound to the goal run");
+    assert!(
+        store.fold.with_untracked(|f| f.finish_on_root_only),
+        "the P0 defense arms with the binding"
+    );
+    assert_eq!(
+        h.prefs.borrow().session_goal("acode-test-session"),
+        Some(("make the suite green".to_string(), "goalrun".to_string())),
+        "the bound goal persists for restart/reattach"
+    );
+
+    // Iteration 1's agent subrun answers: NON-final card, composer stays
+    // captured (fold not finished, phase still Running).
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "goalrun",
+            &serde_json::json!({"run_id": "goalrun", "status": "waiting",
+                "result": {"wait": {"reason": "subworkflow", "wait_key": "subworkflow:iter1",
+                                     "details": {"sub_run_id": "iter1"}}}}),
+        );
+        let _ = f.apply(
+            "iter1",
+            &serde_json::json!({"run_id": "iter1", "node_id": "reason", "status": "started",
+                "effect": {"type": "llm_call", "payload": {}}}),
+        );
+        let _ = f.apply(
+            "iter1",
+            &serde_json::json!({"run_id": "iter1", "node_id": "done", "status": "completed",
+                "result": {"output": {"answer": "iteration 1 done"}}}),
+        );
+    });
+    h.turn();
+    assert!(
+        !store.fold.with_untracked(|f| f.finished),
+        "a subrun answer must NOT finish a goal run (the iteration-1 P0)"
+    );
+    assert_eq!(store.phase.get_untracked(), Phase::Running);
+    let screen = h.turn();
+    assert!(
+        screen.contains("goal:"),
+        "the strip names the active goal:\n{screen}"
+    );
+
+    // The ROOT's own end concludes; terminal clears the goal slot.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "goalrun",
+            &serde_json::json!({"run_id": "goalrun", "node_id": "end", "status": "completed",
+                "result": {"output": {"answer": "goal met"}}}),
+        );
+    });
+    assert!(store.fold.with_untracked(|f| f.finished));
+    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Success);
+    h.turn();
+    assert!(
+        store.goal.get_untracked().is_none(),
+        "an observed end retires the goal"
+    );
+    assert_eq!(
+        h.prefs.borrow().session_goal("acode-test-session"),
+        None,
+        "the prefs slot clears with it"
+    );
+}
+
+#[test]
+fn goal_stop_cancels_durably_and_clears_the_slot() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.goal.set(Some(abstractcode_tui::store::GoalState {
+        text: "long goal".into(),
+        run_id: "goalrun".into(),
+    }));
+    store.run_id.set("goalrun".into());
+    store.phase.set(Phase::Running);
+    h.prefs.borrow_mut().set_session_goal(
+        "acode-test-session",
+        Some(("long goal".into(), "goalrun".into())),
+    );
+    h.turn();
+
+    h.type_text("/goal stop");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Cancel { run_id } if run_id == "goalrun"))
+            .is_some(),
+        "/goal stop cancels the goal run durably"
+    );
+    assert!(store.goal.get_untracked().is_none());
+    assert_eq!(h.prefs.borrow().session_goal("acode-test-session"), None);
+}
+
+// ---------------------------------------------------------------------------
+// Cycle-3 whole-system audit: the cross-lane compositions no single lane
+// owned. Cell letters refer to the interaction matrix (audit deliverable).
+// ---------------------------------------------------------------------------
+
+/// Cell (a): /goal × queue. A goal is a STANDING run — the queue holds
+/// through every iteration (subrun answers never flip the phase under
+/// `finish_on_root_only`) and drains only after the goal's ROOT ends,
+/// exactly like any run. The drained item starts as a NORMAL agent run
+/// (agent workflow, no goal params, flag off) — never a second goal.
+#[test]
+fn goal_holds_the_queue_and_drains_it_after_the_goal_root_ends() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    seed_goal_workflow(store);
+    h.turn();
+
+    // Start the goal; simulate the runner's Ok post (bind + begin_run).
+    h.type_text("/goal make the suite green");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { flow_id, .. } if flow_id == "goal-loop"))
+            .is_some(),
+        "the goal start rides the goal workflow"
+    );
+    store.run_id.set("goalrun".into());
+    store.phase.set(Phase::Running);
+    store.fold.update(|f| f.begin_run("goalrun"));
+    h.turn();
+    assert!(store.fold.with_untracked(|f| f.finish_on_root_only));
+
+    // Queue a follow-up while the goal runs: held, nothing starts.
+    h.type_text("/queue follow-up task");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(store.queue.with_untracked(|q| q.len()), 1);
+    assert!(h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none());
+
+    // Iteration 1 runs and ends with an answer-shaped flow end: the goal
+    // stays open — and the QUEUE stays held (no phase flip, no drain).
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "goalrun",
+            &serde_json::json!({"run_id": "goalrun", "status": "waiting",
+                "result": {"wait": {"reason": "subworkflow", "wait_key": "subworkflow:iter1",
+                                     "details": {"sub_run_id": "iter1"}}}}),
+        );
+        let _ = f.apply(
+            "iter1",
+            &serde_json::json!({"run_id": "iter1", "node_id": "reason", "status": "started",
+                "effect": {"type": "llm_call", "payload": {}}}),
+        );
+        let _ = f.apply(
+            "iter1",
+            &serde_json::json!({"run_id": "iter1", "node_id": "done", "status": "completed",
+                "result": {"output": {"answer": "iteration 1 done"}}}),
+        );
+    });
+    h.turn();
+    h.turn();
+    assert!(!store.fold.with_untracked(|f| f.finished));
+    assert_eq!(store.phase.get_untracked(), Phase::Running);
+    assert_eq!(
+        store.queue.with_untracked(|q| q.len()),
+        1,
+        "the queue holds through goal iterations"
+    );
+    assert!(h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none());
+
+    // The ROOT's own end concludes the goal; the runner's terminal post
+    // writes the outcome mailbox then flips the phase.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "goalrun",
+            &serde_json::json!({"run_id": "goalrun", "node_id": "end", "status": "completed",
+                "result": {"output": {"answer": "goal met"}}}),
+        );
+    });
+    assert!(store.fold.with_untracked(|f| f.finished));
+    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Success);
+    h.turn();
+    h.turn(); // deferred dequeue job
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start {
+            prompt,
+            flow_id,
+            opts,
+            ..
+        }) => {
+            assert_eq!(prompt, "follow-up task");
+            assert_eq!(
+                flow_id, "81795ea9",
+                "the drained item runs the AGENT workflow, never the goal one"
+            );
+            assert!(opts.goal.is_none(), "no goal params ride a queued drain");
+        }
+        other => panic!("expected the drain Start, got {:?}", other.map(|_| "cmd")),
+    }
+    assert_eq!(store.queue.with_untracked(|q| q.len()), 0);
+    assert!(
+        store.goal.get_untracked().is_none(),
+        "the observed goal end retired the slot before the drain started"
+    );
+    assert!(
+        !store.fold.with_untracked(|f| f.finish_on_root_only),
+        "the flag never leaks into the drained run"
+    );
+    assert_eq!(store.phase.get_untracked(), Phase::Starting);
+}
+
+/// Cell (b): /goal × tier policy. Goal runs build StartOpts through the
+/// SHARED `agent_start_opts` path — the persisted tier policy, workspace
+/// scope, and skills ride `input_data` exactly like a plain prompt's run;
+/// goal params compose on top; no client transcript messages.
+#[test]
+fn goal_runs_carry_the_current_tier_policy_and_shared_start_opts() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    seed_goal_workflow(store);
+    store.tools.set(vec![
+        abstractcode_tui::store::ToolInfo {
+            name: "read_file".into(),
+            description: "Read".into(),
+            toolset: "files".into(),
+            ..Default::default()
+        },
+        abstractcode_tui::store::ToolInfo {
+            name: "write_file".into(),
+            description: "Write".into(),
+            toolset: "files".into(),
+            ..Default::default()
+        },
+        abstractcode_tui::store::ToolInfo {
+            name: "fetch_url".into(),
+            description: "Fetch".into(),
+            toolset: "web".into(),
+            ..Default::default()
+        },
+    ]);
+    store.accepted_tier.set("write".into());
+    store
+        .tool_overrides
+        .set(vec![("fetch_url".into(), "ask".into())]);
+    store.workspace_mode.set("workspace_or_allowed".into());
+    store.workspace_allowed.set(vec!["/srv/data".into()]);
+    store.selected_skills.set(vec!["coredoc".into()]);
+    h.turn();
+
+    h.type_text("/goal ship it");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start { opts, .. }) => {
+            assert_eq!(opts.goal, Some(("ship it".to_string(), 8)));
+            let auto = &opts.tool_policy.auto_approve_tools;
+            assert!(auto.contains(&"read_file".to_string()), "{auto:?}");
+            assert!(auto.contains(&"write_file".to_string()), "{auto:?}");
+            assert_eq!(
+                opts.tool_policy.require_approval_tools,
+                vec!["fetch_url".to_string()],
+                "ask pins force-ask on goal runs too"
+            );
+            assert_eq!(opts.workspace_mode.as_deref(), Some("workspace_or_allowed"));
+            assert_eq!(opts.workspace_allowed, vec!["/srv/data".to_string()]);
+            assert_eq!(opts.skills, vec!["coredoc".to_string()]);
+            assert!(
+                opts.messages.is_empty(),
+                "goal runs carry no client transcript (server seed owns continuity)"
+            );
+        }
+        other => panic!("expected the goal Start, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+/// Cell (c): queue × tier. A queued run's StartOpts build AT DRAIN TIME —
+/// a tier raised while the previous run was still working reaches the
+/// drained run's server-side policy (enqueue-time snapshotting would
+/// silently pin yesterday's posture).
+#[test]
+fn queued_items_drain_with_the_tier_policy_current_at_drain_time() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.tools.set(vec![
+        abstractcode_tui::store::ToolInfo {
+            name: "read_file".into(),
+            description: "Read".into(),
+            toolset: "files".into(),
+            ..Default::default()
+        },
+        abstractcode_tui::store::ToolInfo {
+            name: "write_file".into(),
+            description: "Write".into(),
+            toolset: "files".into(),
+            ..Default::default()
+        },
+    ]);
+    // Default tier ("" reads as read): write_file would NOT auto-approve.
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    h.turn();
+    h.type_text("/queue write the docs");
+    h.turn();
+    h.press_enter();
+    h.turn();
+
+    // Mid-run the user raises the tier (the persisted dial).
+    h.type_text("/tools tier write");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(store.accepted_tier.get_untracked(), "write");
+    assert_eq!(h.prefs.borrow().tool_accepted_tier, "write");
+
+    // The run succeeds; the drain builds the queued run's opts NOW.
+    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Success);
+    h.turn();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { prompt, .. } if prompt == "write the docs")) {
+        Some(Cmd::Start { opts, .. }) => {
+            assert!(
+                opts.tool_policy
+                    .auto_approve_tools
+                    .contains(&"write_file".to_string()),
+                "the drain expanded the CURRENT tier, not the enqueue-time one: {:?}",
+                opts.tool_policy
+            );
+        }
+        other => panic!("expected the drain Start, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+/// Cell (d): entity focus × approval modal. An agent-run approval is
+/// run-blocking: while an ENTITY conversation is focused, the modal still
+/// opens, the strip names the lane ("agent: approval needed" — worker B's
+/// exception), and the tier/blanket auto-approve paths still fire. Focus
+/// never gates approval plumbing.
+#[test]
+fn agent_approvals_prompt_and_auto_approve_under_entity_focus() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    // An entity conversation holds the focus.
+    store.convos.update(|cs| {
+        let mut c = abstractcode_tui::convo::EntityConvo::opening("castor", "awake");
+        c.run_id = "visit-run".into();
+        c.status = abstractcode_tui::convo::ConvoStatus::Parked;
+        cs.push(c);
+    });
+    store
+        .focus
+        .set(abstractcode_tui::convo::Focus::Entity("castor".into()));
+    // An agent run is live behind it.
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    h.turn();
+
+    // An above-tier batch arms: the modal MUST open over entity focus,
+    // and the strip names the agent lane.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &approval_record(
+                "s1",
+                "tool_approval:k1",
+                serde_json::json!([{"name": "write_file",
+                                    "arguments": {"path": "a.rs", "content": "x"}}]),
+            ),
+        );
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("approve (a)"),
+        "the approval modal opens even under entity focus:\n{screen}"
+    );
+    assert!(
+        screen.contains("agent: approval needed"),
+        "the strip names the agent lane under entity focus:\n{screen}"
+    );
+
+    // Approve through the modal; the resume rides the AGENT run.
+    h.type_text("a");
+    h.turn();
+    h.turn(); // deferred modal close
+    match h.find_cmd(|c| matches!(c, Cmd::Resume { .. })) {
+        Some(Cmd::Resume {
+            run_id, approved, ..
+        }) => {
+            assert_eq!(run_id, "root");
+            assert_eq!(approved, Some(true));
+        }
+        other => panic!("expected Resume, got {:?}", other.map(|_| "cmd")),
+    }
+
+    // A read-tier batch auto-approves silently — focus-independent.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &approval_record(
+                "s2",
+                "tool_approval:k2",
+                serde_json::json!([{"name": "read_file", "arguments": {"path": "a.rs"}}]),
+            ),
+        );
+    });
+    let screen = h.turn();
+    assert!(
+        !screen.contains("approve (a)"),
+        "at-tier batches never prompt, entity focus or not:\n{screen}"
+    );
+    match h.find_cmd(|c| matches!(c, Cmd::Resume { .. })) {
+        Some(Cmd::Resume {
+            wait_key, approved, ..
+        }) => {
+            assert_eq!(wait_key, "tool_approval:k2");
+            assert_eq!(approved, Some(true));
+        }
+        other => panic!(
+            "expected the tier auto Resume, got {:?}",
+            other.map(|_| "cmd")
+        ),
+    }
+    assert_eq!(
+        store.focus.get_untracked(),
+        abstractcode_tui::convo::Focus::Entity("castor".into()),
+        "approval plumbing never steals the focus"
+    );
+}
+
+/// Cell (e): pending_steer × goal. A steer mid-cycle rides the CYCLING
+/// iteration subrun; a steer typed BETWEEN iterations (the cycling run's
+/// own end cleared the target — its guidance inbox died with it) BUFFERS
+/// and delivers into the NEXT iteration's first cycle. Nothing is ever
+/// injected into a dead run.
+#[test]
+fn steers_between_goal_iterations_buffer_and_deliver_into_the_next_cycle() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    seed_goal_workflow(store);
+    h.turn();
+    h.type_text("/goal loop it");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_some());
+    store.run_id.set("goalrun".into());
+    store.phase.set(Phase::Running);
+    store.fold.update(|f| f.begin_run("goalrun"));
+    h.turn();
+
+    // Iteration 1 is discovered and cycles: a steer goes straight to it.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "goalrun",
+            &serde_json::json!({"run_id": "goalrun", "status": "waiting",
+                "result": {"wait": {"reason": "subworkflow", "wait_key": "subworkflow:iter1",
+                                     "details": {"sub_run_id": "iter1"}}}}),
+        );
+        let _ = f.apply(
+            "iter1",
+            &serde_json::json!({"run_id": "iter1", "node_id": "reason", "status": "started",
+                "effect": {"type": "llm_call", "payload": {}}}),
+        );
+    });
+    h.turn();
+    h.type_text("focus the tests");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Steer { .. })) {
+        Some(Cmd::Steer { run_id, text }) => {
+            assert_eq!(run_id, "iter1", "mid-cycle steers ride the live iteration");
+            assert_eq!(text, "focus the tests");
+        }
+        other => panic!("expected Cmd::Steer, got {:?}", other.map(|_| "cmd")),
+    }
+
+    // Iteration 1 ends (non-final under the goal flag). A steer typed in
+    // the gap must BUFFER — iteration 1's guidance inbox died with it.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "iter1",
+            &serde_json::json!({"run_id": "iter1", "node_id": "done", "status": "completed",
+                "result": {"output": {"answer": "iteration 1 done"}}}),
+        );
+    });
+    h.turn();
+    h.type_text("also update the docs");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Steer { .. })).is_none(),
+        "no steer may target the finished iteration"
+    );
+    let ps = store
+        .pending_steer
+        .get_untracked()
+        .expect("buffered between iterations");
+    assert_eq!(ps.armed_at_root, "goalrun");
+    assert!(!ps.armed_while_starting);
+
+    // Iteration 2 cycles: the buffer delivers INTO IT.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "goalrun",
+            &serde_json::json!({"run_id": "goalrun", "status": "waiting",
+                "result": {"wait": {"reason": "subworkflow", "wait_key": "subworkflow:iter2",
+                                     "details": {"sub_run_id": "iter2"}}}}),
+        );
+        let _ = f.apply(
+            "iter2",
+            &serde_json::json!({"run_id": "iter2", "node_id": "reason", "status": "started",
+                "effect": {"type": "llm_call", "payload": {}}}),
+        );
+    });
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Steer { .. })) {
+        Some(Cmd::Steer { run_id, text }) => {
+            assert_eq!(run_id, "iter2", "delivered into the NEXT iteration");
+            assert_eq!(text, "also update the docs");
+        }
+        other => panic!(
+            "expected the buffered Steer, got {:?}",
+            other.map(|_| "cmd")
+        ),
+    }
+    assert!(store.pending_steer.get_untracked().is_none());
+}
+
+/// Cell (f): /new and /sessions across EVERY lane at once. Enumerates the
+/// reset contract: queue STASHES with its session (restores PAUSED),
+/// pending_steer drops with an echo, the goal slot follows its session
+/// (the old session's prefs slot survives as restart insurance — /goal
+/// stop is the documented escape hatch), auto_approve resets, the
+/// persisted tier survives, entity convos survive with focus reset, and
+/// the old queue can never drain through the boundary.
+#[test]
+fn session_boundaries_reset_exactly_the_right_lanes() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    let old_sid = "acode-test-session".to_string();
+
+    // Load EVERY lane. The permissions level (persisted per session +
+    // global mirror — the c5028 consolidation; the old session blanket
+    // is deleted):
+    store.accepted_tier.set("write".into());
+    h.prefs.borrow_mut().tool_accepted_tier = "write".into();
+    // A live GOAL run:
+    store.phase.set(Phase::Running);
+    store.run_id.set("goalrun".into());
+    store.fold.update(|f| f.begin_run("goalrun"));
+    store.goal.set(Some(abstractcode_tui::store::GoalState {
+        text: "long goal".into(),
+        run_id: "goalrun".into(),
+    }));
+    h.prefs
+        .borrow_mut()
+        .set_session_goal(&old_sid, Some(("long goal".into(), "goalrun".into())));
+    h.turn();
+    // Two queued prompts (held by the running phase, unpaused):
+    h.type_text("/queue task one");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.type_text("/queue task two");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(store.queue.with_untracked(|q| q.len()), 2);
+    assert!(!store.queue_paused.get_untracked());
+    // A buffered steer (no cycling target yet):
+    h.type_text("hurry it up");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(store.pending_steer.get_untracked().is_some());
+    // An entity conversation, focused:
+    store.convos.update(|cs| {
+        let mut c = abstractcode_tui::convo::EntityConvo::opening("castor", "awake");
+        c.run_id = "visit-run".into();
+        c.status = abstractcode_tui::convo::ConvoStatus::Parked;
+        cs.push(c);
+    });
+    store
+        .focus
+        .set(abstractcode_tui::convo::Focus::Entity("castor".into()));
+    h.turn();
+
+    // /new — the boundary. (Commands parse before entity routing, so it
+    // works under entity focus.)
+    h.type_text("/new");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.turn(); // any deferred drain job must observe the swapped state
+
+    // The live goal run was cancelled, not orphaned.
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Cancel { run_id } if run_id == "goalrun"))
+            .is_some(),
+        "/new cancels the live run"
+    );
+    let new_sid = store.session_id.get_untracked();
+    assert_ne!(new_sid, old_sid);
+    // Queue: stashed with the OLD session, empty + unpaused here, and it
+    // NEVER drained through the boundary (the deferred job re-checks).
+    assert_eq!(
+        h.prefs.borrow().session_queue(&old_sid),
+        vec!["task one".to_string(), "task two".to_string()],
+        "the old session's queue is stashed, not dropped"
+    );
+    assert_eq!(store.queue.with_untracked(|q| q.len()), 0);
+    assert!(!store.queue_paused.get_untracked());
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none(),
+        "the old queue must never drain across a session boundary"
+    );
+    // Steer buffer: dropped WITH an echo.
+    assert!(store.pending_steer.get_untracked().is_none());
+    let screen = h.turn();
+    assert!(
+        screen.contains("buffered guidance dropped"),
+        "the drop is echoed, never silent:\n{screen}"
+    );
+    // Goal: the slot follows its session — cleared here, retained in the
+    // OLD session's prefs (restart insurance; /goal stop clears a stale
+    // label after its run died).
+    assert!(store.goal.get_untracked().is_none());
+    assert!(
+        !store.fold.with_untracked(|f| f.finish_on_root_only),
+        "the goal flag never survives into the fresh session"
+    );
+    assert_eq!(
+        h.prefs.borrow().session_goal(&old_sid),
+        Some(("long goal".to_string(), "goalrun".to_string()))
+    );
+    // The permissions LEVEL survives the boundary (c5028 semantics: a
+    // level — `all` included — persists per session and seeds new
+    // sessions via the global baseline; the old die-at-session-end
+    // blanket is deleted, hazard 1 disclosed to the operator).
+    assert_eq!(store.accepted_tier.get_untracked(), "write");
+    assert_eq!(h.prefs.borrow().tool_accepted_tier, "write");
+    // Entity conversations survive; focus comes home to the agent.
+    assert_eq!(store.convos.with_untracked(|cs| cs.len()), 1);
+    assert_eq!(
+        store.focus.get_untracked(),
+        abstractcode_tui::convo::Focus::Agent
+    );
+
+    // Switch BACK to the old session: the stash restores PAUSED, the goal
+    // label returns, and a reattach probe goes out. Still nothing starts.
+    h.type_text(&format!("/sessions {old_sid}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.turn();
+    assert_eq!(store.session_id.get_untracked(), old_sid);
+    assert_eq!(store.queue.with_untracked(|q| q.len()), 2);
+    assert!(
+        store.queue_paused.get_untracked(),
+        "restored queues land PAUSED, never auto-start"
+    );
+    assert_eq!(
+        store.goal.get_untracked(),
+        Some(abstractcode_tui::store::GoalState {
+            text: "long goal".into(),
+            run_id: "goalrun".into(),
+        }),
+        "the goal label follows its session back"
+    );
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::ProbeAttach { session_id, .. } if *session_id == old_sid))
+            .is_some(),
+        "a session switch probes for the live run"
+    );
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none(),
+        "restores never auto-start"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Wave 0 — PRESENCE + DENSITY (HDR-1 · REST-1 · CTX-0 · IDLE-1 · HDR-2 ·
+// OBS-1a-live)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn header_carries_cockpit_facts_and_footer_carries_instruments() {
+    // HDR-1 + REST-1: the header's blank middle carries facts; the
+    // status bar is the instrument row (legend behind `?`).
+    let mut h = harness();
+    let screen = h.turn();
+    assert!(
+        screen.contains("⌂ ws") && screen.contains("server-managed"),
+        "header names directory + workspace mode:\n{screen}"
+    );
+    assert!(
+        screen.contains("? keys"),
+        "footer points at the legend home:\n{screen}"
+    );
+    // Counts render when nonzero (never "skills 0" noise).
+    assert!(!screen.contains("skills 0"), "{screen}");
+    h.store
+        .selected_skills
+        .set(vec!["coredoc".into(), "agora-channels".into()]);
+    h.store
+        .mcp_servers
+        .set(vec![abstractcode_tui::store::McpServer {
+            name: "context7".into(),
+            url: "https://mcp.example".into(),
+            description: String::new(),
+            auth_required: false,
+        }]);
+    // Session totals at rest reach both header and footer. A provider
+    // that reports the split renders it (the ↑/↓ vocabulary); the
+    // splitless case is pinned in the drop test below.
+    h.store.totals.set(abstractcode_tui::store::SessionTotals {
+        input_tokens: 100_000,
+        output_tokens: 28_000,
+        total_tokens: 128_000,
+        runs: 3,
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("skills 2") && screen.contains("mcp 1"),
+        "capability counts render when nonzero:\n{screen}"
+    );
+    assert!(
+        screen.contains("100k↑ 28k↓ tk session"),
+        "footer carries the split session tokens:\n{screen}"
+    );
+}
+
+#[test]
+fn idle_fact_card_is_a_cockpit_and_dedupes_the_wordmark() {
+    // IDLE-1: the empty state is the Python banner's fact set; the
+    // wordmark renders ONCE (it appeared twice before — header + empty
+    // state, while zero capability facts appeared at all).
+    let mut h = harness();
+    let screen = h.turn();
+    for needle in [
+        "workflow",
+        "route",
+        "workspace",
+        "session",
+        "gateway",
+        "skills",
+        "mcp",
+        "context",
+    ] {
+        assert!(screen.contains(needle), "card names {needle}:\n{screen}");
+    }
+    assert!(
+        screen.contains("window not declared"),
+        "context source honesty (no fabricated window):\n{screen}"
+    );
+    assert!(
+        screen.contains("127.0.0.1:8080"),
+        "gateway host on the card:\n{screen}"
+    );
+    assert_eq!(
+        screen.matches("▲ AbstractCode").count(),
+        1,
+        "wordmark deduped — header only:\n{screen}"
+    );
+}
+
+#[test]
+fn fresh_session_strip_shows_the_session_line_not_blank() {
+    // REST-1: the reserved activity-strip row was a permanently blank
+    // line on first launch.
+    let mut h = harness();
+    let screen = h.turn();
+    assert!(
+        screen.contains("no runs yet"),
+        "fresh-session strip line:\n{screen}"
+    );
+}
+
+#[test]
+fn context_command_declares_persists_clears_and_refuses() {
+    let mut h = harness();
+    h.turn();
+    h.type_text("/context 262k");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert_eq!(h.store.context_window.get_untracked(), 262_000);
+    assert_eq!(
+        h.prefs.borrow().context_window,
+        262_000,
+        "declaration persists"
+    );
+    assert!(
+        screen.contains("ctx —/262k tk (declared)"),
+        "declared-but-unmeasured meter renders an em-dash:\n{screen}"
+    );
+    // A measured call fills the meter with the % + source label.
+    h.store.fold.update(|f| {
+        f.begin_run("root");
+        let rec = serde_json::json!({
+            "run_id": "root", "node_id": "reason", "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {"content": "hi",
+                        "usage": {"input_tokens": 41_203, "output_tokens": 20}}
+        });
+        let _ = f.apply("root", &rec);
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("ctx 41k/262k tk (15%, declared)"),
+        "used/window meter, source-labeled:\n{screen}"
+    );
+    // Junk refuses loudly and changes nothing.
+    h.type_text("/context lots");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(h.store.context_window.get_untracked(), 262_000);
+    // `/context off` clears + persists.
+    h.type_text("/context off");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert_eq!(h.store.context_window.get_untracked(), 0);
+    assert_eq!(h.prefs.borrow().context_window, 0);
+    assert!(
+        screen.contains("ctx 41k tk"),
+        "absence keeps today's honest absolute:\n{screen}"
+    );
+}
+
+#[test]
+fn declared_window_rides_run_starts_as_limits() {
+    // CTX-0: the declaration feeds `_limits.max_tokens` on the wire.
+    let mut h = harness();
+    h.turn();
+    h.store.context_window.set(32_000);
+    h.type_text("run the suite");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start { opts, .. }) => {
+            assert_eq!(opts.context_window, 32_000);
+            let input = abstractcode_tui::run_input::build_input_data("x", &opts);
+            assert_eq!(input["_limits"]["max_tokens"], serde_json::json!(32_000));
+        }
+        other => panic!("expected Start, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+#[test]
+fn ctrl_c_clears_the_draft_then_two_consecutive_presses_quit() {
+    // Operator ruling (2026-07-23): Ctrl+C erases the current prompt (if
+    // any); TWO consecutive Ctrl+C are required to quit. The registration
+    // is a global ACTION so it shadows the engine's default
+    // Ctrl+C-instant-quit everywhere, including while a modal is open.
+    let mut h = harness();
+    h.turn();
+    h.type_text("half-typed prompt");
+    let screen = h.turn();
+    assert!(
+        screen.contains("half-typed prompt"),
+        "draft in composer:\n{screen}"
+    );
+    // First press: clears the draft, arms quit, never quits.
+    h.term.push_input(&[0x03]);
+    h.turn();
+    let screen = h.turn();
+    assert!(!h.app.quit_requested(), "first press never quits");
+    assert!(
+        !screen.contains("half-typed prompt"),
+        "draft cleared:\n{screen}"
+    );
+    // The arm notice lands in the toast lane (toasts materialize on a
+    // 60ms timer headless turns don't wait for — the notices signal is
+    // the assertable truth, per the queue-restore precedent).
+    assert!(
+        h.store
+            .notices
+            .get_untracked()
+            .iter()
+            .any(|n| n.contains("Ctrl+C again to quit")),
+        "arm notice in the toast lane"
+    );
+    let _ = screen;
+    // Second consecutive press: quits.
+    h.term.push_input(&[0x03]);
+    h.turn();
+    h.turn();
+    assert!(h.app.quit_requested(), "second consecutive press quits");
+}
+
+#[test]
+fn tool_call_ticker_renders_while_a_batch_runs_and_clears_on_completion() {
+    // The tool twin of the model-call ticker (live P0, 2026-07-23: an
+    // 8m39s gateway-side search_files rendered as a bare "running
+    // search_files" — no clock, read as a client hang). The strip must
+    // carry "tool call Ns" while a batch executes and drop it when the
+    // completion folds.
+    let mut h = harness();
+    h.turn();
+    h.store.phase.set(Phase::Running);
+    h.store.run_id.set("root".into());
+    h.store.fold.update(|f| {
+        f.begin_run("root");
+        let started = serde_json::json!({
+            "run_id": "root", "node_id": "act", "status": "started",
+            "effect": {"type": "tool_calls", "payload": {"tool_calls": [
+                {"name": "search_files", "arguments": {"pattern": "x"}}
+            ]}}
+        });
+        let _ = f.apply("root", &started);
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("running search_files"),
+        "activity names the tool:\n{screen}"
+    );
+    assert!(
+        screen.contains("tool call 0s"),
+        "in-flight batch ticks from the first second:\n{screen}"
+    );
+    h.store.fold.update(|f| {
+        let done = serde_json::json!({
+            "run_id": "root", "node_id": "act", "status": "completed",
+            "effect": {"type": "tool_calls", "payload": {"tool_calls": [
+                {"name": "search_files", "arguments": {"pattern": "x"}}
+            ]}},
+            "result": {"results": [
+                {"name": "search_files", "success": true, "output": "ok"}
+            ]}
+        });
+        let _ = f.apply("root", &done);
+    });
+    let screen = h.turn();
+    // Substring-wide negative (cycle-3 nit): on a slow machine a BROKEN
+    // clear would render "tool call 1s" and a "tool call 0s" negative
+    // would false-pass. Nothing else on this screen carries the
+    // substring (the pending-wait "N tool call(s)" line needs a wait).
+    assert!(
+        !screen.contains("tool call"),
+        "completion drops the clock:\n{screen}"
+    );
+}
+
+#[test]
+fn model_call_ticker_and_last_call_rate() {
+    // OBS-1a-live: the strip names the in-flight call from second zero;
+    // a completed call mints the labeled last-call rate.
+    let mut h = harness();
+    h.turn();
+    h.store.phase.set(Phase::Running);
+    h.store.run_id.set("root".into());
+    h.store.fold.update(|f| {
+        f.begin_run("root");
+        let started = serde_json::json!({
+            "run_id": "root", "node_id": "reason", "status": "started",
+            "effect": {"type": "llm_call", "payload": {}}
+        });
+        let _ = f.apply("root", &started);
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("model call 0s"),
+        "in-flight call ticks from the first second:\n{screen}"
+    );
+    // Let the client clock accumulate a measurable window, then complete.
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    h.store.fold.update(|f| {
+        let done = serde_json::json!({
+            "run_id": "root", "node_id": "reason", "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {"content": "hi",
+                        "usage": {"input_tokens": 1000, "output_tokens": 64}}
+        });
+        let _ = f.apply("root", &done);
+    });
+    h.turn();
+    let rate = h.store.last_call_rate.get_untracked();
+    assert!(
+        rate.map(|r| r > 0.0).unwrap_or(false),
+        "completed call mints a last-call rate, got {rate:?}"
+    );
+    // The NEXT call shows the labeled rate beside its elapsed.
+    h.store.fold.update(|f| {
+        let started = serde_json::json!({
+            "run_id": "root", "node_id": "reason", "status": "started",
+            "effect": {"type": "llm_call", "payload": {}}
+        });
+        let _ = f.apply("root", &started);
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("tok/s (last call)"),
+        "rate labeled with its provenance:\n{screen}"
+    );
+}
+
+#[test]
+fn splitless_receipt_never_mints_a_tok_s_rate() {
+    // Cycle-3 regression (cycle-2 review P1-A): splitless usage
+    // (input==0 && output==0 && total>0, no raw split to repair from)
+    // substitutes the call's TOTAL into the sparkline series — the
+    // meter's numerator must never read that substitution, or the strip
+    // divides prompt+output+reasoning by wall time and OVERSTATES
+    // throughput (~130× on a 40k-context call). Splitless → honest
+    // absence; a split receipt still mints the output-true rate.
+    let mut h = harness();
+    h.turn();
+    h.store.phase.set(Phase::Running);
+    h.store.run_id.set("root".into());
+    h.store.fold.update(|f| {
+        f.begin_run("root");
+        let started = serde_json::json!({
+            "run_id": "root", "node_id": "reason", "status": "started",
+            "effect": {"type": "llm_call", "payload": {}}
+        });
+        let _ = f.apply("root", &started);
+    });
+    h.turn();
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    h.store.fold.update(|f| {
+        let done = serde_json::json!({
+            "run_id": "root", "node_id": "reason", "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {"content": "hi",
+                        "usage": {"input_tokens": 0, "output_tokens": 0,
+                                   "total_tokens": 3180}}
+        });
+        let _ = f.apply("root", &done);
+    });
+    h.turn();
+    assert_eq!(
+        h.store.last_call_rate.get_untracked(),
+        None,
+        "a splitless receipt yields rate ABSENCE, never total/wall-time"
+    );
+    // The sparkline's total-tokens substitution itself stays (per-call
+    // activity is its charter) — only the rate numerator ignores it.
+    assert_eq!(
+        h.store
+            .fold
+            .with_untracked(|f| f.stats.output_series.last().copied()),
+        Some(3180.0)
+    );
+
+    // A SPLIT receipt on the NEXT call mints the output-true rate.
+    h.store.fold.update(|f| {
+        let started = serde_json::json!({
+            "run_id": "root", "node_id": "reason", "status": "started",
+            "effect": {"type": "llm_call", "payload": {}}
+        });
+        let _ = f.apply("root", &started);
+    });
+    h.turn();
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    h.store.fold.update(|f| {
+        let done = serde_json::json!({
+            "run_id": "root", "node_id": "reason", "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {"content": "hi",
+                        "usage": {"input_tokens": 1000, "output_tokens": 64,
+                                   "total_tokens": 1064}}
+        });
+        let _ = f.apply("root", &done);
+    });
+    h.turn();
+    let rate = h
+        .store
+        .last_call_rate
+        .get_untracked()
+        .expect("a split receipt mints a rate");
+    // Numerator = 64 output tokens over a ≥80ms window ⇒ ≤800 tok/s.
+    // The bound cannot false-fail (a slower machine only shrinks the
+    // rate) and catches numerator contamination: input/total (1000/
+    // 1064) reads >800 at this window.
+    assert!(
+        rate > 0.0 && rate <= 800.0,
+        "output-true numerator expected, got {rate} tok/s"
+    );
+}
+
+#[test]
+fn question_mark_opens_the_keys_reference() {
+    // REST-1: the legend moved behind `?` — the footer names the
+    // gesture and it must actually open the reference.
+    let mut h = harness();
+    h.turn();
+    h.type_text("?");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        screen.contains("/sessions [id]"),
+        "`?` opens the commands+keys reference:\n{screen}"
+    );
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none(),
+        "`?` is never sent as a prompt"
+    );
+}
+
+#[test]
+fn ctrl_l_redraw_re_emits_the_full_frame() {
+    // HDR-2a: after an EXTERNAL screen clear the engine's model still
+    // believes the old cells, so byte-identical repaints emit nothing —
+    // the maintainer's blank-header screenshot. Ctrl+L must force real
+    // byte re-emission with the final scene unchanged. Since 0.2.6 the
+    // mechanism is the engine's `request_full_redraw()` (our 0299):
+    // poison-prev + presenter-invalidate, one full-frame emission.
+    // (The harness cannot clear the modeled terminal externally;
+    // re-emission over an unchanged scene IS the mechanism that heals
+    // a cleared one.)
+    let mut h = harness();
+    h.leave_splash(); // byte-idle asserts cannot run on the animated splash
+                      // Settle: drain turns until the app goes byte-idle.
+    let mut before = String::new();
+    for _ in 0..6 {
+        before = h.turn();
+    }
+    let settled = h
+        .driver
+        .turn(&mut h.app, &mut h.term)
+        .expect("settled turn");
+    assert!(!settled.emitted, "app is byte-idle before Ctrl+L");
+    // Ctrl+L is the LF-adjacent C0 byte 0x0c on the legacy wire.
+    h.term.push_input(&[0x0c]);
+    let mut emitted_any = false;
+    for _ in 0..4 {
+        let t = h.driver.turn(&mut h.app, &mut h.term).expect("turn");
+        emitted_any |= t.emitted;
+    }
+    assert!(emitted_any, "Ctrl+L re-emits bytes on an unchanged scene");
+    // The scene is byte-for-byte the same after the full re-emission.
+    let after = h.turn();
+    assert_eq!(before, after, "redraw never changes the scene");
+    let idle = h.driver.turn(&mut h.app, &mut h.term).expect("turn");
+    assert!(!idle.emitted, "redraw settles back to byte-idle");
+}
+
+#[test]
+fn redraw_command_matches_ctrl_l() {
+    let mut h = harness();
+    h.leave_splash(); // a shimmer tick must not masquerade as /redraw's emission
+    for _ in 0..4 {
+        h.turn();
+    }
+    let before = h.turn();
+    h.type_text("/redraw");
+    h.turn();
+    h.press_enter();
+    let mut emitted_any = false;
+    for _ in 0..4 {
+        let t = h.driver.turn(&mut h.app, &mut h.term).expect("turn");
+        emitted_any |= t.emitted;
+    }
+    assert!(emitted_any, "/redraw re-emits");
+    assert_eq!(before, h.turn(), "scene unchanged");
+}
+
+#[test]
+fn composer_hint_renders_while_focused_and_yields_to_typing() {
+    // HDR-2c, engine-owned since 0.2.6 (our 0291):
+    // `placeholder_while_focused(true)` paints the hint beside the
+    // caret while the composer is focused-and-empty — the app-side
+    // absolute overlay is deleted.
+    let mut h = harness();
+    let screen = h.turn();
+    assert!(
+        screen.contains("describe a task — Enter sends"),
+        "hint visible while focused + empty:\n{screen}"
+    );
+    h.type_text("x");
+    let screen = h.turn();
+    assert!(
+        !screen.contains("describe a task — Enter sends"),
+        "hint yields to the draft:\n{screen}"
+    );
+    // Esc clears the draft; the hint returns.
+    h.press_escape();
+    let screen = h.turn();
+    assert!(
+        screen.contains("describe a task — Enter sends"),
+        "hint returns when the draft clears:\n{screen}"
+    );
+}
+
+#[test]
+fn gpu_toggle_round_trip_and_footer_render() {
+    // OBS-6: /gpu flips Off→Pending + issues GpuEnable; a Ready sample
+    // renders on the status bar; /gpu again flips to Off + GpuDisable
+    // and the segment disappears. Unsupported renders NOTHING on the
+    // bar (the toggle toasts the reason once — never a fake meter).
+    let mut h = harness();
+    h.turn();
+    h.type_text("/gpu");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::GpuEnable)).is_some(),
+        "the toggle starts the poller"
+    );
+    assert!(matches!(
+        h.store.gpu.get_untracked(),
+        abstractcode_tui::store::GpuMeter::Pending
+    ));
+    // A sample lands (posted by the poller in production; the store
+    // signal is the seam) — the footer renders the percentage.
+    h.store.gpu.set(abstractcode_tui::store::GpuMeter::Ready(
+        abstractcode_tui::store::GpuSample {
+            util_pct: 42.0,
+            name: "Apple M5 Max".into(),
+        },
+    ));
+    let screen = h.turn();
+    assert!(screen.contains("gpu 42%"), "footer meter:\n{screen}");
+    // Unsupported is honest: the segment leaves the bar entirely.
+    h.store
+        .gpu
+        .set(abstractcode_tui::store::GpuMeter::Unsupported(
+            "host reports no GPU metrics".into(),
+        ));
+    let screen = h.turn();
+    assert!(!screen.contains("gpu 42%"), "no stale meter:\n{screen}");
+    // Toggle off from a non-Off state: Off + GpuDisable.
+    h.type_text("/gpu");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::GpuDisable)).is_some(),
+        "the toggle stops the poller"
+    );
+    assert!(matches!(
+        h.store.gpu.get_untracked(),
+        abstractcode_tui::store::GpuMeter::Off
+    ));
+}
+
+#[test]
+fn status_bar_drops_whole_segments_never_self_ellipsis() {
+    // POLISH-1: at a width too small for every instrument, the footer
+    // drops WHOLE segments right-to-left — the old key legend rendered
+    // a fragmented "/help comm…" at 120 cols (SYNTHESIS §2 baseline)
+    // and read as broken. The harness is 100 cols; loading every
+    // segment (ctx meter + session + gpu + skills + mcp + the ? hint)
+    // overflows the left span, so the tail must vanish whole.
+    let mut h = harness();
+    h.turn();
+    h.store.context_window.set(262_144);
+    h.store.fold.update(|f| {
+        f.begin_run("root");
+        let rec = serde_json::json!({
+            "run_id": "root", "node_id": "reason", "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {"content": "hi",
+                        "usage": {"input_tokens": 41_203, "output_tokens": 20}}
+        });
+        let _ = f.apply("root", &rec);
+    });
+    // Splitless totals (the coder-run provider shape): the footer shows
+    // the honest total, never fabricated "0↑ 0↓".
+    h.store.totals.set(abstractcode_tui::store::SessionTotals {
+        input_tokens: 0,
+        output_tokens: 0,
+        total_tokens: 128_000,
+        runs: 3,
+    });
+    h.store.gpu.set(abstractcode_tui::store::GpuMeter::Ready(
+        abstractcode_tui::store::GpuSample {
+            util_pct: 42.0,
+            name: "Apple M5 Max".into(),
+        },
+    ));
+    h.store
+        .selected_skills
+        .set(vec!["coredoc".into(), "agora-channels".into()]);
+    h.store
+        .mcp_servers
+        .set(vec![abstractcode_tui::store::McpServer {
+            name: "context7".into(),
+            url: "https://mcp.example".into(),
+            description: String::new(),
+            auth_required: false,
+        }]);
+    let screen = h.turn();
+    let footer = screen.lines().last().unwrap_or_default().to_string();
+    assert!(
+        footer.contains("ctx 41k/262k tk (15%, declared)"),
+        "the graded ctx meter keeps its slot:\n{footer}"
+    );
+    assert!(
+        footer.contains("128k tk session") && footer.contains("gpu 42%"),
+        "session (splitless: honest total) + gpu fit at 100 cols:\n{footer}"
+    );
+    assert!(
+        !footer.contains('…'),
+        "the footer never self-truncates a segment into an ellipsis \
+         fragment — overflow drops segments whole:\n{footer}"
+    );
+    assert!(
+        !footer.contains("skills") && !footer.contains("mcp"),
+        "overflowing tail segments vanish WHOLE (right-to-left), \
+         never as fragments:\n{footer}"
+    );
+    // The right cluster (theme · host) is never sacrificed to the left.
+    assert!(
+        footer.contains("127.0.0.1:8080"),
+        "gateway host survives on the right:\n{footer}"
+    );
+}
+
+#[test]
+fn header_facts_drop_whole_before_workflow_and_route() {
+    // HDR-1 degrade rule: when the middle span tightens, cockpit FACTS
+    // drop whole (right-to-left) before workflow/route lose a char —
+    // and never as `…` fragments.
+    let mut h = harness();
+    h.turn();
+    h.store
+        .selected_skills
+        .set(vec!["coredoc".into(), "agora-channels".into()]);
+    h.store
+        .mcp_servers
+        .set(vec![abstractcode_tui::store::McpServer {
+            name: "context7".into(),
+            url: "https://mcp.example".into(),
+            description: String::new(),
+            auth_required: false,
+        }]);
+    h.store.totals.set(abstractcode_tui::store::SessionTotals {
+        input_tokens: 100_000,
+        output_tokens: 28_000,
+        total_tokens: 128_000,
+        runs: 3,
+    });
+    let screen = h.turn();
+    let header = screen.lines().next().unwrap_or_default().to_string();
+    // Identity facts survive: workflow + route + the leading facts.
+    assert!(
+        header.contains("basic-agent") && header.contains("gateway defaults"),
+        "workflow + route never yield to facts:\n{header}"
+    );
+    assert!(
+        header.contains("⌂ ws") && header.contains("server-managed"),
+        "leading facts fill the middle:\n{header}"
+    );
+    assert!(
+        !header.contains('…'),
+        "no fact ever renders as an ellipsis fragment — overflow drops \
+         facts whole:\n{header}"
+    );
+    // At 100 cols with this load the tail facts (skills/mcp/tokens)
+    // exceed the middle span — they must be ABSENT from the header row
+    // (the footer still carries them; the header never fragments).
+    assert!(
+        !header.contains("skills") && !header.contains("mcp"),
+        "overflowing facts drop whole from the header:\n{header}"
+    );
+    // Session id + orb keep the right edge.
+    assert!(
+        header.contains("acode-test-session"),
+        "session id survives on the right:\n{header}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// HDR-2 redraw-defect suite (lane C, 2026-07-23): the blank-screen class.
+// The harness cannot clear the MODELED terminal externally (CaptureTerm's
+// VtScreen is fed only by emitted bytes) — so these tests pin the app's
+// ENTRY POINTS into the heal (Ctrl+L root shortcut, Ctrl+L under a modal
+// via the action registry, /redraw): forced byte re-emission over an
+// UNCHANGED scene. The heal MECHANISM itself is engine-owned since
+// abstracttui 0.2.6 (`request_full_redraw` — poison-prev + presenter-
+// invalidate + image re-place, pinned engine-side in tests/wave_redraw.rs);
+// the old ~5s heartbeat and its pty external-wipe harness
+// (scripts/pty_redraw_heal_verify.py) are deleted/SUPERSEDED — no live
+// external-wipe proof currently exists (a fresh one would assert Ctrl+L
+// full-frame recovery + the focus-gained redraw).
+// ---------------------------------------------------------------------------
+
+/// Ctrl+L must work while a MODAL is open: modal trees swallow every key
+/// they route (consumed or not) BEFORE root-tree shortcuts, so the root
+/// binding alone dies exactly when recovery matters most (a wiped screen
+/// with an invisible approval prompt up). The engine's action registry
+/// runs LAST, only for keys nothing consumed — `register_global_actions`
+/// parks the redraw there.
+#[test]
+fn ctrl_l_redraws_even_with_a_modal_open() {
+    let mut h = harness();
+    // Same registration production makes in run_tui.
+    ui::register_global_actions(&h.app.actions());
+    h.leave_splash(); // the byte-idle assert below races the splash ticker
+    h.turn();
+    // Open the help modal (any modal exercises the swallow path).
+    h.type_text("/help");
+    h.turn();
+    h.press_enter();
+    let mut before = String::new();
+    for _ in 0..6 {
+        before = h.turn();
+    }
+    assert!(
+        before.contains("/sessions [id]"),
+        "help modal is up:\n{before}"
+    );
+    let settled = h
+        .driver
+        .turn(&mut h.app, &mut h.term)
+        .expect("settled turn");
+    assert!(!settled.emitted, "byte-idle with the modal open");
+    // Ctrl+L = C0 0x0c on the legacy wire. The modal consumes nothing
+    // for it; the action registry must catch it.
+    h.term.push_input(&[0x0c]);
+    let mut emitted_any = false;
+    for _ in 0..4 {
+        let t = h.driver.turn(&mut h.app, &mut h.term).expect("turn");
+        emitted_any |= t.emitted;
+    }
+    assert!(
+        emitted_any,
+        "Ctrl+L re-emits bytes with a modal open (action-registry path)"
+    );
+    let after = h.turn();
+    assert_eq!(before, after, "redraw never changes the scene (modal kept)");
+    assert!(
+        after.contains("/sessions [id]"),
+        "the modal survives the redraw:\n{after}"
+    );
+}
+
+/// Esc on the approval prompt DEFERS — it must never deny (a dismissal
+/// that tells the model "denied" would be a lie about the user's
+/// intent). Pins: no Resume command leaves the client on Esc, the wait
+/// stays pending, and `d` remains the only deny path.
+#[test]
+fn approval_escape_defers_never_denies() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &approval_record(
+                "s-esc",
+                "tool_approval:esc",
+                serde_json::json!([{"name": "write_file", "arguments": {"path": "x"}}]),
+            ),
+        );
+    });
+    let screen = h.turn();
+    assert!(screen.contains("approve (a)"), "prompt opens:\n{screen}");
+    // Drain the command channel BEFORE Esc so the assertion below can
+    // only see commands Esc itself produced.
+    while h.rx.try_recv().is_ok() {}
+    h.press_escape();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Resume { .. })).is_none(),
+        "Esc sends NO resume — the run keeps waiting durably"
+    );
+    assert!(
+        h.store.fold.with_untracked(|f| f.pending_wait.is_some()),
+        "the wait is still pending after Esc (deferred, not answered)"
+    );
+    // And the deny path still exists: reopen (Enter on empty composer),
+    // then `d` sends the explicit denial.
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        screen.contains("approve (a)"),
+        "Enter reopens the deferred prompt:\n{screen}"
+    );
+    h.type_text("d");
+    h.turn();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Resume { .. })) {
+        Some(Cmd::Resume { approved, .. }) => {
+            assert_eq!(approved, Some(false), "d is the explicit deny")
+        }
+        other => panic!("expected deny Resume, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cycle-2 integration review (reviewer 3, 2026-07-23): appended pins.
+// ---------------------------------------------------------------------------
+
+/// Ctrl+L with BOTH bindings live (root shortcut + action-registry
+/// fallback, the production registration) still redraws exactly like
+/// the single-binding path: since 0.2.6 the redraw is an idempotent
+/// engine REQUEST FLAG (`request_full_redraw`) drained once per turn —
+/// a hypothetical double fire coalesces into one full-frame emission,
+/// so the old veil-stacking double-fire hazard is structurally gone.
+/// Pins: bytes re-emit, no overlay layer is ever parked, the scene is
+/// unchanged, and the app settles back to byte-idle.
+#[test]
+fn ctrl_l_with_both_bindings_redraws_once_and_leaves_no_layers() {
+    let mut h = harness();
+    // Same registration production makes in run_tui — BOTH bindings live.
+    ui::register_global_actions(&h.app.actions());
+    h.leave_splash(); // the byte-idle assert below races the splash ticker
+    let mut before = String::new();
+    for _ in 0..4 {
+        before = h.turn();
+    }
+    assert_eq!(h.ctx.overlays.top_z(), 0, "no overlay before the chord");
+    // Ctrl+L = C0 0x0c on the legacy wire; no modal open, so the root
+    // shortcut consumes it (the registry runs only for unconsumed keys).
+    h.term.push_input(&[0x0c]);
+    let mut emitted_any = false;
+    for _ in 0..4 {
+        let t = h.driver.turn(&mut h.app, &mut h.term).expect("turn");
+        emitted_any |= t.emitted;
+    }
+    assert!(emitted_any, "the redraw re-emits bytes");
+    assert_eq!(h.ctx.overlays.top_z(), 0, "no layer parked by the redraw");
+    let after = h.turn();
+    assert_eq!(before, after, "redraw never changes the scene");
+    let idle = h.driver.turn(&mut h.app, &mut h.term).expect("turn");
+    assert!(!idle.emitted, "settles back to byte-idle");
+}
+
+/// Esc on the ASK-USER modal defers like the approval prompt: the modal
+/// closes and STAYS closed (P1-2 regression: a bare close bounced —
+/// `wire_wait_modals` re-runs on the close's epoch bump, saw the
+/// still-pending, not-dismissed wait, and reopened the prompt in the
+/// same flush, making Esc a no-op blink). Enter on the empty composer
+/// reopens; no Resume ever leaves the client on Esc.
+#[test]
+fn ask_escape_defers_and_stays_closed() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &serde_json::json!({
+                "run_id": "root", "node_id": "ask", "status": "waiting",
+                "step_id": "s-ask-esc",
+                "result": {"wait": {"reason": "user",
+                    "wait_key": "user:root:ask", "prompt": "Which one?"}}
+            }),
+        );
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("the agent asks"),
+        "ask prompt opens:\n{screen}"
+    );
+    while h.rx.try_recv().is_ok() {}
+    h.press_escape();
+    // Settle several turns: the defective path reopened on the very
+    // next effect flush, so one quiet turn is not proof — drain a few.
+    let mut screen = String::new();
+    for _ in 0..4 {
+        screen = h.turn();
+    }
+    assert!(
+        !screen.contains("the agent asks"),
+        "Esc closes the ask prompt and it STAYS closed:\n{screen}"
+    );
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Resume { .. })).is_none(),
+        "Esc sends NO resume — the run keeps waiting durably"
+    );
+    assert!(
+        h.store.fold.with_untracked(|f| f.pending_wait.is_some()),
+        "the wait is still pending after Esc (deferred, not answered)"
+    );
+    // Enter on the empty composer reopens the deferred prompt.
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        screen.contains("the agent asks"),
+        "Enter reopens the deferred ask prompt:\n{screen}"
+    );
+}
+
+/// Operator rulings (2026-07-26; live screenshot: a plan-approval ask
+/// truncated mid-sentence with a ledger pointer and NO visible way to
+/// respond): an ask renders FULL — scrollable when long, never
+/// truncated — and the response affordances (input + hint) stay
+/// visible at all times. The prompt scrolls from the modal root's
+/// ↑↓/PgUp/PgDn shortcuts while the TextInput KEEPS focus, so typing
+/// the answer needs no focus gymnastics.
+#[test]
+fn long_ask_renders_full_scrollable_with_affordances_always_visible() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    // 60 uniquely-numbered lines (zero-padded: "ask line 01" must never
+    // substring-match "ask line 10").
+    let prompt = (1..=60)
+        .map(|i| format!("ask line {i:02}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &serde_json::json!({
+                "run_id": "root", "node_id": "ask", "status": "waiting",
+                "step_id": "s-ask-long",
+                "result": {"wait": {"reason": "user",
+                    "wait_key": "user:root:ask", "prompt": prompt}}
+            }),
+        );
+    });
+    let screen = h.turn();
+    assert!(screen.contains("the agent asks"), "ask opens:\n{screen}");
+    assert!(
+        screen.contains("ask line 01"),
+        "the question starts at the top:\n{screen}"
+    );
+    // The response affordances are UNMISSABLE: placeholder + hint render
+    // inside the panel, never clipped below it (the old fixed 13-row
+    // panel pushed them off the bottom on long asks).
+    assert!(
+        screen.contains("your answer"),
+        "input placeholder visible:\n{screen}"
+    );
+    assert!(
+        screen.contains("Enter answers"),
+        "hint row visible:\n{screen}"
+    );
+    assert!(
+        screen.contains("scroll"),
+        "the hint advertises scrolling:\n{screen}"
+    );
+    // NEVER truncated, and no storage internals anywhere on screen.
+    assert!(
+        !screen.contains("#TRUNCATION"),
+        "an ask is never truncated:\n{screen}"
+    );
+    assert!(!screen.contains("ledger"), "no ledger pointer:\n{screen}");
+
+    // One Down arrow scrolls by a line while the input keeps focus
+    // (TextInput leaves ↑↓/PgUp/PgDn unconsumed — the root shortcut
+    // fires).
+    h.type_text("\x1b[B");
+    let screen = h.turn();
+    assert!(
+        !screen.contains("ask line 01") && screen.contains("ask line 02"),
+        "Down scrolls the question one line:\n{screen}"
+    );
+
+    // PageDown reaches the very end of the question.
+    for _ in 0..5 {
+        h.type_text("\x1b[6~");
+        h.turn();
+    }
+    let screen = h.turn();
+    assert!(
+        screen.contains("ask line 60"),
+        "the full question is reachable:\n{screen}"
+    );
+    // Affordances survive the scroll to the bottom.
+    assert!(
+        screen.contains("your answer") && screen.contains("Enter answers"),
+        "affordances stay visible at the bottom:\n{screen}"
+    );
+
+    // Typing + Enter still answers: focus never left the input.
+    while h.rx.try_recv().is_ok() {}
+    h.type_text("here you go");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Resume { .. })) {
+        Some(Cmd::Resume { payload, .. }) => {
+            assert_eq!(
+                payload.get("response").and_then(|v| v.as_str()),
+                Some("here you go"),
+                "the typed answer rides the resume"
+            );
+        }
+        other => panic!("expected Resume, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+/// A short ask still fits without a scroll hint and keeps the compact
+/// panel — the full-render path must not inflate small prompts.
+#[test]
+fn short_ask_keeps_affordances_without_scroll_hint() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &serde_json::json!({
+                "run_id": "root", "node_id": "ask", "status": "waiting",
+                "step_id": "s-ask-short",
+                "result": {"wait": {"reason": "user",
+                    "wait_key": "user:root:ask", "prompt": "Which one?"}}
+            }),
+        );
+    });
+    let screen = h.turn();
+    assert!(screen.contains("the agent asks"), "ask opens:\n{screen}");
+    assert!(screen.contains("Which one?"), "prompt in full:\n{screen}");
+    assert!(
+        screen.contains("your answer") && screen.contains("Enter answers"),
+        "affordances visible:\n{screen}"
+    );
+    assert!(
+        !screen.contains("PgDn"),
+        "no scroll hint when the prompt fits:\n{screen}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Cycle-2 presence/density adversarial review (reviewer 2) — regression pins.
+// ---------------------------------------------------------------------------
+
+/// P2-C: IDLE-1's contract is "wordmark exactly once" — the header row
+/// always carries it, so the gateway-Down recovery card must NOT render
+/// its own (the normal branch was deduped; the Down branch had been
+/// missed). The recovery teaching itself stays.
+#[test]
+fn down_state_card_teaches_recovery_with_one_wordmark() {
+    let mut h = harness();
+    h.turn();
+    // Production messages are worded by GwError's kind-aware Display —
+    // the splash renders them VERBATIM now (it used to stamp its own
+    // "gateway unreachable —" prefix over every Down, timeouts included).
+    h.store.conn.set(abstractcode_tui::store::Conn::Down(
+        "gateway unreachable: connection refused (os error 61)".into(),
+        true,
+    ));
+    let screen = h.turn();
+    assert!(
+        screen.contains("gateway unreachable"),
+        "recovery block present:\n{screen}"
+    );
+    assert!(
+        screen.contains("abstractgateway serve"),
+        "gone-evidence teaches the start command:\n{screen}"
+    );
+    assert_eq!(
+        screen.matches("▲ AbstractCode").count(),
+        1,
+        "wordmark exactly once, Down state included:\n{screen}"
+    );
+}
+
+/// HOLE A (comms audit, 2026-07-23): a Down mark born from the SOFT
+/// threshold (repeated timeouts — the gateway is running, likely busy)
+/// must never claim "unreachable": the splash renders the evidence-worded
+/// message verbatim, swaps the start-one advice for a busy explanation,
+/// and the status card words the state "not responding".
+#[test]
+fn soft_down_says_not_responding_never_unreachable() {
+    let mut h = harness();
+    h.turn();
+    h.store.conn.set(abstractcode_tui::store::Conn::Down(
+        "gateway timed out: no response in 30s".into(),
+        false,
+    ));
+    let screen = h.turn();
+    assert!(
+        screen.contains("gateway timed out"),
+        "evidence-worded message renders verbatim:\n{screen}"
+    );
+    assert!(
+        !screen.contains("unreachable"),
+        "a timeout threshold must not claim unreachable:\n{screen}"
+    );
+    assert!(
+        screen.contains("may be busy"),
+        "soft-down advice explains busy instead of teaching start-one:\n{screen}"
+    );
+    assert!(
+        !screen.contains("abstractgateway serve"),
+        "start-one advice is gone-evidence-only:\n{screen}"
+    );
+}
+
+/// P2-D: the durable-pause line owns the strip in ANY focus (like the
+/// wait line) — so in entity focus it must name the AGENT lane; entity
+/// turns are non-interruptible and never pause, and an unprefixed
+/// "run paused" read as the visit being paused.
+#[test]
+fn paused_strip_names_the_agent_lane_in_entity_focus() {
+    let mut h = harness();
+    h.turn();
+    h.store.convos.update(|cs| {
+        let mut c = abstractcode_tui::convo::EntityConvo::opening("castor", "awake");
+        c.status = abstractcode_tui::convo::ConvoStatus::Parked;
+        cs.push(c);
+    });
+    h.store
+        .focus
+        .set(abstractcode_tui::convo::Focus::Entity("castor".into()));
+    h.store.paused.set(true);
+    let screen = h.turn();
+    assert!(
+        screen.contains("⏸ agent: run paused durably"),
+        "entity focus names the paused LANE:\n{screen}"
+    );
+    // Agent focus needs no prefix — the lane is unambiguous there.
+    h.store.focus.set(abstractcode_tui::convo::Focus::Agent);
+    let screen = h.turn();
+    assert!(
+        screen.contains("⏸ run paused durably") && !screen.contains("agent: run paused"),
+        "agent focus keeps the unprefixed line:\n{screen}"
+    );
+}
+
+/// P1-B (zero-split half): an idle session whose runs never produced a
+/// usage receipt renders NO tokens part — "0 in / 0 out tk" would claim
+/// a measurement that never happened. Splitless totals keep the honest
+/// total; split totals keep the split.
+#[test]
+fn idle_strip_summary_omits_unmeasured_tokens() {
+    let mut h = harness();
+    h.turn();
+    // Runs counted, zero receipts (e.g. failed before the first call).
+    h.store.totals.set(abstractcode_tui::store::SessionTotals {
+        input_tokens: 0,
+        output_tokens: 0,
+        total_tokens: 0,
+        runs: 2,
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("session: 2 runs"),
+        "run count renders:\n{screen}"
+    );
+    assert!(
+        !screen.contains("0 in / 0 out"),
+        "no fabricated zero split for unmeasured sessions:\n{screen}"
+    );
+    // Splitless providers: the honest total.
+    h.store.totals.set(abstractcode_tui::store::SessionTotals {
+        input_tokens: 0,
+        output_tokens: 0,
+        total_tokens: 3180,
+        runs: 2,
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("3.2k tk total"),
+        "splitless total renders honestly:\n{screen}"
+    );
+    // Split providers: the split.
+    h.store.totals.set(abstractcode_tui::store::SessionTotals {
+        input_tokens: 12_000,
+        output_tokens: 900,
+        total_tokens: 12_900,
+        runs: 2,
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("12k in / 900 out tk"),
+        "split totals keep the split:\n{screen}"
+    );
+}
+
+/// P1-B (run half, live capture frame-02): before the FIRST usage
+/// receipt the run strip shows the model-call ticker WITHOUT a token
+/// part — "0↑ 0↓ tk" beside "model call 0s" claimed a measurement that
+/// had not happened. The split appears with the first receipt.
+#[test]
+fn run_strip_omits_the_token_split_before_the_first_receipt() {
+    let mut h = harness();
+    h.turn();
+    h.store.phase.set(Phase::Running);
+    h.store.run_id.set("root".into());
+    h.store.fold.update(|f| f.begin_run("root"));
+    h.store.run_started.set(Some(std::time::Instant::now()));
+    let screen = h.turn();
+    assert!(
+        !screen.contains("0↑ 0↓ tk"),
+        "no fabricated zero split before the first receipt:\n{screen}"
+    );
+    h.store.fold.update(|f| {
+        let rec = serde_json::json!({
+            "run_id": "root", "node_id": "reason", "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {"content": "hi",
+                        "usage": {"input_tokens": 41_203, "output_tokens": 20}}
+        });
+        let _ = f.apply("root", &rec);
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("41k↑ 20↓ tk"),
+        "the split renders once measured:\n{screen}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Lane-3 conformance forensics (interruptibility wave, 2026-07-23)
+// ---------------------------------------------------------------------------
+
+/// Replay a captured pty byte stream through the ENGINE's own VT
+/// interpreter (`abstracttui::testing::VtScreen`) and report whether the
+/// approval modal is on the final screen. Diagnostic for the T2 phantom-
+/// modal investigation: pyte (the python harness's interpreter) and
+/// VtScreen disagreeing on the same bytes = harness divergence; both
+/// showing the modal = the bytes genuinely lack the close repaint (a
+/// real emission gap a user's terminal would show too).
+///
+/// Ignored by default: needs a capture file. Run ad hoc:
+///   ACODE_VT_REPLAY_FILE=/tmp/conf_t2-phantom-bytes.bin \
+///     cargo test --release --test headless_ui vt_replay_probe -- --ignored --nocapture
+#[test]
+#[ignore = "forensic probe: point ACODE_VT_REPLAY_FILE at a pty byte capture"]
+fn vt_replay_probe() {
+    let path = std::env::var("ACODE_VT_REPLAY_FILE").expect("set ACODE_VT_REPLAY_FILE");
+    let bytes = std::fs::read(&path).expect("readable capture file");
+    let cols: i32 = std::env::var("ACODE_VT_COLS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(120);
+    let rows: i32 = std::env::var("ACODE_VT_ROWS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(44);
+    let mut vt = abstracttui::testing::VtScreen::new(abstracttui::prelude::Size::new(cols, rows));
+    vt.feed(&bytes);
+    let mut hits = Vec::new();
+    for y in 0..rows {
+        let mut line = String::new();
+        for x in 0..cols {
+            if let Some(cell) = vt.cell(x, y) {
+                line.push_str(cell.display());
+            }
+        }
+        if line.contains("tool approval") || line.contains("approval needed") {
+            hits.push(format!("{y:>3}| {}", line.trim_end()));
+        }
+    }
+    println!(
+        "vt_replay_probe: {} bytes, {} unknown seq(s), {} modal-needle row(s)",
+        bytes.len(),
+        vt.unknown_seq_count(),
+        hits.len()
+    );
+    for h in &hits {
+        println!("  {h}");
+    }
+    for sample in vt.unknown_samples() {
+        println!("  unknown: {sample:?}");
+    }
+}
+
+/// The observer scenario (maintainer contract, lane-3 conformance wave):
+/// a wait resolved FROM ANOTHER APP must close this client's prompt
+/// without any local answer. Mechanism under test: the fold clears
+/// `pending_wait` on ANY later record from the waiting run (the ledger
+/// shows the run moving past the wait after an external resume) and
+/// `wire_wait_modals` closes the open prompt on the None edge. The rule
+/// is kind-agnostic — proven here for BOTH kinds, because the live T3
+/// scenario (ask_user) is unconstructible on gateways whose tool
+/// inventory lacks an ask tool (live finding 2026-07-23: 14 tools, none
+/// ask-like). Live proof for the approval kind: scripts/
+/// pty_conformance_t2.py (turn 1, external-only resolution).
+#[test]
+fn wait_resolved_elsewhere_closes_the_modal_without_local_answer() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+
+    // ---- approval kind ----------------------------------------------------
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    store.fold.update(|f| {
+        let rec = serde_json::json!({
+            "run_id": "root", "node_id": "act", "status": "waiting", "step_id": "s1",
+            "effect": {"type": "tool_calls",
+                        "payload": {"tool_calls": [{"name": "write_file", "call_id": "c1"}]}},
+            "result": {"wait": {"reason": "user", "wait_key": "tool_approval:k1",
+                "details": {"mode": "approval_required",
+                             "tool_calls": [{"name": "write_file", "call_id": "c1",
+                                              "arguments": {"file_path": "x"}}]}}}
+        });
+        let _ = f.apply("root", &rec);
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("approve (a)"),
+        "approval prompt opens:\n{screen}"
+    );
+
+    // The ledger shows the run progressing past the wait (what an external
+    // resume produces): the tool_calls step completes.
+    store.fold.update(|f| {
+        let rec = serde_json::json!({
+            "run_id": "root", "node_id": "act", "status": "completed", "step_id": "s2",
+            "effect": {"type": "tool_calls",
+                        "payload": {"tool_calls": [{"name": "write_file", "call_id": "c1"}]}},
+            "result": {"results": [{"call_id": "c1", "success": true, "output": "ok"}]}
+        });
+        let _ = f.apply("root", &rec);
+    });
+    h.turn(); // effect closes the modal; the deferred retire lands next tick
+    let screen = h.turn();
+    assert!(
+        !screen.contains("approve (a)") && !screen.contains("tool approval"),
+        "the approval prompt closes when the wait resolves elsewhere:\n{screen}"
+    );
+    assert!(
+        !screen.contains("approval needed"),
+        "the waiting strip clears too:\n{screen}"
+    );
+    assert!(
+        store.fold.with_untracked(|f| f.pending_wait.is_none()),
+        "no pending wait survives the resolution"
+    );
+    // The client never answered locally: no Resume command was sent.
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Resume { .. })).is_none(),
+        "no local resume rides an externally-resolved approval"
+    );
+
+    // ---- ask kind (same slot, same rule, different modal) ------------------
+    store.fold.update(|f| {
+        let rec = serde_json::json!({
+            "run_id": "root", "node_id": "ask", "status": "waiting", "step_id": "s3",
+            "effect": {"type": "tool_calls", "payload": {}},
+            "result": {"wait": {"reason": "user", "wait_key": "user:root:ask",
+                                 "prompt": "Which color do you want?"}}
+        });
+        let _ = f.apply("root", &rec);
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("the agent asks"),
+        "ask prompt opens:\n{screen}"
+    );
+
+    store.fold.update(|f| {
+        let rec = serde_json::json!({
+            "run_id": "root", "node_id": "reason", "status": "started", "step_id": "s4",
+            "effect": {"type": "llm_call", "payload": {}}
+        });
+        let _ = f.apply("root", &rec);
+    });
+    h.turn(); // effect closes the modal; the deferred retire lands next tick
+    let screen = h.turn();
+    assert!(
+        !screen.contains("the agent asks"),
+        "the ask prompt closes when the wait resolves elsewhere:\n{screen}"
+    );
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Resume { .. })).is_none(),
+        "no local resume rides an externally-answered ask"
+    );
+}
+
+/// Fresh per-test export dir under the OS temp root (never the cwd — the
+/// prefs tests' pollution discipline applied to exports).
+fn export_scratch_dir() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "acode-export-headless-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    dir
+}
+
+#[test]
+fn export_command_writes_markdown_and_refuses_overwrite() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+
+    // Empty transcript (no conversation): /export refuses with a notice
+    // and writes nothing.
+    h.type_text("/export");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(
+        store
+            .notices
+            .get_untracked()
+            .iter()
+            .any(|n| n.contains("nothing to export")),
+        "empty-transcript refusal: {:?}",
+        store.notices.get_untracked()
+    );
+
+    // Seed one complete turn + a tool, then export to an explicit path.
+    store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::User {
+            text: "write hello.txt".into(),
+        });
+        f.push_item(abstractcode_tui::transcript::Item::Tool {
+            key: "k1".into(),
+            name: "write_file".into(),
+            args_preview: "{\"path\":\"hello.txt\"}".into(),
+            status: abstractcode_tui::transcript::ToolStatus::Ok,
+            result_preview: "ok".into(),
+            error: String::new(),
+        });
+        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+            text: "done — hello.txt written".into(),
+            final_answer: true,
+        });
+    });
+    h.turn();
+    let dir = export_scratch_dir();
+    let md_path = dir.join("t.md");
+    h.type_text(&format!("/export {}", md_path.display()));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let md = std::fs::read_to_string(&md_path).expect("markdown file written");
+    assert!(md.starts_with("# AbstractCode transcript"), "{md}");
+    assert!(
+        md.contains("## User") && md.contains("## Assistant"),
+        "{md}"
+    );
+    assert!(
+        md.contains("- session: `acode-test-session`"),
+        "header names the session:\n{md}"
+    );
+    assert!(
+        md.contains("- ✓ **write_file**"),
+        "default view carries the one-line tool summary:\n{md}"
+    );
+    assert!(
+        !md.contains("```result"),
+        "no tool result fences without --details:\n{md}"
+    );
+    let notices = store.notices.get_untracked();
+    assert!(
+        notices
+            .iter()
+            .any(|n| n.contains("exported agent transcript")
+                && n.contains("t.md")
+                && n.contains("markdown")),
+        "success notice names the file: {notices:?}"
+    );
+
+    // Same path again: refused, content untouched.
+    h.type_text(&format!("/export {}", md_path.display()));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(
+        store
+            .notices
+            .get_untracked()
+            .iter()
+            .any(|n| n.contains("never overwrites")),
+        "collision refusal: {:?}",
+        store.notices.get_untracked()
+    );
+    assert_eq!(
+        std::fs::read_to_string(&md_path).unwrap(),
+        md,
+        "collision left the original bytes untouched"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn export_jsonl_details_writes_training_lines() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::User { text: "q1".into() });
+        f.push_item(abstractcode_tui::transcript::Item::Thinking {
+            iteration: 1,
+            content: String::new(),
+            reasoning: "think first".into(),
+        });
+        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+            text: "a1".into(),
+            final_answer: true,
+        });
+        // A dangling second prompt (no answer): skipped from the file,
+        // counted in the notice.
+        f.push_item(abstractcode_tui::transcript::Item::User {
+            text: "q2-unanswered".into(),
+        });
+    });
+    h.turn();
+    let dir = export_scratch_dir();
+    let jl_path = dir.join("t.jsonl");
+    h.type_text(&format!("/export jsonl --details {}", jl_path.display()));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let doc = std::fs::read_to_string(&jl_path).expect("jsonl file written");
+    let lines: Vec<&str> = doc.lines().collect();
+    assert_eq!(lines.len(), 1, "one completed turn = one line:\n{doc}");
+    let v: serde_json::Value = serde_json::from_str(lines[0]).expect("line is valid JSON");
+    let msgs = v["messages"].as_array().expect("chat schema");
+    assert_eq!(msgs.len(), 2);
+    assert_eq!(msgs[0]["role"], "user");
+    assert_eq!(msgs[0]["content"], "q1");
+    assert_eq!(msgs[1]["role"], "assistant");
+    assert_eq!(msgs[1]["content"], "a1");
+    assert_eq!(
+        v["details"]["cycles"][0]["reasoning"], "think first",
+        "--details carries the turn's cycles"
+    );
+    assert!(
+        !doc.contains("q2-unanswered"),
+        "dangling prompts never enter the file:\n{doc}"
+    );
+    let notices = store.notices.get_untracked();
+    assert!(
+        notices.iter().any(|n| n.contains("1 training line(s)")
+            && n.contains("1 incomplete turn(s) skipped")
+            && n.contains("t.jsonl")),
+        "notice counts lines + skipped turns: {notices:?}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// ---------------------------------------------------------------------------
+// Attachments: /attach + chips + drop-as-paste + custody (design
+// untracked/reviews/attachments-design.md)
+// ---------------------------------------------------------------------------
+
+fn attach_tempfile(name: &str, bytes: &[u8]) -> (std::path::PathBuf, String) {
+    // Unique dir PER FILE: tests run in parallel threads of one process
+    // and each cleans its own dir — a shared dir raced (one test's
+    // remove_dir_all deleted another's file mid-stage).
+    let dir = std::env::temp_dir().join(format!("acode-attach-ui-{}-{name}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let p = dir.join(name);
+    std::fs::write(&p, bytes).unwrap();
+    let canon = std::fs::canonicalize(&p).unwrap().display().to_string();
+    (dir, canon)
+}
+
+/// Push a bracketed-paste sequence (DEC 2004 — how every terminal
+/// delivers a file DROP).
+fn paste(h: &mut Harness, text: &str) {
+    h.term.push_input(b"\x1b[200~");
+    h.term.push_input(text.as_bytes());
+    h.term.push_input(b"\x1b[201~");
+}
+
+#[test]
+fn attach_command_stages_chips_and_start_carries_custody() {
+    let (dir, path) = attach_tempfile("report.md", b"hello world");
+    let mut h = harness();
+    h.turn();
+    // Stage via /attach <path> (typed args accept absolute paths).
+    h.type_text(&format!("/attach {path}"));
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    let pending = h.store.pending_attachments.get_untracked();
+    assert_eq!(pending.len(), 1, "one chip staged");
+    assert_eq!(pending[0].name, "report.md");
+    assert!(
+        screen.contains("report.md"),
+        "chips row renders the staged file:\n{screen}"
+    );
+    // Duplicate attach refuses (state unchanged).
+    h.type_text(&format!("/attach {path}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(
+        h.store.pending_attachments.with_untracked(|p| p.len()),
+        1,
+        "duplicate refused"
+    );
+    // A missing path refuses with a notice, nothing staged.
+    h.type_text("/attach /definitely/not/here.txt");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(h.store.pending_attachments.with_untracked(|p| p.len()), 1);
+    // Send a prompt: Cmd::Start carries the pending list (custody rides
+    // to the worker; chips stay until the run STARTS) AND the cap as a
+    // UI-thread snapshot — the worker must never read the signal itself
+    // (thread stamp panics; verify-pass NEW-1).
+    h.store.max_attachment_bytes.set(26_214_400);
+    h.type_text("summarize the attached file");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let (sent, cap) = loop {
+        match h.rx.try_recv() {
+            Ok(Cmd::Start {
+                attachments,
+                attachment_cap,
+                ..
+            }) => break (attachments, attachment_cap),
+            Ok(_) => continue,
+            Err(e) => panic!("expected Cmd::Start, got {e:?}"),
+        }
+    };
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].path, path);
+    assert_eq!(cap, 26_214_400, "the cap rides the command");
+    assert_eq!(
+        h.store.pending_attachments.with_untracked(|p| p.len()),
+        1,
+        "chips KEPT until the run starts (custody rule — the assistant's optimistic-clear defect)"
+    );
+    // Simulate the worker's started post: sent batch leaves, 📎 records.
+    abstractcode_tui::runner::clear_sent_attachments(&h.store, &h.ctx.tx.clone(), &sent);
+    let screen = h.turn();
+    assert_eq!(
+        h.store.pending_attachments.with_untracked(|p| p.len()),
+        0,
+        "started clears the sent batch"
+    );
+    assert!(
+        screen.contains("📎") || screen.contains("report.md"),
+        "transcript records what rode the turn:\n{screen}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn dropped_path_paste_attaches_and_ctrl_o_undoes() {
+    let (dir, path) = attach_tempfile("dropped.txt", b"drop me");
+    let mut h = harness();
+    h.turn();
+    // A real drop: bracketed paste of one existing absolute path.
+    paste(&mut h, &path);
+    h.turn();
+    let screen = h.turn();
+    let pending = h.store.pending_attachments.get_untracked();
+    assert_eq!(pending.len(), 1, "drop attached directly:\n{screen}");
+    assert_eq!(pending[0].name, "dropped.txt");
+    // Consumed: the composer draft stays EMPTY (nothing inserted).
+    assert!(
+        !screen.contains(&path),
+        "path text never lands in the composer on a consumed drop:\n{screen}"
+    );
+    assert!(
+        h.store.paste_undo.get_untracked().is_some(),
+        "undo slot armed"
+    );
+    // Ctrl+O: undo — chip out, RAW text back into the draft.
+    h.term.push_input(&[0x0f]);
+    h.turn();
+    let screen = h.turn();
+    assert_eq!(
+        h.store.pending_attachments.with_untracked(|p| p.len()),
+        0,
+        "undo removes the chip"
+    );
+    assert!(
+        screen.contains("dropped.txt"),
+        "undo restores the pasted path text into the composer:\n{screen}"
+    );
+    assert!(h.store.paste_undo.get_untracked().is_none());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn prose_paste_inserts_and_never_attaches() {
+    let mut h = harness();
+    h.turn();
+    paste(&mut h, "see /usr/bin for details");
+    h.turn();
+    let screen = h.turn();
+    assert_eq!(
+        h.store.pending_attachments.with_untracked(|p| p.len()),
+        0,
+        "prose never attaches (classifier asymmetry: existence + spelling gates)"
+    );
+    assert!(
+        screen.contains("see /usr/bin for details"),
+        "prose paste inserts byte-identical:\n{screen}"
+    );
+}
+
+#[test]
+fn session_boundary_discards_pending_chips_with_notice() {
+    let (dir, path) = attach_tempfile("stale.txt", b"x");
+    let mut h = harness();
+    h.turn();
+    h.type_text(&format!("/attach {path}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(h.store.pending_attachments.with_untracked(|p| p.len()), 1);
+    h.type_text("/new");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(
+        h.store.pending_attachments.with_untracked(|p| p.len()),
+        0,
+        "session rotation discards chips (cached refs are session-bound)"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn entity_focus_refuses_attach_and_suppresses_the_drop_hook() {
+    let (dir, path) = attach_tempfile("efile.txt", b"x");
+    let mut h = harness();
+    h.turn();
+    h.store
+        .focus
+        .set(abstractcode_tui::convo::Focus::Entity("castor".into()));
+    h.turn();
+    // /attach refuses on the entity lane.
+    h.type_text(&format!("/attach {path}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(
+        h.store.pending_attachments.with_untracked(|p| p.len()),
+        0,
+        "entity lane refuses /attach (v1)"
+    );
+    // A drop inserts as text (no chip, no consume) on the entity lane.
+    paste(&mut h, &path);
+    h.turn();
+    h.turn();
+    assert_eq!(
+        h.store.pending_attachments.with_untracked(|p| p.len()),
+        0,
+        "drop hook suppressed outside the agent lane"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn bare_attach_opens_picker_when_nothing_pending() {
+    let mut h = harness();
+    h.turn();
+    h.type_text("/attach");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let screen = h.turn();
+    // The engine FilePicker renders a breadcrumb + filter row inside our
+    // modal (smoke: the modal exists and shows the start directory).
+    assert!(
+        h.ctx.modal.borrow().is_some(),
+        "bare /attach with nothing pending opens the picker modal:\n{screen}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Attachments: the custody/undo lane the design ordered tested hardest
+// (impl-review P1-5; P1-1/P1-2 regressions probe-shaped)
+// ---------------------------------------------------------------------------
+
+/// P1-1 regression: a drop whose SPELLING crosses a symlink
+/// (macOS /tmp → /private/tmp) must still undo — the undo slot keys on
+/// the CANONICAL paths the chips carry, never the pasted spelling.
+#[test]
+fn drop_through_a_symlinked_prefix_still_undoes() {
+    // std::env::temp_dir() on macOS lives under the /var symlink; use
+    // the /tmp spelling explicitly so the test exercises the class on
+    // every platform where it exists (elsewhere it degrades to the
+    // plain undo test — still valid).
+    let dir = format!("/tmp/acode-symlink-undo-{}", std::process::id());
+    std::fs::create_dir_all(&dir).unwrap();
+    let spelled = format!("{dir}/sym.txt");
+    std::fs::write(&spelled, b"x").unwrap();
+    let canonical = std::fs::canonicalize(&spelled)
+        .unwrap()
+        .display()
+        .to_string();
+
+    let mut h = harness();
+    h.turn();
+    paste(&mut h, &spelled);
+    h.turn();
+    h.turn();
+    let pending = h.store.pending_attachments.get_untracked();
+    assert_eq!(pending.len(), 1, "drop attached");
+    assert_eq!(pending[0].path, canonical, "chips store canonical paths");
+    let (_, undo_paths) = h.store.paste_undo.get_untracked().expect("undo armed");
+    assert_eq!(
+        undo_paths,
+        vec![canonical],
+        "undo slot keys on the canonical path the chip carries"
+    );
+    h.term.push_input(&[0x0f]); // Ctrl+O
+    h.turn();
+    let screen = h.turn();
+    assert_eq!(
+        h.store.pending_attachments.with_untracked(|p| p.len()),
+        0,
+        "undo removed the chip across the symlink spelling:\n{screen}"
+    );
+    assert!(
+        screen.contains("sym.txt"),
+        "path text restored into the composer:\n{screen}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// P1-2 regression: once the dropped chips RODE a run, Ctrl+O must do
+/// nothing — no chip changes, no stale path text injected, no "drop
+/// undone" claim (the artifact is permanent server-side).
+#[test]
+fn ctrl_o_after_the_chips_rode_a_run_is_a_dead_key() {
+    let (dir, path) = attach_tempfile("sent.txt", b"x");
+    let mut h = harness();
+    h.turn();
+    paste(&mut h, &path);
+    h.turn();
+    h.turn();
+    let sent = h.store.pending_attachments.get_untracked();
+    assert_eq!(sent.len(), 1);
+    // Simulate the worker's started post (custody transfer).
+    abstractcode_tui::runner::clear_sent_attachments(&h.store, &h.ctx.tx.clone(), &sent);
+    h.turn();
+    assert!(
+        h.store.paste_undo.get_untracked().is_none(),
+        "the undo slot dies with the send"
+    );
+    h.term.push_input(&[0x0f]);
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        !screen.contains("drop undone"),
+        "no undo claim after the send:\n{screen}"
+    );
+    assert!(
+        !screen.contains("sent.txt") || screen.contains("📎"),
+        "no stale path text injected into the composer (the 📎 record may name it):\n{screen}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Custody unit lane over the two pub worker helpers (impl-review
+/// P1-5): sibling ref caching merges BY PATH into the live list, a
+/// removed chip stays removed, and a foreign-session cached ref never
+/// counts as uploaded.
+#[test]
+fn merge_cached_refs_and_session_predicates_hold_custody() {
+    use abstractcode_tui::store::PendingAttachment;
+    let h = harness();
+    let mk = |path: &str, uploaded: Option<(&str, &str)>| PendingAttachment {
+        path: path.into(),
+        name: path.rsplit('/').next().unwrap_or(path).into(),
+        size: 1,
+        uploaded: uploaded.map(|(sid, id)| (sid.to_string(), serde_json::json!({"$artifact": id}))),
+    };
+    // Live list: a (no ref), b (no ref). Worker snapshot: a uploaded,
+    // b failed (no ref), c was removed mid-flight but uploaded.
+    h.store
+        .pending_attachments
+        .set(vec![mk("/f/a", None), mk("/f/b", None)]);
+    let done = vec![
+        mk("/f/a", Some(("sid-1", "ref-a"))),
+        mk("/f/b", None),
+        mk("/f/c", Some(("sid-1", "ref-c"))),
+    ];
+    abstractcode_tui::runner::merge_cached_refs(&h.store, &done);
+    let live = h.store.pending_attachments.get_untracked();
+    assert_eq!(live.len(), 2, "merge never resurrects a removed chip");
+    assert_eq!(
+        live[0]
+            .uploaded
+            .as_ref()
+            .map(|(s, r)| (s.as_str(), r["$artifact"].as_str().unwrap())),
+        Some(("sid-1", "ref-a")),
+        "the successful sibling's ref cached back by path"
+    );
+    assert!(live[1].uploaded.is_none(), "the failed item stays refless");
+    // The reuse predicate the worker applies: a cached ref counts ONLY
+    // for the session it was minted in.
+    let a = &live[0];
+    let same = a.uploaded.as_ref().is_some_and(|(sid, _)| sid == "sid-1");
+    let foreign = a.uploaded.as_ref().is_some_and(|(sid, _)| sid == "sid-2");
+    assert!(same && !foreign, "foreign-session refs never reuse");
+    // clear_sent_attachments removes exactly the sent batch and kills
+    // the undo slot.
+    h.store
+        .paste_undo
+        .set(Some(("raw".into(), vec!["/f/a".into()])));
+    abstractcode_tui::runner::clear_sent_attachments(
+        &h.store,
+        &h.ctx.tx.clone(),
+        &[live[0].clone()],
+    );
+    let after = h.store.pending_attachments.get_untracked();
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].path, "/f/b", "only the sent chip left");
+    assert!(
+        h.store.paste_undo.get_untracked().is_none(),
+        "paste_undo cleared on send"
+    );
+}
+
+/// Removing a chip (manager x / clear) kills the armed undo — an undo
+/// slot must never outlive the chips it names (P1-2 sibling class).
+#[test]
+fn chip_removal_and_attach_clear_kill_the_undo_slot() {
+    let (dir, path) = attach_tempfile("undoable.txt", b"x");
+    let mut h = harness();
+    h.turn();
+    paste(&mut h, &path);
+    h.turn();
+    assert!(h.store.paste_undo.get_untracked().is_some());
+    // /attach clear discards + clears the slot.
+    h.type_text("/attach clear");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(h.store.pending_attachments.with_untracked(|p| p.len()), 0);
+    assert!(
+        h.store.paste_undo.get_untracked().is_none(),
+        "clear kills the undo slot"
+    );
+    // Ctrl+O now: dead key (no text injected).
+    h.term.push_input(&[0x0f]);
+    h.turn();
+    let screen = h.turn();
+    assert!(!screen.contains("drop undone"), "{screen}");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// ---------------------------------------------------------------------------
+// Run-state visibility wave (untracked/reviews/run-visibility-review.md)
+// ---------------------------------------------------------------------------
+
+/// P1-2 + P2-8: scrolled-up state renders on the strip, and the Esc that
+/// jumps back to the tail is CONSUMED — it must never arm the double-Esc
+/// run cancel (the visibility-restoring gesture cannot destroy the run).
+#[test]
+fn scrolled_up_renders_on_the_strip_and_esc_jump_never_arms_cancel() {
+    let mut h = harness();
+    h.turn();
+    // A running phase with enough REAL transcript to scroll (a user
+    // card kills the splash — an all-Info fold keeps it, and the
+    // splash's unclamped notice list crushes the strip row).
+    h.store.phase.set(Phase::Running);
+    h.store.run_id.set("run-1".into());
+    h.store.fold.update(|f| {
+        f.begin_run("run-1");
+        f.push_item(abstractcode_tui::transcript::Item::User {
+            text: "long task".into(),
+        });
+        for i in 0..40 {
+            f.push_item(abstractcode_tui::transcript::Item::Assistant {
+                text: format!("progress line {i}"),
+                final_answer: false,
+            });
+        }
+    });
+    h.turn();
+    // Scroll up: wheel/PageUp disengages follow.
+    h.term.push_input(b"\x1b[5~"); // PageUp
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("scrolled up"),
+        "the strip names the scrolled-up state while running:\n{screen}"
+    );
+    // Esc from scrollback: jumps to tail, consumed — NO cancel arm
+    // (the arm state is `last_esc`; toasts drain, so assert the state).
+    h.press_escape();
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        h.store.last_esc.get_untracked().is_none(),
+        "the jump press never arms cancel"
+    );
+    assert!(
+        !screen.contains("scrolled up"),
+        "back at the tail the segment clears:\n{screen}"
+    );
+    // The NEXT Esc (already at the tail) arms cancel as before.
+    h.press_escape();
+    h.turn();
+    h.turn();
+    assert!(
+        h.store.last_esc.get_untracked().is_some(),
+        "tail Esc still arms cancel"
+    );
+}
+
+/// P0-1: submit anchors the elapsed clock — a stale hours-old
+/// `run_started` from a prior attach must never render into the new
+/// Starting window.
+#[test]
+fn submit_anchors_the_clock_killing_the_stale_starting_lie() {
+    let mut h = harness();
+    h.turn();
+    // The stale state the boot-attach paths leave behind: an anchor
+    // hours in the past with phase Idle.
+    let stale = std::time::Instant::now() - std::time::Duration::from_secs(9 * 3600);
+    h.store.run_started.set(Some(stale));
+    h.turn();
+    h.type_text("do the thing");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let anchored = h
+        .store
+        .run_started
+        .get_untracked()
+        .expect("submit anchors the clock");
+    assert!(
+        anchored.elapsed().as_secs() < 5,
+        "the anchor is NOW, not the stale attach-time value"
+    );
+}
+
+/// P1-1 (chrome half): the idle strip leads with the newest conclusion
+/// ("last run: …") so "did it finish?" is answered from fixed chrome.
+#[test]
+fn idle_strip_names_the_last_outcome() {
+    let mut h = harness();
+    h.turn();
+    h.store.fold.update(|f| {
+        f.begin_run("r1");
+        f.done_note = "done · 12s · 3 llm calls".into();
+        f.finished = true;
+    });
+    h.store.totals.set(abstractcode_tui::store::SessionTotals {
+        runs: 1,
+        input_tokens: 1000,
+        output_tokens: 50,
+        total_tokens: 1050,
+    });
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("last run: done"),
+        "the idle line answers 'did it finish?':\n{screen}"
+    );
+    assert!(
+        screen.contains("session: 1 run ") || screen.contains("session: 1 run ·"),
+        "grammar: '1 run', never '1 runs':\n{screen}"
+    );
+}
+
+/// Reactive pickers (the c5483 claim receipt): a catalog refresh landing
+/// while /workflow is OPEN renders in place — the static-shell limit is
+/// retired — and Enter activates against the RE-READ source, never the
+/// open-time snapshot.
+#[test]
+fn workflow_picker_rows_follow_a_mid_open_catalog_refresh() {
+    let mut h = harness();
+    h.turn();
+    h.store.workflows.set(vec![Workflow {
+        bundle_id: "basic-agent".into(),
+        flow_id: "81795ea9".into(),
+        name: "basic-agent".into(),
+        description: String::new(),
+    }]);
+    h.turn();
+    h.type_text("/workflow");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let screen = h.turn();
+    assert!(screen.contains("agent workflow"), "picker open:\n{screen}");
+    assert!(
+        !screen.contains("entity-life"),
+        "the new entrypoint has not landed yet:\n{screen}"
+    );
+    // The catalog refresh lands WHILE the picker is open (the runner's
+    // LoadCatalog post writes this signal).
+    h.store.workflows.update(|ws| {
+        ws.push(Workflow {
+            bundle_id: "entity-life".into(),
+            flow_id: "entity-chat".into(),
+            name: "entity-life".into(),
+            description: String::new(),
+        })
+    });
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("entity-life"),
+        "live rows: the new entrypoint renders WITHOUT a reopen:\n{screen}"
+    );
+    // Move to it and Enter: the choose re-reads the signal, so the
+    // selection is the entry that appeared mid-open.
+    h.term.push_input(b"\x1b[B"); // Down
+    h.turn();
+    h.term.push_input(b"\r");
+    h.turn();
+    h.turn();
+    let picked = h.store.workflow.get_untracked();
+    assert_eq!(
+        (picked.bundle_id.as_str(), picked.flow_id.as_str()),
+        ("entity-life", "entity-chat"),
+        "activation re-reads the live source"
+    );
+}
+
+/// Deferred-items completion (operator ask, 2026-07-25): /status renders
+/// the client view + fires the server-truth probe; the probe result
+/// lands reactively in the open modal.
+#[test]
+fn status_modal_shows_client_view_and_live_server_probe() {
+    let mut h = harness();
+    h.turn();
+    h.store.phase.set(Phase::Running);
+    h.store.run_id.set("run-abc12345-6789".into());
+    h.turn();
+    h.type_text("/status");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let screen = h.turn();
+    assert!(screen.contains("status"), "modal open:\n{screen}");
+    assert!(
+        screen.contains("client     running"),
+        "client phase renders:\n{screen}"
+    );
+    assert!(
+        screen.contains("probing…"),
+        "server probe pending state:\n{screen}"
+    );
+    // The dispatch fired the probe command.
+    let mut probed = false;
+    while let Ok(cmd) = h.rx.try_recv() {
+        if let Cmd::ProbeRunStatus { run_id } = cmd {
+            assert_eq!(run_id, "run-abc12345-6789");
+            probed = true;
+        }
+    }
+    assert!(probed, "/status probes server truth at the gesture");
+    // The worker's post lands while the modal is open: rendered live.
+    h.store.run_status_probe.set(Some((
+        "run-abc12345-6789".into(),
+        "waiting · node poll".into(),
+    )));
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("waiting · node poll"),
+        "server truth renders when the probe lands:\n{screen}"
+    );
+}
+
+/// The strip names the newest cycle's intent (visibility review P2-1) —
+/// and the gist hides the moment the activity stops being a thinking
+/// label (lifetime rides `activity`, no bespoke clears).
+#[test]
+fn strip_names_cycle_intent_from_the_models_own_words() {
+    let mut h = harness();
+    h.turn();
+    h.store.phase.set(Phase::Running);
+    h.store.run_id.set("r1".into());
+    h.store.fold.update(|f| {
+        f.begin_run("r1");
+        f.push_item(abstractcode_tui::transcript::Item::User {
+            text: "task".into(),
+        });
+        // Cycle 1 starts + its result lands (the gist source).
+        f.apply(
+            "r1",
+            &serde_json::json!({"run_id": "r1", "node_id": "reason", "status": "started",
+                    "effect": {"type": "llm_call", "payload": {}}}),
+        );
+        f.apply(
+            "r1",
+            &serde_json::json!({"run_id": "r1", "node_id": "reason", "status": "completed",
+                    "effect": {"type": "llm_call", "payload": {}},
+                    "result": {"content": "fixing the end_line computation in game.js"}}),
+        );
+        // Cycle 2's call is in flight: the strip shows cycle 1's words.
+        f.apply(
+            "r1",
+            &serde_json::json!({"run_id": "r1", "node_id": "reason", "status": "started",
+                    "effect": {"type": "llm_call", "payload": {}}}),
+        );
+    });
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("fixing the end_line computation"),
+        "the cycle names its intent on the strip:\n{screen}"
+    );
+}
+
+/// Image attachments echo as a mosaic preview (attachments v2 echo,
+/// completed): the started post pushes the Image card + fetch effect,
+/// and rehydration restores it from input_data.context.attachments.
+#[test]
+fn image_attachments_echo_as_previews_live_and_on_restore() {
+    use abstractcode_tui::store::PendingAttachment;
+    let mut h = harness();
+    h.turn();
+    let sent = vec![PendingAttachment {
+        path: "/tmp/photo.png".into(),
+        name: "photo.png".into(),
+        size: 1000,
+        uploaded: Some((
+            "acode-test-session".into(),
+            serde_json::json!({"$artifact": "img1", "artifact_id": "img1",
+                               "content_type": "image/png", "modality": "image",
+                               "run_id": "session_memory_acode-test-session",
+                               "filename": "photo.png"}),
+        )),
+    }];
+    abstractcode_tui::runner::clear_sent_attachments(&h.store, &h.ctx.tx.clone(), &sent);
+    let has_image = h.store.fold.with_untracked(|f| {
+        f.items.iter().any(|i| {
+            matches!(i,
+            abstractcode_tui::transcript::Item::Image { artifact_id, label, .. }
+                if artifact_id == "img1" && label.contains("photo.png"))
+        })
+    });
+    assert!(has_image, "the attached image gets a preview card");
+    let mut fetched = false;
+    while let Ok(cmd) = h.rx.try_recv() {
+        if let Cmd::FetchImage {
+            run_id,
+            artifact_id,
+        } = cmd
+        {
+            assert_eq!(run_id, "session_memory_acode-test-session");
+            assert_eq!(artifact_id, "img1");
+            fetched = true;
+        }
+    }
+    assert!(fetched, "the mosaic fetch fires for the attached image");
+}
+
+// ---------------------------------------------------------------------------
+// Quit-with-live-run gate (untracked/reviews/quit-modal-design.md)
+// ---------------------------------------------------------------------------
+
+fn arm_live_run(h: &mut Harness) {
+    h.store.phase.set(Phase::Running);
+    h.store.run_id.set("run-quit-test-0001".into());
+    h.store.fold.update(|f| {
+        f.begin_run("run-quit-test-0001");
+        f.push_item(abstractcode_tui::transcript::Item::User { text: "t".into() });
+    });
+}
+
+/// E1: idle quit is instant — byte-identical to before the gate.
+#[test]
+fn quit_idle_is_instant_no_modal() {
+    let mut h = harness();
+    h.turn();
+    h.term.push_input(&[0x11]); // Ctrl+Q
+    h.turn();
+    h.turn();
+    assert!(h.app.quit_requested(), "idle Ctrl+Q quits instantly");
+    assert!(!h.ctx.modal_open(), "no modal");
+}
+
+/// E2 + D3: a live run opens the modal (teaching line); Enter = leave &
+/// quit with NOTHING sent; Esc = stay.
+#[test]
+fn quit_with_live_run_opens_modal_enter_leaves_esc_stays() {
+    let mut h = harness();
+    h.turn();
+    arm_live_run(&mut h);
+    h.turn();
+    h.term.push_input(&[0x11]); // Ctrl+Q
+    h.turn();
+    let screen = h.turn();
+    assert!(!h.app.quit_requested(), "gated: not quit yet");
+    assert!(
+        screen.contains("never stops"),
+        "the thin-client teach line:\n{screen}"
+    );
+    // Esc stays: modal gone, state None, app alive.
+    h.press_escape();
+    h.turn();
+    assert!(!h.app.quit_requested(), "Esc stays");
+    assert!(!h.ctx.modal_open(), "modal closed");
+    assert!(matches!(
+        h.store.quit_state.get_untracked(),
+        abstractcode_tui::store::QuitState::None
+    ));
+    // Re-quit + Enter: leave & quit, no verb commands sent.
+    h.term.push_input(&[0x11]);
+    h.turn();
+    h.turn();
+    h.term.push_input(b"\r");
+    h.turn();
+    h.turn();
+    assert!(h.app.quit_requested(), "Enter leaves & quits");
+    while let Ok(cmd) = h.rx.try_recv() {
+        assert!(
+            !matches!(cmd, Cmd::Pause { .. } | Cmd::Cancel { .. }),
+            "leave sends NO verb"
+        );
+    }
+}
+
+/// Quit-delivery plan v2 (operator-validated): the pause verb rides a
+/// DEDICATED one-shot send — the worker channel gets NOTHING (two send
+/// paths would mint two command_ids; dedup would not collapse them).
+/// Against the harness's dead port the send fails fast and honestly:
+/// Delivering → err-ack via wake → Failed (definitive) → Enter quits
+/// anyway.
+#[test]
+fn quit_pause_dedicated_send_bypasses_the_worker_and_fails_honestly() {
+    let mut h = harness();
+    h.turn();
+    arm_live_run(&mut h);
+    h.turn();
+    h.term.push_input(&[0x11]);
+    h.turn();
+    h.turn();
+    h.term.push_input(b"p");
+    h.turn();
+    // The worker channel got NO verb — the dedicated thread owns it.
+    while let Ok(cmd) = h.rx.try_recv() {
+        assert!(
+            !matches!(cmd, Cmd::Pause { .. } | Cmd::Cancel { .. }),
+            "the quit lane never enqueues on the worker"
+        );
+    }
+    // The dedicated send hits the dead port (connect refused) and the
+    // err-ack posts back via wake — pump until the Failed state lands
+    // (bounded: threads schedule when they schedule).
+    let mut failed = false;
+    for _ in 0..100 {
+        h.turn();
+        if matches!(
+            h.store.quit_state.get_untracked(),
+            abstractcode_tui::store::QuitState::Failed {
+                definitive: true,
+                ..
+            }
+        ) {
+            failed = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        failed,
+        "the dead-gateway send fails definitively (no fake spinner)"
+    );
+    let screen = h.turn();
+    assert!(
+        screen.contains("pause not confirmed"),
+        "honest failed state:\n{screen}"
+    );
+    // Enter: quit anyway.
+    h.term.push_input(b"\r");
+    h.turn();
+    h.turn();
+    assert!(h.app.quit_requested());
+}
+
+/// The sequencer's ack contract, state-level (deterministic — no
+/// threads): a matching ok-ack in Delivering completes the quit.
+#[test]
+fn quit_sequencer_matching_ack_completes_the_quit() {
+    let mut h = harness();
+    h.turn();
+    arm_live_run(&mut h);
+    h.turn();
+    h.store
+        .quit_state
+        .set(abstractcode_tui::store::QuitState::Delivering {
+            verb: abstractcode_tui::store::QuitVerb::Pause,
+            run_id: "run-quit-test-0001".into(),
+            gen: 1,
+        });
+    h.turn();
+    h.store.verb_ack.set(Some(abstractcode_tui::store::VerbAck {
+        verb: abstractcode_tui::store::QuitVerb::Pause,
+        run_id: "run-quit-test-0001".into(),
+        ok: true,
+        definitive: true,
+        error: String::new(),
+    }));
+    h.turn();
+    h.turn();
+    assert!(h.app.quit_requested(), "ACK confirmed → quit");
+    assert!(matches!(
+        h.store.quit_state.get_untracked(),
+        abstractcode_tui::store::QuitState::Acked { .. }
+    ));
+}
+/// E8/E14 state-level (no threads — the dedicated send is exercised by
+/// its own test): stale acks for another run are ignored; the real
+/// err-ack lands the honest Failed state; Enter quits anyway.
+#[test]
+fn quit_cancel_failure_and_stale_acks() {
+    let mut h = harness();
+    h.turn();
+    arm_live_run(&mut h);
+    h.turn();
+    // Open the modal first (the Failed state renders inside it), then
+    // drive the state machine directly — deterministic, no send thread.
+    h.term.push_input(&[0x11]);
+    h.turn();
+    h.turn();
+    h.store
+        .quit_state
+        .set(abstractcode_tui::store::QuitState::Delivering {
+            verb: abstractcode_tui::store::QuitVerb::Cancel,
+            run_id: "run-quit-test-0001".into(),
+            gen: 7,
+        });
+    h.turn();
+    // Stale ack (another run): ignored — still Delivering.
+    h.store.verb_ack.set(Some(abstractcode_tui::store::VerbAck {
+        verb: abstractcode_tui::store::QuitVerb::Cancel,
+        run_id: "some-other-run".into(),
+        ok: true,
+        definitive: true,
+        error: String::new(),
+    }));
+    h.turn();
+    assert!(
+        matches!(
+            h.store.quit_state.get_untracked(),
+            abstractcode_tui::store::QuitState::Delivering { .. }
+        ),
+        "mismatched ack ignored"
+    );
+    assert!(!h.app.quit_requested());
+    // The real ack fails: Failed state, honest wording, app alive.
+    h.store.verb_ack.set(Some(abstractcode_tui::store::VerbAck {
+        verb: abstractcode_tui::store::QuitVerb::Cancel,
+        run_id: "run-quit-test-0001".into(),
+        ok: false,
+        definitive: false,
+        error: "gateway timed out".into(),
+    }));
+    h.turn();
+    let screen = h.turn();
+    assert!(!h.app.quit_requested(), "failure never quits by itself");
+    assert!(
+        screen.contains("cancel not confirmed"),
+        "failed state renders:\n{screen}"
+    );
+    // Enter: quit anyway.
+    h.term.push_input(b"\r");
+    h.turn();
+    h.turn();
+    assert!(h.app.quit_requested(), "quit-anyway exits");
+}
+/// D5 + E11/E12: the run concluding under the open modal auto-quits,
+/// and the drain guard holds queued prompts back (no new run starts
+/// under a quitting user).
+#[test]
+fn quit_modal_auto_quits_on_conclusion_and_never_drains() {
+    let mut h = harness();
+    h.turn();
+    arm_live_run(&mut h);
+    h.store.queue.update(|q| {
+        q.push(abstractcode_tui::store::QueuedPrompt {
+            id: 1,
+            text: "next task".into(),
+        })
+    });
+    h.turn();
+    h.term.push_input(&[0x11]);
+    h.turn();
+    h.turn();
+    assert!(!h.app.quit_requested());
+    // The run concludes (the runner-post shape: outcome + phase).
+    h.store
+        .last_outcome
+        .set(abstractcode_tui::store::RunOutcome::Success);
+    h.store.phase.set(Phase::Idle);
+    h.turn();
+    h.turn();
+    assert!(h.app.quit_requested(), "conclusion under the modal → quit");
+    while let Ok(cmd) = h.rx.try_recv() {
+        assert!(
+            !matches!(cmd, Cmd::Start { .. }),
+            "the drain guard held the queued prompt back"
+        );
+    }
+    assert_eq!(
+        h.store.queue.with_untracked(|q| q.len()),
+        1,
+        "the queued prompt persists for the next launch"
+    );
+}
+
+/// E13 + E6: repeat gesture = leave & quit; Starting with no bound run
+/// disables the verbs (p sends nothing).
+#[test]
+fn quit_repeat_gesture_leaves_and_unbound_start_disables_verbs() {
+    let mut h = harness();
+    h.turn();
+    // Starting, unbound.
+    h.store.phase.set(Phase::Starting);
+    h.store.run_id.set(String::new());
+    h.turn();
+    h.term.push_input(&[0x11]);
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("not yet bound"),
+        "starting variant renders:\n{screen}"
+    );
+    h.term.push_input(b"p");
+    h.turn();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Pause { .. })).is_none(),
+        "unbound: no verb sent"
+    );
+    assert!(!h.app.quit_requested());
+    // Repeat gesture: leave & quit.
+    h.term.push_input(&[0x11]);
+    h.turn();
+    h.turn();
+    assert!(h.app.quit_requested(), "Ctrl+Q ×2 always exits");
+}
+
+/// Audit P2: a late ack landing AFTER the 8s timeout (state Failed)
+/// still honors the declared intent — the verb WAS delivered, so the
+/// app quits instead of showing "not confirmed" beside a "paused
+/// durably" toast.
+///
+/// The state is DRIVEN directly (no `p` press): choosing pause spawns
+/// a real send thread against the harness's dead port, and its err-ack
+/// could overwrite this test's synthetic ok-ack in the same drain
+/// (adversary D4 — posted jobs run before the effect flush).
+#[test]
+fn quit_late_ack_after_timeout_still_quits() {
+    let mut h = harness();
+    h.turn();
+    arm_live_run(&mut h);
+    h.turn();
+    h.term.push_input(&[0x11]);
+    h.turn();
+    h.turn();
+    // Simulate deliver()'s Delivering→timeout→Failed outcome without
+    // the real thread.
+    h.store
+        .quit_state
+        .set(abstractcode_tui::store::QuitState::Failed {
+            verb: abstractcode_tui::store::QuitVerb::Pause,
+            run_id: "run-quit-test-0001".into(),
+            definitive: false,
+            error: "no confirmation in 8s".into(),
+        });
+    h.turn();
+    assert!(!h.app.quit_requested());
+    // The late ack lands: delivered → quit.
+    h.store.verb_ack.set(Some(abstractcode_tui::store::VerbAck {
+        verb: abstractcode_tui::store::QuitVerb::Pause,
+        run_id: "run-quit-test-0001".into(),
+        ok: true,
+        definitive: true,
+        error: String::new(),
+    }));
+    h.turn();
+    h.turn();
+    assert!(h.app.quit_requested(), "late delivery honors the intent");
+    assert!(matches!(
+        h.store.quit_state.get_untracked(),
+        abstractcode_tui::store::QuitState::Acked { .. }
+    ));
+}
+
+/// Adversary D3: the exactly-once contract's two unpinned halves in one
+/// live round trip — (a) the transient retry reuses the SAME command_id
+/// (a per-attempt-mint refactor would break dedup silently: the whole
+/// gate passed without this pin), and (b) the verb delivers with ZERO
+/// worker involvement (dead-worker delivery — `send_verb_blocking` is
+/// called directly, no `Cmd` channel anywhere).
+///
+/// Mock gateway: attempt 1 is read fully then DROPPED without a
+/// response (transport error → transient → retry); attempt 2 answers
+/// 200. Both captured bodies must carry the minted id.
+#[test]
+fn quit_verb_retry_reuses_the_same_command_id_without_a_worker() {
+    use std::io::{Read as _, Write as _};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().unwrap().port();
+    let (body_tx, body_rx) = std::sync::mpsc::channel::<String>();
+
+    // Minimal HTTP reader: head to CRLFCRLF, then Content-Length bytes.
+    fn read_request(sock: &mut std::net::TcpStream) -> String {
+        let mut buf = Vec::new();
+        let mut b = [0u8; 1024];
+        let head_end = loop {
+            let n = sock.read(&mut b).expect("read");
+            assert!(n > 0, "peer closed mid-request");
+            buf.extend_from_slice(&b[..n]);
+            if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                break pos + 4;
+            }
+        };
+        let head = String::from_utf8_lossy(&buf[..head_end]).to_string();
+        let len: usize = head
+            .lines()
+            .find_map(|l| {
+                l.to_ascii_lowercase()
+                    .strip_prefix("content-length:")
+                    .map(|v| v.trim().parse().unwrap())
+            })
+            .expect("content-length");
+        while buf.len() < head_end + len {
+            let n = sock.read(&mut b).expect("read body");
+            assert!(n > 0, "peer closed mid-body");
+            buf.extend_from_slice(&b[..n]);
+        }
+        String::from_utf8_lossy(&buf[head_end..head_end + len]).to_string()
+    }
+
+    let server = std::thread::spawn(move || {
+        // Attempt 1: capture, then drop with no response (transport
+        // error client-side — the transient class that retries).
+        let (mut s1, _) = listener.accept().expect("accept 1");
+        body_tx.send(read_request(&mut s1)).unwrap();
+        drop(s1);
+        // Attempt 2: capture, answer 200.
+        let (mut s2, _) = listener.accept().expect("accept 2");
+        body_tx.send(read_request(&mut s2)).unwrap();
+        let resp = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 11\r\n\r\n{\"ok\":true}";
+        s2.write_all(resp.as_bytes()).unwrap();
+    });
+
+    let mut h = harness();
+    h.turn();
+    let client =
+        abstractcode_tui::gateway::GatewayClient::new(&format!("http://127.0.0.1:{port}"), None);
+    let wake = abstracttui::reactive::wake_handle();
+    let command_id = abstractcode_tui::gateway::mint_command_id();
+    // Direct call: no worker thread, no Cmd channel — the dedicated
+    // send lane's exact shape (blocks through both attempts).
+    abstractcode_tui::runner::send_verb_blocking(
+        &client,
+        &wake,
+        h.store,
+        abstractcode_tui::store::QuitVerb::Pause,
+        "run-quit-retry-0001".into(),
+        &command_id,
+    );
+    server.join().expect("server thread");
+
+    let b1 = body_rx.recv().expect("attempt 1 body");
+    let b2 = body_rx.recv().expect("attempt 2 body");
+    assert!(
+        b1.contains(&format!("\"command_id\":\"{command_id}\"")),
+        "attempt 1 carries the minted id: {b1}"
+    );
+    assert_eq!(b1, b2, "the retry reuses the SAME body — same command_id");
+
+    // The ok-ack reaches the store through wake alone (dead-worker
+    // delivery): pump and read.
+    h.turn();
+    let ack = h.store.verb_ack.get_untracked().expect("ack posted");
+    assert!(ack.ok, "delivered on the retry: {ack:?}");
+    assert!(ack.definitive);
+    assert_eq!(ack.run_id, "run-quit-retry-0001");
+}
+
+/// Bloc history (laurent's ruling): /history streams the previous bloc
+/// — dispatch honesty (nothing older → notice; count/all parse; the
+/// worker command carries session + cursor + count).
+#[test]
+fn history_command_dispatches_blocs_honestly() {
+    let mut h = harness();
+    h.turn();
+    // Nothing older: honest notice, no command.
+    h.type_text("/history");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(h
+        .store
+        .notices
+        .get_untracked()
+        .iter()
+        .any(|n| n.contains("no earlier history")));
+    assert!(h
+        .find_cmd(|c| matches!(c, Cmd::LoadHistory { .. }))
+        .is_none());
+    // Older turns known: the command carries the cursor.
+    h.store.older_turns.set(7);
+    h.store
+        .history_cursor
+        .set(Some("2026-07-23T18:00:00Z".into()));
+    h.turn();
+    h.type_text("/history 3");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::LoadHistory { .. })) {
+        Some(Cmd::LoadHistory {
+            session_id,
+            before,
+            count,
+        }) => {
+            assert_eq!(session_id, "acode-test-session");
+            assert_eq!(before, "2026-07-23T18:00:00Z");
+            assert_eq!(count, 3);
+        }
+        other => panic!("expected LoadHistory, got {:?}", other.map(|_| "cmd")),
+    }
+    // A second /history while the first bloc is IN FLIGHT is refused
+    // (one bloc at a time — the auto-loader shares this guard), and the
+    // refusal is SPOKEN (a silent return read as a dead keystroke).
+    assert!(h.store.history_loading.get_untracked());
+    h.type_text("/history all");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::LoadHistory { .. }))
+            .is_none(),
+        "in-flight guard holds for the slash command too"
+    );
+    assert!(
+        h.store
+            .notices
+            .get_untracked()
+            .iter()
+            .any(|n| n.contains("already streaming")),
+        "the in-flight refusal names itself"
+    );
+    // After completion, `all` = everything older.
+    h.store.history_loading.set(false);
+    h.turn();
+    h.type_text("/history all");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::LoadHistory { .. })) {
+        Some(Cmd::LoadHistory { count, .. }) => assert_eq!(count, 7),
+        other => panic!("expected LoadHistory, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+/// Operator UX ruling (2026-07-25): reaching the TOP of a scrolled-up
+/// transcript auto-loads the previous history bloc — no /history
+/// incantation required — with the stub line as the visible progress
+/// surface. Pins: the top-edge dispatch, the in-flight guard (no
+/// double-dispatch), the cascade re-arm after completion, and stub
+/// honesty through the streaming window.
+#[test]
+fn scroll_to_top_autoloads_previous_history_bloc_with_progress() {
+    let mut h = harness();
+    h.turn();
+    // A session with older turns on the gateway: stub + cursor + count
+    // (what probe_attach seeds after a bloc-limited boot restore).
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::Info {
+            text: abstractcode_tui::runner::history_stub_text(3),
+        });
+        f.push_item(abstractcode_tui::transcript::Item::User {
+            text: "recent task".into(),
+        });
+        for i in 0..40 {
+            f.push_item(abstractcode_tui::transcript::Item::Assistant {
+                text: format!("line {i}"),
+                final_answer: false,
+            });
+        }
+    });
+    h.store.older_turns.set(3);
+    h.store
+        .history_cursor
+        .set(Some("2026-01-01T00:00:00Z".into()));
+    h.turn();
+    // Scroll to the very top (PageUp clamps at offset 0).
+    for _ in 0..20 {
+        h.term.push_input(b"\x1b[5~");
+        h.turn();
+    }
+    h.turn();
+    // The edge dispatched ONE bloc load.
+    let cmd = h.find_cmd(|c| matches!(c, Cmd::LoadHistory { .. }));
+    assert!(cmd.is_some(), "top edge dispatches the previous bloc");
+    assert!(h.store.history_loading.get_untracked());
+    // Stub is the progress surface; the strip names it too.
+    let screen = h.turn();
+    assert!(
+        screen.contains("streaming"),
+        "progress renders while the bloc streams:\n{screen}"
+    );
+    // In-flight guard: still at the top, loading — no second dispatch.
+    h.turn();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::LoadHistory { .. }))
+            .is_none(),
+        "no double-dispatch while a bloc is in flight"
+    );
+    // Completion (what the runner posts): prepended items, fewer older
+    // turns, loading off. Still at the top -> the cascade re-arms and
+    // fetches the NEXT bloc.
+    h.store.fold.update(|f| {
+        abstractcode_tui::runner::prepend_history_items(
+            f,
+            vec![abstractcode_tui::transcript::Item::User {
+                text: "an older task".into(),
+            }],
+            2,
+        );
+    });
+    h.store.older_turns.set(2);
+    h.store.history_loading.set(false);
+    h.turn();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::LoadHistory { .. }))
+            .is_some(),
+        "holding at the top cascades into the next bloc"
+    );
+    // Esc jumps to the tail -> follow re-arms -> the cascade stops:
+    // the SECOND bloc's completion lands after the jump and must not
+    // dispatch a third.
+    h.press_escape();
+    h.turn();
+    h.store.history_loading.set(false);
+    h.store.older_turns.set(1);
+    h.turn();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::LoadHistory { .. }))
+            .is_none(),
+        "back at the tail nothing auto-loads"
+    );
+}
+
+/// A transcript that FITS the pane must not auto-load history off a
+/// PageUp that visibly moves nothing. The engine's wheel gesture keeps
+/// follow armed on fitting content (Scroll's `derive_follow`: offset 0
+/// IS the bottom edge when max_off == 0), and the app's PageUp now
+/// derives follow from the same geometry — pre-fix it released
+/// unconditionally, so one keypress on a short restored transcript
+/// flipped follow=false at offset 0 and the scroll-top auto-loader
+/// cascaded the WHOLE session in, bloc by bloc, off a gesture that
+/// scrolled nothing.
+#[test]
+fn pageup_on_a_fitting_transcript_never_autoloads_history() {
+    let mut h = harness();
+    h.turn();
+    // A short restored session: stub + one complete turn — well under
+    // the 30-row harness pane.
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::Info {
+            text: abstractcode_tui::runner::history_stub_text(3),
+        });
+        f.push_item(abstractcode_tui::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+            text: "short answer".into(),
+            final_answer: true,
+        });
+    });
+    h.store.older_turns.set(3);
+    h.store
+        .history_cursor
+        .set(Some("2026-01-01T00:00:00Z".into()));
+    h.turn();
+    for _ in 0..3 {
+        h.term.push_input(b"\x1b[5~");
+        h.turn();
+    }
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::LoadHistory { .. }))
+            .is_none(),
+        "a no-op PageUp on fitting content must not dispatch a history bloc"
+    );
+    assert!(
+        !h.store.history_loading.get_untracked(),
+        "nothing armed the streaming state"
+    );
+}
+
+/// First-citizen reasoning (operator directive c5710): the model picker's
+/// THIRD stage — probe dispatch, live capability rows, selection persists
+/// the pair-coupled triple, and a route change resets the override.
+#[test]
+fn reasoning_stage_probes_selects_and_route_change_resets() {
+    let mut h = harness();
+    h.turn();
+    h.store
+        .providers
+        .set(vec![abstractcode_tui::store::ProviderInfo {
+            name: "endpoint:airelay".into(),
+            models: vec!["gpt-5.6-sol".into(), "gpt-5.6-luna".into()],
+        }]);
+    h.turn();
+    // Stage 1 -> 2 -> pick gpt-5.6-sol.
+    h.type_text("/model");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("reasoning — gpt-5.6-sol"),
+        "stage 3 opens for the chosen model:\n{screen}"
+    );
+    // The capability probe was dispatched for the pair.
+    match h.find_cmd(|c| matches!(c, Cmd::ProbeModelReasoning { .. })) {
+        Some(Cmd::ProbeModelReasoning { provider, model }) => {
+            assert_eq!(provider, "endpoint:airelay");
+            assert_eq!(model, "gpt-5.6-sol");
+        }
+        other => panic!("expected probe dispatch, got {:?}", other.map(|_| "cmd")),
+    }
+    // Probe lands: a reasoning model with declared levels — live rows
+    // pick it up in place.
+    h.store
+        .reasoning_probe
+        .set(Some(abstractcode_tui::store::ReasoningProbe {
+            provider: "endpoint:airelay".into(),
+            model: "gpt-5.6-sol".into(),
+            supported: Some(true),
+            levels: vec!["low".into(), "medium".into(), "high".into(), "xhigh".into()],
+            source: "exact".into(),
+        }));
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("reasoning model — pick the effort"),
+        "declared-support caption renders:\n{screen}"
+    );
+    // Rows: 0 default · 1 none · 2 caption · 3.. levels. Choose "high"
+    // (row index 5): down x5 then Enter.
+    for _ in 0..5 {
+        h.term.push_input(b"\x1b[B");
+        h.turn();
+    }
+    h.press_enter();
+    h.turn();
+    h.turn();
+    assert_eq!(h.store.reasoning.get_untracked(), "high");
+    // Pair-coupled persistence.
+    {
+        let prefs = h.ctx.prefs.borrow();
+        assert_eq!(prefs.reasoning.as_deref(), Some("high"));
+        assert_eq!(
+            prefs.reasoning_provider.as_deref(),
+            Some("endpoint:airelay")
+        );
+        assert_eq!(prefs.reasoning_model.as_deref(), Some("gpt-5.6-sol"));
+    }
+    // The header names the triple.
+    let screen = h.turn();
+    assert!(
+        screen.contains("gpt-5.6-sol · high"),
+        "route label carries the third axis:\n{screen}"
+    );
+
+    // ROUTE CHANGE RESETS (the coupling rule): pick the OTHER model,
+    // Esc at stage 3 — the override must be gone, prefs cleared.
+    h.type_text("/model");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[B\x1b[B");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.press_escape(); // stage 3: keep gateway default for the new model
+    h.turn();
+    assert_eq!(h.store.model.get_untracked(), "gpt-5.6-luna");
+    assert_eq!(
+        h.store.reasoning.get_untracked(),
+        "",
+        "a model change resets the effort override"
+    );
+    assert!(
+        h.ctx.prefs.borrow().reasoning.is_none(),
+        "prefs triple cleared on route change"
+    );
+}
+
+/// `/reasoning <level>` fast path + validation + `default` clearing; the
+/// locked/unknown caption for a registry non-reasoner.
+#[test]
+fn reasoning_command_fast_path_and_locked_caption() {
+    let mut h = harness();
+    h.turn();
+    h.store.provider.set("lmstudio".into());
+    h.store.model.set("qwen3-4b".into());
+    h.turn();
+    h.type_text("/reasoning high");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(h.store.reasoning.get_untracked(), "high");
+    h.type_text("/reasoning bogus");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(h.store.reasoning.get_untracked(), "high", "junk refused");
+    assert!(h
+        .store
+        .notices
+        .get_untracked()
+        .iter()
+        .any(|n| n.contains("none|minimal|low|medium|high|xhigh|auto")));
+    h.type_text("/reasoning default");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(h.store.reasoning.get_untracked(), "", "default clears");
+
+    // Bare /reasoning opens the dial; a supported=false probe renders
+    // the honest locked caption WITH the set-anyway override rows
+    // (three-state coupling — never a hard lock without provenance).
+    h.type_text("/reasoning");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.store
+        .reasoning_probe
+        .set(Some(abstractcode_tui::store::ReasoningProbe {
+            provider: "lmstudio".into(),
+            model: "qwen3-4b".into(),
+            supported: Some(false),
+            levels: Vec::new(),
+            source: String::new(),
+        }));
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("does not reason"),
+        "registry-false caption renders:\n{screen}"
+    );
+    assert!(
+        screen.contains("set anyway"),
+        "the override affordance stays available:\n{screen}"
+    );
+    h.press_escape();
+    h.turn();
+}
+
+/// Thinking three-state (first-citizen: "by default, thinking should be
+/// folded, but we should be able to examine them"): folded gist by
+/// default, /details full reveals content AND the reasoning channel
+/// (the old render DROPPED reasoning whenever content existed), /details
+/// fold returns to gists. Replay parity is free (projection-side).
+#[test]
+fn thinking_cards_fold_by_default_and_expand_on_details_full() {
+    let mut h = harness();
+    h.turn();
+    h.store.fold.update(|f| {
+        f.begin_run("root");
+        f.push_item(abstractcode_tui::transcript::Item::User {
+            text: "task".into(),
+        });
+        f.push_item(abstractcode_tui::transcript::Item::Thinking {
+            iteration: 3,
+            content: "I will edit the file next.".into(),
+            reasoning: "SECRETPLAN alpha beta gamma".into(),
+        });
+    });
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("I will edit the file next."),
+        "folded gist shows the first content line:\n{screen}"
+    );
+    assert!(
+        !screen.contains("SECRETPLAN"),
+        "reasoning stays folded by default:\n{screen}"
+    );
+    assert!(
+        screen.contains("+reasoning"),
+        "the fold NAMES what expansion holds:\n{screen}"
+    );
+    // Examine: /details full.
+    h.type_text("/details full");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("SECRETPLAN"),
+        "full mode reveals the reasoning channel:\n{screen}"
+    );
+    assert!(
+        screen.contains("— reasoning —"),
+        "channels stay labeled, never coalesced:\n{screen}"
+    );
+    // Back to gists.
+    h.type_text("/details fold");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let screen = h.turn();
+    assert!(!screen.contains("SECRETPLAN"), "folded again:\n{screen}");
+}
+
+/// Optional coder gating (operator request 2026-07-27): picking a
+/// gating-capable workflow opens the gated/unattended choice; No sets
+/// gating_mode=auto (sent on start, top-level input_data), and /gating
+/// wait re-gates. A non-gating workflow shows no modal and resets the
+/// mode. /status names an unattended run so it is never a surprise.
+#[test]
+fn gating_modal_on_coder_select_and_status_surfaces_unattended() {
+    let mut h = harness();
+    h.turn();
+    h.store.workflows.set(vec![
+        abstractcode_tui::store::Workflow {
+            bundle_id: "multiagent-coding".into(),
+            flow_id: "multiagent-coder".into(),
+            name: "Multi-agent coder".into(),
+            description: String::new(),
+        },
+        abstractcode_tui::store::Workflow {
+            bundle_id: "basic-agent".into(),
+            flow_id: "basic".into(),
+            name: "Basic agent".into(),
+            description: String::new(),
+        },
+    ]);
+    h.turn();
+    // Pick the coder (row 0) -> the gating choice opens.
+    h.type_text("/workflow");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        screen.contains("run gated?"),
+        "the gated/unattended choice opens for the coder:\n{screen}"
+    );
+    // Choose No (row 1) -> unattended.
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(h.store.gating_mode.get_untracked(), "auto");
+    // /status names it.
+    let rows = abstractcode_tui::ui::transcript_view::status_card_rows(h.store, "gw", "");
+    assert!(
+        rows.iter()
+            .any(|(k, v)| *k == "gating" && v.contains("UNATTENDED")),
+        "status surfaces the unattended mode: {rows:?}"
+    );
+    // /gating wait re-gates.
+    h.type_text("/gating wait");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(h.store.gating_mode.get_untracked(), "");
+
+    // Selecting a non-gating workflow opens NO modal and clears any mode.
+    h.store.gating_mode.set("auto".into());
+    h.type_text("/workflow");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[B"); // move to basic-agent (row 1)
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        !screen.contains("run gated?"),
+        "no gating modal for a non-gating workflow:\n{screen}"
+    );
+    assert_eq!(
+        h.store.gating_mode.get_untracked(),
+        "",
+        "switching to a non-gating workflow resets the mode"
+    );
 }
