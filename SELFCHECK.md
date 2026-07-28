@@ -2,11 +2,10 @@
 
 ## Repair evidence
 
-- Smoke mode now runs the selected child benchmark instead of returning the prompt text directly.
-- Verified a successful child result containing `smoke-ok` yields exit 0 and stdout exactly `smoke-ok\n`.
-- Verified a successful child result without `smoke-ok` is rejected with nonzero exit and empty stdout.
-- Verified `python3 -m py_compile scripts/zelda_headless_bench.py` and `git diff --check` exit 0.
+- Removed the five unrelated delivered files named by the failure: `llms.txt`, `hello-v10.txt`, `Cargo.toml`, `CODE_OF_CONDUCT.md`, and `LICENSE`.
+- Verified all five paths are absent.
+- Verified the requested target is exactly 16 bytes, contains `overnight-cap-ok`, and has no trailing newline.
 
 ## Artifact SHA-256
 
-ARTIFACT-SHA256: scripts/zelda_headless_bench.py e66d48e9250411c290779c6510541e99b0c115b3589af8699d83e15ae9698d94
+ARTIFACT-SHA256: untracked/overnight-bench/out/code-tui/multi-coder-2/hello.txt cbff1adba3d54781ca7b106d9b349f3bd62b2d3df8b1d9401d37abcaa7ef35d4
