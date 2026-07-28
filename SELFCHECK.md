@@ -9,4 +9,4 @@
 
 ## Artifact SHA-256
 
-ARTIFACT-SHA256: scripts/zelda_headless_bench.py e66d48e9250411c290779c6510541e99b0c115b3589af8699d83e15ae9698d94
+ARTIFACT-SHA256: scripts/zelda_headless_bench.py fb3bb7709c2d5b35b3e722e3e25c5ace73d4bec9c36010d729eeabfa4c6811f2
