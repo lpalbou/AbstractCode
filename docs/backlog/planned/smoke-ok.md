@@ -4,14 +4,14 @@
 - Source: multi-agent coding workflow
 
 ## Goal
-Return exactly the text "smoke-ok" as requested, without any additional explanation, formatting, or code changes.
+Return exactly the text "smoke-ok" as requested, without additional explanation or formatting.
 
 ## Steps
-- Provide the exact response: smoke-ok
-- Verify that no extra text, punctuation, or formatting is included.
+- Output the exact string "smoke-ok".
+- Verify there are no prefixes, suffixes, code fences, or extra whitespace.
 
 ## Files
 - (none)
 
 ## Risks
-- Any additional content would violate the exact-response requirement.
+- Any additional text or formatting would violate the exact-output requirement.
