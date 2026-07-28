@@ -3,9 +3,8 @@
 ## Repair evidence
 
 - Created the required `untracked/overnight-bench/out/code-tui/multi-coder-2/hello.txt`.
-- Verified `llms.txt`, `hello-v10.txt`, `LICENSE`, `Cargo.toml`, and `CODE_OF_CONDUCT.md` match `main` and are not delivered changes.
-- Removed the prior wrong-path artifact under `multi-coder-1` from the delivered changes.
-- Verified that, excluding this evidence file, the sole delivered delta is the requested artifact.
+- Removed the five named files outside the permitted output path: `llms.txt`, `hello-v10.txt`, `LICENSE`, `Cargo.toml`, and `CODE_OF_CONDUCT.md`.
+- Removed the prior wrong-path artifact under `multi-coder-1`.
 - Verified the required artifact contains exactly `overnight-cap-ok`, is exactly 16 bytes, and has no trailing newline.
 
 ## Artifact SHA-256
