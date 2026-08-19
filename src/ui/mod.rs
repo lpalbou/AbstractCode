@@ -11,6 +11,7 @@ pub mod modals;
 pub mod queue_lane;
 pub mod queue_modal;
 pub mod quit;
+pub mod thinking;
 pub mod transcript_view;
 
 use queue_lane::{

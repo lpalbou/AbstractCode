@@ -2,7 +2,7 @@
 
 use abstracttui::prelude::*;
 use abstracttui::text;
-use abstracttui::widgets::{Sparkline, Spinner};
+use abstracttui::widgets::Sparkline;
 
 use crate::store::{Conn, Phase, Store};
 use crate::ui::UiCtx;
@@ -381,14 +381,7 @@ pub fn activity_strip(t: &TokenSet, store: Store, spin: Signal<u64>, follow: Sig
                             .padding(Edges::hv(1, 0))
                             .width(Dimension::Percent(1.0)),
                     )
-                    .child(
-                        Spinner::new()
-                            .frame(frame)
-                            .label(label)
-                            .layout(LayoutStyle::default().h(1).grow(1.0))
-                            .element(&t)
-                            .build(),
-                    )
+                    .child(crate::ui::thinking::element(&t, frame, label).build())
                     .build();
             }
             let faint = t.text_faint;
@@ -703,14 +696,12 @@ pub fn activity_strip(t: &TokenSet, store: Store, spin: Signal<u64>, follow: Sig
                     // spinner label (live finding: the strip never rendered).
                     .width(Dimension::Percent(1.0)),
             )
-            .child(
-                Spinner::new()
-                    .frame(frame)
-                    .label(label)
-                    .layout(LayoutStyle::default().h(1).grow(1.0))
-                    .element(&t)
-                    .build(),
-            )
+            // The working indicator is the app's own wave, not the
+            // engine Spinner: six cells moving in height AND ink read as
+            // "working" from across the room, where one accent dot read
+            // as punctuation (operator report, 2026-08-19). See
+            // `ui::thinking` for the theme-floor and exact-wrap rules.
+            .child(crate::ui::thinking::element(&t, frame, label).build())
             .child(if series.len() >= 2 {
                 Sparkline::new(series)
                     .layout(LayoutStyle::default().h(1).width(Dimension::Cells(16)))

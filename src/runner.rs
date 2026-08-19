@@ -1073,7 +1073,11 @@ impl Runner {
         let store = self.store;
         if let Ok(v) = self.client.workspace_policy() {
             if let Some(note) = workspace_preflight_note(&v, &opts) {
-                self.post(move || store.fold.update(|f| f.push_item(Item::Info { text: note })));
+                self.post(move || {
+                    store
+                        .fold
+                        .update(|f| f.push_item(Item::Info { text: note }))
+                });
             }
         }
         // Upload pending attachments BEFORE the run exists (design §4.3:

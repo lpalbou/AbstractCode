@@ -762,11 +762,8 @@ pub fn run(args: &Args) -> i32 {
                     eprintln!("agent asks: {prompt}");
                     let (response, log) = resolve_headless_ask(prompt);
                     eprintln!("{log}");
-                    match client.resume(
-                        &wait.run_id,
-                        &wait.wait_key,
-                        json!({"response": response}),
-                    ) {
+                    match client.resume(&wait.run_id, &wait.wait_key, json!({"response": response}))
+                    {
                         Ok(_) => {
                             fold.wait_answered(&wait.wait_key, &wait.step_id);
                         }

@@ -8667,3 +8667,51 @@ fn type_to_focus_leaves_navigation_and_ctrl_chords_alone() {
         "Ctrl+D still reaches the root shortcut"
     );
 }
+
+/// The working indicator on the activity strip is the app's block wave,
+/// not the engine's one-cell spinner (operator report, 2026-08-19: the
+/// old dot was too easy to miss). Pins that it renders while a run is
+/// live, and that it MOVES as frames advance — a frozen wave would look
+/// identical to a hung run.
+#[test]
+fn the_activity_strip_shows_a_moving_wave_while_a_run_is_live() {
+    let mut h = harness();
+    h.turn();
+    h.store.phase.set(Phase::Running);
+    h.store.run_id.set("root".into());
+    h.store.fold.update(|f| f.begin_run("root"));
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::User { text: "hi".into() });
+    });
+
+    let wave_row = |screen: &str| -> Option<String> {
+        screen
+            .lines()
+            .find(|l| l.contains("working"))
+            .map(|l| l.trim_end().to_string())
+    };
+
+    let first = wave_row(&h.turn()).expect("the strip names the running state");
+    assert!(
+        first
+            .chars()
+            .any(|c| ('\u{2581}'..='\u{2588}').contains(&c)),
+        "the wave draws block cells:\n{first}"
+    );
+
+    // Advance past the strip ticker's 120ms cadence: the picture must
+    // change (the wave's own unit tests pin the shape; this pins that
+    // the frame signal actually reaches the strip).
+    let mut moved = false;
+    for _ in 0..6 {
+        std::thread::sleep(std::time::Duration::from_millis(130));
+        if wave_row(&h.turn()).is_some_and(|row| row != first) {
+            moved = true;
+            break;
+        }
+    }
+    assert!(
+        moved,
+        "the wave never advanced — a frozen run reads as hung"
+    );
+}

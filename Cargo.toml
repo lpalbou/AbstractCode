@@ -53,14 +53,3 @@ abstracttui = "0.3.3"
 ureq = { version = "2.12", default-features = false, features = ["tls", "gzip"] }
 # JSON: gateway payloads carry arbitrary user text; battle-tested parsing.
 serde_json = "1"
-
-# 0.3.3 is cut in the sibling repo; crates.io still serves 0.3.1 as of
-# this commit, so the requirement above cannot resolve from the registry
-# alone. This patch builds it from the local checkout in the meantime;
-# DELETE this section once 0.3.3 lands on crates.io (the requirement is
-# already the published spelling, so nothing else changes). `cargo
-# publish` of this crate must wait for that too — a patch section is
-# ignored by consumers, and a requirement no registry can satisfy would
-# break every install.
-[patch.crates-io]
-abstracttui = { path = "../abstracttui" }
