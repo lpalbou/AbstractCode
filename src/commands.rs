@@ -36,6 +36,9 @@ pub enum Command {
     /// (the multi-agent coder): auto runs unattended (skips human
     /// approval pauses), wait restores gated. Bare shows/toggles.
     Gating(Option<String>),
+    /// `/review [on|off|rounds N]` — verifier-before-conclude, the
+    /// premature-completion guard (parity with abstractcode's `/review`).
+    Review(Option<String>),
     /// `/status` — the run/session status card (client phase + server
     /// run status probe + connection + workspace facts).
     Status,
@@ -145,6 +148,7 @@ pub fn parse(text: &str) -> Option<Command> {
             Command::Reasoning(if rest.is_empty() { None } else { Some(rest) })
         }
         "/gating" | "/gate" => Command::Gating(if rest.is_empty() { None } else { Some(rest) }),
+        "/review" | "/verify" => Command::Review(if rest.is_empty() { None } else { Some(rest) }),
         "/status" => Command::Status,
         "/history" => Command::History(if rest.is_empty() { None } else { Some(rest) }),
         "/attach" => Command::Attach(if rest.is_empty() { None } else { Some(rest) }),
@@ -202,6 +206,7 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
     ("new", "fresh session"),
     ("theme", "pick a theme"),
     ("workflow", "pick the agent workflow"),
+    ("review", "verifier before the agent may conclude"),
     ("model", "pick provider + model + reasoning"),
     ("reasoning", "reasoning effort for the current route"),
     (
@@ -260,7 +265,7 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
     ),
     ("task", "leave a task on an entity's desk"),
     ("end", "close an entity visit (reflection runs)"),
-    ("focus", "switch conversation focus (Ctrl+E cycles)"),
+    ("focus", "switch conversation focus (Alt+E cycles)"),
     ("quit", "leave"),
 ];
 
@@ -303,6 +308,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     (
         "/theme [id]",
         "pick a theme (26 built-in) or set one directly",
+    ),
+    (
+        "/review",
+        "verifier the agent must survive before it may conclude (on|off|rounds N)",
     ),
     (
         "/workflow",
@@ -401,7 +410,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     (
         "/focus <name|agent>",
-        "switch conversation focus (Ctrl+E cycles)",
+        "switch conversation focus (Alt+E cycles)",
     ),
     ("/quit", "leave (Ctrl+Q too; Ctrl+C clears the prompt — twice in a row quits)"),
 ];
@@ -425,7 +434,10 @@ pub const HELP_EXTRA: &[(&str, &str)] = &[
         "?",
         "on an empty composer: open this reference (the footer's `? keys + commands`)",
     ),
-    ("Tab", "move focus (composer / transcript / modal fields)"),
+    (
+        "Tab",
+        "move focus (composer / transcript / modal fields) — outside a modal, typing / pasting / dropping a file returns focus to the composer and keeps what arrived (a dropped file becomes a chip, as always)",
+    ),
     ("Ctrl+T", "cycle theme"),
     (
         "select text",
@@ -436,8 +448,8 @@ pub const HELP_EXTRA: &[(&str, &str)] = &[
         "newline — works in EVERY terminal (it is the LF byte on the legacy wire); Shift+Enter works where the kitty keyboard protocol is live (kitty/Ghostty/foot from startup; iTerm2 ≥ 3.5, VS Code/Cursor, Warp via the mid-session probe); Alt+Enter = Option+Enter with \"Option as Meta/Esc+\" on macOS",
     ),
     (
-        "Ctrl+E",
-        "cycle conversation focus (agent ↔ open entity visits)",
+        "Alt+E",
+        "cycle conversation focus (agent ↔ open entity visits) — Option+E on macOS with \"Option as Meta/Esc+\"; `/focus <name|agent>` works on every terminal. Was Ctrl+E before 0.4.0: the composer's editor keymap now owns that chord (move to line end)",
     ),
     (
         "entity turns",

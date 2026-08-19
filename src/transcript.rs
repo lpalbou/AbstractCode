@@ -36,6 +36,26 @@ pub enum ToolStatus {
     Denied,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct CallCost {
+    /// Provider-reported whole-call duration in milliseconds. `None`
+    /// means the record did not carry a positive `gen_time`.
+    pub gen_time_ms: Option<f64>,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+impl CallCost {
+    fn from_record(rec: &Value) -> Self {
+        let usage = protocol::usage_from_record(rec).unwrap_or_default();
+        Self {
+            gen_time_ms: protocol::gen_time_ms_from_record(rec),
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     User {
@@ -49,6 +69,16 @@ pub enum Item {
         iteration: u32,
         content: String,
         reasoning: String,
+        /// Per-call cost facts, rendered ONLY under `/details full`.
+        ///
+        /// `gen_time` is the whole call — prompt processing AND generation — because
+        /// that is all a non-streaming response can report; the split needs a
+        /// first-token timestamp the provider never sends back. What the two token
+        /// counts DO separate is which side the time went to: a call with a large
+        /// input and few output tokens spent it preprocessing, and one with a low
+        /// output rate against a small input is not working, it is stuck. The
+        /// pathological call in run 6b77351b was 120 minutes for 111 output tokens.
+        call: CallCost,
     },
     Tool {
         key: String,
@@ -131,6 +161,16 @@ pub struct Stats {
     /// zero-poisoned split rather than reported — chrome renders "ctx ~N"
     /// so an estimate is never presented as a measurement.
     pub last_input_is_estimate: bool,
+    /// Input tokens of the call BEFORE the newest one. The difference
+    /// against `last_input_tokens` is the only cache-relevant number a
+    /// client can compute without provider cooperation: how much of this
+    /// prompt is NEW (must be evaluated) versus carried forward from the
+    /// previous cycle (a cacheable prefix). Local llama.cpp-class servers
+    /// almost never report `cached_input_tokens`, so this derivation is
+    /// what makes the cache panel say anything at all — and it explains the
+    /// thing operators actually feel, which is later cycles costing more
+    /// because a big tool result was folded into the context.
+    pub prev_input_tokens: u64,
     /// Cumulative prompt tokens served from the provider cache this run
     /// (0 when the provider never reports cache hits).
     pub cached_tokens: u64,
@@ -385,6 +425,19 @@ pub struct Fold {
     pub finished: bool,
     /// True when the ROOT (or answer-source run) recorded a failure.
     pub failed: bool,
+    /// The loop STOPPED on its iteration budget rather than FINISHING
+    /// (`outcome: "iteration_budget"`), with the iteration count when the
+    /// verdict carried one.
+    ///
+    /// Separate from `failed` on purpose: nothing failed — the agent was
+    /// interrupted mid-task, which is a THIRD outcome beside "finished" and
+    /// "errored" and must never be rendered or exit-coded as either. Before
+    /// this existed the verdict reached only an `Item::Error` in scrollback
+    /// while the fixed chrome line still read `✓ done` and headless `exec`
+    /// still exited 0 — so a truncated run was indistinguishable from a
+    /// completed one to both the operator and every script, and
+    /// `zelda_headless_bench.py` scored it as a PASS.
+    pub budget_exhausted: Option<u64>,
     /// Turn wall clock (set at `begin_run`) — feeds the done summary's
     /// elapsed. Meaningless during ledger REPLAY (`replay` suppresses
     /// the elapsed segment, never the summary itself).
@@ -448,6 +501,12 @@ impl Fold {
         self.followed.insert(root_run_id.to_string());
         self.finished = false;
         self.failed = false;
+        // Per-TURN verdict, cleared like `failed`. Leaving it latched made a
+        // truncated turn poison every later turn in the session: turn 2 of a
+        // clean run still rendered "stopped: iteration budget (N)" in the
+        // fixed chrome. A honesty fix that lies in the other direction is
+        // still a lying client.
+        self.budget_exhausted = None;
         self.activity.clear();
         self.cycle = 0;
         self.cycles.clear();
@@ -854,6 +913,7 @@ impl Fold {
                     iteration: n.max(1),
                     content: bounded(&cycle.content, TEXT_BLOCK_MAX),
                     reasoning: bounded(&cycle.reasoning, TEXT_BLOCK_MAX),
+                    call: CallCost::from_record(rec),
                 });
             }
         }
@@ -1322,6 +1382,11 @@ impl Fold {
                     // "tool call 14m" into the NEXT turn's Starting
                     // window (adversary P2-2).
                     self.clear_llm_inflight();
+                    // The loop's own verdict decides the WORD. A run that
+                    // exhausted its iteration budget mid-task must not read
+                    // as "done" — that is the client claiming completion the
+                    // loop never claimed.
+                    self.push_verdict_note(rec);
                     self.push_done_summary("completed");
                 } else if rec_run == self.steer_run_id {
                     // An ITERATION's own end (the goal lane): its
@@ -1352,6 +1417,11 @@ impl Fold {
                     self.activity.clear();
                     self.pending_wait = None;
                     self.clear_llm_inflight();
+                    // The loop's own verdict decides the WORD. A run that
+                    // exhausted its iteration budget mid-task must not read
+                    // as "done" — that is the client claiming completion the
+                    // loop never claimed.
+                    self.push_verdict_note(rec);
                     self.push_done_summary("completed");
                 } else if rec_run == self.steer_run_id {
                     self.steer_run_id.clear();
@@ -1413,12 +1483,68 @@ impl Fold {
     /// Exactly-once by the same `finished` guards that already fence
     /// the conclusion sites. Facts are fold-truth (ledger-derived);
     /// elapsed is the client turn clock, omitted under replay.
+    /// Surface the loop's own machine-readable verdict BEFORE the done line,
+    /// when it says something the "✓ done" line would hide.
+    ///
+    /// Two cases, both from `abstractagent/adapters/react_runtime.py`:
+    /// `outcome: "iteration_budget"` (the `max_iterations_node` fired — the
+    /// loop STOPPED, it did not FINISH) and `review_skipped: true` (the
+    /// verifier pass was asked for and could not run, so nothing checked the
+    /// answer). Ignoring both is how a truncated run reads as a completed
+    /// one.
+    fn push_verdict_note(&mut self, rec: &Value) {
+        let verdict = match protocol::run_verdict(rec) {
+            Some(v) if !v.is_unremarkable() => v,
+            _ => return,
+        };
+        if verdict.budget_exhausted() {
+            // Latch it so the CONCLUSION word and the exit code can tell the
+            // truth too — an error card at the transcript tail is not where
+            // "did it finish?" gets answered.
+            self.budget_exhausted = Some(verdict.iterations.unwrap_or(0));
+            let iters = verdict
+                .iterations
+                .map(|n| format!(" after {n} iterations"))
+                .unwrap_or_default();
+            self.push_item(Item::Error {
+                text: format!(
+                    "iteration budget exhausted{iters} — the agent STOPPED, \
+                     it did not finish. Raise --max-iterations, or send the \
+                     remaining work as a follow-up turn."
+                ),
+            });
+        }
+        if verdict.review_skipped {
+            self.push_item(Item::Info {
+                text: "#FALLBACK: the verifier pass was requested but did not run — \
+                       this answer was not checked against the tool outputs."
+                    .into(),
+            });
+        }
+    }
+
     fn push_done_summary(&mut self, outcome: &str) {
-        let (glyph, word) = match outcome {
-            "completed" => ("✓", "done".to_string()),
-            "cancelled" => ("⊘", "cancelled".to_string()),
-            "unknown" => ("✗", "ended (status unknown)".to_string()),
-            other => ("✗", other.to_string()),
+        // A budget-stopped run reports "completed" at the RUN level — correct
+        // there, wrong at the turn level, because the loop stopped mid-task.
+        // The verdict overrides the word so the one line the operator reads
+        // from fixed chrome (`last run: …`, sourced from `done_note`) cannot
+        // say "done" about work that was cut off.
+        let (glyph, word) = match (outcome, self.budget_exhausted) {
+            ("completed", Some(iters)) => (
+                "⚠",
+                if iters > 0 {
+                    // `iterations` is the count USED (react_runtime sets it from
+                    // `current_iteration`), not the ceiling — "budget (7)" read
+                    // as if 7 were the limit.
+                    format!("stopped: iteration budget after {iters} iterations")
+                } else {
+                    "stopped: iteration budget".to_string()
+                },
+            ),
+            ("completed", None) => ("✓", "done".to_string()),
+            ("cancelled", _) => ("⊘", "cancelled".to_string()),
+            ("unknown", _) => ("✗", "ended (status unknown)".to_string()),
+            (other, _) => ("✗", other.to_string()),
         };
         let mut parts: Vec<String> = Vec::new();
         if !self.replay {
@@ -1674,6 +1800,9 @@ impl Fold {
         self.stats.cached_tokens += usage.cached_tokens;
         if telemetry_lane && usage.input_tokens > 0 {
             // The live "context used" number: the agent lane's newest call.
+            // Keep the previous one first — their difference is the new-vs-carried
+            // split the cache panel reports (see `Stats::prev_input_tokens`).
+            self.stats.prev_input_tokens = self.stats.last_input_tokens;
             self.stats.last_input_tokens = usage.input_tokens;
             self.stats.last_input_is_estimate = false;
         } else if telemetry_lane && usage.total_tokens > 0 {
@@ -1689,6 +1818,7 @@ impl Fold {
             // output is also unreported), and mark it so chrome renders
             // "~" — an estimate labeled, never a stale number presented
             // as fresh.
+            self.stats.prev_input_tokens = self.stats.last_input_tokens;
             self.stats.last_input_tokens = usage.total_tokens.saturating_sub(usage.output_tokens);
             self.stats.last_input_is_estimate = true;
         }
@@ -1714,9 +1844,18 @@ impl Fold {
         }
     }
 
+    /// Card identity for a tool call.
+    ///
+    /// The id branch is scoped by `run_id` for the same reason the positional branch
+    /// always was: a card key is only safe as a global namespace if the id inside it
+    /// is globally unique, and a correlation id is unique per RUN, not per session.
+    /// Unscoped, two calls sharing an id anywhere in the tree (a retry, a sub-agent)
+    /// collapse onto one card — the second call renders no card and its result
+    /// overwrites the first's, so a card shows another call's output under its own
+    /// name and arguments.
     fn tool_key(run_id: &str, node_id: &str, index: usize, call_id: &str) -> String {
         if !call_id.is_empty() {
-            format!("call:{call_id}")
+            format!("call:{run_id}:{call_id}")
         } else {
             format!("pos:{run_id}:{node_id}:{index}")
         }
@@ -1732,7 +1871,9 @@ impl Fold {
         args: Option<&Value>,
     ) {
         let key = Self::tool_key(run_id, node_id, index, &call_id);
-        if !call_id.is_empty() && !self.seen_call_ids.insert(call_id.clone()) {
+        // Track the run-scoped KEY, not the bare id: the set decides "does a card
+        // already exist for this call?", and card identity is the key.
+        if !call_id.is_empty() && !self.seen_call_ids.insert(key.clone()) {
             // Already have a card (from the approval wait); flip it to running.
             for item in self.items.iter_mut().rev() {
                 if let Item::Tool { key: k, status, .. } = item {
@@ -1854,7 +1995,7 @@ impl Fold {
         }
         // No started card (replay from mid-stream): append a finished one.
         if !view.call_id.is_empty() {
-            self.seen_call_ids.insert(view.call_id.clone());
+            self.seen_call_ids.insert(key.clone());
         }
         self.push_item(Item::Tool {
             key,
@@ -1890,9 +2031,11 @@ impl Fold {
                 if let Some(view) = protocol::tool_call_view(tc) {
                     let key = Self::tool_key(run_id, "approval", i, &view.call_id);
                     let args_preview = value_preview(view.arguments.as_ref(), ARGS_PREVIEW_MAX);
-                    if !view.call_id.is_empty() && !self.seen_call_ids.insert(view.call_id.clone())
-                    {
-                        let call_key = format!("call:{}", view.call_id);
+                    // `tool_key` is the single authority for card identity. This site
+                    // used to hand-roll `call:{id}` to find the card `upsert_tool_started`
+                    // had made — which only worked while both spellings were unscoped.
+                    if !view.call_id.is_empty() && !self.seen_call_ids.insert(key.clone()) {
+                        let call_key = key.clone();
                         let mut flipped = false;
                         for item in self.items.iter_mut().rev() {
                             if let Item::Tool {
@@ -1965,6 +2108,94 @@ impl Fold {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two distinct calls must never collapse onto one card.
+    ///
+    /// Regression: `tool_key` keyed the id branch as a GLOBAL `call:{id}` namespace
+    /// and `tool_call_view` preferred the MODEL-supplied `call_id` (observed as bare
+    /// repeating integers) over the run-unique `runtime_call_id`. Two `read_file`
+    /// calls sharing an id then collapsed: the second minted no card, and its result
+    /// overwrote the first's — one card labelled with call A's arguments while
+    /// displaying call B's output, with both files genuinely read.
+    #[test]
+    fn colliding_call_ids_do_not_merge_tool_cards() {
+        let record = json!({
+            "run_id": "root", "node_id": "n1", "status": "completed",
+            "effect": {"type": "tool_calls", "payload": {"tool_calls": [
+                {"name": "read_file", "arguments": {"file_path": "Core/Self_Model.md"},
+                 "call_id": "1", "runtime_call_id": "rtcall_abc_1"},
+                {"name": "read_file", "arguments": {"file_path": "Semantic/Critical_Insights.md"},
+                 "call_id": "1", "runtime_call_id": "rtcall_abc_2"}
+            ]}},
+            "result": {"results": [
+                {"name": "read_file", "call_id": "1", "runtime_call_id": "rtcall_abc_1",
+                 "success": true, "output": "CONTENT-OF-SELF-MODEL"},
+                {"name": "read_file", "call_id": "1", "runtime_call_id": "rtcall_abc_2",
+                 "success": true, "output": "CONTENT-OF-CRITICAL-INSIGHTS"}
+            ]}
+        });
+
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply("root", &record);
+
+        let cards: Vec<(String, String)> = fold
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Tool {
+                    args_preview,
+                    result_preview,
+                    ..
+                } => Some((args_preview.clone(), result_preview.clone())),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(cards.len(), 2, "each call gets its own card: {cards:?}");
+        for (args, result) in &cards {
+            // The whole point: the file named in the arguments is the file whose
+            // content the card shows.
+            if args.contains("Self_Model") {
+                assert!(
+                    result.contains("SELF-MODEL"),
+                    "card shows another call's output: {cards:?}"
+                );
+            } else {
+                assert!(
+                    result.contains("CRITICAL-INSIGHTS"),
+                    "card shows another call's output: {cards:?}"
+                );
+            }
+        }
+    }
+
+    /// The same correlation id in two different runs is two different calls.
+    #[test]
+    fn same_call_id_across_runs_stays_separate() {
+        let mk = |run: &str, path: &str, out: &str| {
+            json!({
+                "run_id": run, "node_id": "n1", "status": "completed",
+                "effect": {"type": "tool_calls", "payload": {"tool_calls": [
+                    {"name": "read_file", "arguments": {"file_path": path}, "call_id": "dup"}
+                ]}},
+                "result": {"results": [
+                    {"name": "read_file", "call_id": "dup", "success": true, "output": out}
+                ]}
+            })
+        };
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply("root", &mk("root", "a.md", "OUTPUT-A"));
+        fold.apply("root", &mk("sub", "b.md", "OUTPUT-B"));
+
+        let n = fold
+            .items
+            .iter()
+            .filter(|i| matches!(i, Item::Tool { .. }))
+            .count();
+        assert_eq!(n, 2, "a shared id in a different run is a different call");
+    }
 
     #[test]
     fn done_summary_marks_every_conclusion() {
@@ -2629,6 +2860,7 @@ mod tests {
             iteration: 1,
             content: "…".into(),
             reasoning: String::new(),
+            call: CallCost::default(),
         });
         fold.push_item(Item::Assistant {
             text: "a1".into(),
@@ -3013,6 +3245,101 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// A run that STOPPED on its iteration budget must not read as one that
+    /// FINISHED — in the scrollback card, in `done_note` (the only source for
+    /// the fixed chrome `last run: …` line), or in the glyph.
+    ///
+    /// This is the operator's original complaint in its purest form: the agent
+    /// claimed completion it had not earned. Before this test the verdict
+    /// reached an `Item::Error` only, while `done_note` still said `done` —
+    /// so the one line built to answer "did it finish?" answered wrong.
+    #[test]
+    fn iteration_budget_stop_never_renders_or_reports_as_done() {
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "node_id": "done", "status": "completed",
+                    "result": {"completed": true, "output": {
+                        "answer": "Here is the game.",
+                        "outcome": "iteration_budget",
+                        "iterations": 50}}}),
+        );
+        assert!(fold.finished);
+        assert_eq!(
+            fold.budget_exhausted,
+            Some(50),
+            "the verdict latches with its iteration count"
+        );
+        // NOT a failure: nothing errored, the agent was interrupted.
+        assert!(
+            !fold.failed,
+            "budget exhaustion is a third outcome, not a failure"
+        );
+        // The conclusion word itself must carry the truth.
+        assert!(
+            fold.done_note.contains("stopped: iteration budget"),
+            "done_note drives the fixed chrome line; got {:?}",
+            fold.done_note
+        );
+        assert!(
+            fold.done_note.contains("50"),
+            "the budget that was hit is named: {:?}",
+            fold.done_note
+        );
+        assert!(
+            !fold.done_note.starts_with("done"),
+            "a truncated run must never announce itself as done: {:?}",
+            fold.done_note
+        );
+        // The explanatory card still fires, with the remedy.
+        assert!(
+            fold.items.iter().any(|i| matches!(i, Item::Error { text }
+                if text.contains("STOPPED") && text.contains("max-iterations"))),
+            "the verdict card explains the stop and how to raise the budget"
+        );
+        // And the exec exit code separates it from success AND from failure.
+        assert_eq!(
+            crate::exec::exit_code_for_status_with_verdict("completed", true),
+            crate::exec::EXIT_ITERATION_BUDGET
+        );
+        assert_ne!(crate::exec::EXIT_ITERATION_BUDGET, 0);
+        assert_ne!(crate::exec::EXIT_ITERATION_BUDGET, 1);
+    }
+
+    /// The mirror: an ordinary completion is untouched by the new branch —
+    /// still `✓ done`, still exit 0. Guards against over-firing the verdict.
+    #[test]
+    fn ordinary_completion_still_reads_done_and_exits_zero() {
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "node_id": "done", "status": "completed",
+                    "result": {"completed": true, "output": {"answer": "Done."}}}),
+        );
+        assert!(fold.finished);
+        assert_eq!(fold.budget_exhausted, None);
+        assert!(
+            fold.done_note.starts_with("done"),
+            "got {:?}",
+            fold.done_note
+        );
+        assert_eq!(
+            crate::exec::exit_code_for_status_with_verdict("completed", false),
+            0
+        );
+        // A real failure keeps priority over the budget verdict.
+        assert_eq!(
+            crate::exec::exit_code_for_status_with_verdict("failed", true),
+            1
+        );
+        assert_eq!(
+            crate::exec::exit_code_for_status_with_verdict("cancelled", true),
+            130
+        );
     }
 
     #[test]
@@ -3662,6 +3989,48 @@ mod tests {
         assert_eq!(fold.session.input_tokens, 7975);
         assert_eq!(fold.session.output_tokens, 307);
         assert_eq!(fold.stats.effective_model, "gpt-5.6-sol");
+    }
+
+    /// The cache panel's new-vs-carried split. Providers of the llama.cpp class
+    /// never report `cached_input_tokens`, so the only cache-relevant thing a
+    /// client can state is how much of THIS prompt is new against the previous
+    /// call — a difference between two numbers it already holds.
+    #[test]
+    fn prev_input_tokens_tracks_the_call_before_the_newest() {
+        let call = |input: u64, output: u64| {
+            json!({"run_id": "root", "node_id": "reason", "status": "completed",
+                   "effect": {"type": "llm_call", "payload": {}},
+                   "result": {"content": "…", "usage": {
+                       "input_tokens": input, "output_tokens": output,
+                       "total_tokens": input + output}}})
+        };
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+
+        fold.apply("root", &call(4_396, 111));
+        assert_eq!(fold.stats.last_input_tokens, 4_396);
+        assert_eq!(fold.stats.prev_input_tokens, 0, "no previous call yet");
+
+        // A 20k-token tool result folds into the transcript: the next prompt is
+        // mostly carried, and the NEW part is what actually has to be evaluated.
+        fold.apply("root", &call(24_831, 17_405));
+        assert_eq!(fold.stats.last_input_tokens, 24_831);
+        assert_eq!(fold.stats.prev_input_tokens, 4_396);
+        assert_eq!(
+            fold.stats.last_input_tokens - fold.stats.prev_input_tokens,
+            20_435,
+            "new tokens on this call"
+        );
+
+        // Compaction shrinks the context: the panel must not underflow.
+        fold.apply("root", &call(9_000, 50));
+        assert_eq!(fold.stats.prev_input_tokens, 24_831);
+        assert!(fold.stats.last_input_tokens < fold.stats.prev_input_tokens);
+
+        // Re-send amplification, the other number the panel reports.
+        assert_eq!(fold.stats.input_tokens, 38_227);
+        assert_eq!(fold.stats.output_tokens, 17_566);
+        assert_eq!(fold.stats.llm_calls, 3);
     }
 
     #[test]

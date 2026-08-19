@@ -38,6 +38,10 @@ use crate::ui::UiCtx;
 /// thread's round-trip (and its one same-id retry). On timeout the
 /// Failed state says the command may still land if the user stays —
 /// the dedicated thread keeps running and a late ack still quits.
+/// `#[WARNING:TIMEOUT]` quit-acknowledgement grace (ADR-0027 §4).
+/// NOT a run deadline: the run keeps going on the gateway and a late ack is
+/// still honored (`quit.rs` late-ack path). It only bounds how long the UI
+/// waits before letting the operator go.
 pub(crate) const QUIT_ACK_TIMEOUT: Duration = Duration::from_secs(8);
 
 thread_local! {

@@ -315,6 +315,75 @@ pub enum Cmd {
     Shutdown,
 }
 
+fn workspace_preflight_note(policy_response: &Value, opts: &StartOpts) -> Option<String> {
+    let policy = policy_response.get("policy").unwrap_or(policy_response);
+    if policy.get("target").and_then(Value::as_str).unwrap_or("") != "server" {
+        return None;
+    }
+    let overrides = policy
+        .get("client_workspace_scope_overrides")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let mounts: Vec<String> = policy
+        .get("mounts")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("name").and_then(Value::as_str))
+                .filter(|name| !name.trim().is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let requested_mode = opts
+        .workspace_mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty());
+    let requested_scope = opts
+        .workspace_root
+        .as_deref()
+        .is_some_and(|r| !r.trim().is_empty())
+        || requested_mode.is_some()
+        || opts.workspace_allowed.iter().any(|p| !p.trim().is_empty());
+    let all_except_allowed = policy
+        .get("allowed_access_modes")
+        .and_then(Value::as_array)
+        .is_some_and(|arr| arr.iter().any(|m| m.as_str() == Some("all_except_ignored")));
+
+    let base = if mounts.is_empty() {
+        "gateway default workspace only".to_string()
+    } else {
+        format!(
+            "gateway default workspace + extra allowed workspaces [{}]",
+            mounts.join(", ")
+        )
+    };
+    if overrides {
+        let scope_part = if requested_scope {
+            "this run may use its requested client workspace scope"
+        } else {
+            "gateway will honor client-declared workspace scope when a run requests it"
+        };
+        let grants = if mounts.is_empty() {
+            String::new()
+        } else {
+            format!(" Extra allowed workspaces: {}.", mounts.join(", "))
+        };
+        Some(format!(
+            "workspace access policy: launch-folder trust ON — {scope_part}.{grants}"
+        ))
+    } else {
+        let mut note = format!("workspace access policy: launch-folder trust OFF — {base}");
+        if requested_mode == Some("all_except_ignored") && !all_except_allowed {
+            note.push_str("; requested access mode `all_except_ignored` is unavailable here");
+        } else if requested_scope {
+            note.push_str("; this run cannot widen its scope from the client side");
+        }
+        Some(note)
+    }
+}
+
 /// Queue the FETCH effects a REHYDRATION fold produced (offloaded-answer
 /// and image fetches for restored placeholders). `FollowRun` is ignored
 /// BY CONTRACT here: rehydration decides stream membership itself from
@@ -376,6 +445,11 @@ struct Runner {
     catalog_attempted: bool,
     catalog_loaded: bool,
     catalog_preference: (Option<String>, Option<String>),
+    /// The raw `--workflow` string, when the operator gave one on the COMMAND
+    /// LINE. `None` for a prefs-driven selection — only an explicit request
+    /// earns a mismatch refusal (a saved preference degrading to the default
+    /// is the interactive contract).
+    requested_workflow: Option<String>,
 }
 
 pub fn spawn(
@@ -384,6 +458,7 @@ pub fn spawn(
     store: Store,
     tx: Sender<Cmd>,
     rx: Receiver<Cmd>,
+    requested_workflow: Option<String>,
 ) -> std::thread::JoinHandle<()> {
     let panic_wake = wake.clone();
     std::thread::Builder::new()
@@ -403,6 +478,7 @@ pub fn spawn(
                     catalog_attempted: false,
                     catalog_loaded: false,
                     catalog_preference: (None, None),
+                    requested_workflow,
                 };
                 while let Ok(cmd) = rx.recv() {
                     if matches!(cmd, Cmd::Shutdown) {
@@ -732,6 +808,33 @@ impl Runner {
                     preferred_bundle.as_deref(),
                     preferred_flow.as_deref(),
                 );
+                // A workflow requested on the COMMAND LINE that resolved to
+                // something else must say so. `choose_workflow` degrades to
+                // basic-agent by design for the PREFS lane (a stale saved
+                // preference falling back to the default is the interactive
+                // contract), but headless `exec` refuses outright for an
+                // explicit `--workflow`, and this lane used to accept the
+                // substitution in silence — the operator asked for one agent
+                // and watched a different one work, with only the header
+                // wordmark as a tell. Deterministic orchestration needs the
+                // mismatch stated.
+                // BOOT LOAD ONLY. `/workflow` re-issues LoadCatalog with the
+                // SAVED PREFS, not the CLI flag, so evaluating the flag again
+                // on every picker open posted a false "not found" card for an
+                // installed workflow, repeatedly, while `store.workflow` was
+                // left untouched anyway.
+                let first_load = !self.catalog_loaded;
+                let substitution = self
+                    .requested_workflow
+                    .as_deref()
+                    .filter(|_| first_load)
+                    .and_then(|raw| {
+                        let c = chosen.as_ref()?;
+                        let catalog = crate::discovery::all_entrypoints_from_bundles(&v);
+                        crate::exec::explicit_workflow_mismatch_diagnosed(
+                            raw, c, &workflows, &catalog,
+                        )
+                    });
                 self.soft_failures = 0;
                 self.catalog_loaded = true;
                 self.post(move || {
@@ -748,6 +851,14 @@ impl Runner {
                         .with_untracked(|prev| catalog_change_note(prev, &workflows))
                     {
                         store.notify(note);
+                    }
+                    // Loud, and in the transcript rather than a toast that
+                    // scrolls away: this changes WHAT RAN.
+                    if let Some(msg) = substitution {
+                        store.notify("requested workflow not available — see transcript");
+                        store
+                            .fold
+                            .update(|f| f.push_item(crate::transcript::Item::Error { text: msg }));
                     }
                     store.workflows.set(workflows);
                     store.goal_workflows.set(goal_workflows);
@@ -960,6 +1071,11 @@ impl Runner {
     ) {
         self.stop_streams();
         let store = self.store;
+        if let Ok(v) = self.client.workspace_policy() {
+            if let Some(note) = workspace_preflight_note(&v, &opts) {
+                self.post(move || store.fold.update(|f| f.push_item(Item::Info { text: note })));
+            }
+        }
         // Upload pending attachments BEFORE the run exists (design §4.3:
         // custody stays with the UI until the run starts). Reuse refs
         // cached from a prior failed start of the SAME session — retry
@@ -3189,6 +3305,50 @@ fn push_attachments_line(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn workspace_preflight_note_names_mounts_and_disallowed_override_mode() {
+        let policy = json!({
+            "policy": {
+                "target": "server",
+                "mounts": [{"name": "notes"}],
+                "client_workspace_scope_overrides": false,
+                "allowed_access_modes": ["workspace_only", "workspace_or_allowed"]
+            }
+        });
+        let opts = StartOpts {
+            workspace_root: Some("/tmp/ws".into()),
+            workspace_mode: Some("all_except_ignored".into()),
+            workspace_allowed: vec!["/tmp/notes".into()],
+            ..StartOpts::default()
+        };
+        let note = workspace_preflight_note(&policy, &opts).expect("note");
+        assert!(
+            note.contains("launch-folder trust OFF — gateway default workspace + extra allowed workspaces [notes]"),
+            "{note}"
+        );
+        assert!(note.contains("all_except_ignored"), "{note}");
+    }
+
+    #[test]
+    fn workspace_preflight_note_names_trusted_client_scope_when_enabled() {
+        let policy = json!({
+            "policy": {
+                "target": "server",
+                "mounts": [{"name": "notes"}],
+                "client_workspace_scope_overrides": true,
+                "allowed_access_modes": ["workspace_only", "workspace_or_allowed", "all_except_ignored"]
+            }
+        });
+        let opts = StartOpts {
+            workspace_root: Some("/tmp/ws".into()),
+            ..StartOpts::default()
+        };
+        let note = workspace_preflight_note(&policy, &opts).expect("note");
+        assert!(note.contains("launch-folder trust ON"), "{note}");
+        assert!(note.contains("requested client workspace scope"), "{note}");
+        assert!(note.contains("Extra allowed workspaces: notes."), "{note}");
+    }
 
     #[test]
     fn rehydrate_folds_full_detail_and_leaves_no_pending_prompt() {

@@ -3,7 +3,7 @@ name = "abstractcode-tui"
 version = "0.4.0"
 edition = "2021"
 license = "MIT"
-# MSRV floor comes from the locked dependency set (abstracttui 0.2.20
+# MSRV floor comes from the locked dependency set (abstracttui 0.3.3
 # declares 1.87 — `is_multiple_of`; ureq 2.12 declares 1.71).
 rust-version = "1.87"
 authors = ["Laurent-Philippe Albou <contact@abstractframework.ai>"]
@@ -24,13 +24,28 @@ path = "src/main.rs"
 
 [dependencies]
 # The rendering engine — published crate, exactly what any user installs.
-# 0.2.9: the shifted-letter wire fold at EVERY chord-match site (tree
-# shortcuts, ChoicePrompt letters, Actions, KeyState — first-app
-# 0286/0288 fixed at the engine: one registration matches both wire
-# spellings of Shift+letter) + ChoicePrompt body()/body_rows() (0287).
-# ChoicePrompt re-assessed for the approval modal and still not adopted
-# — the remaining gaps are filed as first-app/0271 (see CHANGELOG).
-abstracttui = "0.2.20"
+# 0.3.1: the CLIPBOARD floor. Through 0.2.x the engine's only copy route
+# was OSC 52, fire-and-forget — and the env pass advertises it for the
+# kitty/WezTerm/ghostty/foot/iTerm2/Windows Terminal lineage only, so on
+# macOS Terminal.app, VS Code/Cursor terminals and Warp EVERY selection
+# copy was dropped on the floor behind a one-time "copies may be
+# ignored" notice (field report 2026-08-16). 0.2.25 added the host
+# clipboard fallback (`pbcopy`/`wl-copy`/`xclip`/`clip.exe`), on by
+# default via `RunConfig::platform_clipboard` — which `App::run()` uses,
+# so this bump needs no code change here. 0.3.0 is the version that
+# fallback shipped in for real (0.2.27 was yanked: the two new
+# `RunConfig` fields break exhaustive struct literals, which we do not
+# write).
+#
+# 0.3.3: the SELECTION floor — a live screen selection freezes
+# follow-tail scrollers, so a drag over a streaming transcript copies
+# the cells it highlighted instead of whatever scrolled under them by
+# release. Engine-side; no app wiring. Ships beside the Codex editor
+# chords, which the composer now consumes — see the Alt+E note in
+# `ui::root` — plus a scrollbar-thumb minimum and a copy notice that
+# reports the size copied. 0.3.2 carried the same feature set but was
+# tagged without reaching crates.io, so 0.3.3 is the resolvable floor.
+abstracttui = "0.3.3"
 # HTTP client (blocking, small): gateway calls + SSE ledger streaming.
 # The explicit feature set = ureq's defaults, pinned deliberately: "tls" is
 # rustls (remote HTTPS gateways work with zero system OpenSSL — the
@@ -38,3 +53,14 @@ abstracttui = "0.2.20"
 ureq = { version = "2.12", default-features = false, features = ["tls", "gzip"] }
 # JSON: gateway payloads carry arbitrary user text; battle-tested parsing.
 serde_json = "1"
+
+# 0.3.3 is cut in the sibling repo; crates.io still serves 0.3.1 as of
+# this commit, so the requirement above cannot resolve from the registry
+# alone. This patch builds it from the local checkout in the meantime;
+# DELETE this section once 0.3.3 lands on crates.io (the requirement is
+# already the published spelling, so nothing else changes). `cargo
+# publish` of this crate must wait for that too — a patch section is
+# ignored by consumers, and a requirement no registry can satisfy would
+# break every install.
+[patch.crates-io]
+abstracttui = { path = "../abstracttui" }

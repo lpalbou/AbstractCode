@@ -64,20 +64,42 @@ when the world moves on its own between the load and the first measurement.
 
 Rubric weights (100 total):
   Tier 0  VALIDITY GATES, binary and disqualifying — builds, resolves, parses.
-  Tier 1  BEHAVIORAL, 80 — observed in Chrome. Renders, flies, shoots, scrolls.
+  Tier 1  MECHANICS, 80 raw x 0.6875 = 55 — observed in Chrome. Renders,
+          flies, shoots, scrolls. Internal weights untouched (see T1_RESCALE).
+  Tier 1b SPEC + GENRE, 25 — observed in Chrome over two long campaign
+          branches plus dedicated probes (`rtype_spec_tier.py`). Fire
+          direction, killability, drop-driven weapon progression, pacing,
+          orbs, arcade mode, campaign structure, music layer, delivery
+          self-sufficiency. Added because the operator PLAYED the corpus and
+          the mechanics tier could not represent one of their findings.
   Tier 2  CONTENT + CODE QUALITY, 20 — read from source. Partly gameable, so
-          never weighted above the behavioral tier, and every gameable check is
-          flagged as such in the notes. It was 30 until the source tier was
+          never weighted above the behavioral tiers, and every gameable check
+          is flagged as such in the notes. It was 30 until the source tier was
           shown to be buyable outright; see `t2_score`.
 
-EVERY CHECK IS TRUE, FALSE, or UNKNOWN. Missing evidence is UNKNOWN and never
-False: a branch that did not run, a canvas that could not be read, a noise floor
-that could not be built, or a differential too close to that floor to survive a
-rerun are all states in which the instrument has no verdict, and reporting False
-for them would state that a game was watched and found not to move. UNKNOWN
-earns no points — points have to be observed — so `SCORE` is a FLOOR and
-`SCORE_CEILING` is what the product would have scored had every unmeasured check
-passed. A wide band means re-run, not rank.
+EVERY CHECK IS A NUMBER IN [0, 1], or UNKNOWN. Missing evidence is UNKNOWN and
+never 0: a branch that did not run, a canvas that could not be read, or a noise
+floor that could not be built are all states in which the instrument has no
+verdict, and reporting 0 for them would state that a game was watched and found
+not to move. UNKNOWN earns no points — points have to be observed — so `SCORE`
+is a FLOOR and `SCORE_CEILING` is what the product would have scored had every
+unmeasured check passed. A wide band means re-run, not rank.
+
+SIX OF THE NINE BEHAVIOURAL CHECKS ARE GRADED, and that is the difference
+between this version and every earlier one. A threshold on a continuous
+measurement discards the measurement twice over: the Tier-1 total took TEN
+distinct values across 23 products with 8 of them pinned at a perfect 80/80,
+and every single product that moved between two runs of identical code over
+identical artifacts moved by FLIPPING a threshold, 8 to 11 points at a time.
+`tui-coder-3` is the proof that the flip was not even monotone — its horizontal
+differential went DOWN, 21 cells to 16, while the check went False to True.
+Graded, the same 23 products take 23 distinct Tier-1 totals, and on identical
+measurements the mean run-to-run movement falls by about a third. The three
+checks that are still binary — R0, R1, R5 — are VALIDITY GATES, and a gate that
+can be half-passed is not a gate. See the "graded Tier-1 scales" section for
+each scale, where it saturates, and why the checks whose magnitude is a
+statement about implementation STYLE (draw calls, scheduled oscillators) grade
+detection confidence only and refuse to grade the magnitude.
 
 Explicitly NON-SCORING (reported only): file count, total bytes. Weighting size
 scores verbosity as quality, and this corpus contains a 6-file product that
@@ -132,6 +154,17 @@ from zelda_review_score import (  # noqa: E402
     tier0,
 )
 
+# Tier 1b — the SPEC/GENRE behavioural checks (operator's corrected prompt,
+# 2026-08-04): fire direction, killability, drop-driven weapon progression,
+# pacing, orbs, campaign structure, arcade mode, music layer, delivery. Lives
+# in a sibling file so the mechanics tier above stays reviewable; it is hashed
+# into the rubric sha alongside this file and the harness.
+from rtype_spec_tier import (  # noqa: E402
+    S_WEIGHTS,
+    selfcheck_spec_scales,
+    spec_tier,
+)
+
 # ---------------------------------------------------------------- constants
 
 # Frames advanced before any measurement, to get past a title screen/attract
@@ -167,9 +200,21 @@ BRANCH_FRAMES = 30
 # START key, which is precisely the failure this rubric claims to have closed.
 # Five presses at GESTURE_GAP_FRAMES apart reach frame 365, past the slowest
 # intro in the corpus with margin.
+#
+# `key:1*2` / `key:1*5` are the DIGIT-SELECT convention — "[1] Campaign
+# [2] Arcade", coin-op "PRESS 1" — which is a menu style, not a product.
+# MEASURED false negative without them: abstractcode-basic-2's title reads
+# "Select mode: [1] Campaign  [2] Arcade" and its update() consumes ONLY the
+# digit keys while in state 'title', so all ten prior gestures measured exactly
+# 0/0 cells and a fully playable product (verified by hand: ship answers all
+# four arrows, z/j fires, HUD and enemies live) scored 0.143 as if dead. The
+# digit is pressed at a game that every earlier gesture has already been shown
+# NOT to start, so the same "never poke a running game" rule that protects
+# Enter protects this. `*5` for the same timed-intro reason as `key:Enter*5`
+# (that product's intro locks input for 5.5 s — frame 330 at its 60 fps).
 START_GESTURES = ["none", "key:Enter*2", "key:Enter*3", "key:Space*2",
-                  "click:canvas*2", "key:z*2", "key:j*2", "key:x*2",
-                  "key:Enter*5", "key:Space*5"]
+                  "click:canvas*2", "key:z*2", "key:j*2", "key:x*2", "key:1*2",
+                  "key:Enter*5", "key:Space*5", "key:1*5"]
 
 # Fire-button candidates.
 #
@@ -263,19 +308,25 @@ ACTIVATION_CELLS = 6
 # Applied to EXCLUSIVE footprints (see _axis_sep), where a ship moving 9 rows
 # separates the two centroids by ~9 rows.
 CENTROID_MARGIN = 1.5
-# How far above the noise gate a differential must sit before the verdict is
-# trusted. Between `gate` and `TIE_FACTOR x gate` the reading is a TIE and the
-# check reports UNKNOWN rather than a coin flip.
+# How far above the noise gate a differential must sit before the reading is
+# FULLY trusted. It is the point at which the evidence ramp in `_axis_credit`
+# and `_persist_credit` saturates: at the gate the differential equals the
+# measured noise and earns nothing, at `TIE_FACTOR x gate` it is worth its full
+# weight, and in between it is worth the fraction it can support.
 #
 # SET FROM MEASUREMENT, not from taste. Two runs of identical code over
 # identical artifacts moved 5 of 24 products. Across the 72 axis checks those
 # runs passed, the signal/gate ratio was 1.17, 1.28, then 2.67, 3.25, 3.33,
 # 3.33, 3.67, and on up to 1023. The two ratios below 2.0 are EXACTLY the two
 # passes that flipped to False on the rerun — tui-multi-1 vertical and
-# opencode-3 horizontal — and every check at 2.67 or above reproduced. A band at
-# 2.0 therefore converts precisely the unreproducible verdicts into UNKNOWN and
-# touches nothing that was stable: it is a cut placed in an observed gap, not a
-# chosen tolerance.
+# opencode-3 horizontal — and every check at 2.67 or above reproduced. So 2.0 is
+# a cut placed in an observed gap rather than a chosen tolerance.
+#
+# IT USED TO BE A BAND REPORTING UNKNOWN, and that was right for a bit: an
+# unreproducible bit is worse than no bit. It was wrong as a solution, because
+# it moved the cliff instead of removing it — at exactly 2x the gate a check
+# was worth 0 points and one cell later 11. A ramp says the same measured thing
+# at the resolution the measurement actually has.
 TIE_FACTOR = 2.0
 # Fraction of the grid above which a difference is a SCENE REPAINT rather than a
 # moving object. R4 has always used this to reject a start/restart key; R2/R3
@@ -1137,7 +1188,12 @@ def _blank_t1() -> dict:
     # a corpus in which one product defaulted to `false` and the rest measured
     # `0.0` would show two distinct values for a check that separated nothing.
     # The audit exists to catch dead weight; it must not manufacture variance.
-    return {
+    #
+    # SPEC-TIER checks default to None (UNKNOWN): every one of them requires a
+    # measurement the blank path never made, and the measured path overwrites
+    # them wholesale via `res.update(spec)`.
+    return {**{k: None for k in S_WEIGHTS},
+            "spec_notes": "", "spec_evidence": {},
         "R0_loads_without_exception": False, "R1_renders_and_animates": False,
         "R2_ship_moves_vertically": 0.0, "R3_ship_moves_horizontally": 0.0,
         "R4_weapon_fires": 0.0, "R5_world_scrolls": False,
@@ -1158,10 +1214,11 @@ def _blank_t1() -> dict:
 def _unmeasured_t1(note: str) -> dict:
     """A Tier-1 result for a product that was never observed.
 
-    Every behavioural check is UNKNOWN, not False. `_blank_t1`'s False defaults
-    are correct for the MEASURED path — R4 in particular relies on them to record
-    "eight keys were tried and none fired" — but on a path where the browser
-    never ran they would assert that a game was watched and found not to move.
+    Every behavioural check is UNKNOWN, not False and not 0.0. `_blank_t1`'s
+    zero defaults are correct for the MEASURED path — R4 in particular relies on
+    them to record "eight keys were tried and none fired" — but on a path where
+    the browser never ran they would assert that a game was watched and found
+    not to move.
     """
     res = _blank_t1()
     for k in T1_WEIGHTS:
@@ -1543,6 +1600,13 @@ def _tier1(d: Path, entry: Path, root: Path, sess: "_Session") -> dict:
                "self_change": br.get("self_change", 0),
                "dpf": br.get("draws_per_frame", 0.0),
                "vs_ctrl_post": fpost["cells"], "vs_ctrl_late": flate["cells"],
+               # The POST centroid column of the fire footprint. The spec tier
+               # reads it for S1 (fire direction): bullets hang on whichever
+               # side of the ship they were fired at during the 30-frame hold,
+               # which is measurable even when they leave the screen before the
+               # LATE checkpoint and the travel signature therefore cannot be.
+               "post_cx": (round(fpost["cx"], 2)
+                           if fpost["measured"] and fpost["cx"] is not None else None),
                "travel": travel}
         if br.get("js_exceptions"):
             rec["why"] = f"threw: {str(br['js_exceptions'][0])[:90]}"
@@ -1603,8 +1667,20 @@ def _tier1(d: Path, entry: Path, root: Path, sess: "_Session") -> dict:
         # the named key's credit instead would let a key with a marginally
         # higher draw delta but no travel LOWER the score below a key with both
         # signatures — a non-monotonicity in the rubric's own selection rule.
-        res["fire_credit_key"] = max(accepted, key=lambda r: r["credit"])["key"]
-        res["R4_weapon_fires"] = max(r["credit"] for r in accepted)
+        credit_rec = max(accepted, key=lambda r: r["credit"])
+        res["fire_credit_key"] = credit_rec["key"]
+        res["R4_weapon_fires"] = credit_rec["credit"]
+        # Carried for the spec tier's S1 (fire direction), all from the
+        # CREDITED key — the key R4's own points stand on.
+        res["fire_post_cx"] = credit_rec.get("post_cx")
+        res["fire_post_cells"] = credit_rec.get("vs_ctrl_post")
+        res["fire_travel_credit"] = credit_rec.get("travel")
+        res["fire_travels_gated"] = bool(credit_rec.get("travels"))
+        # Every accepted key, strongest first — the spec tier's charge probe
+        # tries the top two, because a charge mechanic often lives on a
+        # SECONDARY weapon key that also fired in this sweep.
+        res["fire_keys_accepted"] = [
+            r["key"] for r in sorted(accepted, key=lambda r: -r["credit"])]
         fire_branch = best["branch"]
     else:
         res["fire_draw_delta"] = None
@@ -1668,17 +1744,37 @@ def _tier1(d: Path, entry: Path, root: Path, sess: "_Session") -> dict:
     # survives.
     # `late_gate` and `late_measured` were built next to the post gate above, so
     # that R4 could use them too.
-    persist_cells = [c["cells"] for c in
-                     (cd(b, ctrl, "grid_late")
-                      for b in (up, down, right, left, fire_branch or ctrl)
-                      if b.get("ok"))
-                     if c["measured"]]
+    _persist_all = [c["cells"] for c in
+                    (cd(b, ctrl, "grid_late")
+                     for b in (up, down, right, left, fire_branch or ctrl)
+                     if b.get("ok"))
+                    if c["measured"]]
+    # WHOLE-SCREEN REPAINT GUARD, the same one R4 and the axis test already
+    # apply, extended here because R7 was the third place it belongs and the
+    # only one still missing it. MEASURED: pi-3 was credited the full 8 points
+    # for a late-grid difference of 3059 of 3072 cells — 99.6% of the screen.
+    # That is a restart, a death, or a scene change, and it is not evidence
+    # that an arrow press left a trace; a real one is roughly the ship's own
+    # footprint. Reading a repaint as persistence rewards exactly the products
+    # that lose their state, which inverts the check.
+    #
+    # Scene-sized readings are DISCARDED rather than scored 0: the branch did
+    # repaint, so what the input left behind underneath is unobservable, not
+    # absent. If every branch repaints there is nothing left to read and the
+    # answer is UNKNOWN — the evidence law this file now holds to everywhere.
+    _repaint_cut = SCENE_CHANGE_FRAC_AXIS * (GRID_W * GRID_H)
+    persist_cells = [c for c in _persist_all if c <= _repaint_cut]
+    res["persistence_repaints"] = len(_persist_all) - len(persist_cells)
     res["persistence_gate"] = late_gate if late_measured else None
     if not late_measured or not persist_cells:
-        # No comparable late grids: the question was never put, so it has no
-        # answer. Not "the input left no trace".
+        # No comparable late grids, or every one of them was a repaint: the
+        # question was never answerable, so it has no answer. Not "the input
+        # left no trace".
         res["persistence_cells"] = None
         res["R7_input_persists"] = None
+        if _persist_all and not persist_cells:
+            res["notes"] = (res.get("notes") or "") + \
+                "R7 UNKNOWN: every late branch repainted the scene; "
     else:
         persist = max(persist_cells)
         res["persistence_cells"] = persist
@@ -1717,6 +1813,33 @@ def _tier1(d: Path, entry: Path, root: Path, sess: "_Session") -> dict:
         # 12 points that could not separate the products they were meant to
         # separate. See SCENE_FULL_FRAC for where it saturates and why.
         res["R8_scene_populated"] = _scene_credit(frac)
+
+    # ---- Tier 1b: the spec/genre tier, in the SAME session ----------------
+    # Runs after R4 because it needs the credited fire key, and inside the
+    # session so its branches pay no browser start-up. A spec-tier crash must
+    # never cost the mechanics measurements already in hand: every S check
+    # falls back to UNKNOWN, and the error is reported, not swallowed.
+    try:
+        spec = spec_tier(sess, entry, root, {
+            "activated": bool(res.get("activated")),
+            "gesture": gesture,
+            "fire_key": res.get("fire_credit_key"),
+            "fire_keys_accepted": res.get("fire_keys_accepted"),
+            "fire_measured_absent": res.get("R4_weapon_fires") == 0.0,
+            "fire_travel": res.get("fire_travel_credit"),
+            "fire_travels_gated": res.get("fire_travels_gated"),
+            "fire_post_cx": res.get("fire_post_cx"),
+            "fire_post_cells": res.get("fire_post_cells"),
+            "gate": gate if noise_measured else None,
+            "up": up, "down": down, "base": base,
+        })
+    except Exception as e:  # noqa: BLE001
+        spec = {k: None for k in S_WEIGHTS}
+        spec["spec_notes"] = f"spec tier crashed: {str(e)[:160]}"
+        spec["spec_evidence"] = {}
+    res.update(spec)
+    if spec.get("spec_notes"):
+        res["notes"] = (res.get("notes") or "") + " | " + spec["spec_notes"]
 
     stalls = sum(b.get("stalls", 0) for b in (base, up, down, right, left) if b.get("ok"))
     if stalls:
@@ -1993,6 +2116,23 @@ T1_GRADED = {"R2_ship_moves_vertically", "R3_ship_moves_horizontally",
              "R4_weapon_fires", "R6_audio_scheduled", "R7_input_persists",
              "R8_scene_populated"}
 
+# THE 100 POINTS ARE RE-SPLIT: mechanics 55, spec/genre 25, source 20. The
+# mechanics tier's INTERNAL weights are untouched — the perturbation study
+# showed the arm ordering is insensitive to them, and re-tuning them while
+# adding a tier would confound the two changes — so the whole tier is rescaled
+# by one factor. Behavioural dominance holds: 80 of the 100 points are still
+# observed in Chrome, and the gameable source tier stays at 20.
+#
+# WHY THE SPEC TIER IS WORTH A QUARTER. The operator played this corpus and
+# the mechanics tier could not represent a single one of their findings: a
+# wrong-direction weapon, unkillable enemies, a minute-empty field and the
+# corpus's only real power-up all scored inside the same few points. Those are
+# not polish items — they are what the product was FOR. 25 points is enough
+# that a product failing the operator-visible spec items cannot finish above
+# one that delivers them, and small enough that the mechanics gates (does it
+# run, respond, render) still dominate.
+T1_RESCALE = 55.0 / 80.0
+
 
 def _cap(n: int, full: int) -> float:
     """Saturating credit: `full` distinct live terms earns 1.0, more earns no
@@ -2083,32 +2223,46 @@ def score_one(d: Path) -> dict:
         # A product that does not build/resolve/parse is not a game. Gate, not
         # a deduction — the tiers below it are meaningless.
         r["SCORE"] = 0.0
+        r["SCORE_LEGACY"] = 0.0
         r["T1_POINTS"] = 0.0
+        r["T1B_POINTS"] = 0.0
         r["T2_POINTS"] = 0.0
         r["notes"] = (r.get("notes") or "") + " | TIER0 FAIL"
         return r
 
     t1_pts = round(sum(w * float(t1.get(k) or 0) for k, w in T1_WEIGHTS.items()), 2)
+    s_pts = round(sum(w * float(t1.get(k) or 0) for k, w in S_WEIGHTS.items()), 2)
     t2_pts, t2_parts = t2_score(t2)
-    r["T1_POINTS"] = t1_pts
+    r["T1_POINTS"] = t1_pts        # mechanics, on its own 80-point scale
+    r["T1B_POINTS"] = s_pts        # spec/genre, on its 25-point scale
     r["T2_POINTS"] = t2_pts
     r["T2_PARTS"] = t2_parts
-    r["SCORE"] = round((t1_pts + t2_pts) / 100.0, 4)
+    r["SCORE"] = round((t1_pts * T1_RESCALE + s_pts + t2_pts) / 100.0, 4)
+    # THE PRE-SPEC LENS over the SAME measurements: what this run would have
+    # scored under the mechanics-only rubric. Reported so a rescore can show
+    # per-product what the new tier changed without re-running anything, and so
+    # the two lenses can never drift apart on instrument or corpus version.
+    r["SCORE_LEGACY"] = round((t1_pts + t2_pts) / 100.0, 4)
     # UNKNOWN checks are reported as a BAND, not folded silently into the score.
     # An unmeasurable check earns nothing — points have to be observed — but
     # SCORE is then a FLOOR rather than a verdict, and a reader who cannot see
     # the difference between "measured and failed" and "never measured" will
     # rank the two the same. `SCORE_CEILING` is what this product would have
     # scored had every unmeasured check passed; when the band is wide the
-    # product should be re-run, not ranked.
+    # product should be re-run, not ranked. Spec-tier UNKNOWNs (a boss horizon
+    # the probe never reached, a win sequence hours away) widen the band
+    # exactly as mechanics UNKNOWNs do.
     unknown = [k for k in T1_WEIGHTS if t1.get(k) is None]
+    s_unknown = [k for k in S_WEIGHTS if t1.get(k) is None]
     r["T1_UNKNOWN"] = unknown
-    r["EVIDENCE_INCOMPLETE"] = bool(unknown)
+    r["T1B_UNKNOWN"] = s_unknown
+    r["EVIDENCE_INCOMPLETE"] = bool(unknown or s_unknown)
     r["SCORE_CEILING"] = round(
-        (t1_pts + sum(T1_WEIGHTS[k] for k in unknown) + t2_pts) / 100.0, 4)
-    if unknown:
+        ((t1_pts + sum(T1_WEIGHTS[k] for k in unknown)) * T1_RESCALE
+         + s_pts + sum(S_WEIGHTS[k] for k in s_unknown) + t2_pts) / 100.0, 4)
+    if unknown or s_unknown:
         r["notes"] = ((r.get("notes") or "")
-                      + f" | UNMEASURED: {','.join(unknown)}"
+                      + f" | UNMEASURED: {','.join(unknown + s_unknown)}"
                       + f" (score is a floor; ceiling {r['SCORE_CEILING']})")
     return r
 
@@ -2146,7 +2300,8 @@ def dead_check_audit(rows: list[dict]) -> dict:
     for r in live:
         for k, v in (r.get("T2_PARTS") or {}).items():
             per_part.setdefault("T2:" + k, []).append(v)
-    keys = list(T1_WEIGHTS) + [k for k in rows[0] if k.startswith(("V_", "Q_"))]
+    keys = (list(T1_WEIGHTS) + list(S_WEIGHTS)
+            + [k for k in rows[0] if k.startswith(("V_", "Q_"))])
     for k in keys + list(per_part):
         vals = per_part[k] if k in per_part else [r.get(k) for r in live if k in r]
         # UNKNOWN carries no information about whether a check DISCRIMINATES, so
@@ -2158,7 +2313,7 @@ def dead_check_audit(rows: list[dict]) -> dict:
         if not vals:
             continue
         uniq = {json.dumps(v) for v in vals}
-        weight = T1_WEIGHTS.get(k, 0) or (
+        weight = T1_WEIGHTS.get(k, 0) or S_WEIGHTS.get(k, 0) or (
             max(v for v in vals if isinstance(v, (int, float))) if k in per_part else 0)
         nums = [v for v in vals if isinstance(v, (int, float))]
         entry = {"check": k, "weight": weight, "values": sorted(uniq)[:6],
@@ -2182,7 +2337,43 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=3)
     ap.add_argument("--out", default=None)
     ap.add_argument("--glob", default="*-product")
+    # Verifies the graded scales' two claimed properties — monotone and
+    # saturating — by sampling them. Pure arithmetic, no browser, no corpus, so
+    # it is checkable in a second and cannot be quietly skipped because a run
+    # takes twenty minutes.
+    ap.add_argument("--selfcheck", action="store_true",
+                    help="check the graded Tier-1 scales and exit")
     a = ap.parse_args()
+
+    if a.selfcheck:
+        rep = _selfcheck_graded_scales()
+        for c in rep["checks"]:
+            print(f"  {'ok ' if c['monotone'] else 'FAIL'}  {c['scale']:28}"
+                  f"  {c['min']:.3f}..{c['max']:.3f}   {c['over']}")
+        print("\nsaturation (every entry must be 1.0):")
+        for k, v in rep["saturation"].items():
+            print(f"  {'ok ' if abs(v - 1.0) < 1e-9 else 'FAIL'}  {k:44} {v}")
+        print("\nfloors (every entry must be 0.0):")
+        for k, v in rep["floors"].items():
+            print(f"  {'ok ' if v == 0.0 else 'FAIL'}  {k:44} {v}")
+        print(f"\nGRADED SCALES: {'PASS' if rep['PASS'] else 'FAIL'}"
+              f"  (monotone={rep['MONOTONE']} saturates={rep['SATURATES']}"
+              f" floors={rep['FLOORS_ZERO']})")
+        srep = selfcheck_spec_scales()
+        print("\nspec-tier scales:")
+        for c in srep["checks"]:
+            print(f"  {'ok ' if c['monotone'] else 'FAIL'}  {c['scale']:32} {c['over']}")
+        for k, v in srep["saturation"].items():
+            print(f"  {'ok ' if abs(v - 1.0) < 1e-9 else 'FAIL'}  sat  {k:40} {v}")
+        for k, v in srep["floors"].items():
+            print(f"  {'ok ' if v == 0.0 else 'FAIL'}  flr  {k:40} {v}")
+        wsum = sum(T1_WEIGHTS.values()) * T1_RESCALE + sum(S_WEIGHTS.values()) + 20
+        print(f"  {'ok ' if abs(wsum - 100.0) < 1e-9 else 'FAIL'}  weights: "
+              f"{sum(T1_WEIGHTS.values())}x{T1_RESCALE:.4f} mechanics + "
+              f"{sum(S_WEIGHTS.values())} spec + 20 source = {wsum}")
+        print(f"SPEC SCALES: {'PASS' if srep['PASS'] else 'FAIL'}")
+        ok = rep["PASS"] and srep["PASS"] and abs(wsum - 100.0) < 1e-9
+        return 0 if ok else 1
 
     root = Path(a.root)
     dirs = sorted(p for p in root.glob(a.glob) if p.is_dir())
@@ -2191,7 +2382,8 @@ def main() -> int:
         return 2
 
     here = Path(__file__).resolve()
-    rubric_sha = sha_of(here, here.parent / "zelda_review_score.py")
+    rubric_sha = sha_of(here, here.parent / "zelda_review_score.py",
+                        here.parent / "rtype_spec_tier.py")
     print(f"rubric sha256 {rubric_sha[:16]}  ({len(dirs)} products, jobs={a.jobs})")
 
     rows: list[dict] = []
@@ -2210,8 +2402,9 @@ def main() -> int:
             rows.append(r)
             s = r.get("SCORE")
             print(f"  {name:28} {('%.3f' % s) if s is not None else ' FAIL':>6}"
-                  f"  T1={r.get('T1_POINTS', 0):>4}  T2={r.get('T2_POINTS', 0):>5}"
-                  f"  det={r.get('deterministic')}  {r.get('notes', '')[:50]}")
+                  f"  T1={r.get('T1_POINTS', 0):>4}  S={r.get('T1B_POINTS', 0):>5}"
+                  f"  T2={r.get('T2_POINTS', 0):>5}"
+                  f"  det={r.get('deterministic')}  {r.get('notes', '')[:44]}")
 
     rows.sort(key=lambda r: (r["arm"], r["rep"]))
     audit = dead_check_audit([r for r in rows if r.get("SCORE") is not None])
@@ -2219,7 +2412,8 @@ def main() -> int:
     out = Path(a.out or (root / "rtype_scores.json"))
     out.write_text(json.dumps(
         {"rubric_sha256": rubric_sha, "root": str(root), "rows": rows,
-         "weights": {"tier1": T1_WEIGHTS, "tier2_total": 20},
+         "weights": {"tier1": T1_WEIGHTS, "tier1_rescale": T1_RESCALE,
+                     "tier1b": S_WEIGHTS, "tier2_total": 20},
          "dead_check_audit": audit}, indent=1))
 
     print(f"\n--- dead-check audit ({audit['n_ranked']} ranked products) ---")
@@ -2236,29 +2430,81 @@ def main() -> int:
     # every score by the same amount: that is a change of SCALE, not of
     # information, and it is what pushes a corpus into a narrow band at the top
     # exactly as the Zelda rubric pushed it into a narrow band in the middle.
-    total_w = sum(T1_WEIGHTS.values()) + 20
+    total_w = 100
     live_rows = [r for r in rows if r.get("TIER0_PASS")]
-    inf_w = 0
-    for k, w in T1_WEIGHTS.items():
+    # EFFECTIVE weights: what a check actually contributes to the 100-point
+    # score — mechanics carry their tier rescale, spec checks their own weight.
+    eff_w = {**{k: w * T1_RESCALE for k, w in T1_WEIGHTS.items()}, **S_WEIGHTS}
+    inf_w = 0.0
+    for k, w in eff_w.items():
         # `bool()` would collapse a graded check's 0.5 and 1.0 into one value
         # and report an informative check as dead.
         seen = {float(r.get(k) or 0) for r in live_rows}
         if len(seen) > 1:
             inf_w += w
-    print(f"\nINFORMATIVE BEHAVIOURAL WEIGHT: {inf_w}/{sum(T1_WEIGHTS.values())}"
+
+    # COUNTING A CHECK AS INFORMATIVE BECAUSE IT VARIES AT ALL OVERSTATES IT, and
+    # the overstatement is not small: a check that separates ONE product from 22
+    # "varies", and this line called R0 and R6 — 14 points between them — fully
+    # informative on exactly that basis. So the same weight is also reported
+    # ENTROPY-WEIGHTED, against the entropy of a check that separates every
+    # product (log2 n). Under that measure the pre-grading rubric was carrying
+    # 11.7 of 80, not 72 of 80, and that gap is the whole reason Tier 1 was
+    # regraded. Both numbers are printed because they answer different
+    # questions: "does this check do anything at all", and "how much".
+    def _entropy(vals: list) -> float:
+        vals = [v for v in vals if v is not None]
+        if not vals:
+            return 0.0
+        n = len(vals)
+        seen: dict = {}
+        for v in vals:
+            seen[round(float(v), 6)] = seen.get(round(float(v), 6), 0) + 1
+        import math as _m
+        return -sum((c / n) * _m.log2(c / n) for c in seen.values())
+
+    import math as _math
+    hmax = _math.log2(len(live_rows)) if len(live_rows) > 1 else 1.0
+    ent = {k: _entropy([float(r.get(k) or 0) for r in live_rows])
+           for k in eff_w}
+    ent_w = sum(w * min(1.0, ent[k] / hmax) for k, w in eff_w.items())
+    behav_total = sum(eff_w.values())
+    print(f"\nINFORMATIVE BEHAVIOURAL WEIGHT: {inf_w:.1f}/{behav_total:.0f}"
           f" behavioural pts vary across the ranked products"
           f"  ({inf_w / total_w:.0%} of the 100-pt rubric)")
-    for k, w in T1_WEIGHTS.items():
+    print(f"ENTROPY-WEIGHTED, against a check that separates every product "
+          f"(H_max {hmax:.2f} bits): {ent_w:.1f}/{behav_total:.0f}")
+    # UNKNOWN-share per check, printed beside the distribution: a spec check
+    # can be honest and still mostly UNKNOWN (a win sequence beyond the probe
+    # horizon). The audit must show the difference between "constant because
+    # dead" and "constant because rarely measurable".
+    for k, w in list(T1_WEIGHTS.items()) + list(S_WEIGHTS.items()):
+        we = eff_w[k]
         vals = [float(r.get(k) or 0) for r in live_rows]
         p = sum(1 for v in vals if v > 0)
+        unk = sum(1 for r in live_rows if r.get(k) is None)
         # A GRADED check is only constant when its CONTRIBUTED POINTS are
         # constant, not when every product scores something. Counting "passed"
         # for a graded check would hide a check pinned at half marks.
         flag = "  <-- CONSTANT" if len(set(vals)) == 1 else ""
-        if k in T1_GRADED:
-            print(f"    {k:32} w={w:>3}  graded, values {sorted(set(vals))}{flag}")
+        tail = (f"  H={ent[k]:.2f} bits, {len(set(vals))} distinct"
+                + (f", {unk} UNKNOWN" if unk else "") + flag)
+        if k in T1_GRADED or k in S_WEIGHTS:
+            vs = sorted(set(vals))
+            shown = vs if len(vs) <= 6 else [vs[0], "...", vs[-1]]
+            print(f"    {k:32} w={we:>5.1f}  graded {shown}{tail}")
         else:
-            print(f"    {k:32} w={w:>3}  passed {p}/{len(live_rows)}{flag}")
+            print(f"    {k:32} w={we:>5.1f}  gate, passed {p}/{len(live_rows)}{tail}")
+    # THE RESOLUTION OF THE TIER AS A WHOLE, which is what actually limits
+    # ranking: if the behavioural total can only take a handful of values, no
+    # amount of per-check variance can separate the products that share one.
+    for label, key, tot in (("T1_POINTS (mechanics tier)", "T1_POINTS", 80),
+                            ("T1B_POINTS (spec tier)", "T1B_POINTS", 25)):
+        tv = [r.get(key) for r in live_rows if r.get(key) is not None]
+        if tv:
+            print(f"    {label:32} w={tot:>3}  "
+                  f"{len(set(tv))} distinct values over {len(tv)} products"
+                  f"  H={_entropy(tv):.2f} of {hmax:.2f} bits")
 
     # PER-ARM MEANS EXCLUDE TIER-0 FAILURES, exactly as the dead-check audit
     # does. A product that does not build is scored 0.0 BY GATE — that zero is a

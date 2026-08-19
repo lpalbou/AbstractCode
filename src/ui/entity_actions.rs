@@ -358,13 +358,13 @@ pub fn focus_by_word(store: Store, word: &str) {
     }
 }
 
-/// Ctrl+E: agent → convo 1 → convo 2 → … → agent.
+/// Alt+E: agent → convo 1 → convo 2 → … → agent.
 ///
 /// CYCLE order is the convos vec order, always. The header may PAINT
 /// chips in a different order (the focused chip moves to the front when
 /// it would otherwise hide behind "+N" — `convo::chip_paint_plan`), but
 /// that is presentation only: cycling here never consults the paint plan,
-/// so Ctrl+E lands on the same next conversation whatever the width.
+/// so Alt+E lands on the same next conversation whatever the width.
 pub fn cycle_focus(store: Store) {
     let names: Vec<String> = store
         .convos
@@ -420,7 +420,7 @@ pub fn escape_in_entity_focus(store: Store) -> bool {
     });
     if running {
         store.notify(format!(
-            "{name}'s turn is non-interruptible — it completes server-side (Ctrl+E switches focus)"
+            "{name}'s turn is non-interruptible — it completes server-side (Alt+E switches focus)"
         ));
     }
     // Entity focus consumes the cancel arm entirely: there is no agent-run

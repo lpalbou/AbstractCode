@@ -77,7 +77,7 @@ approvals, workspace scope).
   says so and starts nothing.
 - **Summoned entities**: `@name` opens a durable visit with a gateway
   entity (`/entities` lists the roster with identity cards); each
-  conversation gets its own transcript and header chip, and `Ctrl+E`
+  conversation gets its own transcript and header chip, and `Alt+E`
   cycles focus between the agent and open visits. Entity turns are
   non-interruptible and stream no mid-turn progress (a server-side
   boundary, rendered honestly) — typing during a turn holds one draft and
@@ -175,7 +175,7 @@ Inside the app:
 - tool approvals and agent questions open as modals; the run waits durably
   (server-side) until you answer — even across client restarts
 - `@name` talks with a summoned entity when the gateway hosts them
-  (`/entities` lists the roster); `Ctrl+E` cycles conversation focus
+  (`/entities` lists the roster); `Alt+E` cycles conversation focus
 
 ## Headless one-shots
 
@@ -197,8 +197,9 @@ runs never stall.
 
 ```
 --gateway <URL> --token <TOK>     connection (flag > env > login store)
---session <ID>                    durable session id (default: last used)
---workflow <bundle[:flow]>        agent workflow (default: basic-agent)
+--session <ID>                    durable session id (default: fresh session)
+--resume                          reopen the last session (`--continue` alias)
+--workflow <bundle[:flow]>        agent workflow (default: saved or basic-agent)
 --provider <P> --model <M>        route override (default: gateway defaults)
 --workspace <PATH>                requested workspace root (see note)
 --theme <ID>                      start theme (ABSTRACTTUI_THEME works too)
@@ -231,11 +232,66 @@ from anywhere).
 - [docs/faq.md](docs/faq.md) and [docs/troubleshooting.md](docs/troubleshooting.md)
 - Agent-oriented: [llms.txt](llms.txt)
 
+## Benchmark smoke mode
+
+`scripts/zelda_headless_bench.py` includes a smoke mode for checking the real
+selected benchmark client without running the full Zelda prompt. Set
+`ZELDA_BENCH_SMOKE` to an exact-answer prompt:
+
+```sh
+ZELDA_BENCH_SMOKE='Reply with exactly: smoke-ok' \
+ZELDA_BENCH_TIMEOUT_S=120 ZELDA_BENCH_MAX_ITER=3 \
+python3 scripts/zelda_headless_bench.py code-1
+```
+
+On success, stdout is exactly:
+
+```text
+smoke-ok
+```
+
+The smoke path still launches the selected child (`abstractcode` for `code-1`
+or the release `abstractcode-tui` binary for `code-tui-1`). It exits 0 and
+prints the requested answer only when every selected run exits successfully
+and its captured final answer contains that value; otherwise it exits nonzero
+without printing a success value. As in full benchmark mode, run logs and
+reports are written under `untracked/zelda-bench/`.
+
+Controls:
+
+- Select lanes with `code-1`, `code-tui-1`, `code-2`, or `code-tui-2`; omit
+  lane arguments to run the four-step matrix.
+- `ZELDA_BENCH_CODE_LOOP` and `ZELDA_BENCH_CODE_AGENT` select the local
+  `abstractcode` loop and agent.
+- `ZELDA_BENCH_TUI_LOOP` selects a built-in TUI workflow mapping (`basic`,
+  `react`, `codeact`, `memact`, or `multi-coder`), while
+  `ZELDA_BENCH_TUI_WORKFLOW` overrides it with an explicit workflow reference.
+- `ZELDA_BENCH_PROVIDER`, `ZELDA_BENCH_MODEL`, `ZELDA_BENCH_BASE_URL`,
+  `ZELDA_BENCH_REASONING`, `ZELDA_BENCH_MAX_ITER`, and
+  `ZELDA_BENCH_TIMEOUT_S` configure the child run.
+- TUI benchmark lanes require `target/release/abstractcode-tui`; build it with
+  `cargo build --release`. Gateway credentials come from
+  `~/.abstractcode/gateway.json`, falling back to `ABSTRACTGATEWAY_URL` and
+  `ABSTRACTGATEWAY_AUTH_TOKEN`.
+
+## Repository structure
+
+- `src/` — Rust CLI, gateway client, durable-run fold, policy, storage, export,
+  and TUI modules.
+- `tests/` — integration, replay, policy, and headless UI coverage.
+- `scripts/` — live checks and benchmark drivers, including
+  `zelda_headless_bench.py`.
+- `docs/` — getting started, command/key reference, architecture,
+  troubleshooting, design notes, and reports.
+- `untracked/` — generated benchmark artifacts and logs; not application
+  source.
+
 ## Development
 
 ```sh
 cargo test          # unit + headless UI (real pipeline, no pty) + replay
 cargo clippy --all-targets
+cargo build --release                              # required by TUI benchmark lanes
 ACODE_GATEWAY_TOKEN=… python3 scripts/pty_live_smoke.py   # live E2E
 ```
 
@@ -350,7 +406,7 @@ gateway until you answer.
 If your gateway hosts summoned entities, `@name` opens a durable **visit**
 (`/entities` lists the roster with identity cards; `Enter` there does the
 same as `@name`). The visit gets its own transcript and a header chip;
-`Ctrl+E` cycles focus between the agent and open visits, and everything you
+`Alt+E` cycles focus between the agent and open visits, and everything you
 submit under entity focus is that visit's next turn.
 
 Two honesty rules to know up front: entity turns are **non-interruptible**
@@ -649,6 +705,7 @@ abstractcode-tui --help | --version
 | `--replay-turns <N>` | Prior turns replayed in full detail at boot (0 disables) | 20 |
 | `--permissions <level>` | tool permissions for the invocation: `read` \| `write` \| `all` | prefs level |
 | `--require-approval <t>` | gate these tools regardless of level (comma list, repeatable); exec denies them | — |
+| `--no-prompt-cache` | exec: opt the run out of the runtime prompt cache (`_runtime.prompt_cache=false`) | server truth (on) |
 | `--timeout <SECS>` | exec: overall deadline | 900 |
 
 ### Environment
@@ -704,7 +761,7 @@ abstractcode-tui --help | --version
 | `/brain <name>` | FLOW-BRAIN conversation with an entity: each message is one summon of the `entity-chat` VisualFlow through the entity door (poll to terminal; the structured `degraded`/`moment_error` contract renders as warn lines). Continuity rides the entity's own memory graph under one client-minted session id; the view is session-local, and `/end` closes it locally (no server visit exists). One conversation per entity: a live `@name` visit refuses with "/end first"; bare `/brain` reports the focused conversation's brain |
 | `/task <name> <title>` | Leave a task on the entity's desk — durable, no visit needed, works while the entity sleeps. Pickup happens at the entity's own boundary (day end, wake check, or visit close), never "immediately" |
 | `/end [name] [reason]` | Close the visit (the entity's reflection runs server-side; a visit that woke a sleeping entity restores the sleep). Refused mid-turn — entity turns are non-interruptible |
-| `/focus <name\|agent>` | Switch conversation focus (`Ctrl+E` cycles) |
+| `/focus <name\|agent>` | Switch conversation focus (`Alt+E` cycles) |
 | `/quit` | Exit — with a live agent run, the quit gate opens first (see "Quitting with a live run") |
 
 Anything that is not a command is a task (when idle) or steering guidance
@@ -825,7 +882,7 @@ recovers it.
 | `PgUp` / `PgDn` | anywhere | Scroll the transcript (PgDn to the tail re-sticks) |
 | mouse wheel | transcript | Scroll (unsticks from the tail) |
 | `Ctrl+D` | anywhere | Toggle detail view (thinking + tool results vs answers only) |
-| `Ctrl+E` | anywhere | Cycle conversation focus: agent → entity visit 1 → … → agent. Cycle order is the order conversations were opened — it never changes with how the header paints chips |
+| `Alt+E` | anywhere | Cycle conversation focus: agent → entity visit 1 → … → agent. Cycle order is the order conversations were opened — it never changes with how the header paints chips. Option+E on macOS with "Option as Meta/Esc+"; `/focus <name\|agent>` needs no modifier setting. (`Ctrl+E` is move-to-line-end in the composer) |
 | `Ctrl+T` | anywhere | Cycle theme |
 | `Ctrl+L` | anywhere | Force a full-screen repaint (`/redraw`) — recovers from a terminal clear |
 | `Ctrl+O` | while a drop's chips are still pending | Undo the newest file drop: chips out, the pasted path text back in the composer. Expires once the chips ride a run or are removed |
@@ -834,6 +891,11 @@ recovers it.
 | `Ctrl+C` | anywhere | Clear the current prompt (if any) and arm quit — a second Ctrl+C within 2s quits (with a live run, the quit gate opens; a third press = leave & quit) |
 | `↑↓` + `Enter`/`Space` | pickers | Move + choose — Space confirms too, single-select semantics (theme picker previews live) |
 | `Tab` | anywhere | Move focus (composer ↔ transcript ↔ modal fields) |
+| any character | transcript focused | Return focus to the composer and keep the character — typing is never dropped because focus wandered. `/` opens the command dropdown the same way |
+| paste / file drop | transcript focused | Same: pasted text lands in the draft, a dropped file becomes an attachment chip, and focus returns so you can type the prompt that goes with it |
+| `Ctrl+A` / `Ctrl+E` | composer | Move to line start / line end (`Home` / `End` also work) |
+| `Alt+B` / `Alt+F` | composer | Move one word left / right (`Ctrl+←` / `Ctrl+→` also work). Hold `Shift` on any form to extend the selection |
+| `Ctrl+W` / `Alt+D` | composer | Delete the word before / after the caret (`Alt+Backspace`, `Ctrl+Backspace`, `Alt+Delete`, `Ctrl+Delete` also work) |
 
 ### Modal keys
 
@@ -886,7 +948,7 @@ entries, tools ran); the full memory digests sit behind the details toggle
   (`◆castor parked`, `◆castor ✎42s` while a turn runs); chips render
   whole or collapse into an honest `+N` tail at narrow widths — the
   **focused** chip always renders (painted first when it would otherwise
-  hide), while `Ctrl+E` keeps cycling in open order regardless of paint
+  hide), while `Alt+E` keeps cycling in open order regardless of paint
   order; facts paint after chips and clip first.
 - **Activity strip** (while running): spinner · current activity · cycle ·
   the in-flight model call (`model call 14s · 41 tok/s (last call)` —
@@ -915,12 +977,76 @@ entries, tools ran); the full memory digests sit behind the details toggle
 ## Caching and context
 
 The gateway enables prompt caching automatically per run when the provider
-supports it (auto = on when available; nothing to configure client-side).
-`/cache` reports: the effective route, whether that provider/model supports
-prompt caching (and in which mode), cache hits observed this run, and the
-context size of the latest model call. Local providers (e.g. LM Studio)
+supports it. Interactive sessions take the server default; there is nothing to
+configure. `/cache` reports: the effective route, whether that provider/model
+supports prompt caching (and in which mode), cache hits observed this run, and
+the context size of the latest model call. Local providers (e.g. LM Studio)
 often cache without reporting hit counts — the panel says so rather than
 inventing zeros.
+
+### `--no-prompt-cache`
+
+`exec --no-prompt-cache` opts a headless run out of the runtime prompt cache by
+sending `_runtime.prompt_cache = false` in the run's start vars. Absent, the run
+takes the gateway default (on). It exists so one gateway can serve both sides of
+an A/B measurement: the cached and uncached lanes then differ only by that key.
+
+```bash
+# uncached lane
+abstractcode-tui exec "<prompt>" --session bench-off --workflow react-agent:react \
+  --provider mlx --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
+  --no-project-context --no-review --permissions read --max-iterations 4 \
+  --no-prompt-cache
+
+# cached lane: the same command without --no-prompt-cache
+```
+
+**Scope.** The flag reaches the model calls of the run `exec` starts, and only
+those.
+
+- **It is `exec`-only.** The interactive client always takes the server default.
+- **It does not reach flow-graph bundles.** `coding-agent`, `basic-agent` and
+  `multiagent-coding` — including the default workflow — run their agent loop in
+  an Agent-node child run. The visual-flow compiler builds that child's
+  `_runtime` namespace from an explicit inheritance list: provider, model,
+  thinking, audio policy, transcription language, skills block and
+  `prompt_cache_binding` are carried across; **`prompt_cache` is not.** The child
+  therefore resolves the posture for itself and takes the gateway default,
+  whatever the parent was sent. Flow-graph bundles cannot be A/B'd from the
+  client today.
+- **Use `--workflow react-agent:react` for an A/B.** Its model calls run in the
+  run `exec` starts, so the posture governs them.
+
+**Verify the lane from the ledger, never from the flag.** On providers with an
+in-process cache, every model call that received a cache key carries
+`metadata.prompt_cache`. Absence of that metadata on *every* call is what proves
+an uncached lane; presence on any call in a lane you believe is off means the
+flag did not reach it. Check before trusting any comparison built on it.
+
+### What to expect when the cache is on
+
+Caching removes prompt prefill, not decoding, so the gain grows with prefix
+length and shrinks on short prompts with long answers, and it varies by model
+architecture.
+
+Measured through this client over three-turn sessions at ~5.6k-token contexts: a
+full-attention 4B served 96% of its prompt tokens from cache after the first
+turn, and two hybrid-attention models (4B and 27B) served about 47%, spending one
+turn rebuilding where the transcript first grows. Turns after the first were
+roughly twice as fast on those models, though the ratio moves by up to ×2 between
+repeat runs — treat it as an order of magnitude, not a figure. The first turn is
+slightly slower, because it builds the prefix cache the later turns reuse.
+
+GGUF models are the exception to watch: llama.cpp reuses the prefix on its own,
+and setting a cache key replaces that reuse rather than adding to it. The
+recorded comparison came out slower with the key, but it ran on CPU (Metal
+offload is disabled once PyTorch is in the process), so it is not a verdict for a
+GPU-offloaded GGUF host. Benchmark your own workload before enabling it there.
+
+See
+[AbstractCore's prompt-caching guide](https://github.com/lpalbou/AbstractCore/blob/main/docs/prompt-caching.md)
+for the per-model support matrix, the pending measurement list, and the
+measurement method.
 
 ========================================================================
 FILE: docs/faq.md
@@ -982,6 +1108,17 @@ provider supports it — nothing to configure client-side. `/cache` shows the
 posture for the effective route (supported + mode), observed cache hits, and
 the latest context size. Local providers (LM Studio) often cache without
 reporting hit counts; the panel says so instead of inventing zeros.
+
+**Can I turn prompt caching off to compare?**
+`exec --no-prompt-cache` opts a headless run out, which is enough to A/B one
+gateway against itself. It is `exec`-only, and it reaches the model calls of the
+run it starts — so pair it with `--workflow react-agent:react`. Flow-graph
+bundles (`coding-agent`, `basic-agent`, `multiagent-coding`, and the default
+workflow) run their agent loop in a child run that does not inherit the posture,
+so they cannot be A/B'd from the client. Confirm the lane you actually got from
+the run ledger, not from the flag. See
+[Caching and context](api.md#caching-and-context) for the full scope and what to
+expect from the cache.
 
 **Which model serves "gateway defaults"?**
 The gateway's configured text route (its Multimodal console page). The
@@ -1168,25 +1305,28 @@ have approved). If the connection dropped mid-wait, the polling fallback
 picks it up within seconds; the status bar shows the connection error
 meanwhile.
 
-## Keys go nowhere after switching themes rapidly
+## What I type does not appear in the prompt box
 
-The composer's autofocus re-fires on every theme rebuild (engine 0.2.0);
-if a broken state persists, press Tab to refocus the composer.
-
-## Enter or `c` suddenly copies instead of typing
-
-You drag-selected text and the selection region is still active (it stays
-visible after the release-copy so `c`/Enter can re-copy). Press Esc or
-click once to clear it; any other typed key clears it too. Engine-side
-one-shot-copy fix is tracked upstream (AbstractTUI backlog 0290).
+Just keep typing: any character returns focus to the composer and is kept,
+and so is a paste or a file drop. Focus can sit on the transcript after you
+click in the scrollback or press Tab, and the transcript answers only
+navigation keys — so if a keystroke seems to vanish, type the next one and
+both land. `Tab` still moves focus explicitly, and `/focus <name|agent>`
+switches conversations from any state.
 
 ## Copy did not reach the clipboard
 
-In-app copy uses OSC 52, which some terminals gate behind a setting
-(tmux needs `set -g set-clipboard on`; some terminals cap the payload).
-Shift-drag (Option-drag on macOS Terminal/iTerm2) bypasses the app and
-uses the terminal's native selection — see AbstractTUI's
-`docs/troubleshooting.md` for the full modifier matrix.
+Copy uses OSC 52 where the terminal advertises it, and falls back to the
+host clipboard tool (`pbcopy`, `wl-copy`, `xclip`, `clip.exe`) everywhere
+else, so a drag-copy works in macOS Terminal.app, the VS Code and Cursor
+terminals, and Warp. If OSC 52 is the only route your setup allows, tmux
+needs `set -g set-clipboard on` and some terminals cap the payload size.
+Shift-drag (Option-drag on macOS Terminal and iTerm2) bypasses the app and
+uses the terminal's native selection.
+
+A selection made while a run streams copies exactly the cells you
+highlighted: the transcript holds still for the length of the drag and
+returns to the live tail when the region clears.
 
 ## Garbled cells / misaligned borders
 
@@ -1208,6 +1348,153 @@ ACODE_GATEWAY_TOKEN=<token> python3 scripts/pty_live_smoke.py
 
 Boots the real binary under a pty against your gateway, drives a prompt →
 approval → answer round trip, and verifies a clean exit.
+
+========================================================================
+FILE: docs/orchestration-cards.md
+========================================================================
+
+# Orchestration cards — the coding workflows, how each works, how they differ
+
+One card per orchestration. "Measured profile" = Zelda benchmark, gpt-5.4 medium,
+n=3 post-fix runs unless noted (v2 numbers from the 2026-08-01 v2 matrix, n=2).
+All are gateway bundles, `abstractcode.agent.v1` chat entries, runnable as
+`abstractcode-tui exec "<prompt>" --workflow <bundle:flow>`.
+
+---
+
+## react-coder — the plain loop
+**Bundle:** `react-coding:react-coder` · **Anatomy:** one LLM in a
+think→tool→observe loop (`llm_call` + `tool_calls`), no agent node, no in-loop
+verifier. The loop ends when the model answers without tool calls, the budget
+runs out, or a queued steer extends it.
+
+- **How it decides "done":** the model claims it; an OPTIONAL post-loop
+  `verify_command` decides `passed`, and default wait-mode routes the finish
+  claim to a human gate. The benchmark ran ungated with no verify_command —
+  in THAT posture, nothing checks.
+- **Memory:** the growing transcript (UNBOUNDED as of the 2026-08-02 ADR-0026
+  purge — the 24000-char default tail bound was removed; an operator who wants
+  one sets the `max_chars` pin explicitly and gets a loud in-band trim marker).
+- **Measured profile:** 10 llm calls · 32 KB · 5 min · scores 0.60–0.81 · 1 screen.
+- **Character:** cheapest and fastest; stops at its first satisfactory draft —
+  the canonical premature-completion pattern. Output is playable but shallow.
+- **Use when:** small, well-specified tasks where a review pass would cost more
+  than a redo.
+
+## ralph-coder — fresh context, workspace memory
+**Bundle:** `ralph-coding:ralph-coder` · **Anatomy:** the SAME fixed prompt every
+cycle, each cycle a **fresh subflow run** (no transcript carry). Memory lives in
+the workspace: read `PLAN.md`/`PROGRESS.md` first, append `PROGRESS.md` last.
+A deterministic gate ends the loop: `verify_command` exit 0 **and** the `DONE:`
+marker in PROGRESS (with `verify_command` empty the completion is stamped
+`marker-only-unverified` — the honest degradation added in 0.1.2).
+
+- **v0.2.0 (tested, n=4): scores [0.385, 0.636, 0.75, 0.795] mean 0.641, calls 55-112 — warm-start works, instability remains; last for greenfield.** Changes: warm start (each cycle's prompt mechanically embeds the
+  last PROGRESS entries + a workspace listing — fresh context, re-derivation
+  tax reduced ~31% at n=2, not eliminated) and early stop (two consecutive verified-green, unchanged-workspace
+  cycles conclude the loop instead of burning to max_cycles; settling requires
+  a verify_command — marker-less runs never settle).
+- **Measured profile (0.1.2):** 109 llm calls · 32 KB · 22 min · 0.3 KB/call ·
+  widest variance (0.955 and 0.28 in one arm).
+- **Character:** immune to context poisoning by construction; pays for it in
+  re-derivation. The workspace IS the agent's mind.
+- **Use when:** work that outlives any context window (UNTESTED hypothesis — no
+  overflow runs exist); not greenfield builds that fit in context.
+
+## coder — builder + independent verifier + gates
+**Bundle:** `coding-agent:coder` · **Anatomy:** ONE builder agent per round,
+then an **independent verifier subflow**: deterministic gates first (delivery,
+integration/references, orphans, DOM contract, self-report hash binding, plus a
+bounded `browser_probe` execution for web artifacts — script syntax surfaces
+only via the probe or the verifier's own commands), then an LLM verifier
+judging BUILDS / EXECUTES / MATCHES against the original request, with the gate
+outputs as ground truth (three-state since 0.2.6: missing probe diagnostics
+read UNKNOWN, never False). Failures return to the builder as named defects;
+repair is smallest-change-only, and a MATCHES-only gap escalates to a ONE-TIME
+REBUILD (the additive repair charter lives in multi and spec, not here). Round
+budget, honest stopped-open-failures report.
+
+- **How it decides "done":** the verifier and gates do; the builder's own claim
+  is never sufficient.
+- **Measured profile:** 52 llm calls · 193 KB · 26 min · **3.7 KB/call (best)** ·
+  scores 0.80–**1.0** · NPC evidence 3/3.
+- **Character:** the efficiency frontier — maximum checking per token, no
+  coordination overhead. Its blind spot: it verifies against the request but
+  has no coverage *ledger*, so unstated-but-implied scope can slip.
+- **Use when:** the default for real coding tasks today.
+
+## multiagent-coder — the pipeline
+**Bundle:** `multiagent-coding:multiagent-coder` · **Anatomy:** two scouts
+(code + internet) → planner (structured plan, human gate optional) → builder
+rounds with the coder-style verify subflow → PR/doc stage. Steering,
+repair-history memory (untruncated since 0.0.17), additive repair charter.
+
+- **v0.0.18 (tested, n=4): scores [0.647, 0.765, 0.822, 0.825] mean 0.765 at 106-141 calls — consistent, costliest; fast-path fires but Zelda-scale totals unchanged.** Changes: greenfield preflight — an empty workspace skips
+  scouts+planner entirely ("the request is the plan"), recorded in the report;
+  a dead probe FAILS SAFE to brownfield; Zelda-scale totals were unchanged by
+  the fast-path (builder rounds dominate); brownfield keeps the full pipeline.
+- **Measured profile (0.0.17):** 120 llm calls · 84 KB · 57 min · 0.7 KB/call ·
+  scores 0.795–0.825 · most drawn dialogue text; only Zelda arm to reach 3
+  screens once.
+- **Character:** the most machinery per unit of quality; scouts add real value
+  only when there is something to scout.
+- **Use when:** brownfield tasks in unfamiliar codebases (UNTESTED hypothesis — no brownfield runs exist); not greenfield.
+
+## spec-coder — two loops: build it, then prove it covers the ask
+**Bundle:** `spec-coding:spec-coder` · **Anatomy (the DigitalArticle design):**
+**Loop 1** = coder's build/verify machinery. **Loop 2** = a requirements ledger:
+extraction (once, temp 0, strict schema) turns the USER PROMPT into ≤12 stated
+(≤16 with derived) probe-able requirements with countable thresholds; each coverage round runs two
+bounded probe batches (grep/file + run-probes) (`REQ <id> COUNT <c> MIN <m>` lines), routes unknowns to a
+read-only judge (met requires a quoted file excerpt), and feeds unmet items back
+as an ADDITIVE scope round. It can never conclude "done" with items uncovered:
+exhaustion headlines `STOPPED: N requirements uncovered`.
+
+- **v0.2.0 (tested, n=4): scores [0.56, 0.765, 1.0, 1.0] mean 0.831 — the only arm with two perfect runs — at 33-58 calls (mean 46, cheapest heavy arm); floor 0.56 is its open weakness.** Changes: a GENERAL runtime-evidence probe class (`type:"run"` — a
+  bounded command whose output is the evidence: run the tests, invoke the CLI,
+  curl the endpoint), a derived runtime-surface
+  requirement for any artifact with a user-facing surface, specstd folded in as
+  a `derive_standards` pin, budgets rebalanced (build 2, coverage 4).
+- **Measured profile (0.1.0):** 109 llm calls · **312 KB (largest)** · 46 min ·
+  2.9 KB/call · 0.825×3 (tightest quality spread) · most living-world motion.
+- **Character:** the scope engine. Its 0.1.0 limit — static probes prove code
+  presence, not runtime reachability — is exactly what 0.2.0's run-probes exist
+  to close.
+- **Known defect:** the judge lane mounts no tools inside while-subflows on
+  current runtimes — judge-only/aesthetic items grade UNVERIFIED.
+- **Use when:** completeness against the ask matters more than latency; thin or
+  rich prompts (derivation covers the thin case).
+
+## spec-std-coder — spec + field standards (folded into spec 0.2.0)
+**Bundle:** `spec-std-coding:spec-std-coder` (standalone ≤0.1.3) · **Anatomy:**
+spec with two-stage extraction: stated requirements first, then the FIELD is
+identified ("browser canvas game", "CLI tool") and its standard practices are
+derived as probe-able requirements up to `min_reqs` — stated always win the
+cap, derived items carry `source: derived` + a practice note, enforcement is
+identical. Rich prompts derive ≈nothing (mechanical, proven).
+
+- **Measured profile:** rich-prompt parity with spec (0.794 vs 0.825 means);
+  thin prompts: up to 2× built content (best run; ranges overlap at n=3) and the
+  campaign's only 9-screen thin-prompt world; behavioral scores unchanged (the 4-check score doesn't reward scenes).
+- **Character:** insurance against under-specified prompts — the user's 2-line
+  ask is held to the field's 10-line bar.
+- **Lesson it taught:** evidence lenses must be wide — narrow grep patterns and
+  `*.js` globs turned present features into "evidence of absence" twice before
+  the doctrine (alternation-rich patterns, glob `*`, count-0 routes to judge)
+  landed.
+
+---
+
+## How they differ, in one table
+
+| | loop count | who says "done" | memory | verification target | cost profile |
+|---|---|---|---|---|---|
+| react | 1 | model claim (+optional verify_command / human gate) | transcript | verify_command if set | minimal |
+| ralph | N fresh | deterministic gate | workspace files | verify_command | very high |
+| coder | rounds | independent verifier | transcript + round state | request (judged) | **best ratio** |
+| multi | pipeline | verifier + gates | plan + repair history | request (judged) | highest |
+| spec | 2 loops | coverage ledger | transcript + requirements vars | request (**itemized, probed**) | high, buys scope |
+| specstd | 2 loops | coverage ledger | same + field standards | request + field practices | high, thin-prompt insurance |
 
 ========================================================================
 FILE: CONTRIBUTING.md
@@ -1360,6 +1647,55 @@ All notable changes to this project are documented here. The format follows
 [SemVer](https://semver.org/).
 
 ## [Unreleased]
+
+### Added (typing anywhere reaches the prompt, 2026-08-17)
+
+- **Typing, pasting, or dropping a file returns focus to the composer and
+  keeps what arrived.** Focus can sit on the transcript — after a click in
+  the scrollback or a `Tab` — and typing from there now lands the
+  character in the draft and brings focus back with it. `/` opens the
+  command dropdown the same way, pasted text inserts with newlines
+  normalized, and a dropped file becomes an attachment chip with focus
+  returned so you can type the prompt that goes with it.
+- Navigation is unchanged: `PgUp`/`PgDn`, arrows and the wheel scroll the
+  transcript, `Ctrl` and `Alt` chords reach their shortcuts, and modals
+  own their own keys.
+
+### Changed (engine bump `abstracttui` 0.3.1 → 0.3.3, 2026-08-17)
+
+- **Copying while a run streams copies exactly what you highlighted.** A
+  live screen selection now holds the transcript still for the length of
+  the drag and returns it to the live tail when the region clears, so
+  rows that arrive mid-drag no longer move under the highlight. Engine
+  behavior; no configuration needed.
+- **Editor chords in the composer**: word motion (`Alt+B`/`Alt+F`,
+  `Ctrl+←`/`Ctrl+→`), line motion (`Ctrl+A`/`Ctrl+E`, `Home`/`End`) and
+  word delete (`Ctrl+W`, `Alt+D`, `Alt`/`Ctrl+Backspace`,
+  `Alt`/`Ctrl+Delete`). Hold `Shift` on any motion to extend the
+  selection.
+- **Scrollbars keep a visible thumb** on long transcripts, and a
+  successful copy reports its size (`copied 240 characters (3 lines) to
+  the clipboard`) instead of naming the route it took.
+- **Migration — conversation focus cycles on `Alt+E`.** `Ctrl+E` is now
+  move-to-line-end in the composer, so the focus-cycle binding moved to
+  `Alt+E` (Option+E on macOS with "Option as Meta/Esc+"). This is the
+  only binding the new chords affect. `/focus <name|agent>` switches
+  conversations on every terminal and needs no modifier setting.
+
+### Fixed (selection copy actually reaches the clipboard, 2026-08-16)
+
+- **Engine bump `abstracttui` 0.2.20 → 0.3.1.** Drag-select copied
+  nothing on macOS Terminal.app, the VS Code/Cursor integrated terminals
+  and Warp: through 0.2.x the engine's only copy route was OSC 52, which
+  those terminals ignore (the env pass advertises the capability for the
+  kitty/WezTerm/ghostty/foot/iTerm2/Windows Terminal lineage only), and
+  the one-time "copies may be ignored" notice was the only sign — every
+  later copy in the session failed silently. 0.2.25 added the host
+  clipboard fallback (`pbcopy` / `wl-copy` / `xclip` / `clip.exe`),
+  default-on through `RunConfig::platform_clipboard`, which our plain
+  `App::run()` already uses: no code change here, and the bump carries
+  every 0.2.21–0.3.1 fix with it (List accessories, `Element::on_paste`,
+  theme modes, Block close affordance, the drawer ✕ hit region).
 
 ### Fixed (asks render full + no ledger pointers in user-facing text, 2026-07-26)
 

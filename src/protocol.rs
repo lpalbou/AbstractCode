@@ -104,9 +104,14 @@ pub fn tool_calls_from_wait(wait: &Value) -> Vec<Value> {
 ///   (integrations/abstractcore/effect_handlers.py, TOOL_CALLS wait
 ///   branch), and the runtime's own resume path keys on exactly this
 ///   check (core/runtime.py, thin-client approval resume).
-/// - the `tool_approval:` wait-key prefix is the ApprovalToolExecutor's
-///   key factory (`f"tool_approval:{uuid4().hex}"`,
-///   integrations/abstractcore/tool_executor.py).
+/// - the `tool_approval:` wait-key prefix is the runtime's derived approval
+///   key, `tool_approval:{run_id}:{node_id}:{effect_identity}`
+///   (core/event_keys.py::build_tool_approval_wait_key; since 2026-08-01 it
+///   replaced ApprovalToolExecutor's `tool_approval:{uuid4}` factory, which
+///   was distinct per call but re-randomised on crash-replay). The prefix is
+///   unchanged, so this check is unaffected. NOTE for any consumer that
+///   deduplicates: these keys are now DISTINCT per approval instance -- the
+///   old constant fallback `tool_calls:{run}:{node}` is gone.
 /// - `details.executor.kind == "tool_approval"` is the executor's own
 ///   detail dict (`{"kind": "tool_approval", ...}`), nested under
 ///   `executor` by the same effect-handler assembly.
@@ -270,16 +275,30 @@ pub struct ToolCallView {
     pub arguments: Option<Value>,
 }
 
+/// Correlation id for pairing a tool call with its result.
+///
+/// `runtime_call_id` is tried FIRST and deliberately: abstractruntime derives it
+/// from the effect idempotency key (which hashes run + node), so it is unique by
+/// construction. `call_id`/`id` may be model-supplied and carry no such guarantee —
+/// observed values are bare integers that repeat across turns and sub-agents. This
+/// used to prefer the model id, which made two distinct calls collide on one key.
+///
+/// Call and result sides MUST use this same helper: when they read different key
+/// lists, a producer that stamps one but not the other yields no match at all.
+pub fn correlation_id(v: &Value) -> String {
+    ["runtime_call_id", "call_id", "id"]
+        .iter()
+        .map(|k| s(v, k))
+        .find(|v| !v.is_empty())
+        .unwrap_or_default()
+}
+
 pub fn tool_call_view(tc: &Value) -> Option<ToolCallView> {
     let name = s(tc, "name");
     if name.is_empty() {
         return None;
     }
-    let call_id = ["call_id", "id", "runtime_call_id"]
-        .iter()
-        .map(|k| s(tc, k))
-        .find(|v| !v.is_empty())
-        .unwrap_or_default();
+    let call_id = correlation_id(tc);
     Some(ToolCallView {
         name,
         call_id,
@@ -337,11 +356,7 @@ pub fn tool_results_from_record(rec: &Value) -> Vec<ToolResultView> {
             .iter()
             .filter_map(|r| {
                 let name = s(r, "name");
-                let call_id = ["call_id", "id"]
-                    .iter()
-                    .map(|k| s(r, k))
-                    .find(|v| !v.is_empty())
-                    .unwrap_or_default();
+                let call_id = correlation_id(r);
                 if name.is_empty() && call_id.is_empty() {
                     return None;
                 }
@@ -368,14 +383,7 @@ pub fn tool_results_from_record(rec: &Value) -> Vec<ToolResultView> {
             None => continue,
         };
         let matched = if !view.call_id.is_empty() {
-            results.iter().find(|r| {
-                let rid = ["call_id", "id"]
-                    .iter()
-                    .map(|k| s(r, k))
-                    .find(|v| !v.is_empty())
-                    .unwrap_or_default();
-                rid == view.call_id
-            })
+            results.iter().find(|r| correlation_id(r) == view.call_id)
         } else {
             results.get(i)
         };
@@ -501,6 +509,68 @@ fn pick_textish(v: Option<&Value>) -> String {
 /// without it the fold never saw a final answer and the turn only
 /// concluded via the terminal-status poll, silently).
 const OUTPUT_TEXT_KEYS: [&str; 6] = ["answer", "response", "message", "text", "content", "report"];
+
+/// The loop's MACHINE-READABLE verdict on how a run ended.
+///
+/// abstractagent's ReAct workflow writes `outcome` from two different
+/// terminal nodes — `done_node` → `"final_answer"`, `max_iterations_node` →
+/// `"iteration_budget"` — plus `review_skipped` when the verifier could not
+/// run (`adapters/react_runtime.py:2488-2489`). Those fields exist precisely
+/// so a host does not have to guess from prose.
+///
+/// This client used to ignore both and print "✓ done" either way, so a run
+/// that merely RAN OUT OF ITERATIONS mid-task was indistinguishable from one
+/// that finished — the reported "claims completion too early" symptom, in the
+/// client's own words rather than the model's.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RunVerdict {
+    /// Verbatim `outcome` (empty = the flow authored none).
+    pub outcome: String,
+    /// Iterations the loop reported using.
+    pub iterations: Option<u64>,
+    /// The verifier pass was requested but did not run.
+    pub review_skipped: bool,
+}
+
+impl RunVerdict {
+    /// The loop stopped because the iteration budget ran out — NOT because
+    /// the task was finished.
+    pub fn budget_exhausted(&self) -> bool {
+        self.outcome == "iteration_budget"
+    }
+
+    /// Nothing worth telling the operator about.
+    pub fn is_unremarkable(&self) -> bool {
+        !self.budget_exhausted() && !self.review_skipped
+    }
+}
+
+/// Read the loop verdict out of a run-output record. `None` when the record
+/// carries no output object at all.
+///
+/// Tolerates the `{"success": true, "result": {…}}` wrapper the runtime's
+/// resume/job completion records use, exactly as `output_inline_text` does.
+pub fn run_verdict(rec: &Value) -> Option<RunVerdict> {
+    let out = rec.get("result").and_then(|r| r.get("output"))?;
+    let obj = match out {
+        Value::Object(_) => out,
+        _ => return None,
+    };
+    // One wrapper level down, same ladder as the text reader.
+    let inner = obj.get("result").filter(|r| r.is_object()).unwrap_or(obj);
+    let read = |key: &str| -> Option<&Value> { obj.get(key).or_else(|| inner.get(key)) };
+    Some(RunVerdict {
+        outcome: read("outcome")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+        iterations: read("iterations").and_then(Value::as_u64),
+        review_skipped: read("review_skipped")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
 
 /// Inline text from a flow-output OBJECT: the conventional keys in
 /// precedence order, then ONE wrapper level down — the runtime's

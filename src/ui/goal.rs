@@ -55,6 +55,22 @@ fn start_goal_run(store: Store, ctx: &UiCtx, text: &str) {
     let mut opts = agent_start_opts(store, ctx, Vec::new());
     let max_cycles = ctx.prefs.borrow().goal_cycles();
     opts.goal = Some((text.to_string(), max_cycles));
+    // The goal bundle needs an EXPLICIT tool list. `goal-agent@0.0.1`'s
+    // `worker` node has a CONNECTED `tools` pin and no `pinDefaults.tools`,
+    // so the runtime's "was tools specified?" test
+    // (`abstractruntime/.../visual/executor.py:3537` — `"tools" in
+    // input_data`) sees the key present with a null value, normalizes it to
+    // `[]`, and skips the node-default fallback. For every other workflow
+    // `tools: None` correctly means "use the flow's own defaults"; here it
+    // means the worker cycles with ZERO tools and can never do or verify
+    // real work. Send the enabled inventory so "untouched /tools" means the
+    // same thing to this bundle as to the others.
+    if opts.tools.is_none() {
+        let grantable = store.grantable_tool_names();
+        if !grantable.is_empty() {
+            opts.tools = Some(grantable);
+        }
+    }
     store.fold.update(|f| {
         f.push_item(Item::Info {
             text: format!(

@@ -55,6 +55,17 @@ posture for the effective route (supported + mode), observed cache hits, and
 the latest context size. Local providers (LM Studio) often cache without
 reporting hit counts; the panel says so instead of inventing zeros.
 
+**Can I turn prompt caching off to compare?**
+`exec --no-prompt-cache` opts a headless run out, which is enough to A/B one
+gateway against itself. It is `exec`-only, and it reaches the model calls of the
+run it starts — so pair it with `--workflow react-agent:react`. Flow-graph
+bundles (`coding-agent`, `basic-agent`, `multiagent-coding`, and the default
+workflow) run their agent loop in a child run that does not inherit the posture,
+so they cannot be A/B'd from the client. Confirm the lane you actually got from
+the run ledger, not from the flag. See
+[Caching and context](api.md#caching-and-context) for the full scope and what to
+expect from the cache.
+
 **Which model serves "gateway defaults"?**
 The gateway's configured text route (its Multimodal console page). The
 header names it as soon as the catalog loads, and switches to the model

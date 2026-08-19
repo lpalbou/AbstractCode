@@ -76,7 +76,14 @@ fn harness() -> Harness {
             quitter: quitter.clone(),
             prefs: prefs_for_ctx.clone(),
             workspace_root: Some("/tmp/ws".into()),
+            max_iterations_explicit: false,
             max_iterations: 50,
+            // Hermetic: harness runs never read the repo's AGENTS.md, so
+            // editing that file can never move a UI assertion.
+            no_project_context: true,
+            // Harness default: absent posture = server truth, same as a launch
+            // without --no-prompt-cache.
+            no_prompt_cache: false,
             replay_turns: 20,
             gateway_label: "127.0.0.1:8080".into(),
             modal: Rc::new(RefCell::new(None)),
@@ -310,7 +317,14 @@ fn splash_short_pane_clips_whole_rows_and_keeps_the_logo() {
             quitter: quitter.clone(),
             prefs: Rc::new(RefCell::new(Prefs::default())),
             workspace_root: Some("/tmp/ws".into()),
+            max_iterations_explicit: false,
             max_iterations: 50,
+            // Hermetic: harness runs never read the repo's AGENTS.md, so
+            // editing that file can never move a UI assertion.
+            no_project_context: true,
+            // Harness default: absent posture = server truth, same as a launch
+            // without --no-prompt-cache.
+            no_prompt_cache: false,
             replay_turns: 20,
             gateway_label: "127.0.0.1:8080".into(),
             modal: Rc::new(RefCell::new(None)),
@@ -998,6 +1012,7 @@ fn details_toggle_hides_thinking_and_start_carries_context() {
             iteration: 1,
             content: "let me think about xyzzy".into(),
             reasoning: String::new(),
+            call: abstractcode_tui::transcript::CallCost::default(),
         });
         f.push_item(abstractcode_tui::transcript::Item::Assistant {
             text: "first answer".into(),
@@ -1923,6 +1938,7 @@ fn details_command_immediately_rerenders_mixed_content() {
             iteration: 1,
             content: "pondering the xyzzy strategy".into(),
             reasoning: String::new(),
+            call: abstractcode_tui::transcript::CallCost::default(),
         });
         f.push_item(abstractcode_tui::transcript::Item::Tool {
             key: "call:1".into(),
@@ -2165,6 +2181,7 @@ fn feed_order_survives_mid_list_visibility_flips() {
             iteration: 1,
             content: "zz_marker_think".into(),
             reasoning: String::new(),
+            call: abstractcode_tui::transcript::CallCost::default(),
         });
         f.push_item(abstractcode_tui::transcript::Item::Assistant {
             text: "BBB-update".into(),
@@ -2354,6 +2371,7 @@ fn details_shrink_while_scrolled_up_never_blanks_the_pane() {
                 iteration: i + 1,
                 content: format!("ponder step {i}"),
                 reasoning: String::new(),
+                call: abstractcode_tui::transcript::CallCost::default(),
             });
         }
         f.push_item(abstractcode_tui::transcript::Item::Assistant {
@@ -6703,6 +6721,7 @@ fn export_jsonl_details_writes_training_lines() {
             iteration: 1,
             content: String::new(),
             reasoning: "think first".into(),
+            call: abstractcode_tui::transcript::CallCost::default(),
         });
         f.push_item(abstractcode_tui::transcript::Item::Assistant {
             text: "a1".into(),
@@ -7289,12 +7308,22 @@ fn workflow_picker_rows_follow_a_mid_open_catalog_refresh() {
     let screen = h.turn();
     assert!(screen.contains("agent workflow"), "picker open:\n{screen}");
     assert!(
-        !screen.contains("entity-life"),
+        !screen.contains("react-coding"),
         "the new entrypoint has not landed yet:\n{screen}"
     );
     // The catalog refresh lands WHILE the picker is open (the runner's
-    // LoadCatalog post writes this signal).
+    // LoadCatalog post writes this signal). Two entrypoints arrive: a
+    // pickable coding flow AND an entity-lane flow — the picker must render
+    // the first live and keep the second hidden (the coding-picker filter,
+    // operator finding 2026-08-01: entity/test entrypoints made /workflow a
+    // registry dump).
     h.store.workflows.update(|ws| {
+        ws.push(Workflow {
+            bundle_id: "react-coding".into(),
+            flow_id: "react-coder".into(),
+            name: "React coder".into(),
+            description: String::new(),
+        });
         ws.push(Workflow {
             bundle_id: "entity-life".into(),
             flow_id: "entity-chat".into(),
@@ -7305,8 +7334,12 @@ fn workflow_picker_rows_follow_a_mid_open_catalog_refresh() {
     h.turn();
     let screen = h.turn();
     assert!(
-        screen.contains("entity-life"),
+        screen.contains("react-coding"),
         "live rows: the new entrypoint renders WITHOUT a reopen:\n{screen}"
+    );
+    assert!(
+        !screen.contains("entity-life"),
+        "entity-lane flows stay OUT of the coding picker even when they land mid-open:\n{screen}"
     );
     // Move to it and Enter: the choose re-reads the signal, so the
     // selection is the entry that appeared mid-open.
@@ -7318,8 +7351,9 @@ fn workflow_picker_rows_follow_a_mid_open_catalog_refresh() {
     let picked = h.store.workflow.get_untracked();
     assert_eq!(
         (picked.bundle_id.as_str(), picked.flow_id.as_str()),
-        ("entity-life", "entity-chat"),
-        "activation re-reads the live source"
+        ("react-coding", "react-coder"),
+        "activation re-reads the live source (and indexes the FILTERED view — \
+         picking through the filter must land on the row the user saw)"
     );
 }
 
@@ -8289,6 +8323,7 @@ fn thinking_cards_fold_by_default_and_expand_on_details_full() {
             iteration: 3,
             content: "I will edit the file next.".into(),
             reasoning: "SECRETPLAN alpha beta gamma".into(),
+            call: abstractcode_tui::transcript::CallCost::default(),
         });
     });
     h.turn();
@@ -8401,5 +8436,234 @@ fn gating_modal_on_coder_select_and_status_surfaces_unattended() {
         h.store.gating_mode.get_untracked(),
         "",
         "switching to a non-gating workflow resets the mode"
+    );
+}
+
+/// Type-to-focus: the transcript `Scroll` is focusable, so a Tab (or a
+/// click in the scrollback) parks the keyboard off the composer — and
+/// the Scroll answers only navigation keys, so every character typed
+/// there used to be DROPPED with no sign of where it went (operator
+/// report 2026-08-16). Typing now hands focus back AND keeps the first
+/// character; Enter proves the focus really moved (an unfocused
+/// composer never submits).
+#[test]
+fn typing_off_the_composer_recovers_focus_and_keeps_the_first_character() {
+    let mut h = harness();
+    h.turn();
+    // A conversation (not the splash) is what mounts the scrollable
+    // transcript the keyboard can wander into.
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+            text: "hello there".into(),
+            final_answer: true,
+        });
+    });
+    h.turn();
+
+    // Tab moves focus to the transcript.
+    h.type_text("\t");
+    h.turn();
+
+    // Typing lands in the draft — including the very first character.
+    h.type_text("write a haiku");
+    let screen = h.turn();
+    assert!(
+        screen.contains("write a haiku"),
+        "the first keystroke is not swallowed:\n{screen}"
+    );
+
+    // Enter submits: only a FOCUSED composer sees it.
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start { prompt, .. }) => assert_eq!(prompt, "write a haiku"),
+        _ => panic!("typing recovered the draft but not the focus: Enter never submitted"),
+    }
+}
+
+/// The same recovery for the gesture that actually causes this in the
+/// field: a plain left CLICK in the scrollback (to read, or to start a
+/// selection) focuses the nearest focusable ancestor — the transcript
+/// Scroll — and the keyboard silently stops reaching the composer.
+#[test]
+fn typing_after_a_click_in_the_transcript_recovers_focus() {
+    let mut h = harness();
+    h.turn();
+    abstracttui::app::selection::selection().set_enabled(true);
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+            text: "a line worth clicking".into(),
+            final_answer: true,
+        });
+    });
+    h.turn();
+    let screen = h.turn();
+    let (row, col) = locate(&screen, "a line worth clicking").expect("answer on screen");
+    let (x, y) = (col + 2, row + 1); // SGR is 1-based
+    h.term.push_input(format!("\x1b[<0;{x};{y}M").as_bytes());
+    h.turn();
+    h.term.push_input(format!("\x1b[<0;{x};{y}m").as_bytes());
+    h.turn();
+
+    h.type_text("write a haiku");
+    let screen = h.turn();
+    assert!(
+        screen.contains("❯"),
+        "sanity: the composer row is on screen:\n{screen}"
+    );
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start { prompt, .. }) => assert_eq!(prompt, "write a haiku"),
+        _ => panic!("typing after a transcript click never reached the composer"),
+    }
+}
+
+/// A `/command` typed off the composer arrives whole: the character
+/// lands in the draft AND the completion dropdown opens on it, because
+/// the recovery writes the same value/caret signals the engine's
+/// completion controller watches (operator ask: "typing a text or /").
+#[test]
+fn a_slash_typed_off_the_composer_opens_the_command_dropdown() {
+    let mut h = harness();
+    h.turn();
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+            text: "hello there".into(),
+            final_answer: true,
+        });
+    });
+    h.turn();
+    h.type_text("\t");
+    h.turn();
+
+    h.type_text("/he");
+    let screen = h.turn();
+    assert!(
+        screen.contains("commands + keys"),
+        "the dropdown opens on a '/' typed from the transcript:\n{screen}"
+    );
+}
+
+/// Pasted text off the composer: the same recovery, with the engine's
+/// block-paste rule (newlines normalized, nothing dropped).
+#[test]
+fn pasted_text_off_the_composer_lands_in_the_draft_and_recovers_focus() {
+    let mut h = harness();
+    h.turn();
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+            text: "hello there".into(),
+            final_answer: true,
+        });
+    });
+    h.turn();
+    h.type_text("\t");
+    h.turn();
+
+    paste(&mut h, "write a haiku");
+    let screen = h.turn();
+    assert!(
+        screen.contains("write a haiku"),
+        "the paste is not swallowed:\n{screen}"
+    );
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start { prompt, .. }) => assert_eq!(prompt, "write a haiku"),
+        _ => panic!("the paste landed but the focus never came back"),
+    }
+}
+
+/// A file DROP off the composer stages its chip (the drop-as-paste
+/// contract runs whichever widget holds focus) and hands focus back, so
+/// the prompt that goes with the file can be typed straight away.
+#[test]
+fn a_file_dropped_on_the_transcript_stages_a_chip_and_recovers_focus() {
+    let (dir, path) = attach_tempfile("dropped.md", b"hello world");
+    let mut h = harness();
+    h.turn();
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+            text: "hello there".into(),
+            final_answer: true,
+        });
+    });
+    h.turn();
+    h.type_text("\t");
+    h.turn();
+
+    paste(&mut h, &path);
+    let screen = h.turn();
+    let pending = h.store.pending_attachments.get_untracked();
+    assert_eq!(pending.len(), 1, "the drop staged a chip:\n{screen}");
+    assert_eq!(pending[0].name, "dropped.md");
+    assert!(
+        !screen.contains(&path),
+        "a consumed drop inserts no path text:\n{screen}"
+    );
+
+    // Focus is back on the composer: the prompt that goes with the file
+    // types and sends without a Tab.
+    h.type_text("summarize it");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start { prompt, .. }) => assert_eq!(prompt, "summarize it"),
+        _ => panic!("the drop staged its chip but the focus never came back"),
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The recovery claims TYPING only: the transcript keeps its navigation
+/// keys, and Ctrl chords keep reaching the root shortcut table.
+#[test]
+fn type_to_focus_leaves_navigation_and_ctrl_chords_alone() {
+    let mut h = harness();
+    h.turn();
+    h.store.fold.update(|f| {
+        for i in 0..80 {
+            f.push_item(abstractcode_tui::transcript::Item::Info {
+                text: format!("line {i}"),
+            });
+        }
+        f.push_item(abstractcode_tui::transcript::Item::User {
+            text: "the tail card".into(),
+        });
+    });
+    h.turn();
+    let tail = h.turn();
+    assert!(tail.contains("the tail card"), "sanity: pinned to the tail");
+
+    // Focus the transcript, then page up: navigation must stay
+    // navigation, and nothing may land in the draft.
+    h.type_text("\t");
+    h.turn();
+    h.term.push_input(b"\x1b[5~");
+    let scrolled = h.turn();
+    assert!(
+        !scrolled.contains("the tail card"),
+        "PageUp still scrolls the transcript:\n{scrolled}"
+    );
+    assert!(
+        scrolled.contains("describe a task"),
+        "the draft stays empty — no navigation key became a character:\n{scrolled}"
+    );
+
+    // Ctrl+D reaches the root shortcut table even while the transcript
+    // holds focus (the handler claims plain characters only).
+    let before = h.store.show_details.get_untracked();
+    h.term.push_input(&[0x04]);
+    h.turn();
+    assert_ne!(
+        h.store.show_details.get_untracked(),
+        before,
+        "Ctrl+D still reaches the root shortcut"
     );
 }

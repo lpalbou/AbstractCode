@@ -15,6 +15,7 @@ INCLUDED = [
     "docs/api.md",
     "docs/faq.md",
     "docs/troubleshooting.md",
+    "docs/orchestration-cards.md",
     "CONTRIBUTING.md",
     "SECURITY.md",
     "ACKNOWLEDGEMENTS.md",

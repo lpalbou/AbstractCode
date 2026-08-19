@@ -65,7 +65,14 @@ fn harness_sized(w: i32, h: i32) -> SizedHarness {
             quitter: quitter.clone(),
             prefs: Rc::new(RefCell::new(Prefs::default())),
             workspace_root: Some("/tmp/ws".into()),
+            max_iterations_explicit: false,
             max_iterations: 50,
+            // Hermetic: harness runs never read the repo's AGENTS.md, so
+            // editing that file can never move a UI assertion.
+            no_project_context: true,
+            // Harness default: absent posture = server truth, same as a launch
+            // without --no-prompt-cache.
+            no_prompt_cache: false,
             replay_turns: 20,
             gateway_label: "127.0.0.1:8080".into(),
             modal: Rc::new(RefCell::new(None)),

@@ -6,6 +6,55 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (typing anywhere reaches the prompt, 2026-08-17)
+
+- **Typing, pasting, or dropping a file returns focus to the composer and
+  keeps what arrived.** Focus can sit on the transcript — after a click in
+  the scrollback or a `Tab` — and typing from there now lands the
+  character in the draft and brings focus back with it. `/` opens the
+  command dropdown the same way, pasted text inserts with newlines
+  normalized, and a dropped file becomes an attachment chip with focus
+  returned so you can type the prompt that goes with it.
+- Navigation is unchanged: `PgUp`/`PgDn`, arrows and the wheel scroll the
+  transcript, `Ctrl` and `Alt` chords reach their shortcuts, and modals
+  own their own keys.
+
+### Changed (engine bump `abstracttui` 0.3.1 → 0.3.3, 2026-08-17)
+
+- **Copying while a run streams copies exactly what you highlighted.** A
+  live screen selection now holds the transcript still for the length of
+  the drag and returns it to the live tail when the region clears, so
+  rows that arrive mid-drag no longer move under the highlight. Engine
+  behavior; no configuration needed.
+- **Editor chords in the composer**: word motion (`Alt+B`/`Alt+F`,
+  `Ctrl+←`/`Ctrl+→`), line motion (`Ctrl+A`/`Ctrl+E`, `Home`/`End`) and
+  word delete (`Ctrl+W`, `Alt+D`, `Alt`/`Ctrl+Backspace`,
+  `Alt`/`Ctrl+Delete`). Hold `Shift` on any motion to extend the
+  selection.
+- **Scrollbars keep a visible thumb** on long transcripts, and a
+  successful copy reports its size (`copied 240 characters (3 lines) to
+  the clipboard`) instead of naming the route it took.
+- **Migration — conversation focus cycles on `Alt+E`.** `Ctrl+E` is now
+  move-to-line-end in the composer, so the focus-cycle binding moved to
+  `Alt+E` (Option+E on macOS with "Option as Meta/Esc+"). This is the
+  only binding the new chords affect. `/focus <name|agent>` switches
+  conversations on every terminal and needs no modifier setting.
+
+### Fixed (selection copy actually reaches the clipboard, 2026-08-16)
+
+- **Engine bump `abstracttui` 0.2.20 → 0.3.1.** Drag-select copied
+  nothing on macOS Terminal.app, the VS Code/Cursor integrated terminals
+  and Warp: through 0.2.x the engine's only copy route was OSC 52, which
+  those terminals ignore (the env pass advertises the capability for the
+  kitty/WezTerm/ghostty/foot/iTerm2/Windows Terminal lineage only), and
+  the one-time "copies may be ignored" notice was the only sign — every
+  later copy in the session failed silently. 0.2.25 added the host
+  clipboard fallback (`pbcopy` / `wl-copy` / `xclip` / `clip.exe`),
+  default-on through `RunConfig::platform_clipboard`, which our plain
+  `App::run()` already uses: no code change here, and the bump carries
+  every 0.2.21–0.3.1 fix with it (List accessories, `Element::on_paste`,
+  theme modes, Block close affordance, the drawer ✕ hit region).
+
 ### Fixed (asks render full + no ledger pointers in user-facing text, 2026-07-26)
 
 Operator rulings after a live screenshot showed a plan-approval ask cut

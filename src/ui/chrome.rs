@@ -188,7 +188,7 @@ pub fn header(t: &TokenSet, store: Store, spin: Signal<u64>, cwd_base: String) -
                 // cycle-2 UX review at 100 cols with 3 conversations).
                 // The FOCUSED chip always paints (first, when it would
                 // otherwise fall into the tail) — PAINT order only: the
-                // Ctrl+E cycle order is the convos vec order and never
+                // Alt+E cycle order is the convos vec order and never
                 // follows this reordering (see `convo::chip_paint_plan`).
                 let widths: Vec<usize> = chips
                     .iter()
@@ -725,6 +725,30 @@ pub fn activity_strip(t: &TokenSet, store: Store, spin: Signal<u64>, follow: Sig
     })
 }
 
+/// The composer's live instance id, republished on every focus gain.
+///
+/// The engine assigns ids at MOUNT, and this composer remounts on every
+/// chrome rebuild (theme, phase, focus-lane, caps upgrade), so the app
+/// cannot hold one forever — it re-reads it from the FocusIn the
+/// remount's `.autofocus()` delivers. The root's type-to-focus handler
+/// is the only consumer: it needs a `ViewId` for
+/// `EventCtx::request_focus`, and there is no other app-visible route
+/// to one. `None` before the first mount; a stale id (generational key)
+/// makes `set_focus` a no-op rather than focusing a stranger.
+#[derive(Clone, Default)]
+pub struct ComposerAnchor(std::rc::Rc<std::cell::Cell<Option<abstracttui::ui::ViewId>>>);
+
+impl ComposerAnchor {
+    /// The live composer instance, or `None` before the first mount.
+    pub fn get(&self) -> Option<abstracttui::ui::ViewId> {
+        self.0.get()
+    }
+
+    fn publish(&self, id: Option<abstracttui::ui::ViewId>) {
+        self.0.set(id);
+    }
+}
+
 /// Composer: multiline `TextArea` (grows 1..4 rows, Enter submits,
 /// Ctrl+J inserts a newline EVERYWHERE — engine-owned since abstracttui
 /// 0.2.2 (our 0295 ask): the edit model consumes the chord under every
@@ -739,17 +763,24 @@ pub fn activity_strip(t: &TokenSet, store: Store, spin: Signal<u64>, follow: Sig
 /// `.autofocus()` re-fires on every dyn regeneration (theme switches), so
 /// boot focus and post-theme-switch focus need no app bookkeeping
 /// (abstracttui 0.2.0; the 0.1.0 autofocus-in-dyn panic is fixed).
+///
+/// `anchor` receives the mounted instance id (see [`ComposerAnchor`]) so
+/// the root can hand focus BACK here when the user types with the
+/// keyboard parked on the transcript.
+#[allow(clippy::too_many_arguments)]
 pub fn composer(
     cx: Scope,
     t: &TokenSet,
     store: Store,
     state: &abstracttui::widgets::TextAreaState,
+    anchor: &ComposerAnchor,
     overlays: &abstracttui::app::Overlays,
     placeholder: String,
     on_submit: impl FnMut(&str) + Clone + 'static,
 ) -> View {
     let mut submit = on_submit;
     let submit_state = state.clone();
+    let anchor = anchor.clone();
     let area = abstracttui::widgets::TextArea::new()
         .state(state)
         // The chat convention: Enter sends, Shift+Enter inserts a newline.
@@ -788,6 +819,22 @@ pub fn composer(
             submit(&owned);
         })
         .element(cx, t)
+        // Publish the mounted instance to the anchor. FocusIn is
+        // delivered TARGET-ONLY by the engine, and this element is the
+        // focusable node (`TextArea::element` is what carries
+        // `.focusable()`), so a bubble listener here hears exactly the
+        // composer's own focus gains — boot autofocus, every dyn
+        // rebuild's re-fire, and a Tab back — which keeps the recorded
+        // id the LIVE one across rebuilds. Ids are generational, so a
+        // stale one can never name a different widget.
+        .on(
+            abstracttui::ui::Phase::Bubble,
+            move |ctx: &mut abstracttui::ui::EventCtx, ev: &abstracttui::ui::UiEvent| {
+                if matches!(ev, abstracttui::ui::UiEvent::FocusIn) {
+                    anchor.publish(ctx.current());
+                }
+            },
+        )
         .autofocus()
         .build();
     // `/` command completion at the caret (engine anchored panel: never

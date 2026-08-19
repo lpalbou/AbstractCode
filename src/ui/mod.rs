@@ -68,6 +68,19 @@ pub struct UiCtx {
     // at boot, edited by /workspace) is the ONE authority — a UiCtx copy
     // was dead state that could only drift (cycle-3 audit).
     pub max_iterations: u32,
+    /// `--max-iterations` was explicitly given at launch.
+    pub max_iterations_explicit: bool,
+    /// `--no-project-context`: suppress AGENTS.md injection for this session.
+    pub no_project_context: bool,
+    /// `--no-prompt-cache`: state the OFF posture for this session.
+    ///
+    /// The flag was wired into `exec` only. The interactive path built its
+    /// `StartOpts` with `prompt_cache: None` — "server truth" — so the TUI
+    /// ACCEPTED `--no-prompt-cache` (rc=0, where an unknown flag gives rc=2)
+    /// and then silently cached anyway. A flag that parses, exits clean, and
+    /// does nothing is worse than one that is rejected: the operator has no
+    /// way to discover it did not take.
+    pub no_prompt_cache: bool,
     /// Prior turns replayed in full detail on session attach.
     pub replay_turns: usize,
     /// Short host label for the status bar (e.g. "127.0.0.1:8080").
@@ -224,6 +237,9 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     // Durable composer state (draft, caret, input history): lives in root
     // scope so theme rebuilds of the TextArea keep everything.
     let composer = abstracttui::widgets::TextAreaState::new(cx);
+    // Where the composer currently lives in the tree — the root's
+    // type-to-focus handler needs it (see `chrome::ComposerAnchor`).
+    let composer_anchor = chrome::ComposerAnchor::default();
     wire_ctrl_c(cx, actions, store, &ctx, &composer);
 
     // One-shot composer seed (queue modal `e` pops an item into the
@@ -327,6 +343,78 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
 
     Element::new()
         .style(LayoutStyle::column())
+        // INPUT RETURNS TO THE COMPOSER (operator ask 2026-08-16). The
+        // transcript `Scroll` is focusable, so ONE Tab — or a click
+        // anywhere in the scrollback, which focuses the nearest
+        // focusable ancestor — parks the keyboard there, and the Scroll
+        // answers only arrows/PageUp/Home/End. Everything the user
+        // MEANT for the prompt was DROPPED after that, with no visible
+        // sign of where it went: characters, `/commands`, pasted text,
+        // dropped files. Typing and pasting are the universal "I want
+        // to write" gestures, so they hand focus back and keep what
+        // arrived.
+        //
+        // Capture phase at the root: handlers run root->target BEFORE
+        // the shortcut table, so this sees the event first. It claims
+        // PRINTABLE characters and PASTES only — Ctrl/Alt chords fall
+        // through to the shortcut table (Ctrl+T/D/E/Q/L/O), and the
+        // Scroll keeps every navigation key it owns. Guards: nothing
+        // happens while the composer already holds focus (its own edit
+        // model and paste hook own that input, `/` dropdown included),
+        // and modals never reach here at all — a modal overlay swallows
+        // keys inside its own layer tree.
+        .on(abstracttui::ui::Phase::Capture, {
+            let composer = composer.clone();
+            let anchor = composer_anchor.clone();
+            move |ctx: &mut abstracttui::ui::EventCtx, ev: &abstracttui::ui::UiEvent| {
+                if composer.focused().get_untracked() {
+                    return; // the composer already owns this input
+                }
+                // No anchor = the composer has never mounted. Do
+                // NOTHING (side effects included) rather than act for a
+                // widget that cannot take the focus: input parked in an
+                // unfocused draft is worse than the dropped input it
+                // replaces.
+                let Some(id) = anchor.get() else { return };
+                let insert = match ev {
+                    // `Key::Char` + `!ctrl && !alt` mirrors the engine's
+                    // own insert rule (`widgets::textarea_model`), so
+                    // SHIFT arrives already folded into the character on
+                    // both wire spellings.
+                    abstracttui::ui::UiEvent::Key(k) => {
+                        let Key::Char(ch) = k.key else { return };
+                        if k.mods.contains(Mods::CTRL) || k.mods.contains(Mods::ALT) {
+                            return;
+                        }
+                        ch.to_string()
+                    }
+                    // The composer's paste contract, run from the one
+                    // place that can still see this event: a verified
+                    // file drop becomes attachment chips (Consume —
+                    // nothing inserted, focus still comes back so the
+                    // user can type the prompt that goes WITH the file),
+                    // everything else inserts with newlines normalized.
+                    // Both halves are the engine's — `handle_paste` is
+                    // the same hook body `TextArea::on_paste` runs, and
+                    // the normalization mirrors its block-paste rule.
+                    // An unknown future action INSERTS (engine ADR-0003
+                    // §3: never silently drop the user's text).
+                    abstracttui::ui::UiEvent::Paste(raw) => {
+                        match attachments::handle_paste(store, raw) {
+                            abstracttui::widgets::PasteAction::Consume => String::new(),
+                            _ => raw.replace("\r\n", "\n").replace('\r', "\n"),
+                        }
+                    }
+                    _ => return,
+                };
+                if !insert.is_empty() {
+                    let caret = composer.caret_byte();
+                    composer.replace_range(caret..caret, &insert);
+                }
+                ctx.request_focus(id);
+                ctx.stop_propagation();
+            }
+        })
         .shortcut(KeyChord::new(Mods::CTRL, Key::Char('t')), move |_| {
             cycle_theme(&root_ctx);
         })
@@ -334,7 +422,18 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
             let ctx = ctx.clone();
             move |_| toggle_details(store, &ctx)
         })
-        .shortcut(KeyChord::new(Mods::CTRL, Key::Char('e')), move |_| {
+        // Alt+E cycles conversation focus. This was Ctrl+E until
+        // abstracttui 0.3.2, which gave the text widgets Codex's editor
+        // keymap — Ctrl+E is move-to-line-end there, and a FOCUSED
+        // editor consumes its chords before any shortcut can see them
+        // (the engine's documented resolution order). The composer holds
+        // focus almost always, so Ctrl+E had become a dead key rather
+        // than an ambiguous one. Alt keeps the E-for-entity mnemonic
+        // (the engine's editor claims Alt+b/f/d and Alt+arrows, never
+        // Alt+e); on macOS it needs "Option as Meta/Esc+", the same
+        // setting Alt+Enter already asks for, and `/focus <name>` is
+        // the spelling that works on every terminal regardless.
+        .shortcut(KeyChord::new(Mods::ALT, Key::Char('e')), move |_| {
             entity_actions::cycle_focus(store)
         })
         .shortcut(KeyChord::new(Mods::CTRL, Key::Char('q')), {
@@ -441,6 +540,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                         &t,
                         store,
                         &composer,
+                        &composer_anchor,
                         &overlays,
                         placeholder,
                         on_submit.clone(),
@@ -652,6 +752,14 @@ pub(crate) fn agent_start_opts(
         // pending list) — the shared opts stay attachment-free so goal
         // and queue-drain starts can never pick chips up implicitly.
         attachments: Vec::new(),
+        // `--no-prompt-cache` states the OFF posture; absent = server truth.
+        // Same rule as `exec.rs`, deliberately: the two entry points must not
+        // disagree about whether a launch flag is honoured.
+        prompt_cache: if ctx.no_prompt_cache {
+            Some(false)
+        } else {
+            None
+        },
         workspace_root: ctx.workspace_root.clone(),
         workspace_mode: if ws_mode.trim().is_empty() {
             None
@@ -660,7 +768,26 @@ pub(crate) fn agent_start_opts(
         },
         workspace_allowed: store.workspace_allowed.get_untracked(),
         max_iterations: ctx.max_iterations,
+        max_iterations_explicit: ctx.max_iterations_explicit,
         system: String::new(),
+        // Verifier-before-conclude: the session posture (`/review`), always
+        // STATED so a run's transcript records what was asked for rather
+        // than inheriting whichever server default was in force.
+        review_mode: Some(store.review_mode.get_untracked()),
+        review_capable: store
+            .workflow
+            .with_untracked(|w| crate::discovery::workflow_is_review_capable(&w.bundle_id)),
+        review_max_rounds: store.review_rounds.get_untracked(),
+        // Project instructions (AGENTS.md) for the session's workspace —
+        // resolved through the SAME helper headless `exec` uses, so both
+        // surfaces inject identical context for identical workspaces. The
+        // notices ride the toast lane; a missing file stays silent.
+        system_prompt_extra: crate::project_context::resolve_project_context(
+            ctx.workspace_root.as_deref(),
+            ctx.no_project_context,
+            |line| store.notify(line),
+            |sources, chars| store.notify(format!("project context: {sources} ({chars} chars)")),
+        ),
         messages,
         tools,
         skills: store.selected_skills.get_untracked(),
@@ -855,6 +982,61 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command) {
                 other => {
                     store.notify(format!("/gating takes auto | wait (got {other:?})"));
                 }
+            }
+        }
+        Command::Review(arg) => {
+            let raw = arg.as_deref().map(str::trim).unwrap_or("");
+            let v = raw.to_ascii_lowercase();
+            let (head, tail) = match v.split_once(char::is_whitespace) {
+                Some((h, t)) => (h, t.trim()),
+                None => (v.as_str(), ""),
+            };
+            match head {
+                "" => {
+                    let on = store.review_mode.get_untracked();
+                    let rounds = store.review_rounds.get_untracked();
+                    let state = if on {
+                        format!(
+                            "ON (max_rounds={rounds}) — a strict verifier re-reads the \
+                             transcript before any tool-call-free answer is accepted, and \
+                             can force more tool calls"
+                        )
+                    } else {
+                        "OFF — the agent concludes on its first answer without a check".into()
+                    };
+                    store.notify(format!("review: {state} · /review on | off | rounds N"));
+                }
+                "on" | "true" => {
+                    store.review_mode.set(true);
+                    store.notify(format!(
+                        "review: ON (max_rounds={}) — the agent must survive a verifier pass \
+                         before it may conclude",
+                        store.review_rounds.get_untracked()
+                    ));
+                }
+                "off" | "false" => {
+                    store.review_mode.set(false);
+                    store.notify(
+                        "review: OFF — the agent concludes on its first tool-call-free answer. \
+                         Faster, and the class of run that claims done too early.",
+                    );
+                }
+                "rounds" | "max_rounds" => match tail.parse::<u32>() {
+                    Ok(n) => {
+                        store.review_rounds.set(n);
+                        // Rounds without review on is a claim about a loop
+                        // that never runs — say so rather than silently
+                        // storing a dead number.
+                        let note = if store.review_mode.get_untracked() {
+                            String::new()
+                        } else {
+                            " (review is OFF — /review on to use it)".into()
+                        };
+                        store.notify(format!("review rounds: {n}{note}"));
+                    }
+                    Err(_) => store.notify(format!("/review rounds takes a number (got {tail:?})")),
+                },
+                other => store.notify(format!("/review takes on | off | rounds N (got {other:?})")),
             }
         }
         Command::Reasoning(arg) => match arg.as_deref().map(str::trim) {

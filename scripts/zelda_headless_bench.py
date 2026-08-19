@@ -6,7 +6,8 @@ Output layout (per operator request):
 
 Writes a JSON summary + markdown assessment under untracked/zelda-bench/.
 
-Fair 1:1 matrix (four steps, default 3600s/iter unless overridden):
+Fair 1:1 matrix (four steps, UNCAPPED per iteration unless overridden —
+see the TIMEOUT_S note below; ADR-0014/0027):
   code-1, code-tui-1, code-2, code-tui-2
 
 Lane env (unset = defaults below):
@@ -51,8 +52,10 @@ CODE_AGENT = os.environ.get("ZELDA_BENCH_CODE_AGENT", "react")
 TUI_LOOP = os.environ.get("ZELDA_BENCH_TUI_LOOP", "basic")
 AGENT_REF = "basic-agent@0.0.3:81795ea9"
 
-# Exec resolves bundle-only refs via a basic-agent fallback — multi-flow bundles
-# need the explicit bundle:flow form (e.g. react-agent:react).
+# Bundle-only refs now resolve inside their own bundle (a single agent flow is
+# the evident intent; ambiguity refuses and lists the choices), so plain
+# "react-agent" works. The explicit bundle:flow form is kept here anyway — a
+# benchmark should pin exactly what it measured.
 _TUI_WORKFLOW_BY_LOOP = {
     "basic": "basic-agent",
     "react": "react-agent:react",
@@ -70,11 +73,26 @@ WORKFLOW = os.environ.get("ZELDA_BENCH_TUI_WORKFLOW") or _default_tui_workflow(T
 SMOKE_PROMPT = os.environ.get("ZELDA_BENCH_SMOKE", "").strip()
 
 PROVIDER = os.environ.get("ZELDA_BENCH_PROVIDER", "endpoint:airelay")
-MODEL = os.environ.get("ZELDA_BENCH_MODEL", "gpt-5.6-sol")
+MODEL = os.environ.get("ZELDA_BENCH_MODEL", "gpt-5.4")
 BASE_URL = os.environ.get("ZELDA_BENCH_BASE_URL", "http://127.0.0.1:8317/v1")
-REASONING = os.environ.get("ZELDA_BENCH_REASONING", "auto")
+REASONING = os.environ.get("ZELDA_BENCH_REASONING", "medium")
 MAX_ITERATIONS = int(os.environ.get("ZELDA_BENCH_MAX_ITER", "50"))
-TIMEOUT_S = int(os.environ.get("ZELDA_BENCH_TIMEOUT_S", "3600"))
+# #[WARNING:TIMEOUT] UNCAPPED by default (0 → `exec --timeout 0`).
+#
+# ADR-0027 §2/§3 and ADR-0014 §2: no low defaults on correctness-critical
+# paths, and defaults impose no maximum duration on a run. The Zelda prompt is
+# the heaviest task in this repo — capping it does not measure quality, it
+# truncates the thing being measured, and a truncated run scores as a bad coder
+# rather than an interrupted one. That is precisely the artifact that made an
+# earlier conformance pass report healthy pipelines as failures.
+TIMEOUT_S = int(os.environ.get("ZELDA_BENCH_TIMEOUT_S", "0"))
+# Finite only so a wedged subprocess is eventually reaped; 6h is far past any
+# real run of this prompt and is reported as an overrun, never as a verdict.
+SUBPROCESS_REAP_S = int(os.environ.get("ZELDA_BENCH_REAP_S", "21600"))
+# Mirrors `exec::EXIT_ITERATION_BUDGET` (src/exec.rs): the agent stopped on its
+# iteration budget — neither success nor failure, and never a quality sample.
+EXIT_ITERATION_BUDGET = 125
+REPEATS = int(os.environ.get("ZELDA_BENCH_REPEATS", "3"))
 
 
 @dataclass
@@ -90,6 +108,10 @@ class RunResult:
     summary_path: str = ""
     file_count: int = 0
     total_bytes: int = 0
+    # ADR-0026: the WHOLE final answer. This was `final[:500]` and the smoke
+    # gate below runs a substring search over it — a needle appearing past
+    # char 500 was reported as ABSENT, i.e. the truncation silently failed
+    # passing runs. Field name kept for the existing JSON consumers.
     final_snippet: str = ""
     error: str = ""
 
@@ -169,11 +191,11 @@ def _parse_exec_jsonl(log_path: Path) -> tuple[str, dict]:
     return final, stats
 
 
-def run_abstractcode(iteration: int) -> RunResult:
-    out_dir = UNTRACKED / "code" / f"{CODE_LOOP}-{iteration}"
+def run_abstractcode(loop: str, iteration: int) -> RunResult:
+    out_dir = UNTRACKED / "code" / f"{loop}-{iteration}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    log_path = BENCH_ROOT / f"code-{CODE_LOOP}-{iteration}.jsonl"
-    state_file = BENCH_ROOT / f"code-{CODE_LOOP}-{iteration}.state.json"
+    log_path = BENCH_ROOT / f"code-{loop}-{iteration}.jsonl"
+    state_file = BENCH_ROOT / f"code-{loop}-{iteration}.state.json"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     started = datetime.now(timezone.utc).isoformat()
     t0 = time.monotonic()
@@ -214,7 +236,8 @@ def run_abstractcode(iteration: int) -> RunResult:
             env=env,
             stdout=log_path.open("w"),
             stderr=subprocess.STDOUT,
-            timeout=TIMEOUT_S + 30,
+            # #[WARNING:TIMEOUT] hang-catcher only — see SUBPROCESS_REAP_S.
+            timeout=(TIMEOUT_S + 30) if TIMEOUT_S > 0 else SUBPROCESS_REAP_S,
         )
         code = proc.returncode
         err = ""
@@ -226,7 +249,7 @@ def run_abstractcode(iteration: int) -> RunResult:
         err = str(exc)
     elapsed = time.monotonic() - t0
     final, stats = _parse_exec_jsonl(log_path)
-    summary_path = BENCH_ROOT / f"code-{CODE_LOOP}-{iteration}-summary.json"
+    summary_path = BENCH_ROOT / f"code-{loop}-{iteration}-summary.json"
     run_store = state_file.with_name(state_file.stem + ".d")
     summary_path.write_text(
         json.dumps({**stats, "state_file": str(state_file), "run_store": str(run_store)}, indent=2)
@@ -234,7 +257,7 @@ def run_abstractcode(iteration: int) -> RunResult:
     fc, tb = _count_tree(out_dir)
     return RunResult(
         client="code",
-        loop=CODE_LOOP,
+        loop=loop,
         iteration=iteration,
         out_dir=str(out_dir),
         started_at=started,
@@ -244,15 +267,16 @@ def run_abstractcode(iteration: int) -> RunResult:
         summary_path=str(summary_path),
         file_count=fc,
         total_bytes=tb,
-        final_snippet=final[:500],
+        final_snippet=final,
         error=err,
     )
 
 
-def run_code_tui(iteration: int) -> RunResult:
-    out_dir = UNTRACKED / "code-tui" / f"{TUI_LOOP}-{iteration}"
+def run_code_tui(loop: str, iteration: int) -> RunResult:
+    workflow = os.environ.get("ZELDA_BENCH_TUI_WORKFLOW") or _default_tui_workflow(loop)
+    out_dir = UNTRACKED / "code-tui" / f"{loop}-{iteration}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    log_path = BENCH_ROOT / f"code-tui-{TUI_LOOP}-{iteration}.log"
+    log_path = BENCH_ROOT / f"code-tui-{loop}-{iteration}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     gw_url, gw_token = _load_gateway()
     if not CODE_TUI_BIN.is_file():
@@ -264,7 +288,7 @@ def run_code_tui(iteration: int) -> RunResult:
         "exec",
         _prompt_for(out_dir),
         "--workflow",
-        WORKFLOW,
+        workflow,
         "--provider",
         PROVIDER,
         "--model",
@@ -298,7 +322,8 @@ def run_code_tui(iteration: int) -> RunResult:
             env=env,
             stdout=log_path.open("w"),
             stderr=subprocess.STDOUT,
-            timeout=TIMEOUT_S + 30,
+            # #[WARNING:TIMEOUT] hang-catcher only — see SUBPROCESS_REAP_S.
+            timeout=(TIMEOUT_S + 30) if TIMEOUT_S > 0 else SUBPROCESS_REAP_S,
         )
         code = proc.returncode
         err = ""
@@ -321,12 +346,12 @@ def run_code_tui(iteration: int) -> RunResult:
             if line.strip().startswith("✦") or "assistant" in line.lower():
                 final = line.strip()[:2000]
                 break
-    summary_path = BENCH_ROOT / f"code-tui-{TUI_LOOP}-{iteration}-summary.json"
+    summary_path = BENCH_ROOT / f"code-tui-{loop}-{iteration}-summary.json"
     summary_path.write_text(json.dumps(stats, indent=2))
     fc, tb = _count_tree(out_dir)
     return RunResult(
         client="code-tui",
-        loop=TUI_LOOP,
+        loop=loop,
         iteration=iteration,
         out_dir=str(out_dir),
         started_at=started,
@@ -336,7 +361,7 @@ def run_code_tui(iteration: int) -> RunResult:
         summary_path=str(summary_path),
         file_count=fc,
         total_bytes=tb,
-        final_snippet=final[:500],
+        final_snippet=final,
         error=err,
     )
 
@@ -378,22 +403,22 @@ def assess(report: BenchReport) -> str:
 
 def main() -> int:
     only = sys.argv[1:] if len(sys.argv) > 1 else None
-    steps = [
-        ("code", 1, run_abstractcode),
-        ("code-tui", 1, run_code_tui),
-        ("code", 2, run_abstractcode),
-        ("code-tui", 2, run_code_tui),
-    ]
+    code_loop = CODE_LOOP
+    tui_loop = TUI_LOOP
+    steps = []
+    for iteration in range(1, REPEATS + 1):
+        steps.append(("code", code_loop, iteration, run_abstractcode))
+        steps.append(("code-tui", tui_loop, iteration, run_code_tui))
     if only:
         filt = set(only)
-        steps = [s for s in steps if f"{s[0]}-{s[1]}" in filt or s[0] in filt]
+        steps = [s for s in steps if f"{s[0]}-{s[2]}" in filt or s[0] in filt]
     report = BenchReport()
     BENCH_ROOT.mkdir(parents=True, exist_ok=True)
-    for _label, iteration, fn in steps:
+    for _label, loop, iteration, fn in steps:
         client = fn.__name__.replace("run_", "").replace("abstractcode", "code")
         if not SMOKE_PROMPT:
-            print(f"=== {client} iter {iteration} ===", flush=True)
-        result = fn(iteration)
+            print(f"=== {client} {loop} iter {iteration} ===", flush=True)
+        result = fn(loop, iteration)
         report.runs.append(result)
         partial = BENCH_ROOT / "report.partial.json"
         partial.write_text(json.dumps({"runs": [asdict(r) for r in report.runs]}, indent=2))
@@ -404,6 +429,20 @@ def main() -> int:
     (BENCH_ROOT / "report.json").write_text(
         json.dumps({"runs": [asdict(r) for r in report.runs], "assessment": report.assessment}, indent=2)
     )
+    # exit 125 = EXIT_ITERATION_BUDGET: the agent STOPPED on its iteration
+    # budget with work outstanding. Scoring that as success is how an
+    # interrupted agent gets measured as a competent one — the exact artifact
+    # this harness exists to avoid. Called out by name so a truncated run is
+    # never quietly averaged into a quality verdict.
+    budget_stopped = [r for r in report.runs if r.exit_code == EXIT_ITERATION_BUDGET]
+    if budget_stopped:
+        print(
+            "\n⚠ ITERATION BUDGET EXHAUSTED — these runs were cut off mid-task "
+            "and are NOT valid quality samples (raise ZELDA_BENCH_MAX_ITER):",
+            flush=True,
+        )
+        for r in budget_stopped:
+            print(f"    {r.client} {r.loop}-{r.iteration}  ({r.elapsed_s}s)", flush=True)
     succeeded = bool(report.runs) and all(r.exit_code == 0 for r in report.runs)
     if SMOKE_PROMPT:
         needle = _smoke_needle()

@@ -54,14 +54,24 @@ pub struct EntityClient {
 
 impl EntityClient {
     pub fn new(base_url: &str, token: Option<&str>) -> EntityClient {
+        // `#[WARNING:TIMEOUT]` entity control-plane agent (ADR-0027 §4) —
+        // short metadata calls (list/summon/dismiss), no model call inside.
         let slow = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(5))
             .timeout_read(Duration::from_secs(30))
             .timeout_write(Duration::from_secs(30))
             .build();
+        // `#[WARNING:TIMEOUT]` entity TURN agent (ADR-0027 §4). This request
+        // BLOCKS on a full model call, which makes it a correctness-critical
+        // path under ADR-0027 §2 and an LLM effect under ADR-0014 §2 — so it
+        // carries the framework's 7200s LLM default, not a courtesy value.
+        // It was 600s: a large-context turn on a slow local model got its
+        // socket cut at ten minutes and surfaced as an opaque entity failure,
+        // which is the exact "client disconnected" class ADR-0014 was written
+        // to end.
         let turn = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(5))
-            .timeout_read(Duration::from_secs(600))
+            .timeout_read(Duration::from_secs(7200))
             .timeout_write(Duration::from_secs(30))
             .build();
         EntityClient {
@@ -1005,16 +1015,28 @@ pub fn spawn_flow_turn(
                     return;
                 }
             };
-            // Poll to terminal. Transient poll errors don't kill the turn
-            // (the run is durable server-side); the BOUND does, honestly.
-            let deadline = std::time::Instant::now() + Duration::from_secs(300);
+            // `#[WARNING:TIMEOUT]` summon-poll bound (ADR-0027 §4).
+            //
+            // A summon BLOCKS on a full model call — it is deliberately routed
+            // to the 7200s turn agent above — so this poll must not give up
+            // first. It was 300s: the client abandoned a healthy summon at five
+            // minutes while the model was still generating, which is exactly
+            // the "a healthy agentic cycle is never interrupted" breach
+            // ADR-0027 §2 forbids. Now matched to the LLM effect default
+            // (ADR-0014 §2), so the bound is a genuine hang-catcher rather
+            // than a routine ceiling.
+            //
+            // Transient poll errors never kill the turn (the run is durable
+            // server-side); only this bound does, and it says so honestly.
+            const SUMMON_POLL_BOUND_S: u64 = 7200;
+            let deadline = std::time::Instant::now() + Duration::from_secs(SUMMON_POLL_BOUND_S);
             loop {
                 std::thread::sleep(Duration::from_secs(2));
                 if std::time::Instant::now() > deadline {
                     post_failure(
                         &wake,
                         format!(
-                            "the summon is still running after 300s (run {}) — if the turn \
+                            "the summon is still running after {SUMMON_POLL_BOUND_S}s (run {}) — if the turn \
                              is executing, it completes server-side and its memory forms \
                              there; wait a moment before resending",
                             run_id.get(..8).unwrap_or(&run_id)

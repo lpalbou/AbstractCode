@@ -260,6 +260,7 @@ fn render_item(t: &TokenSet, item: &Item, store: Store, details: bool) -> Option
             iteration,
             content,
             reasoning,
+            ..
         } => {
             if !details {
                 return None;
@@ -436,6 +437,7 @@ fn fingerprint(item: &Item, store: &Store) -> u64 {
             iteration,
             content,
             reasoning,
+            ..
         } => {
             h.byte(3);
             h.u64(*iteration as u64);
@@ -1059,6 +1061,7 @@ mod tests {
                     iteration: 1,
                     content: "c".into(),
                     reasoning: "r".into(),
+                    call: crate::transcript::CallCost::default(),
                 },
                 tool(ToolStatus::AwaitingApproval, ""),
                 tool(ToolStatus::Running, ""),

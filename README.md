@@ -66,7 +66,7 @@ approvals, workspace scope).
   says so and starts nothing.
 - **Summoned entities**: `@name` opens a durable visit with a gateway
   entity (`/entities` lists the roster with identity cards); each
-  conversation gets its own transcript and header chip, and `Ctrl+E`
+  conversation gets its own transcript and header chip, and `Alt+E`
   cycles focus between the agent and open visits. Entity turns are
   non-interruptible and stream no mid-turn progress (a server-side
   boundary, rendered honestly) — typing during a turn holds one draft and
@@ -164,7 +164,7 @@ Inside the app:
 - tool approvals and agent questions open as modals; the run waits durably
   (server-side) until you answer — even across client restarts
 - `@name` talks with a summoned entity when the gateway hosts them
-  (`/entities` lists the roster); `Ctrl+E` cycles conversation focus
+  (`/entities` lists the roster); `Alt+E` cycles conversation focus
 
 ## Headless one-shots
 

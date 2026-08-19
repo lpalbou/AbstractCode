@@ -15,7 +15,10 @@ use serde_json::json;
 
 use crate::cli::Args;
 use crate::config;
-use crate::discovery::{agent_workflows_from_bundles, choose_workflow, tools_from_discovery};
+use crate::discovery::{
+    agent_workflow_ids_from_bundles, agent_workflows_from_bundles, choose_workflow,
+    tools_from_discovery,
+};
 use crate::gateway::GatewayClient;
 use crate::run_input::{build_input_data, StartOpts};
 use crate::tool_policy::{self, ToolClass};
@@ -23,6 +26,40 @@ use crate::transcript::{Fold, FoldEffect, Item, ToolStatus, WaitKind};
 
 const ASK_REFUSAL: &str =
     "No interactive user is present (headless run). Proceed with your best judgment and finish the task.";
+
+/// Decide how headless `exec` should answer an ask-user wait.
+///
+/// Most asks are genuine operator questions and must still get the honest
+/// headless refusal. One narrow exception is the conclude gate emitted by
+/// review/coding workflows: it does not ask for missing information, it asks
+/// whether the operator accepts the already-produced answer or wants to steer
+/// another cycle. Refusing that prompt headlessly creates a client-side loop
+/// that keeps feeding the same refusal back as steering.
+///
+/// So headless `exec` auto-accepts ONLY the conclude-confirmation shape and
+/// keeps refusing every other ask. The classifier is intentionally narrow: it
+/// requires an explicit `'accept' to finish` instruction plus another
+/// conclude-gate cue, so an unrelated user question never gets a false
+/// "accept".
+pub fn resolve_headless_ask(prompt: &str) -> (&'static str, &'static str) {
+    let lower = prompt.to_ascii_lowercase();
+    let names_accept = lower.contains("reply 'accept' to finish")
+        || lower.contains("reply \"accept\" to finish")
+        || lower.contains("type 'accept' to finish")
+        || lower.contains("type \"accept\" to finish");
+    let looks_like_conclude_gate = lower.contains("believes the task is done")
+        || lower.contains("task is done after")
+        || lower.contains("fed straight into the next cycle")
+        || lower.contains("operator steering");
+    if names_accept && looks_like_conclude_gate {
+        (
+            "accept",
+            "answering with the headless auto-accept for the conclude gate",
+        )
+    } else {
+        (ASK_REFUSAL, "answering with the headless refusal")
+    }
+}
 
 /// The resolution of one approval wait under headless policy: whether it
 /// is approved, the resume payload, and a one-line human log naming WHY
@@ -187,10 +224,95 @@ pub fn explicit_workflow_mismatch(
     chosen: &crate::store::Workflow,
     available: &[crate::store::Workflow],
 ) -> Option<String> {
+    explicit_workflow_mismatch_diagnosed(requested_raw, chosen, available, &[])
+}
+
+/// `explicit_workflow_mismatch` with the full catalog for DIAGNOSIS: the
+/// `(bundle, flow, interfaces)` rows from `all_entrypoints_from_bundles`.
+///
+/// The refusal is unchanged in verdict, only in truthfulness. Three cases
+/// the old single sentence collapsed into "not found on this gateway":
+///  * the flow IS installed but behind a non-agent interface (e.g. the
+///    `abstractcode.coding.v1` pipeline entrypoints) — say which interface;
+///  * the bundle is installed and holds several agent flows, so a
+///    bundle-only ref is AMBIGUOUS — list them and ask for `bundle:flow`;
+///  * genuinely absent — the original message.
+pub fn explicit_workflow_mismatch_diagnosed(
+    requested_raw: &str,
+    chosen: &crate::store::Workflow,
+    available: &[crate::store::Workflow],
+    catalog: &[(String, String, Vec<String>)],
+) -> Option<String> {
     let (b, f) = crate::cli::split_workflow_ref(requested_raw);
     let satisfied = chosen.bundle_id == b && f.as_deref().is_none_or(|flow| chosen.flow_id == flow);
     if satisfied {
         return None;
+    }
+    // Installed-but-wrong-interface: the exact ref exists in the catalog and
+    // simply does not carry the agent interface this client runs.
+    if let Some((_, _, ifs)) = catalog
+        .iter()
+        .find(|(cb, cf, _)| cb == &b && f.as_deref().is_some_and(|flow| cf == flow))
+    {
+        let ifs_txt = if ifs.is_empty() {
+            "none declared".to_string()
+        } else {
+            ifs.join(", ")
+        };
+        let mut msg = format!(
+            "✗ workflow '{requested_raw}' IS installed but does not carry the agent interface \
+             '{iface}' — refusing to run a different agent\n  its interfaces: {ifs_txt}",
+            iface = crate::discovery::AGENT_INTERFACE_V1
+        );
+        let siblings: Vec<&crate::store::Workflow> =
+            crate::discovery::flows_in_bundle(available, &b);
+        if !siblings.is_empty() {
+            msg.push_str("\n  agent entrypoints in this bundle:");
+            for w in siblings {
+                msg.push_str(&format!("\n    {}:{}", w.bundle_id, w.flow_id));
+            }
+        }
+        return Some(msg);
+    }
+    // Bundle-only ref naming an INSTALLED bundle that simply has no agent
+    // entrypoint. Without this the commonest spelling (`--workflow coder`)
+    // reported "not found on this gateway" for a bundle sitting right there —
+    // the same lie the diagnosed refusal exists to end, just one input shape
+    // further along.
+    if f.is_none() && crate::discovery::flows_in_bundle(available, &b).is_empty() {
+        let eps: Vec<&(String, String, Vec<String>)> =
+            catalog.iter().filter(|(cb, _, _)| cb == &b).collect();
+        if !eps.is_empty() {
+            let mut msg = format!(
+                "✗ bundle '{b}' is installed but has no '{iface}' entrypoint —                  refusing to run a different agent\n  its entrypoints:",
+                iface = crate::discovery::AGENT_INTERFACE_V1
+            );
+            for (_, flow, ifs) in eps {
+                let i = if ifs.is_empty() {
+                    "none declared".to_string()
+                } else {
+                    ifs.join(", ")
+                };
+                msg.push_str(&format!("\n    {b}:{flow}  ({i})"));
+            }
+            return Some(msg);
+        }
+    }
+    // Ambiguous bundle-only ref: the bundle holds several agent flows and
+    // none is named after it, so no flow is the operator's evident intent.
+    if f.is_none() {
+        let siblings = crate::discovery::flows_in_bundle(available, &b);
+        if siblings.len() > 1 {
+            let mut msg = format!(
+                "✗ workflow '{requested_raw}' is ambiguous — bundle '{b}' has {n} agent \
+                 entrypoints and none is named after the bundle; name one as 'bundle:flow'",
+                n = siblings.len()
+            );
+            for w in siblings {
+                msg.push_str(&format!("\n    {}:{}", w.bundle_id, w.flow_id));
+            }
+            return Some(msg);
+        }
     }
     let mut msg = format!(
         "✗ workflow '{requested_raw}' not found on this gateway — refusing to run a different agent"
@@ -254,7 +376,10 @@ pub fn run(args: &Args) -> i32 {
     // stale saved preference degrading to the default is the interactive
     // contract, and the header names what ran.
     if let Some(raw) = args.workflow.as_deref() {
-        if let Some(msg) = explicit_workflow_mismatch(raw, &workflow, &workflows) {
+        let catalog = crate::discovery::all_entrypoints_from_bundles(&bundles);
+        if let Some(msg) =
+            explicit_workflow_mismatch_diagnosed(raw, &workflow, &workflows, &catalog)
+        {
             eprintln!("{msg}");
             return 2;
         }
@@ -323,7 +448,16 @@ pub fn run(args: &Args) -> i32 {
     // Uploads run INSIDE the --timeout budget (the deadline is minted
     // before this loop and threaded to the wait loop below) — N uploads
     // must not stretch a bounded invocation before its clock starts.
-    let exec_deadline = Instant::now() + Duration::from_secs(args.timeout_secs.max(10));
+    // `#[WARNING:TIMEOUT]` exec wall-clock safeguard (ADR-0014/0027).
+    // `--timeout 0` = NO client-side cap: a run that should never be
+    // interrupted gets a deadline ~10 years out rather than a special case at
+    // every comparison below. Note the ordering — `.max(10)` must not apply to
+    // 0, or "unlimited" would silently become the shortest cap in the program.
+    let exec_deadline = if args.timeout_secs == 0 {
+        Instant::now() + Duration::from_secs(315_360_000)
+    } else {
+        Instant::now() + Duration::from_secs(args.timeout_secs.max(10))
+    };
     let mut attachment_refs: Vec<serde_json::Value> = Vec::new();
     for raw in &args.attach {
         if Instant::now() > exec_deadline {
@@ -387,6 +521,25 @@ pub fn run(args: &Args) -> i32 {
             }
         }
     }
+    let workspace_root = if args.no_workspace {
+        None
+    } else {
+        args.workspace.clone().or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.display().to_string())
+        })
+    };
+    // Project instructions (AGENTS.md) for the run's workspace — parity with
+    // the Python client, which has always injected them. Scoped to the
+    // workspace: `--no-workspace` runs have no project to read conventions
+    // from. `--no-project-context` opts out for byte-exact scripted runs.
+    let project_context = crate::project_context::resolve_project_context(
+        workspace_root.as_deref(),
+        args.no_project_context,
+        |line| eprintln!("⚠ {line}"),
+        |sources, chars| eprintln!("project context: {sources} ({chars} chars)"),
+    );
     let opts = StartOpts {
         attachments: attachment_refs,
         provider: args.provider.clone().unwrap_or_default(),
@@ -403,15 +556,7 @@ pub fn run(args: &Args) -> i32 {
         } else {
             String::new()
         },
-        workspace_root: if args.no_workspace {
-            None
-        } else {
-            args.workspace.clone().or_else(|| {
-                std::env::current_dir()
-                    .ok()
-                    .map(|p| p.display().to_string())
-            })
-        },
+        workspace_root: workspace_root.clone(),
         // Config-first for headless runs: flags win, prefs.json fills in
         // (the same file the TUI's /workspace edits).
         workspace_mode: args
@@ -420,7 +565,16 @@ pub fn run(args: &Args) -> i32 {
             .or_else(|| prefs.workspace_mode.clone()),
         workspace_allowed: prefs.workspace_allowed.clone(),
         max_iterations: args.max_iterations,
+        max_iterations_explicit: args.max_iterations_explicit,
         system: String::new(),
+        system_prompt_extra: project_context,
+        // Verifier-before-conclude: on unless `--no-review`. Headless runs
+        // are exactly where nobody is watching for a too-early "done", so
+        // the posture is always STATED on the wire, never left to whichever
+        // server default happens to be in force.
+        review_mode: Some(args.review.unwrap_or(crate::cli::DEFAULT_REVIEW_MODE)),
+        review_capable: crate::discovery::workflow_is_review_capable(&workflow.bundle_id),
+        review_max_rounds: args.review_rounds,
         // One-shot runs have no prior client transcript; cross-invocation
         // continuity rides the server-side session seed.
         messages: Vec::new(),
@@ -438,8 +592,33 @@ pub fn run(args: &Args) -> i32 {
         } else {
             prefs.context_window
         },
+        // `--no-prompt-cache` states the OFF posture; absent = server truth.
+        prompt_cache: if args.no_prompt_cache {
+            Some(false)
+        } else {
+            None
+        },
     };
-    let input = build_input_data(&prompt, &opts);
+    let mut input = build_input_data(&prompt, &opts);
+    // `--param` pins ride input_data top-level — on_flow_start resolves
+    // declared pins input-first, so a key matching a workflow's start pin
+    // reaches it; unknown keys are inert. Scalars are typed (a `number`
+    // pin never sees the string "16"); everything else rides verbatim.
+    for (k, v) in &args.params {
+        let t = v.trim();
+        let val = if t.eq_ignore_ascii_case("true") {
+            serde_json::Value::Bool(true)
+        } else if t.eq_ignore_ascii_case("false") {
+            serde_json::Value::Bool(false)
+        } else if let Ok(n) = t.parse::<i64>() {
+            serde_json::json!(n)
+        } else if let Ok(fl) = t.parse::<f64>() {
+            serde_json::json!(fl)
+        } else {
+            serde_json::Value::String(v.clone())
+        };
+        input[k.as_str()] = val;
+    }
     let run_id = match client.start_run(
         &workflow.flow_id,
         Some(&workflow.bundle_id),
@@ -461,6 +640,13 @@ pub fn run(args: &Args) -> i32 {
     );
 
     let mut fold = Fold::new();
+    // Declare the catalog's agent entrypoint ids (the lane-1 fold contract)
+    // BEFORE folding any record. The TUI worker does this at every catalog
+    // load; headless exec never did, so `is_agent_workflow` fell back to
+    // matching the `visual_react_agent_` prefix alone and a wrapper bundle
+    // spawning a catalogued agent child degraded to the labeled-cycle
+    // #FALLBACK instead of recognizing its answer source.
+    fold.set_agent_workflows(agent_workflow_ids_from_bundles(&bundles));
     fold.begin_run(&run_id);
     fold.push_item(Item::User { text: prompt });
 
@@ -574,11 +760,12 @@ pub fn run(args: &Args) -> i32 {
                 }
                 WaitKind::Ask { prompt } => {
                     eprintln!("agent asks: {prompt}");
-                    eprintln!("answering with the headless refusal");
+                    let (response, log) = resolve_headless_ask(prompt);
+                    eprintln!("{log}");
                     match client.resume(
                         &wait.run_id,
                         &wait.wait_key,
-                        json!({"response": ASK_REFUSAL}),
+                        json!({"response": response}),
                     ) {
                         Ok(_) => {
                             fold.wait_answered(&wait.wait_key, &wait.step_id);
@@ -598,13 +785,29 @@ pub fn run(args: &Args) -> i32 {
         if fold.finished {
             let stats = &fold.stats;
             let failed = fold.failed;
+            let budget = fold.budget_exhausted;
+            // Name the outcome honestly on the ONE line a piped caller reads.
+            // "done" for a run the agent was cut off mid-task is the same lie
+            // the chrome line told (transcript.rs `push_done_summary`).
+            let head = match budget {
+                Some(n) if n > 0 => format!("stopped: iteration budget ({n})"),
+                Some(_) => "stopped: iteration budget".to_string(),
+                None => "done".to_string(),
+            };
             eprintln!(
-                "done · {} llm calls · {} tools · {} (run {run_id} finalizes on the gateway)",
+                "{head} · {} llm calls · {} tools · {} (run {run_id} finalizes on the gateway)",
                 stats.llm_calls,
                 stats.tool_calls,
                 fmt_stats_tokens(stats)
             );
-            return if failed { 1 } else { 0 };
+            if failed {
+                return 1;
+            }
+            return if budget.is_some() {
+                EXIT_ITERATION_BUDGET
+            } else {
+                0
+            };
         }
 
         // Terminal check on the ANSWER-SOURCE agent subrun (the
@@ -715,7 +918,10 @@ pub fn run(args: &Args) -> i32 {
                         stats.tool_calls,
                         fmt_stats_tokens(stats)
                     );
-                    return exit_code_for_status(&status);
+                    return exit_code_for_status_with_verdict(
+                        &status,
+                        fold.budget_exhausted.is_some(),
+                    );
                 }
             }
             Err(e) => eprintln!("· status read failed ({e}); retrying"),
@@ -725,18 +931,41 @@ pub fn run(args: &Args) -> i32 {
     }
 }
 
+/// Exit code for a run that STOPPED on its iteration budget instead of
+/// finishing. Distinct from both success and failure: nothing failed, and
+/// nothing finished — the agent was interrupted with work outstanding.
+///
+/// A dedicated code exists because `0` here is actively harmful. Every
+/// harness in `scripts/` scores success as `exit_code == 0`, so a
+/// budget-truncated Zelda run used to be recorded as a PASS — measuring an
+/// interrupted agent as a competent one. 125 is outside the shell's signal
+/// range and unused by this binary.
+pub const EXIT_ITERATION_BUDGET: i32 = 125;
+
 /// The documented exec exit-code truth table for a run/answer-source
 /// reaching a terminal status: completed → 0, cancelled → 130 (script
 /// convention: a cancel is neither success nor failure), anything else
 /// (failed, unexpected) → 1. ONE authority for both terminal branches —
 /// pre-fix, a CANCELLED answer-source subrun concluded through the
 /// generic finished branch and exited 0 (cycle-2 review F2).
-pub fn exit_code_for_status(status: &str) -> i32 {
+///
+/// `budget_exhausted` overrides a `completed` status: the RUN completed, the
+/// TURN did not (see `EXIT_ITERATION_BUDGET`).
+pub fn exit_code_for_status_with_verdict(status: &str, budget_exhausted: bool) -> i32 {
+    if status == "completed" && budget_exhausted {
+        return EXIT_ITERATION_BUDGET;
+    }
     match status {
         "completed" => 0,
         "cancelled" => 130,
         _ => 1,
     }
+}
+
+/// Status-only door for callers with no fold in hand (kept so the truth
+/// table has one home).
+pub fn exit_code_for_status(status: &str) -> i32 {
+    exit_code_for_status_with_verdict(status, false)
 }
 
 /// Token summary line: honest fallback to the cumulative total when the
@@ -785,12 +1014,53 @@ fn print_new(fold: &Fold, printed: &mut usize, tool_state: &mut HashMap<usize, T
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{resolve_headless_ask, ASK_REFUSAL};
+
+    #[test]
+    fn conclude_gate_auto_accepts_in_headless_exec() {
+        let prompt = "The coding agent believes the task is done after 2 cycle(s).\n\n\
+                      WORKFLOW_CHECK\n\n\
+                      Reply 'accept' to finish, or describe what still needs to change \
+                      (your words are fed straight into the next cycle as operator steering).";
+        let (response, log) = resolve_headless_ask(prompt);
+        assert_eq!(response, "accept");
+        assert!(
+            log.contains("auto-accept"),
+            "the log names the special-case resolution: {log}"
+        );
+    }
+
+    #[test]
+    fn ordinary_user_question_keeps_the_headless_refusal() {
+        let (response, log) = resolve_headless_ask("Which one?");
+        assert_eq!(response, ASK_REFUSAL);
+        assert!(
+            log.contains("refusal"),
+            "ordinary asks must still refuse headlessly: {log}"
+        );
+    }
+}
+
+/// One-line tool-result tail for the headless stream.
+///
+/// ADR-0026: display bound, but NEVER a silent one. This stream is captured by
+/// the bench harnesses and piped into orchestrating agents, so a cut that
+/// leaves no trace reads downstream as "the tool returned exactly this". The
+/// marker names what was dropped; the full result stays in the gateway ledger.
 fn preview_suffix(preview: &str) -> String {
     let first = preview.lines().next().unwrap_or("").trim();
     if first.is_empty() {
-        String::new()
+        return String::new();
+    }
+    let total = preview.chars().count();
+    let more_lines = preview.lines().count() > 1;
+    let capped: String = first.chars().take(100).collect();
+    if capped.chars().count() < first.chars().count() || more_lines {
+        //[WARNING:TRUNCATION] headless one-line tool preview; full result in the ledger
+        format!(" — {capped}… [#TRUNCATION: first line, 100 chars of {total}; full result in the run ledger]")
     } else {
-        let capped: String = first.chars().take(100).collect();
         format!(" — {capped}")
     }
 }
@@ -803,6 +1073,7 @@ fn print_item(item: &Item) {
             iteration,
             content,
             reasoning,
+            ..
         } => {
             let body = if content.trim().is_empty() {
                 reasoning
@@ -811,7 +1082,17 @@ fn print_item(item: &Item) {
             };
             let first: String = body.lines().take(3).collect::<Vec<_>>().join(" | ");
             let capped: String = first.chars().take(240).collect();
-            println!("∴ cycle {iteration}: {capped}");
+            // ADR-0026: the cycle line is progress chrome, but a SILENT cut in a
+            // piped stream reads as the model's whole thought. Say so when it cuts.
+            if capped.chars().count() < first.chars().count() || body.lines().count() > 3 {
+                //[WARNING:TRUNCATION] headless cycle preview; full reasoning in the ledger
+                println!(
+                    "∴ cycle {iteration}: {capped}… [#TRUNCATION: first 3 lines, 240 chars of {}; full text in the run ledger]",
+                    body.chars().count()
+                );
+            } else {
+                println!("∴ cycle {iteration}: {capped}");
+            }
         }
         Item::Tool {
             name,
@@ -846,6 +1127,12 @@ fn print_item(item: &Item) {
             let first = body.lines().next().unwrap_or("").trim();
             if first.is_empty() {
                 println!("◈ {title}");
+            } else if body.lines().count() > 1 {
+                //[WARNING:TRUNCATION] headless probe card shows the first body line only
+                println!(
+                    "◈ {title} — {first} [#TRUNCATION: first of {} lines; full probe body in the run ledger]",
+                    body.lines().count()
+                );
             } else {
                 println!("◈ {title} — {first}");
             }

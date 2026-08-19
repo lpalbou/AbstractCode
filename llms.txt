@@ -33,12 +33,20 @@
   (including `@name`, `/entities`, `/task`, `/end`, `/queue`, `/goal`,
   `/permissions`, `/workspace`, `/attach`, `/export`, `/context`, `/gpu`,
   `/redraw`), key bindings (incl. `Ctrl+L` repaint, `Ctrl+J` newline,
-  `Ctrl+O` drop-undo, `?` reference), per-modal keys, transcript glyph
-  vocabulary, attachments custody rules, exec exit codes.
+  `Ctrl+O` drop-undo, `Alt+E` conversation focus, the composer's editor
+  chords, `?` reference), the type-to-focus rule (typing, pasting or
+  dropping a file returns focus to the composer and keeps the input),
+  per-modal keys, transcript glyph
+  vocabulary, attachments custody rules, exec exit codes, and prompt-cache
+  posture (`exec --no-prompt-cache`, its scope, and how to verify the lane).
 - [FAQ](docs/faq.md): Durability, workspace policy, token stats, steering
-  semantics, queue pause semantics, approval tiers, parallel sessions.
+  semantics, queue pause semantics, approval tiers, parallel sessions,
+  prompt-cache A/B.
 - [Troubleshooting](docs/troubleshooting.md): Symptom → cause → fix for
   connection, auth, catalog, provider, workspace, and rendering issues.
+- [Orchestration cards](docs/orchestration-cards.md): One card per coding
+  workflow accepted by `--workflow` — anatomy, how each decides it is done,
+  what it remembers, measured profile, and when to choose it.
 - [Documentation index](docs/README.md): One-line map of every page.
 
 ## Project

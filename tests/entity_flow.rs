@@ -58,7 +58,14 @@ fn harness() -> Harness {
             // Path-less Prefs: ephemeral, never touches the real file.
             prefs: Rc::new(RefCell::new(Prefs::default())),
             workspace_root: Some("/tmp/ws".into()),
+            max_iterations_explicit: false,
             max_iterations: 50,
+            // Hermetic: harness runs never read the repo's AGENTS.md, so
+            // editing that file can never move a UI assertion.
+            no_project_context: true,
+            // Harness default: absent posture = server truth, same as a launch
+            // without --no-prompt-cache.
+            no_prompt_cache: false,
             replay_turns: 20,
             gateway_label: "127.0.0.1:8080".into(),
             modal: Rc::new(RefCell::new(None)),
@@ -490,7 +497,7 @@ fn focused_chip_always_renders_even_from_the_overflow_tail() {
     // 100 cols, 5 conversations, focus on the FIFTH: identity order would
     // hide it behind "+N" — the focused chip must paint (first), and the
     // "+N" count must still name every unpainted chip (cycle-3 task 3).
-    // Ctrl+E cycle order is untouched by the paint reorder (asserted via
+    // Alt+E cycle order is untouched by the paint reorder (asserted via
     // cycle_focus below).
     let mut h = harness();
     h.turn();
@@ -515,7 +522,7 @@ fn focused_chip_always_renders_even_from_the_overflow_tail() {
         header.contains(&format!("+{}", 5 - visible)),
         "+N counts every unpainted chip:\n{header}"
     );
-    // Paint order is presentation only: Ctrl+E from "fifth" (last in the
+    // Paint order is presentation only: Alt+E from "fifth" (last in the
     // convos vec) cycles back to the AGENT, exactly as identity order says.
     abstractcode_tui::ui::entity_actions::cycle_focus(store);
     assert_eq!(store.focus.get_untracked(), Focus::Agent);
@@ -838,8 +845,14 @@ fn composer_placeholder_swaps_in_entity_focus_and_footer_stays_facts() {
     );
 }
 
+/// Alt+E (ESC-prefixed 'e' on the legacy wire) cycles conversation
+/// focus. It was Ctrl+E until the abstracttui 0.3.2 bump handed the text
+/// widgets Codex's editor keymap, where Ctrl+E is move-to-line-end: a
+/// focused editor consumes its chords before any shortcut sees them, so
+/// the old binding was DEAD while the composer held focus (which is
+/// nearly always).
 #[test]
-fn ctrl_e_cycles_focus_and_new_session_resets_to_agent() {
+fn alt_e_cycles_focus_and_new_session_resets_to_agent() {
     let mut h = harness();
     h.turn();
     let store = h.store;
@@ -848,16 +861,16 @@ fn ctrl_e_cycles_focus_and_new_session_resets_to_agent() {
         cs.push(parked_convo("doorcheck", vec![]));
     });
     h.turn();
-    h.term.push_input(b"\x05"); // Ctrl+E
+    h.term.push_input(b"\x1be"); // Alt+E
     h.turn();
     assert_eq!(store.focus.get_untracked(), Focus::Entity("castor".into()));
-    h.term.push_input(b"\x05");
+    h.term.push_input(b"\x1be");
     h.turn();
     assert_eq!(
         store.focus.get_untracked(),
         Focus::Entity("doorcheck".into())
     );
-    h.term.push_input(b"\x05");
+    h.term.push_input(b"\x1be");
     h.turn();
     assert_eq!(store.focus.get_untracked(), Focus::Agent);
 

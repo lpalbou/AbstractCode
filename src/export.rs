@@ -370,6 +370,10 @@ fn quoted(body: &str) -> String {
     }
 }
 
+fn is_wrapper_runtime_note(text: &str) -> bool {
+    text == crate::runner::SUBRUN_CONCLUSION_NOTE
+}
+
 /// Render the transcript as a readable archival markdown document. Header
 /// first (session, timestamp, workflow, counts, truncation honesty), then
 /// the conversation with per-role `##` markers; intra-turn material
@@ -475,6 +479,7 @@ pub fn to_markdown(items: &[Item], meta: &ExportMeta, details: bool) -> String {
                 iteration,
                 content,
                 reasoning,
+                ..
             } => {
                 // Mirror the view: content when present, else reasoning.
                 let body = if content.trim().is_empty() {
@@ -499,13 +504,17 @@ pub fn to_markdown(items: &[Item], meta: &ExportMeta, details: bool) -> String {
                 sections.push(format!("- image{label_part} (artifact `{artifact_id}`)"));
             }
             Item::Info { text } => {
-                let mut lines = text.lines();
-                let first = lines.next().unwrap_or("");
-                let mut block = format!("> · {first}");
-                for l in lines {
-                    block.push_str(&format!("\n> {l}"));
+                if is_wrapper_runtime_note(text) {
+                    sections.push(format!("### ℹ Runtime wrapper note\n\n{}", quoted(text)));
+                } else {
+                    let mut lines = text.lines();
+                    let first = lines.next().unwrap_or("");
+                    let mut block = format!("> · {first}");
+                    for l in lines {
+                        block.push_str(&format!("\n> {l}"));
+                    }
+                    sections.push(block);
                 }
-                sections.push(block);
             }
             Item::Error { text } => sections.push(format!("### ✗ Error\n\n{text}")),
         }
@@ -579,6 +588,7 @@ fn segment_turns(items: &[Item]) -> Vec<SftTurn> {
                 iteration,
                 content,
                 reasoning,
+                ..
             } => {
                 if let Some(last) = turns.last_mut() {
                     if last.assistant.is_none() {
@@ -693,6 +703,7 @@ mod tests {
             iteration,
             content: content.into(),
             reasoning: reasoning.into(),
+            call: crate::transcript::CallCost::default(),
         }
     }
 
@@ -1000,6 +1011,24 @@ mod tests {
         ];
         let md = to_markdown(&items, &ExportMeta::default(), false);
         assert!(md.contains("- image **diagram.png** (artifact `art-9`)"));
+    }
+
+    #[test]
+    fn markdown_wrapper_runtime_note_stays_separate_from_normal_info_lines() {
+        let items = vec![
+            user("do the work"),
+            answer("done"),
+            Item::Info {
+                text: crate::runner::SUBRUN_CONCLUSION_NOTE.into(),
+            },
+        ];
+        let md = to_markdown(&items, &ExportMeta::default(), false);
+        assert!(md.contains("### ℹ Runtime wrapper note"), "{md}");
+        assert!(md.contains(crate::runner::SUBRUN_CONCLUSION_NOTE), "{md}");
+        assert!(
+            !md.contains(&format!("> · {}", crate::runner::SUBRUN_CONCLUSION_NOTE)),
+            "the wrapper note must not blend into the generic inline info stream:\n{md}"
+        );
     }
 
     // -- jsonl ----------------------------------------------------------------

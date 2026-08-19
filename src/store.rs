@@ -379,6 +379,14 @@ pub struct Store {
     /// gated; "auto" = unattended, skip the workflow's human pauses). Set
     /// by the workflow-select modal or /gating; sent as input_data.gating_mode.
     pub gating_mode: Signal<String>,
+    /// Verifier-before-conclude for this session (`_runtime.review_mode`):
+    /// before a tool-call-free response is accepted as final, a strict
+    /// verifier re-reads the transcript and can force more tool calls.
+    /// Seeded from `--review`/`--no-review` (default ON — abstractcode's
+    /// long-standing default) and toggled by `/review`.
+    pub review_mode: Signal<bool>,
+    /// Verifier round budget (`_runtime.review_max_rounds`); `/review rounds N`.
+    pub review_rounds: Signal<u32>,
     /// Reasoning effort override ("" = gateway default). The third leg
     /// of the route triple; provider/model changes reset it (coupling
     /// rule — an effort may only apply under the model it was chosen
@@ -573,6 +581,8 @@ impl Store {
             provider: cx.signal(String::new()),
             model: cx.signal(String::new()),
             gating_mode: cx.signal(String::new()),
+            review_mode: cx.signal(crate::cli::DEFAULT_REVIEW_MODE),
+            review_rounds: cx.signal(crate::cli::DEFAULT_REVIEW_ROUNDS),
             reasoning: cx.signal(String::new()),
             reasoning_probe: cx.signal(None),
             providers: cx.signal(Vec::new()),
@@ -677,6 +687,24 @@ impl Store {
                     .any(|t| t.name == **d && !t.served_disabled)
             })
             .count()
+    }
+
+    /// Every tool this session could actually be granted: the inventory
+    /// minus server-disabled rows minus the user's `/tools` opt-outs.
+    ///
+    /// This is the materialized form of "the default tool set" — needed for
+    /// bundles that require an EXPLICIT `tools` list and treat a missing one
+    /// as an empty one (see the goal lane), where sending nothing means
+    /// sending nothing rather than "your defaults, please".
+    pub fn grantable_tool_names(&self) -> Vec<String> {
+        let disabled = self.disabled_tools.get_untracked();
+        self.tools.with_untracked(|inv| {
+            inv.iter()
+                .filter(|t| !t.served_disabled)
+                .map(|t| t.name.clone())
+                .filter(|n| !disabled.contains(n))
+                .collect()
+        })
     }
 
     pub fn tool_classes(&self) -> Vec<crate::tool_policy::ToolClass> {

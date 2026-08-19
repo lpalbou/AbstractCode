@@ -4,3 +4,10 @@ untracked/
 .cursor/
 __pycache__/
 .cg_rounds/
+node_modules/
+.DS_Store
+test-results/
+test_result.txt
+.abstractcode/
+.agora/
+.codex/

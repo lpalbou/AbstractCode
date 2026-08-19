@@ -31,6 +31,7 @@ abstractcode-tui --help | --version
 | `--replay-turns <N>` | Prior turns replayed in full detail at boot (0 disables) | 20 |
 | `--permissions <level>` | tool permissions for the invocation: `read` \| `write` \| `all` | prefs level |
 | `--require-approval <t>` | gate these tools regardless of level (comma list, repeatable); exec denies them | — |
+| `--no-prompt-cache` | exec: opt the run out of the runtime prompt cache (`_runtime.prompt_cache=false`) | server truth (on) |
 | `--timeout <SECS>` | exec: overall deadline | 900 |
 
 ### Environment
@@ -86,7 +87,7 @@ abstractcode-tui --help | --version
 | `/brain <name>` | FLOW-BRAIN conversation with an entity: each message is one summon of the `entity-chat` VisualFlow through the entity door (poll to terminal; the structured `degraded`/`moment_error` contract renders as warn lines). Continuity rides the entity's own memory graph under one client-minted session id; the view is session-local, and `/end` closes it locally (no server visit exists). One conversation per entity: a live `@name` visit refuses with "/end first"; bare `/brain` reports the focused conversation's brain |
 | `/task <name> <title>` | Leave a task on the entity's desk — durable, no visit needed, works while the entity sleeps. Pickup happens at the entity's own boundary (day end, wake check, or visit close), never "immediately" |
 | `/end [name] [reason]` | Close the visit (the entity's reflection runs server-side; a visit that woke a sleeping entity restores the sleep). Refused mid-turn — entity turns are non-interruptible |
-| `/focus <name\|agent>` | Switch conversation focus (`Ctrl+E` cycles) |
+| `/focus <name\|agent>` | Switch conversation focus (`Alt+E` cycles) |
 | `/quit` | Exit — with a live agent run, the quit gate opens first (see "Quitting with a live run") |
 
 Anything that is not a command is a task (when idle) or steering guidance
@@ -207,7 +208,7 @@ recovers it.
 | `PgUp` / `PgDn` | anywhere | Scroll the transcript (PgDn to the tail re-sticks) |
 | mouse wheel | transcript | Scroll (unsticks from the tail) |
 | `Ctrl+D` | anywhere | Toggle detail view (thinking + tool results vs answers only) |
-| `Ctrl+E` | anywhere | Cycle conversation focus: agent → entity visit 1 → … → agent. Cycle order is the order conversations were opened — it never changes with how the header paints chips |
+| `Alt+E` | anywhere | Cycle conversation focus: agent → entity visit 1 → … → agent. Cycle order is the order conversations were opened — it never changes with how the header paints chips. Option+E on macOS with "Option as Meta/Esc+"; `/focus <name\|agent>` needs no modifier setting. (`Ctrl+E` is move-to-line-end in the composer) |
 | `Ctrl+T` | anywhere | Cycle theme |
 | `Ctrl+L` | anywhere | Force a full-screen repaint (`/redraw`) — recovers from a terminal clear |
 | `Ctrl+O` | while a drop's chips are still pending | Undo the newest file drop: chips out, the pasted path text back in the composer. Expires once the chips ride a run or are removed |
@@ -216,6 +217,11 @@ recovers it.
 | `Ctrl+C` | anywhere | Clear the current prompt (if any) and arm quit — a second Ctrl+C within 2s quits (with a live run, the quit gate opens; a third press = leave & quit) |
 | `↑↓` + `Enter`/`Space` | pickers | Move + choose — Space confirms too, single-select semantics (theme picker previews live) |
 | `Tab` | anywhere | Move focus (composer ↔ transcript ↔ modal fields) |
+| any character | transcript focused | Return focus to the composer and keep the character — typing is never dropped because focus wandered. `/` opens the command dropdown the same way |
+| paste / file drop | transcript focused | Same: pasted text lands in the draft, a dropped file becomes an attachment chip, and focus returns so you can type the prompt that goes with it |
+| `Ctrl+A` / `Ctrl+E` | composer | Move to line start / line end (`Home` / `End` also work) |
+| `Alt+B` / `Alt+F` | composer | Move one word left / right (`Ctrl+←` / `Ctrl+→` also work). Hold `Shift` on any form to extend the selection |
+| `Ctrl+W` / `Alt+D` | composer | Delete the word before / after the caret (`Alt+Backspace`, `Ctrl+Backspace`, `Alt+Delete`, `Ctrl+Delete` also work) |
 
 ### Modal keys
 
@@ -268,7 +274,7 @@ entries, tools ran); the full memory digests sit behind the details toggle
   (`◆castor parked`, `◆castor ✎42s` while a turn runs); chips render
   whole or collapse into an honest `+N` tail at narrow widths — the
   **focused** chip always renders (painted first when it would otherwise
-  hide), while `Ctrl+E` keeps cycling in open order regardless of paint
+  hide), while `Alt+E` keeps cycling in open order regardless of paint
   order; facts paint after chips and clip first.
 - **Activity strip** (while running): spinner · current activity · cycle ·
   the in-flight model call (`model call 14s · 41 tok/s (last call)` —
@@ -297,9 +303,73 @@ entries, tools ran); the full memory digests sit behind the details toggle
 ## Caching and context
 
 The gateway enables prompt caching automatically per run when the provider
-supports it (auto = on when available; nothing to configure client-side).
-`/cache` reports: the effective route, whether that provider/model supports
-prompt caching (and in which mode), cache hits observed this run, and the
-context size of the latest model call. Local providers (e.g. LM Studio)
+supports it. Interactive sessions take the server default; there is nothing to
+configure. `/cache` reports: the effective route, whether that provider/model
+supports prompt caching (and in which mode), cache hits observed this run, and
+the context size of the latest model call. Local providers (e.g. LM Studio)
 often cache without reporting hit counts — the panel says so rather than
 inventing zeros.
+
+### `--no-prompt-cache`
+
+`exec --no-prompt-cache` opts a headless run out of the runtime prompt cache by
+sending `_runtime.prompt_cache = false` in the run's start vars. Absent, the run
+takes the gateway default (on). It exists so one gateway can serve both sides of
+an A/B measurement: the cached and uncached lanes then differ only by that key.
+
+```bash
+# uncached lane
+abstractcode-tui exec "<prompt>" --session bench-off --workflow react-agent:react \
+  --provider mlx --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
+  --no-project-context --no-review --permissions read --max-iterations 4 \
+  --no-prompt-cache
+
+# cached lane: the same command without --no-prompt-cache
+```
+
+**Scope.** The flag reaches the model calls of the run `exec` starts, and only
+those.
+
+- **It is `exec`-only.** The interactive client always takes the server default.
+- **It does not reach flow-graph bundles.** `coding-agent`, `basic-agent` and
+  `multiagent-coding` — including the default workflow — run their agent loop in
+  an Agent-node child run. The visual-flow compiler builds that child's
+  `_runtime` namespace from an explicit inheritance list: provider, model,
+  thinking, audio policy, transcription language, skills block and
+  `prompt_cache_binding` are carried across; **`prompt_cache` is not.** The child
+  therefore resolves the posture for itself and takes the gateway default,
+  whatever the parent was sent. Flow-graph bundles cannot be A/B'd from the
+  client today.
+- **Use `--workflow react-agent:react` for an A/B.** Its model calls run in the
+  run `exec` starts, so the posture governs them.
+
+**Verify the lane from the ledger, never from the flag.** On providers with an
+in-process cache, every model call that received a cache key carries
+`metadata.prompt_cache`. Absence of that metadata on *every* call is what proves
+an uncached lane; presence on any call in a lane you believe is off means the
+flag did not reach it. Check before trusting any comparison built on it.
+
+### What to expect when the cache is on
+
+Caching removes prompt prefill, not decoding, so the gain grows with prefix
+length and shrinks on short prompts with long answers, and it varies by model
+architecture.
+
+Measured through this client over three-turn sessions at ~5.6k-token contexts: a
+full-attention 4B served 96% of its prompt tokens from cache after the first
+turn, and two hybrid-attention models (4B and 27B) served about 47%, spending one
+turn rebuilding where the transcript first grows. Turns after the first were
+roughly twice as fast on those models, though the ratio moves by up to ×2 between
+repeat runs — treat it as an order of magnitude, not a figure. The first turn is
+slightly slower, because it builds the prefix cache the later turns reuse.
+
+GGUF models are the exception to watch: llama.cpp reuses the prefix on its own,
+and setting a cache key replaces that reuse rather than adding to it. The
+recorded comparison came out slower with the key, but it ran on CPU (Metal
+offload is disabled once PyTorch is in the process), so it is not a verdict for a
+GPU-offloaded GGUF host. Benchmark your own workload before enabling it there.
+
+See
+[AbstractCore's prompt-caching guide](https://github.com/lpalbou/AbstractCore/blob/main/docs/prompt-caching.md)
+for the per-model support matrix, the pending measurement list, and the
+measurement method.

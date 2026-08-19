@@ -188,7 +188,21 @@ pub(crate) fn err_from_ureq(label: &str, e: ureq::Error) -> GwError {
                     if t.is_empty() {
                         format!("{label} failed")
                     } else {
-                        t.chars().take(400).collect()
+                        // ADR-0026: a non-JSON error body is the only account
+                        // the operator gets of WHY the call failed. Bound it
+                        // so one HTML error page cannot own the screen, but a
+                        // silent cut reads as the server's whole answer.
+                        const ERR_BODY_CHARS: usize = 400;
+                        let total = t.chars().count();
+                        let head: String = t.chars().take(ERR_BODY_CHARS).collect();
+                        if total > ERR_BODY_CHARS {
+                            //[WARNING:TRUNCATION] non-JSON error body bounded for display
+                            format!(
+                                "{head}… [#TRUNCATION: {ERR_BODY_CHARS} of {total} chars of the error body]"
+                            )
+                        } else {
+                            head
+                        }
                     }
                 });
             GwError::http(code, detail)
@@ -296,14 +310,25 @@ pub struct GatewayClient {
 
 impl GatewayClient {
     pub fn new(base_url: &str, token: Option<&str>) -> GatewayClient {
+        // `#[WARNING:TIMEOUT]` REST control-plane agent (ADR-0027 §4).
+        // These bound SHORT request/response JSON calls only — catalog reads,
+        // run start, ledger pages, wait resolutions — never a model call and
+        // never the ledger stream (which has its own agent below). A stalled
+        // 60s read here is a transport fault, not a slow agent: run duration
+        // is unaffected, because the run lives durably on the gateway and the
+        // next poll picks it back up.
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(5))
             .timeout_read(Duration::from_secs(60))
             .timeout_write(Duration::from_secs(30))
             .build();
-        // The SSE stream idles between records; the gateway heartbeats with
-        // keep-alive comments, so a long read timeout doubles as the idle
-        // watchdog (on timeout the runner polls run status and reconnects).
+        // `#[WARNING:TIMEOUT]` SSE ledger-stream agent (ADR-0027 §4).
+        // NOT a run deadline: the stream idles between records and the gateway
+        // heartbeats with keep-alive comments, so this read timeout is an IDLE
+        // WATCHDOG. On expiry the runner polls run status and reconnects from
+        // its cursor (`runner.rs:2566`) — an agent thinking for an hour keeps
+        // its run; only the socket is replaced. Must stay above the gateway's
+        // heartbeat interval, or every quiet stretch costs a reconnect.
         let stream_agent = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(5))
             .timeout_read(Duration::from_secs(75))

@@ -30,6 +30,7 @@ pub mod export;
 pub mod gateway;
 pub mod mention;
 pub mod paths;
+pub mod project_context;
 pub mod protocol;
 pub mod run_input;
 pub mod runner;
@@ -262,6 +263,13 @@ fn run_tui(args: &cli::Args) -> i32 {
         store.provider.set(provider.clone());
         store.model.set(model.clone());
         store.reasoning.set(reasoning.clone());
+        // Verifier-before-conclude: `--review`/`--no-review` seeds the
+        // session; `/review` retunes it. The default is ON (see
+        // `cli::DEFAULT_REVIEW_MODE`).
+        store
+            .review_mode
+            .set(args.review.unwrap_or(cli::DEFAULT_REVIEW_MODE));
+        store.review_rounds.set(args.review_rounds);
         store.context_window.set(context_window);
         if let Some(details) = show_details_pref {
             store.show_details.set(details);
@@ -286,7 +294,14 @@ fn run_tui(args: &cli::Args) -> i32 {
         let wake = abstracttui::reactive::wake_handle();
         let rx = rx_slot.take().expect("mount runs once");
         let ui_client = client.clone();
-        runner::spawn(client.clone(), wake, store, tx.clone(), rx);
+        runner::spawn(
+            client.clone(),
+            wake,
+            store,
+            tx.clone(),
+            rx,
+            args.workflow.clone(),
+        );
 
         // Boot sequence: probe, load the catalog (+ saved workflow), and
         // reattach to a live run of this session if one exists.
@@ -321,6 +336,9 @@ fn run_tui(args: &cli::Args) -> i32 {
             prefs: Rc::new(RefCell::new(prefs)),
             workspace_root,
             max_iterations,
+            max_iterations_explicit: args.max_iterations_explicit,
+            no_project_context: args.no_project_context,
+            no_prompt_cache: args.no_prompt_cache,
             replay_turns: args_replay_turns,
             gateway_label,
             modal: Rc::new(RefCell::new(None)),

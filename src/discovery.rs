@@ -73,6 +73,60 @@ pub fn agent_workflow_ids_from_bundles(v: &Value) -> Vec<String> {
     out
 }
 
+/// EVERY catalogued entrypoint as `(bundle_id, flow_id, interfaces)` — the
+/// DIAGNOSTIC view, no interface filter and deprecated rows included.
+///
+/// Selection never uses this (`workflows_with_interface` owns that): it
+/// exists so a refusal can tell the truth about WHY a ref was rejected. A
+/// flow that is installed but carries, say, `abstractcode.coding.v1` used to
+/// be reported as "not found on this gateway", which sent the operator
+/// hunting for a missing bundle that was in fact sitting right there behind
+/// a different interface.
+pub fn all_entrypoints_from_bundles(v: &Value) -> Vec<(String, String, Vec<String>)> {
+    let mut out = Vec::new();
+    for b in v
+        .get("items")
+        .and_then(Value::as_array)
+        .unwrap_or(&Vec::new())
+    {
+        let bundle_id = b
+            .get("bundle_id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if bundle_id.is_empty() {
+            continue;
+        }
+        for ep in b
+            .get("entrypoints")
+            .and_then(Value::as_array)
+            .unwrap_or(&Vec::new())
+        {
+            let flow_id = ep
+                .get("flow_id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
+            if flow_id.is_empty() {
+                continue;
+            }
+            let interfaces = ep
+                .get("interfaces")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            out.push((bundle_id.to_string(), flow_id.to_string(), interfaces));
+        }
+    }
+    out
+}
+
 /// Bundle entrypoints whose `interfaces[]` carry `interface_id` — the one
 /// catalog filter, generalized over the interface parameter (agent.v1 for
 /// `/workflow`, goal.v1 for `/goal`) instead of a second parser copy.
@@ -142,18 +196,96 @@ pub fn workflows_with_interface(v: &Value, interface_id: &str) -> Vec<Workflow> 
     out
 }
 
+/// Flows belonging to `bundle_id` — the bundle-only resolution set.
+pub fn flows_in_bundle<'a>(workflows: &'a [Workflow], bundle_id: &str) -> Vec<&'a Workflow> {
+    workflows
+        .iter()
+        .filter(|w| w.bundle_id == bundle_id)
+        .collect()
+}
+
+/// Resolve a BUNDLE-ONLY reference (`--workflow react-agent`, a saved pref
+/// carrying no flow) to one flow inside that bundle.
+///
+/// Determinism first (the operator's orchestration contract): a bundle with
+/// exactly one agent flow resolves to it; a multi-flow bundle resolves ONLY
+/// on an unambiguous name match (`flow_id` or `name` equal to the bundle id
+/// — the conventional "chat entry" spelling). Anything else returns `None`
+/// so the caller refuses and names the choices, rather than picking a flow
+/// the operator did not ask for.
+///
+/// Before this existed, `choose_workflow` required BOTH halves and a
+/// bundle-only ref fell through to the basic-agent fallback — so
+/// `--workflow react-agent` (a bundle that IS installed) resolved to
+/// basic-agent, which headless `exec` then refused as "not found on this
+/// gateway", while `--workflow basic-agent` worked only by coinciding with
+/// the fallback. Verified live 2026-07-30 against the running gateway.
+pub fn resolve_bundle_only(workflows: &[Workflow], bundle_id: &str) -> Option<Workflow> {
+    let in_bundle = flows_in_bundle(workflows, bundle_id);
+    match in_bundle.len() {
+        0 => None,
+        1 => Some(in_bundle[0].clone()),
+        _ => in_bundle
+            .iter()
+            .find(|w| w.flow_id == bundle_id || w.name == bundle_id)
+            .map(|w| (*w).clone()),
+    }
+}
+
+/// Resolve the workflow to run: exact `bundle:flow` > bundle-only >
+/// coding-agent:coder (the benchmark-verified default) > basic-agent >
+/// first agent flow.
+///
+/// The trailing fallbacks serve the PREFS lane (a stale saved preference
+/// degrading to the default is the interactive contract). Callers acting on
+/// an EXPLICIT request must re-check the result — see
+/// `exec::explicit_workflow_mismatch` — because a fallback silently running
+/// a different agent breaks deterministic orchestration.
+/// Whether a bundle's loop has review nodes at all.
+///
+/// memact does not: `MemActAgent` deprecation-warns on `review_mode` /
+/// `review_max_rounds` (`abstractagent/agents/memact.py:88-96`) and the Python
+/// client withholds them for that agent kind (`react_shell.py:775-779`).
+/// Match that rather than making the server warn about a posture it ignores.
+pub fn workflow_is_review_capable(bundle_id: &str) -> bool {
+    !bundle_id.starts_with("memact")
+}
+
 pub fn choose_workflow(
     workflows: &[Workflow],
     preferred_bundle: Option<&str>,
     preferred_flow: Option<&str>,
 ) -> Option<Workflow> {
-    if let (Some(b), Some(f)) = (preferred_bundle, preferred_flow) {
-        if let Some(w) = workflows
-            .iter()
-            .find(|w| w.bundle_id == b && w.flow_id == f)
-        {
-            return Some(w.clone());
+    if let Some(b) = preferred_bundle {
+        match preferred_flow {
+            Some(f) => {
+                if let Some(w) = workflows
+                    .iter()
+                    .find(|w| w.bundle_id == b && w.flow_id == f)
+                {
+                    return Some(w.clone());
+                }
+            }
+            // Bundle-only: resolve WITHIN the bundle before any fallback.
+            None => {
+                if let Some(w) = resolve_bundle_only(workflows, b) {
+                    return Some(w);
+                }
+            }
         }
+    }
+    // DEFAULT (operator ruling 2026-08-01, benchmark-backed): the verified
+    // coding workflow. Across a ~70-run campaign, `coding-agent:coder` had the
+    // highest quality floor of every loop design (0.795; the only heavy arm
+    // with no sub-0.6 run in any era) and the best calls-to-artifact ratio —
+    // builder + independent verifier + deterministic gates. basic-agent stays
+    // the fallback where coder is not installed; a saved preference still
+    // wins above.
+    if let Some(w) = workflows
+        .iter()
+        .find(|w| w.bundle_id == "coding-agent" && w.flow_id == "coder")
+    {
+        return Some(w.clone());
     }
     if let Some(w) = workflows.iter().find(|w| w.bundle_id == "basic-agent") {
         return Some(w.clone());
@@ -548,10 +680,138 @@ mod tests {
         ];
         let picked = choose_workflow(&flows, Some("coding-agent"), Some("coder")).unwrap();
         assert_eq!(picked.bundle_id, "coding-agent");
+        // Default ruling 2026-08-01: coder is the default when installed
+        // (highest quality floor of the loop-design benchmark); basic-agent
+        // is the fallback when it is not.
         let fallback = choose_workflow(&flows, None, None).unwrap();
-        assert_eq!(fallback.bundle_id, "basic-agent");
+        assert_eq!(fallback.bundle_id, "coding-agent");
         let missing_pref = choose_workflow(&flows, Some("gone"), Some("x")).unwrap();
-        assert_eq!(missing_pref.bundle_id, "basic-agent");
+        assert_eq!(missing_pref.bundle_id, "coding-agent");
+        let no_coder: Vec<Workflow> = flows
+            .iter()
+            .filter(|w| w.bundle_id != "coding-agent")
+            .cloned()
+            .collect();
+        let basic = choose_workflow(&no_coder, None, None).unwrap();
+        assert_eq!(basic.bundle_id, "basic-agent", "fallback without coder");
+    }
+
+    /// A BUNDLE-ONLY reference resolves inside its own bundle — it must never
+    /// fall through to the basic-agent default.
+    ///
+    /// Live regression (2026-07-30, gateway 127.0.0.1:8080): `--workflow
+    /// react-agent` exited 2 with "not found on this gateway" while
+    /// `react-agent:react` ran GREEN, because the old resolver required BOTH
+    /// halves and a bundle-only ref landed on basic-agent, which headless
+    /// `exec` then correctly refused. `--workflow basic-agent` appeared to
+    /// work only because it coincided with the fallback.
+    #[test]
+    fn bundle_only_reference_resolves_within_its_bundle() {
+        let flows = vec![
+            Workflow {
+                bundle_id: "react-agent".into(),
+                flow_id: "react".into(),
+                name: "react".into(),
+                description: String::new(),
+            },
+            Workflow {
+                bundle_id: "multiagent-coding".into(),
+                flow_id: "multiagent-coder".into(),
+                name: "Multi-agent coder — chat entry".into(),
+                description: String::new(),
+            },
+            Workflow {
+                bundle_id: "basic-agent".into(),
+                flow_id: "81795ea9".into(),
+                name: "basic-agent".into(),
+                description: String::new(),
+            },
+        ];
+        // The single agent flow in the bundle is the evident intent.
+        let react = choose_workflow(&flows, Some("react-agent"), None).unwrap();
+        assert_eq!(
+            (react.bundle_id.as_str(), react.flow_id.as_str()),
+            ("react-agent", "react")
+        );
+        // Including when the flow id is nothing like the bundle id.
+        let mc = choose_workflow(&flows, Some("multiagent-coding"), None).unwrap();
+        assert_eq!(mc.flow_id, "multiagent-coder");
+        // A bundle that genuinely is not installed still degrades (the prefs
+        // lane contract); explicit callers re-check via
+        // `exec::explicit_workflow_mismatch`.
+        assert_eq!(
+            choose_workflow(&flows, Some("gone"), None)
+                .unwrap()
+                .bundle_id,
+            "basic-agent"
+        );
+    }
+
+    /// A multi-flow bundle resolves ONLY on an unambiguous name match; an
+    /// ambiguous bundle-only ref returns None so the caller can refuse and
+    /// list the choices. Picking one silently would run an agent the
+    /// operator did not name — the orchestration-determinism failure.
+    #[test]
+    fn ambiguous_bundle_only_reference_refuses_to_guess() {
+        let two = vec![
+            Workflow {
+                bundle_id: "dual".into(),
+                flow_id: "alpha".into(),
+                name: "alpha".into(),
+                description: String::new(),
+            },
+            Workflow {
+                bundle_id: "dual".into(),
+                flow_id: "beta".into(),
+                name: "beta".into(),
+                description: String::new(),
+            },
+        ];
+        assert!(
+            resolve_bundle_only(&two, "dual").is_none(),
+            "two candidates, no name match → the caller must ask"
+        );
+        // A flow named after its bundle IS the evident chat entry.
+        let mut named = two.clone();
+        named.push(Workflow {
+            bundle_id: "dual".into(),
+            flow_id: "dual".into(),
+            name: "dual".into(),
+            description: String::new(),
+        });
+        assert_eq!(resolve_bundle_only(&named, "dual").unwrap().flow_id, "dual");
+        assert!(resolve_bundle_only(&two, "absent").is_none());
+    }
+
+    /// The diagnostic view reports EVERY entrypoint with its interfaces —
+    /// including the `abstractcode.coding.v1` pipelines that the agent-only
+    /// selection filter hides, so a refusal can say "installed, different
+    /// interface" instead of the false "not found on this gateway".
+    #[test]
+    fn diagnostic_catalog_reports_every_interface() {
+        let v = json!({"items": [
+            {"bundle_id": "multiagent-coding", "entrypoints": [
+                {"flow_id": "multiagent-coder", "interfaces": ["abstractcode.agent.v1"]},
+                {"flow_id": "multiagent-coding", "interfaces": ["abstractcode.coding.v1"]}]},
+            {"bundle_id": "coder", "entrypoints": [{"flow_id": "b4c6f107", "interfaces": []}]},
+            {"bundle_id": "", "entrypoints": [{"flow_id": "x", "interfaces": []}]}
+        ]});
+        let all = all_entrypoints_from_bundles(&v);
+        assert!(all.contains(&(
+            "multiagent-coding".to_string(),
+            "multiagent-coding".to_string(),
+            vec!["abstractcode.coding.v1".to_string()]
+        )));
+        // Interface-less rows are still VISIBLE to diagnosis (they are the
+        // hardest refusals to explain), blank bundle ids are not.
+        assert!(all
+            .iter()
+            .any(|(b, f, i)| b == "coder" && f == "b4c6f107" && i.is_empty()));
+        assert!(all.iter().all(|(b, _, _)| !b.is_empty()));
+        // Selection stays agent-only — diagnosis must not widen it.
+        let selectable = agent_workflows_from_bundles(&v);
+        assert_eq!(selectable.len(), 1);
+        assert_eq!(selectable[0].flow_id, "multiagent-coder");
     }
 
     #[test]

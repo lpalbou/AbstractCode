@@ -7,6 +7,7 @@
 | [api.md](api.md) | Reference: CLI options and env vars, slash commands, key bindings, transcript vocabulary, exit codes. |
 | [faq.md](faq.md) | Relationship to the Python CLI, durability, workspaces, tokens, steering semantics. |
 | [troubleshooting.md](troubleshooting.md) | Symptom → cause → fix, from connection failures to workspace surprises. |
+| [orchestration-cards.md](orchestration-cards.md) | One card per coding workflow you can pass to `--workflow`: how each loop decides it is done, what it remembers, its measured profile, and when to choose it. Read it with the workflow section of [getting-started.md](getting-started.md). |
 
 Root documents: [README](../README.md) · [CHANGELOG](../CHANGELOG.md) ·
 [CONTRIBUTING](../CONTRIBUTING.md) · [SECURITY](../SECURITY.md) ·

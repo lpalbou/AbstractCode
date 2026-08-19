@@ -117,25 +117,28 @@ have approved). If the connection dropped mid-wait, the polling fallback
 picks it up within seconds; the status bar shows the connection error
 meanwhile.
 
-## Keys go nowhere after switching themes rapidly
+## What I type does not appear in the prompt box
 
-The composer's autofocus re-fires on every theme rebuild (engine 0.2.0);
-if a broken state persists, press Tab to refocus the composer.
-
-## Enter or `c` suddenly copies instead of typing
-
-You drag-selected text and the selection region is still active (it stays
-visible after the release-copy so `c`/Enter can re-copy). Press Esc or
-click once to clear it; any other typed key clears it too. Engine-side
-one-shot-copy fix is tracked upstream (AbstractTUI backlog 0290).
+Just keep typing: any character returns focus to the composer and is kept,
+and so is a paste or a file drop. Focus can sit on the transcript after you
+click in the scrollback or press Tab, and the transcript answers only
+navigation keys — so if a keystroke seems to vanish, type the next one and
+both land. `Tab` still moves focus explicitly, and `/focus <name|agent>`
+switches conversations from any state.
 
 ## Copy did not reach the clipboard
 
-In-app copy uses OSC 52, which some terminals gate behind a setting
-(tmux needs `set -g set-clipboard on`; some terminals cap the payload).
-Shift-drag (Option-drag on macOS Terminal/iTerm2) bypasses the app and
-uses the terminal's native selection — see AbstractTUI's
-`docs/troubleshooting.md` for the full modifier matrix.
+Copy uses OSC 52 where the terminal advertises it, and falls back to the
+host clipboard tool (`pbcopy`, `wl-copy`, `xclip`, `clip.exe`) everywhere
+else, so a drag-copy works in macOS Terminal.app, the VS Code and Cursor
+terminals, and Warp. If OSC 52 is the only route your setup allows, tmux
+needs `set -g set-clipboard on` and some terminals cap the payload size.
+Shift-drag (Option-drag on macOS Terminal and iTerm2) bypasses the app and
+uses the terminal's native selection.
+
+A selection made while a run streams copies exactly the cells you
+highlighted: the transcript holds still for the length of the drag and
+returns to the live tail when the region clears.
 
 ## Garbled cells / misaligned borders
 

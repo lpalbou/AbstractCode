@@ -34,7 +34,61 @@ pub struct StartOpts {
     /// policy may clamp paths outside operator-controlled roots.
     pub workspace_allowed: Vec<String>,
     pub max_iterations: u32,
+    /// The operator named the budget on this invocation (`--max-iterations`),
+    /// as opposed to inheriting the client's own default.
+    ///
+    /// Gates whether `_limits.max_iterations` rides at all — see the long note
+    /// at the `_limits` composition below. Only an explicit declaration is
+    /// worth suppressing the runtime's complete `_limits` seeding for.
+    pub max_iterations_explicit: bool,
     pub system: String,
+    /// Project instructions (`AGENTS.md`) to APPEND to the agent's system
+    /// prompt — rides `_runtime.system_prompt_extra`, the exact wire key the
+    /// Python `abstractcode` client already uses (react_shell.py:12998).
+    /// Empty = absent = server truth, byte-parity for every existing caller.
+    ///
+    /// Reach, corrected: this lands for NATIVE-LOOP bundles, whose root run
+    /// vars are the loop's vars. Flow-graph Agent children do NOT inherit it —
+    /// the compiler rebuilds each child `_runtime` and copies a fixed set that
+    /// includes `thinking` but not this key (`compiler.py:1347-1396`); a child
+    /// gets a system prompt only from its own node pin
+    /// (`compiler.py:1417-1421`). An earlier version of this comment claimed
+    /// inheritance "with no server-side change" — that was wrong, and it is the
+    /// same reach limit `review_mode` has.
+    ///
+    /// This client used to send NOTHING here while `system` stayed hardcoded
+    /// empty, so the gateway agent never read the repo's own conventions.
+    pub system_prompt_extra: String,
+    /// Verifier-before-conclude (`_runtime.review_mode`). `None` = absent =
+    /// server default, which is **OFF**
+    /// (`abstractagent/adapters/react_runtime.py:2244-2246` reads the key and
+    /// falls back to `False`).
+    ///
+    /// THE premature-completion fix. The Python `abstractcode` client
+    /// constructs its ReAct agent with `review_mode=True,
+    /// review_max_rounds=3` by DEFAULT (`react_shell.py:251-252`), so before
+    /// accepting any tool-call-free response as final, a strict verifier LLM
+    /// call re-reads the transcript and can force more tool calls
+    /// ("only count actions supported by the tool outputs"). This client sent
+    /// the key nowhere, so a gateway run concluded the first time the model
+    /// stopped calling tools — exactly "stops iterating too soon and claims
+    /// completion too early".
+    ///
+    /// Reach: `review_mode` is absent from abstractruntime and
+    /// abstractgateway entirely (verified 2026-07-30), so it lands for
+    /// NATIVE-LOOP bundles — react-agent, codeact-agent, memact-agent —
+    /// whose root run vars are the loop's own vars. Flow-graph bundles
+    /// (basic-agent, coding-agent, multiagent-coding) need the runtime
+    /// compiler to inherit the key the way it already inherits `thinking`;
+    /// see the cross-package request in the analysis report.
+    pub review_mode: Option<bool>,
+    /// Verifier round budget (`_runtime.review_max_rounds`); 0 = absent =
+    /// the loop's own default (1). abstractcode uses 3.
+    pub review_max_rounds: u32,
+    /// The chosen workflow has review nodes at all. False for memact (see the
+    /// composition site). Defaults to false so `StartOpts::default()` states
+    /// no posture; both real call sites compute it from the workflow.
+    pub review_capable: bool,
     /// Prior conversation turns (role, content) carried by the client.
     /// Client-provided messages WIN over the server-side session seed —
     /// needed live because wrapper bundles can leave prior roots
@@ -71,6 +125,12 @@ pub struct StartOpts {
     /// key abstractflow's live follow-up sends. Filled by the worker at
     /// send time; empty = no key.
     pub attachments: Vec<Value>,
+    /// Prompt-cache posture (`_runtime.prompt_cache`). `None` = absent =
+    /// server truth (the runtime's own default, ON). `Some(false)` opts the
+    /// run out of the prepare/reuse lane so a single gateway can serve an
+    /// A/B measurement. Only an explicit posture is ever sent — an untouched
+    /// caller keeps byte-parity.
+    pub prompt_cache: Option<bool>,
 }
 
 pub fn build_input_data(prompt: &str, opts: &StartOpts) -> Value {
@@ -119,6 +179,32 @@ pub fn build_input_data(prompt: &str, opts: &StartOpts) -> Value {
     if !opts.reasoning.trim().is_empty() {
         runtime.insert("thinking".into(), json!(opts.reasoning.trim()));
     }
+    // Project instructions (AGENTS.md): APPENDED to whatever system prompt
+    // the workflow bakes in, never replacing it — `system_prompt_extra` is
+    // additive by contract, so a bundle's own persona and gate wording stay
+    // intact while the repo's conventions reach the model. Cross-client
+    // parity with abstractcode's composition.
+    if !opts.system_prompt_extra.trim().is_empty() {
+        runtime.insert(
+            "system_prompt_extra".into(),
+            json!(opts.system_prompt_extra.trim()),
+        );
+    }
+    // Verifier-before-conclude. Sent only when the operator has a posture
+    // (Some) so an untouched caller keeps server truth; the round budget
+    // rides only alongside an ENABLED verifier — a budget with review off
+    // would be a claim about a loop that never runs.
+    // memact has NO review nodes: `MemActAgent` deprecation-warns on these
+    // kwargs (`abstractagent/agents/memact.py:88-96`) and the Python client
+    // deliberately withholds them for that agent kind
+    // (`react_shell.py:775-779`). Sending them would be noise the server has
+    // to warn about, so the posture is simply not stated.
+    if let Some(review) = opts.review_mode.filter(|_| opts.review_capable) {
+        runtime.insert("review_mode".into(), json!(review));
+        if review && opts.review_max_rounds > 0 {
+            runtime.insert("review_max_rounds".into(), json!(opts.review_max_rounds));
+        }
+    }
     // Gating mode: top-level `input_data.gating_mode` — the coder
     // workflow reads it as a declared start pin (on_flow_start resolves
     // declared pins input-first). Only "auto" is sent; absent = the
@@ -148,15 +234,69 @@ pub fn build_input_data(prompt: &str, opts: &StartOpts) -> Value {
         }
         runtime.insert("tool_policy".into(), Value::Object(policy));
     }
+    // Prompt cache: composed into the SAME `_runtime` map. Sent only when
+    // the operator stated a posture, so a default run keeps server truth.
+    if let Some(pc) = opts.prompt_cache {
+        runtime.insert("prompt_cache".into(), json!(pc));
+    }
     if !runtime.is_empty() {
         input["_runtime"] = Value::Object(runtime);
     }
-    // Declared context window (CTX-0): the runtime's canonical `_limits`
-    // namespace, top-level (root run vars; subflows inherit parent
-    // `_limits`). `max_tokens` = total context window (ADR-0008). Sent
-    // only when the operator declared one — absence keeps server truth.
+    // `_limits`: the runtime's canonical limits namespace, top-level (root
+    // run vars; subflows inherit parent `_limits`).
+    //
+    // The iteration budget MUST ride here, not only as the flat
+    // `max_iterations` key above. The flat key alone is silently discarded:
+    // when `_limits` is absent from the start vars, abstractruntime seeds it
+    // with ITS OWN defaults (`core/runtime.py:1163-1165` → `max_iterations:
+    // 20`, `core/config.py:51`), and abstractagent then resolves the budget
+    // from `_limits` FIRST (`adapters/generation_params.py:94-100`) while
+    // treating "the key is present" as proof the CALLER set it
+    // (`adapters/react_runtime.py:114-119`) — so the runtime's own default
+    // out-votes the operator. Wire-verified 2026-07-30: 31 consecutive
+    // gateway runs started with `--max-iterations 50` carried
+    // `scratchpad.max_iterations: 50` beside `_limits.max_iterations: 20`,
+    // and the loop obeyed 20.
+    //
+    // The old behaviour also had a perverse tell that pins the diagnosis: a
+    // run that ALSO declared a context window got its budget honoured, purely
+    // because `_limits` then existed and the runtime skipped its seeding.
+    // `max_tokens` = total context window (ADR-0008), sent only when the
+    // operator declared one — absence keeps server truth.
+    //
+    // …WHICH IS ALSO THE TRAP. `_limits` seeding is ALL-OR-NOTHING: sending a
+    // partial dict makes the runtime skip its fill entirely
+    // (`core/runtime.py:1166`) and `get_limits` never backfills a dict that is
+    // already present (`core/vars.py:85-89`). abstractgateway's own seeder
+    // documents the rule and complies by merging the runtime's FULL
+    // `to_limits_dict()` first (`entity_visits.py:_seed_run_vars`). This
+    // client cannot do that: `to_limits_dict` derives `max_tokens` from model
+    // capabilities and then clamps `max_input_tokens` arithmetically
+    // (`core/config.py:70-135`) — facts a thin client does not hold, and
+    // hard-coding the 32768 fallback would CAP a 262k-window model.
+    //
+    // So an unconditional partial `_limits` would trade a wrong iteration
+    // budget for blinded context accounting: no `max_tokens` means
+    // `generation_params.py` can never fire the context-overflow warning and
+    // the gateway serves no context percentage — reviving exactly the
+    // instrument blindness that let a 132k-token flood pass unwarned in
+    // `untracked/agent_quality_investigation.md`. Losing the warning is worse
+    // than losing the budget.
+    //
+    // Therefore: send `_limits` ONLY when the operator declared something for
+    // it to carry. A default run keeps the runtime's own complete seeding.
+    // The real fix belongs server-side — abstractagent should treat a flat
+    // `max_iterations` as caller-explicit — and is filed as such in
+    // `docs/reports/2026-07-30-abstractcode-parity.md`.
+    let mut limits = serde_json::Map::new();
+    if opts.max_iterations_explicit && opts.max_iterations > 0 {
+        limits.insert("max_iterations".into(), json!(opts.max_iterations));
+    }
     if opts.context_window > 0 {
-        input["_limits"] = json!({ "max_tokens": opts.context_window });
+        limits.insert("max_tokens".into(), json!(opts.context_window));
+    }
+    if !limits.is_empty() {
+        input["_limits"] = Value::Object(limits);
     }
     if !opts.system.trim().is_empty() {
         input["system"] = json!(opts.system.trim());
@@ -200,9 +340,14 @@ mod tests {
             "empty provider stays absent"
         );
         assert!(input.get("_runtime").is_none());
+        // NO `_limits` on a default run. `_limits` seeding is all-or-nothing
+        // server-side, so a partial dict suppresses the runtime's COMPLETE
+        // fill — including the `max_tokens` the context-overflow warning and
+        // the gateway's context meter both need. An undeclared run must leave
+        // that seeding intact; only an explicit declaration earns the key.
         assert!(
             input.get("_limits").is_none(),
-            "no declared window = no _limits key (server truth owns limits)"
+            "an undeclared run must not suppress the runtime's own _limits seeding"
         );
         assert!(input.get("workspace_root").is_none());
         assert!(input.get("workspace_allowed_paths").is_none());
@@ -238,6 +383,7 @@ mod tests {
             workspace_root: Some("/tmp/proj".into()),
             workspace_mode: Some("all_except_ignored".into()),
             max_iterations: 20,
+            max_iterations_explicit: true,
             ..StartOpts::default()
         };
         let input = build_input_data("do it", &opts);
@@ -250,7 +396,10 @@ mod tests {
         assert!(input.get("thinking").is_none());
         assert_eq!(input["workspace_root"], json!("/tmp/proj"));
         assert_eq!(input["workspace_access_mode"], json!("all_except_ignored"));
+        // BOTH surfaces: the flat key for back-compat, `_limits` because
+        // that is the one the loop's resolver actually reads first.
         assert_eq!(input["max_iterations"], json!(20));
+        assert_eq!(input["_limits"]["max_iterations"], json!(20));
     }
 
     #[test]
@@ -317,9 +466,53 @@ mod tests {
         };
         let input = build_input_data("go", &opts);
         assert_eq!(input["_limits"]["max_tokens"], json!(262_144));
+        assert_eq!(
+            input["_limits"].as_object().map(|m| m.len()),
+            Some(1),
+            "ONLY the declared window — the iteration budget was not declared, \
+             and fabricating limits the operator never set is what blinds the \
+             runtime's own seeding"
+        );
+    }
+
+    /// The `_limits` gate: an EXPLICIT `--max-iterations` earns the key, the
+    /// client's own default never does.
+    ///
+    /// Both halves matter. Without the key an explicit budget is silently
+    /// out-voted by the runtime's 20 (wire-verified: 31 runs asked for 50 and
+    /// ran 20). With the key sent unconditionally, every default run loses the
+    /// runtime's complete `_limits` fill and with it the context-overflow
+    /// warning — trading a wrong budget for a blind instrument.
+    #[test]
+    fn limits_iteration_budget_rides_only_when_the_operator_declared_it() {
+        let implicit = build_input_data(
+            "go",
+            &StartOpts {
+                max_iterations: 50,
+                max_iterations_explicit: false,
+                ..StartOpts::default()
+            },
+        );
         assert!(
-            input["_limits"].as_object().map(|m| m.len()) == Some(1),
-            "exactly the window declaration — no fabricated sibling limits"
+            implicit.get("_limits").is_none(),
+            "the client's own default must not suppress server seeding"
+        );
+        // The flat key still rides for loops that read it directly.
+        assert_eq!(implicit["max_iterations"], json!(50));
+
+        let explicit = build_input_data(
+            "go",
+            &StartOpts {
+                max_iterations: 12,
+                max_iterations_explicit: true,
+                ..StartOpts::default()
+            },
+        );
+        assert_eq!(explicit["_limits"]["max_iterations"], json!(12));
+        assert_eq!(
+            explicit["_limits"].as_object().map(|m| m.len()),
+            Some(1),
+            "just the declared budget"
         );
     }
 
@@ -366,7 +559,12 @@ mod tests {
             workspace_mode: Some("workspace_or_allowed".into()),
             workspace_allowed: vec!["/srv/data".into()],
             max_iterations: 20,
+            max_iterations_explicit: true,
             system: "be brief".into(),
+            system_prompt_extra: "Project instructions: run cargo fmt.".into(),
+            review_mode: Some(true),
+            review_capable: true,
+            review_max_rounds: 3,
             messages: vec![
                 ("user".into(), "hi".into()),
                 ("assistant".into(), "yo".into()),
@@ -380,6 +578,7 @@ mod tests {
             },
             context_window: 262_144,
             attachments: vec![json!({"$artifact": "a1", "filename": "report.pdf"})],
+            prompt_cache: Some(false),
         };
         let input = build_input_data("make the suite green", &opts);
         // Top-level surfaces.
@@ -435,13 +634,165 @@ mod tests {
             runtime["tool_policy"]["require_approval_tools"],
             json!(["fetch_url"])
         );
+        // Project instructions APPEND to the workflow's own system prompt.
+        assert_eq!(
+            runtime["system_prompt_extra"],
+            json!("Project instructions: run cargo fmt.")
+        );
+        // Verifier-before-conclude rides beside them.
+        assert_eq!(runtime["review_mode"], json!(true));
+        assert_eq!(runtime["review_max_rounds"], json!(3));
+        // Prompt-cache posture rides the SAME map (`--no-prompt-cache`).
+        assert_eq!(runtime["prompt_cache"], json!(false));
         assert_eq!(
             runtime.len(),
-            4,
-            "exactly provider + model + thinking + tool_policy — a new _runtime writer must extend this test"
+            8,
+            "exactly provider + model + thinking + system_prompt_extra + review_mode + review_max_rounds + tool_policy + prompt_cache — a new _runtime writer must extend this test"
         );
-        // The declared window rides its own namespace, never _runtime.
+        // The declared window rides its own namespace, never _runtime —
+        // beside the iteration budget, which must reach the resolver here or
+        // the runtime's 20-iteration default wins.
         assert_eq!(input["_limits"]["max_tokens"], json!(262_144));
+        assert_eq!(input["_limits"]["max_iterations"], json!(20));
+    }
+
+    #[test]
+    fn prompt_cache_states_a_posture_only_when_the_operator_declared_one() {
+        // Absent by default: every pre-existing caller keeps server truth
+        // (the gateway seeds `_runtime.prompt_cache = {"enabled": true}`),
+        // so no `_runtime` key is created on its own account.
+        let bare = build_input_data("go", &StartOpts::default());
+        assert!(bare.get("_runtime").is_none());
+
+        // `--no-prompt-cache` -> Some(false) -> the literal `false` the
+        // runtime reads as "derive no key at all"
+        // (effect_handlers.py `_maybe_inject_prompt_cache_key`).
+        let off = build_input_data(
+            "go",
+            &StartOpts {
+                prompt_cache: Some(false),
+                ..Default::default()
+            },
+        );
+        assert_eq!(off["_runtime"]["prompt_cache"], json!(false));
+        assert_eq!(
+            off["_runtime"].as_object().expect("one map").len(),
+            1,
+            "the posture is enough to create _runtime and carries nothing else"
+        );
+
+        // An explicit ON posture is expressible too and rides the same key.
+        let on = build_input_data(
+            "go",
+            &StartOpts {
+                prompt_cache: Some(true),
+                provider: "mlx".into(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(on["_runtime"]["prompt_cache"], json!(true));
+        assert_eq!(on["_runtime"]["provider"], json!("mlx"));
+    }
+
+    #[test]
+    fn project_context_rides_runtime_and_stays_absent_when_empty() {
+        // Absent by default: a repo with no AGENTS.md keeps byte-parity with
+        // every pre-existing caller (no _runtime key at all).
+        let bare = build_input_data("go", &StartOpts::default());
+        assert!(bare.get("_runtime").is_none());
+
+        // Present alone: it is enough to create `_runtime` on its own — the
+        // key does not depend on provider/model being set.
+        let only_ctx = StartOpts {
+            system_prompt_extra: "Project instructions (from AGENTS.md — follow them):\nrule"
+                .into(),
+            ..StartOpts::default()
+        };
+        let input = build_input_data("go", &only_ctx);
+        assert!(input["_runtime"]["system_prompt_extra"]
+            .as_str()
+            .expect("rides _runtime")
+            .contains("rule"));
+        // NOT a top-level key and NOT the `system` pin: `system` REPLACES a
+        // workflow's prompt, `system_prompt_extra` APPENDS to it. Sending
+        // project conventions as `system` would silently delete the
+        // bundle's own persona and gate wording.
+        assert!(input.get("system_prompt_extra").is_none());
+        assert!(input.get("system").is_none());
+
+        // Whitespace-only is absent, not an empty injected block.
+        let blank = StartOpts {
+            system_prompt_extra: "   \n ".into(),
+            ..StartOpts::default()
+        };
+        assert!(build_input_data("go", &blank).get("_runtime").is_none());
+    }
+
+    #[test]
+    fn review_mode_rides_runtime_with_an_explicit_posture_only() {
+        // Untouched = absent = server truth (which is review OFF). A caller
+        // that never opted in must keep byte-parity.
+        let bare = build_input_data("go", &StartOpts::default());
+        assert!(bare.get("_runtime").is_none());
+
+        // Enabled with a budget.
+        let on = StartOpts {
+            review_mode: Some(true),
+            review_capable: true,
+            review_max_rounds: 3,
+            ..StartOpts::default()
+        };
+        let input = build_input_data("go", &on);
+        assert_eq!(input["_runtime"]["review_mode"], json!(true));
+        assert_eq!(input["_runtime"]["review_max_rounds"], json!(3));
+
+        // Explicitly DISABLED is a real posture and must ride: it pins the
+        // run against a future server-side default flip.
+        let off = StartOpts {
+            review_mode: Some(false),
+            review_capable: true,
+            review_max_rounds: 3,
+            ..StartOpts::default()
+        };
+        let input = build_input_data("go", &off);
+        assert_eq!(input["_runtime"]["review_mode"], json!(false));
+        // No budget alongside a disabled verifier — it would describe a loop
+        // that never runs.
+        assert!(input["_runtime"].get("review_max_rounds").is_none());
+
+        // A review-INCAPABLE workflow (memact) states no posture at all:
+        // `MemActAgent` deprecation-warns on these kwargs and the Python client
+        // withholds them for that agent kind. Sending them would make the
+        // server warn about a posture it ignores.
+        let memact = StartOpts {
+            review_mode: Some(true),
+            review_capable: false,
+            review_max_rounds: 3,
+            ..StartOpts::default()
+        };
+        let input = build_input_data("go", &memact);
+        assert!(
+            input
+                .get("_runtime")
+                .and_then(|r| r.get("review_mode"))
+                .is_none(),
+            "memact must receive no review posture"
+        );
+        assert!(input
+            .get("_runtime")
+            .and_then(|r| r.get("review_max_rounds"))
+            .is_none());
+
+        // Enabled with no budget leaves the loop's own default (1) alone.
+        let no_budget = StartOpts {
+            review_mode: Some(true),
+            review_capable: true,
+            review_max_rounds: 0,
+            ..StartOpts::default()
+        };
+        let input = build_input_data("go", &no_budget);
+        assert_eq!(input["_runtime"]["review_mode"], json!(true));
+        assert!(input["_runtime"].get("review_max_rounds").is_none());
     }
 
     #[test]

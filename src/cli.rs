@@ -4,6 +4,43 @@ use crate::config;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Verifier rounds when review is on — 3, the value the Python
+/// `abstractcode` client has always used (`react_shell.py:252`).
+pub const DEFAULT_REVIEW_ROUNDS: u32 = 3;
+
+/// `#[WARNING:TIMEOUT]` — `exec`'s wall-clock safeguard, 7200s (2h).
+///
+/// Source of the number: ADR-0014 §2 sets 7200s as the per-effect
+/// orchestrated default and states these defaults "do not impose any maximum
+/// duration on a workflow/run". ADR-0027 §2 forbids low defaults on
+/// correctness-critical paths and prefers "no client-side timeout … or a very
+/// high safeguard (e.g., 2h)"; §3 allows timeouts only as explicit,
+/// documented, auditable safeguards.
+///
+/// This replaced a 900s default that abandoned any genuinely complex build
+/// after 15 minutes. `--timeout 0` disables the safeguard outright, for runs
+/// that should never be interrupted by this client.
+pub const DEFAULT_EXEC_TIMEOUT_SECS: u64 = 7200;
+
+/// Verifier-before-conclude is ON unless the operator says otherwise.
+///
+/// Aimed at the premature-completion gap, with a precise parity claim —
+/// the loose version of it does not survive reading the Python source.
+///
+/// abstractcode has TWO agent paths. Its NATIVE loops (`--agent react`,
+/// `--agent codeact`) are constructed with `review_mode=True,
+/// review_max_rounds=3` (`react_shell.py:251-252`, `agents/react.py:189-194`).
+/// Its `WorkflowAgent` path — the one that runs gateway BUNDLES, i.e. the
+/// closest analogue to this whole client — passes no review kwargs at all
+/// (`workflow_agent.py:1192-1200`). So this is parity with abstractcode's
+/// native-loop default, EXTENDED to the bundles this client runs; it is not a
+/// behaviour abstractcode exhibits when it runs the same bundle.
+///
+/// Costs one extra verifier LLM call per candidate final answer. Reach is
+/// limited: see `run_input::StartOpts::review_mode`. Not sent for memact,
+/// which has no review nodes (matching `react_shell.py:775-779`).
+pub const DEFAULT_REVIEW_MODE: bool = true;
+
 #[derive(Debug, Clone, Default)]
 pub struct Args {
     pub subcommand: Option<String>,
@@ -21,9 +58,24 @@ pub struct Args {
     pub model: Option<String>,
     pub workspace: Option<String>,
     pub no_workspace: bool,
+    /// `--no-project-context` — do NOT inject the workspace's `AGENTS.md`
+    /// into the agent's system prompt. Injection is the default (parity with
+    /// the Python `abstractcode` client); this opts a scripted run out when
+    /// it needs a byte-exact prompt independent of the repo's files.
+    pub no_project_context: bool,
+    /// `--review` / `--no-review` — verifier-before-conclude posture
+    /// (`_runtime.review_mode`). `None` = the client default (ON, matching
+    /// the Python `abstractcode` client); `Some(false)` pins it off.
+    pub review: Option<bool>,
+    /// `--review-rounds <N>` — verifier round budget (default 3, as
+    /// abstractcode uses). 0 leaves the loop's own default.
+    pub review_rounds: u32,
     pub workspace_mode: Option<String>,
     pub theme: Option<String>,
     pub max_iterations: u32,
+    /// `--max-iterations` was given on THIS command line (vs the built-in
+    /// default). Only an explicit budget rides `_limits` — see `run_input.rs`.
+    pub max_iterations_explicit: bool,
     /// Operator-declared model context window in tokens (CTX-0);
     /// 0 = not declared. Session-scoped; `/context` persists.
     pub max_tokens: u64,
@@ -52,7 +104,22 @@ pub struct Args {
     /// run starts, riding as `context.attachments` (repeatable). Any
     /// failure exits 1 BEFORE `runs/start` — nothing spent.
     pub attach: Vec<String>,
+    /// `exec --param KEY=VALUE` — extra `input_data` keys for workflow input
+    /// pins (repeatable). Deterministic orchestration needs parameterizable
+    /// pins: the ralph loop's `verify_command`/`max_steps_per_cycle` are
+    /// declared start pins the client previously had no way to reach (the
+    /// Python client has had `--param` all along). Values parse as JSON
+    /// scalars when they look like one (numbers, booleans), else ride as
+    /// strings. Reserved keys the client owns (prompt, workspace_root, …)
+    /// are refused at parse rather than silently clobbered.
+    pub params: Vec<(String, String)>,
     pub timeout_secs: u64,
+    /// `--no-prompt-cache` — opt this run OUT of the runtime's prompt-cache
+    /// prepare/reuse lane (`_runtime.prompt_cache = false`). Absent = the
+    /// gateway/runtime default (on), byte-parity for every existing caller.
+    /// Exists so a single gateway can serve an A/B measurement: the cached
+    /// and uncached lanes differ only by this key.
+    pub no_prompt_cache: bool,
     pub show_caps: bool,
     pub show_help: bool,
     pub show_version: bool,
@@ -77,11 +144,21 @@ OPTIONS:
   --reasoning <LEVEL>     reasoning effort: none|minimal|low|medium|high|xhigh|auto
   --ungated               run a gating-capable workflow unattended (skips its
                           human approval pauses); requires --permissions
-  --workflow <B[:F]>      agent workflow bundle[:flow] (default: saved or basic-agent)
+  --workflow <B[:F]>      agent workflow bundle[:flow] (default: saved, else
+                          coding-agent:coder — the verified coding loop)
   --provider <NAME>       provider override (default: gateway defaults)
   --model <NAME>          model override
   --workspace <PATH>      workspace root for tools (default: current directory)
   --no-workspace          do not send a workspace root
+  --no-project-context    do not inject the workspace AGENTS.md into the
+                          agent system prompt (injected by default)
+  --no-prompt-cache       opt this run out of the runtime prompt cache
+                          (_runtime.prompt_cache=false); default: server truth
+  --review / --no-review  verifier-before-conclude: before accepting a
+                          tool-call-free response as final, a strict
+                          verifier re-reads the transcript and can force
+                          more tool calls (default: on; /review toggles)
+  --review-rounds <N>     verifier round budget (default 3)
   --workspace-mode <M>    workspace access mode: workspace_only |
                           workspace_or_allowed | all_except_ignored
                           (default: server-managed; /workspace edits + persists)
@@ -100,7 +177,13 @@ OPTIONS:
                           repeatable); headless exec DENIES them, the TUI prompts
   --attach <PATH>         exec: attach a file to the prompt (repeatable; uploads
                           to the gateway before the run starts, exits 1 on failure)
-  --timeout <SECS>        exec: give up after SECS (default: 900)
+  --param <K=V>           exec: extra input_data key for a workflow input pin
+                          (repeatable; numbers/booleans parse, else string —
+                          e.g. --param verify_command='node --check game.js'
+                          --param max_steps_per_cycle=16)
+  --timeout <SECS>        exec: wall-clock safeguard, 0 = none (default: 7200 = 2h;
+                          ADR-0014/0027 — a complex agentic run may take hours,
+                          so this never doubles as a performance knob)
   -h, --help              this help
   -V, --version           version
 
@@ -136,8 +219,17 @@ to the store shared with the Python CLI: ~/.abstractcode/gateway.json.
 pub fn parse(argv: &[String]) -> Result<Args, String> {
     let mut args = Args {
         max_iterations: 50,
+        // Parity with abstractcode's ReAct default (`react_shell.py:252`).
+        review_rounds: DEFAULT_REVIEW_ROUNDS,
         replay_turns: crate::runner::REHYDRATE_DEFAULT_TURNS,
-        timeout_secs: 900,
+        // #[WARNING:TIMEOUT] exec wall-clock safeguard. ADR-0027 §2 forbids
+        // low defaults on correctness-critical paths and prefers none or a
+        // very high safeguard; ADR-0014 sets 7200s per effect and states that
+        // defaults impose NO maximum duration on a run. The old 900s default
+        // gave up on any genuinely complex build — a coding agent can work for
+        // an hour — and the abandoned run kept burning tokens server-side.
+        // `--timeout 0` disables the safeguard entirely.
+        timeout_secs: DEFAULT_EXEC_TIMEOUT_SECS,
         ..Args::default()
     };
     let mut i = 0;
@@ -173,6 +265,15 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
             "--model" => args.model = Some(take(a)?),
             "--workspace" => args.workspace = Some(take(a)?),
             "--no-workspace" => args.no_workspace = true,
+            "--no-project-context" => args.no_project_context = true,
+            "--no-prompt-cache" => args.no_prompt_cache = true,
+            "--review" => args.review = Some(true),
+            "--no-review" => args.review = Some(false),
+            "--review-rounds" => {
+                args.review_rounds = take(a)?
+                    .parse()
+                    .map_err(|_| "--review-rounds needs a number".to_string())?
+            }
             "--workspace-mode" => args.workspace_mode = Some(take(a)?),
             "--theme" => args.theme = Some(take(a)?),
             "--max-iterations" => {
@@ -180,6 +281,7 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
                 args.max_iterations = v
                     .parse::<u32>()
                     .map_err(|_| format!("--max-iterations: not a number: {v}"))?;
+                args.max_iterations_explicit = true;
             }
             "--max-tokens" | "--context" | "--context-window" => {
                 let v = take(a)?;
@@ -201,6 +303,32 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
                     ));
                 }
                 args.permissions = Some(v);
+            }
+            "--param" => {
+                let v = take(a)?;
+                let (k, val) = v
+                    .split_once('=')
+                    .ok_or_else(|| format!("--param: expected KEY=VALUE, got {v}"))?;
+                let k = k.trim();
+                const RESERVED: [&str; 8] = [
+                    "prompt",
+                    "workspace_root",
+                    "workspace_access_mode",
+                    "gating_mode",
+                    "provider",
+                    "model",
+                    "use_session_history",
+                    "max_iterations",
+                ];
+                if k.is_empty() {
+                    return Err("--param: empty key".into());
+                }
+                if RESERVED.contains(&k) {
+                    return Err(format!(
+                        "--param: '{k}' is client-owned (set it with its dedicated flag)"
+                    ));
+                }
+                args.params.push((k.to_string(), val.to_string()));
             }
             "--require-approval" => {
                 let v = take(a)?;
@@ -392,6 +520,12 @@ mod tests {
         assert!(args.subcommand.is_none());
         assert_eq!(args.max_iterations, 50);
         assert_eq!(args.max_tokens, 0, "window undeclared by default");
+        assert_eq!(
+            args.timeout_secs, 7200,
+            "ADR-0014 §2 / ADR-0027 §2: the exec safeguard is the framework's \
+             2h default, never a low performance knob — a complex agentic run \
+             can legitimately take hours"
+        );
 
         let argv: Vec<String> = ["exec", "do things", "--permissions", "all", "--model", "m1"]
             .iter()
@@ -402,6 +536,29 @@ mod tests {
         assert_eq!(args.prompt.as_deref(), Some("do things"));
         assert_eq!(args.permissions.as_deref(), Some("all"));
         assert_eq!(args.model.as_deref(), Some("m1"));
+    }
+
+    /// ADR-0027 §2/§3 contract for the one wall-clock cap this binary owns.
+    /// Pinned because the failure mode is invisible: a lowered default does
+    /// not break any test, it just starts abandoning long runs.
+    #[test]
+    fn exec_timeout_is_a_high_explicit_safeguard_and_zero_disables_it() {
+        let with_cap =
+            parse(&["exec".into(), "go".into(), "--timeout".into(), "30".into()]).unwrap();
+        assert_eq!(with_cap.timeout_secs, 30, "an explicit cap is honored");
+
+        // 0 is the documented "never interrupt this run" spelling. It must
+        // survive parsing as 0 — `exec` widens it to a ~10-year deadline. The
+        // trap this guards: exec's old `.max(10)` clamp would have turned
+        // "unlimited" into the shortest cap in the program.
+        let uncapped =
+            parse(&["exec".into(), "go".into(), "--timeout".into(), "0".into()]).unwrap();
+        assert_eq!(uncapped.timeout_secs, 0, "0 reaches exec as 0 = no cap");
+
+        assert!(
+            usage().contains("0 = none"),
+            "the uncapped spelling must be discoverable in --help"
+        );
     }
 
     #[test]

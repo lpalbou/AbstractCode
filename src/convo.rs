@@ -208,7 +208,7 @@ pub fn fmt_elapsed(secs: u64) -> String {
 /// Identity order (the convos vec) paints first-come-first-fit — EXCEPT
 /// when the FOCUSED chip would land in the hidden tail: then it paints
 /// FIRST (the one chip the user is looking at must always be visible).
-/// PAINT order is presentation only: Ctrl+E CYCLE order stays the convos
+/// PAINT order is presentation only: Alt+E CYCLE order stays the convos
 /// vec order unconditionally (`cycle_focus` never consults this plan), so
 /// reordering the pixels never reorders the keyboard.
 pub fn chip_paint_plan(

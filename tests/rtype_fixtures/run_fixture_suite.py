@@ -77,8 +77,16 @@ SCALE_TOL = 0.02
 # Behavioural checks an attack must never be credited with. `None` (UNKNOWN) is
 # acceptable — it means the instrument could not measure, which is not a claim
 # that the page responded. Only True is a violation.
+#
+# The spec tier's play-dependent checks joined the list: an attract loop that
+# cannot be started can neither kill enemies, grow a weapon, nor pace a level,
+# and crediting any of those to it would be the same class of defect the
+# original four guard against.
 INPUT_CHECKS = ["R2_ship_moves_vertically", "R3_ship_moves_horizontally",
-                "R4_weapon_fires", "R7_input_persists"]
+                "R4_weapon_fires", "R7_input_persists",
+                "S1_fire_direction", "S2_enemies_killable",
+                "S3_weapon_progression", "S4_charge_shot", "S5_enemy_pacing",
+                "S8b_boss_encounter", "S10_impact_vfx"]
 
 FIXTURES = {
     "control-playable": {
@@ -162,6 +170,33 @@ FIXTURES = {
         "require": [],
         "forbid": INPUT_CHECKS,
         "max_t2_parts": {"modularity": 2.5},
+    },
+    # PROBES: playable fixtures that exist to pin ONE spec-tier check to a
+    # known value, positive or negative. They are excluded from the
+    # control/attack margin arithmetic — a probe is deliberately defective (or
+    # deliberately generous) in exactly one dimension, so its TOTAL is not a
+    # statement the margin should rest on. `expect_checks` is exact-value
+    # assertion; `expect_min` a floor.
+    "probe-backward-fire": {
+        "kind": "probe",
+        "what": "fully playable EXCEPT the gun fires leftward, away from the "
+                "enemies — the operator-reported defect S1 exists to catch",
+        "require": ["R2_ship_moves_vertically", "R3_ship_moves_horizontally",
+                    "R4_weapon_fires"],
+        "forbid": [],
+        "expect_checks": {"S1_fire_direction": 0.0},
+    },
+    "probe-powerup-drop": {
+        "kind": "probe",
+        "what": "the corrected spec's core loop working: kills burst into "
+                "particles, every 5th kill drops a magnet capsule, each "
+                "capsule adds a parallel gun",
+        "require": ["R2_ship_moves_vertically", "R3_ship_moves_horizontally",
+                    "R4_weapon_fires"],
+        "forbid": [],
+        "expect_min": {"S1_fire_direction": 1.0, "S2_enemies_killable": 0.5,
+                       "S3_weapon_progression": 0.5,
+                       "S11_delivery_selfsufficient": 1.0},
     },
     "attack-d-combined": {
         "kind": "attack",
@@ -334,7 +369,8 @@ def main() -> int:
             return 2
 
     rubric = sha_of(REPO / "scripts" / "rtype_review_score.py",
-                    REPO / "scripts" / "zelda_review_score.py")
+                    REPO / "scripts" / "zelda_review_score.py",
+                    REPO / "scripts" / "rtype_spec_tier.py")
     print(f"rubric sha256 {rubric[:16]}  ({len(names)} fixtures, jobs={a.jobs})\n")
 
     rows: dict = {}
@@ -365,11 +401,19 @@ def main() -> int:
                   "R7_input_persists", "R8_scene_populated"]:
             v = r.get(k)
             flags += "?" if v is None else (k[1] if v else ".")
+        sflags = ""
+        for k in ["S1_fire_direction", "S2_enemies_killable",
+                  "S3_weapon_progression", "S4_charge_shot", "S5_enemy_pacing",
+                  "S6_orb_companion", "S7_arcade_mode", "S8a_level_intro",
+                  "S8b_boss_encounter", "S9_music_layer", "S10_impact_vfx",
+                  "S11_delivery_selfsufficient"]:
+            v = r.get(k)
+            sflags += "?" if v is None else ("x" if v else ".")
         print(f"{n:26}{FIXTURES[n]['kind']:9}{_num(r.get('SCORE'), 4):>8}"
               f"{_num(r.get('T1_POINTS'), 1):>7}{_num(r.get('T2_POINTS'), 2):>7}"
-              f"   R{flags}")
-    print("   flags: R0..R8 in order, digit = credited, '.' = not credited, "
-          "'?' = UNKNOWN (not measured)")
+              f"   R{flags} S{sflags}")
+    print("   flags: R0..R8 then S1,S2,S3,S4,S5,S6,S7,S8a,S8b,S9,S10,S11; "
+          "digit/x = credited, '.' = not credited, '?' = UNKNOWN (not measured)")
 
     # ---- assertions --------------------------------------------------------
     fails: list[str] = []
@@ -404,6 +448,14 @@ def main() -> int:
             if r.get(k) is True or (isinstance(r.get(k), (int, float))
                                     and r.get(k)):
                 fails.append(f"{n}: attack was CREDITED with {k} (= {r.get(k)!r})")
+        for k, want in (spec.get("expect_checks") or {}).items():
+            got = r.get(k)
+            if got is None or abs(float(got) - want) > 1e-6:
+                fails.append(f"{n}: probe expected {k} == {want}, measured {got!r}")
+        for k, floor in (spec.get("expect_min") or {}).items():
+            got = r.get(k)
+            if got is None or float(got) < floor:
+                fails.append(f"{n}: probe expected {k} >= {floor}, measured {got!r}")
         for k, cap in (spec.get("max_t2_parts") or {}).items():
             got = (r.get("T2_PARTS") or {}).get(k)
             if got is not None and got > cap:

@@ -101,7 +101,7 @@ gateway until you answer.
 If your gateway hosts summoned entities, `@name` opens a durable **visit**
 (`/entities` lists the roster with identity cards; `Enter` there does the
 same as `@name`). The visit gets its own transcript and a header chip;
-`Ctrl+E` cycles focus between the agent and open visits, and everything you
+`Alt+E` cycles focus between the agent and open visits, and everything you
 submit under entity focus is that visit's next turn.
 
 Two honesty rules to know up front: entity turns are **non-interruptible**

@@ -848,8 +848,43 @@ pub fn open_theme_picker(cx: Scope, store: Store, ctx: &UiCtx) {
     );
 }
 
+/// Should this workflow appear in the CODING picker?
+///
+/// The catalog's agent.v1 set includes entrypoints other lanes own — the
+/// entity-conversation flows (summoned via the entity lane, not `/workflow`)
+/// and plumbing-test bundles. Listing them here made the picker read like a
+/// registry dump (operator finding 2026-08-01). The fold's answer-source
+/// recognition keeps the FULL set; this predicate narrows only what a human
+/// browses.
+fn workflow_pickable(w: &crate::store::Workflow) -> bool {
+    if w.bundle_id == "entity-life" {
+        return false;
+    }
+    if w.bundle_id.ends_with("-test") || w.bundle_id.contains("llm-test") {
+        return false;
+    }
+    true
+}
+
+/// The description, made READABLE: first sentence only, whitespace collapsed.
+/// Bundle descriptions are paragraphs written for catalogs; a picker row
+/// needs the one line a human scans.
+fn workflow_desc_line(desc: &str, budget: i32) -> String {
+    let flat = desc.split_whitespace().collect::<Vec<_>>().join(" ");
+    let first = match flat.find(". ") {
+        Some(i) => &flat[..i + 1],
+        None => flat.as_str(),
+    };
+    text::truncate_ellipsis(first, budget)
+}
+
 pub fn open_workflow_picker(cx: Scope, store: Store, ctx: &UiCtx) {
-    let workflows = store.workflows.get_untracked();
+    let workflows: Vec<crate::store::Workflow> = store
+        .workflows
+        .get_untracked()
+        .into_iter()
+        .filter(workflow_pickable)
+        .collect();
     if workflows.is_empty() {
         store.notify("no agent workflows discovered yet (is the gateway up?)");
         return;
@@ -863,7 +898,9 @@ pub fn open_workflow_picker(cx: Scope, store: Store, ctx: &UiCtx) {
         .iter()
         .position(|w| w.bundle_id == current.bundle_id && w.flow_id == current.flow_id)
         .unwrap_or(0);
-    let size = modal_size(84, (labels.len() as i32 + 7).min(24));
+    // Wide + tall: descriptions were the point of the row and 84 cols
+    // truncated nearly all of them (operator finding 2026-08-01).
+    let size = modal_size(120, (labels.len() as i32 + 7).min(30));
     let choose_ctx = ctx.clone();
     open_picker(
         cx,
@@ -879,6 +916,7 @@ pub fn open_workflow_picker(cx: Scope, store: Store, ctx: &UiCtx) {
                 let current = store.workflow.get();
                 store.workflows.with(|ws| {
                     ws.iter()
+                        .filter(|w| workflow_pickable(w))
                         .map(|w| workflow_row(w, &current))
                         .collect::<Vec<_>>()
                 })
@@ -890,7 +928,11 @@ pub fn open_workflow_picker(cx: Scope, store: Store, ctx: &UiCtx) {
             on_choose: Box::new(move |ix| {
                 // Re-read at activation: the rows rebuilt from this
                 // signal, so the open-time snapshot may be stale.
-                let picked = store.workflows.with_untracked(|ws| ws.get(ix).cloned());
+                // Index into the FILTERED view — the same predicate the rows
+                // used, or a hidden entry would shift every selection below it.
+                let picked = store.workflows.with_untracked(|ws| {
+                    ws.iter().filter(|w| workflow_pickable(w)).nth(ix).cloned()
+                });
                 if let Some(w) = picked {
                     let gating_capable = w.supports_gating();
                     store.workflow.set(w.clone());
@@ -1006,7 +1048,7 @@ fn workflow_row(w: &crate::store::Workflow, current: &crate::store::Workflow) ->
     let desc = if w.description.is_empty() {
         String::new()
     } else {
-        format!(" — {}", text::truncate_ellipsis(&w.description, 46))
+        format!(" — {}", workflow_desc_line(&w.description, 74))
     };
     format!(
         "{marker}{} ({}:{}){desc}",
@@ -2269,7 +2311,8 @@ pub fn open_cache(cx: Scope, store: Store, ctx: &UiCtx) {
                         );
                     } else {
                         line(
-                            "cache hits none reported (many local providers never report them)"
+                            "cache hits not reported by this provider — the split below is \
+                             derived client-side"
                                 .to_string(),
                             true,
                         );
@@ -2282,8 +2325,56 @@ pub fn open_cache(cx: Scope, store: Store, ctx: &UiCtx) {
                             ),
                             false,
                         );
+                        // NEW vs CARRIED. The number an operator can act on: a prompt is
+                        // only expensive to the extent it is NEW, because the carried
+                        // prefix is what any prefix cache can reuse. Providers that never
+                        // report `cached_input_tokens` still cannot hide this — it is the
+                        // difference between two numbers the client already has.
+                        if stats.prev_input_tokens > 0 {
+                            let last = stats.last_input_tokens;
+                            let prev = stats.prev_input_tokens;
+                            if last >= prev {
+                                let new_tk = last - prev;
+                                line(
+                                    format!(
+                                        "           {} new since the previous call, {} carried \
+                                         forward (reusable prefix)",
+                                        crate::ui::chrome::fmt_tokens(new_tk),
+                                        crate::ui::chrome::fmt_tokens(prev)
+                                    ),
+                                    true,
+                                );
+                            } else {
+                                line(
+                                    format!(
+                                        "           {} smaller than the previous call — the \
+                                         context was compacted or reset",
+                                        crate::ui::chrome::fmt_tokens(prev - last)
+                                    ),
+                                    true,
+                                );
+                            }
+                        }
                     } else {
                         line("context    no model call observed yet".to_string(), true);
+                    }
+                    // RE-SEND AMPLIFICATION. An agent loop re-sends its whole transcript
+                    // every cycle, so total input dwarfs total output and grows with the
+                    // number of cycles. This ratio is the honest cost of the loop, and it
+                    // is the thing a cache is there to blunt.
+                    if stats.llm_calls > 0 && stats.output_tokens > 0 {
+                        line(
+                            format!(
+                                "run cost   {} tk in / {} tk out over {} model call{} — {:.1}x \
+                                 sent per token produced",
+                                crate::ui::chrome::fmt_tokens(stats.input_tokens),
+                                crate::ui::chrome::fmt_tokens(stats.output_tokens),
+                                stats.llm_calls,
+                                if stats.llm_calls == 1 { "" } else { "s" },
+                                stats.input_tokens as f64 / stats.output_tokens as f64
+                            ),
+                            false,
+                        );
                     }
                     if !stats.effective_model.is_empty() {
                         line(format!("served by  {}", stats.effective_model), false);
