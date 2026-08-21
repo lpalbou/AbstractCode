@@ -28,19 +28,22 @@
 //! trace, and errored tools keep their full card in both modes (the view's
 //! own honesty rule; "errored" is STATUS-based — `Failed`/`Denied` — never
 //! the error string alone, which can be empty while the failure text
-//! rides the result preview). `--details` adds thinking/reasoning blocks
-//! and full tool cards (args + result previews).
+//! rides the result). `--details` adds thinking/reasoning blocks and full
+//! tool cards — the UNCUT arguments and the whole result body.
 //!
 //! **Honest bounds**: the fold truncates old items ([`Fold::truncated`]) —
 //! a truncated MARKDOWN export says so in its header line; JSONL is
 //! schema-pure by design (no header line — strict trainability), so the
 //! on-screen notice carries the warning there, naming the consequence:
 //! the earliest turns are missing from every line's prefix. Never
-//! pretend completeness. Bodies are exported exactly as held: prompts
-//! and answers are full text; tool args/results are the fold's
-//! preview-bounded copies (`[#TRUNCATION]` markers ride along where the
-//! fold cut). No EXTRA truncation happens here. Images are referenced by
-//! artifact id + label, never bytes.
+//! pretend completeness. Bodies are exported exactly as held, and since
+//! 2026-08-20 the fold holds them WHOLE — prompts, answers, thinking,
+//! tool results, errors and (in the detailed card) arguments are the full
+//! text the ledger reported, not a preview of it. The one deliberate
+//! bound left is the one-line summary of a clean tool call in non-details
+//! markdown, which carries the folded view's `args_preview` hint. No
+//! EXTRA truncation happens here. Images are referenced by artifact id +
+//! label, never bytes.
 //!
 //! **JSONL (the SFT half)**: one JSON object per line, OpenAI chat schema
 //! `{"messages":[{"role":"user",...},{"role":"assistant",...}]}` — ONE
@@ -58,10 +61,11 @@
 //! `messages` key (drop-in trainable; strict validators reject unknown
 //! keys). `--details` adds a `details` side field (that turn's tools,
 //! cycles, steers) instead of fabricating assistant `tool_calls`: the
-//! client holds preview-bounded STRINGS, not wire-faithful call
-//! structures — minting tool_calls with truncated non-JSON arguments
-//! would teach a model malformed calls. Faithful tool traces live in the
-//! gateway run ledgers.
+//! client holds rendered STRINGS, not wire-faithful call structures —
+//! the arguments are complete since 2026-08-20, but they are a humane
+//! rendering, not the provider's JSON, and minting tool_calls out of
+//! them would teach a model malformed calls. Faithful tool traces live
+//! in the gateway run ledgers.
 //!
 //! **File write**: never overwrites (atomic `create_new`, no
 //! check-then-write race), never creates parent directories, never
@@ -303,6 +307,7 @@ fn status_word(s: ToolStatus) -> &'static str {
         ToolStatus::Ok => "ok",
         ToolStatus::Failed => "failed",
         ToolStatus::Denied => "denied",
+        ToolStatus::Interrupted => "interrupted",
     }
 }
 
@@ -314,6 +319,7 @@ fn status_glyph(s: ToolStatus) -> &'static str {
         ToolStatus::Ok => "✓",
         ToolStatus::Failed => "✗",
         ToolStatus::Denied => "⊘",
+        ToolStatus::Interrupted => "◌",
     }
 }
 
@@ -406,9 +412,9 @@ pub fn to_markdown(items: &[Item], meta: &ExportMeta, details: bool) -> String {
         );
     }
     header.push_str(
-        "\n> Bodies are exported as rendered in the TUI: prompts and answers are full\n\
-         > text; tool args/results are the fold's preview-bounded copies. Agent-lane\n\
-         > transcript only (v1).\n\n---",
+        "\n> Bodies are exported whole, as the TUI holds them: prompts, answers,\n\
+         > thinking, tool arguments, results and errors are the full text the run\n\
+         > reported. Agent-lane transcript only (v1).\n\n---",
     );
 
     let mut sections: Vec<String> = vec![header];
@@ -430,8 +436,9 @@ pub fn to_markdown(items: &[Item], meta: &ExportMeta, details: bool) -> String {
             Item::Tool {
                 name,
                 args_preview,
+                args_full,
                 status,
-                result_preview,
+                result,
                 error,
                 ..
             } => {
@@ -440,7 +447,7 @@ pub fn to_markdown(items: &[Item], meta: &ExportMeta, details: bool) -> String {
                 // and "errored" is STATUS-based, matching the view
                 // exactly (round-2 P1-1): `Failed` is minted from
                 // `success: false` even with an EMPTY error string, the
-                // failure text riding `result_preview` (the standard
+                // failure text riding `result` (the standard
                 // shape for e.g. execute_command with a non-zero exit).
                 // The error-string test alone dropped that evidence from
                 // default archival exports. Clean tools stay one-line
@@ -453,15 +460,27 @@ pub fn to_markdown(items: &[Item], meta: &ExportMeta, details: bool) -> String {
                         status_glyph(*status),
                         status_word(*status)
                     );
-                    if !args_preview.is_empty() {
-                        let fence = fence_for(args_preview);
-                        card.push_str(&format!("\n\n{fence}args\n{args_preview}\n{fence}"));
+                    // The UNCUT arguments (adversarial review 2026-08-20,
+                    // F8): the card used to fence the folded view's hint,
+                    // so an archived — or SFT-bound — export carried
+                    // path-compacted, 60-char-clipped commands with no
+                    // marker saying so. The hint stays on the one-line
+                    // summary below, where a bound is the point.
+                    let args = if args_full.is_empty() {
+                        args_preview
+                    } else {
+                        args_full
+                    };
+                    if !args.is_empty() {
+                        let fence = fence_for(args);
+                        card.push_str(&format!("\n\n{fence}args\n{args}\n{fence}"));
                     }
                     if !error.is_empty() {
                         card.push_str(&format!("\n\n**error:** {error}"));
-                    } else if !result_preview.is_empty() {
-                        let fence = fence_for(result_preview);
-                        card.push_str(&format!("\n\n{fence}result\n{result_preview}\n{fence}"));
+                    }
+                    if !result.is_empty() {
+                        let fence = fence_for(result);
+                        card.push_str(&format!("\n\n{fence}result\n{result}\n{fence}"));
                     }
                     sections.push(card);
                 } else {
@@ -561,8 +580,9 @@ fn segment_turns(items: &[Item]) -> Vec<SftTurn> {
             Item::Tool {
                 name,
                 args_preview,
+                args_full,
                 status,
-                result_preview,
+                result,
                 error,
                 ..
             } => {
@@ -574,8 +594,14 @@ fn segment_turns(items: &[Item]) -> Vec<SftTurn> {
                         if !args_preview.is_empty() {
                             t.insert("args_preview".into(), json!(args_preview));
                         }
-                        if !result_preview.is_empty() {
-                            t.insert("result_preview".into(), json!(result_preview));
+                        // The uncut arguments ride beside the hint (F8):
+                        // a training/archival record must not carry a
+                        // silently clipped command.
+                        if !args_full.is_empty() {
+                            t.insert("args".into(), json!(args_full));
+                        }
+                        if !result.is_empty() {
+                            t.insert("result".into(), json!(result));
                         }
                         if !error.is_empty() {
                             t.insert("error".into(), json!(error));
@@ -687,13 +713,32 @@ mod tests {
         }
     }
 
+    fn tool_with_full_args(
+        name: &str,
+        status: ToolStatus,
+        hint: &str,
+        args_full: &str,
+        result: &str,
+    ) -> Item {
+        Item::Tool {
+            key: format!("k-{name}"),
+            name: name.into(),
+            args_preview: hint.into(),
+            args_full: args_full.into(),
+            status,
+            result: result.into(),
+            error: String::new(),
+        }
+    }
+
     fn tool(name: &str, status: ToolStatus, args: &str, result: &str, error: &str) -> Item {
         Item::Tool {
             key: format!("k-{name}"),
             name: name.into(),
             args_preview: args.into(),
+            args_full: String::new(),
             status,
-            result_preview: result.into(),
+            result: result.into(),
             error: error.into(),
         }
     }
@@ -947,7 +992,7 @@ mod tests {
     fn markdown_failed_tool_with_empty_error_keeps_its_result_in_clean_mode() {
         // Round-2 P1-1: `Failed` is minted from `success: false` even
         // with an EMPTY error string — the failure text rides
-        // result_preview (execute_command with a non-zero exit is the
+        // result (execute_command with a non-zero exit is the
         // standard shape). The full card must survive a DEFAULT export;
         // the error-string test alone dropped exactly the evidence an
         // archival export exists to keep.
@@ -1178,5 +1223,42 @@ mod tests {
         // Errors-only transcript: nothing trainable either.
         let only_errors = vec![Item::Error { text: "x".into() }];
         assert_eq!(sft_lines(&only_errors, true).0.len(), 0);
+    }
+
+    /// A detailed export carries the UNCUT arguments (adversarial review
+    /// 2026-08-20, F8). It used to fence the folded view's hint, so an
+    /// archived — or SFT-bound — export held path-compacted, 60-char
+    /// clipped commands with nothing saying so. The one-line summary of a
+    /// clean call still uses the hint: a summary is meant to be bounded.
+    #[test]
+    fn detailed_export_writes_the_uncut_arguments() {
+        let full = format!("command: cargo test {} --nocapture-TAIL", "x".repeat(900));
+        let items = vec![
+            user("go"),
+            tool_with_full_args(
+                "execute_command",
+                ToolStatus::Ok,
+                "cargo test …",
+                &full,
+                "ok",
+            ),
+            answer("done"),
+        ];
+        let md = to_markdown(&items, &ExportMeta::default(), true);
+        assert!(
+            md.contains("--nocapture-TAIL"),
+            "the detailed card fences the whole argument, not the hint"
+        );
+        let jsonl = to_sft_jsonl(&items, true);
+        assert!(
+            jsonl.contains("--nocapture-TAIL"),
+            "the JSONL details field carries the whole argument"
+        );
+        // The non-details summary keeps the bounded hint, on purpose.
+        let folded = to_markdown(&items, &ExportMeta::default(), false);
+        assert!(
+            folded.contains("cargo test …") && !folded.contains("--nocapture-TAIL"),
+            "the folded summary line stays a summary"
+        );
     }
 }

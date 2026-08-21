@@ -109,18 +109,12 @@ fn lines_view(lines: Vec<String>, ink: Rgba) -> (View, i32) {
     (view, rows)
 }
 
-fn wrapped_lines(source: &str, width: i32, ink: Rgba, cap: usize) -> (View, i32) {
-    let mut lines = wrap_lines(source, width, Some(cap));
-    if lines.len() > cap {
-        lines.truncate(cap);
-        // The marker is USER-FACING: name the fact, never point at
-        // server internals (operator ruling 2026-07-26: users do not
-        // read ledgers). The one remaining caller is the approval
-        // modal's `f` JSON view, which IS the fullest in-client view —
-        // there is no fuller surface to point at.
-        lines.push("… [#TRUNCATION: shortened for display]".into());
-    }
-    lines_view(lines, ink)
+/// The approval modal's `f` JSON view: EVERY line, never a cap
+/// (2026-08-20). It is the fullest in-client view of a call the operator
+/// is being asked to approve, and it lives inside a `Scroll` — a cap
+/// bought nothing and hid the tail of the very payload under decision.
+fn wrapped_lines(source: &str, width: i32, ink: Rgba) -> (View, i32) {
+    lines_view(wrap_lines(source, width, None), ink)
 }
 
 // ---------------------------------------------------------------------------
@@ -511,7 +505,7 @@ pub fn open_approval(cx: Scope, store: Store, ctx: &UiCtx, wait: PendingWait) {
                     move |scx| {
                         let t2 = abstracttui::app::current_theme().tokens;
                         let (view, rows) = if show_json.get() {
-                            let (v, r) = wrapped_lines(&json_text, width, t2.text_muted, 400);
+                            let (v, r) = wrapped_lines(&json_text, width, t2.text_muted);
                             (v, r)
                         } else {
                             let h = body_rows.len().max(1) as i32;
@@ -2220,11 +2214,51 @@ pub fn open_status(cx: Scope, store: Store, ctx: &UiCtx) {
     });
 }
 
+/// One `RowSpec` as a single mounted line — the `Scroll`-friendly twin of
+/// `draw_rows`' windowed painter. `draw_rows` windows against the rect it
+/// is granted (no scrollbar, no wheel, keyboard cannot reach the tail);
+/// a panel this tall needs a real scroll, and a real scroll needs its
+/// content MOUNTED so the widget can measure and clip it.
+fn row_line(t: &TokenSet, row: RowSpec, width: i32) -> View {
+    let ink = if row.header {
+        t.accent
+    } else if row.dim {
+        t.text_faint
+    } else {
+        t.text
+    };
+    let text_s = row.text;
+    Element::new()
+        .style(LayoutStyle::line(1).shrink(0.0))
+        .draw(move |canvas, rect| {
+            if text_s.is_empty() {
+                return;
+            }
+            let fitted = text::truncate_ellipsis(&text_s, width.min(rect.w).max(4));
+            canvas.print(Point::new(rect.x, rect.y), &fitted, ink, Rgba::TRANSPARENT);
+        })
+        .build()
+}
+
+/// `/cache` — prompt-cache posture and the token economics it governs,
+/// for the LATEST call, THIS RUN, and the WHOLE SESSION.
+///
+/// Scrollable and tall on purpose: the panel reports three scopes plus
+/// its own reading notes, and the previous fixed 15-row window hid the
+/// tail behind a "↓ N more" marker no key could move.
 pub fn open_cache(cx: Scope, store: Store, ctx: &UiCtx) {
     let ctx2 = ctx.clone();
-    let size = modal_size(78, 15);
-    ctx.open_modal(cx, size, move |_mcx| {
+    let size = modal_size(88, 34);
+    // Wrap/draw width == the Scroll's content width, minus the column its
+    // scrollbar glyph occupies (UX-17: text clipped UNDER the gutter).
+    let content_w = size.w - 4;
+    ctx.open_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
+        // Offset lives on the MODAL scope, never the generation scope:
+        // the body rebuilds on every stats change (i.e. once per model
+        // call while a run streams), and a rebuild must not yank a
+        // reader back to the top mid-read.
+        let scroll = mcx.signal(0i32);
         Element::new()
             .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
             .focusable()
@@ -2233,28 +2267,23 @@ pub fn open_cache(cx: Scope, store: Store, ctx: &UiCtx) {
                 let ctx = ctx2.clone();
                 move |_| ctx.close_modal()
             })
+            // Enter closed this panel before it grew a scroll; keeping it
+            // means the habit still works (the body never consumes Enter).
             .shortcut(KeyChord::plain(Key::Enter), {
                 let ctx = ctx2.clone();
                 move |_| ctx.close_modal()
             })
-            .child(title_row(&t, "prompt cache + context · Esc closes".into()))
-            .child(dyn_view(
+            .child(title_row(
+                &t,
+                "prompt cache + context · ↑↓/PgUp/PgDn scroll · Esc closes".into(),
+            ))
+            .child(dyn_view_scoped(
                 LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)),
-                move || {
-                    let cache = store.cache.get();
+                move |gcx| {
+                    let t = abstracttui::app::current_theme().tokens;
                     let (dp, dm) = store.default_route.get();
                     let provider = store.provider.get();
                     let model = store.model.get();
-                    let stats = store.fold.with(|f| f.stats.clone());
-                    let mut rows: Vec<RowSpec> = Vec::new();
-                    let mut line = |text: String, dim: bool| {
-                        rows.push(RowSpec {
-                            text,
-                            header: false,
-                            checked: None,
-                            dim,
-                        })
-                    };
                     let route = if !provider.is_empty() || !model.is_empty() {
                         format!("{provider} · {model} (your override)")
                     } else if !dp.is_empty() {
@@ -2262,139 +2291,651 @@ pub fn open_cache(cx: Scope, store: Store, ctx: &UiCtx) {
                     } else {
                         "unresolved (gateway defaults; route not reported yet)".to_string()
                     };
-                    line(format!("route      {route}"), false);
-                    // Always name the pair the probe ASKED ABOUT — a verdict
-                    // without its subject can silently describe a different
-                    // route than the line above (adversary finding 5).
-                    match &cache {
-                        Some(c) if c.supported => line(
-                            format!(
-                                "cache      supported ({} mode) on {} · {} — runs enable it automatically",
-                                if c.mode.is_empty() {
-                                    "provider"
-                                } else {
-                                    &c.mode
-                                },
-                                c.provider,
-                                if c.model.is_empty() {
-                                    "(provider default)"
-                                } else {
-                                    &c.model
-                                }
-                            ),
-                            false,
-                        ),
-                        Some(c) => line(
-                            format!(
-                                "cache      not supported by {} · {}",
-                                c.provider,
-                                if c.model.is_empty() {
-                                    "(provider default)"
-                                } else {
-                                    &c.model
-                                }
-                            ),
-                            false,
-                        ),
-                        None => line(
-                            "cache      unknown (gateway probe pending or unavailable)".to_string(),
-                            true,
-                        ),
+                    let facts = CacheFacts {
+                        route,
+                        cache: store.cache.get(),
+                        stats: store.fold.with(|f| f.stats.clone()),
+                        session: store.fold.with(|f| f.session),
+                    };
+                    let rows = cache_rows(&facts, content_w - 2);
+                    let n_rows = rows.len() as i32;
+                    let mut body = Element::new().style(LayoutStyle::column());
+                    for row in rows {
+                        body = body.child(row_line(&t, row, content_w));
                     }
-                    if stats.cached_tokens > 0 {
-                        line(
-                            format!(
-                                "cache hits {} tk served from cache this run",
-                                crate::ui::chrome::fmt_tokens(stats.cached_tokens)
-                            ),
-                            false,
-                        );
-                    } else {
-                        line(
-                            "cache hits not reported by this provider — the split below is \
-                             derived client-side"
-                                .to_string(),
-                            true,
-                        );
-                    }
-                    if stats.last_input_tokens > 0 {
-                        line(
-                            format!(
-                                "context    {} tk sent on the latest model call",
-                                crate::ui::chrome::fmt_tokens(stats.last_input_tokens)
-                            ),
-                            false,
-                        );
-                        // NEW vs CARRIED. The number an operator can act on: a prompt is
-                        // only expensive to the extent it is NEW, because the carried
-                        // prefix is what any prefix cache can reuse. Providers that never
-                        // report `cached_input_tokens` still cannot hide this — it is the
-                        // difference between two numbers the client already has.
-                        if stats.prev_input_tokens > 0 {
-                            let last = stats.last_input_tokens;
-                            let prev = stats.prev_input_tokens;
-                            if last >= prev {
-                                let new_tk = last - prev;
-                                line(
-                                    format!(
-                                        "           {} new since the previous call, {} carried \
-                                         forward (reusable prefix)",
-                                        crate::ui::chrome::fmt_tokens(new_tk),
-                                        crate::ui::chrome::fmt_tokens(prev)
-                                    ),
-                                    true,
-                                );
-                            } else {
-                                line(
-                                    format!(
-                                        "           {} smaller than the previous call — the \
-                                         context was compacted or reset",
-                                        crate::ui::chrome::fmt_tokens(prev - last)
-                                    ),
-                                    true,
-                                );
-                            }
-                        }
-                    } else {
-                        line("context    no model call observed yet".to_string(), true);
-                    }
-                    // RE-SEND AMPLIFICATION. An agent loop re-sends its whole transcript
-                    // every cycle, so total input dwarfs total output and grows with the
-                    // number of cycles. This ratio is the honest cost of the loop, and it
-                    // is the thing a cache is there to blunt.
-                    if stats.llm_calls > 0 && stats.output_tokens > 0 {
-                        line(
-                            format!(
-                                "run cost   {} tk in / {} tk out over {} model call{} — {:.1}x \
-                                 sent per token produced",
-                                crate::ui::chrome::fmt_tokens(stats.input_tokens),
-                                crate::ui::chrome::fmt_tokens(stats.output_tokens),
-                                stats.llm_calls,
-                                if stats.llm_calls == 1 { "" } else { "s" },
-                                stats.input_tokens as f64 / stats.output_tokens as f64
-                            ),
-                            false,
-                        );
-                    }
-                    if !stats.effective_model.is_empty() {
-                        line(format!("served by  {}", stats.effective_model), false);
-                    }
-                    line(String::new(), true);
-                    line(
-                        "the gateway enables prompt caching per run automatically when the"
-                            .to_string(),
-                        true,
-                    );
-                    line(
-                        "provider supports it (auto = on when available); nothing to configure"
-                            .to_string(),
-                        true,
-                    );
-                    draw_rows(rows, usize::MAX, Vec::new())
+                    Scroll::new(body.build())
+                        .content_size(content_w, n_rows)
+                        .offset_y(scroll)
+                        .scrollbar_auto_hide(true)
+                        .layout(LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)))
+                        .element(gcx, &t)
+                        .autofocus()
+                        .build()
                 },
             ))
             .build()
     });
+}
+
+/// Exact token count with thousands separators ("29,200"). The chrome's
+/// `fmt_tokens` rounds to "29k" because a status bar has three columns to
+/// spend; THIS panel is the detail view an operator opens precisely
+/// because the rounded number was not enough — two calls that both read
+/// "29k" can differ by 900 tokens, which is the whole delta being
+/// examined.
+fn tk_exact(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Percentage of `whole` that `part` is, as a display string ("37%").
+/// A zero denominator yields `None` — the panel prints no ratio at all
+/// rather than a `0%` that reads as a measured miss (the honesty rule
+/// this whole surface is built on: absence of evidence is not evidence).
+fn pct(part: u64, whole: u64) -> Option<String> {
+    if whole == 0 {
+        return None;
+    }
+    let p = part as f64 * 100.0 / whole as f64;
+    Some(if !(0.05..99.95).contains(&p) {
+        format!("{p:.0}%")
+    } else if p < 10.0 {
+        format!("{p:.1}%")
+    } else {
+        format!("{p:.0}%")
+    })
+}
+
+/// Human duration for a millisecond total: sub-second keeps a decimal,
+/// everything else goes through the ONE elapsed humanizer so /cache and
+/// the activity strip can never disagree about the same clock.
+fn fmt_ms(ms: u64) -> String {
+    if ms < 950 {
+        format!("{:.1}s", ms as f64 / 1000.0)
+    } else {
+        crate::convo::fmt_elapsed((ms as f64 / 1000.0).round() as u64)
+    }
+}
+
+/// Output tokens per second of provider-reported model time.
+fn tok_per_s(tokens: u64, ms: u64) -> Option<String> {
+    if ms == 0 || tokens == 0 {
+        return None;
+    }
+    Some(format!("{:.1} tk/s", tokens as f64 * 1000.0 / ms as f64))
+}
+
+/// Everything `/cache` renders, snapshotted from the store. A plain
+/// struct (not signals) so the row builder is a pure function — the
+/// arithmetic below is the part that can lie, so it is the part that is
+/// unit-tested.
+struct CacheFacts {
+    route: String,
+    cache: Option<crate::store::CacheInfo>,
+    stats: crate::transcript::Stats,
+    session: crate::transcript::SessionStats,
+}
+
+/// Build the `/cache` panel rows.
+///
+/// Three scopes, each labeled with what it measures: the LATEST call
+/// (what the model just received), THIS RUN (per-run stats, reset at
+/// `begin_run`), and the SESSION (lifetime of the fold, across runs).
+/// The panel used to show only the first two blurred together, so
+/// "how is the cache doing overall?" had no answer on screen.
+///
+/// Two kinds of number live here and they are never mixed silently:
+/// PROVIDER-REPORTED cache hits (`cached_tokens` — absent from most
+/// local servers), and the CLIENT-DERIVED new/carried split (consecutive
+/// context sizes), which is labeled "derived" everywhere it appears.
+fn cache_rows(f: &CacheFacts, width: i32) -> Vec<RowSpec> {
+    let s = &f.stats;
+    let sess = &f.session;
+    // Values WRAP into their own column instead of truncating: every
+    // number here is the point of the row, and a clipped
+    // "…automatica" is a metric the operator has to guess at (the help
+    // screen learned this the hard way — `help_rows`). The column widths
+    // come from the panel's real drawable width, so an 80-column
+    // terminal reflows rather than eating tails.
+    const LABEL_W: usize = 19;
+    let val_w = (width - LABEL_W as i32 - 2).max(24);
+    let mut rows: Vec<RowSpec> = Vec::new();
+    let section = |rows: &mut Vec<RowSpec>, title: &str| {
+        if !rows.is_empty() {
+            rows.push(RowSpec {
+                text: String::new(),
+                header: false,
+                checked: None,
+                dim: true,
+            });
+        }
+        rows.push(RowSpec {
+            text: title.to_string(),
+            header: true,
+            checked: None,
+            dim: false,
+        });
+    };
+    let wrapped = move |rows: &mut Vec<RowSpec>, label: &str, value: &str, dim: bool| {
+        let mut slices = text::wrap(value, val_w);
+        if slices.is_empty() {
+            slices.push(String::new());
+        }
+        for (i, slice) in slices.into_iter().enumerate() {
+            let head = if i == 0 { label } else { "" };
+            rows.push(RowSpec {
+                text: format!("  {head:<LABEL_W$}{slice}"),
+                header: false,
+                checked: None,
+                dim,
+            });
+        }
+    };
+    let kv = |rows: &mut Vec<RowSpec>, label: &str, value: String| {
+        wrapped(rows, label, &value, false);
+    };
+    let note = |rows: &mut Vec<RowSpec>, text: String| {
+        wrapped(rows, "", &text, true);
+    };
+    let prose = |rows: &mut Vec<RowSpec>, text: &str| {
+        for line in text::wrap(text, (width - 2).max(24)) {
+            rows.push(RowSpec {
+                text: format!("  {line}"),
+                header: false,
+                checked: None,
+                dim: true,
+            });
+        }
+    };
+    let tk = tk_exact;
+
+    // --- route ------------------------------------------------------
+    section(&mut rows, "route");
+    kv(&mut rows, "requested", f.route.clone());
+    if !s.effective_model.is_empty() {
+        kv(
+            &mut rows,
+            "serving",
+            format!("{} (reported by the run)", s.effective_model),
+        );
+    }
+    match &f.cache {
+        Some(c) if c.supported => {
+            kv(
+                &mut rows,
+                "cache",
+                format!(
+                    "supported · {} mode · enabled per run automatically",
+                    if c.mode.is_empty() {
+                        "provider"
+                    } else {
+                        &c.mode
+                    }
+                ),
+            );
+        }
+        Some(_) => kv(
+            &mut rows,
+            "cache",
+            "not supported on this route".to_string(),
+        ),
+        None => kv(
+            &mut rows,
+            "cache",
+            "unknown (gateway probe pending or unavailable)".to_string(),
+        ),
+    }
+    // Always name the pair the probe ASKED ABOUT — a verdict without its
+    // subject can silently describe a different route than the line above
+    // (adversary finding 5).
+    if let Some(c) = &f.cache {
+        note(
+            &mut rows,
+            format!(
+                "probe subject: {} · {}",
+                if c.provider.is_empty() {
+                    "(provider default)"
+                } else {
+                    &c.provider
+                },
+                if c.model.is_empty() {
+                    "(provider default)"
+                } else {
+                    &c.model
+                }
+            ),
+        );
+    }
+    // Reporting posture: the difference between "the cache missed" and
+    // "this provider never says". Counted, not guessed.
+    if sess.llm_calls == 0 {
+        kv(
+            &mut rows,
+            "hit reporting",
+            "no model call observed yet".to_string(),
+        );
+    } else if sess.cache_reported_calls > 0 {
+        kv(
+            &mut rows,
+            "hit reporting",
+            format!(
+                "provider-reported on {}/{} call{}",
+                sess.cache_reported_calls,
+                sess.llm_calls,
+                if sess.llm_calls == 1 { "" } else { "s" }
+            ),
+        );
+    } else {
+        kv(
+            &mut rows,
+            "hit reporting",
+            format!(
+                "never reported by this provider ({} call{})",
+                sess.llm_calls,
+                if sess.llm_calls == 1 { "" } else { "s" }
+            ),
+        );
+        note(
+            &mut rows,
+            "hit counts are absent, not zero — the new/carried split below is \
+             derived client-side"
+                .to_string(),
+        );
+    }
+
+    // --- latest call ------------------------------------------------
+    section(&mut rows, "latest model call");
+    if s.last_input_tokens == 0 {
+        kv(
+            &mut rows,
+            "context sent",
+            "no model call observed on this run yet".to_string(),
+        );
+    } else {
+        let last = s.last_input_tokens;
+        let prev = s.prev_input_tokens;
+        kv(
+            &mut rows,
+            "context sent",
+            format!(
+                "{} tk{}",
+                tk(last),
+                if s.last_input_is_estimate {
+                    "  (estimated: the provider reported no input/output split)"
+                } else {
+                    ""
+                }
+            ),
+        );
+        if prev == 0 {
+            note(
+                &mut rows,
+                "first call of this run — the whole prompt is new".to_string(),
+            );
+        } else if last >= prev {
+            let new_tk = last - prev;
+            kv(
+                &mut rows,
+                "├ new",
+                format!(
+                    "{} tk{}  · evaluated fresh",
+                    tk(new_tk),
+                    pct(new_tk, last)
+                        .map(|p| format!("  {p}"))
+                        .unwrap_or_default()
+                ),
+            );
+            kv(
+                &mut rows,
+                "└ carried forward",
+                format!(
+                    "{} tk{}  · reusable prefix (derived)",
+                    tk(prev),
+                    pct(prev, last)
+                        .map(|p| format!("  {p}"))
+                        .unwrap_or_default()
+                ),
+            );
+        } else {
+            kv(
+                &mut rows,
+                "└ context shrank",
+                format!(
+                    "{} tk smaller than the previous call ({} tk) — compacted or reset",
+                    tk(prev - last),
+                    tk(prev)
+                ),
+            );
+            note(
+                &mut rows,
+                "a shrink breaks the cached prefix: the next call re-evaluates from \
+                 the divergence point"
+                    .to_string(),
+            );
+        }
+        if s.last_cached_tokens > 0 {
+            kv(
+                &mut rows,
+                "cache hits",
+                format!(
+                    "{} tk from cache{}",
+                    tk(s.last_cached_tokens),
+                    pct(s.last_cached_tokens, last)
+                        .map(|p| format!("  ·  {p} of the prompt"))
+                        .unwrap_or_default()
+                ),
+            );
+        } else if sess.cache_reported_calls > 0 {
+            kv(
+                &mut rows,
+                "cache hits",
+                "0 tk — a real miss (this provider does report hits)".to_string(),
+            );
+        } else {
+            kv(
+                &mut rows,
+                "cache hits",
+                "not reported for this call".to_string(),
+            );
+        }
+        if s.last_output_tokens > 0 {
+            kv(
+                &mut rows,
+                "output",
+                format!("{} tk", tk(s.last_output_tokens)),
+            );
+        }
+        if s.last_gen_time_ms > 0 {
+            kv(
+                &mut rows,
+                "call time",
+                format!(
+                    "{}{}",
+                    fmt_ms(s.last_gen_time_ms),
+                    tok_per_s(s.last_output_tokens, s.last_gen_time_ms)
+                        .map(|r| format!("  ·  {r} out"))
+                        .unwrap_or_default()
+                ),
+            );
+        }
+    }
+
+    // --- this run ---------------------------------------------------
+    section(&mut rows, "this run");
+    if s.llm_calls == 0 {
+        kv(&mut rows, "model calls", "none yet".to_string());
+    } else {
+        kv(
+            &mut rows,
+            "model calls",
+            format!(
+                "{}  ·  {} tool call{}{}",
+                s.llm_calls,
+                s.tool_calls,
+                if s.tool_calls == 1 { "" } else { "s" },
+                if s.tool_failures > 0 {
+                    format!(" ({} failed)", s.tool_failures)
+                } else {
+                    String::new()
+                }
+            ),
+        );
+        kv(
+            &mut rows,
+            "tokens",
+            format!(
+                "{} in  /  {} out  /  {} total",
+                tk(s.input_tokens),
+                tk(s.output_tokens),
+                tk(s.total_tokens.max(s.input_tokens + s.output_tokens))
+            ),
+        );
+        // RE-SEND AMPLIFICATION. An agent loop re-sends its whole
+        // transcript every cycle, so total input dwarfs total output and
+        // grows with the number of cycles. This ratio is the honest cost
+        // of the loop, and it is the thing a cache is there to blunt.
+        if s.output_tokens > 0 && s.input_tokens > 0 {
+            kv(
+                &mut rows,
+                "amplification",
+                format!(
+                    "{:.1}x input sent per output token",
+                    s.input_tokens as f64 / s.output_tokens as f64
+                ),
+            );
+        }
+        for row in cache_effect_rows(
+            s.cached_tokens,
+            s.cache_reported_calls,
+            s.cacheable_input_tokens,
+            s.llm_calls,
+            s.new_tokens,
+            s.carried_tokens,
+            width,
+        ) {
+            rows.push(row);
+        }
+        if s.peak_input_tokens > 0 {
+            kv(
+                &mut rows,
+                "peak context",
+                format!(
+                    "{} tk{}",
+                    tk(s.peak_input_tokens),
+                    if s.context_resets > 0 {
+                        format!(
+                            "  ·  {} context reset{} (prefix broken)",
+                            s.context_resets,
+                            if s.context_resets == 1 { "" } else { "s" }
+                        )
+                    } else {
+                        "  ·  no context reset".to_string()
+                    }
+                ),
+            );
+        }
+        if s.gen_time_ms > 0 {
+            kv(
+                &mut rows,
+                "model time",
+                format!(
+                    "{} over {} call{}  ·  avg {}{}",
+                    fmt_ms(s.gen_time_ms),
+                    s.llm_calls,
+                    if s.llm_calls == 1 { "" } else { "s" },
+                    fmt_ms(s.gen_time_ms / s.llm_calls.max(1)),
+                    tok_per_s(s.output_tokens, s.gen_time_ms)
+                        .map(|r| format!("  ·  {r} out"))
+                        .unwrap_or_default()
+                ),
+            );
+        }
+    }
+
+    // --- session ----------------------------------------------------
+    section(&mut rows, "session (every run in this conversation)");
+    if sess.llm_calls == 0 {
+        kv(&mut rows, "model calls", "none yet".to_string());
+    } else {
+        kv(&mut rows, "runs", sess.runs.to_string());
+        kv(&mut rows, "model calls", sess.llm_calls.to_string());
+        kv(
+            &mut rows,
+            "tokens",
+            format!(
+                "{} in  /  {} out  /  {} total",
+                tk(sess.input_tokens),
+                tk(sess.output_tokens),
+                tk(sess
+                    .total_tokens
+                    .max(sess.input_tokens + sess.output_tokens))
+            ),
+        );
+        if sess.output_tokens > 0 && sess.input_tokens > 0 {
+            kv(
+                &mut rows,
+                "amplification",
+                format!(
+                    "{:.1}x input sent per output token",
+                    sess.input_tokens as f64 / sess.output_tokens as f64
+                ),
+            );
+        }
+        for row in cache_effect_rows(
+            sess.cached_tokens,
+            sess.cache_reported_calls,
+            sess.cacheable_input_tokens,
+            sess.llm_calls,
+            sess.new_tokens,
+            sess.carried_tokens,
+            width,
+        ) {
+            rows.push(row);
+        }
+        if sess.peak_input_tokens > 0 {
+            kv(
+                &mut rows,
+                "peak context",
+                format!(
+                    "{} tk{}",
+                    tk(sess.peak_input_tokens),
+                    if sess.context_resets > 0 {
+                        format!(
+                            "  ·  {} context reset{}",
+                            sess.context_resets,
+                            if sess.context_resets == 1 { "" } else { "s" }
+                        )
+                    } else {
+                        "  ·  no context reset".to_string()
+                    }
+                ),
+            );
+        }
+        if sess.gen_time_ms > 0 {
+            kv(
+                &mut rows,
+                "model time",
+                format!(
+                    "{} over {} call{}  ·  avg {}{}",
+                    fmt_ms(sess.gen_time_ms),
+                    sess.llm_calls,
+                    if sess.llm_calls == 1 { "" } else { "s" },
+                    fmt_ms(sess.gen_time_ms / sess.llm_calls.max(1)),
+                    tok_per_s(sess.output_tokens, sess.gen_time_ms)
+                        .map(|r| format!("  ·  {r} out"))
+                        .unwrap_or_default()
+                ),
+            );
+        }
+    }
+
+    // --- how to read it ---------------------------------------------
+    section(&mut rows, "how to read this");
+    prose(
+        &mut rows,
+        "carried forward is the prompt prefix a cache can serve; new is what the \
+         model must evaluate. Both are DERIVED from consecutive context sizes, so \
+         they exist even when a provider reports no hit counts at all — which is \
+         the normal case for local servers.",
+    );
+    prose(
+        &mut rows,
+        "cache hits are the provider's own number. 0 hits with 0 reporting calls \
+         means the provider never said — not that the cache was cold.",
+    );
+    prose(
+        &mut rows,
+        "the gateway enables prompt caching per run automatically when the provider \
+         supports it (auto = on when available); nothing to configure. \
+         --no-prompt-cache opts one run out.",
+    );
+    rows
+}
+
+/// The cache block shared by the run and session scopes: hits, the
+/// derived reuse split, and the savings that split implies. Identical
+/// arithmetic on both scopes by construction — the two blocks used to be
+/// hand-rolled separately and drifted.
+fn cache_effect_rows(
+    cached: u64,
+    reported_calls: u64,
+    cacheable_input: u64,
+    calls: u64,
+    new_tokens: u64,
+    carried_tokens: u64,
+    width: i32,
+) -> Vec<RowSpec> {
+    let tk = tk_exact;
+    const LABEL_W: usize = 19;
+    let val_w = (width - LABEL_W as i32 - 2).max(24);
+    let mut out: Vec<RowSpec> = Vec::new();
+    let mut kv = |label: &str, value: String, dim: bool| {
+        let mut slices = text::wrap(&value, val_w);
+        if slices.is_empty() {
+            slices.push(String::new());
+        }
+        for (i, slice) in slices.into_iter().enumerate() {
+            let head = if i == 0 { label } else { "" };
+            out.push(RowSpec {
+                text: format!("  {head:<LABEL_W$}{slice}"),
+                header: false,
+                checked: None,
+                dim,
+            });
+        }
+    };
+    if reported_calls > 0 {
+        kv(
+            "cache hits",
+            format!(
+                "{} tk{}  ·  {}/{} calls",
+                tk(cached),
+                pct(cached, cacheable_input)
+                    .map(|p| format!("  ·  {p} of input"))
+                    .unwrap_or_default(),
+                reported_calls,
+                calls
+            ),
+            false,
+        );
+    } else {
+        kv(
+            "cache hits",
+            "not reported by this provider".to_string(),
+            true,
+        );
+    }
+    let total_split = new_tokens + carried_tokens;
+    if total_split > 0 {
+        kv(
+            "new vs carried",
+            format!(
+                "{} new  /  {} carried{}",
+                tk(new_tokens),
+                tk(carried_tokens),
+                pct(carried_tokens, total_split)
+                    .map(|p| format!("  ·  {p} reusable prefix"))
+                    .unwrap_or_default()
+            ),
+            false,
+        );
+        kv(
+            "",
+            format!(
+                "derived · a perfect cache skips {} tk of prompt work",
+                tk(carried_tokens)
+            ),
+            true,
+        );
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -2982,5 +3523,198 @@ mod tests {
                 row.desc
             );
         }
+    }
+
+    // --- /cache panel -------------------------------------------------
+    //
+    // The panel's whole value is that its numbers are TRUE: a derived
+    // split must never be presented as a measurement, and an unreported
+    // cache hit count must never render as a zero (a cold cache). These
+    // tests pin both, plus the arithmetic.
+
+    use super::{cache_rows, CacheFacts};
+    use crate::store::CacheInfo;
+    use crate::transcript::{SessionStats, Stats};
+
+    fn facts(stats: Stats, session: SessionStats) -> CacheFacts {
+        CacheFacts {
+            route: "mlx · qwen (your override)".into(),
+            cache: Some(CacheInfo {
+                provider: "mlx".into(),
+                model: "qwen".into(),
+                supported: true,
+                mode: "local_control_plane".into(),
+            }),
+            stats,
+            session,
+        }
+    }
+
+    fn text_of(f: &CacheFacts) -> String {
+        cache_rows(f, 78)
+            .into_iter()
+            .map(|r| r.text)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn exact_token_counts_group_without_rounding() {
+        // The panel exists because "29k" was not enough: two calls that
+        // both round to 29k can differ by the ~900 tokens under study.
+        assert_eq!(super::tk_exact(0), "0");
+        assert_eq!(super::tk_exact(999), "999");
+        assert_eq!(super::tk_exact(1_000), "1,000");
+        assert_eq!(super::tk_exact(29_200), "29,200");
+        assert_eq!(super::tk_exact(1_240_000), "1,240,000");
+    }
+
+    #[test]
+    fn latest_call_splits_new_from_carried_with_percentages() {
+        let stats = Stats {
+            llm_calls: 2,
+            input_tokens: 16_200,
+            output_tokens: 558,
+            last_input_tokens: 10_000,
+            prev_input_tokens: 6_200,
+            last_output_tokens: 558,
+            ..Default::default()
+        };
+        let out = text_of(&facts(stats, SessionStats::default()));
+        assert!(out.contains("3,800 tk"), "new tokens missing: {out}");
+        assert!(out.contains("6,200 tk"), "carried tokens missing: {out}");
+        assert!(out.contains("38%"), "new share missing: {out}");
+        assert!(out.contains("62%"), "carried share missing: {out}");
+        assert!(out.contains("reusable prefix (derived)"), "{out}");
+    }
+
+    #[test]
+    fn unreported_cache_hits_never_render_as_a_cold_cache() {
+        // 12 calls, none of which carried a hit count: the honest line is
+        // "never reported", NOT "0 tk served" — the zero would read as a
+        // measured miss and send an operator chasing a cache that is
+        // simply silent.
+        let stats = Stats {
+            llm_calls: 12,
+            input_tokens: 100_000,
+            output_tokens: 4_000,
+            cacheable_input_tokens: 100_000,
+            ..Default::default()
+        };
+        let session = SessionStats {
+            llm_calls: 12,
+            runs: 1,
+            input_tokens: 100_000,
+            output_tokens: 4_000,
+            cacheable_input_tokens: 100_000,
+            ..Default::default()
+        };
+        let out = text_of(&facts(stats, session));
+        assert!(out.contains("never reported by this provider"), "{out}");
+        assert!(out.contains("not reported by this provider"), "{out}");
+        assert!(
+            !out.contains("0 tk served"),
+            "silence rendered as a miss: {out}"
+        );
+    }
+
+    #[test]
+    fn a_reporting_provider_makes_a_zero_a_real_miss() {
+        // Once ANY call reported a hit count, the provider is known to
+        // talk — so a later zero IS evidence of a miss and says so.
+        let stats = Stats {
+            llm_calls: 3,
+            last_input_tokens: 9_000,
+            prev_input_tokens: 8_000,
+            last_cached_tokens: 0,
+            cached_tokens: 5_000,
+            cache_reported_calls: 2,
+            cacheable_input_tokens: 20_000,
+            ..Default::default()
+        };
+        let session = SessionStats {
+            llm_calls: 3,
+            runs: 1,
+            cached_tokens: 5_000,
+            cache_reported_calls: 2,
+            cacheable_input_tokens: 20_000,
+            ..Default::default()
+        };
+        let out = text_of(&facts(stats, session));
+        assert!(out.contains("a real miss"), "{out}");
+        assert!(out.contains("2/3 calls"), "{out}");
+        assert!(out.contains("25% of input"), "{out}");
+    }
+
+    #[test]
+    fn session_block_reports_totals_across_runs() {
+        // The panel's headline addition: per-run stats reset at
+        // begin_run, so without this block "how is the cache doing
+        // overall?" had no answer on screen.
+        let session = SessionStats {
+            runs: 4,
+            llm_calls: 37,
+            input_tokens: 1_200_000,
+            output_tokens: 40_000,
+            total_tokens: 1_240_000,
+            cached_tokens: 300_000,
+            cache_reported_calls: 30,
+            cacheable_input_tokens: 1_200_000,
+            new_tokens: 400_000,
+            carried_tokens: 800_000,
+            context_resets: 2,
+            peak_input_tokens: 96_000,
+            gen_time_ms: 600_000,
+        };
+        let out = text_of(&facts(Stats::default(), session));
+        assert!(out.contains("runs               4"), "{out}");
+        assert!(out.contains("model calls        37"), "{out}");
+        assert!(out.contains("1,200,000 in"), "{out}");
+        assert!(out.contains("30.0x input sent per output token"), "{out}");
+        assert!(out.contains("67% reusable prefix"), "{out}");
+        assert!(out.contains("2 context resets"), "{out}");
+        assert!(out.contains("10m00s over 37 calls"), "{out}");
+    }
+
+    #[test]
+    fn a_shrinking_context_is_named_as_a_broken_prefix() {
+        let stats = Stats {
+            llm_calls: 5,
+            last_input_tokens: 4_000,
+            prev_input_tokens: 30_000,
+            context_resets: 1,
+            ..Default::default()
+        };
+        let out = text_of(&facts(stats, SessionStats::default()));
+        assert!(out.contains("compacted or reset"), "{out}");
+        assert!(out.contains("breaks the cached prefix"), "{out}");
+    }
+
+    #[test]
+    fn empty_state_claims_nothing() {
+        // No calls yet: every scope says so plainly. A panel that
+        // renders 0%/0x against no observation is a lying panel.
+        let out = text_of(&facts(Stats::default(), SessionStats::default()));
+        assert!(out.contains("no model call observed yet"), "{out}");
+        assert!(
+            out.contains("no model call observed on this run yet"),
+            "{out}"
+        );
+        assert!(!out.contains('%'), "ratios invented from no data: {out}");
+        assert!(!out.contains("0.0x"), "amplification invented: {out}");
+    }
+
+    #[test]
+    fn an_estimated_context_is_labeled_as_one() {
+        // The zero-poisoned-split path (abstractcore usage normalization):
+        // the number is a derivation, and the panel must say so.
+        let stats = Stats {
+            llm_calls: 1,
+            last_input_tokens: 137_000,
+            last_input_is_estimate: true,
+            ..Default::default()
+        };
+        let out = text_of(&facts(stats, SessionStats::default()));
+        assert!(out.contains("estimated"), "{out}");
     }
 }

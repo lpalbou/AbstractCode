@@ -189,20 +189,14 @@ pub(crate) fn err_from_ureq(label: &str, e: ureq::Error) -> GwError {
                         format!("{label} failed")
                     } else {
                         // ADR-0026: a non-JSON error body is the only account
-                        // the operator gets of WHY the call failed. Bound it
-                        // so one HTML error page cannot own the screen, but a
-                        // silent cut reads as the server's whole answer.
-                        const ERR_BODY_CHARS: usize = 400;
-                        let total = t.chars().count();
-                        let head: String = t.chars().take(ERR_BODY_CHARS).collect();
-                        if total > ERR_BODY_CHARS {
-                            //[WARNING:TRUNCATION] non-JSON error body bounded for display
-                            format!(
-                                "{head}… [#TRUNCATION: {ERR_BODY_CHARS} of {total} chars of the error body]"
-                            )
-                        } else {
-                            head
-                        }
+                        // the operator gets of WHY the call failed — so it
+                        // arrives WHOLE (2026-08-20). The 400-char cut that
+                        // used to live here fired before any view existed,
+                        // and its `[#TRUNCATION …]` marker then rode into
+                        // `/details`, which by contract shortens nothing.
+                        // Bounding an HTML error page to a screenful is the
+                        // FOLDED view's job, where the cut is labeled.
+                        t.to_string()
                     }
                 });
             GwError::http(code, detail)
@@ -371,8 +365,18 @@ impl GatewayClient {
     }
 
     fn post_json(&self, path: &str, payload: &Value) -> GwResult<Value> {
+        self.post_json_via(&self.agent, path, payload)
+    }
+
+    /// `post_json` over a CALLER-CHOSEN agent. The retry path passes a
+    /// throwaway agent so its attempt cannot land on a pooled socket:
+    /// ureq returns a stream to the pool as soon as the body read hits
+    /// EOF (`pool.rs::PoolReturnRead`), including the EOF that ENDED a
+    /// failed read, so retrying through the shared agent can pick the
+    /// very socket that just broke.
+    fn post_json_via(&self, agent: &ureq::Agent, path: &str, payload: &Value) -> GwResult<Value> {
         let req = self.with_auth(
-            self.agent
+            agent
                 .post(&self.url(path))
                 .set("Accept", "application/json")
                 .set("Content-Type", "application/json"),
@@ -537,8 +541,14 @@ impl GatewayClient {
     }
 
     pub fn list_runs(&self, session_id: &str, limit: u32) -> GwResult<Value> {
+        // include_ledger_len=false (session-reload investigation,
+        // 2026-08-19): the gateway defaults the flag ON and, on
+        // file-backed stores, LINE-READS every listed run's whole
+        // ledger JSONL to compute it — a per-reload cost linear in the
+        // session's ledger bytes, for a field this client never reads.
+        // Pre-flag gateways ignore the unknown query param.
         self.get_json(&format!(
-            "/runs?limit={limit}&session_id={}&root_only=true",
+            "/runs?limit={limit}&session_id={}&root_only=true&include_ledger_len=false",
             url_encode(session_id)
         ))
     }
@@ -615,6 +625,78 @@ impl GatewayClient {
         self.post_json("/commands", &body)
     }
 
+    /// Submit a command with ONE same-id retry on a transient transport
+    /// failure, and report whether any attempt was AMBIGUOUS.
+    ///
+    /// This is the single owner of the command retry policy. It exists
+    /// because the policy was implemented in the quit lane and nowhere
+    /// else, so a steer that hit a reset socket was simply lost — the
+    /// live failure of 2026-08-20 ("steer not delivered: … Connection
+    /// reset by peer"). ureq will not cover this for us: it re-opens
+    /// only when the PRELUDE write fails on a recycled connection, and
+    /// its post-response retry is restricted to idempotent methods with
+    /// an empty body (`unit.rs::is_retryable`) — a POST with a JSON body
+    /// is neither, so a reset arriving after the prelude reaches us raw.
+    ///
+    /// The retry is exactly-once by construction: the durable command
+    /// store dedups on `command_id` (runtime receipt c5541), so a repeat
+    /// of an accepted command returns the original seq instead of
+    /// applying twice. That is why the id is minted by the CALLER and
+    /// reused verbatim here.
+    ///
+    /// `ambiguous` = some attempt may have LEFT and only its answer was
+    /// lost (timeout or body-level transport). A connect-level failure
+    /// (nobody there) and an HTTP status (the server spoke) are both
+    /// unambiguous. It is sticky across attempts: a first attempt that
+    /// may have landed makes the final verdict non-definitive even if
+    /// the retry fails cleanly.
+    pub fn submit_command_retried(
+        &self,
+        command_id: &str,
+        run_id: &str,
+        typ: &str,
+        payload: Value,
+    ) -> (GwResult<Value>, bool) {
+        let ambiguous = |e: &GwError| e.status.is_none() && !e.is_gone();
+        let first = self.submit_command_with_id(command_id, run_id, typ, payload.clone());
+        let Err(e) = &first else {
+            return (first, false);
+        };
+        let saw_ambiguous = ambiguous(e);
+        if !e.is_transient() {
+            return (first, saw_ambiguous);
+        }
+        let second = self.submit_command_on_a_fresh_connection(command_id, run_id, typ, payload);
+        let saw_ambiguous = saw_ambiguous || second.as_ref().err().is_some_and(ambiguous);
+        (second, saw_ambiguous)
+    }
+
+    /// The retry attempt: same command id, guaranteed-new socket.
+    fn submit_command_on_a_fresh_connection(
+        &self,
+        command_id: &str,
+        run_id: &str,
+        typ: &str,
+        payload: Value,
+    ) -> GwResult<Value> {
+        let body = json!({
+            "command_id": command_id,
+            "run_id": run_id,
+            "type": typ,
+            "payload": payload,
+            "client_id": "abstractcode-tui",
+        });
+        // A throwaway agent owns an empty pool, so this cannot reuse the
+        // socket the first attempt just broke. Same timeouts as the
+        // control-plane agent (ADR-0027 §4).
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(5))
+            .timeout_read(Duration::from_secs(60))
+            .timeout_write(Duration::from_secs(30))
+            .build();
+        self.post_json_via(&agent, "/commands", &body)
+    }
+
     /// Per-model reasoning capability probe (first-citizen picker stage 3):
     /// the gateway's model-capabilities lookup — runtime discovery facade
     /// over core's registry. Reads `thinking_support` + `reasoning_levels`
@@ -656,8 +738,17 @@ impl GatewayClient {
         self.submit_command(run_id, "resume", json!({}))
     }
 
-    pub fn steer(&self, run_id: &str, guidance: &str) -> GwResult<Value> {
-        self.submit_command(run_id, "inject_guidance", json!({ "guidance": guidance }))
+    /// Steer a live run. Returns the outcome plus whether the guidance
+    /// may have landed despite the error (see
+    /// [`GatewayClient::submit_command_retried`]) — the operator is told
+    /// "not delivered" only when that is actually known.
+    pub fn steer(&self, run_id: &str, guidance: &str) -> (GwResult<Value>, bool) {
+        self.submit_command_retried(
+            &mint_command_id(),
+            run_id,
+            "inject_guidance",
+            json!({ "guidance": guidance }),
+        )
     }
 
     /// One document for a whole run TREE: `input_data` (the prompt),
@@ -1083,6 +1174,181 @@ mod tests {
             "timeout wording must not claim unreachable: {gw}"
         );
         drop(listener);
+    }
+
+    /// Read ONE complete HTTP request (headers + `Content-Length` body).
+    /// A server that closes with the request body still unread makes the
+    /// kernel emit RST, which shows up as spurious client-side errors —
+    /// the tests below must fail for the reason they are testing.
+    #[cfg(test)]
+    fn read_http_request(stream: &mut std::net::TcpStream) -> String {
+        use std::io::Read;
+        let mut raw: Vec<u8> = Vec::new();
+        let mut buf = [0u8; 1024];
+        loop {
+            let n = match stream.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => n,
+            };
+            raw.extend_from_slice(&buf[..n]);
+            let text = String::from_utf8_lossy(&raw).to_string();
+            let Some(head_end) = text.find("\r\n\r\n") else {
+                continue;
+            };
+            let want: usize = text[..head_end]
+                .lines()
+                .find_map(|l| {
+                    let (k, v) = l.split_once(':')?;
+                    (k.trim().eq_ignore_ascii_case("content-length"))
+                        .then(|| v.trim().parse::<usize>().ok())?
+                })
+                .unwrap_or(0);
+            if raw.len() >= head_end + 4 + want {
+                break;
+            }
+        }
+        String::from_utf8_lossy(&raw).to_string()
+    }
+
+    /// The live steer failure of 2026-08-20: "steer not delivered:
+    /// /commands: … Network Error: Connection reset by peer (os error 54)".
+    ///
+    /// ureq protects only part of this class. It silently re-opens when
+    /// the PRELUDE write fails on a recycled connection (so a socket
+    /// already known-dead is handled), and it retries a closed response
+    /// only for idempotent methods with an empty body
+    /// (`unit.rs::is_retryable`). A POST carrying a JSON body — every
+    /// command this client sends — is NEITHER, so a reset that lands
+    /// after the prelude went out reaches the caller untouched.
+    ///
+    /// This builds that exact shape: the second connection is accepted
+    /// and then closed with the request still unread, which makes the
+    /// kernel answer with RST. The command must still be delivered,
+    /// because `submit_command_with_id` retries once with the SAME
+    /// command id and the durable store dedups on it.
+    #[test]
+    fn a_reset_after_the_prelude_still_delivers_the_command() {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(AtomicUsize::new(0));
+        let seen_srv = seen.clone();
+        let server = std::thread::spawn(move || {
+            for stream in listener.incoming().take(2) {
+                let Ok(mut stream) = stream else { break };
+                let n = seen_srv.fetch_add(1, Ordering::SeqCst);
+                if n == 0 {
+                    // First connection: accept the request, then close it
+                    // WITHOUT reading — unread bytes in the receive queue
+                    // make close() emit RST, which is exactly what the
+                    // operator saw (os error 54).
+                    std::thread::sleep(Duration::from_millis(60));
+                    drop(stream);
+                    continue;
+                }
+                // The retry's connection: behave.
+                let _ = read_http_request(&mut stream);
+                let body = "{\"ok\":true}";
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                );
+                let _ = stream.flush();
+            }
+        });
+
+        let client = GatewayClient::new(&format!("http://127.0.0.1:{port}"), None);
+        let (delivered, ambiguous) = client.steer("run-1", "please use AbstractTUI");
+        // Never join: without the retry the server is still parked on
+        // accept(), and a hung test says nothing.
+        drop(server);
+        assert_eq!(
+            seen.load(Ordering::SeqCst),
+            2,
+            "the client must try again after the reset"
+        );
+        assert!(
+            delivered.is_ok(),
+            "a steer must survive one reset — the command store dedups the \
+             same-id retry, so losing the operator's words here is pure loss: {:?}",
+            delivered.err()
+        );
+        assert!(
+            ambiguous,
+            "the first attempt may have landed before the reset — the caller \
+             must be told the outcome is not definitive"
+        );
+    }
+
+    /// The retry is EXACTLY-ONCE or it is a bug: the durable command
+    /// store dedups on `command_id`, so both attempts must carry the
+    /// same one. A fresh id per attempt would double-apply a steer that
+    /// actually landed — which is precisely why `steer` mints once and
+    /// hands the id to the retry policy.
+    #[test]
+    fn both_attempts_carry_the_same_command_id() {
+        use std::io::Write;
+        use std::sync::mpsc;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let (tx, rx) = mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            for (n, stream) in listener.incoming().take(2).enumerate() {
+                let Ok(mut stream) = stream else { break };
+                let _ = tx.send(read_http_request(&mut stream));
+                if n == 0 {
+                    // A response that dies mid-body: deterministic
+                    // transport failure (no socket-state race), which is
+                    // what the policy retries. The point of THIS test is
+                    // the id, not the flavour of the break.
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nshort",
+                    );
+                    let _ = stream.flush();
+                    drop(stream);
+                } else {
+                    let body = "{}";
+                    let _ = stream.write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    );
+                    let _ = stream.flush();
+                }
+            }
+        });
+
+        let client = GatewayClient::new(&format!("http://127.0.0.1:{port}"), None);
+        let (outcome, _) = client.steer("run-1", "keep going");
+        assert!(outcome.is_ok(), "the retry lands: {:?}", outcome.err());
+        let first = rx.recv_timeout(Duration::from_secs(5)).expect("attempt 1");
+        let second = rx.recv_timeout(Duration::from_secs(5)).expect("attempt 2");
+        let id_of = |req: &str| -> String {
+            let body = req.split("\r\n\r\n").nth(1).unwrap_or_default().to_string();
+            serde_json::from_str::<Value>(&body)
+                .ok()
+                .and_then(|v| {
+                    v.get("command_id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .unwrap_or_default()
+        };
+        let (a, b) = (id_of(&first), id_of(&second));
+        assert!(!a.is_empty(), "attempt 1 carries a command id: {first}");
+        assert_eq!(
+            a, b,
+            "the retry MUST reuse the id — dedup is what makes it safe"
+        );
     }
 
     #[test]

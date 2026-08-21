@@ -51,9 +51,14 @@ session totals across runs.
 **Is prompt caching on?**
 The gateway enables prompt caching automatically for every run when the
 provider supports it — nothing to configure client-side. `/cache` shows the
-posture for the effective route (supported + mode), observed cache hits, and
-the latest context size. Local providers (LM Studio) often cache without
-reporting hit counts; the panel says so instead of inventing zeros.
+posture for the effective route (supported + mode) and then the numbers, at
+three scopes: the latest model call, this run, and the whole session. Per
+scope: cache hits against reported input, the derived new-vs-carried split
+(how much of what you send is a reusable prefix), re-send amplification, peak
+context and context resets, and model time. The panel scrolls (`↑↓`/`PgUp`/
+`PgDn`). Local providers (LM Studio) often cache without reporting hit counts;
+the panel says "never reported by this provider" instead of inventing a zero —
+and the derived split still tells you what a cache could save.
 
 **Can I turn prompt caching off to compare?**
 `exec --no-prompt-cache` opts a headless run out, which is enough to A/B one

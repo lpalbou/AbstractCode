@@ -101,8 +101,11 @@ approvals, workspace scope).
   persistent instrument row (context meter, session tokens, `/gpu` meter,
   skills/MCP counts — the key legend lives behind `?`); the activity
   strip shows live context size (`ctx`), cache hits, and the in-flight
-  model call with its last-call tok/s; `/cache` reports the prompt-cache
-  posture for the effective route (auto = on when available).
+  model call with its last-call tok/s; `/cache` is the detail panel:
+  prompt-cache posture for the effective route (auto = on when available)
+  plus exact metrics for the latest call, this run, and the whole session —
+  hits, the derived new-vs-carried split, re-send amplification, peak
+  context, resets, and model time.
 - **A context meter you declare**: `/context 262k` declares the model's
   window (persisted; `--max-tokens` for one session) and the footer
   reads `ctx 41k/262k tk (15%, declared)` — warn at 75%, error at 90%.
@@ -192,6 +195,8 @@ runs never stall.
 --provider <P> --model <M>        route override (default: gateway defaults)
 --workspace <PATH>                requested workspace root (see note)
 --theme <ID>                      start theme (ABSTRACTTUI_THEME works too)
+--animation <on|off>              launch animation (default: on) — SAVED, so
+                                  `--animation off` once disables it for good
 --caps                            print the terminal capability report
 ```
 

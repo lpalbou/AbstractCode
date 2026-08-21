@@ -27,6 +27,7 @@ abstractcode-tui --help | --version
 | `--no-workspace` | Send no workspace root | — |
 | `--workspace-mode <M>` | Workspace access mode | server default |
 | `--theme <ID>` | Start theme | `ABSTRACTTUI_THEME`, else saved pick |
+| `--animation <on\|off>` | Launch animation; **persisted** to `prefs.json` (`animation`). Also skipped when stdout is not a tty, `NO_COLOR`/`TERM=dumb` is set, or `ABSTRACTTUI_NO_SPLASH` is set | on |
 | `--max-iterations <N>` | Agent iteration budget | 50 |
 | `--replay-turns <N>` | Prior turns replayed in full detail at boot (0 disables) | 20 |
 | `--permissions <level>` | tool permissions for the invocation: `read` \| `write` \| `all` | prefs level |
@@ -43,6 +44,7 @@ abstractcode-tui --help | --version
 | `ABSTRACTCODE_GATEWAY_CONNECTION_FILE` | Login store path (default `~/.abstractcode/gateway.json`) |
 | `ABSTRACTCODE_TUI_PREFS_FILE` | Preferences path (default `~/.abstractcode-tui/prefs.json`) |
 | `ABSTRACTTUI_THEME` | Start theme id |
+| `ABSTRACTTUI_NO_SPLASH` | Set to anything but `0` to skip the launch animation for one run (the persisted switch is `--animation off`) |
 
 ### Exit codes (`exec`)
 
@@ -63,21 +65,21 @@ abstractcode-tui --help | --version
 | `/workspace` | Inspect + edit the filesystem scope tools may touch: root (from `--workspace`/cwd), access mode, allowed paths. Mode + paths persist and ride every run |
 | `/skills` | Attach gateway skills to your runs (`Space` toggles; sent as `input_data.skills`) |
 | `/mcp` | The gateway's MCP server registry (read-only; their tools appear in `/tools` once declared) |
-| `/cache` | Prompt-cache + context status for the effective route |
+| `/cache` | Prompt-cache + context metrics: route, latest call, run, session |
 | `/history [n\|all]` | Stream the PREVIOUS bloc of this session's turns from the gateway ledgers, prepended in full detail. Boot replays only the last bloc (`--replay-turns` sizes it, default 5); a stub line names how many earlier turns exist. **Scrolling to the top of the transcript auto-loads the previous bloc** — the stub becomes a live progress line and holding at the top cascades bloc-by-bloc until the session is fully loaded (Esc returns to the tail and stops the cascade). Failures name their cause — never a silent hole |
 | `/status` | The status card: workflow, route, workspace, session, connection, client phase + run id + last outcome, and a LIVE gateway run-status probe — the one place client view vs server truth is inspectable (wrapper roots legitimately stay `waiting` after your turn concluded) |
 | `/sessions` | Pick a recent session to continue (named by first prompt) |
 | `/session [id]` | Show or switch the session id (switching probes for a live run to reattach) |
-| `/details [full\|fold]` | Toggle the clean answers view (`Ctrl+D`): reasoning folds away and tool cards drop their DETAIL (argument line + result body) — the tool CALL stays as a one-line header, so the trace is never hidden; active, failed, and denied tools plus errors always keep their bodies. Thinking cards render as one-line gists by default — `/details full` expands them (content plus the labeled reasoning channel), `/details fold` returns to gists |
+| `/details [full\|fold]` | Toggle transcript verbosity (`Ctrl+D`): `fold` (the default) renders each tool call as ONE line — glyph, name, status word (`ok`/`failed`/`running`/…), faint args hint — and thinking as a capped gist; `full` expands the whole card UNCUT (arguments in full on their own rows, the `│`-guttered result body entire, thinking content plus the labeled reasoning channel — nothing shortened). Thinking and every called tool stay visible in BOTH states — the toggle gates detail, never existence; errors always keep their `↳` bodies |
 | `/gating [auto\|wait]` | Approval gating for gating-capable workflows (the multi-agent coder): `auto` runs unattended (skips the workflow's human-approval pauses), `wait` re-gates (the default). Selecting the coder also opens a gated/unattended choice. Rides `input_data.gating_mode`; tool approval is a SEPARATE axis (`/permissions`) |
 | `/reasoning [level]` | Reasoning effort for the current route (`none\|minimal\|low\|medium\|high\|xhigh\|auto`; `default` clears). Bare `/reasoning` opens the dial — also stage 3 of `/model`: pick provider, then model, then effort. Non-reasoning models show a locked `none` (set-anyway override available while capability provenance is unserved); the choice is pair-coupled — changing provider or model resets it. Rides the run as `_runtime.thinking` (absent = gateway default) |
 | `/export [md\|jsonl] [--details] [path]` | Export the agent transcript to a file: `md` (default) = archival markdown; `jsonl` = SFT training lines. `--details` adds reasoning + full tool cards. Bare `/export` auto-names in the cwd; never overwrites — see "Transcript export" below |
-| `/attach [path\|clear]` | Stage a file for your NEXT message (chips above the composer; uploaded at send as `context.attachments`; **session uploads are permanent** server-side). Accepts `~`, quotes, escaped spaces, `file://`, relative paths. Bare `/attach` opens the file browser (nothing staged) or the pending manager (chips staged); `clear` discards. Dropping a file onto the terminal attaches directly — `Ctrl+O` undoes (chips out, path text back). Agent-lane only (v1) — see "Attachments" below |
+| `/attach [path\|preview\|clear]` | Stage a file for your NEXT message (chips above the composer; uploaded at send as `context.attachments`; **session uploads are permanent** server-side). Accepts `~`, quotes, escaped spaces, `file://`, relative paths. Bare `/attach` opens the file browser (nothing staged) or the pending manager (chips staged); `preview [n\|path]` opens the file itself (text or PNG/JPEG — staged or not); `clear` discards. Dropping a file onto the terminal attaches directly — `Ctrl+O` undoes (chips out, path text back). Agent-lane only (v1) — see "Attachments" below |
 | `/auto` | Removed (the session blanket had latent holes) — opens the `/permissions` report teaching the replacement |
 | `/pause` | Pause the run tree durably on the gateway (stops at the next step boundary; survives quitting the client) |
 | `/resume` | Resume a paused run tree |
 | `/cancel` | Cancel the active run |
-| `/steer <text>` | Explicit steering (plain Enter during a run steers too; buffered until the run's first reasoning cycle when it has not started cycling yet) |
+| `/steer <text>` | Explicit steering (plain Enter during a run steers too; buffered until the run's first reasoning cycle when it has not started cycling yet). A send that hits a transport failure is retried once with the same command id — the gateway dedups on it, so the retry is exactly-once — and if it still fails your words are kept: they ride the error card and return to the composer when it is empty |
 | `/queue [text]` | Queue a prompt (FIFO): auto-runs after the current run **succeeds**; halts on failure/cancel (explicit resume). Persists per session and restores **paused** — a restore never auto-starts. Bare `/queue` opens the manager (keys under "Modal keys" below). Agent-lane only: under entity focus the visit's held-draft lane is the queue |
 | `/goal [text\|stop]` | Start a goal run on a goal workflow (`abstractcode.goal.v1`): loops until verified done or `max_cycles` (prefs `goal_max_cycles`, default 8). Bare `/goal` shows status; `/goal stop` cancels durably. Ships dark until a goal bundle is published on the gateway |
 | `/context [n\|off]` | Declare the model's context window in tokens (`262144`, `262k`, `1m`) — the footer meter becomes `ctx used/window tk (%, declared)`, warn ≥75% / error ≥90%, and the declaration rides runs as `_limits.max_tokens`. Bare `/context` reports; `off` clears. Persisted (`context_window`); `--max-tokens` declares for one session. Source-labeled "declared" — never a client capability table |
@@ -123,8 +125,8 @@ never changes the output. v1 exports the **agent-lane** transcript
   provider-hostile — and counted in the notice, never written to the
   file. Default lines carry **only** `messages` (strict validators
   accept them as-is); `--details` adds a `details` side field (that
-  turn's tools/cycles/steers as preview-bounded strings — deliberately
-  not fabricated `tool_calls`: the client holds display previews, not
+  turn's tools/cycles/steers as full strings — deliberately
+  not fabricated `tool_calls`: the client holds a humane rendering, not
   wire-faithful call structures; full traces live in the gateway run
   ledgers).
 
@@ -145,6 +147,12 @@ server-side (120 KB/item), PDFs extract on `open_attachment`, images
 need a vision-capable route, other binaries are listable-not-readable
 (the attach notice says which).
 
+- **The chips row is interactive**: a staged file's NAME opens its
+  preview, and the `×` beside it unstages the file. Removing a chip
+  before the send is a true no-op (nothing has been uploaded yet).
+  Names are capped at 20 characters plus an ellipsis so one long
+  filename cannot own the row; the preview header and the manager spell
+  the full name out.
 - **Custody**: an upload or start failure blocks the send and KEEPS the
   chips (error card names the server detail); refs minted before the
   failure are cached, so the retry never duplicates artifacts. Chips
@@ -164,6 +172,23 @@ need a vision-capable route, other binaries are listable-not-readable
   they ride a run (and again on session restore) — you see exactly
   what was attached. Reminder: the image reaches the MODEL only on a
   vision-capable route.
+- **Preview** (click the chip, `/attach preview [n|path]`, or `p`/`Enter`
+  in the manager) opens the file's real bytes BEFORE it rides anything: a
+  scrolling, line-numbered document for text-like files, or the picture
+  itself for PNG/JPEG (same mosaic ladder as the transcript). Magic
+  bytes decide the kind, never the extension. It is a look, not an
+  attach — `/attach preview <path>` works on a file that is not staged
+  and stages nothing. Bounds are stated, never silent: text previews
+  the first 512 KB of a larger file and the header says so; invalid
+  UTF-8 is labeled; tabs expand to 4 columns; long lines WRAP (the
+  wrapped tail carries no line number, so the numbers stay a true index
+  into the file) and re-wrap when the terminal is resized. ANSI escape
+  sequences are removed so colored logs read, and the header says they
+  were; BOM'd UTF-16 is transcoded and labeled. Known limit: BOM-less
+  UTF-16 is indistinguishable from binary and refuses as such. The engine draws PNG and JPEG only — GIF/WebP/BMP/TIFF
+  and PDFs say so by name and remind you the attachment itself still
+  uploads and works. Reading and decoding run on their own thread, so a
+  large photo shows `reading…` rather than freezing the interface.
 - **Boundaries**: session uploads are PERMANENT server-side (the
   session's attachment index has no delete surface). `/new` and session
   switches discard pending chips with a notice. Chips never ride
@@ -231,30 +256,63 @@ recovers it.
 | ask (agent question) | `Enter` send the answer · `Esc` keeps the run waiting |
 | `/tools` | `Space` toggle · `a` all on · `n` all off · `p` cycle the per-tool pin (none → auto → ask → none; a pin beats the tier both ways) · `t` cycle the approval tier (read → write → all, persisted) · `Enter`/`Esc` close |
 | `/queue` | `↑↓` select · `x` remove · `u`/`d` move up/down · `c` clear all · `r` resume a paused queue · `e` pop the prompt into the composer for editing · `Enter`/`Esc` close |
-| `/attach` manager | `↑↓` select · `x` remove · `c` clear · `b` browse (file picker) · `Enter`/`Esc` close |
+| chips row | click a staged file's name to preview it · click its `×` to unstage it |
+| `/attach` manager | `↑↓` select · `Enter`/`p` preview · `x` remove · `c` clear · `b` browse (file picker) · `Esc` close |
+| attachment preview | `↑↓` scroll · `PgUp`/`PgDn` page · `Home`/`End` ends · `Enter`/`Esc` close |
 | `/attach` picker | type to filter · `↑↓` move · `Enter` descend into a folder / attach the file (marked set when non-empty) · `Space` mark files for multi-attach · `Backspace`/`←` parent folder (filter empty) · `Esc` close |
 | `/entities` | `↑↓` browse (the identity card follows) · `Enter` talk (`@name`) · `t` leave a task (title prompt) · `e` end that entity's open visit · `Ctrl+D` show per-section provenance · `Esc` close |
 | `/workspace` | `↑↓` move · `Space` select an access mode / remove an allowed path · type a path + `Enter` adds it (switches to `workspace_or_allowed` when needed) · `Esc` close |
 
 ## Transcript vocabulary
 
-| Glyph | Item |
+The transcript reads as TURNS: a `══ you ══…` rule opens each one, a
+`══ assistant ══…` rule closes it with the answer (markdown), and the
+reasoning cycles between them are delimited by `── cycle N · 41s ·
+29k↑ 512↓ tk · 92% cached ──…` rules carrying that model call's
+duration, token cost, and — when the provider reports it — how much of
+the prompt was served from cache instead of recomputed. The model's own
+thinking leads every cycle; the cycle's tool calls stack directly
+beneath it, one line each.
+
+| Element | Item |
 | --- | --- |
-| `❯ you` | Your task |
-| `∴ cycle N` | One reasoning cycle's model output (dim) |
-| `? name · awaiting approval` | Tool paused on approval |
-| `» name · running` | Tool executing on the gateway |
-| `✓` / `✗` / `⊘` | Tool succeeded / failed / denied |
-| `✦ assistant` | Answer (markdown; `(update)` for mid-run messages) |
+| `══ you ══…` | Your task (turn opener) |
+| `── cycle N · cost ──…` | One reasoning cycle: the thinking, then its tools |
+| `✓ name · ok  args…` | Tool call: glyph, name, status word, faint args hint |
+| `? · awaiting approval` / `» · running` | Tool paused / executing |
+| `✗ · failed` / `⊘ · denied` / `◌ · interrupted` | Failed / denied / run ended first |
+| `↳ …` | A tool error, attached under its row (error ink) |
+| `│ …` | Tool result output (full mode gutter) |
+| `══ assistant ══…` | The answer (markdown; `✦ assistant (update)` mid-run) |
 | `↪ steer` | Guidance you sent mid-run |
 | `▦` | Generated image (unicode mosaic) |
 | `·` | Informational notice |
 
-Previews are bounded; anything cut is labeled (`… (+N more lines …)` or
-`[#TRUNCATION …]`). Toggle `/details full` to expand in place, or
-`/export` to write the full transcript to a file. (Asks TO you are never
-truncated — a question you cannot fully read is a question you cannot
-answer.)
+Three voices, three markings: bare indented prose is the model
+thinking, `│` is tool output, `↳` is an error. `/details` (or `Ctrl+D`)
+toggles verbosity — folded shows one-line tool calls with status tags
+and thinking gists; full shows args, result bodies, and the labeled
+reasoning channel. Thinking and every called tool stay visible in BOTH
+states.
+
+**`/details full` truncates nothing** (2026-08-20). *Every* body renders
+whole: your own prompts and steers, tool arguments, result bodies, tool
+errors, thinking and its reasoning channel, error and info notices,
+memory-probe digests, and an image's fetch error. No row cap, no
+`[#TRUNCATION …]`, no elision of any kind. The client keeps the full
+text the ledger reported — nothing is shortened on the way in either —
+so the full view has everything to show; use the scrollback (or
+`/export`, which writes the uncut arguments in its detailed mode) to
+read a long one. A failed tool shows its error AND its output: the
+error says that it failed, the body says why.
+
+The FOLDED view is a summary by definition: there, bodies are bounded
+and anything cut is labeled (`… (+N more lines)`, `… (+N words of
+reasoning · /details)`) — result bodies elide middle-out so their final
+lines (the `wc` total, the test verdict) survive, and a tool row stays
+one line. Asks TO you are never truncated in either mode, and neither
+is the approval modal's `f` JSON view — a question you cannot fully
+read is a question you cannot answer.
 
 Entity conversations reuse the same vocabulary. After each entity turn a
 `·` line counts what the probe reported (memories in context, diary
@@ -304,11 +362,33 @@ entries, tools ran); the full memory digests sit behind the details toggle
 
 The gateway enables prompt caching automatically per run when the provider
 supports it. Interactive sessions take the server default; there is nothing to
-configure. `/cache` reports: the effective route, whether that provider/model
-supports prompt caching (and in which mode), cache hits observed this run, and
-the context size of the latest model call. Local providers (e.g. LM Studio)
-often cache without reporting hit counts — the panel says so rather than
-inventing zeros.
+configure. `/cache` is a scrollable panel (`↑↓`/`PgUp`/`PgDn`) reporting three
+scopes:
+
+- **route** — the requested route, the model that actually served the run,
+  whether that provider/model supports prompt caching (and in which mode), the
+  pair the capability probe asked about, and how many calls carried a
+  provider-reported hit count.
+- **latest model call** — context sent, its new-vs-carried split with
+  percentages, cache hits, output tokens, call time and output tok/s.
+- **this run** and **session (every run in this conversation)** — model and
+  tool calls, token totals, re-send amplification (input sent per output
+  token), cache hits against reported input, cumulative new-vs-carried,
+  peak context with a count of context resets, and model time with the
+  per-call average.
+
+Token counts are exact (`29,200`), not the chrome's rounded `29k`: the panel is
+the detail view opened when the rounded number was not enough.
+
+Two kinds of number live there and are never mixed silently. Cache hits are
+provider-reported; local providers (e.g. LM Studio) often cache without
+reporting hit counts, and the panel says "never reported by this provider"
+rather than inventing a zero that would read as a cold cache — once any call
+reports a count, a later zero is labeled as a real miss. The new-vs-carried
+split is DERIVED client-side from consecutive context sizes (the carried part
+is the prefix a cache can serve), and is labeled "derived" everywhere it
+appears. A context that shrank is counted as a reset, and credits nothing as
+carried — the cached prefix is gone.
 
 ### `--no-prompt-cache`
 

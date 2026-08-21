@@ -268,6 +268,12 @@ pub struct Prefs {
     /// `workspace_or_allowed` mode; server policy may clamp them).
     pub workspace_allowed: Vec<String>,
     pub show_details: Option<bool>,
+    /// Launch animation on/off (`--animation`). `None` = never chosen,
+    /// which reads as ON — the identity plays for a new install, and one
+    /// `--animation off` turns it off for good. The engine's boot gate
+    /// (tty, `NO_COLOR`, `TERM=dumb`, `ABSTRACTTUI_NO_SPLASH`) still
+    /// applies on top: this preference can only ever say NO harder.
+    pub animation: Option<bool>,
     /// PERSISTED permissions level (`tool_approval.accepted_tier` — the
     /// at-rest key deliberately keeps the pre-consolidation spelling: it
     /// is documented hand-editable for headless, and renaming the JSON
@@ -533,6 +539,7 @@ impl Prefs {
             workspace_mode: s("workspace_mode"),
             workspace_allowed: string_list("workspace_allowed"),
             show_details: v.get("show_details").and_then(Value::as_bool),
+            animation: v.get("animation").and_then(Value::as_bool),
             tool_accepted_tier,
             tool_overrides,
             disabled_tools: string_list("disabled_tools"),
@@ -581,6 +588,7 @@ impl Prefs {
             "workspace_mode": self.workspace_mode,
             "workspace_allowed": self.workspace_allowed,
             "show_details": self.show_details,
+            "animation": self.animation,
             // Always written normalized + legible: headless users edit
             // this by hand (config-first for exec runs).
             "tool_approval": {
@@ -1025,6 +1033,7 @@ mod tests {
             workspace_mode: Some("workspace_or_allowed".into()),
             workspace_allowed: vec!["/srv/data".into(), "/opt/shared".into()],
             show_details: Some(false),
+            animation: Some(false),
             tool_accepted_tier: "write".into(),
             tool_overrides: vec![("fetch_url".into(), "auto".into())],
             disabled_tools: vec!["fetch_url".into()],
@@ -1056,6 +1065,7 @@ mod tests {
             "\"workspace_mode\"",
             "\"workspace_allowed\"",
             "\"show_details\"",
+            "\"animation\"",
             "\"accepted_tier\"",
             "\"overrides\"",
             "\"disabled_tools\"",
@@ -1077,6 +1087,11 @@ mod tests {
         assert_eq!(l.model.as_deref(), Some("qwen3-4b"));
         assert_eq!(l.session_id.as_deref(), Some("acode-full"));
         assert_eq!(l.workspace_mode.as_deref(), Some("workspace_or_allowed"));
+        assert_eq!(
+            l.animation,
+            Some(false),
+            "the launch-animation pref survives"
+        );
         assert_eq!(
             l.workspace_allowed,
             vec!["/srv/data".to_string(), "/opt/shared".to_string()]

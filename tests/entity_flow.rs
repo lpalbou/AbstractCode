@@ -268,6 +268,9 @@ fn details_toggle_composes_with_focus_probe_items() {
     let mut h = harness();
     h.turn();
     let store = h.store;
+    // Details ON explicitly: probe bodies are details-gated and the
+    // collapsed view is the default since the 2026-08-19 redesign.
+    store.show_details.set(true);
     store.convos.update(|cs| {
         cs.push(parked_convo(
             "doorcheck",
@@ -381,6 +384,9 @@ fn details_and_focus_compose_with_agent_images() {
     let mut h = harness();
     h.turn();
     let store = h.store;
+    // Details ON explicitly: probe bodies are details-gated and the
+    // collapsed view is the default since the 2026-08-19 redesign.
+    store.show_details.set(true);
     store.fold.update(|f| {
         f.push_item(Item::Image {
             run_id: "r".into(),

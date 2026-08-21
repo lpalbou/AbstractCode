@@ -120,6 +120,11 @@ pub struct Args {
     /// Exists so a single gateway can serve an A/B measurement: the cached
     /// and uncached lanes differ only by this key.
     pub no_prompt_cache: bool,
+    /// `--animation <on|off>` — the launch animation, PERSISTED. `None`
+    /// = leave the saved preference alone (default: on). The engine's own
+    /// boot gate still applies on top: no tty, `NO_COLOR`, `TERM=dumb` or
+    /// `ABSTRACTTUI_NO_SPLASH` skip it regardless of this.
+    pub animation: Option<bool>,
     pub show_caps: bool,
     pub show_help: bool,
     pub show_version: bool,
@@ -163,6 +168,11 @@ OPTIONS:
                           workspace_or_allowed | all_except_ignored
                           (default: server-managed; /workspace edits + persists)
   --theme <ID>            start theme (26 built-in; /theme lists them)
+  --animation <on|off>    the launch animation (default: on) — SAVED to
+                          prefs.json, so `--animation off` once disables it
+                          for good. Also skipped, without the flag, when
+                          stdout is not a tty, NO_COLOR or TERM=dumb is set,
+                          or ABSTRACTTUI_NO_SPLASH is set.
   --max-iterations <N>    agent iteration budget (default: 50)
   --max-tokens <N>        declare the model's context window in tokens
                           (e.g. 262144 or 262k) — drives the ctx N/M (%)
@@ -195,6 +205,7 @@ CONFIG (prefs.json — the TUI writes it; headless `exec` reads the SAME file):
   workspace_mode                access mode sent with runs (/workspace).
   workspace_allowed             extra allowlisted roots sent as
                                 workspace_allowed_paths (/workspace).
+  animation                     launch animation on/off (--animation).
   context_window                operator-declared model context window in
                                 tokens (/context; 0 = undeclared) — drives
                                 the footer's ctx used/window (%) meter.
@@ -276,6 +287,14 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
             }
             "--workspace-mode" => args.workspace_mode = Some(take(a)?),
             "--theme" => args.theme = Some(take(a)?),
+            "--animation" => {
+                let v = take(a)?;
+                args.animation = Some(match v.trim().to_ascii_lowercase().as_str() {
+                    "on" | "true" | "yes" | "1" => true,
+                    "off" | "false" | "no" | "0" => false,
+                    _ => return Err(format!("--animation takes on|off (got {v:?})")),
+                });
+            }
             "--max-iterations" => {
                 let v = take(a)?;
                 args.max_iterations = v
@@ -629,6 +648,40 @@ mod tests {
             let a = parse(&[flag.to_string()]).unwrap();
             assert!(a.resume, "{flag} arms resume");
         }
+    }
+
+    /// `--animation` takes a SIDE, spelled several honest ways, and
+    /// refuses anything else rather than guessing — the value is
+    /// persisted, so a typo would silently save the wrong preference.
+    #[test]
+    fn parse_animation_takes_a_side_and_refuses_junk() {
+        for (v, want) in [
+            ("on", true),
+            ("ON", true),
+            ("true", true),
+            ("yes", true),
+            ("1", true),
+            ("off", false),
+            ("Off", false),
+            ("false", false),
+            ("no", false),
+            ("0", false),
+        ] {
+            let argv = vec!["--animation".to_string(), v.to_string()];
+            assert_eq!(
+                parse(&argv).unwrap().animation,
+                Some(want),
+                "--animation {v}"
+            );
+        }
+        // Absent = leave the saved preference alone.
+        assert_eq!(parse(&[]).unwrap().animation, None);
+        let err = parse(&["--animation".into(), "maybe".into()]).unwrap_err();
+        assert!(err.contains("on|off"), "the error names the values: {err}");
+        assert!(
+            parse(&["--animation".to_string()]).is_err(),
+            "needs a value"
+        );
     }
 
     #[test]

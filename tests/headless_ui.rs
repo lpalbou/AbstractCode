@@ -45,9 +45,12 @@ struct Harness {
 }
 
 fn harness() -> Harness {
+    harness_sized(Size::new(100, 30))
+}
+
+fn harness_sized(size: Size) -> Harness {
     // A fresh default theme per test (tests share a process).
     abstracttui::app::set_theme_by_id("abstract-dark");
-    let size = Size::new(100, 30);
     let mut app = App::new(size);
     let overlays = app.overlays();
     let quitter = app.quitter();
@@ -999,7 +1002,7 @@ fn theme_picker_previews_on_arrows_and_reverts_on_escape() {
 }
 
 #[test]
-fn details_toggle_hides_thinking_and_start_carries_context() {
+fn details_toggle_keeps_thinking_visible_and_start_carries_context() {
     let mut h = harness();
     h.turn();
     let store = h.store;
@@ -1012,28 +1015,52 @@ fn details_toggle_hides_thinking_and_start_carries_context() {
             iteration: 1,
             content: "let me think about xyzzy".into(),
             reasoning: String::new(),
-            call: abstractcode_tui::transcript::CallCost::default(),
+            call: abstractcode_tui::transcript::CallCost {
+                gen_time_ms: Some(5_000.0),
+                input_tokens: 10_000,
+                output_tokens: 250,
+                cached_tokens: 9_000,
+            },
         });
         f.push_item(abstractcode_tui::transcript::Item::Assistant {
             text: "first answer".into(),
             final_answer: true,
         });
     });
-    // Two pumps: the feed's first mount discovers its width during draw
-    // and syncs the measured extent one frame later (engine contract —
-    // FeedState rows are "0 until the first draw discovers a width").
+    // Three pumps: width discovery, extent sync, gap-flip geometry
+    // round (see truncation_drains… for the settle contract).
     h.turn();
+    h.turn();
+    let screen = h.turn();
+    // Operator directive 2026-08-19: the thinking LEADS its cycle in
+    // BOTH detail states — the collapsed default shows the gist under
+    // the cycle rule, and Ctrl+D only changes verbosity.
+    assert!(
+        screen.contains("xyzzy"),
+        "thinking gist visible in the collapsed default:\n{screen}"
+    );
+    assert!(
+        screen.contains("── cycle 1"),
+        "the cycle rule delimits the turn:\n{screen}"
+    );
+    // Provider-reported cache reuse rides the rule (operator ask
+    // 2026-08-19): 9k of 10k prompt tokens served from cache = 90%.
+    assert!(
+        screen.contains("90% cached"),
+        "the rule names the cache reuse when the provider reports it:\n{screen}"
+    );
+
+    // Ctrl+D expands detail; thinking and answers BOTH stay.
+    h.term.push_input(&[0x04]); // Ctrl+D
     let screen = h.turn();
     assert!(
         screen.contains("xyzzy"),
-        "details shown by default:\n{screen}"
+        "thinking stays visible with details on:\n{screen}"
     );
-
-    // Ctrl+D hides the thinking block; answers stay.
-    h.term.push_input(&[0x04]); // Ctrl+D
-    let screen = h.turn();
-    assert!(!screen.contains("xyzzy"), "thinking hidden:\n{screen}");
     assert!(screen.contains("first answer"), "answers stay:\n{screen}");
+    // Back to collapsed for the context-carry half below.
+    h.term.push_input(&[0x04]); // Ctrl+D
+    h.turn();
 
     // The next run carries the completed turn as client context.
     h.type_text("second question");
@@ -1925,9 +1952,12 @@ fn delegate_child_calls_never_relabel_model_or_context() {
 
 #[test]
 fn details_command_immediately_rerenders_mixed_content() {
-    // The /details COMMAND path (not just Ctrl+D) must repaint at once:
-    // thinking blocks vanish, tool RESULT previews collapse, tool headers
-    // and answers stay.
+    // The /details COMMAND path (not just Ctrl+D) must repaint at once.
+    // New semantics (operator directive 2026-08-19): the collapsed
+    // DEFAULT shows the thinking gist + one-line tool calls with
+    // status words; /details expands args + result bodies; /details
+    // again collapses. Thinking and every called tool stay visible in
+    // BOTH states; errors too (honesty over tidiness).
     let mut h = harness();
     h.turn();
     h.store.fold.update(|f| {
@@ -1944,16 +1974,18 @@ fn details_command_immediately_rerenders_mixed_content() {
             key: "call:1".into(),
             name: "execute_command".into(),
             args_preview: "cargo test".into(),
+            args_full: String::new(),
             status: abstractcode_tui::transcript::ToolStatus::Ok,
-            result_preview: "result-plugh-lines".into(),
+            result: "result-plugh-lines".into(),
             error: String::new(),
         });
         f.push_item(abstractcode_tui::transcript::Item::Tool {
             key: "call:2".into(),
             name: "broken_tool".into(),
             args_preview: String::new(),
+            args_full: String::new(),
             status: abstractcode_tui::transcript::ToolStatus::Failed,
-            result_preview: String::new(),
+            result: String::new(),
             error: "exploded".into(),
         });
         f.push_item(abstractcode_tui::transcript::Item::Assistant {
@@ -1961,52 +1993,66 @@ fn details_command_immediately_rerenders_mixed_content() {
             final_answer: true,
         });
     });
-    // Two pumps: first feed mount discovers width at draw; the measured
-    // extent syncs on the following frame (engine geometry contract).
+    // Three pumps: width discovery, extent sync, gap-flip geometry
+    // round (see truncation_drains… for the settle contract).
+    h.turn();
     h.turn();
     let screen = h.turn();
-    assert!(screen.contains("xyzzy"), "thinking visible:\n{screen}");
+    // Collapsed default: the thinking gist leads its cycle; the tool
+    // row is the call + its status word; bodies are folded.
     assert!(
-        screen.contains("result-plugh-lines"),
-        "tool result visible:\n{screen}"
+        screen.contains("xyzzy"),
+        "thinking gist visible by default:\n{screen}"
     );
-
-    h.type_text("/details");
-    h.turn();
-    h.press_enter();
-    let screen = h.turn();
     assert!(
-        !screen.contains("xyzzy"),
-        "thinking hidden immediately after /details:\n{screen}"
+        screen.contains("execute_command") && screen.contains("ok"),
+        "the collapsed tool row carries the call + its status word:\n{screen}"
     );
     assert!(
         !screen.contains("result-plugh-lines"),
-        "tool result preview collapsed:\n{screen}"
-    );
-    // Operator ruling 2026-07-26: the clean view STILL SHOWS the tool
-    // was called (header) — it drops the DETAIL (args + result body),
-    // never the card. `execute_command` stays; its `cargo test` arg
-    // preview and result body are gone.
-    assert!(
-        screen.contains("execute_command"),
-        "finished-OK tool CALLS stay visible in the clean view (no detail):\n{screen}"
+        "tool result body folded by default:\n{screen}"
     );
     assert!(
-        !screen.contains("cargo test"),
-        "the argument preview is dropped as detail in the clean view:\n{screen}"
+        screen.contains("cargo test"),
+        "the collapsed row keeps a one-line args hint (which call was this):\n{screen}"
     );
     assert!(
         screen.contains("broken_tool") && screen.contains("exploded"),
-        "failed tools stay visible in the clean view (honesty):\n{screen}"
+        "failed tools show their error in the collapsed view (honesty):\n{screen}"
     );
     assert!(screen.contains("all green"), "answer stays:\n{screen}");
 
-    // Toggle back on: everything returns.
+    // /details: args + result bodies appear immediately.
     h.type_text("/details");
     h.turn();
     h.press_enter();
     let screen = h.turn();
-    assert!(screen.contains("xyzzy"), "details restored:\n{screen}");
+    assert!(
+        screen.contains("result-plugh-lines"),
+        "tool result body appears after /details:\n{screen}"
+    );
+    assert!(
+        screen.contains("cargo test"),
+        "the args preview appears after /details:\n{screen}"
+    );
+    assert!(
+        screen.contains("xyzzy"),
+        "thinking stays visible with details on:\n{screen}"
+    );
+
+    // /details again: back to the collapsed view at once.
+    h.type_text("/details");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        !screen.contains("result-plugh-lines"),
+        "result body collapses again:\n{screen}"
+    );
+    assert!(
+        screen.contains("xyzzy"),
+        "thinking still visible collapsed:\n{screen}"
+    );
 }
 
 #[test]
@@ -2160,28 +2206,27 @@ fn help_modal_opens_and_closes() {
 }
 
 /// Feed order = fold order across a MID-LIST visibility flip (the sync
-/// contract's rebuild seam). Tools are now ALWAYS visible (operator
-/// ruling), so the details-gated element that still flips mid-list is a
-/// THINKING card: hidden in the clean view, it appears BETWEEN its
-/// neighbors when details turn on — never at the feed tail (feed order
-/// is push order; a tail-appended key would misplace it).
+/// contract's rebuild seam). Thinking and tools are now ALWAYS visible
+/// (operator directives 2026-07-26 and 2026-08-19), so the details-
+/// gated element that still flips mid-list is a PROBE body: hidden in
+/// the collapsed view, it appears BETWEEN its neighbors when details
+/// turn on — never at the feed tail (feed order is push order; a
+/// tail-appended key would misplace it).
 #[test]
 fn feed_order_survives_mid_list_visibility_flips() {
     let mut h = harness();
     h.turn();
     let store = h.store;
-    store.show_details.set(false); // clean view: thinking hidden
+    store.show_details.set(false); // collapsed view: probe bodies hidden
     store.fold.update(|f| f.begin_run("root"));
     store.fold.update(|f| {
         f.push_item(abstractcode_tui::transcript::Item::User {
             text: "AAA-question".into(),
         });
-        // A thinking card between the two visible items: hidden now.
-        f.push_item(abstractcode_tui::transcript::Item::Thinking {
-            iteration: 1,
-            content: "zz_marker_think".into(),
-            reasoning: String::new(),
-            call: abstractcode_tui::transcript::CallCost::default(),
+        // A probe body between the two visible items: hidden now.
+        f.push_item(abstractcode_tui::transcript::Item::Probe {
+            title: "zz_marker_probe".into(),
+            body: "probe body lines".into(),
         });
         f.push_item(abstractcode_tui::transcript::Item::Assistant {
             text: "BBB-update".into(),
@@ -2189,32 +2234,33 @@ fn feed_order_survives_mid_list_visibility_flips() {
         });
     });
     h.turn();
+    h.turn();
     let screen = h.turn();
     let pos = |s: &str, needle: &str| s.find(needle).unwrap_or(usize::MAX);
     assert!(
-        !screen.contains("zz_marker_think"),
-        "thinking hidden in the clean view:\n{screen}"
+        !screen.contains("zz_marker_probe"),
+        "probe body hidden in the collapsed view:\n{screen}"
     );
     assert!(
         pos(&screen, "AAA-question") < pos(&screen, "BBB-update"),
-        "initial order user < update (thinking folded):\n{screen}"
+        "initial order user < update (probe folded):\n{screen}"
     );
 
-    // Details ON: the thinking card flips visible mid-list — it must
+    // Details ON: the probe body flips visible mid-list — it must
     // land BETWEEN its neighbors, never at the feed tail.
     h.term.push_input(&[0x04]); // Ctrl+D
     let screen = h.turn();
     assert!(
-        pos(&screen, "AAA-question") < pos(&screen, "zz_marker_think")
-            && pos(&screen, "zz_marker_think") < pos(&screen, "BBB-update"),
-        "restored order user < thinking < update:\n{screen}"
+        pos(&screen, "AAA-question") < pos(&screen, "zz_marker_probe")
+            && pos(&screen, "zz_marker_probe") < pos(&screen, "BBB-update"),
+        "restored order user < probe < update:\n{screen}"
     );
 
     // Details OFF again: back to the folded order, rest intact.
     h.term.push_input(&[0x04]);
     let screen = h.turn();
     assert!(
-        !screen.contains("zz_marker_think")
+        !screen.contains("zz_marker_probe")
             && pos(&screen, "AAA-question") < pos(&screen, "BBB-update"),
         "re-folded, order intact:\n{screen}"
     );
@@ -2247,6 +2293,11 @@ fn truncation_drains_keep_the_feed_in_sync_with_fold_order() {
             f.push_item(user(i));
         }
     });
+    // Three pumps: width discovery at first draw, the measured-extent
+    // sync one frame later (engine contract), and one more deferred
+    // geometry round from the feed's gap flip (the pane runs gap 0;
+    // FeedState boots at the engine default of 1).
+    h.turn();
     h.turn();
     let screen = h.turn();
     assert!(
@@ -2362,6 +2413,14 @@ fn truncation_drains_keep_the_feed_in_sync_with_fold_order() {
 fn details_shrink_while_scrolled_up_never_blanks_the_pane() {
     let mut h = harness();
     h.turn();
+    // Details ON: long thinking bodies render in full — the collapse
+    // to 4-row gists is the feed shrink under test (thinking is always
+    // visible now, so the shrink driver is VERBOSITY, not existence).
+    h.store.show_details.set(true);
+    let long_content = (0..15)
+        .map(|j| format!("ponder step line {j}"))
+        .collect::<Vec<_>>()
+        .join("\n");
     h.store.fold.update(|f| {
         f.push_item(abstractcode_tui::transcript::Item::User {
             text: "FIRST-QUESTION".into(),
@@ -2369,7 +2428,7 @@ fn details_shrink_while_scrolled_up_never_blanks_the_pane() {
         for i in 0..40 {
             f.push_item(abstractcode_tui::transcript::Item::Thinking {
                 iteration: i + 1,
-                content: format!("ponder step {i}"),
+                content: long_content.clone(),
                 reasoning: String::new(),
                 call: abstractcode_tui::transcript::CallCost::default(),
             });
@@ -2379,7 +2438,9 @@ fn details_shrink_while_scrolled_up_never_blanks_the_pane() {
             final_answer: true,
         });
     });
-    // Width discovery + measured-extent sync (engine geometry contract).
+    // Three pumps: width discovery, extent sync, gap-flip geometry
+    // round (see truncation_drains… for the settle contract).
+    h.turn();
     h.turn();
     let screen = h.turn();
     assert!(
@@ -2400,7 +2461,7 @@ fn details_shrink_while_scrolled_up_never_blanks_the_pane() {
         screen.contains("ponder step"),
         "reading mid-transcript:\n{screen}"
     );
-    // Ctrl+D: the clean view folds all 40 thinking cards — the feed
+    // Ctrl+D: all 40 thinking cards collapse to gists — the feed
     // shrinks far below the stranded offset.
     h.term.push_input(&[0x04]);
     h.turn();
@@ -2408,7 +2469,9 @@ fn details_shrink_while_scrolled_up_never_blanks_the_pane() {
     h.turn();
     let screen = h.turn();
     assert!(
-        screen.contains("THE-FINAL-ANSWER") || screen.contains("FIRST-QUESTION"),
+        screen.contains("THE-FINAL-ANSWER")
+            || screen.contains("FIRST-QUESTION")
+            || screen.contains("ponder step"),
         "the pane must keep showing content after the shrink, not go blank:\n{screen}"
     );
 }
@@ -6644,8 +6707,9 @@ fn export_command_writes_markdown_and_refuses_overwrite() {
             key: "k1".into(),
             name: "write_file".into(),
             args_preview: "{\"path\":\"hello.txt\"}".into(),
+            args_full: String::new(),
             status: abstractcode_tui::transcript::ToolStatus::Ok,
-            result_preview: "ok".into(),
+            result: "ok".into(),
             error: String::new(),
         });
         f.push_item(abstractcode_tui::transcript::Item::Assistant {
@@ -6993,6 +7057,902 @@ fn bare_attach_opens_picker_when_nothing_pending() {
         h.ctx.modal.borrow().is_some(),
         "bare /attach with nothing pending opens the picker modal:\n{screen}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Activity strip: the cycle gist is ATTRIBUTED to the cycle it came from
+// (operator report 2026-08-21 — cycle 2 was quoting cycle 1's words)
+// ---------------------------------------------------------------------------
+
+/// One `reason` llm_call record, in the ledger's own shape.
+fn reason_record_for(run: &str, status: &str, content: &str) -> Value {
+    let mut rec = serde_json::json!({
+        "run_id": run,
+        "step_id": format!("step-{run}-{status}-{}", content.len()),
+        "node_id": "reason",
+        "status": status,
+        "effect": {"type": "llm_call"},
+        "started_at": "2026-08-21T00:00:00Z",
+    });
+    if status == "completed" {
+        rec["result"] = serde_json::json!({
+            "content": content,
+            "reasoning": "",
+            "tool_calls": [],
+        });
+        rec["ended_at"] = serde_json::json!("2026-08-21T00:00:10Z");
+    }
+    rec
+}
+
+fn reason_record(status: &str, content: &str) -> Value {
+    reason_record_for("root", status, content)
+}
+
+/// The activity strip's line (the one naming the live cycle).
+fn strip_line(screen: &str, needle: &str) -> String {
+    screen
+        .lines()
+        .find(|l| l.contains(needle))
+        .unwrap_or_default()
+        .to_string()
+}
+
+#[test]
+fn the_strip_never_shows_one_cycles_words_as_another_cycles_thinking() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+
+    // Cycle 1 runs and finishes with its own words.
+    for rec in [
+        reason_record("started", "one"),
+        reason_record(
+            "completed",
+            "I'll inspect the project structure to locate the game code.",
+        ),
+    ] {
+        store.fold.update(|f| {
+            let _ = f.apply("root", &rec);
+        });
+    }
+    let screen = h.turn();
+    assert!(
+        screen.contains("thinking (cycle 1) — “I'll inspect the project structure"),
+        "a cycle's OWN gist rides an em-dash:\n{screen}"
+    );
+
+    // Cycle 2 starts: its words do not exist yet (the ledger carries
+    // them only in the RESULT record), so cycle 1's line must not be
+    // presented as cycle 2's thinking.
+    store.fold.update(|f| {
+        let _ = f.apply("root", &reason_record("started", "two"));
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("thinking (cycle 2)"),
+        "the strip names the live cycle:\n{screen}"
+    );
+    assert!(
+        !screen.contains("thinking (cycle 2) — “I'll inspect"),
+        "cycle 1's words are NOT rendered as cycle 2's intent:\n{screen}"
+    );
+    assert!(
+        screen.contains("last: “I'll inspect"),
+        "they are still shown, marked as the lane's LAST words, not this cycle's:\n{screen}"
+    );
+
+    // Cycle 2 finishes: ITS words take over, on the em-dash.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "root",
+            &reason_record(
+                "completed",
+                "I found an empty workspace, so I need to create the game.",
+            ),
+        );
+    });
+    let screen = h.turn();
+    let strip = screen
+        .lines()
+        .find(|l| l.contains("thinking (cycle 2)"))
+        .unwrap_or_default();
+    assert!(
+        strip.contains("thinking (cycle 2) — “I found an empty workspace"),
+        "the newest cycle's own words lead once they exist:\n{screen}"
+    );
+    assert!(
+        !strip.contains("I'll inspect"),
+        "and the older gist is off the strip (the transcript still has it):\n{strip}"
+    );
+
+    // A TOOL-ONLY cycle (result carries calls, no prose) contributes no
+    // words. The lane's last real words must survive it — an intent
+    // label that goes dark for every tool cycle is dark most of the run.
+    for rec in [
+        reason_record("started", "three"),
+        reason_record("completed", ""),
+        reason_record("started", "four"),
+    ] {
+        store.fold.update(|f| {
+            let _ = f.apply("root", &rec);
+        });
+    }
+    let screen = h.turn();
+    let strip = strip_line(&screen, "thinking (cycle 4)");
+    assert!(
+        strip.contains("last: “I found an empty workspace"),
+        "the lane's last real words survive a tool-only cycle:\n{strip}"
+    );
+}
+
+#[test]
+fn another_runs_words_are_never_shown_as_this_lanes_thinking() {
+    // `cycles` counts PER RUN while the displayed cycle number is a max
+    // ACROSS runs, so comparing a per-run number against it attributes
+    // one run's words to another run's cycle (adversary finding P1,
+    // 2026-08-21). The gist must belong to the run that is cycling.
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+
+    for rec in [
+        reason_record_for("root", "started", "a"),
+        reason_record_for("root", "completed", "ROOT-ONE reading the repository"),
+        reason_record_for("root", "started", "b"),
+    ] {
+        store.fold.update(|f| {
+            let _ = f.apply("root", &rec);
+        });
+    }
+    let screen = h.turn();
+    assert!(
+        strip_line(&screen, "thinking (cycle 2)").contains("last: “ROOT-ONE"),
+        "the cycling lane's own last words show:\n{screen}"
+    );
+
+    // A DELEGATE child's cycle result lands while the root is still the
+    // cycling lane (the partial-replay shape: a completed whose started
+    // never folded). Its words are not the root's intent.
+    store.fold.update(|f| {
+        let _ = f.apply(
+            "child",
+            &reason_record_for("child", "completed", "SUBAGENT-WORDS grepping for tests"),
+        );
+    });
+    let screen = h.turn();
+    let strip = strip_line(&screen, "thinking (cycle 2)");
+    assert!(
+        !strip.contains("SUBAGENT-WORDS"),
+        "another run's words never label this lane's cycle:\n{strip}"
+    );
+    assert!(
+        strip.contains("last: “ROOT-ONE"),
+        "and the lane's own words survive it:\n{strip}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Attachment PREVIEW: `/attach preview` + the manager's p/Enter — the
+// file's real bytes (text documents and PNG/JPEG pictures) drawn before
+// they ride a run. The loader runs on the worker (Cmd::LoadPreview), so
+// each test drives BOTH halves: the command the UI emits, and the body
+// the worker posts back through `runner::apply_preview`.
+// ---------------------------------------------------------------------------
+
+/// Pull the LoadPreview command the UI just emitted (path + seq).
+fn take_load_preview(h: &mut Harness) -> (u64, String) {
+    match h.find_cmd(|c| matches!(c, Cmd::LoadPreview { .. })) {
+        Some(Cmd::LoadPreview { seq, path }) => (seq, path),
+        other => panic!("expected Cmd::LoadPreview, got {other:?}"),
+    }
+}
+
+/// Run the REAL loader (the worker's body) and post it back the way the
+/// worker's wake closure does.
+fn deliver_preview(h: &Harness, seq: u64, path: &str) {
+    let body = abstractcode_tui::preview::load(path);
+    abstractcode_tui::runner::apply_preview(&h.store, seq, body);
+}
+
+#[test]
+fn attach_preview_shows_a_text_document_with_line_numbers() {
+    let (dir, path) = attach_tempfile(
+        "notes.md",
+        b"# Heading\n\nthe second paragraph\nlast line\n",
+    );
+    let mut h = harness();
+    h.turn();
+    h.type_text(&format!("/attach preview {path}"));
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    // The modal opens IMMEDIATELY on the loading body — a slow decode
+    // must never block the frame that opened the preview.
+    assert!(h.ctx.modal.borrow().is_some(), "preview modal opens");
+    assert!(
+        screen.contains("reading"),
+        "loading state is visible while the worker reads:\n{screen}"
+    );
+    let (seq, cmd_path) = take_load_preview(&mut h);
+    assert_eq!(cmd_path, path, "the command names the canonical path");
+    deliver_preview(&h, seq, &path);
+    let screen = h.turn();
+    assert!(
+        screen.contains("notes.md"),
+        "header names the file:\n{screen}"
+    );
+    assert!(screen.contains("text"), "header names the kind:\n{screen}");
+    assert!(
+        screen.contains("# Heading") && screen.contains("last line"),
+        "the document's own words render:\n{screen}"
+    );
+    // The GUTTER renders, not just the row text: the numbers are the
+    // preview's index into the file (4 lines here, so one column).
+    assert!(
+        screen.contains("1 # Heading") && screen.contains("4 last line"),
+        "line numbers render beside their lines:\n{screen}"
+    );
+    assert!(
+        screen.contains("row 1/"),
+        "the hint row places you in the document:\n{screen}"
+    );
+    // Nothing was staged: preview is a look, not an attach.
+    assert_eq!(h.store.pending_attachments.with_untracked(|p| p.len()), 0);
+    h.press_escape();
+    h.turn();
+    assert!(h.ctx.modal.borrow().is_none(), "Esc closes the preview");
+    assert!(
+        h.store.preview.with_untracked(|p| p.is_none()),
+        "closing drops the body — no bitmap or document outlives the modal"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn attach_preview_draws_a_picture_and_names_its_pixels() {
+    let img = abstracttui::widgets::Bitmap::from_fn(64, 32, |x, y| {
+        Rgba::rgb((x * 4) as u8, (y * 8) as u8, 120)
+    });
+    let (dir, path) = attach_tempfile("shot.png", &abstracttui::gfx::png_encode::encode(&img));
+    let mut h = harness();
+    h.turn();
+    h.type_text(&format!("/attach preview {path}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let (seq, p) = take_load_preview(&mut h);
+    deliver_preview(&h, seq, &p);
+    let screen = h.turn();
+    assert!(
+        screen.contains("PNG 64×32"),
+        "the header names the format and the file's TRUE pixel size:\n{screen}"
+    );
+    // The mosaic painted: the body rows carry non-space cells that are
+    // not part of the header or the hint.
+    let body: String = screen
+        .lines()
+        .skip_while(|l| !l.contains("PNG 64×32"))
+        .skip(1)
+        .take_while(|l| !l.contains("Esc closes"))
+        .collect();
+    assert!(
+        body.chars().any(|c| !c.is_whitespace()),
+        "the picture itself is drawn, not an empty box:\n{screen}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_format_the_engine_cannot_draw_is_named_and_the_attachment_still_stands() {
+    let (dir, path) = attach_tempfile("anim.gif", b"GIF89a\x01\x00\x01\x00\x00\x00\x00;");
+    let mut h = harness();
+    h.turn();
+    // Stage it FIRST: the refusal must never read as "your attachment
+    // is broken" — the file uploads perfectly well.
+    h.type_text(&format!("/attach {path}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(h.store.pending_attachments.with_untracked(|p| p.len()), 1);
+    h.type_text("/attach preview");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let (seq, p) = take_load_preview(&mut h);
+    deliver_preview(&h, seq, &p);
+    let screen = h.turn();
+    assert!(screen.contains("GIF"), "the FORMAT is named:\n{screen}");
+    assert!(
+        screen.contains("attaches"),
+        "and the attachment is explicitly still fine:\n{screen}"
+    );
+    assert_eq!(
+        h.store.pending_attachments.with_untracked(|p| p.len()),
+        1,
+        "previewing never unstages anything"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_manager_previews_the_chip_under_the_cursor() {
+    let (dir_a, first) = attach_tempfile("first.txt", b"alpha content\n");
+    let (dir_b, second) = attach_tempfile("second.txt", b"beta content\n");
+    let mut h = harness();
+    h.turn();
+    for path in [&first, &second] {
+        h.type_text(&format!("/attach {path}"));
+        h.turn();
+        h.press_enter();
+        h.turn();
+    }
+    assert_eq!(h.store.pending_attachments.with_untracked(|p| p.len()), 2);
+    // Bare /attach with chips staged opens the manager.
+    h.type_text("/attach");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        screen.contains("Enter/p preview"),
+        "the manager teaches the key:\n{screen}"
+    );
+    // ↓ to the second chip, then p.
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    h.term.push_input(b"p");
+    h.turn();
+    let (seq, path) = take_load_preview(&mut h);
+    assert_eq!(path, second, "the CURSOR's chip previews, not the first");
+    deliver_preview(&h, seq, &path);
+    let screen = h.turn();
+    assert!(
+        screen.contains("beta content"),
+        "the selected file's content renders:\n{screen}"
+    );
+    std::fs::remove_dir_all(&dir_a).ok();
+    std::fs::remove_dir_all(&dir_b).ok();
+}
+
+#[test]
+fn a_stale_load_never_repaints_a_newer_preview() {
+    let (dir_a, first) = attach_tempfile("slow.txt", b"the file you left\n");
+    let (dir_b, second) = attach_tempfile("quick.txt", b"the file you asked for\n");
+    let mut h = harness();
+    h.turn();
+    h.type_text(&format!("/attach preview {first}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let (stale_seq, stale_path) = take_load_preview(&mut h);
+    // Leave the first preview before its loader answers (the modal traps
+    // focus, so the composer is only reachable once it closes) and open
+    // the second.
+    h.press_escape();
+    h.turn();
+    h.type_text(&format!("/attach preview {second}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let (live_seq, live_path) = take_load_preview(&mut h);
+    assert_ne!(stale_seq, live_seq, "each preview mints its own seq");
+    // The SLOW loader lands last — and must be dropped on the floor.
+    deliver_preview(&h, live_seq, &live_path);
+    deliver_preview(&h, stale_seq, &stale_path);
+    let screen = h.turn();
+    assert!(
+        screen.contains("the file you asked for"),
+        "the newer preview owns the modal:\n{screen}"
+    );
+    assert!(
+        !screen.contains("the file you left"),
+        "the stale body never repaints a newer subject:\n{screen}"
+    );
+    std::fs::remove_dir_all(&dir_a).ok();
+    std::fs::remove_dir_all(&dir_b).ok();
+}
+
+#[test]
+fn preview_scrolls_a_long_document_and_says_where_you_are() {
+    let mut body = String::new();
+    for i in 1..=400 {
+        body.push_str(&format!("line {i} of the document\n"));
+    }
+    let (dir, path) = attach_tempfile("long.log", body.as_bytes());
+    let mut h = harness();
+    h.turn();
+    h.type_text(&format!("/attach preview {path}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let (seq, p) = take_load_preview(&mut h);
+    deliver_preview(&h, seq, &p);
+    let screen = h.turn();
+    assert!(screen.contains("line 1 of the document"), "{screen}");
+    assert!(
+        screen.contains("400 lines"),
+        "the header counts them:\n{screen}"
+    );
+    // End jumps to the tail; the hint row moves with it.
+    h.term.push_input(b"\x1b[F");
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("line 400 of the document"),
+        "End reaches the last line:\n{screen}"
+    );
+    assert!(
+        !screen.contains("row 1/400"),
+        "the position indicator moved:\n{screen}"
+    );
+    // Home comes back.
+    h.term.push_input(b"\x1b[H");
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("row 1/400"),
+        "Home returns to the top:\n{screen}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn preview_of_a_missing_path_notifies_and_opens_nothing() {
+    let mut h = harness();
+    h.turn();
+    h.type_text("/attach preview /definitely/not/here.txt");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        h.ctx.modal.borrow().is_none(),
+        "no modal over a file that does not exist:\n{screen}"
+    );
+    let notices = h.store.notices.get_untracked();
+    assert!(
+        notices.iter().any(|n| n.contains("no such file")),
+        "the refusal says why: {notices:?}"
+    );
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::LoadPreview { .. }))
+            .is_none(),
+        "nothing is dispatched for a path that does not exist"
+    );
+    assert!(h.store.preview.with_untracked(|p| p.is_none()));
+}
+
+/// Locate a name ON THE CHIPS ROW. Scanning the whole screen finds the
+/// attach TOAST first whenever one is still up ("attached notes.md —
+/// rides your next message"), which is not a click target and made
+/// these tests depend on toast timing.
+fn locate_chip(screen: &str, needle: &str) -> Option<(usize, usize)> {
+    let (row, line) = screen
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains('\u{1f4ce}'))?;
+    let byte_col = line.find(needle)?;
+    Some((row, abstracttui::text::width(&line[..byte_col]) as usize))
+}
+
+/// The chips row as rendered (empty when no chips are staged).
+fn chips_row_text(screen: &str) -> String {
+    screen
+        .lines()
+        .find(|l| l.contains('\u{1f4ce}'))
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Press + release a left button at a 0-based CELL position.
+fn click_cell(h: &mut Harness, row: usize, col: usize) {
+    let (x, y) = (col + 1, row + 1);
+    h.term.push_input(format!("\x1b[<0;{x};{y}M").as_bytes());
+    h.turn();
+    h.term.push_input(format!("\x1b[<0;{x};{y}m").as_bytes());
+    h.turn();
+    h.turn();
+}
+
+#[test]
+fn clicking_a_chip_opens_its_preview() {
+    // THREE chips, and the click lands on the MIDDLE one: with a single
+    // chip staged, "always preview the first" would pass this test.
+    let (dir0, other0) = attach_tempfile("first_one.md", b"# not this one\n");
+    let (dir, path) = attach_tempfile("clickable.md", b"# clicked open\nbody\n");
+    let (dir2, other2) = attach_tempfile("third_one.md", b"# nor this one\n");
+    let mut h = harness();
+    h.turn();
+    for p in [&other0, &path, &other2] {
+        h.type_text(&format!("/attach {p}"));
+        h.turn();
+        h.press_enter();
+        h.turn();
+    }
+    let screen = h.turn();
+    assert!(
+        screen.contains("clickable.md"),
+        "the chip renders:\n{screen}"
+    );
+    // The chips row teaches nothing in prose — the NAME is the
+    // affordance, so it must be the thing that responds to a click.
+    assert!(
+        !chips_row_text(&screen).contains("/attach preview looks inside"),
+        "no instructional tail on the chips row:\n{screen}"
+    );
+    let (row, col) = locate_chip(&screen, "clickable.md").expect("chip on the row");
+    click_cell(&mut h, row, col + 2);
+    let screen = h.turn();
+    assert!(
+        h.ctx.modal.borrow().is_some(),
+        "the click opened a modal:\n{screen}"
+    );
+    let (seq, clicked) = take_load_preview(&mut h);
+    assert_eq!(clicked, path, "the clicked chip is the one previewed");
+    deliver_preview(&h, seq, &clicked);
+    let screen = h.turn();
+    assert!(screen.contains("# clicked open"), "{screen}");
+    // Still staged: a preview is a look.
+    assert_eq!(h.store.pending_attachments.with_untracked(|p| p.len()), 3);
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::remove_dir_all(&dir0).ok();
+    std::fs::remove_dir_all(&dir2).ok();
+}
+
+#[test]
+fn clicking_beside_a_chip_does_nothing() {
+    let (dir, path) = attach_tempfile("quiet.md", b"nothing happens\n");
+    let mut h = harness();
+    h.turn();
+    h.type_text(&format!("/attach {path}"));
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    let (row, col) = locate_chip(&screen, "quiet.md").expect("chip on the row");
+    // Two cells PAST the end of the chip label (past "quiet.md (16 B)").
+    let past = col + abstracttui::text::width("quiet.md (16.0 B)") as usize + 6;
+    click_cell(&mut h, row, past);
+    h.turn();
+    assert!(
+        h.ctx.modal.borrow().is_none(),
+        "only the chip itself is clickable"
+    );
+    assert!(h
+        .find_cmd(|c| matches!(c, Cmd::LoadPreview { .. }))
+        .is_none());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_long_filename_is_capped_on_the_row_and_still_clickable() {
+    // One long name must not own the row that shows every staged file.
+    let (dir, path) = attach_tempfile("Screenshot 2026-08-21 at 4.37.29 AM.png", b"img\n");
+    // Unique name: `attach_tempfile` keys its directory on the FILE
+    // NAME, so two tests sharing one races (each removes the other's
+    // directory at the end).
+    let (dir2, short) = attach_tempfile("row_notes.md", b"short\n");
+    let mut h = harness();
+    h.turn();
+    for p in [&path, &short] {
+        h.type_text(&format!("/attach {p}"));
+        h.turn();
+        h.press_enter();
+        h.turn();
+    }
+    let screen = h.turn();
+    let chips = chips_row_text(&screen);
+    assert!(
+        chips.contains("Screenshot 2026-08-2…"),
+        "the name is cut at 20 characters plus an ellipsis:\n{chips}"
+    );
+    assert!(
+        !chips.contains("4.37.29 AM.png"),
+        "the tail of the name is not on the row:\n{chips}"
+    );
+    assert!(
+        chips.contains("row_notes.md (6 B)"),
+        "a short name is untouched:\n{chips}"
+    );
+    // The cap is display only — the chip still previews ITS file, and
+    // the preview header spells the whole name out.
+    let (row, col) = locate_chip(&screen, "Screenshot").expect("chip on the row");
+    click_cell(&mut h, row, col + 2);
+    h.turn();
+    let (seq, clicked) = take_load_preview(&mut h);
+    assert_eq!(clicked, path, "the capped chip still names its own file");
+    deliver_preview(&h, seq, &clicked);
+    let screen = h.turn();
+    assert!(
+        screen.contains("Screenshot 2026-08-21 at 4.37.29 AM.png"),
+        "the preview header carries the FULL name:\n{screen}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::remove_dir_all(&dir2).ok();
+}
+
+#[test]
+fn clicking_the_x_unstages_that_chip_and_only_that_one() {
+    let (dir_a, first) = attach_tempfile("keep_me.txt", b"kept\n");
+    let (dir_b, second) = attach_tempfile("drop_me.txt", b"dropped\n");
+    let mut h = harness();
+    h.turn();
+    for path in [&first, &second] {
+        h.type_text(&format!("/attach {path}"));
+        h.turn();
+        h.press_enter();
+        h.turn();
+    }
+    let screen = h.turn();
+    assert_eq!(h.store.pending_attachments.with_untracked(|p| p.len()), 2);
+    // The × sits one cell past the end of the chip it belongs to.
+    let (row, col) = locate_chip(&screen, "drop_me.txt").expect("chip on the row");
+    let x_col = col + abstracttui::text::width("drop_me.txt (8 B)") as usize + 1;
+    click_cell(&mut h, row, x_col);
+    let screen = h.turn();
+    let left = h.store.pending_attachments.get_untracked();
+    assert_eq!(left.len(), 1, "one chip removed:\n{screen}");
+    assert_eq!(left[0].name, "keep_me.txt", "the OTHER chip survived");
+    assert!(
+        !chips_row_text(&screen).contains("drop_me.txt"),
+        "the row reflects it immediately:\n{screen}"
+    );
+    assert!(
+        h.ctx.modal.borrow().is_none(),
+        "removing never opens the preview:\n{screen}"
+    );
+    std::fs::remove_dir_all(&dir_a).ok();
+    std::fs::remove_dir_all(&dir_b).ok();
+}
+
+#[test]
+fn a_name_too_long_for_the_row_is_truncated_not_dropped() {
+    // Dropping it left the row reading "📎  · +1 more": a staged file
+    // that WILL ride the next send, with no name and a separator
+    // separating nothing (adversary finding P2, 2026-08-21).
+    let (dir, path) = attach_tempfile(
+        "2026-08-20-composer-crush-and-caret-clip-and-more-words.md",
+        b"x",
+    );
+    // Narrow enough that even the 20-character name cap leaves the row
+    // short — this is the ROW's own truncation, one layer below the cap.
+    let mut h = harness_sized(Size::new(30, 20));
+    h.turn();
+    h.type_text(&format!("/attach {path}"));
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    let chips = chips_row_text(&screen);
+    assert!(
+        chips.contains("2026-08-20-composer"),
+        "the name still renders, ellipsized:\n{chips}"
+    );
+    assert!(
+        !chips.contains("· +"),
+        "and no tail separates nothing:\n{chips}"
+    );
+    // Still clickable where it is drawn.
+    let (row, col) = locate_chip(&screen, "2026-08-20").expect("chip on the row");
+    click_cell(&mut h, row, col + 2);
+    h.turn();
+    assert!(
+        h.ctx.modal.borrow().is_some(),
+        "a truncated chip is still the preview target"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn preview_by_index_picks_the_named_chip() {
+    let (dir_a, first) = attach_tempfile("index_one.txt", b"the first file\n");
+    let (dir_b, second) = attach_tempfile("index_two.txt", b"the second file\n");
+    let mut h = harness();
+    h.turn();
+    for path in [&first, &second] {
+        h.type_text(&format!("/attach {path}"));
+        h.turn();
+        h.press_enter();
+        h.turn();
+    }
+    h.type_text("/attach preview 2");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let (seq, path) = take_load_preview(&mut h);
+    assert_eq!(path, second, "the index names the chip, 1-based");
+    deliver_preview(&h, seq, &path);
+    let screen = h.turn();
+    assert!(screen.contains("the second file"), "{screen}");
+    std::fs::remove_dir_all(&dir_a).ok();
+    std::fs::remove_dir_all(&dir_b).ok();
+}
+
+#[test]
+fn a_cut_text_preview_says_it_was_cut() {
+    // Bigger than the 512 KB text cap: the header must state the cut —
+    // showing half a file without saying so is the ADR 0001 failure.
+    let mut body = String::new();
+    let mut n = 1;
+    while body.len() < 600 * 1024 {
+        body.push_str(&format!("line {n} of a very long log file\n"));
+        n += 1;
+    }
+    let (dir, path) = attach_tempfile("huge.log", body.as_bytes());
+    let mut h = harness();
+    h.turn();
+    h.type_text(&format!("/attach preview {path}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let (seq, p) = take_load_preview(&mut h);
+    deliver_preview(&h, seq, &p);
+    let screen = h.turn();
+    assert!(
+        screen.contains("showing the first 512.0 KB of"),
+        "the cut is named in the header:\n{screen}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn shrinking_the_terminal_re_wraps_instead_of_clipping_the_text() {
+    // The engine re-clamps a modal to the viewport on resize. Wrapping
+    // against the size the modal ASKED for would ellipsize every row
+    // and say nothing — the horizontal twin of a silent truncation.
+    let line = "AAAAAAAA BBBBBBBB CCCCCCCC DDDDDDDD EEEEEEEE FFFFFFFF GGGGGGGG HHHHHHHH";
+    let (dir, path) = attach_tempfile("wide.txt", format!("{line}\n{line}\n").as_bytes());
+    let mut h = harness_sized(Size::new(100, 30));
+    h.turn();
+    h.type_text(&format!("/attach preview {path}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let (seq, p) = take_load_preview(&mut h);
+    deliver_preview(&h, seq, &p);
+    let screen = h.turn();
+    assert_eq!(
+        screen.matches("HHHHHHHH").count(),
+        2,
+        "wide terminal shows both lines whole:\n{screen}"
+    );
+    // Now shrink to half width. (The capture buffer keeps its old
+    // width, so cells past the new viewport hold stale paint — read
+    // only the columns the app now owns.)
+    h.term.push_resize(Size::new(50, 30));
+    h.turn();
+    let screen = h.turn();
+    let live: String = screen
+        .lines()
+        .map(|l| l.chars().take(50).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        live.matches("HHHHHHHH").count(),
+        2,
+        "after the shrink each line's tail is still reachable — wrapped, not cut:\n{live}"
+    );
+    assert!(
+        live.contains("row 1/4"),
+        "the wrap is re-measured, so the row count reflects the narrow width:\n{live}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_tiny_terminal_still_shows_some_of_the_file() {
+    // A modal cannot ask for more room than the terminal has (the
+    // engine clamps it), and an over-padded layout can leave ZERO body
+    // rows while the hint still claims "row 1/3".
+    let (dir, path) = attach_tempfile("tiny.txt", b"alpha\nbeta\ngamma\n");
+    let mut h = harness_sized(Size::new(20, 8));
+    h.turn();
+    h.type_text(&format!("/attach preview {path}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let (seq, p) = take_load_preview(&mut h);
+    deliver_preview(&h, seq, &p);
+    let screen = h.turn();
+    assert!(
+        screen.contains("alpha"),
+        "the file's first line renders even on an 20x8 terminal:\n{screen}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn another_modal_taking_the_slot_frees_the_preview_body() {
+    let img = abstracttui::widgets::Bitmap::from_fn(32, 16, |_, _| Rgba::rgb(9, 9, 9));
+    let (dir, path) = attach_tempfile("held.png", &abstracttui::gfx::png_encode::encode(&img));
+    let mut h = harness();
+    h.turn();
+    h.type_text(&format!("/attach preview {path}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let (seq, p) = take_load_preview(&mut h);
+    deliver_preview(&h, seq, &p);
+    h.turn();
+    assert!(h.store.preview.with_untracked(|p| p.is_some()));
+    // Any other modal replaces this one — Esc is not the only exit, and
+    // a decoded bitmap must not outlive the modal that showed it.
+    abstractcode_tui::ui::modals::open_help(h.cx, &h.ctx);
+    h.turn();
+    assert!(
+        h.store.preview.with_untracked(|p| p.is_none()),
+        "the preview body is dropped when its modal is replaced"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn opening_a_second_preview_never_wipes_the_one_that_replaced_it() {
+    // The replaced modal's cleanup must not clear the NEWER preview it
+    // was replaced by (the seq guard on the cleanup).
+    let (dir_a, first) = attach_tempfile("one.txt", b"the first file\n");
+    let (dir_b, second) = attach_tempfile("two.txt", b"the second file\n");
+    let mut h = harness();
+    h.turn();
+    h.type_text(&format!("/attach preview {first}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let _ = take_load_preview(&mut h);
+    // Straight into the second preview via the UI entry point (the
+    // composer is behind the modal's focus trap).
+    abstractcode_tui::ui::preview::open_path(h.cx, h.store, &h.ctx, &second);
+    h.turn();
+    let (seq, path) = take_load_preview(&mut h);
+    assert_eq!(path, second);
+    deliver_preview(&h, seq, &path);
+    let screen = h.turn();
+    assert!(
+        h.store.preview.with_untracked(|p| p.is_some()),
+        "the newer preview survives the older modal's cleanup"
+    );
+    assert!(screen.contains("the second file"), "{screen}");
+    std::fs::remove_dir_all(&dir_a).ok();
+    std::fs::remove_dir_all(&dir_b).ok();
+}
+
+#[test]
+fn preview_works_in_an_entity_lane_because_it_stages_nothing() {
+    // The attachment lane guard refuses entity focus because chips ride
+    // AGENT runs. Preview stages nothing and sends nothing, so that
+    // reason is not true of it.
+    let (dir, path) = attach_tempfile("lane.txt", b"readable anywhere\n");
+    let mut h = harness();
+    h.turn();
+    h.store
+        .focus
+        .set(abstractcode_tui::convo::Focus::Entity("someone".into()));
+    h.turn();
+    h.type_text(&format!("/attach preview {path}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let (seq, p) = take_load_preview(&mut h);
+    deliver_preview(&h, seq, &p);
+    let screen = h.turn();
+    assert!(screen.contains("readable anywhere"), "{screen}");
+    let notices = h.store.notices.get_untracked();
+    assert!(
+        !notices
+            .iter()
+            .any(|n| n.contains("attachments ride agent runs only")),
+        "the attachment-lane refusal never fires for a look: {notices:?}"
+    );
+    // Staging one there still refuses, unchanged.
+    h.type_text(&format!("/attach {path}"));
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(h.store.pending_attachments.with_untracked(|p| p.len()), 0);
+    std::fs::remove_dir_all(&dir).ok();
 }
 
 // ---------------------------------------------------------------------------
@@ -8311,7 +9271,7 @@ fn reasoning_command_fast_path_and_locked_caption() {
 /// (the old render DROPPED reasoning whenever content existed), /details
 /// fold returns to gists. Replay parity is free (projection-side).
 #[test]
-fn thinking_cards_fold_by_default_and_expand_on_details_full() {
+fn thinking_cards_fold_by_default_and_expand_with_details_on() {
     let mut h = harness();
     h.turn();
     h.store.fold.update(|f| {
@@ -8337,7 +9297,7 @@ fn thinking_cards_fold_by_default_and_expand_on_details_full() {
         "reasoning stays folded by default:\n{screen}"
     );
     assert!(
-        screen.contains("+reasoning"),
+        screen.contains("words of reasoning"),
         "the fold NAMES what expansion holds:\n{screen}"
     );
     // Examine: /details full.
@@ -8637,6 +9597,9 @@ fn type_to_focus_leaves_navigation_and_ctrl_chords_alone() {
             text: "the tail card".into(),
         });
     });
+    // Three pumps: width discovery, extent sync, and the feed's gap-flip
+    // geometry round (see truncation_drains… for the settle contract).
+    h.turn();
     h.turn();
     let tail = h.turn();
     assert!(tail.contains("the tail card"), "sanity: pinned to the tail");
@@ -8713,5 +9676,593 @@ fn the_activity_strip_shows_a_moving_wave_while_a_run_is_live() {
     assert!(
         moved,
         "the wave never advanced — a frozen run reads as hung"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// RENDER GALLERY (dev tool, #[ignore]d): dumps the transcript rendering
+// as text + SVG screens for design review — the working surface of the
+// 2026-08-19 turn-readability redesign. Not a regression test: it
+// asserts nothing beyond "renders".
+//
+//   cargo test --test headless_ui render_gallery -- --ignored
+//
+// Writes into $GALLERY_DIR (or target/gallery).
+// ---------------------------------------------------------------------------
+
+fn gallery_fold(store: &Store) {
+    use abstractcode_tui::transcript::{CallCost, Item, ToolStatus};
+    store.fold.update(|f| {
+        f.begin_run("root");
+        f.push_item(Item::User {
+            text: "the game freezes after level 3 — find the root cause and fix it".into(),
+        });
+        f.push_item(Item::Thinking {
+            iteration: 5,
+            content: "I've found the root cause. Let me read the rest of `game.js` to see the full picture before deciding on the fix.".into(),
+            reasoning: "The freeze reproduces exactly when the invincibility timer underflows: `player.invincible` is decremented every frame but never clamped, so after level 3's long shield pickup it wraps negative and the collision loop spins. I should confirm the update() path before patching — the audio loop also touches this counter, and a blind clamp could mask the audio bug instead of fixing the freeze. Reading the remaining sections of game.js first.".into(),
+            call: CallCost {
+                gen_time_ms: Some(332_000.0),
+                input_tokens: 26_412,
+                output_tokens: 348,
+                cached_tokens: 0,
+            },
+        });
+        f.push_item(Item::Tool {
+            key: "call:1".into(),
+            name: "read_file".into(),
+            args_preview: "…/todel2/js/game.js  start_line=720  end_line=1187".into(),
+            args_full: String::new(),
+            status: ToolStatus::Ok,
+            result: "File: /Users/albou/tmp/abstractframework/todel2/js/game.js (468 lines)\n720:     ctx.fillStyle = p.color;\n721:     ctx.beginPath();\n722:     ctx.arc(p.x, p.y, p.size + pulse, 0, Math.PI * 2);\n723:     ctx.fill();\n… (+18 more lines)".into(),
+            error: String::new(),
+        });
+        f.push_item(Item::Tool {
+            key: "call:2".into(),
+            name: "execute_command".into(),
+            args_preview: "wc -l js/game.js js/audio.js js/levels.js index.html  working_directory=…/todel2".into(),
+            args_full: String::new(),
+            status: ToolStatus::Ok,
+            result: "🖥 Command executed on Darwin\n⏱ Execution time: 0.09s · ✅ return code 0\n📤 Output:\n  301 js/game.js\n  212 js/audio.js\n  164 js/levels.js\n   89 index.html\n  766 total".into(),
+            error: String::new(),
+        });
+        f.push_item(Item::Thinking {
+            iteration: 6,
+            content: "The collision loop never resets the invincibility timer — that is the freeze. I'll patch `update()` to clamp it at zero and re-run the level-3 repro.".into(),
+            reasoning: String::new(),
+            call: CallCost {
+                gen_time_ms: Some(41_000.0),
+                input_tokens: 28_907,
+                output_tokens: 512,
+                cached_tokens: 26_530,
+            },
+        });
+        f.push_item(Item::Tool {
+            key: "call:3".into(),
+            name: "edit_file".into(),
+            args_preview: "js/game.js  old=if (player.invincible > 0) player.invincible--;  new=player.invincible = Math.max(0, player.invincible - 1);".into(),
+            args_full: String::new(),
+            status: ToolStatus::Ok,
+            result: "edited js/game.js: 1 replacement".into(),
+            error: String::new(),
+        });
+        f.push_item(Item::Tool {
+            key: "call:4".into(),
+            name: "execute_command".into(),
+            args_preview: "node smoke.js --level 3".into(),
+            args_full: String::new(),
+            status: ToolStatus::Failed,
+            result: String::new(),
+            error: "node smoke.js exited 1: TypeError: player.reset is not a function (smoke.js:41)".into(),
+        });
+        f.push_item(Item::Thinking {
+            iteration: 7,
+            content: "The smoke harness is stale — `player.reset` moved into `respawn()` last refactor. Fixing the harness call, then re-running.".into(),
+            reasoning: "Not a regression from my clamp: smoke.js:41 calls player.reset() which was renamed in commit 7abb716. The game code is fine; the harness needs the new name.".into(),
+            call: CallCost {
+                gen_time_ms: Some(18_400.0),
+                input_tokens: 29_961,
+                output_tokens: 233,
+                cached_tokens: 29_004,
+            },
+        });
+        f.push_item(Item::Tool {
+            key: "call:5".into(),
+            name: "edit_file".into(),
+            args_preview: "smoke.js  old=player.reset()  new=player.respawn()".into(),
+            args_full: String::new(),
+            status: ToolStatus::Ok,
+            result: "edited smoke.js: 1 replacement".into(),
+            error: String::new(),
+        });
+        f.push_item(Item::Tool {
+            key: "call:6".into(),
+            name: "execute_command".into(),
+            args_preview: "node smoke.js --level 3".into(),
+            args_full: String::new(),
+            status: ToolStatus::Running,
+            result: String::new(),
+            error: String::new(),
+        });
+        // Design sheet, not a replay: the final answer renders below a
+        // still-running row so ONE screen shows both treatments.
+        f.push_item(Item::Assistant {
+            text: "Fixed. The freeze was an **invincibility timer underflow**: `player.invincible` decremented past zero and the collision loop spun forever.\n\n- `js/game.js` — clamp the timer at zero in `update()`\n- `smoke.js` — the harness called the renamed `player.reset()`; now `respawn()`\n\nLevel 3 survives 500 frames in the smoke run.".into(),
+            final_answer: true,
+        });
+    });
+}
+
+#[test]
+#[ignore = "render gallery: writes design-review screens, run explicitly"]
+fn render_gallery() {
+    let dir = std::env::var("GALLERY_DIR").unwrap_or_else(|_| "target/gallery".into());
+    std::fs::create_dir_all(&dir).expect("gallery dir");
+    let mut shots: Vec<(String, String, String)> = Vec::new(); // (name, text, svg)
+
+    for (label, size) in [("wide", Size::new(160, 45)), ("narrow", Size::new(100, 30))] {
+        let mut h = harness_sized(size);
+        h.turn();
+        gallery_fold(&h.store);
+        for _ in 0..4 {
+            h.turn();
+        }
+        let text = h.turn();
+        let svg = h.term.screen().screenshot().to_svg();
+        shots.push((format!("{label}-collapsed"), text, svg));
+
+        h.store.show_details.set(true);
+        for _ in 0..4 {
+            h.turn();
+        }
+        let text = h.turn();
+        let svg = h.term.screen().screenshot().to_svg();
+        shots.push((format!("{label}-full"), text, svg));
+    }
+
+    for (name, text, svg) in shots {
+        std::fs::write(format!("{dir}/{name}.txt"), &text).expect("write txt");
+        std::fs::write(format!("{dir}/{name}.svg"), &svg).expect("write svg");
+    }
+    eprintln!("gallery written to {dir}");
+}
+
+/// The composer must GROW with the draft (1..4 rows) and keep the caret
+/// row visible — even under a long transcript.
+///
+/// Live report (2026-08-20): the prompt panel stopped at two rows and
+/// then scrolled the text out from under the caret — typing past the
+/// visible rows became blind. Cause: the composer row was flex-
+/// SHRINKABLE inside the chrome column, whose transcript sibling
+/// carries a content-sized basis of hundreds of rows, so the CSS-scaled
+/// shrink pass took rows back from the composer. The TextArea's own
+/// `shrink(0)` saved the WIDGET, not its rect: the engine drew a 4-row
+/// widget inside a 2-row rect, and the widget's scroll window (computed
+/// against `max_rows`, not the drawn height) parked the caret on a row
+/// the clip ate. The fix is `shrink(0.0)` on the composer row.
+#[test]
+fn composer_grows_to_four_rows_and_keeps_the_caret_row_visible() {
+    let mut h = harness_sized(Size::new(100, 30));
+    // A transcript long enough to dominate the column's flex basis —
+    // the exact condition under which the crush appeared live.
+    h.store.fold.update(|f| {
+        for i in 0..60 {
+            f.push_item(abstractcode_tui::transcript::Item::User {
+                text: format!("history line {i}"),
+            });
+        }
+    });
+    for _ in 0..3 {
+        h.turn();
+    }
+    // Eight wrapped rows of draft: past `max_rows`, so the widget must
+    // scroll internally and show the LAST four, caret row included.
+    let mut draft = String::new();
+    for i in 1..=8 {
+        draft.push_str(&format!("LINE{i}{} ", "x".repeat(88)));
+    }
+    h.type_text(&draft);
+    h.turn();
+    let screen = h.turn();
+    let rows: Vec<&str> = screen.lines().collect();
+    let composer_rows = rows
+        .iter()
+        .filter(|l| l.contains('▐') && l.contains('▌'))
+        .count();
+    assert_eq!(
+        composer_rows, 4,
+        "the composer must grow to its full 4 rows, never be flex-crushed:\n{screen}"
+    );
+    // Following the caret: the newest row is on screen, the oldest is not.
+    assert!(
+        screen.contains("LINE8"),
+        "the caret's row must stay visible as the draft grows:\n{screen}"
+    );
+    assert!(
+        !screen.contains("LINE4"),
+        "the window must ride the caret, not the buffer head:\n{screen}"
+    );
+}
+
+#[test]
+fn cache_modal_reports_three_scopes_and_scrolls_to_its_tail() {
+    // The /cache panel carries more rows than any sane modal height, so
+    // the tail (session block + reading notes) is only reachable if the
+    // body genuinely SCROLLS. The previous fixed-window renderer printed
+    // "↓ N more" and no key could move it — a metric that cannot be read
+    // is not reported.
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.cache.set(Some(abstractcode_tui::store::CacheInfo {
+        provider: "mlx".into(),
+        model: "mlx-community/Qwen3.8-27B-4bit".into(),
+        supported: true,
+        mode: "local_control_plane".into(),
+    }));
+    let llm = |input: u64, output: u64, cached: u64| {
+        serde_json::json!({
+            "run_id": "root", "node_id": "reason", "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {"content": "x", "model": "mlx-community/Qwen3.8-27B-4bit",
+                "gen_time": 12_000.0,
+                "usage": {"input_tokens": input, "output_tokens": output,
+                          "total_tokens": input + output,
+                          "prompt_tokens_details": {"cached_tokens": cached}}}
+        })
+    };
+    // Run 1 (closed), then run 2 — so the session block reports strictly
+    // more than the run block, which is the whole point of adding it.
+    store.fold.update(|f| {
+        f.begin_run("root");
+        let _ = f.apply("root", &llm(4_000, 200, 0));
+        let _ = f.apply("root", &llm(9_000, 300, 3_000));
+        f.begin_run("root");
+        let _ = f.apply("root", &llm(6_200, 150, 0));
+        let _ = f.apply("root", &llm(10_000, 558, 6_000));
+    });
+
+    h.type_text("/cache");
+    h.turn();
+    h.press_enter();
+    let head = h.turn();
+    assert!(head.contains("prompt cache + context"), "{head}");
+    assert!(
+        head.contains("latest model call"),
+        "the newest call block:\n{head}"
+    );
+    assert!(
+        head.contains("carried forward"),
+        "the derived reuse split:\n{head}"
+    );
+    // The session block is BELOW the fold at this height — proving the
+    // scroll is load-bearing rather than decorative.
+    assert!(
+        !head.contains("how to read this"),
+        "the tail starts off-screen (otherwise this test proves nothing):\n{head}"
+    );
+
+    // Page down: everything below the fold must become readable. The
+    // union of the frames is what "reachable by keyboard" means — no
+    // single frame holds the whole panel, and that is fine.
+    let mut seen = head.clone();
+    for _ in 0..8 {
+        h.term.push_input(b"\x1b[6~"); // PgDn
+        seen.push_str(&h.turn());
+    }
+    let tail = h.turn();
+    seen.push_str(&tail);
+    for needle in [
+        "session (every run in this conversation)",
+        "runs               2",
+        "model calls        4",
+        "how to read this",
+    ] {
+        assert!(
+            seen.contains(needle),
+            "{needle:?} never became readable while paging down:\n{tail}"
+        );
+    }
+    // Run scope vs session scope are DIFFERENT numbers here (run 2 sent
+    // 16.2k, the session 29.2k) — the session block is not a relabeled
+    // copy of the run block.
+    assert!(
+        seen.contains("16,200 in") && seen.contains("29,200 in"),
+        "run and session totals are distinct:\n{seen}"
+    );
+
+    // …and back up: the head returns (the scroll is two-way, and the
+    // panel is not a one-shot dump).
+    for _ in 0..12 {
+        h.term.push_input(b"\x1b[5~"); // PgUp
+        h.turn();
+    }
+    let back = h.turn();
+    assert!(
+        back.contains("latest model call"),
+        "scrolls back to the head:\n{back}"
+    );
+
+    // Esc still closes with the scroll focused — the title advertises it.
+    h.press_escape();
+    let closed = h.turn();
+    assert!(
+        !closed.contains("prompt cache + context"),
+        "Esc closes the panel from a focused scroll:\n{closed}"
+    );
+}
+
+#[test]
+fn cache_modal_never_reports_a_cold_cache_when_the_provider_is_silent() {
+    // Honesty pin at the SCREEN, not just the row builder: a provider
+    // that never reports hit counts must produce "not reported", never a
+    // 0 that reads as a measured miss. Driven at 80x24 — the small
+    // terminal is where a fixed-width panel eats its own numbers.
+    let mut h = harness_sized(Size::new(80, 24));
+    h.turn();
+    let store = h.store;
+    store.fold.update(|f| {
+        f.begin_run("root");
+        for i in 0..3 {
+            let _ = f.apply(
+                "root",
+                &serde_json::json!({
+                    "run_id": "root", "node_id": "reason", "status": "completed",
+                    "effect": {"type": "llm_call", "payload": {}},
+                    "result": {"content": "x", "usage": {
+                        "input_tokens": 1_000 * (i + 1), "output_tokens": 50,
+                        "total_tokens": 1_000 * (i + 1) + 50}}
+                }),
+            );
+        }
+    });
+    h.type_text("/cache");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        screen.contains("never reported by this provider"),
+        "silence named as silence:\n{screen}"
+    );
+    assert!(
+        !screen.contains("0 tk served"),
+        "silence must never render as a measured miss:\n{screen}"
+    );
+    // …and at 80 columns the value wraps into its own column instead of
+    // losing its tail: the continuation line must be on screen.
+    assert!(
+        screen.contains("split below is derived client-side"),
+        "values wrap at a narrow width rather than truncating:\n{screen}"
+    );
+}
+
+/// `/details` shows ALL the details — nothing is shortened, anywhere.
+///
+/// Operator report, 2026-08-20: `[#TRUNCATION: shortened for display]`
+/// and `… (+57 more lines)` were appearing in the FULL view. Two layers
+/// were cutting: the fold stored preview-bounded copies (700 chars of a
+/// tool result, 200 of an error, 8k of a thinking block), so the text
+/// was gone before any view could decide; and the details render still
+/// applied the folded view's row caps.
+///
+/// EVERY capped arm of `render_item` is exercised here, each with a body
+/// past its own cap plus `CAP_SLACK`, and each asserted by a unique tail
+/// marker — the first cut of this test only covered two arms, and the
+/// adversarial review proved the other five assertions were no-ops
+/// (findings F1/F7). A failed tool carrying BOTH an error and output is
+/// included: that output used to be dropped entirely (F3).
+#[test]
+fn details_mode_truncates_nothing() {
+    // Tall enough to hold the whole feed: the point is to read every
+    // rendered row, not to model a real terminal.
+    let mut h = harness_sized(Size::new(120, 1400));
+    h.turn();
+    let lines = |prefix: &str, n: usize, tail: &str| -> String {
+        (1..=n)
+            .map(|i| format!("{prefix}-{i}\n"))
+            .collect::<String>()
+            + tail
+    };
+    let result = lines("out-line", 400, "TAIL-OF-RESULT");
+    let thinking = format!("HEAD-OF-THINKING {} TAIL-OF-THINKING", "z ".repeat(4_000));
+    let args_full = lines("arg-line", 40, "TAIL-OF-ARGS");
+    let tool_error = lines("err-line", 40, "TAIL-OF-TOOLERROR");
+    h.store.fold.update(|f| {
+        use abstractcode_tui::transcript::Item;
+        f.push_item(Item::User {
+            text: lines("u-line", 300, "TAIL-OF-USER"),
+        });
+        f.push_item(Item::Steer {
+            text: lines("s-line", 80, "TAIL-OF-STEER"),
+        });
+        f.push_item(Item::Thinking {
+            iteration: 1,
+            content: thinking.clone(),
+            reasoning: String::new(),
+            call: abstractcode_tui::transcript::CallCost::default(),
+        });
+        f.push_item(Item::Tool {
+            key: "call:1".into(),
+            name: "execute_command".into(),
+            args_preview: "cargo test".into(),
+            args_full: args_full.clone(),
+            status: abstractcode_tui::transcript::ToolStatus::Ok,
+            result: result.clone(),
+            error: String::new(),
+        });
+        // Failed WITH output: both must render (F3).
+        f.push_item(Item::Tool {
+            key: "call:2".into(),
+            name: "broken_tool".into(),
+            args_preview: String::new(),
+            args_full: String::new(),
+            status: abstractcode_tui::transcript::ToolStatus::Failed,
+            result: lines("fail-out", 20, "TAIL-OF-FAILED-OUTPUT"),
+            error: tool_error.clone(),
+        });
+        f.push_item(Item::Info {
+            text: lines("info-line", 30, "TAIL-OF-INFO"),
+        });
+        f.push_item(Item::Error {
+            text: lines("erritem-line", 30, "TAIL-OF-ERRORITEM"),
+        });
+        f.push_item(Item::Probe {
+            title: "memory digest".into(),
+            body: lines("probe-line", 30, "TAIL-OF-PROBE"),
+        });
+        f.push_item(Item::Image {
+            run_id: "root".into(),
+            artifact_id: "img-1".into(),
+            label: "chart".into(),
+        });
+    });
+    // An image whose fetch FAILED: its reason is a body like any other.
+    h.store.upsert_image(abstractcode_tui::store::ImageEntry {
+        artifact_id: "img-1".into(),
+        bitmap: None,
+        error: lines("imgerr-line", 20, "TAIL-OF-IMAGEERROR"),
+    });
+    h.type_text("/details");
+    h.turn();
+    h.press_enter();
+    for _ in 0..3 {
+        h.turn();
+    }
+    let screen = h.turn();
+    for marker in ["[#TRUNCATION", "more lines)"] {
+        assert!(
+            !screen.contains(marker),
+            "details mode must not shorten anything — found {marker:?}"
+        );
+    }
+    for needle in [
+        // first line and last line of every body
+        "out-line-1",
+        "out-line-400",
+        "TAIL-OF-RESULT",
+        "HEAD-OF-THINKING",
+        "TAIL-OF-THINKING",
+        "arg-line-1",
+        "TAIL-OF-ARGS",
+        "err-line-1",
+        "TAIL-OF-TOOLERROR",
+        "TAIL-OF-FAILED-OUTPUT",
+        "u-line-1",
+        "TAIL-OF-USER",
+        "TAIL-OF-STEER",
+        "TAIL-OF-INFO",
+        "TAIL-OF-ERRORITEM",
+        "TAIL-OF-PROBE",
+        "imgerr-line-1",
+        "TAIL-OF-IMAGEERROR",
+    ] {
+        assert!(screen.contains(needle), "details mode must keep {needle:?}");
+    }
+}
+
+/// The FOLDED view is a summary and must stay one: the opposite bug
+/// (everything unbounded everywhere) would bury the operator in a wall
+/// of output with no way back. Bodies are capped there, the cut is
+/// LABELED, and a tool row stays exactly one line even though the fold
+/// now stores multi-line errors.
+#[test]
+fn folded_view_stays_a_bounded_labelled_summary() {
+    let mut h = harness_sized(Size::new(120, 60));
+    h.turn();
+    h.store.fold.update(|f| {
+        use abstractcode_tui::transcript::Item;
+        f.push_item(Item::User {
+            text: (1..=300)
+                .map(|i| format!("u-line-{i}\n"))
+                .collect::<String>(),
+        });
+        f.push_item(Item::Tool {
+            key: "call:1".into(),
+            name: "broken_tool".into(),
+            args_preview: "cargo test".into(),
+            args_full: "cargo test".into(),
+            status: abstractcode_tui::transcript::ToolStatus::Failed,
+            result: String::new(),
+            error: "line one\nline two\nline three\nline four\nline five".into(),
+        });
+    });
+    for _ in 0..3 {
+        h.turn();
+    }
+    let screen = h.turn();
+    assert!(
+        screen.contains("more lines)"),
+        "the folded view caps long bodies and LABELS the cut:\n{screen}"
+    );
+    assert!(
+        !screen.contains("u-line-300"),
+        "the folded view does not render a 300-line prompt whole:\n{screen}"
+    );
+    // The folded tool row is one line + at most its 3 error rows.
+    assert!(
+        screen.contains("broken_tool") && screen.contains("line one"),
+        "the folded row still names the call and its error:\n{screen}"
+    );
+}
+
+/// An undelivered steer is never silently swallowed: the words ride the
+/// error card AND come back to an empty composer, so the operator can
+/// resend with one Enter.
+///
+/// Live failure, 2026-08-20: a steer died on a reset socket
+/// ("steer not delivered: … Connection reset by peer (os error 54)") and
+/// the paragraph the operator had typed was gone — the composer clears
+/// on submit, and nothing put it back.
+#[test]
+fn an_undelivered_steer_keeps_the_words_and_restores_the_composer() {
+    let mut h = harness_sized(Size::new(120, 40));
+    h.turn();
+    let words = "no, i really want you to find a way to use AbstractTUI";
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::Error {
+            text: format!("steer not delivered: boom\n\n— your steer —\n{words}"),
+        });
+    });
+    // The runner posts this after a failed send; root() drains it.
+    h.store.steer_restore.set(Some(words.to_string()));
+    for _ in 0..3 {
+        h.turn();
+    }
+    let screen = h.turn();
+    assert!(
+        screen.contains("steer not delivered"),
+        "the failure is stated:\n{screen}"
+    );
+    assert!(
+        screen.contains("find a way to use AbstractTUI"),
+        "the operator's words survive in the card:\n{screen}"
+    );
+    // …and the composer holds them again: submitting now resends.
+    assert!(
+        screen.matches("find a way to use AbstractTUI").count() >= 2,
+        "the words are back in the composer too:\n{screen}"
+    );
+}
+
+/// A draft typed after the failure OUTRANKS the restore — the restore
+/// must never clobber words the operator is in the middle of writing.
+#[test]
+fn a_steer_restore_never_clobbers_a_draft() {
+    let mut h = harness_sized(Size::new(120, 40));
+    h.turn();
+    h.type_text("a newer draft");
+    h.turn();
+    h.store.steer_restore.set(Some("the failed steer".into()));
+    for _ in 0..3 {
+        h.turn();
+    }
+    let screen = h.turn();
+    assert!(
+        screen.contains("a newer draft"),
+        "the draft in progress wins:\n{screen}"
+    );
+    assert!(
+        !screen.contains("the failed steer"),
+        "the restore stands down rather than overwrite it:\n{screen}"
     );
 }

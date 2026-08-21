@@ -45,7 +45,29 @@ path = "src/main.rs"
 # `ui::root` — plus a scrollbar-thumb minimum and a copy notice that
 # reports the size copied. 0.3.2 carried the same feature set but was
 # tagged without reaching crates.io, so 0.3.3 is the resolvable floor.
-abstracttui = "0.3.3"
+#
+# 0.3.6: the IMAGE floor. 0.3.5 taught `gfx::decode_image` PROGRESSIVE
+# JPEG (SOF2: spectral selection, successive approximation, EOB runs,
+# restart markers) plus single-component non-interleaved scans.
+# Progressive is what phone cameras, editors and "save for web" emit by
+# DEFAULT, so through 0.3.4 an ordinary photo dropped into `/attach` —
+# or any progressive JPEG artifact a tool wrote — reached
+# `Runner::fetch_image`, failed with `jpeg: progressive JPEG not
+# supported`, and rendered as an error card where the picture belonged.
+# No app wiring: our decode call site is unchanged and the sequential
+# path is byte-identical. 0.3.6 also makes `widgets::Image` and markdown
+# image blocks follow `MosaicMode::auto` instead of pinning half blocks
+# (~3 dB PSNR on a photo) — that one does NOT touch our in-feed picture,
+# which draws through `gfx::mosaic::render_to_cells` and has resolved
+# the family from live caps since 0.2.2; we inherit it only if we ever
+# adopt the widget. 0.3.4 fixed `Screenshot::to_svg` runs that distort
+# in Chromium viewers, which our headless SVG captures emit.
+#
+# One call site renders a decode failure as user-facing text
+# (`ui::transcript_view`, the image block's error line); 0.3.5 reworded
+# the unsupported-format message, and that site prints it verbatim
+# rather than matching on it.
+abstracttui = "0.3.6"
 # HTTP client (blocking, small): gateway calls + SSE ledger streaming.
 # The explicit feature set = ureq's defaults, pinned deliberately: "tls" is
 # rustls (remote HTTPS gateways work with zero system OpenSSL — the

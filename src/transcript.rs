@@ -17,8 +17,6 @@ use serde_json::Value;
 use crate::protocol::{self, UsageDelta};
 
 const ARGS_PREVIEW_MAX: usize = 200;
-const RESULT_PREVIEW_MAX: usize = 700;
-const TEXT_BLOCK_MAX: usize = 8_000;
 /// Strip-rendered cycle-intent one-liner (visibility review P2-1).
 const CYCLE_PREVIEW_MAX: usize = 48;
 pub const MAX_ITEMS: usize = 500;
@@ -34,6 +32,12 @@ pub enum ToolStatus {
     Ok,
     Failed,
     Denied,
+    /// The run reached a terminal state while this call was still
+    /// in flight (adversarial review round 2, F3): "running" is a
+    /// present-tense claim — frozen into scrollback it made "hung or
+    /// historical?" unanswerable a week later. Not a failure: the
+    /// result was simply never observed.
+    Interrupted,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -43,6 +47,13 @@ pub struct CallCost {
     pub gen_time_ms: Option<f64>,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Prompt tokens the provider REPORTED as served from its cache
+    /// for THIS call (operator ask 2026-08-19: "% input context that
+    /// was cached and not recomputed" on the cycle rule). 0 = not
+    /// reported — absence of evidence, not a cold cache — and the rule
+    /// renders nothing rather than a derived guess (the prev-input
+    /// derivation lives in /cache, labeled as the estimate it is).
+    pub cached_tokens: u64,
 }
 
 impl CallCost {
@@ -52,6 +63,7 @@ impl CallCost {
             gen_time_ms: protocol::gen_time_ms_from_record(rec),
             input_tokens: usage.input_tokens,
             output_tokens: usage.output_tokens,
+            cached_tokens: usage.cached_tokens,
         }
     }
 }
@@ -69,7 +81,7 @@ pub enum Item {
         iteration: u32,
         content: String,
         reasoning: String,
-        /// Per-call cost facts, rendered ONLY under `/details full`.
+        /// Per-call cost facts, rendered on the transcript's cycle rule.
         ///
         /// `gen_time` is the whole call — prompt processing AND generation — because
         /// that is all a non-streaming response can report; the split needs a
@@ -83,9 +95,20 @@ pub enum Item {
     Tool {
         key: String,
         name: String,
+        /// One-line humane hint for the FOLDED row (bounded on purpose —
+        /// it has one row to answer "which call was this").
         args_preview: String,
+        /// The arguments in full, uncut: what `/details` renders. Nothing
+        /// here is elided — an inner value, a path, a whole heredoc all
+        /// survive (operator directive 2026-08-20: details means details).
+        args_full: String,
         status: ToolStatus,
-        result_preview: String,
+        /// The tool's output in FULL. The fold is no longer a preview
+        /// store: bounding happens in the view, per verbosity mode, so
+        /// `/details` can show everything the ledger reported.
+        result: String,
+        /// The error in FULL (multi-line preserved). The folded row
+        /// one-lines it at render; `/details` shows all of it.
         error: String,
     },
     Assistant {
@@ -177,6 +200,42 @@ pub struct Stats {
     /// The model that actually served the newest llm_call — the resolved
     /// truth even under "gateway defaults" (from the result's own field).
     pub effective_model: String,
+    /// Cache hits the provider reported for the NEWEST telemetry-lane call
+    /// (0 = not reported for that call). `cached_tokens` above is the
+    /// run's cumulative total; this is the one call an operator is looking
+    /// at when they open /cache.
+    pub last_cached_tokens: u64,
+    /// Output tokens of the newest telemetry-lane call.
+    pub last_output_tokens: u64,
+    /// Provider-reported whole-call duration of the newest telemetry-lane
+    /// call, in whole milliseconds (0 = unreported).
+    pub last_gen_time_ms: u64,
+    /// Sum of provider-reported call durations this run (ms; unreported
+    /// calls contribute 0, so this is a FLOOR, never an inflated total).
+    pub gen_time_ms: u64,
+    /// Calls whose usage carried a non-zero cache-hit count. Paired with
+    /// `llm_calls` it separates "the cache missed" from "the provider
+    /// never reports hits" — the distinction the panel used to blur.
+    pub cache_reported_calls: u64,
+    /// Sum of input tokens over calls that reported one — the honest
+    /// denominator for a hit rate (calls with a zero-poisoned split
+    /// contribute nothing to either side of the ratio).
+    pub cacheable_input_tokens: u64,
+    /// Derived NEW tokens across telemetry-lane calls: per call, the
+    /// growth over the previous call's context (the whole prompt on the
+    /// first call, and after a reset). Client-side derivation — labeled as
+    /// an estimate everywhere it is shown.
+    pub new_tokens: u64,
+    /// Derived CARRIED tokens: per call, the previous call's context that
+    /// this call re-sent — the reusable prefix a prompt cache exists to
+    /// serve.
+    pub carried_tokens: u64,
+    /// Telemetry-lane calls whose context SHRANK against the previous one
+    /// (compaction, reset, or a lane change): each one breaks the prefix a
+    /// cache had built.
+    pub context_resets: u64,
+    /// Largest context observed on a telemetry-lane call this run.
+    pub peak_input_tokens: u64,
 }
 
 /// Lifetime-of-fold totals (across runs; per-run stats reset per run).
@@ -188,6 +247,25 @@ pub struct SessionStats {
     /// reports no input/output split (see `Stats::total_tokens`).
     pub total_tokens: u64,
     pub runs: u64,
+    /// Model calls across every run in this session.
+    pub llm_calls: u64,
+    /// Prompt tokens the provider reported as served from its cache,
+    /// across the whole session (0 = never reported — see
+    /// `cache_reported_calls` before reading that as a cold cache).
+    pub cached_tokens: u64,
+    /// Session-lifetime mirrors of the per-run cache metrics
+    /// (`Stats::cache_reported_calls` and friends). Per-run stats reset at
+    /// `begin_run`; these are what "how is the cache doing overall?"
+    /// actually means.
+    pub cache_reported_calls: u64,
+    pub cacheable_input_tokens: u64,
+    pub new_tokens: u64,
+    pub carried_tokens: u64,
+    pub context_resets: u64,
+    pub peak_input_tokens: u64,
+    /// Sum of provider-reported call durations (ms); a floor, since
+    /// unreported calls contribute 0.
+    pub gen_time_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -263,20 +341,145 @@ pub(crate) fn one_line(text: &str, max: usize) -> String {
     out
 }
 
-pub(crate) fn bounded(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_string();
+/// The arguments in FULL for `/details`: the same humane ordering as
+/// [`tool_args_preview`] — identifying value first, then `k=v` — with
+/// every cut removed. No outer bound, no per-value 60-char clip, no
+/// path compaction, and newlines PRESERVED (a heredoc or a multi-line
+/// patch reads as itself). Details means details (operator, 2026-08-20).
+pub(crate) fn tool_args_full(v: Option<&Value>) -> String {
+    let obj = match v {
+        None | Some(Value::Null) => return String::new(),
+        Some(Value::String(s)) => return s.clone(),
+        Some(Value::Object(m)) => m,
+        Some(other) => return other.to_string(),
+    };
+    let scalar = |val: &Value| -> Option<String> {
+        match val {
+            Value::String(s) => Some(s.clone()),
+            Value::Number(n) => Some(n.to_string()),
+            Value::Bool(b) => Some(b.to_string()),
+            _ => None,
+        }
+    };
+    let mut parts: Vec<String> = Vec::new();
+    let mut lead_key: Option<&str> = None;
+    for k in ARGS_PRIMARY {
+        if let Some(val) = obj.get(k).and_then(&scalar) {
+            if !val.is_empty() {
+                parts.push(format!("{k}: {val}"));
+                lead_key = Some(k);
+                break;
+            }
+        }
     }
-    let cut: String = text.chars().take(max).collect();
-    format!("{cut}… [#TRUNCATION: shortened for display]")
+    let mut keys: Vec<&String> = obj
+        .keys()
+        .filter(|k| Some(k.as_str()) != lead_key)
+        .collect();
+    keys.sort_by_key(|k| (args_rank(k), k.as_str()));
+    for k in keys {
+        let val = &obj[k.as_str()];
+        let rendered = match scalar(val) {
+            Some(s) => s,
+            None => serde_json::to_string_pretty(val).unwrap_or_else(|_| val.to_string()),
+        };
+        parts.push(format!("{k}: {rendered}"));
+    }
+    parts.join("\n")
 }
 
-pub(crate) fn value_preview(v: Option<&Value>, max: usize) -> String {
-    match v {
-        None => String::new(),
-        Some(Value::String(s)) => one_line(s, max),
-        Some(Value::Null) => String::new(),
-        Some(other) => one_line(&other.to_string(), max),
+/// Keys whose value identifies the call — shared by the bounded hint and
+/// the full render so both lead with the same fact.
+const ARGS_PRIMARY: [&str; 9] = [
+    "command",
+    "file_path",
+    "path",
+    "url",
+    "query",
+    "pattern",
+    "prompt",
+    "name",
+    "id",
+];
+
+/// Semantic key order (adversarial review round 2, F1): known pairs get
+/// their reading order, the rest stay alphabetical behind them.
+fn args_rank(k: &str) -> usize {
+    const ORDERED: [&str; 6] = ["old", "new", "start_line", "end_line", "offset", "limit"];
+    ORDERED
+        .iter()
+        .position(|o| *o == k)
+        .unwrap_or(ORDERED.len())
+}
+
+/// Humane tool-args preview (adversarial design review, 2026-08-19):
+/// the FOLDED tool row and the strip must answer "WHICH call was this"
+/// at a glance — raw JSON spent a third of the row on syntax, and
+/// alphabetical key order pushed the identifying value (`file_path`,
+/// `command`) off the edge. Objects render as VALUES: the primary
+/// identifier first (bare), the rest as `k=v`, long absolute paths
+/// tail-compacted at a '/' boundary so the basename always survives.
+///
+/// This is a BOUND: `max` chars through `one_line`, plus a 60-char clip
+/// per value and path compaction. It is the one-row summary, never the
+/// truth — [`tool_args_full`] is what `/details` renders, and the
+/// ledger keeps the verbatim arguments behind both.
+pub(crate) fn tool_args_preview(v: Option<&Value>, max: usize) -> String {
+    let obj = match v {
+        None | Some(Value::Null) => return String::new(),
+        Some(Value::String(s)) => return one_line(s, max),
+        Some(Value::Object(m)) => m,
+        Some(other) => return one_line(&other.to_string(), max),
+    };
+    let scalar = |val: &Value| -> Option<String> {
+        match val {
+            Value::String(s) => Some(compact_path(s)),
+            Value::Number(n) => Some(n.to_string()),
+            Value::Bool(b) => Some(b.to_string()),
+            _ => None,
+        }
+    };
+    let mut parts: Vec<String> = Vec::new();
+    let mut lead_key: Option<&str> = None;
+    for k in ARGS_PRIMARY {
+        if let Some(val) = obj.get(k).and_then(&scalar) {
+            if !val.is_empty() {
+                parts.push(val);
+                lead_key = Some(k);
+                break;
+            }
+        }
+    }
+    let mut keys: Vec<&String> = obj
+        .keys()
+        .filter(|k| Some(k.as_str()) != lead_key)
+        .collect();
+    keys.sort_by_key(|k| (args_rank(k), k.as_str()));
+    for k in keys {
+        let val = &obj[k.as_str()];
+        match scalar(val) {
+            Some(s) => parts.push(format!("{k}={}", one_line(&s, 60))),
+            // Nested values stay honest as compact JSON.
+            None => parts.push(format!("{k}={}", one_line(&val.to_string(), 60))),
+        }
+    }
+    one_line(&parts.join("  "), max)
+}
+
+/// Tail-compact a long absolute path at a '/' boundary so the basename
+/// and as many parent segments as fit survive (the `js/ga…` death of a
+/// head-first cut). Same intent as `ui::chrome::tail_ellipsis`,
+/// boundary-aware; lives here because the fold owns preview text.
+fn compact_path(s: &str) -> String {
+    const KEEP: usize = 44;
+    if !s.starts_with('/') || s.chars().count() <= KEEP {
+        return s.to_string();
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let tail: String = chars[chars.len() - KEEP..].iter().collect();
+    match tail.find('/') {
+        Some(ix) => format!("…{}", &tail[ix..]),
+        None => format!("…{tail}"),
     }
 }
 
@@ -305,7 +508,7 @@ fn inflight_tool_label(rec: &Value) -> Option<String> {
     }
     let c = calls.first()?;
     let name = c.get("name").and_then(Value::as_str).unwrap_or("tool");
-    let arg = value_preview(c.get("arguments"), 48);
+    let arg = tool_args_preview(c.get("arguments"), 48);
     if arg.is_empty() {
         Some(name.to_string())
     } else {
@@ -329,15 +532,61 @@ fn inflight_anchor(rec: &Value) -> std::time::Instant {
     now
 }
 
-fn value_block(v: Option<&Value>, max: usize) -> String {
+/// The CONTENT fields beside `rendered` — `stdout`, `stderr`,
+/// `exit_code`, a `results` array, whatever a tool actually reported
+/// alongside its summary line.
+///
+/// Two rulings meet here and both hold. 2026-08-19: the transport
+/// envelope is noise, so the human `rendered` payload LEADS and the
+/// wrapper keys (`platform`, `duration_s`, the echoed `command`, a null
+/// `error`) never reach the card. 2026-08-20: details truncates
+/// nothing — so a field carrying real output can no longer be dropped
+/// on the floor the way every sibling of `rendered` used to be
+/// (adversarial review F5). The rule is therefore a DENYLIST, not an
+/// allowlist: anything unrecognised is content and survives; only the
+/// known transport keys, the nulls and the empties are filtered. Empty
+/// for a plain `{rendered}` envelope, which is the common case — a
+/// normal tool result gains no noise.
+fn envelope_rest(v: Option<&Value>) -> String {
+    let Some(Value::Object(map)) = v else {
+        return String::new();
+    };
+    /// Transport, not output. `command` is the tool's echo of its own
+    /// arguments, which the card already prints in full above.
+    const TRANSPORT: [&str; 6] = [
+        "rendered",
+        "error",
+        "success",
+        "platform",
+        "duration_s",
+        "command",
+    ];
+    let mut parts: Vec<String> = Vec::new();
+    for (k, val) in map {
+        if TRANSPORT.contains(&k.as_str()) || val.is_null() {
+            continue;
+        }
+        let text = match val {
+            Value::String(s) => s.clone(),
+            other => serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string()),
+        };
+        if text.trim().is_empty() {
+            continue;
+        }
+        parts.push(format!("{k}: {text}"));
+    }
+    parts.join("\n")
+}
+
+/// The tool output as text, in FULL. Bounding is the VIEW's job now
+/// (`/details` shows everything; the folded row shows none of this), so
+/// nothing is cut on the way into the fold — the operator's rule, 2026-08-20.
+fn value_block(v: Option<&Value>) -> String {
     match v {
         None => String::new(),
-        Some(Value::String(s)) => bounded(s, max),
+        Some(Value::String(s)) => s.clone(),
         Some(Value::Null) => String::new(),
-        Some(other) => bounded(
-            &serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string()),
-            max,
-        ),
+        Some(other) => serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string()),
     }
 }
 
@@ -452,6 +701,25 @@ pub struct Fold {
     /// the activity IS a thinking label, so tool/conclusion transitions
     /// hide it without bespoke clears.
     pub cycle_preview: String,
+    /// WHICH cycle wrote `cycle_preview` — the RUN it came from and
+    /// that run's own cycle number.
+    ///
+    /// The gist lands with a cycle's RESULT record; the next cycle's
+    /// `started` record arrives moments later and moves `activity` to
+    /// "thinking (cycle N+1)" — so a gist rendered without this
+    /// provenance reads as the CURRENT cycle's intent while being the
+    /// PREVIOUS cycle's words (operator report 2026-08-21: cycle 2
+    /// quoting cycle 1's opening line).
+    ///
+    /// The RUN half matters as much as the number: `cycles` counts per
+    /// run while `cycle` is a MAX across runs, so in any tree where two
+    /// runs cycle — delegate children, and goal loops, which start a
+    /// fresh cycling subrun per iteration — comparing a per-run number
+    /// against the max attributes one run's words to another's cycle
+    /// (adversary finding P1, 2026-08-21). `cycle_gist` compares like
+    /// with like or says nothing.
+    cycle_preview_of: u32,
+    cycle_preview_run: String,
     /// The newest turn's one-line outcome ("completed · 9m14s · …") —
     /// the idle strip renders `last run: …` from it so "did it finish?"
     /// is answered from fixed chrome too, not only at the transcript
@@ -481,6 +749,16 @@ pub struct Fold {
     /// Lane B verified the incident's root held the words the artifact
     /// fetch lost to one transport blip).
     unresolved_offload: Option<String>,
+}
+
+/// The attributed form of the newest reasoning gist — see
+/// [`Fold::cycle_gist`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CycleGist {
+    /// The live cycle's OWN words.
+    Own(String),
+    /// The newest words from the same cycling run, from an earlier cycle.
+    Last(String),
 }
 
 impl Fold {
@@ -515,6 +793,8 @@ impl Fold {
         // elapsed lives in the store — this one survives phase flips).
         self.run_started_at = Some(std::time::Instant::now());
         self.cycle_preview.clear();
+        self.cycle_preview_of = 0;
+        self.cycle_preview_run.clear();
         self.session.runs += 1;
         self.pending_wait = None;
         // A prior turn's unresolved answer card is history — the new
@@ -641,6 +921,43 @@ impl Fold {
             out.push(("assistant".to_string(), a));
         }
         out
+    }
+
+    /// What the activity strip may honestly say about the model's words
+    /// beside "thinking (cycle N)".
+    ///
+    /// The ledger carries a cycle's text only in its RESULT record, so
+    /// while a cycle is in flight the newest gist the client holds is an
+    /// EARLIER one. It is still worth showing — it is what the lane just
+    /// decided — but it has to say whose words it is:
+    ///
+    /// - `Own` — the live cycle's own words (its result landed and no
+    ///   later cycle has started): the em-dash reading.
+    /// - `Last` — the newest words from the SAME cycling run, from an
+    ///   earlier cycle. Deliberately NUMBERLESS: `cycles` counts per run
+    ///   while `cycle` is a max across runs, so any number printed here
+    ///   would be in a different namespace from the "(cycle N)" beside
+    ///   it. "last" is true in both.
+    /// - `None` — nothing attributable: no gist, or a gist from a
+    ///   DIFFERENT run than the one now cycling (a delegate child's
+    ///   words are not this lane's intent).
+    pub fn cycle_gist(&self) -> Option<CycleGist> {
+        if self.cycle_preview.is_empty() || self.cycle_preview_run.is_empty() {
+            return None;
+        }
+        if self.cycle_preview_run != self.steer_run_id {
+            return None;
+        }
+        let live = *self.cycles.get(&self.steer_run_id).unwrap_or(&0);
+        if self.cycle_preview_of == live {
+            Some(CycleGist::Own(self.cycle_preview.clone()))
+        } else if self.cycle_preview_of < live {
+            Some(CycleGist::Last(self.cycle_preview.clone()))
+        } else {
+            // A gist ahead of the live count: unreachable through the
+            // fold's own writes, and not something to guess about.
+            None
+        }
     }
 
     /// The run currently emitting reasoning cycles — `None` until the
@@ -906,13 +1223,21 @@ impl Fold {
                     },
                     CYCLE_PREVIEW_MAX,
                 );
-                if !gist.is_empty() {
+                // Only the CYCLING lane's words are kept. A result
+                // from another run (a delegate child, or a `completed`
+                // whose `started` never folded in a partial replay)
+                // would otherwise clobber the slot and blank the strip
+                // — or worse, be rendered as this lane's intent
+                // (adversary finding P1, 2026-08-21).
+                if !gist.is_empty() && rec_run == self.steer_run_id {
                     self.cycle_preview = gist;
+                    self.cycle_preview_of = n.max(1);
+                    self.cycle_preview_run = rec_run.clone();
                 }
                 self.push_item(Item::Thinking {
                     iteration: n.max(1),
-                    content: bounded(&cycle.content, TEXT_BLOCK_MAX),
-                    reasoning: bounded(&cycle.reasoning, TEXT_BLOCK_MAX),
+                    content: cycle.content.clone(),
+                    reasoning: cycle.reasoning.clone(),
                     call: CallCost::from_record(rec),
                 });
             }
@@ -936,7 +1261,14 @@ impl Fold {
                 && !self.steer_run_id.is_empty()
                 && rec_run == self.steer_run_id);
         if let Some(usage) = protocol::usage_from_record(rec) {
-            self.fold_usage(usage, telemetry_lane);
+            // The call's own duration rides along: /cache reports model
+            // time and throughput, and the only place the wall clock for
+            // one call exists is the record that carried its usage.
+            self.fold_usage(
+                usage,
+                telemetry_lane,
+                protocol::gen_time_ms_from_record(rec),
+            );
         }
         if telemetry_lane {
             if let Some(model) = protocol::model_from_record(rec) {
@@ -1037,14 +1369,12 @@ impl Fold {
                     };
                     if !text.is_empty() {
                         match level.as_str() {
-                            "error" => self.push_item(Item::Error {
-                                text: bounded(&text, TEXT_BLOCK_MAX),
-                            }),
+                            "error" => self.push_item(Item::Error { text }),
                             "warning" | "warn" => self.push_item(Item::Info {
-                                text: bounded(&format!("warning: {text}"), TEXT_BLOCK_MAX),
+                                text: format!("warning: {text}"),
                             }),
                             _ => self.push_item(Item::Assistant {
-                                text: bounded(&text, TEXT_BLOCK_MAX),
+                                text,
                                 final_answer: false,
                             }),
                         }
@@ -1184,11 +1514,9 @@ impl Fold {
                 .to_lowercase();
             if !msg.is_empty() {
                 match level.as_str() {
-                    "error" => self.push_item(Item::Error {
-                        text: bounded(&msg, TEXT_BLOCK_MAX),
-                    }),
+                    "error" => self.push_item(Item::Error { text: msg.clone() }),
                     "warning" | "warn" => self.push_item(Item::Info {
-                        text: bounded(&format!("warning: {msg}"), TEXT_BLOCK_MAX),
+                        text: format!("warning: {msg}"),
                     }),
                     _ => {
                         // Workflow PROGRESS lines (flow's committed stable
@@ -1205,7 +1533,7 @@ impl Fold {
                             self.activity = one_line(&msg, CYCLE_PREVIEW_MAX);
                         }
                         self.push_item(Item::Assistant {
-                            text: bounded(&msg, TEXT_BLOCK_MAX),
+                            text: msg.clone(),
                             final_answer: false,
                         });
                     }
@@ -1323,7 +1651,7 @@ impl Fold {
                 // labels the card; the composer is never held hostage
                 // by the fetch).
                 let text = if !out.response.is_empty() {
-                    bounded(&out.response, TEXT_BLOCK_MAX * 4)
+                    out.response.clone()
                 } else if let Some(aid) = &out.offload_artifact {
                     offload_placeholder(aid)
                 } else {
@@ -1447,9 +1775,7 @@ impl Fold {
                 let inline = protocol::extract_flow_output(rec)
                     .map(|o| o.response)
                     .unwrap_or_default();
-                if !inline.is_empty()
-                    && self.swap_answer_card(&aid, bounded(&inline, TEXT_BLOCK_MAX * 4))
-                {
+                if !inline.is_empty() && self.swap_answer_card(&aid, inline.clone()) {
                     self.unresolved_offload = None;
                 }
             }
@@ -1457,9 +1783,7 @@ impl Fold {
 
         if status == "failed" {
             let err = protocol::error_from_record(rec);
-            self.push_item(Item::Error {
-                text: bounded(&err, TEXT_BLOCK_MAX),
-            });
+            self.push_item(Item::Error { text: err });
             if rec_run == self.root_run_id {
                 self.finished = true;
                 // `failed` was declared but never set (exec's exit code and
@@ -1594,6 +1918,18 @@ impl Fold {
         self.activity.clear();
         self.pending_wait = None;
         self.clear_llm_inflight();
+        // Restamp unfinished tool rows (adversarial review round 2,
+        // F3): once the tree is terminal, nothing will ever complete
+        // them — a row left saying "running" in scrollback is a
+        // present-tense lie. "interrupted" is the honest past tense:
+        // the run ended before the result was observed.
+        for item in self.items.iter_mut() {
+            if let Item::Tool { status, .. } = item {
+                if matches!(*status, ToolStatus::Running | ToolStatus::AwaitingApproval) {
+                    *status = ToolStatus::Interrupted;
+                }
+            }
+        }
         if !self.finished {
             match status {
                 "completed" => {}
@@ -1780,7 +2116,7 @@ impl Fold {
     pub fn resolve_offloaded_answer(&mut self, artifact_id: &str, outcome: Result<String, String>) {
         match outcome {
             Ok(t) => {
-                if self.swap_answer_card(artifact_id, bounded(&t, TEXT_BLOCK_MAX * 4))
+                if self.swap_answer_card(artifact_id, t.clone())
                     && self.unresolved_offload.as_deref() == Some(artifact_id)
                 {
                     self.unresolved_offload = None;
@@ -1792,12 +2128,36 @@ impl Fold {
         }
     }
 
-    fn fold_usage(&mut self, usage: UsageDelta, telemetry_lane: bool) {
+    fn fold_usage(&mut self, usage: UsageDelta, telemetry_lane: bool, gen_time_ms: Option<f64>) {
         self.stats.llm_calls += 1;
         self.stats.input_tokens += usage.input_tokens;
         self.stats.output_tokens += usage.output_tokens;
         self.stats.total_tokens += usage.total_tokens;
         self.stats.cached_tokens += usage.cached_tokens;
+        self.session.llm_calls += 1;
+        self.session.cached_tokens += usage.cached_tokens;
+        // "Did the cache miss?" vs "does this provider report hits at
+        // all?" — one call that reported a hit proves the provider talks,
+        // so a later zero is a real miss. Without this counter both look
+        // identical (a 0 that means nothing was said).
+        if usage.cached_tokens > 0 {
+            self.stats.cache_reported_calls += 1;
+            self.session.cache_reported_calls += 1;
+        }
+        // Denominator for every hit/reuse rate: only calls that actually
+        // reported an input count. A zero-poisoned split contributes to
+        // NEITHER side, so a ratio can never be inflated by a call the
+        // provider described in totals only.
+        if usage.input_tokens > 0 {
+            self.stats.cacheable_input_tokens += usage.input_tokens;
+            self.session.cacheable_input_tokens += usage.input_tokens;
+        }
+        let gen_ms = gen_time_ms
+            .filter(|ms| *ms > 0.0)
+            .map(|ms| ms.round() as u64)
+            .unwrap_or(0);
+        self.stats.gen_time_ms += gen_ms;
+        self.session.gen_time_ms += gen_ms;
         if telemetry_lane && usage.input_tokens > 0 {
             // The live "context used" number: the agent lane's newest call.
             // Keep the previous one first — their difference is the new-vs-carried
@@ -1821,6 +2181,41 @@ impl Fold {
             self.stats.prev_input_tokens = self.stats.last_input_tokens;
             self.stats.last_input_tokens = usage.total_tokens.saturating_sub(usage.output_tokens);
             self.stats.last_input_is_estimate = true;
+        }
+        if telemetry_lane {
+            // Latest-call facts. Set on the lane that owns "latest"
+            // everywhere else in this fold (root/agent), so /cache's
+            // newest-call block can never describe a delegate's tiny call.
+            self.stats.last_cached_tokens = usage.cached_tokens;
+            self.stats.last_output_tokens = usage.output_tokens;
+            self.stats.last_gen_time_ms = gen_ms;
+            let last = self.stats.last_input_tokens;
+            let prev = self.stats.prev_input_tokens;
+            // NEW vs CARRIED, accumulated. The per-call split (see
+            // `Stats::prev_input_tokens`) is only a snapshot; summing it
+            // is what answers "how much of everything this session sent
+            // was a reusable prefix?" — the question a prompt cache is
+            // bought to answer, and one no provider reports for you.
+            if last > 0 {
+                if prev == 0 {
+                    self.stats.new_tokens += last;
+                    self.session.new_tokens += last;
+                } else if last >= prev {
+                    self.stats.new_tokens += last - prev;
+                    self.stats.carried_tokens += prev;
+                    self.session.new_tokens += last - prev;
+                    self.session.carried_tokens += prev;
+                } else {
+                    // The context SHRANK: the prefix a cache had built is
+                    // gone, so none of this prompt is credited as carried.
+                    self.stats.context_resets += 1;
+                    self.session.context_resets += 1;
+                    self.stats.new_tokens += last;
+                    self.session.new_tokens += last;
+                }
+                self.stats.peak_input_tokens = self.stats.peak_input_tokens.max(last);
+                self.session.peak_input_tokens = self.session.peak_input_tokens.max(last);
+            }
         }
         self.session.input_tokens += usage.input_tokens;
         self.session.output_tokens += usage.output_tokens;
@@ -1896,12 +2291,18 @@ impl Fold {
                     name: n,
                     status,
                     args_preview: ap,
+                    args_full: af,
                     ..
                 } = item
                 {
                     if n == name && *status == ToolStatus::AwaitingApproval {
                         *status = ToolStatus::Running;
-                        *ap = value_preview(args, ARGS_PREVIEW_MAX);
+                        // BOTH copies move together (adversarial review
+                        // 2026-08-20, F2): updating only the hint left
+                        // `/details` showing the PRE-rewrite arguments —
+                        // the full view was less truthful than the summary.
+                        *ap = tool_args_preview(args, ARGS_PREVIEW_MAX);
+                        *af = tool_args_full(args);
                         return;
                     }
                 }
@@ -1910,9 +2311,10 @@ impl Fold {
         self.push_item(Item::Tool {
             key,
             name: name.to_string(),
-            args_preview: value_preview(args, ARGS_PREVIEW_MAX),
+            args_preview: tool_args_preview(args, ARGS_PREVIEW_MAX),
+            args_full: tool_args_full(args),
             status: ToolStatus::Running,
-            result_preview: String::new(),
+            result: String::new(),
             error: String::new(),
         });
     }
@@ -1930,7 +2332,7 @@ impl Fold {
         // the ledger carries a `$artifact` ref — rendering the raw ref
         // JSON reads as garbage (and a ref-bearing preview later riding
         // context is the 2026-07-23 instruction-kit class). Name it.
-        let result_preview = match view.output.as_ref().and_then(|o| {
+        let result = match view.output.as_ref().and_then(|o| {
             o.get("$artifact")
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_string)
@@ -1939,7 +2341,34 @@ impl Fold {
                 "(large output stored as artifact {}…)",
                 &aid[..aid.len().min(8)]
             ),
-            None => value_block(view.output.as_ref(), RESULT_PREVIEW_MAX),
+            // Relevance (adversarial design review, 2026-08-19): a
+            // result object whose runtime envelope carries a human
+            // `rendered` string IS the payload — it LEADS, ahead of the
+            // transport JSON around it ("error": null, "platform":
+            // "Darwin"). But leading is not the same as dropping: the
+            // remaining fields used to vanish here with no notice
+            // (adversarial review 2026-08-20, F5), so a tool reporting
+            // `rendered` plus `stdout`/`exit_code` lost everything but
+            // the summary line. They now follow, labeled, and the view
+            // shows them in details like any other body.
+            None => match view
+                .output
+                .as_ref()
+                .and_then(|o| o.get("rendered"))
+                .and_then(Value::as_str)
+                .filter(|r| !r.trim().is_empty())
+            {
+                Some(rendered) => {
+                    let mut body = rendered.to_string();
+                    let rest = envelope_rest(view.output.as_ref());
+                    if !rest.is_empty() {
+                        body.push_str("\n— envelope —\n");
+                        body.push_str(&rest);
+                    }
+                    body
+                }
+                None => value_block(view.output.as_ref()),
+            },
         };
         let status = if !view.error.is_empty() || view.success == Some(false) {
             ToolStatus::Failed
@@ -1957,15 +2386,15 @@ impl Fold {
             if let Item::Tool {
                 key: k,
                 status: st,
-                result_preview: rp,
+                result: rp,
                 error,
                 ..
             } = item
             {
                 if *k == key {
                     *st = status;
-                    *rp = result_preview;
-                    *error = one_line(&view.error, ARGS_PREVIEW_MAX);
+                    *rp = result;
+                    *error = view.error.clone();
                     return;
                 }
             }
@@ -1977,7 +2406,7 @@ impl Fold {
                 if let Item::Tool {
                     name,
                     status: st,
-                    result_preview: rp,
+                    result: rp,
                     error,
                     ..
                 } = item
@@ -1986,8 +2415,8 @@ impl Fold {
                         && matches!(*st, ToolStatus::Running | ToolStatus::AwaitingApproval)
                     {
                         *st = status;
-                        *rp = result_preview;
-                        *error = one_line(&view.error, ARGS_PREVIEW_MAX);
+                        *rp = result;
+                        *error = view.error.clone();
                         return;
                     }
                 }
@@ -2000,10 +2429,11 @@ impl Fold {
         self.push_item(Item::Tool {
             key,
             name: view.name,
-            args_preview: value_preview(view.arguments.as_ref(), ARGS_PREVIEW_MAX),
+            args_preview: tool_args_preview(view.arguments.as_ref(), ARGS_PREVIEW_MAX),
+            args_full: tool_args_full(view.arguments.as_ref()),
             status,
-            result_preview,
-            error: one_line(&view.error, ARGS_PREVIEW_MAX),
+            result,
+            error: view.error.clone(),
         });
     }
 
@@ -2030,7 +2460,7 @@ impl Fold {
             for (i, tc) in tool_calls.iter().enumerate() {
                 if let Some(view) = protocol::tool_call_view(tc) {
                     let key = Self::tool_key(run_id, "approval", i, &view.call_id);
-                    let args_preview = value_preview(view.arguments.as_ref(), ARGS_PREVIEW_MAX);
+                    let args_preview = tool_args_preview(view.arguments.as_ref(), ARGS_PREVIEW_MAX);
                     // `tool_key` is the single authority for card identity. This site
                     // used to hand-roll `call:{id}` to find the card `upsert_tool_started`
                     // had made — which only worked while both spellings were unscoped.
@@ -2042,6 +2472,7 @@ impl Fold {
                                 key: k,
                                 status,
                                 args_preview: ap,
+                                args_full: af,
                                 ..
                             } = item
                             {
@@ -2051,7 +2482,12 @@ impl Fold {
                                     }
                                     // The wait carries the FINAL (rewritten)
                                     // arguments — the truth of what will run.
+                                    // Both copies move (F2): this is the
+                                    // APPROVAL path, so a stale full view
+                                    // would show the operator a command
+                                    // that is not the one about to run.
                                     *ap = args_preview.clone();
+                                    *af = tool_args_full(view.arguments.as_ref());
                                     flipped = true;
                                     break;
                                 }
@@ -2065,8 +2501,9 @@ impl Fold {
                         key,
                         name: view.name,
                         args_preview,
+                        args_full: tool_args_full(view.arguments.as_ref()),
                         status: ToolStatus::AwaitingApproval,
-                        result_preview: String::new(),
+                        result: String::new(),
                         error: String::new(),
                     });
                 }
@@ -2145,9 +2582,9 @@ mod tests {
             .filter_map(|i| match i {
                 Item::Tool {
                     args_preview,
-                    result_preview,
+                    result,
                     ..
-                } => Some((args_preview.clone(), result_preview.clone())),
+                } => Some((args_preview.clone(), result.clone())),
                 _ => None,
             })
             .collect();
@@ -2315,17 +2752,103 @@ mod tests {
         );
         assert_eq!(fold.items.len(), 1);
         match &fold.items[0] {
-            Item::Tool {
-                status,
-                result_preview,
-                ..
-            } => {
+            Item::Tool { status, result, .. } => {
                 assert_eq!(*status, ToolStatus::Ok);
-                assert!(result_preview.contains("data"));
+                assert!(result.contains("data"));
             }
             other => panic!("unexpected {other:?}"),
         }
         assert_eq!(fold.stats.tool_calls, 1);
+    }
+
+    /// The approval card must show the arguments that will ACTUALLY run.
+    ///
+    /// The runtime may REWRITE a call before asking for approval, and the
+    /// wait record carries the final form. The folded hint was updated on
+    /// that flip while the full copy kept the original (adversarial
+    /// review 2026-08-20, F2) — so `/details`, the view an operator opens
+    /// to decide, showed a command that was not the one about to run.
+    /// Both copies move together.
+    #[test]
+    fn a_rewritten_call_updates_both_the_hint_and_the_full_arguments() {
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "node_id": "tools", "status": "started",
+                "effect": {"type": "tool_calls", "payload": {"tool_calls": [
+                    {"id": "c1", "name": "execute_command",
+                     "arguments": {"command": "rm -rf /tmp/ORIGINAL"}}]}}}),
+        );
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "node_id": "act", "status": "waiting",
+                "result": {"wait": {"reason": "job", "wait_key": "tool_approval:1",
+                    "details": {"mode": "approval_required",
+                        "tool_calls": [{"name": "execute_command", "call_id": "c1",
+                            "arguments": {"command": "rm -rf /tmp/REWRITTEN"}}]}}}}),
+        );
+        let (hint, full) = fold
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Tool {
+                    args_preview,
+                    args_full,
+                    ..
+                } => Some((args_preview.clone(), args_full.clone())),
+                _ => None,
+            })
+            .expect("the tool card");
+        assert!(
+            hint.contains("REWRITTEN") && !hint.contains("ORIGINAL"),
+            "the folded hint carries the rewritten call: {hint}"
+        );
+        assert!(
+            full.contains("REWRITTEN") && !full.contains("ORIGINAL"),
+            "the DETAILS copy carries the rewritten call too: {full}"
+        );
+
+        // Same law on the id-less flip: an approval card matched by NAME
+        // when a started record carries no call id.
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "node_id": "act", "status": "waiting",
+                "result": {"wait": {"reason": "job", "wait_key": "tool_approval:2",
+                    "details": {"mode": "approval_required",
+                        "tool_calls": [{"name": "execute_command",
+                            "arguments": {"command": "rm -rf /tmp/ORIGINAL"}}]}}}}),
+        );
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "node_id": "tools", "status": "started",
+                "effect": {"type": "tool_calls", "payload": {"tool_calls": [
+                    {"name": "execute_command",
+                     "arguments": {"command": "rm -rf /tmp/REWRITTEN"}}]}}}),
+        );
+        let (hint, full) = fold
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Tool {
+                    args_preview,
+                    args_full,
+                    status: ToolStatus::Running,
+                    ..
+                } => Some((args_preview.clone(), args_full.clone())),
+                _ => None,
+            })
+            .expect("the flipped tool card");
+        assert!(
+            hint.contains("REWRITTEN") && !hint.contains("ORIGINAL"),
+            "id-less flip updates the hint: {hint}"
+        );
+        assert!(
+            full.contains("REWRITTEN") && !full.contains("ORIGINAL"),
+            "id-less flip updates the DETAILS copy: {full}"
+        );
     }
 
     #[test]
@@ -2745,16 +3268,188 @@ mod tests {
             "effect": {"type": "emit_event", "payload": {"name": "abstract.tool_result",
                 "payload": [{"tool": "web_search", "call_id": "e1", "success": true, "output": "results…"}]}}}));
         match fold.items.last().unwrap() {
-            Item::Tool {
-                status,
-                result_preview,
-                ..
-            } => {
+            Item::Tool { status, result, .. } => {
                 assert_eq!(*status, ToolStatus::Ok);
-                assert!(result_preview.contains("results"));
+                assert!(result.contains("results"));
             }
             other => panic!("unexpected {other:?}"),
         }
+    }
+
+    /// The fold is not a preview store (operator directive 2026-08-20).
+    /// Tool output, tool errors, the model's words and its reasoning all
+    /// land WHOLE, so `/details` has something to show — the old
+    /// ingestion bounds (700 chars of result, 200 of error, 8k of a
+    /// thinking block) destroyed the text before any view could decide.
+    #[test]
+    fn ingestion_keeps_every_body_whole() {
+        let long_out = format!("HEAD {} TAIL", "z".repeat(50_000));
+        let long_err = format!("EHEAD {} ETAIL", "e".repeat(5_000));
+        let long_arg = format!("cargo test {} --nocapture-TAIL", "x".repeat(5_000));
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "status": "completed",
+            "effect": {"type": "emit_event", "payload": {"name": "abstract.tool_result",
+                "payload": [{"tool": "execute_command", "call_id": "e1", "success": true,
+                             "arguments": {"command": long_arg},
+                             "output": long_out}]}}}),
+        );
+        match fold.items.last().unwrap() {
+            Item::Tool {
+                args_preview,
+                args_full,
+                result,
+                ..
+            } => {
+                assert!(
+                    result.contains("HEAD") && result.contains("TAIL"),
+                    "the tool result lands whole (len {})",
+                    result.len()
+                );
+                assert!(
+                    !result.contains("#TRUNCATION"),
+                    "nothing is shortened on the way into the fold"
+                );
+                assert!(
+                    args_full.contains("--nocapture-TAIL"),
+                    "the arguments land whole for the details card"
+                );
+                // The folded row still gets its bounded one-line hint —
+                // that view has one row, and it says so.
+                assert!(
+                    args_preview.chars().count() <= ARGS_PREVIEW_MAX + 1,
+                    "the FOLDED hint stays bounded: {args_preview}"
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        // The `rendered` envelope path: the payload leads WHOLE, and its
+        // content siblings survive (adversarial review F5 — `stdout` and
+        // friends used to be dropped with no notice), while the transport
+        // keys stay out (the 2026-08-19 relevance ruling).
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "status": "completed",
+            "effect": {"type": "emit_event", "payload": {"name": "abstract.tool_result",
+                "payload": [{"tool": "execute_command", "call_id": "e3", "success": true,
+                             "output": {"rendered": format!("RHEAD {} RTAIL", "r".repeat(50_000)),
+                                        "stdout": "STDOUT-KEPT",
+                                        "exit_code": 0,
+                                        "platform": "Darwin",
+                                        "duration_s": 0.09,
+                                        "error": null}}]}}}),
+        );
+        match fold.items.last().unwrap() {
+            Item::Tool { result, .. } => {
+                assert!(
+                    result.contains("RHEAD") && result.contains("RTAIL"),
+                    "the rendered payload lands whole (len {})",
+                    result.len()
+                );
+                assert!(
+                    result.contains("STDOUT-KEPT") && result.contains("exit_code"),
+                    "content siblings of `rendered` survive: {result}"
+                );
+                assert!(
+                    !result.contains("platform") && !result.contains("duration_s"),
+                    "transport keys stay out of the card: {result}"
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+
+        // Errors: whole, newlines and all (the folded row one-lines at render).
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "status": "completed",
+            "effect": {"type": "emit_event", "payload": {"name": "abstract.tool_result",
+                "payload": [{"tool": "broken", "call_id": "e2", "success": false,
+                             "error": long_err}]}}}),
+        );
+        match fold.items.last().unwrap() {
+            Item::Tool { error, .. } => assert!(
+                error.contains("EHEAD") && error.contains("ETAIL"),
+                "the tool error lands whole (len {})",
+                error.len()
+            ),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// The other five bodies claim-1 frees: thinking, its reasoning
+    /// channel, an assistant message, an error notice and a warning
+    /// notice. The tool-body test above cannot see these — the
+    /// adversarial review (F9) proved a re-introduced 80-char cap on
+    /// `Item::Thinking` left the whole suite green.
+    #[test]
+    fn ingestion_keeps_thinking_answers_and_notices_whole() {
+        let big = |head: &str, tail: &str| format!("{head} {} {tail}", "w ".repeat(30_000));
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        // A cycle: content + the reasoning channel, both oversized.
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "node_id": "reason", "status": "started",
+                "effect": {"type": "llm_call", "payload": {}}}),
+        );
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "node_id": "reason", "status": "completed",
+            "effect": {"type": "llm_call", "payload": {}},
+            "result": {"content": big("CHEAD", "CTAIL"), "reasoning": big("RHEAD", "RTAIL")}}),
+        );
+        let thinking = fold
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Thinking {
+                    content, reasoning, ..
+                } => Some((content.clone(), reasoning.clone())),
+                _ => None,
+            })
+            .expect("a thinking card");
+        assert!(
+            thinking.0.contains("CHEAD") && thinking.0.contains("CTAIL"),
+            "the model's words land whole (len {})",
+            thinking.0.len()
+        );
+        assert!(
+            thinking.1.contains("RHEAD") && thinking.1.contains("RTAIL"),
+            "the reasoning channel lands whole (len {})",
+            thinking.1.len()
+        );
+
+        // Message events: assistant text, an error notice, a warning.
+        let msg = |level: &str, text: String| {
+            json!({"run_id": "root", "status": "completed",
+                "effect": {"type": "emit_event", "payload": {"name": "abstract.message",
+                    "payload": {"text": text, "level": level}}}})
+        };
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply("root", &msg("info", big("AHEAD", "ATAIL")));
+        fold.apply("root", &msg("error", big("EHEAD", "ETAIL")));
+        fold.apply("root", &msg("warning", big("WHEAD", "WTAIL")));
+        let mut seen = (false, false, false);
+        for item in &fold.items {
+            match item {
+                Item::Assistant { text, .. } if text.contains("AHEAD") => {
+                    seen.0 = text.contains("ATAIL");
+                }
+                Item::Error { text } if text.contains("EHEAD") => seen.1 = text.contains("ETAIL"),
+                Item::Info { text } if text.contains("WHEAD") => seen.2 = text.contains("WTAIL"),
+                _ => {}
+            }
+        }
+        assert!(seen.0, "an assistant message lands whole");
+        assert!(seen.1, "an error notice lands whole");
+        assert!(seen.2, "a warning notice lands whole");
     }
 
     #[test]
@@ -3847,12 +4542,12 @@ mod tests {
                     }
                     Item::Tool {
                         args_preview,
-                        result_preview,
+                        result,
                         error,
                         ..
                     } => {
                         out.push(args_preview.clone());
-                        out.push(result_preview.clone());
+                        out.push(result.clone());
                         out.push(error.clone());
                     }
                     Item::Image { label, .. } => out.push(label.clone()),
@@ -3865,16 +4560,11 @@ mod tests {
             out
         }
 
-        // Direct text builders.
-        let marker = bounded(&"x".repeat(50), 10);
-        assert!(
-            marker.contains("[#TRUNCATION: shortened for display]"),
-            "bounded marker names the fact only: {marker}"
-        );
+        // Direct text builders. (`bounded` is gone: the fold no longer
+        // shortens anything on the way in — 2026-08-20.)
         sweep(
             "builders",
             &[
-                marker,
                 offload_failure_label("HTTP 500"),
                 offload_placeholder("abc123"),
             ],
@@ -4031,6 +4721,143 @@ mod tests {
         assert_eq!(fold.stats.input_tokens, 38_227);
         assert_eq!(fold.stats.output_tokens, 17_566);
         assert_eq!(fold.stats.llm_calls, 3);
+    }
+
+    /// Session-scope cache accounting: per-run `Stats` reset at
+    /// `begin_run`, so the only thing that can answer "how is the cache
+    /// doing overall?" is `SessionStats`. It must survive the run
+    /// boundary, and the derived new/carried split must be accumulated
+    /// per call rather than re-derived from the surviving endpoints
+    /// (which would silently drop every intermediate cycle).
+    #[test]
+    fn session_cache_metrics_accumulate_across_runs() {
+        let call = |input: u64, output: u64, cached: u64, gen_ms: f64| {
+            json!({"run_id": "root", "node_id": "reason", "status": "completed",
+                   "effect": {"type": "llm_call", "payload": {}},
+                   "result": {"content": "…", "gen_time": gen_ms, "usage": {
+                       "input_tokens": input, "output_tokens": output,
+                       "total_tokens": input + output,
+                       "prompt_tokens_details": {"cached_tokens": cached}}}})
+        };
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply("root", &call(1_000, 100, 0, 2_000.0));
+        fold.apply("root", &call(3_000, 100, 900, 4_000.0));
+        // Run 1: 1000 new (first call) + 2000 new / 1000 carried.
+        assert_eq!(fold.stats.new_tokens, 3_000);
+        assert_eq!(fold.stats.carried_tokens, 1_000);
+        assert_eq!(fold.stats.cached_tokens, 900);
+        assert_eq!(fold.stats.cache_reported_calls, 1, "one call reported hits");
+        assert_eq!(fold.stats.cacheable_input_tokens, 4_000);
+        assert_eq!(fold.stats.peak_input_tokens, 3_000);
+        assert_eq!(fold.stats.gen_time_ms, 6_000);
+        assert_eq!(
+            fold.stats.last_cached_tokens, 900,
+            "newest call, not the total"
+        );
+        assert_eq!(fold.stats.last_output_tokens, 100);
+        assert_eq!(fold.stats.last_gen_time_ms, 4_000);
+
+        // A second run wipes the per-run stats and keeps the session's.
+        fold.begin_run("root2");
+        assert_eq!(fold.stats.new_tokens, 0, "per-run stats reset");
+        assert_eq!(fold.stats.cached_tokens, 0);
+        fold.apply(
+            "root2",
+            &json!({"run_id": "root2", "node_id": "reason", "status": "completed",
+                    "effect": {"type": "llm_call", "payload": {}},
+                    "result": {"content": "…", "usage": {
+                        "input_tokens": 5_000, "output_tokens": 200,
+                        "total_tokens": 5_200}}}),
+        );
+        assert_eq!(fold.session.runs, 2);
+        assert_eq!(fold.session.llm_calls, 3);
+        assert_eq!(
+            fold.session.cached_tokens, 900,
+            "session cache total survives"
+        );
+        assert_eq!(fold.session.cache_reported_calls, 1);
+        assert_eq!(fold.session.cacheable_input_tokens, 9_000);
+        assert_eq!(
+            fold.session.new_tokens, 8_000,
+            "run 2's first call is all new"
+        );
+        assert_eq!(fold.session.carried_tokens, 1_000);
+        assert_eq!(fold.session.peak_input_tokens, 5_000);
+        assert_eq!(
+            fold.session.gen_time_ms, 6_000,
+            "unreported gen_time adds 0"
+        );
+        assert_eq!(fold.session.context_resets, 0);
+    }
+
+    /// A shrinking context breaks the cacheable prefix: nothing is
+    /// credited as carried, and the reset is COUNTED — a silent shrink
+    /// would leave the reuse rate looking healthy while every call after
+    /// it re-evaluated from scratch.
+    #[test]
+    fn a_context_shrink_counts_as_a_reset_and_credits_no_carry() {
+        let call = |input: u64| {
+            json!({"run_id": "root", "node_id": "reason", "status": "completed",
+                   "effect": {"type": "llm_call", "payload": {}},
+                   "result": {"content": "…", "usage": {
+                       "input_tokens": input, "output_tokens": 10,
+                       "total_tokens": input + 10}}})
+        };
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply("root", &call(10_000));
+        fold.apply("root", &call(30_000));
+        fold.apply("root", &call(4_000)); // compaction
+        assert_eq!(fold.stats.context_resets, 1);
+        assert_eq!(fold.session.context_resets, 1);
+        assert_eq!(
+            fold.stats.carried_tokens, 10_000,
+            "only the growing call carried"
+        );
+        assert_eq!(fold.stats.new_tokens, 10_000 + 20_000 + 4_000);
+        assert_eq!(fold.stats.peak_input_tokens, 30_000);
+    }
+
+    /// A DELEGATE child's call must not relabel the latest-call block —
+    /// the same lane rule the ctx chip and served-model line already
+    /// follow. Cumulative totals still fold from every followed run.
+    #[test]
+    fn delegate_calls_never_relabel_the_latest_call_block() {
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "node_id": "reason", "status": "completed",
+                    "effect": {"type": "llm_call", "payload": {}},
+                    "result": {"content": "…", "usage": {
+                        "input_tokens": 20_000, "output_tokens": 500,
+                        "total_tokens": 20_500,
+                        "prompt_tokens_details": {"cached_tokens": 8_000}}}}),
+        );
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "status": "waiting",
+                "result": {"wait": {"reason": "subworkflow", "wait_key": "subworkflow:kid",
+                    "details": {"sub_run_id": "kid"}}}}),
+        );
+        fold.apply(
+            "kid",
+            &json!({"run_id": "kid", "node_id": "reason", "status": "completed",
+                    "effect": {"type": "llm_call", "payload": {}},
+                    "result": {"content": "…", "usage": {
+                        "input_tokens": 300, "output_tokens": 20, "total_tokens": 320}}}),
+        );
+        assert_eq!(
+            fold.stats.last_input_tokens, 20_000,
+            "delegate never relabels"
+        );
+        assert_eq!(fold.stats.last_cached_tokens, 8_000);
+        assert_eq!(fold.stats.last_output_tokens, 500);
+        // …but the tree's real spend still counts.
+        assert_eq!(fold.stats.input_tokens, 20_300);
+        assert_eq!(fold.session.llm_calls, 2);
+        assert_eq!(fold.stats.cacheable_input_tokens, 20_300);
     }
 
     #[test]
@@ -4370,5 +5197,174 @@ mod tests {
             last_content(&fold),
             Item::Assistant { text, final_answer: true } if text == "root's answer"
         ));
+    }
+
+    /// The humane args preview (adversarial design review, 2026-08-19):
+    /// the identifying value leads bare, the rest follow as k=v, long
+    /// absolute paths keep their basename. The ledger keeps the
+    /// verbatim JSON; this is the row's answer to "which call was
+    /// this".
+    #[test]
+    fn tool_args_preview_leads_with_the_identifying_value() {
+        let args = serde_json::json!({
+            "end_line": "1187",
+            "file_path": "/Users/albou/tmp/abstractframework/todel2/js/game.js",
+            "start_line": "720",
+        });
+        let p = tool_args_preview(Some(&args), 200);
+        assert!(
+            p.starts_with("…") && p.contains("/js/game.js"),
+            "file_path leads, tail-compacted at a '/' boundary: {p}"
+        );
+        assert!(
+            p.contains("end_line=1187") && p.contains("start_line=720"),
+            "the remaining args follow as k=v: {p}"
+        );
+        // Semantic order (round-2 F1): ranges read forward, diffs
+        // original-first — alphabetical printed them backwards.
+        assert!(
+            p.find("start_line").unwrap() < p.find("end_line").unwrap(),
+            "start before end: {p}"
+        );
+        let edit = serde_json::json!({
+            "file_path": "js/game.js",
+            "new": "b",
+            "old": "a",
+        });
+        let p = tool_args_preview(Some(&edit), 200);
+        assert!(
+            p.find("old=a").unwrap() < p.find("new=b").unwrap(),
+            "a diff reads original-then-replacement: {p}"
+        );
+        assert!(
+            !p.contains('{') && !p.contains('"'),
+            "no JSON syntax in the preview: {p}"
+        );
+
+        // `command` outranks everything and renders bare.
+        let args = serde_json::json!({"command": "node smoke.js --level 3"});
+        assert_eq!(
+            tool_args_preview(Some(&args), 200),
+            "node smoke.js --level 3"
+        );
+
+        // Non-object shapes render as plain one-line previews.
+        assert_eq!(tool_args_preview(None, 200), "");
+        assert_eq!(tool_args_preview(Some(&serde_json::Value::Null), 200), "");
+        let s = serde_json::Value::String("raw string args".into());
+        assert_eq!(tool_args_preview(Some(&s), 200), "raw string args");
+
+        // Nested values stay honest as compact JSON, never dropped.
+        let args = serde_json::json!({"filters": {"lang": "rs"}, "query": "fold"});
+        let p = tool_args_preview(Some(&args), 200);
+        assert!(
+            p.starts_with("fold") && p.contains("filters="),
+            "query leads; the nested arg is named: {p}"
+        );
+    }
+
+    /// A result object with a human `rendered` string shows THAT, not
+    /// the transport envelope around it (adversarial design review,
+    /// 2026-08-19) — and a failure in the envelope still fails the
+    /// card through `success`/`error`, so no failure hides behind the
+    /// payload.
+    #[test]
+    fn finish_tool_prefers_the_rendered_payload_over_the_envelope() {
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        let started = serde_json::json!({
+            "run_id": "root", "node_id": "tools", "status": "started",
+            "effect": {"type": "tool_calls", "payload": {"tool_calls": [
+                {"id": "c1", "name": "execute_command",
+                 "arguments": {"command": "wc -l js/game.js"}}
+            ]}},
+        });
+        fold.apply("root", &started);
+        let done = serde_json::json!({
+            "run_id": "root", "node_id": "tools", "status": "completed",
+            "effect": {"type": "tool_calls", "payload": {"tool_calls": [
+                {"id": "c1", "name": "execute_command",
+                 "arguments": {"command": "wc -l js/game.js"}}
+            ]}},
+            "result": {"results": [
+                {"call_id": "c1", "name": "execute_command", "success": true,
+                 "output": {
+                     "command": "wc -l js/game.js",
+                     "duration_s": 0.09,
+                     "error": null,
+                     "platform": "Darwin",
+                     "rendered": "301 js/game.js"
+                 }}
+            ]},
+        });
+        fold.apply("root", &done);
+        let (args, result) = fold
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Tool {
+                    args_preview,
+                    result,
+                    status: ToolStatus::Ok,
+                    ..
+                } => Some((args_preview.clone(), result.clone())),
+                _ => None,
+            })
+            .expect("finished tool card");
+        assert_eq!(args, "wc -l js/game.js", "humane args preview: {args}");
+        assert_eq!(
+            result, "301 js/game.js",
+            "the rendered payload is the preview, not the envelope: {result}"
+        );
+        assert!(
+            !result.contains("platform"),
+            "no transport keys in the preview: {result}"
+        );
+    }
+
+    /// A terminal run restamps unfinished tool rows (adversarial
+    /// review round 2, F3): "running" is a present-tense claim — once
+    /// the tree is terminal nothing will ever complete the row, and
+    /// scrollback must say so ("interrupted"), not lie forever.
+    #[test]
+    fn run_terminal_restamps_unfinished_tool_rows_as_interrupted() {
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        let started = serde_json::json!({
+            "run_id": "root", "node_id": "tools", "status": "started",
+            "effect": {"type": "tool_calls", "payload": {"tool_calls": [
+                {"id": "c1", "name": "execute_command",
+                 "arguments": {"command": "node soak.js"}}
+            ]}},
+        });
+        fold.apply("root", &started);
+        assert!(fold.items.iter().any(|i| matches!(
+            i,
+            Item::Tool {
+                status: ToolStatus::Running,
+                ..
+            }
+        )));
+        fold.run_terminal("cancelled");
+        assert!(
+            fold.items.iter().any(|i| matches!(
+                i,
+                Item::Tool {
+                    status: ToolStatus::Interrupted,
+                    ..
+                }
+            )),
+            "the running row restamps to interrupted at run end"
+        );
+        assert!(
+            !fold.items.iter().any(|i| matches!(
+                i,
+                Item::Tool {
+                    status: ToolStatus::Running,
+                    ..
+                }
+            )),
+            "no present-tense rows survive a terminal run"
+        );
     }
 }

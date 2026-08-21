@@ -24,9 +24,11 @@ pub enum Command {
     /// `None` opens the picker; `Some(id)` switches directly (the old
     /// separate `/session` command folded in — one surface, 2026-07-22).
     Sessions(Option<String>),
-    /// `/details [full|fold]` — bare toggles the clean view; `full`
-    /// expands thinking cards (content + labeled reasoning channel),
-    /// `fold` returns to one-line gists (the default).
+    /// `/details [full|fold]` — bare toggles transcript verbosity:
+    /// full tool calls (args + result bodies, expanded thinking) vs.
+    /// the collapsed view (one-line tool calls with status tags,
+    /// thinking gists — the default). Thinking and every called tool
+    /// stay visible in both states.
     Details(Option<String>),
     /// `/reasoning [level]` — the effort dial for the current route
     /// (stage 3 of the model picker, opened directly); with an argument,
@@ -46,7 +48,8 @@ pub enum Command {
     /// from the gateway ledgers (boot loads only the last bloc; older
     /// history rapidly on request — the 2026-07-25 ruling).
     History(Option<String>),
-    /// `/attach [path]` — stage a file for the NEXT plain-prompt send.
+    /// `/attach [path]` — stage a file for the NEXT plain-prompt send;
+    /// `preview [n|path]` opens it (text or picture) without staging.
     /// `None` opens the pending manager (or prints usage when empty);
     /// `Some(rest)` is a path candidate (raw rest kept — paths contain
     /// spaces; `clear` resolved at dispatch, the /export precedent).
@@ -221,7 +224,7 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
     ("workspace", "workspace root, access mode, allowed paths"),
     ("skills", "attach gateway skills"),
     ("mcp", "MCP server registry"),
-    ("cache", "prompt-cache + context status"),
+    ("cache", "prompt-cache + context metrics"),
     (
         "status",
         "run + session status card (client phase vs gateway run status)",
@@ -231,10 +234,10 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
         "stream earlier session turns (boot loads the last bloc only)",
     ),
     ("sessions", "pick or set a session"),
-    ("details", "show/hide reasoning (Ctrl+D)"),
+    ("details", "expand/collapse tool + thinking detail (Ctrl+D)"),
     (
         "attach",
-        "attach a file to your next message · bare /attach manages",
+        "attach a file to your next message · bare /attach manages · preview looks inside",
     ),
     (
         "export",
@@ -332,14 +335,14 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     ("/skills", "attach gateway skills to your runs"),
     ("/mcp", "show the gateway MCP server registry"),
-    ("/cache", "prompt-cache + context status for the route"),
+    ("/cache", "prompt-cache + context metrics: route, latest call, run, session"),
     (
         "/sessions [id]",
         "pick a recent session, or switch straight to an id",
     ),
     (
         "/details [full|fold]",
-        "show/hide work detail (Ctrl+D); `full` expands thinking cards (content + reasoning), `fold` returns to one-line gists",
+        "transcript verbosity (Ctrl+D): `full` = tool args + results + expanded thinking; `fold` = one-line tool calls with status tags + thinking gists (default)",
     ),
     (
         "/reasoning [level]",
@@ -355,7 +358,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     (
         "/attach [path]",
-        "attach a file to your NEXT message (uploads at send; session uploads are permanent) — accepts ~, quotes, file:// spellings; bare /attach browses or manages pending; /attach clear discards; dropping a file onto the terminal attaches it directly (Ctrl+O undoes)",
+        "attach a file to your NEXT message (uploads at send; session uploads are permanent) — accepts ~, quotes, file:// spellings; bare /attach browses or manages pending; /attach preview [n|path] shows the file itself (text documents and PNG/JPEG pictures, staged or not); /attach clear discards; dropping a file onto the terminal attaches it directly (Ctrl+O undoes)",
     ),
     (
         "/export [fmt] [--details] [path]",

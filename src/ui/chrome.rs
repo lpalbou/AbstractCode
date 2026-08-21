@@ -534,7 +534,9 @@ pub fn activity_strip(t: &TokenSet, store: Store, spin: Signal<u64>, follow: Sig
         }
 
         let frame = spin.get();
-        let cycle_preview = store.fold.with(|f| f.cycle_preview.clone());
+        // ATTRIBUTED by the fold (`cycle_gist`): whose words these are is
+        // a question about ledger provenance, not about chrome.
+        let cycle_gist = store.fold.with(|f| f.cycle_gist());
         let (activity, cycle, stats) = store.fold.with(|f| {
             // Stale-wait truth filter (lane-3 conformance, 2026-07-23):
             // the two wait-claiming activity strings are written ONLY by
@@ -578,10 +580,23 @@ pub fn activity_strip(t: &TokenSet, store: Store, spin: Signal<u64>, follow: Sig
             // attempting in the model's own words — only while the
             // activity IS a thinking label (tool transitions replace
             // the activity, hiding a stale gist for free).
-            let base = if base.starts_with("thinking (cycle") && !cycle_preview.is_empty() {
-                format!("{base} — “{cycle_preview}”")
-            } else {
-                base
+            //
+            // ATTRIBUTED (operator report 2026-08-21). The gateway's
+            // ledger carries a cycle's words only in its RESULT record,
+            // so while cycle N is in flight the newest gist we hold is
+            // an EARLIER cycle's. Rendering it with an em-dash read as
+            // "this is what cycle N is thinking" — the strip said
+            // "thinking (cycle 2) — “I'll inspect the project…”" while
+            // cycle 2 was actually writing "I found an empty
+            // workspace…". The words are still worth showing; they just
+            // have to say whose they are, and `Fold::cycle_gist` is the
+            // one place that decides.
+            let base = match (base.starts_with("thinking (cycle"), &cycle_gist) {
+                (true, Some(crate::transcript::CycleGist::Own(g))) => format!("{base} — “{g}”"),
+                (true, Some(crate::transcript::CycleGist::Last(g))) => {
+                    format!("{base} · last: “{g}”")
+                }
+                _ => base,
             };
             let mut parts = vec![base];
             // The active /goal names itself on the strip (the composer is
@@ -922,10 +937,29 @@ pub fn composer(
             })
             .build()
     };
+    // `shrink(0.0)` on the composer ROW (2026-08-20): the TextArea
+    // itself already refuses to shrink, but this ancestor did not, so
+    // any overflow pressure in the chrome column bought a row back from
+    // the composer. The engine then drew a 4-row-tall widget inside a
+    // 3-row rect: the widget's own scroll window (computed against
+    // `max_rows`, not the drawn height) kept the caret on row 4, which
+    // the clip ate — typing past the visible rows scrolled the text out
+    // from under the caret. A composer that cannot be crushed cannot
+    // desync. The pressure itself is gone at its source (the transcript
+    // pane's flex basis, see `transcript_view::pane`); this is the guard
+    // the engine's own zero-collapse diagnostic prescribes for a row
+    // that must never yield, so the next pressure source cannot make
+    // typing invisible again.
+    //
+    // The shrink stays on the inner column: that child sits on the
+    // Block's ROW main axis, where shrink is WIDTH — it is what pulls
+    // the TextArea's `width: 100%` basis back to leave the 2-cell `❯`
+    // gutter room (shrink 0 there overflows the right `▌` stroke off
+    // the screen).
     abstracttui::widgets::Block::new()
         .border(abstracttui::widgets::BorderKind::None)
         .fill(t.surface)
-        .layout(LayoutStyle::row())
+        .layout(LayoutStyle::row().shrink(0.0))
         .child(glyph)
         .child(
             Element::new()

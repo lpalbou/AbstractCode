@@ -261,6 +261,15 @@ pub enum Cmd {
         run_id: String,
         artifact_id: String,
     },
+    /// Load a LOCAL file's preview body (`/attach preview`, `p` in the
+    /// attachment manager). Read + decode happen on a dedicated thread,
+    /// never on this loop: a 100 MP JPEG decode behind a live Start
+    /// would be a visible stall. `seq` is the staleness guard — the
+    /// result applies only while it still names the open preview.
+    LoadPreview {
+        seq: u64,
+        path: String,
+    },
     /// The answer landed: stop following helper subruns (wrapper bundles can
     /// keep status-watcher subflows polling long after the agent finished).
     StopFollows,
@@ -384,6 +393,29 @@ fn workspace_preflight_note(policy_response: &Value, opts: &StartOpts) -> Option
     }
 }
 
+/// Should the preflight note be PRINTED for this run? The policy is a
+/// property of the gateway + this run's declared scope, not of the
+/// prompt: re-stating it above every single message was pure noise (the
+/// header already carries the live access mode). It is announced on the
+/// first run of a session, and again only when the sentence itself
+/// CHANGES — a policy that flips mid-session is news and must not be
+/// swallowed by the dedup. `last` is the runner-thread memo, updated in
+/// place when the note earns its line.
+fn announce_workspace_note(
+    last: &mut Option<(String, String)>,
+    session_id: &str,
+    note: &str,
+) -> bool {
+    if last
+        .as_ref()
+        .is_some_and(|(sid, prev)| sid == session_id && prev == note)
+    {
+        return false;
+    }
+    *last = Some((session_id.to_string(), note.to_string()));
+    true
+}
+
 /// Queue the FETCH effects a REHYDRATION fold produced (offloaded-answer
 /// and image fetches for restored placeholders). `FollowRun` is ignored
 /// BY CONTRACT here: rehydration decides stream membership itself from
@@ -450,6 +482,9 @@ struct Runner {
     /// earns a mismatch refusal (a saved preference degrading to the default
     /// is the interactive contract).
     requested_workflow: Option<String>,
+    /// `(session_id, note)` of the last workspace preflight note actually
+    /// printed — the dedup memo for `announce_workspace_note`.
+    last_workspace_note: Option<(String, String)>,
 }
 
 pub fn spawn(
@@ -479,6 +514,7 @@ pub fn spawn(
                     catalog_loaded: false,
                     catalog_preference: (None, None),
                     requested_workflow,
+                    last_workspace_note: None,
                 };
                 while let Ok(cmd) = rx.recv() {
                     if matches!(cmd, Cmd::Shutdown) {
@@ -625,6 +661,7 @@ impl Runner {
                 run_id,
                 artifact_id,
             } => self.fetch_answer(run_id, artifact_id),
+            Cmd::LoadPreview { seq, path } => self.load_preview(seq, path),
             Cmd::StopFollows => self.stop_follow_streams(),
             // GPU meter lane: the poller runs on its own thread (a
             // metrics read must never starve Probe/Start on this loop).
@@ -1073,11 +1110,13 @@ impl Runner {
         let store = self.store;
         if let Ok(v) = self.client.workspace_policy() {
             if let Some(note) = workspace_preflight_note(&v, &opts) {
-                self.post(move || {
-                    store
-                        .fold
-                        .update(|f| f.push_item(Item::Info { text: note }))
-                });
+                if announce_workspace_note(&mut self.last_workspace_note, &session_id, &note) {
+                    self.post(move || {
+                        store
+                            .fold
+                            .update(|f| f.push_item(Item::Info { text: note }))
+                    });
+                }
             }
         }
         // Upload pending attachments BEFORE the run exists (design §4.3:
@@ -1840,19 +1879,36 @@ impl Runner {
 
     fn steer(&self, run_id: String, text: String) {
         let store = self.store;
-        match self.client.steer(&run_id, &text) {
-            Ok(_) => {}
-            Err(e) => {
-                let msg = e.to_string();
-                self.post(move || {
-                    store.notify(format!("steer failed: {msg}"));
-                    store.fold.update(|f| {
-                        f.push_item(Item::Error {
-                            text: format!("steer not delivered: {msg}"),
-                        })
-                    });
+        // ONE same-id retry lives in the client (`submit_command_retried`):
+        // a keep-alive socket the gateway had already closed cost an
+        // operator a long steer on 2026-08-20, because ureq does not
+        // retry a POST with a body and this lane had no policy of its own.
+        let (outcome, ambiguous) = self.client.steer(&run_id, &text);
+        if let Err(e) = outcome {
+            let msg = e.to_string();
+            self.post(move || {
+                store.notify(format!("steer failed: {msg}"));
+                store.fold.update(|f| {
+                    // Ambiguity is stated, never guessed away: when the
+                    // request may have left, "not delivered" would be a
+                    // claim we cannot make.
+                    let lead = if ambiguous {
+                        "steer may not have been delivered (the gateway never confirmed it; \
+                         it may still land)"
+                    } else {
+                        "steer not delivered"
+                    };
+                    f.push_item(Item::Error {
+                        // The words RIDE the card: the composer was
+                        // cleared on submit, so without this the operator
+                        // retypes a paragraph they already wrote.
+                        text: format!("{lead}: {msg}\n\n— your steer —\n{text}"),
+                    })
                 });
-            }
+                // …and back into the composer when it is empty, so the
+                // fix is one Enter away. A draft typed since always wins.
+                store.steer_restore.set(Some(text.clone()));
+            });
         }
     }
 
@@ -1917,6 +1973,34 @@ impl Runner {
                     })
                 });
             }
+        }
+    }
+
+    /// Load one local file's preview on its OWN thread (`crate::preview`
+    /// is the pure half). Off this loop by construction: the decode is
+    /// CPU work measured in hundreds of milliseconds for a phone photo,
+    /// and the command loop also carries Start/Probe.
+    fn load_preview(&self, seq: u64, path: String) {
+        let store = self.store;
+        let wake = self.wake.clone();
+        let spawned = std::thread::Builder::new()
+            .name("attachment-preview".into())
+            .spawn(move || {
+                let body = crate::preview::load(&path);
+                wake.post(move || apply_preview(&store, seq, body));
+            });
+        if spawned.is_err() {
+            // Thread exhaustion: say so in the modal instead of leaving
+            // "loading…" spinning forever (the fetch_answer precedent).
+            self.post(move || {
+                apply_preview(
+                    &store,
+                    seq,
+                    crate::preview::PreviewBody::Unavailable {
+                        reason: "the client could not start the preview loader".into(),
+                    },
+                )
+            });
         }
     }
 
@@ -2243,29 +2327,21 @@ pub fn send_verb_blocking(
         crate::store::QuitVerb::Pause => "pause",
         crate::store::QuitVerb::Cancel => "cancel",
     };
+    // ONE retry policy for every command lane, owned by the client
+    // (`submit_command_retried`): same id (the store's dedup key makes it
+    // exactly-once), one attempt on a guaranteed-fresh connection, and a
+    // STICKY ambiguity flag. This lane used to carry its own copy of the
+    // policy — which is exactly why the steer lane had none and lost an
+    // operator's guidance to a reset socket on 2026-08-20.
+    //
     // AMBIGUOUS = the request may have LEFT and only the response was
     // lost (timeout / body-level transport). Unreachable (connect never
     // made) and HTTP statuses (the server spoke) are unambiguous. Any
     // ambiguous attempt makes a final failure NON-definitive — the
     // command may have landed (adversary D2: a blanket "will NOT land"
     // overclaimed exactly there).
-    let ambiguous = |e: &crate::gateway::GwError| e.status.is_none() && !e.is_gone();
-    let mut saw_ambiguous = false;
-    let mut outcome =
-        client.submit_command_with_id(command_id, &run_id, typ, serde_json::json!({}));
-    if let Err(e) = &outcome {
-        saw_ambiguous |= ambiguous(e);
-        if e.is_transient() {
-            // SAME id: the dedup key makes the retry exactly-once even
-            // if the first attempt was accepted and only its response
-            // was lost.
-            outcome =
-                client.submit_command_with_id(command_id, &run_id, typ, serde_json::json!({}));
-        }
-    }
-    if let Err(e) = &outcome {
-        saw_ambiguous |= ambiguous(e);
-    }
+    let (outcome, saw_ambiguous) =
+        client.submit_command_retried(command_id, &run_id, typ, serde_json::json!({}));
     match outcome {
         Ok(_) => wake.post(move || {
             match verb {
@@ -2910,6 +2986,31 @@ fn finish(
     });
 }
 
+/// UI-thread half of one preview load: fill the OPEN preview's body —
+/// but only while `seq` still names it. A body that arrives after the
+/// operator previewed something else (or closed the modal) is dropped
+/// on the floor; the `upsert_image` lesson one lane over is that a late
+/// arrival must never repaint a newer subject.
+pub fn apply_preview(store: &Store, seq: u64, body: crate::preview::PreviewBody) {
+    // Check BEFORE writing: `Signal::update` dirties the signal
+    // unconditionally, and a rejected body would still re-run the
+    // modal's wrap memo over the whole document for nothing.
+    let mine = store
+        .preview
+        .with_untracked(|p| p.as_ref().is_some_and(|s| s.seq == seq));
+    if !mine {
+        return;
+    }
+    let mut body = Some(body);
+    store.preview.update(|slot| {
+        if let Some(state) = slot.as_mut() {
+            if let Some(b) = body.take() {
+                state.body = b;
+            }
+        }
+    });
+}
+
 /// Decode-time pixel ceiling for transcript images (F3), contain-fit.
 /// The in-feed mosaic renders at most IMAGE_ROWS (14) cell rows — ≤ 56 px
 /// tall even on the densest glyph ladder (braille, 2×4 px/cell) — and a
@@ -3352,6 +3453,26 @@ mod tests {
         assert!(note.contains("launch-folder trust ON"), "{note}");
         assert!(note.contains("requested client workspace scope"), "{note}");
         assert!(note.contains("Extra allowed workspaces: notes."), "{note}");
+    }
+
+    #[test]
+    fn workspace_note_is_announced_once_per_session_and_on_change() {
+        let mut last = None;
+        let note = "workspace access policy: launch-folder trust ON — x";
+        assert!(announce_workspace_note(&mut last, "s1", note), "first run");
+        assert!(
+            !announce_workspace_note(&mut last, "s1", note),
+            "same session + same policy: not restated above every prompt"
+        );
+        assert!(
+            announce_workspace_note(&mut last, "s1", "trust OFF — x"),
+            "a policy that CHANGES mid-session is news"
+        );
+        assert!(
+            announce_workspace_note(&mut last, "s2", "trust OFF — x"),
+            "a new session's transcript gets the note once too"
+        );
+        assert!(!announce_workspace_note(&mut last, "s2", "trust OFF — x"));
     }
 
     #[test]

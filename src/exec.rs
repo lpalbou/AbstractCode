@@ -990,7 +990,7 @@ fn print_new(fold: &Fold, printed: &mut usize, tool_state: &mut HashMap<usize, T
         if let Item::Tool {
             status,
             name,
-            result_preview,
+            result,
             error,
             ..
         } = item
@@ -999,11 +999,12 @@ fn print_new(fold: &Fold, printed: &mut usize, tool_state: &mut HashMap<usize, T
             if prev.is_some() && prev != Some(*status) {
                 tool_state.insert(i, *status);
                 let line = match status {
-                    ToolStatus::Ok => format!("  ✓ {name} done{}", preview_suffix(result_preview)),
+                    ToolStatus::Ok => format!("  ✓ {name} done{}", preview_suffix(result)),
                     ToolStatus::Failed => format!("  ✗ {name} failed: {error}"),
                     ToolStatus::Denied => format!("  ⊘ {name} denied"),
                     ToolStatus::Running => format!("  » {name} running"),
                     ToolStatus::AwaitingApproval => format!("  ? {name} awaiting approval"),
+                    ToolStatus::Interrupted => format!("  ◌ {name} interrupted"),
                 };
                 println!("{line}");
             }
@@ -1103,6 +1104,7 @@ fn print_item(item: &Item) {
                 ToolStatus::Ok => "✓",
                 ToolStatus::Failed => "✗",
                 ToolStatus::Denied => "⊘",
+                ToolStatus::Interrupted => "◌",
             };
             println!("{glyph} {name} {args_preview}");
         }

@@ -16,7 +16,7 @@ use crate::entities::{
 // `bounded`/`one_line` are transcript.rs's pub(crate) text bounds — this
 // module carried byte-identical private copies until cycle-3 (presence
 // review P3-11: consolidation needed the transcript side opened up).
-use crate::transcript::{bounded, one_line, Item, ToolStatus};
+use crate::transcript::{one_line, Item, ToolStatus};
 
 /// Which conversation the transcript pane mirrors.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -412,14 +412,19 @@ fn push_tool_cards(items: &mut Vec<Item>, details: &[ToolDetail]) {
             key: format!("entity:{}:{}", items.len(), i),
             name: d.name.clone(),
             args_preview: one_line(&d.arg, 200),
+            // Entity tool cards carry the same law: the folded row gets
+            // the one-line hint, `/details` gets the argument whole.
+            args_full: d.arg.clone(),
             status: if failed {
                 ToolStatus::Failed
             } else {
                 ToolStatus::Ok
             },
-            result_preview: bounded(&d.result, 700),
+            // Full text into the fold; the VIEW bounds per verbosity
+            // mode (operator directive 2026-08-20).
+            result: d.result.clone(),
             error: if failed {
-                one_line(&d.result, 200)
+                d.result.clone()
             } else {
                 String::new()
             },

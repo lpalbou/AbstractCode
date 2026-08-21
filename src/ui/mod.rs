@@ -8,9 +8,11 @@ pub mod entity_modals;
 pub mod goal;
 pub mod logo;
 pub mod modals;
+pub mod preview;
 pub mod queue_lane;
 pub mod queue_modal;
 pub mod quit;
+pub mod splash;
 pub mod thinking;
 pub mod transcript_view;
 
@@ -252,6 +254,21 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
             if let Some(text) = store.composer_seed.get() {
                 store.composer_seed.set(None);
                 composer.set_text(&text);
+            }
+        });
+    }
+
+    // An undelivered steer comes BACK to the composer — but only into an
+    // empty one. A draft the operator typed after the failure outranks a
+    // restore; the error card carries the words in both cases.
+    {
+        let composer = composer.clone();
+        cx.effect(move || {
+            if let Some(text) = store.steer_restore.get() {
+                store.steer_restore.set(None);
+                if composer.text().trim().is_empty() {
+                    composer.set_text(&text);
+                }
             }
         });
     }
@@ -531,7 +548,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                     // Pending attachment chips (only while staged — no
                     // reserved blank; CHROME_ROWS estimates deliberately
                     // exclude this sometimes-present row).
-                    .child(attachments::chips_row(store))
+                    .child(attachments::chips_row(cx, store, &ctx))
                     .child(chrome::activity_strip(&t, store, spin, follow))
                     // In-flow composer: grows 1..4 rows with the draft (the
                     // absolute-position + spacer trick existed only for the
@@ -940,15 +957,19 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command) {
         Command::Gpu => toggle_gpu_meter(store, ctx),
         Command::Details(arg) => match arg.as_deref().map(str::trim) {
             None | Some("") => toggle_details(store, ctx),
-            Some("full") | Some("expand") => {
+            Some("full") | Some("expand") | Some("on") => {
                 store.show_details.set(true);
-                store.details_full.set(true);
-                store.notify("details: FULL — thinking cards expanded (content + reasoning) · /details fold returns to gists");
+                persist_prefs(ctx, |p| p.show_details = Some(true));
+                store.notify(
+                    "details: full — tool args + results, thinking expanded · /details fold collapses",
+                );
             }
-            Some("fold") | Some("gist") => {
-                store.details_full.set(false);
-                store
-                    .notify("details: folded — thinking as one-line gists · /details full expands");
+            Some("fold") | Some("gist") | Some("off") => {
+                store.show_details.set(false);
+                persist_prefs(ctx, |p| p.show_details = Some(false));
+                store.notify(
+                    "details: folded — one-line tool calls with status tags, thinking gists · /details full expands",
+                );
             }
             Some(other) => {
                 store.notify(format!("/details takes full|fold (got {other:?})"));
@@ -1740,8 +1761,10 @@ fn wire_llm_meter(cx: Scope, store: Store) {
     });
 }
 
-/// Show/hide the reasoning detail (thinking blocks + tool result previews).
-/// The answers-only view is the "clean" mode; details are one keystroke away.
+/// Toggle transcript VERBOSITY (operator directive 2026-08-19): full =
+/// tool args + result bodies + expanded thinking; folded = one-line
+/// tool calls with status tags + thinking gists. Thinking and every
+/// called tool stay visible in BOTH states.
 /// pub(crate): modal layers swallow keys before root shortcuts (engine
 /// overlay dispatch), so modals promising Ctrl+D must bind it themselves.
 pub(crate) fn toggle_details(store: Store, ctx: &UiCtx) {
@@ -1749,9 +1772,9 @@ pub(crate) fn toggle_details(store: Store, ctx: &UiCtx) {
     store.show_details.set(now);
     persist_prefs(ctx, |p| p.show_details = Some(now));
     store.notify(if now {
-        "details: shown (reasoning + tool cards + results)"
+        "details: full — tool args + results, thinking expanded (Ctrl+D folds)"
     } else {
-        "details: hidden — clean answers view (active/failed tools stay) — Ctrl+D restores"
+        "details: folded — one-line tool calls with status tags, thinking gists (Ctrl+D expands)"
     });
 }
 

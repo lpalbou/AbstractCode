@@ -6,6 +6,134 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (the boot animation, 2026-08-21)
+
+- **A launch animation.** Three brand-gradient planes fly in, overshoot
+  and lock into the ascending **A** of the Abstract house mark; the
+  impact throws sparks and fires a hairline across the stage; the
+  `ABSTRACT CODE` wordmark then resolves under it in the SAME half-block
+  letterforms the idle screen carries — so the splash does not cut to
+  the app, it lands into it. ~1.9 s, and **any key skips it**. Two
+  renderers behind one storyboard: truecolor terminals get the real
+  software-3D mark (perspective slabs, lambert shading, depth fog,
+  motion afterglow, 2× supersampled), everything else gets the same
+  three planes rasterized with coverage antialiasing and mosaicked to
+  half-blocks. Typography, timeline and beats are shared, so the two
+  lanes cannot drift. Preview either without launching the client:
+  `cargo run --example splash -- --2d|--3d`.
+- **`--animation <on|off>`, and it STICKS.** The flag sets the launch
+  animation and PERSISTS the choice to `prefs.json` (`animation`), so
+  `abstractcode-tui --animation off` once disables it for good. The
+  engine's boot gate still applies on top and can only ever say no
+  harder: no tty, `NO_COLOR`, `TERM=dumb`, `ABSTRACTTUI_NO_SPLASH` or a
+  terminal that reports itself dumb all skip it silently. The animation
+  plays BETWEEN mount and run — the gateway probe, catalog, tool
+  inventory and entity roster are already in flight while it plays, so
+  it spends wall-clock the client was spending anyway.
+
+### Fixed (the chips row and the strip, 2026-08-21)
+
+- **The attachment chip IS the button now.** Clicking a staged file's
+  name opens its preview; the row no longer carries an instruction tail
+  telling you which command to type. Each chip is its own element, so
+  the layout owns the hit rectangles and the click lands on the file you
+  pointed at. When more chips are staged than the terminal can show, the
+  row ends in `+N more` rather than cutting a staged file off the edge.
+- **Chip names are capped at 20 characters** (the rest is an ellipsis),
+  so one long filename — a screenshot, a dated report — no longer owns
+  the row that is supposed to show every staged file. Display only: the
+  chip still previews its own file, and the full name is spelled out in
+  the preview header and the `/attach` manager (which also carries the
+  whole path).
+- **Each chip carries a `×` that unstages it.** Removing a file no
+  longer means opening the manager: click the `×` beside its name. The
+  glyph is its own element with destructive ink on hover, so a click
+  can never resolve to the wrong action, and it goes through the same
+  removal authority as the manager's `x` — including the rule that
+  clears an armed drop-undo, which must never outlive the chips it
+  names. Both chip actions key on the file's canonical PATH rather than
+  its position in the row, so a click always acts on the file you
+  pointed at even if the staged set changed underneath it.
+- **The strip no longer puts one cycle's words in another cycle's
+  mouth.** A reasoning cycle's text reaches the client only in its
+  RESULT record, so while cycle 2 was thinking, the newest words the
+  client held were cycle 1's — and the strip printed them as
+  `thinking (cycle 2) — "I'll inspect the project structure…"` while
+  cycle 2 was actually writing something else. The words are still
+  shown, now attributed: the live cycle's own words keep the em-dash,
+  and anything earlier reads `· last: "…"`. Attribution is by RUN as
+  well as by number — cycle counts are per run while the displayed
+  number is a maximum across them, so in a delegate tree or a goal loop
+  the old comparison could name another agent's cycle. A gist from a
+  run that is not the one cycling is neither shown nor allowed to
+  displace the cycling lane's own words, and a tool-only cycle (calls,
+  no prose) no longer blanks the label.
+
+### Added (look at an attachment before it rides a run, 2026-08-21)
+
+- **Attachments preview: text documents and pictures, from the real
+  bytes on disk.** The engine can draw images and wrap text, and a chip
+  was still only a filename and a byte count taken on trust — a wrong
+  file, or a picture that turned out to be a screenshot of the wrong
+  window, only became visible after the upload was permanent.
+  `/attach preview` now opens the file itself: a scrolling, line-
+  numbered document for text (source, markdown, JSON, logs, SVG, CSV),
+  or the picture drawn in the mosaic ladder for PNG and JPEG.
+- Three ways in, all the same preview: `/attach preview` (the staged
+  chip), `/attach preview <n>` (one of several staged chips, 1-based),
+  and `/attach preview <path>` — any local file, which is the useful
+  one BEFORE attaching. Inside the attachment manager, `p` or `Enter`
+  previews the chip under the cursor; `Esc` closes as everywhere else.
+  `↑↓`, `PgUp`/`PgDn` and `Home`/`End` scroll, and the hint row keeps
+  saying which row of how many you are on.
+- The preview never claims more than it read. A file bigger than 512 KB
+  previews its first 512 KB and the header SAYS so (`showing the first
+  512.0 KB of 3.1 MB`); invalid UTF-8 is labeled, not silently
+  swallowed; tabs expand so indented source previews as it is written.
+- A format the engine cannot draw is NAMED, and named as a preview
+  limit rather than an attachment problem: GIF, WebP, BMP and TIFF say
+  "the preview draws PNG and JPEG; this file still attaches and uploads
+  normally", and a PDF says the gateway extracts its text server-side.
+  Magic bytes decide, never the extension — a `.txt` holding PNG bytes
+  previews as the picture it is.
+- Reading and decoding happen on their own worker thread, so opening a
+  100 MP photo paints "reading…" instead of freezing the frame, and a
+  slow load that lands after you moved to another file is dropped
+  instead of repainting the newer preview.
+- What the preview CHANGES to make a file readable, it also says: an
+  ANSI-colored build log renders as text with "ANSI color codes hidden"
+  in the header rather than as `[32mok` garbage, and a UTF-16 document
+  is transcoded and labeled instead of being dismissed as binary.
+  Carriage-return line endings split into lines (a CR-only file used to
+  preview as one run-on line), and line numbers size themselves to the
+  file so a 120 000-line log numbers its rows truthfully.
+- Resizing the terminal re-wraps the document instead of cutting each
+  row at the width the modal originally asked for, the preview fits
+  terminals down to 20×8, and the body is freed as soon as its modal
+  goes — including when another modal replaces it.
+
+### Fixed (engine bump `abstracttui` 0.3.3 → 0.3.6, 2026-08-20)
+
+- **Ordinary photos render instead of an error.** Progressive JPEG is
+  what phone cameras, image editors and "save for web" write by
+  default, and the engine's decoder read only baseline frames — so an
+  image dropped on the composer, or an image artifact a tool produced,
+  came back as `image decode failed: parse: jpeg: progressive JPEG not
+  supported (baseline only)` in the card where the picture belonged.
+  Progressive frames now decode, to the same picture and the same
+  quality as the baseline encode of it. Multi-scan sequential JPEGs
+  decode too. PNG and baseline JPEG are byte-for-byte unchanged.
+- The decoder's message for a format it genuinely cannot read now names
+  what it can: `image: unrecognized format (magic ...); PNG and JPEG
+  decode, GIF/WebP/AVIF/TIFF do not`. GIF, WebP, AVIF and TIFF still do
+  not decode — the message just stops saying "baseline JPEG".
+- Transcript pictures already chose their cell density from the
+  terminal's proved capabilities (quadrants on a Unicode + truecolor
+  terminal, half blocks otherwise), and `tests/image_pipeline.rs` now
+  pins that end to end alongside the decode floor.
+- Headless SVG captures no longer distort in Chromium-based viewers
+  (engine `Screenshot::to_svg` run-padding fix); test tooling only.
+
 ### Added (typing anywhere reaches the prompt, 2026-08-17)
 
 - **Typing, pasting, or dropping a file returns focus to the composer and

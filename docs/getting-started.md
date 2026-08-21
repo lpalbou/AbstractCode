@@ -177,6 +177,13 @@ Three ways to hand the agent a file:
 - **`exec --attach <path>`** — headless parity (repeatable; any upload
   failure exits 1 before the run starts).
 
+The chips row is interactive: **click a file's name** to preview it,
+**click the `×`** to unstage it. Preview opens the file itself — a
+scrolling, line-numbered view for text documents, the picture for PNG
+and JPEG. **`/attach preview <path>`** works on any file, staged or not;
+inside the pending manager, `p` (or `Enter`) previews the chip under the
+cursor and `x` removes it.
+
 Chips upload at SEND time and ride the run as `context.attachments`.
 Text-like files inline straight into the model's context (up to 120 KB
 each, server-side); PDFs extract on demand; images need a

@@ -72,9 +72,9 @@ fn slimmed_completion_still_finishes_the_card() {
             Item::Tool {
                 name,
                 status,
-                result_preview,
+                result,
                 ..
-            } if name == "write_file" => Some((status, result_preview)),
+            } if name == "write_file" => Some((status, result)),
             _ => None,
         })
         .expect("write_file card present");

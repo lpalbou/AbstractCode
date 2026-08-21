@@ -30,6 +30,7 @@ pub mod export;
 pub mod gateway;
 pub mod mention;
 pub mod paths;
+pub mod preview;
 pub mod project_context;
 pub mod protocol;
 pub mod run_input;
@@ -95,6 +96,20 @@ fn apply_boot_render_policy() {
     abstracttui::app::set_redraw_on_focus_gained(true);
 }
 
+/// Launch-animation policy, extracted so a test can pin it (the
+/// `apply_boot_render_policy` pattern): `--animation` SETS AND PERSISTS
+/// the choice — the operator turns the animation off once, not once per
+/// launch — and absent the flag, the saved preference stands, with
+/// never-chosen reading as ON. The engine's boot gate (tty, `NO_COLOR`,
+/// `TERM=dumb`, `ABSTRACTTUI_NO_SPLASH`, dumb caps) applies on top
+/// inside `ui::splash::play_boot`, so it can only ever say no harder.
+fn resolve_animation(prefs: &mut config::Prefs, flag: Option<bool>) -> bool {
+    if let Some(on) = flag {
+        prefs.animation = Some(on);
+    }
+    prefs.animation.unwrap_or(true)
+}
+
 fn run_tui(args: &cli::Args) -> i32 {
     if !abstracttui::term::have_tty() {
         eprintln!("abstractcode-tui: needs an interactive terminal (use `exec` for headless runs)");
@@ -113,6 +128,10 @@ fn run_tui(args: &cli::Args) -> i32 {
             eprintln!("abstractcode-tui: unknown theme {id:?} — using the default");
         }
     }
+
+    // Launch animation. Resolved (and persisted) BEFORE the session
+    // write below, which is the save that carries it to disk.
+    let animation = resolve_animation(&mut prefs, args.animation);
 
     let conn = config::resolve_connection(args.gateway.as_deref(), args.token.as_deref());
     let gateway_label = conn
@@ -364,6 +383,14 @@ fn run_tui(args: &cli::Args) -> i32 {
         eprintln!("abstractcode-tui: mount failed: {e:?}");
         return 1;
     }
+    // The boot animation, between mount and run: mounting has already
+    // handed the probe/catalog/tools/entities fetches to the worker
+    // thread, so the ~1.9s identity plays while they land instead of
+    // being added to the time before first paint. Any key skips it; a
+    // non-tty, NO_COLOR, TERM=dumb, ABSTRACTTUI_NO_SPLASH or
+    // `--animation off` skips it silently (a launch animation that
+    // prints an explanation is worse than no launch animation).
+    let _ = ui::splash::play_boot(animation);
     // Initial focus comes from the composer's `.autofocus()` (0.2.0 fires
     // it correctly inside dyn regenerations too — no focus bookkeeping).
     let outcome = app.run();
@@ -403,6 +430,33 @@ fn run_tui(args: &cli::Args) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    use super::resolve_animation;
+    use crate::config::Prefs;
+
+    /// The flag decides AND sticks; without it the saved preference
+    /// decides; never-chosen is ON. (The seam this pins is the one that
+    /// would otherwise fail silently: a launch flag that changes this
+    /// run but forgets to persist looks identical at launch and wrong on
+    /// the next one.)
+    #[test]
+    fn animation_flag_sets_persists_and_defaults_on() {
+        let mut fresh = Prefs::default();
+        assert!(
+            resolve_animation(&mut fresh, None),
+            "never chosen reads as on"
+        );
+        assert_eq!(fresh.animation, None, "no flag writes no preference");
+
+        let mut off = Prefs::default();
+        assert!(!resolve_animation(&mut off, Some(false)));
+        assert_eq!(off.animation, Some(false), "--animation off is PERSISTED");
+        // Next launch, no flag: the saved choice still governs.
+        assert!(!resolve_animation(&mut off, None));
+        // And it is reversible from the same surface.
+        assert!(resolve_animation(&mut off, Some(true)));
+        assert_eq!(off.animation, Some(true));
+    }
+
     /// The focus-gained auto-heal opt-in is load-bearing boot policy
     /// (it REPLACED the deleted ~5s chrome heartbeat): pin that the
     /// boot policy actually sets the engine flag, so removing the call

@@ -449,15 +449,16 @@ pub struct Store {
     pub notices: Signal<Vec<String>>,
     /// Bumped by Esc; two within a second cancels the run.
     pub last_esc: Signal<Option<Instant>>,
-    /// Show reasoning detail (thinking blocks, tool result previews).
-    /// Hidden = the clean answers-only view; toggled by Ctrl+D //details.
+    /// Transcript VERBOSITY (operator directive 2026-08-19: /details
+    /// toggles the full tool call vs. just the call + a status tag).
+    /// true = full cards — wrapped args, result bodies, thinking
+    /// content + the labeled reasoning channel. false (default) = the
+    /// collapsed view — cycle rules + thinking gists + one-line tool
+    /// calls with right-aligned status words. The thinking itself and
+    /// every called tool stay visible in BOTH states; this signal
+    /// gates detail, never existence. Toggled by Ctrl+D / /details;
+    /// /details full|fold set it directly.
     pub show_details: Signal<bool>,
-    /// Thinking examination mode (first-citizen directive: "by default,
-    /// thinking should be folded, but we should be able to examine
-    /// them"). false = folded one-line gists (the default); true =
-    /// expanded cards showing content AND the reasoning channel as a
-    /// labeled block. Only meaningful while `show_details` is true.
-    pub details_full: Signal<bool>,
     /// The active run tree is PAUSED on the gateway (durable /pause).
     pub paused: Signal<bool>,
     /// Files staged for the NEXT plain-prompt send (chips above the
@@ -508,6 +509,15 @@ pub struct Store {
     /// removes those chips and puts the RAW text into the composer
     /// (the pasted-path-as-prose escape hatch). One level, newest wins.
     pub paste_undo: Signal<Option<(String, Vec<String>)>>,
+    /// The open attachment preview (`/attach preview`, `p` in the
+    /// manager). Minted on the UI thread as `Loading`, filled by the
+    /// worker's loader thread; `None` = no preview open. The modal
+    /// renders this signal, so the body can arrive after the frame that
+    /// opened it. See [`crate::preview`].
+    pub preview: Signal<Option<crate::preview::PreviewState>>,
+    /// Monotonic mint for `PreviewState::seq` — the staleness guard
+    /// that keeps a slow loader from overwriting a newer preview.
+    pub preview_seq: Signal<u64>,
     /// PERSISTED permissions level ("read"|"write"|"all"; "" reads as
     /// "read"): batches at-or-below it auto-approve (`/permissions`;
     /// the c5028 consolidation — the old session-scoped /auto blanket
@@ -543,6 +553,13 @@ pub struct Store {
     /// One-shot composer seed (queue modal `e` pops an item into the
     /// composer; root() owns the TextAreaState and drains this).
     pub composer_seed: Signal<Option<String>>,
+    /// One-shot RESTORE of an undelivered steer (2026-08-20). Distinct
+    /// from `composer_seed` on purpose: the seed REPLACES the draft
+    /// because the operator asked for it, while a restore must never
+    /// clobber words typed since the failure — root() drops it when the
+    /// composer is non-empty, and the error card keeps the text either
+    /// way, so nothing is ever lost.
+    pub steer_restore: Signal<Option<String>>,
     // -- /goal lane -------------------------------------------------------
     /// The active goal (text + bound run id), persisted per session.
     pub goal: Signal<Option<GoalState>>,
@@ -606,8 +623,9 @@ impl Store {
             elapsed_secs: cx.signal(0),
             notices: cx.signal(Vec::new()),
             last_esc: cx.signal(None),
-            show_details: cx.signal(true),
-            details_full: cx.signal(false),
+            // Collapsed by default: the readable scan view (thinking
+            // gists + tagged one-line tool calls); /details expands.
+            show_details: cx.signal(false),
             paused: cx.signal(false),
             quit_state: cx.signal(QuitState::None),
             verb_ack: cx.signal(None),
@@ -619,6 +637,8 @@ impl Store {
             pending_attachments: cx.signal(Vec::new()),
             max_attachment_bytes: cx.signal(0),
             paste_undo: cx.signal(None),
+            preview: cx.signal(None),
+            preview_seq: cx.signal(0),
             accepted_tier: cx.signal(String::new()),
             tool_overrides: cx.signal(Vec::new()),
             workspace_mode: cx.signal(String::new()),
@@ -629,6 +649,7 @@ impl Store {
             last_outcome: cx.signal(RunOutcome::None),
             queue_next_id: cx.signal(1),
             composer_seed: cx.signal(None),
+            steer_restore: cx.signal(None),
             goal: cx.signal(None),
             goal_workflows: cx.signal(Vec::new()),
             focus: cx.signal(crate::convo::Focus::Agent),

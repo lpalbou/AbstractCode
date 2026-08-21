@@ -45,8 +45,23 @@ pub(crate) const CLIENT_SAFETY_CEILING_BYTES: u64 = 512 * 1024 * 1024;
 const TEXT_INLINE_WARN_BYTES: u64 = 200 * 1024;
 
 /// `/attach` dispatch: bare = manage (picker when nothing pending),
-/// `clear` = discard, anything else = a path candidate.
+/// `clear` = discard, `preview [n|path]` = look at the bytes, anything
+/// else = a path candidate.
 pub(crate) fn dispatch_attach(cx: Scope, store: Store, ctx: &UiCtx, arg: Option<String>) {
+    // PREVIEW runs BEFORE the lane guard: it reads a local file and
+    // stages nothing, so the guard's reason ("attachments ride agent
+    // runs only") is not true of it. Looking at a file is never a
+    // lane-specific request shape.
+    //
+    // `preview` is a KEYWORD, like `clear` — a file literally named
+    // "preview" still previews as `./preview`.
+    match arg.as_deref().map(str::trim) {
+        Some("preview") => return preview_dispatch(cx, store, ctx, ""),
+        Some(rest) if rest.starts_with("preview ") => {
+            return preview_dispatch(cx, store, ctx, rest["preview ".len()..].trim())
+        }
+        _ => {}
+    }
     if entity_lane_refused(store) {
         return;
     }
@@ -86,6 +101,48 @@ fn entity_lane_refused(store: Store) -> bool {
         store.notify("attachments ride agent runs only (v1) — /focus agent first");
         true
     }
+}
+
+/// `/attach preview [n|path]`: no argument previews the single staged
+/// chip (or points at the manager when there are several); a 1-based
+/// index previews that chip; anything else is a PATH — previewing a
+/// file you have not attached yet is the point of the command.
+fn preview_dispatch(cx: Scope, store: Store, ctx: &UiCtx, arg: &str) {
+    let n = store.pending_attachments.with_untracked(|p| p.len());
+    if arg.is_empty() {
+        match n {
+            0 => store.notify("nothing staged — /attach preview <path> looks at any file"),
+            1 => crate::ui::preview::open_pending(cx, store, ctx, 0),
+            _ => {
+                store.notify(format!(
+                    "{n} attachments staged — /attach preview <1-{n}>, or p in the manager"
+                ));
+                open_manager(cx, store, ctx);
+            }
+        }
+        return;
+    }
+    // An index only when it NAMES a staged chip: `1` with nothing
+    // staged is a path candidate (and fails as one, honestly), never a
+    // silent no-op.
+    // Digits ONLY: `+2` parses as 2 for `usize`, which would preview a
+    // chip when the operator named a file called `+2`.
+    let as_index = arg
+        .chars()
+        .all(|c| c.is_ascii_digit())
+        .then(|| arg.parse::<usize>().ok())
+        .flatten();
+    if let Some(ix) = as_index {
+        if ix >= 1 && ix <= n {
+            crate::ui::preview::open_pending(cx, store, ctx, ix - 1);
+            return;
+        }
+        if n > 0 {
+            store.notify(format!("no attachment {ix} — {n} staged"));
+            return;
+        }
+    }
+    crate::ui::preview::open_path(cx, store, ctx, arg);
 }
 
 /// Validate + stage one path as a pending chip, announcing the result.
@@ -372,38 +429,291 @@ pub(crate) fn note_kept_for_goal(store: Store) {
     }
 }
 
+/// Manager `p`/Enter: preview the chip under the cursor. Empty list =
+/// a notice, never a modal over nothing.
+fn preview_selected(cx: Scope, store: Store, ctx: &UiCtx, ix: usize) {
+    if store.pending_attachments.with_untracked(|p| p.is_empty()) {
+        store.notify("nothing staged to preview");
+        return;
+    }
+    crate::ui::preview::open_pending(cx, store, ctx, ix);
+}
+
+/// Longest filename the chips row spells out. An attachment is
+/// recognized by the HEAD of its name, and one long name (a screenshot,
+/// a dated report) must not own the row that shows every staged file.
+const NAME_MAX_CHARS: usize = 20;
+
+/// A chip's display name: at most [`NAME_MAX_CHARS`] characters, plus an
+/// ellipsis when there was more. The full name is never lost — the
+/// preview header and the `/attach` manager both spell it out (the
+/// manager also carries the whole path).
+///
+/// Counts CHARACTERS, not cells: the cap is about how much of a name to
+/// spell, while the row's own packing works in cells (`text::width`), so
+/// a CJK name still lays out correctly at twice the width.
+fn chip_name(name: &str) -> String {
+    let mut chars = name.chars();
+    let head: String = chars.by_ref().take(NAME_MAX_CHARS).collect();
+    if chars.next().is_some() {
+        format!("{head}…")
+    } else {
+        head
+    }
+}
+
+/// Unstage one chip, keyed by its CANONICAL path. The path is the
+/// chip's identity (it is already the dedup key), so this is safe
+/// against a list that changed since the caller last looked — an index
+/// captured by a click handler can name a different file by the time
+/// the click lands. Returns whether anything was removed.
+///
+/// ONE authority: the manager's `x` and the chips row's `×` both come
+/// here, so the paste-undo rule (an armed undo must never outlive the
+/// chips it names — P1-2 class) cannot drift between them.
+pub(crate) fn remove_pending(store: Store, path: &str) -> bool {
+    let mut removed = false;
+    store.pending_attachments.update(|p| {
+        let before = p.len();
+        p.retain(|a| a.path != path);
+        removed = p.len() != before;
+    });
+    if removed {
+        store.paste_undo.set(None);
+    }
+    removed
+}
+
+/// The chip row's clickable name — clicking it previews the file.
+fn chip_view(gcx: Scope, label: String, on_click: impl Fn() + 'static) -> View {
+    let access = label.clone();
+    clickable_run(gcx, label, access, false, on_click)
+}
+
+/// A one-glyph action beside a chip (`×` removes it). Separate element
+/// from the name so a click can never resolve to the wrong action, and
+/// DESTRUCTIVE ink on hover so the target reads as what it does.
+fn chip_action(gcx: Scope, glyph: String, access: String, on_click: impl Fn() + 'static) -> View {
+    clickable_run(gcx, glyph, access, true, on_click)
+}
+
+/// One CLICKABLE run of text. Deliberately not an engine `Button`:
+/// Button is focusable, and adding focus stops to the chrome would
+/// rewrite the app's Tab order (composer ⇄ transcript) for what is
+/// purely a mouse affordance. Everything else follows Button's contract
+/// exactly — press, then release INSIDE the rect decides the click
+/// (pointer capture keeps the release routed here), state is cleared
+/// BEFORE the callback runs (the disposal-safety law: the callback
+/// opens a modal), and hover shifts ink only.
+fn clickable_run(
+    gcx: Scope,
+    label: String,
+    access: String,
+    destructive: bool,
+    on_click: impl Fn() + 'static,
+) -> View {
+    let width = text::width(&label).max(1);
+    let hovered = gcx.signal(false);
+    let pressed = gcx.signal(false);
+    Element::new()
+        .style(
+            LayoutStyle::default()
+                .width(Dimension::Cells(width))
+                .height(Dimension::Cells(1))
+                .shrink(0.0),
+        )
+        .role(abstracttui::ui::Role::Button)
+        .access_label(access)
+        .hover_signal(hovered)
+        .on(abstracttui::ui::Phase::Bubble, move |ectx, ev| {
+            let abstracttui::ui::UiEvent::Mouse(m) = ev else {
+                return;
+            };
+            match m.kind {
+                abstracttui::ui::MouseKind::Down(abstracttui::ui::MouseButton::Left) => {
+                    pressed.set(true);
+                    ectx.stop_propagation();
+                }
+                abstracttui::ui::MouseKind::Up(abstracttui::ui::MouseButton::Left) => {
+                    let inside = ectx.current_rect().contains(m.pos);
+                    let clicks = pressed.get_untracked() && inside;
+                    pressed.set(false);
+                    ectx.stop_propagation();
+                    if clicks {
+                        on_click();
+                    }
+                }
+                _ => {}
+            }
+        })
+        .child(dyn_view(
+            LayoutStyle::default()
+                .width(Dimension::Percent(1.0))
+                .height(Dimension::Cells(1)),
+            move || {
+                let t = abstracttui::app::current_theme().tokens;
+                let hot = if destructive { t.warn } else { t.accent };
+                let (ink, bold) = if pressed.get() {
+                    (hot, true)
+                } else if hovered.get() {
+                    (hot, false)
+                } else if destructive {
+                    (t.text_faint, false)
+                } else {
+                    (t.text_muted, false)
+                };
+                let label = label.clone();
+                Element::new()
+                    .style(LayoutStyle::default().width(Dimension::Percent(1.0)))
+                    .draw(move |canvas, rect| {
+                        if rect.is_empty() {
+                            return;
+                        }
+                        let mut style = abstracttui::render::Style::new()
+                            .fg(ink)
+                            .bg(Rgba::TRANSPARENT);
+                        if bold {
+                            style = style.attrs(abstracttui::render::Attrs::BOLD);
+                        }
+                        let fitted = text::truncate_ellipsis(&label, rect.w);
+                        canvas.print_styled(Point::new(rect.x, rect.y), &fitted, &style);
+                    })
+                    .build()
+            },
+        ))
+        .build()
+}
+
+/// A plain (non-interactive) run of text in the chips row.
+fn chip_label(text_: String, ink: Rgba) -> View {
+    let width = text::width(&text_).max(1);
+    Element::new()
+        .style(
+            LayoutStyle::default()
+                .width(Dimension::Cells(width))
+                .height(Dimension::Cells(1))
+                .shrink(0.0),
+        )
+        .draw(move |canvas, rect| {
+            if rect.is_empty() {
+                return;
+            }
+            let fitted = text::truncate_ellipsis(&text_, rect.w);
+            canvas.print(Point::new(rect.x, rect.y), &fitted, ink, Rgba::TRANSPARENT);
+        })
+        .build()
+}
+
 /// Chips row between the transcript spacer and the activity strip:
 /// exists only while pending is non-empty (no reserved blank line).
+///
+/// Each file NAME is the affordance: clicking it opens the preview
+/// (`ui::preview`). One element per chip, so the LAYOUT owns the hit
+/// rectangles — no hand-rolled column arithmetic that can drift from
+/// what was actually drawn.
+///
+/// `cx` is the ROOT scope, not the row's: it owns the modal a click
+/// opens, which must outlive this row's next rebuild.
+///
 /// NOTE: chrome-height estimates (CHROME_ROWS) deliberately exclude
 /// this sometimes-present row — those are scroll ESTIMATES only, and
 /// one row of slack while chips show is benign.
-pub(crate) fn chips_row(store: Store) -> View {
-    dyn_view(LayoutStyle::default().shrink(0.0), move || {
+pub(crate) fn chips_row(cx: Scope, store: Store, ctx: &UiCtx) -> View {
+    let ctx = ctx.clone();
+    dyn_view_scoped(LayoutStyle::default().shrink(0.0), move |gcx| {
         let pending = store.pending_attachments.get();
         if pending.is_empty() {
             return Element::new().build();
         }
         let t = abstracttui::app::current_theme().tokens;
-        let chips = pending
-            .iter()
-            .map(|a| format!("{} ({})", a.name, human_size(a.size)))
-            .collect::<Vec<_>>()
-            .join(" · ");
-        let line = format!("📎 {chips} — /attach manages");
-        let (ink, faint) = (t.text_muted, t.text_faint);
-        Element::new()
-            .style(LayoutStyle::line(1).shrink(0.0))
-            .draw(move |canvas, rect| {
-                let fitted = text::truncate_ellipsis(&line, (rect.w - 2).max(6));
-                canvas.print(
-                    Point::new(rect.x + 1, rect.y),
-                    &fitted,
-                    ink,
-                    Rgba::TRANSPARENT,
-                );
-                let _ = faint;
-            })
-            .build()
+        // Track the viewport so the row re-packs on resize.
+        let width = abstracttui::app::use_viewport(gcx).get().w;
+        const MARKER: &str = "📎 ";
+        const SEP: &str = " · ";
+        // The remove target, and the gap that separates it from the
+        // name so a click cannot land on the wrong one.
+        const REMOVE: &str = "×";
+        const REMOVE_GAP: &str = " ";
+        let per_chip_extra = text::width(REMOVE_GAP) + text::width(REMOVE);
+        // One column of inset on each side (the chrome convention) plus
+        // the marker.
+        let mut budget = width - 2 - text::width(MARKER);
+        let mut row = Element::new()
+            .style(
+                LayoutStyle::row()
+                    .width(Dimension::Percent(1.0))
+                    .height(Dimension::Cells(1))
+                    .shrink(0.0),
+            )
+            .child(chip_label(" ".into(), t.text_faint))
+            .child(chip_label(MARKER.into(), t.text_faint));
+        // The narrowest label worth rendering: below this a chip is all
+        // ellipsis and nothing is gained by keeping it.
+        const MIN_LABEL: i32 = 8;
+        let mut shown = 0usize;
+        for (index, a) in pending.iter().enumerate() {
+            let full = format!("{} ({})", chip_name(&a.name), human_size(a.size));
+            let sep_w = if shown == 0 { 0 } else { text::width(SEP) };
+            // Room for the "+N more" tail whenever anything is left
+            // over — a chip cut off at the screen edge would hide a
+            // staged file that IS going to ride the next send. Sized
+            // from the real tail text, not a guessed constant: "+10
+            // more" is wider than "+9 more".
+            let tail = if index + 1 < pending.len() {
+                text::width(&format!("{SEP}+{} more", pending.len() - shown))
+            } else {
+                0
+            };
+            let room = budget - tail - sep_w - per_chip_extra;
+            // A name too long for the row is TRUNCATED, never dropped —
+            // dropping the only chip left the row reading "📎 · +1 more"
+            // with a dangling separator and no name at all (adversary
+            // finding P2, 2026-08-21). Only the first chip earns this:
+            // once the row is full the rest belong in the tail, where
+            // they are counted.
+            let label = if text::width(&full) <= room {
+                full
+            } else if shown == 0 && room >= MIN_LABEL {
+                text::truncate_ellipsis(&full, room)
+            } else {
+                break;
+            };
+            let cost = sep_w + text::width(&label) + per_chip_extra;
+            budget -= cost;
+            if shown > 0 {
+                row = row.child(chip_label(SEP.into(), t.text_faint));
+            }
+            // Both actions key on the chip's PATH, never on this
+            // index: the row is rebuilt from the signal, but a click
+            // resolves against whatever is staged when it LANDS.
+            let path = a.path.clone();
+            let name = a.name.clone();
+            let ctx = ctx.clone();
+            let preview_path = path.clone();
+            row = row.child(chip_view(gcx, label, move || {
+                crate::ui::preview::open_chip(cx, store, &ctx, &preview_path)
+            }));
+            row = row.child(chip_label(REMOVE_GAP.into(), t.text_faint));
+            row = row.child(chip_action(
+                gcx,
+                REMOVE.into(),
+                format!("remove {name}"),
+                move || {
+                    remove_pending(store, &path);
+                },
+            ));
+            shown += 1;
+        }
+        if shown < pending.len() {
+            // No leading separator when nothing precedes it — a row
+            // reading " · +1 more" separates the tail from nothing.
+            let lead = if shown == 0 { "" } else { SEP };
+            row = row.child(chip_label(
+                format!("{lead}+{} more", pending.len() - shown),
+                t.text_faint,
+            ));
+        }
+        row.build()
     })
 }
 
@@ -424,16 +734,17 @@ pub(crate) fn open_manager(cx: Scope, store: Store, ctx: &UiCtx) {
             cursor.update(|c| *c = (*c as i64 + delta).clamp(0, n as i64 - 1) as usize);
         };
         let remove_selected = move || {
+            // Through the ONE authority (`remove_pending`, path-keyed):
+            // it also clears the drop-undo slot, because any removal may
+            // orphan it (P1-2 class: an armed undo must never outlive
+            // the chips it names).
             let ix = cursor.get_untracked();
-            store.pending_attachments.update(|p| {
-                if ix < p.len() {
-                    p.remove(ix);
-                }
-            });
-            // Any removal may orphan the drop-undo slot — clearing it
-            // is the cheapest sound rule (P1-2 class: an armed undo
-            // must never outlive the chips it names).
-            store.paste_undo.set(None);
+            let path = store
+                .pending_attachments
+                .with_untracked(|p| p.get(ix).map(|a| a.path.clone()));
+            if let Some(path) = path {
+                remove_pending(store, &path);
+            }
             let n = store.pending_attachments.with_untracked(|p| p.len());
             cursor.update(|c| *c = (*c).min(n.saturating_sub(1)));
         };
@@ -445,9 +756,15 @@ pub(crate) fn open_manager(cx: Scope, store: Store, ctx: &UiCtx) {
                 let ctx = ctx2.clone();
                 move |_| ctx.close_modal()
             })
+            // Enter OPENS the selected chip (the file-manager idiom);
+            // Esc is this app's universal close, so nothing is lost.
             .shortcut(KeyChord::plain(Key::Enter), {
                 let ctx = ctx2.clone();
-                move |_| ctx.close_modal()
+                move |_| preview_selected(cx, store, &ctx, cursor.get_untracked())
+            })
+            .shortcut(KeyChord::plain(Key::Char('p')), {
+                let ctx = ctx2.clone();
+                move |_| preview_selected(cx, store, &ctx, cursor.get_untracked())
             })
             .shortcut(KeyChord::plain(Key::Up), move |_| move_cursor(-1))
             .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
@@ -501,7 +818,7 @@ pub(crate) fn open_manager(cx: Scope, store: Store, ctx: &UiCtx) {
                             if rows.is_empty() {
                                 canvas.print(
                                     Point::new(rect.x + 1, rect.y),
-                                    "nothing staged — /attach <path> adds a file, b browses",
+                                    "nothing staged — /attach <path> adds a file, b browses, p previews",
                                     t2.text_faint,
                                     Rgba::TRANSPARENT,
                                 );
@@ -541,7 +858,8 @@ pub(crate) fn open_manager(cx: Scope, store: Store, ctx: &UiCtx) {
                 Element::new()
                     .style(LayoutStyle::line(1).shrink(0.0))
                     .draw(move |canvas, rect| {
-                        let hint = "↑↓ select · x remove · c clear · b browse · Esc closes";
+                        let hint =
+                            "↑↓ select · Enter/p preview · x remove · c clear · b browse · Esc closes";
                         let fitted = text::truncate_ellipsis(hint, (rect.w - 1).max(4));
                         canvas.print(Point::new(rect.x, rect.y), &fitted, faint, Rgba::TRANSPARENT);
                     })
@@ -596,4 +914,30 @@ pub(crate) fn open_picker_modal(cx: Scope, store: Store, ctx: &UiCtx) {
             )
             .build()
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chip_names_are_capped_at_twenty_characters() {
+        // At the cap and under, the name is spelled in full.
+        assert_eq!(chip_name("notes.md"), "notes.md");
+        let exactly = "a".repeat(NAME_MAX_CHARS);
+        assert_eq!(chip_name(&exactly), exactly);
+        // One over: the first 20 characters, then the ellipsis.
+        let over = format!("{exactly}b");
+        assert_eq!(chip_name(&over), format!("{exactly}…"));
+        // The real case that prompted the cap.
+        assert_eq!(
+            chip_name("Screenshot 2026-08-21 at 4.37.29 AM.png"),
+            "Screenshot 2026-08-2…"
+        );
+        // Characters, not bytes: a multibyte name keeps 20 of them.
+        let cjk = "文".repeat(25);
+        let capped = chip_name(&cjk);
+        assert_eq!(capped.chars().count(), NAME_MAX_CHARS + 1);
+        assert!(capped.ends_with('…'));
+    }
 }
