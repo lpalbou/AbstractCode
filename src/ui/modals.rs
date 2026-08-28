@@ -554,7 +554,7 @@ pub fn open_approval(cx: Scope, store: Store, ctx: &UiCtx, wait: PendingWait) {
 
 pub fn open_ask(cx: Scope, store: Store, ctx: &UiCtx, wait: PendingWait) {
     let prompt = match &wait.kind {
-        WaitKind::Ask { prompt } => prompt.clone(),
+        WaitKind::Ask { prompt, .. } => prompt.clone(),
         _ => return,
     };
     let ctx2 = ctx.clone();
@@ -2939,6 +2939,632 @@ fn cache_effect_rows(
 }
 
 // ---------------------------------------------------------------------------
+// Host resources (/resources): memory + resident models + session caches
+// ---------------------------------------------------------------------------
+
+/// Bytes humanized up to TB. `paths::human_size` stops at MB (attachment
+/// scale); a 4.5 GB model must not read "4508.9 MB".
+fn human_bytes(bytes: u64) -> String {
+    const G: f64 = 1024.0 * 1024.0 * 1024.0;
+    let b = bytes as f64;
+    if b >= 1024.0 * G {
+        format!("{:.1} TB", b / (1024.0 * G))
+    } else if b >= G {
+        format!("{:.1} GB", b / G)
+    } else {
+        crate::paths::human_size(bytes)
+    }
+}
+
+/// Plain-text meter bar: `[####----] 62%`. Rendered only when the
+/// percentage is KNOWN — the caller never invents one.
+fn meter_bar(pct: f64) -> String {
+    let pct = pct.clamp(0.0, 100.0);
+    const SLOTS: usize = 8;
+    let filled = ((pct / 100.0) * SLOTS as f64).round() as usize;
+    format!(
+        "[{}{}] {pct:.0}%",
+        "#".repeat(filled.min(SLOTS)),
+        "-".repeat(SLOTS - filled.min(SLOTS))
+    )
+}
+
+/// One resident-model row's display text. TRI-STATE residency renders
+/// distinct ("resident unknown") — a null must never read as "no"; every
+/// absent number is OMITTED, never zero-filled (chrome.rs's "absence is
+/// omission" rule).
+fn residency_row_text(
+    m: &crate::store::ResidencyRow,
+    contracts: &crate::store::HostContracts,
+) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if !m.task.is_empty() {
+        // Modality distinguished by LABEL TEXT (the served modality_ui
+        // label); its hex color is deliberately unused — theme inks only.
+        parts.push(format!("[{}]", contracts.label_for(&m.task)));
+    }
+    parts.push(format!("{}/{}", m.provider, m.model));
+    parts.push(match m.resident {
+        Some(true) => "resident yes".into(),
+        Some(false) => "resident no".into(),
+        None => "resident unknown".into(),
+    });
+    if !m.state.is_empty() {
+        parts.push(m.state.clone());
+    }
+    if let Some(size) = m.size_bytes {
+        let vram = m
+            .size_vram_bytes
+            .filter(|v| *v != size)
+            .map(|v| format!(" (vram {})", human_bytes(v)))
+            .unwrap_or_default();
+        parts.push(format!("{}{vram}", human_bytes(size)));
+    }
+    // ctx: the calibrated number wins and is starred; an uncalibrated
+    // declared length renders bare; unknown renders nothing.
+    match (m.calibrated_context_length, m.context_length) {
+        (Some(c), _) if m.context_calibrated => parts.push(format!("ctx {c}*")),
+        (_, Some(c)) => parts.push(format!("ctx {c}")),
+        (Some(c), None) => parts.push(format!("ctx {c}")),
+        (None, None) => {}
+    }
+    if m.locked {
+        parts.push("🔒".into());
+    }
+    if m.is_default {
+        parts.push("default".into());
+    }
+    parts.join(" · ")
+}
+
+/// One cursor-reachable row of the `/resources` panel: its row index
+/// (for `draw_rows`) plus, when it is a MODEL row, the model's index in
+/// `facts.models`. Cache and totals rows are reachable too — reachable
+/// is what makes the tail scrollable (`draw_rows` windows around the
+/// cursor; a model-only cursor pinned the window at the top and hid the
+/// caches/totals tail behind a "↓ N more" no key could move — the exact
+/// defect `/cache`'s scroll rework documents).
+#[derive(Clone, Copy)]
+struct ResTarget {
+    row: usize,
+    model: Option<usize>,
+}
+
+/// Build the `/resources` panel rows from parsed host facts. Pure (the
+/// `cache_rows` discipline: the arithmetic and honesty rules live where
+/// a unit test reaches them). Returns the rows plus the cursor targets —
+/// every model/cache/totals row is reachable; action keys act only when
+/// the target carries a model index.
+fn resources_rows(
+    facts: &crate::store::HostFacts,
+    contracts: &crate::store::HostContracts,
+    estimate: Option<&(String, String)>,
+    width: i32,
+) -> (Vec<RowSpec>, Vec<ResTarget>) {
+    let mut rows: Vec<RowSpec> = Vec::new();
+    let mut selectable: Vec<ResTarget> = Vec::new();
+    let wrap_w = (width - 2).max(24);
+    let section = |rows: &mut Vec<RowSpec>, title: String| {
+        if !rows.is_empty() {
+            rows.push(RowSpec {
+                text: String::new(),
+                header: false,
+                checked: None,
+                dim: true,
+            });
+        }
+        rows.push(RowSpec {
+            text: title,
+            header: true,
+            checked: None,
+            dim: false,
+        });
+    };
+    let line = |rows: &mut Vec<RowSpec>, text: String, dim: bool| {
+        rows.push(RowSpec {
+            text,
+            header: false,
+            checked: None,
+            dim,
+        });
+    };
+
+    // Degraded lanes FIRST: the reader must know which numbers below are
+    // missing because a collector is down, before trusting the rest.
+    if !facts.degraded.is_empty() {
+        for l in text::wrap(&format!("degraded: {}", facts.degraded.join(" · ")), wrap_w) {
+            line(&mut rows, l, false);
+        }
+    }
+
+    // --- memory ------------------------------------------------------
+    section(&mut rows, "memory".into());
+    let mut any_memory = false;
+    if let (Some(used), Some(total)) = (facts.ram_used, facts.ram_total) {
+        let bar = facts
+            .ram_percent
+            .map(|p| format!("  {}", meter_bar(p)))
+            .unwrap_or_default();
+        line(
+            &mut rows,
+            format!(
+                "  ram      {} / {}{bar}",
+                human_bytes(used),
+                human_bytes(total)
+            ),
+            false,
+        );
+        any_memory = true;
+    }
+    if let Some(alloc) = facts.device_allocated {
+        let backend = if facts.device_backend.is_empty() {
+            "device".to_string()
+        } else {
+            format!("device ({})", facts.device_backend)
+        };
+        let total = facts
+            .device_total
+            .map(|t| format!(" / {}", human_bytes(t)))
+            .unwrap_or_default();
+        let bar = facts
+            .device_total
+            .filter(|t| *t > 0)
+            .map(|t| format!("  {}", meter_bar(alloc as f64 * 100.0 / t as f64)))
+            .unwrap_or_default();
+        line(
+            &mut rows,
+            format!(
+                "  {backend:<8} {} allocated{total}{bar}",
+                human_bytes(alloc)
+            ),
+            false,
+        );
+        any_memory = true;
+    }
+    if facts.gpu_supported {
+        if let Some(pct) = facts.gpu_util_pct {
+            line(&mut rows, format!("  gpu      {}", meter_bar(pct)), false);
+            any_memory = true;
+        }
+    }
+    if let Some(rss) = facts.process_rss {
+        line(
+            &mut rows,
+            format!("  process  {} rss (the gateway itself)", human_bytes(rss)),
+            false,
+        );
+        any_memory = true;
+    }
+    if !facts.host_name.is_empty() {
+        line(&mut rows, format!("  host     {}", facts.host_name), false);
+        any_memory = true;
+    }
+    if !any_memory {
+        line(&mut rows, "  not reported by this gateway".into(), true);
+    }
+
+    // --- models ------------------------------------------------------
+    section(&mut rows, format!("models ({})", facts.models.len()));
+    if facts.models.is_empty() {
+        line(&mut rows, "  none reported".into(), true);
+    }
+    for (i, m) in facts.models.iter().enumerate() {
+        selectable.push(ResTarget {
+            row: rows.len(),
+            model: Some(i),
+        });
+        line(&mut rows, residency_row_text(m, contracts), false);
+    }
+    if let Some((subject, text)) = estimate {
+        // Only the in-flight "estimating…" line is dim (status, not
+        // information); the RESULT is the answer the operator asked for
+        // and renders in full ink — t.text_faint never carries info.
+        let pending = text == "estimating…";
+        for l in text::wrap(&format!("estimate {subject}: {text}"), wrap_w) {
+            line(&mut rows, format!("  {l}"), pending);
+        }
+    }
+
+    // --- session caches ----------------------------------------------
+    section(
+        &mut rows,
+        format!("session caches ({})", facts.caches.len()),
+    );
+    if facts.caches.is_empty() {
+        // Worded off the CONTRACT bit: a gateway that never declared the
+        // session_caches lane did not report "none" — it reported nothing.
+        line(
+            &mut rows,
+            if contracts.session_caches {
+                "  none".into()
+            } else {
+                "  not reported by this gateway".into()
+            },
+            true,
+        );
+    }
+    for c in &facts.caches {
+        let mut parts: Vec<String> = Vec::new();
+        if !c.session_id.is_empty() {
+            parts.push(c.session_id.clone());
+        }
+        if !c.provider.is_empty() || !c.model.is_empty() {
+            parts.push(format!("{}/{}", c.provider, c.model));
+        }
+        if let Some(b) = c.bytes {
+            parts.push(human_bytes(b));
+        }
+        if let Some(tk) = c.token_count {
+            parts.push(format!("{tk} tk"));
+        }
+        if parts.is_empty() {
+            parts.push(c.key.clone());
+        }
+        selectable.push(ResTarget {
+            row: rows.len(),
+            model: None,
+        });
+        line(&mut rows, format!("  {}", parts.join(" · ")), false);
+    }
+
+    // --- totals ------------------------------------------------------
+    if !facts.totals.is_empty() {
+        section(&mut rows, "totals".into());
+        for (key, value) in &facts.totals {
+            let shown = if key.ends_with("_bytes") {
+                human_bytes(*value)
+            } else {
+                value.to_string()
+            };
+            selectable.push(ResTarget {
+                row: rows.len(),
+                model: None,
+            });
+            line(&mut rows, format!("  {key:<24} {shown}"), false);
+        }
+    }
+    (rows, selectable)
+}
+
+/// "HH:MM:SS" from an ISO timestamp; anything unrecognized passes
+/// through whole (never invented, never emptied).
+fn short_ts(ts: &str) -> &str {
+    match ts.get(11..19) {
+        Some(t) if t.bytes().all(|b| b.is_ascii_digit() || b == b':') => t,
+        _ => ts,
+    }
+}
+
+/// `/resources` (alias `/host`) — the gateway host's memory, resident
+/// models (row_v1) and session prompt caches, with admin actions:
+/// `u` unload (confirm; `f` forces past a lock after a 409 refusal),
+/// `k` lock/unlock, `e` context estimate, `r` refresh.
+///
+/// GATED on the gateway's declared `host_state` contract
+/// (`/discovery/capabilities`): contracts still probing or absent render
+/// an honest state — never a fabricated view. `/host/state` is slow by
+/// contract, so data is fetched at open + `r` only; no polling.
+pub fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
+    use crate::store::HostState;
+    let ctx2 = ctx.clone();
+    let size = modal_size(96, 30);
+    let content_w = size.w - 4;
+    ctx.open_modal(cx, size, move |mcx| {
+        let t = abstracttui::app::current_theme().tokens;
+        // Cursor over the MODEL rows (the k-th selectable is models[k]).
+        let cursor = mcx.signal(0usize);
+        // Armed unload confirmation: (provider, model, force).
+        let confirm = mcx.signal(Option::<(String, String, bool)>::None);
+
+        // Late-landing capabilities: the modal can open while the boot's
+        // contracts fetch is still in flight — fetch host state the
+        // moment the contract lands (Idle only; never a duplicate).
+        {
+            let tx = ctx2.tx.clone();
+            mcx.effect(move || {
+                let ready = store
+                    .host_contracts
+                    .with(|c| c.as_ref().is_some_and(|c| c.host_state));
+                if ready && matches!(store.host_state.get_untracked(), HostState::Idle) {
+                    store.host_state.set(HostState::Pending);
+                    let _ = tx.send(Cmd::LoadHostState);
+                }
+            });
+        }
+
+        // The ONE cursor→target authority: recompute the same targets the
+        // renderer draws (pure + cheap) with the SAME clamp the display
+        // applies — after a shrink the highlighted row and the action
+        // target can never disagree.
+        let current_targets = move || -> (Vec<ResTarget>, crate::store::HostFacts) {
+            let facts = match store.host_state.get_untracked() {
+                HostState::Ready(f) | HostState::Stale(f) => f,
+                _ => return (Vec::new(), Default::default()),
+            };
+            let contracts = store.host_contracts.get_untracked().unwrap_or_default();
+            let estimate = store.host_estimate.get_untracked();
+            let (_, targets) = resources_rows(&facts, &contracts, estimate.as_ref(), content_w);
+            (targets, facts)
+        };
+        let selected_model = move || -> Option<crate::store::ResidencyRow> {
+            let (targets, facts) = current_targets();
+            let cur = cursor.get_untracked().min(targets.len().saturating_sub(1));
+            targets
+                .get(cur)
+                .and_then(|t| t.model)
+                .and_then(|ix| facts.models.get(ix).cloned())
+        };
+        let move_cursor = move |delta: i64| {
+            let (targets, _) = current_targets();
+            if targets.is_empty() {
+                return;
+            }
+            cursor.update(|c| {
+                // Re-clamp BEFORE stepping: a shrink since the last move
+                // must not leave a step landing out of range.
+                let cur = (*c).min(targets.len() - 1) as i64 + delta;
+                *c = cur.clamp(0, targets.len() as i64 - 1) as usize;
+            });
+        };
+        // Arm the unload confirmation for the selected row. The send
+        // happens only on the explicit y/Enter confirm below.
+        let arm_unload = move |force: bool| {
+            let Some(row) = selected_model() else {
+                store.notify("no model selected — ↑↓ onto a model row first");
+                return;
+            };
+            confirm.set(Some((row.provider, row.model, force)));
+        };
+        let confirm_pending = {
+            let ctx = ctx2.clone();
+            move || -> bool {
+                if let Some((provider, model, force)) = confirm.get_untracked() {
+                    confirm.set(None);
+                    ctx.send(Cmd::UnloadModel {
+                        provider,
+                        model,
+                        force,
+                    });
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+
+        Element::new()
+            .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
+            .focusable()
+            .autofocus()
+            .shortcut(KeyChord::plain(Key::Escape), {
+                let ctx = ctx2.clone();
+                move |_| {
+                    // Esc backs out of an armed confirm before it closes.
+                    if confirm.get_untracked().is_some() {
+                        confirm.set(None);
+                    } else {
+                        ctx.close_modal();
+                    }
+                }
+            })
+            .shortcut(KeyChord::plain(Key::Enter), {
+                let ctx = ctx2.clone();
+                let confirm_pending = confirm_pending.clone();
+                move |_| {
+                    if !confirm_pending() {
+                        ctx.close_modal();
+                    }
+                }
+            })
+            .shortcut(KeyChord::plain(Key::Up), move |_| move_cursor(-1))
+            .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
+            .shortcut(KeyChord::plain(Key::Char('u')), move |_| arm_unload(false))
+            .shortcut(KeyChord::plain(Key::Char('f')), move |_| arm_unload(true))
+            .shortcut(KeyChord::plain(Key::Char('y')), {
+                let confirm_pending = confirm_pending.clone();
+                move |_| {
+                    confirm_pending();
+                }
+            })
+            .shortcut(KeyChord::plain(Key::Char('n')), move |_| confirm.set(None))
+            .shortcut(KeyChord::plain(Key::Char('k')), {
+                let ctx = ctx2.clone();
+                move |_| {
+                    let Some(row) = selected_model() else {
+                        store.notify("no model selected — ↑↓ onto a model row first");
+                        return;
+                    };
+                    if row.locked {
+                        ctx.send(Cmd::UnlockModel {
+                            provider: row.provider,
+                            model: row.model,
+                        });
+                    } else if row.lockable {
+                        ctx.send(Cmd::LockModel {
+                            provider: row.provider,
+                            model: row.model,
+                        });
+                    } else {
+                        store.notify(format!(
+                            "{}/{} is not lockable on this gateway",
+                            row.provider, row.model
+                        ));
+                    }
+                }
+            })
+            .shortcut(KeyChord::plain(Key::Char('e')), {
+                let ctx = ctx2.clone();
+                move |_| {
+                    let Some(row) = selected_model() else {
+                        store.notify("no model selected — ↑↓ onto a model row first");
+                        return;
+                    };
+                    let subject = format!("{}/{}", row.provider, row.model);
+                    // Honest pending line; the worker replaces it.
+                    store.host_estimate.set(Some((subject, "estimating…".into())));
+                    ctx.send(Cmd::EstimateContext {
+                        provider: row.provider,
+                        model: row.model,
+                        context_length: row.context_length,
+                    });
+                }
+            })
+            .shortcut(KeyChord::plain(Key::Char('r')), {
+                let ctx = ctx2.clone();
+                move |_| {
+                    let contracts_ok = store
+                        .host_contracts
+                        .with_untracked(|c| c.as_ref().is_some_and(|c| c.host_state));
+                    if contracts_ok {
+                        // Held facts (fresh OR stale) stay visible while
+                        // the refresh runs; only a factless state flips
+                        // to Pending.
+                        if !matches!(
+                            store.host_state.get_untracked(),
+                            HostState::Ready(_) | HostState::Stale(_)
+                        ) {
+                            store.host_state.set(HostState::Pending);
+                        }
+                        ctx.send(Cmd::LoadHostState);
+                        store.notify("refreshing host state…");
+                    } else {
+                        ctx.send(Cmd::LoadCapabilities);
+                        store.notify("re-probing gateway capabilities…");
+                    }
+                }
+            })
+            .child(dyn_view(LayoutStyle::line(1), move || {
+                let t2 = abstracttui::app::current_theme().tokens;
+                let state = store.host_state.get();
+                let title = match &state {
+                    HostState::Ready(f) | HostState::Stale(f) => {
+                        let host = if f.host_name.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" · {}", f.host_name)
+                        };
+                        // Staleness is VISIBLE: last-good facts never
+                        // render indistinguishable from fresh ones.
+                        let freshness = match (&state, f.ts.is_empty()) {
+                            (HostState::Stale(_), false) => {
+                                format!(" · STALE — refresh failed · as of {}", short_ts(&f.ts))
+                            }
+                            (HostState::Stale(_), true) => " · STALE — refresh failed".into(),
+                            (_, false) => format!(" · as of {}", short_ts(&f.ts)),
+                            (_, true) => String::new(),
+                        };
+                        format!(
+                            "host resources{host} — {} model(s) · {} cache(s){freshness} · r refreshes",
+                            f.models.len(),
+                            f.caches.len()
+                        )
+                    }
+                    HostState::Pending => "host resources — fetching host state…".into(),
+                    _ => "host resources · Esc closes".into(),
+                };
+                title_row(&t2, title)
+            }))
+            .child(dyn_view(
+                LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)),
+                move || {
+                    let contracts = store.host_contracts.get();
+                    let estimate = store.host_estimate.get();
+                    let plain = |text: &str| {
+                        let rows = text::wrap(text, (content_w - 2).max(24))
+                            .into_iter()
+                            .map(|l| RowSpec {
+                                text: l,
+                                header: false,
+                                checked: None,
+                                dim: false,
+                            })
+                            .collect::<Vec<_>>();
+                        draw_rows(rows, usize::MAX, Vec::new())
+                    };
+                    let Some(contracts) = contracts else {
+                        // Capabilities not answered yet: an honest probing
+                        // state (the boot fetch may have hit a blip; the
+                        // dispatch re-sent it, and this view updates live).
+                        return plain(
+                            "probing gateway capabilities… — the host_state contract has \
+                             not been confirmed yet; r retries",
+                        );
+                    };
+                    if !contracts.host_state {
+                        return plain(
+                            "not supported by this gateway — /discovery/capabilities \
+                             declares no host_state contract (older gateway); upgrade the \
+                             gateway to use /resources",
+                        );
+                    }
+                    match store.host_state.get() {
+                        HostState::Ready(facts) | HostState::Stale(facts) => {
+                            let (rows, targets) =
+                                resources_rows(&facts, &contracts, estimate.as_ref(), content_w);
+                            let cur = cursor.get().min(targets.len().saturating_sub(1));
+                            let selectable: Vec<usize> =
+                                targets.iter().map(|t| t.row).collect();
+                            draw_rows(rows, cur, selectable)
+                        }
+                        HostState::Idle | HostState::Pending => plain(
+                            "fetching host state… (a slow endpoint by contract — fetched \
+                             at open and on r, never polled)",
+                        ),
+                        HostState::Unsupported(why) => {
+                            plain(&format!("host state unavailable: {why}"))
+                        }
+                        HostState::Error(e) => {
+                            plain(&format!("host state fetch failed: {e} — r retries"))
+                        }
+                    }
+                },
+            ))
+            .child(dyn_view(LayoutStyle::line(1), move || {
+                let t2 = abstracttui::app::current_theme().tokens;
+                match confirm.get() {
+                    Some((p, m, force)) => {
+                        let warn = t2.warn;
+                        let text = format!(
+                            "unload {p}/{m}{}? Enter/y confirms · n/Esc cancels",
+                            if force {
+                                " FORCED (ignores the residency lock)"
+                            } else {
+                                ""
+                            }
+                        );
+                        Element::new()
+                            .style(LayoutStyle::line(1).shrink(0.0))
+                            .draw(move |canvas, rect| {
+                                let fitted =
+                                    text::truncate_ellipsis(&text, (rect.w - 1).max(4));
+                                canvas.print(
+                                    Point::new(rect.x, rect.y),
+                                    &fitted,
+                                    warn,
+                                    Rgba::TRANSPARENT,
+                                );
+                            })
+                            .build()
+                    }
+                    None => hint_row(
+                        &t2,
+                        "↑↓ select model · u unload · f force-unload · k lock/unlock · \
+                         e ctx estimate · r refresh · Esc closes"
+                            .into(),
+                    ),
+                }
+            }))
+            .child(hint_row(
+                &t,
+                "admin actions apply on the GATEWAY host · a locked model refuses unload \
+                 (409) — force or unlock first · ctx values with * are calibrated"
+                    .into(),
+            ))
+            .build()
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Workspace (root / access mode / allowed paths)
 // ---------------------------------------------------------------------------
 
@@ -3716,5 +4342,245 @@ mod tests {
         };
         let out = text_of(&facts(stats, SessionStats::default()));
         assert!(out.contains("estimated"), "{out}");
+    }
+
+    // --- /resources panel ---------------------------------------------
+    //
+    // The same honesty law as /cache: residency is tri-state (null is
+    // rendered UNKNOWN, never "no"), absent numbers are omitted (never
+    // zero-filled), locks are marked, calibrated contexts are starred.
+
+    use super::resources_rows;
+    use crate::store::{HostContracts, HostFacts, ResidencyRow, SessionCacheRow};
+
+    fn host_contracts() -> HostContracts {
+        HostContracts {
+            model_residency: true,
+            host_state: true,
+            session_caches: true,
+            modality_labels: vec![
+                ("image-generation".into(), "IMG".into()),
+                ("text-generation".into(), "LLM".into()),
+            ],
+        }
+    }
+
+    fn host_facts() -> HostFacts {
+        HostFacts {
+            ts: "2026-08-27T10:00:00Z".into(),
+            host_name: "studio.local".into(),
+            ram_total: Some(137_438_953_472),
+            ram_used: Some(85_238_953_472),
+            ram_available: Some(52_200_000_000),
+            ram_percent: Some(62.0),
+            process_rss: Some(512_000_000),
+            device_backend: "mlx".into(),
+            device_allocated: Some(21_474_836_480),
+            device_total: Some(103_079_215_104),
+            device_free: Some(81_604_378_624),
+            gpu_supported: true,
+            gpu_util_pct: Some(21.0),
+            models: vec![
+                ResidencyRow {
+                    task: "text-generation".into(),
+                    provider: "lmstudio".into(),
+                    model: "qwen3-4b".into(),
+                    resident: Some(true),
+                    state: "loaded".into(),
+                    locked: true,
+                    lockable: true,
+                    size_bytes: Some(4_508_876_800),
+                    context_length: Some(32_768),
+                    calibrated_context_length: Some(28_672),
+                    context_calibrated: true,
+                    is_default: true,
+                    ..Default::default()
+                },
+                ResidencyRow {
+                    task: "image-generation".into(),
+                    provider: "mlx-gen".into(),
+                    model: "flux".into(),
+                    resident: None,
+                    ..Default::default()
+                },
+            ],
+            caches: vec![SessionCacheRow {
+                key: "k1".into(),
+                provider: "lmstudio".into(),
+                model: "qwen3-4b".into(),
+                session_id: "acode-abc".into(),
+                bytes: Some(1_048_576),
+                token_count: Some(2_100),
+            }],
+            totals: vec![("models_size_bytes".into(), 4_508_876_800)],
+            degraded: Vec::new(),
+        }
+    }
+
+    fn resources_text(f: &HostFacts) -> String {
+        let (rows, _) = resources_rows(f, &host_contracts(), None, 92);
+        rows.into_iter()
+            .map(|r| r.text)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn resources_rows_render_the_honest_full_picture() {
+        let f = host_facts();
+        let (rows, targets) = resources_rows(&f, &host_contracts(), None, 92);
+        // EVERY model/cache/totals row is cursor-reachable (the tail must
+        // scroll — review HIGH-1); only model targets carry a model index,
+        // in models[] order.
+        assert_eq!(targets.len(), 2 + 1 + 1, "2 models + 1 cache + 1 totals");
+        assert_eq!(targets[0].model, Some(0));
+        assert_eq!(targets[1].model, Some(1));
+        assert!(rows[targets[0].row].text.contains("lmstudio/qwen3-4b"));
+        assert!(rows[targets[1].row].text.contains("mlx-gen/flux"));
+        assert_eq!(targets[2].model, None, "cache row: reachable, no action");
+        assert!(rows[targets[2].row].text.contains("acode-abc"));
+        assert_eq!(targets[3].model, None, "totals row: reachable, no action");
+        assert!(rows[targets[3].row].text.contains("models_size_bytes"));
+
+        let out = resources_text(&f);
+        // Memory: humanized bytes + the text bar from the SERVED percent.
+        assert!(out.contains("79.4 GB / 128.0 GB"), "{out}");
+        assert!(out.contains("[#####---] 62%"), "{out}");
+        assert!(out.contains("device (mlx)"), "{out}");
+        assert!(out.contains("studio.local"), "{out}");
+        // Models: modality LABEL text, lock marker, starred calibrated ctx.
+        assert!(out.contains("[LLM]"), "{out}");
+        assert!(out.contains("[IMG]"), "{out}");
+        assert!(out.contains("🔒"), "{out}");
+        assert!(out.contains("ctx 28672*"), "calibrated ctx starred: {out}");
+        assert!(out.contains("4.2 GB"), "model size humanized: {out}");
+        assert!(out.contains("default"), "{out}");
+        // Caches + totals.
+        assert!(out.contains("acode-abc"), "{out}");
+        assert!(out.contains("2100 tk"), "{out}");
+        assert!(out.contains("models_size_bytes"), "{out}");
+    }
+
+    #[test]
+    fn unknown_residency_renders_distinct_and_absent_numbers_are_omitted() {
+        let out = resources_text(&host_facts());
+        assert!(out.contains("resident unknown"), "null is UNKNOWN: {out}");
+        assert!(out.contains("resident yes"), "{out}");
+        // The unknown-resident row carries NO fabricated size/ctx/zero.
+        let flux = out
+            .lines()
+            .find(|l| l.contains("mlx-gen/flux"))
+            .expect("flux row");
+        assert!(!flux.contains("0 B") && !flux.contains("ctx"), "{flux}");
+        assert!(!flux.contains("🔒"), "no lock invented: {flux}");
+        // And a null must NEVER read as a "no" claim.
+        assert!(!flux.contains("resident no"), "{flux}");
+    }
+
+    #[test]
+    fn resources_empty_and_degraded_states_claim_nothing() {
+        let f = HostFacts {
+            degraded: vec!["gpu: ioreg unavailable".into()],
+            ..Default::default()
+        };
+        let (rows, targets) = resources_rows(&f, &HostContracts::default(), None, 92);
+        assert!(targets.is_empty());
+        let out = rows
+            .into_iter()
+            .map(|r| r.text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(out.contains("degraded: gpu: ioreg unavailable"), "{out}");
+        assert!(out.contains("not reported by this gateway"), "{out}");
+        assert!(out.contains("none reported"), "{out}");
+        // A gateway that never declared the session_caches contract did
+        // not report "none" — it reported NOTHING (review LOW-7).
+        assert!(
+            !out.contains("  none\n") && !out.ends_with("  none"),
+            "no fabricated cache 'none' without the contract: {out}"
+        );
+        // No meter, no percent, no bytes invented from nothing.
+        assert!(!out.contains('%'), "no fabricated percent: {out}");
+        assert!(!out.contains(" B "), "no fabricated bytes: {out}");
+    }
+
+    #[test]
+    fn empty_caches_say_none_only_under_the_declared_contract() {
+        let f = HostFacts::default();
+        let declared = host_contracts();
+        let (rows, _) = resources_rows(&f, &declared, None, 92);
+        let out = rows
+            .iter()
+            .map(|r| r.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            out.contains("session caches (0)") && out.contains("  none"),
+            "declared contract + empty list = a true 'none': {out}"
+        );
+        let (rows, _) = resources_rows(&f, &HostContracts::default(), None, 92);
+        let cache_ix = rows
+            .iter()
+            .position(|r| r.text.contains("session caches"))
+            .expect("caches section");
+        assert_eq!(
+            rows[cache_ix + 1].text.trim(),
+            "not reported by this gateway",
+            "no contract = nothing was reported"
+        );
+    }
+
+    #[test]
+    fn estimate_line_rides_the_models_section() {
+        let est = (
+            "lmstudio/qwen3-4b".to_string(),
+            "calibrated · predicted max context 28672".to_string(),
+        );
+        let (rows, _) = resources_rows(&host_facts(), &host_contracts(), Some(&est), 92);
+        let result_row = rows
+            .iter()
+            .find(|r| r.text.contains("estimate lmstudio/qwen3-4b: calibrated"))
+            .expect("estimate result renders");
+        // The RESULT is the answer the operator asked for: full ink
+        // (t.text_faint never carries information — review MEDIUM-4)…
+        assert!(!result_row.dim, "the estimate RESULT must not render dim");
+        // …and so is a failure line; only the in-flight status is dim.
+        let fail = (
+            "lmstudio/qwen3-4b".to_string(),
+            "estimate failed: gateway HTTP 500: boom".to_string(),
+        );
+        let (rows, _) = resources_rows(&host_facts(), &host_contracts(), Some(&fail), 92);
+        let fail_row = rows
+            .iter()
+            .find(|r| r.text.contains("estimate failed"))
+            .expect("failure line renders");
+        assert!(!fail_row.dim, "a failure is information, not chrome");
+        let pending = ("lmstudio/qwen3-4b".to_string(), "estimating…".to_string());
+        let (rows, _) = resources_rows(&host_facts(), &host_contracts(), Some(&pending), 92);
+        let pending_row = rows
+            .iter()
+            .find(|r| r.text.contains("estimating…"))
+            .expect("pending line renders");
+        assert!(pending_row.dim, "the in-flight status line is dim");
+    }
+
+    #[test]
+    fn short_ts_extracts_the_clock_and_passes_junk_through() {
+        assert_eq!(super::short_ts("2026-08-27T10:03:22Z"), "10:03:22");
+        assert_eq!(super::short_ts("2026-08-27T10:03:22.123+00:00"), "10:03:22");
+        assert_eq!(super::short_ts("just now"), "just now");
+        assert_eq!(super::short_ts(""), "");
+    }
+
+    #[test]
+    fn byte_humanizing_scales_to_gb_and_tb() {
+        assert_eq!(super::human_bytes(512), "512 B");
+        assert_eq!(super::human_bytes(4_508_876_800), "4.2 GB");
+        assert_eq!(super::human_bytes(137_438_953_472), "128.0 GB");
+        assert_eq!(super::human_bytes(2_199_023_255_552), "2.0 TB");
+        // The meter bar clamps and rounds honestly.
+        assert_eq!(super::meter_bar(62.0), "[#####---] 62%");
+        assert_eq!(super::meter_bar(0.0), "[--------] 0%");
+        assert_eq!(super::meter_bar(140.0), "[########] 100%");
     }
 }

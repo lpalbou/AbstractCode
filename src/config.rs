@@ -320,6 +320,12 @@ pub struct Prefs {
     /// "declared" — never a client-shipped capability table (the
     /// 2026-07-17 fabricated-selection class is the hard line).
     pub context_window: u64,
+    /// `/iterations` — the iteration budget REQUESTED for new runs
+    /// (`_limits.max_iterations`). `0` = request nothing and take the
+    /// server's own, which is this client's default posture and what every
+    /// other client gets. An explicit `--max-iterations` at launch overrides
+    /// it for that session without rewriting the file.
+    pub max_iterations: u32,
     /// Where this Prefs persists. `None` = EPHEMERAL: `save()` is a no-op.
     /// Default-constructed prefs never touch the filesystem — a test
     /// harness building a UiCtx cannot pollute the operator's real file
@@ -564,6 +570,14 @@ impl Prefs {
                 .and_then(Value::as_u64)
                 .filter(|n| (1..=1_000_000_000_000).contains(n))
                 .unwrap_or(0),
+            // Same load posture as the window above: an out-of-range or
+            // hand-edited value reads as UNSET rather than declaring a
+            // budget the command surface would refuse.
+            max_iterations: v
+                .get("max_iterations")
+                .and_then(Value::as_u64)
+                .filter(|n| (1..=10_000).contains(n))
+                .unwrap_or(0) as u32,
             path: Some(path),
         }
     }
@@ -632,6 +646,7 @@ impl Prefs {
             })).collect::<Vec<_>>(),
             "goal_max_cycles": self.goal_max_cycles,
             "context_window": self.context_window,
+            "max_iterations": self.max_iterations,
         });
         let body = format!(
             "{}\n",
@@ -1044,6 +1059,7 @@ mod tests {
             session_tool_prefs: Vec::new(),
             goal_max_cycles: 12,
             context_window: 262_144,
+            max_iterations: 60,
             path: Some(path.clone()),
         };
         p.touch_session("acode-full", Some("first prompt"));
@@ -1116,6 +1132,7 @@ mod tests {
         );
         assert_eq!(l.goal_max_cycles, 12);
         assert_eq!(l.context_window, 262_144);
+        assert_eq!(l.max_iterations, 60);
         let _ = fs::remove_dir_all(dir);
     }
 

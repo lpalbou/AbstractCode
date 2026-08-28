@@ -6,6 +6,220 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (session-loading screen, 2026-08-28)
+
+- **An animated loading screen for session restores** (`ui::loading`).
+  Picking a session in `/sessions` (and a boot `--resume`) used to render
+  the idle splash — "describe a task below" over a session whose history
+  was mid-flight, with one faint strip line as the only truth — for the
+  whole restore window (up to ~21 HTTP bundle fetches). The transcript
+  pane is now the waiting surface while `restoring` is armed: the brand
+  lockup with its sheen, the engine's braille `Spinner`, and a progress
+  bar that SWEEPS (soft sheen band — honest motion, no fake percentage)
+  while the run list is in flight, then turns determinate on the
+  worker's own counters — the engine's `Progress` widget filling per
+  fetched turn bundle, captioned `restored N of M prior turn(s) in full
+  detail`. The screen arms on the UI thread at the pick gesture (never
+  waiting for the worker to reach the probe), hands off directly to the
+  restored transcript, and shares the splash ticker's one interval (the
+  zero-wakeup idle rule keeps a single predicate). The strip line stays
+  and now repeats the counter (`turn N of M`) so the fact survives pane
+  heights where the captions clip. New store signal
+  `restore_progress: Option<(fetched, total)>`, posted by
+  `probe_attach` before the first bundle fetch and after every one
+  (failed fetches advance it too — their errors are carded); cleared on
+  every probe exit path, on session reset, and by the worker-death
+  recovery.
+
+## [0.5.0] - 2026-08-27
+
+### Added (`/resources` — gateway-host memory, models + caches, 2026-08-27)
+
+- **`/resources` (alias `/host`) — the gateway host's memory, resident
+  models and session prompt caches, with admin actions.** The panel reads
+  `GET /host/state` and renders: a MEMORY section (RAM used/total with a
+  meter bar from the served percent, the compute device and backend's
+  allocation, GPU utilization where the host supports it, the gateway
+  process's own RSS, the host name — each row only when reported), a
+  MODELS section (one selectable row per model: modality label text such
+  as `[LLM]`, tri-state residency — `resident yes` / `no` / `unknown`,
+  a null never folded into "no" — state, humanized size (+ VRAM when it
+  differs), context length with `*` marking a calibrated value, a 🔒
+  residency-lock marker, `default`), SESSION CACHES, and TOTALS. Absent
+  numbers are omitted, never zero-filled; junk values read as unknown,
+  never as a clamped truth; degraded collector lanes render first with
+  their reasons.
+- **Admin actions on the selected model row**: `u` unloads through a
+  two-step in-modal confirm (`y`/`Enter` fires, `n`/`Esc` backs out);
+  `f` force-unloads (confirm labeled FORCED). A locked model's HTTP 409
+  `model_locked` refusal teaches the force path; any other refusal
+  reports its own text. `k` locks/unlocks residency, `e` asks the
+  gateway for a context estimate (inline result line under the models
+  section), `r` refreshes. `↑↓` walk every row — caches and totals
+  included, so the tail is always reachable in a long panel.
+- **Fetched at the gesture, never polled**: `/host/state` is read at
+  open, on `r`, and after a successful mutation — no background polling.
+  Host-state reads and mutations run on their own one-shot threads, so a
+  slow host answer never stalls run control. A failed refresh keeps the
+  last snapshot and MARKS it: the title reads `STALE — refresh failed ·
+  as of HH:MM:SS` instead of passing old numbers off as fresh.
+- **Contract-gated honestly**: boot fetches `GET
+  /discovery/capabilities` once, and `/resources` opens only into what
+  the gateway declared — a still-unanswered probe shows "probing gateway
+  capabilities…" and re-probes (the modal heals live when the answer
+  lands); a gateway that declares no `host_state` contract gets "not
+  supported by this gateway" and no host-state fetch ever fires. An
+  empty caches section says "none" only under a declared session-caches
+  contract — otherwise "not reported by this gateway".
+- **Footer `mem` meter**: a `mem NN%` segment beside the GPU meter
+  carries the host's served RAM percent from the last `/resources`
+  fetch — graded on the rounded percent like the context meter (warn
+  ≥ 75%, error ≥ 90%), starred (`mem 62%*`) when the snapshot is stale,
+  absent when no percent is known.
+
+### Added (`/conclude`, 2026-08-21)
+
+- **`/conclude [note]` — end a long turn well.** Between `/pause` (freeze) and
+  `/cancel` (throw the work away) there was no way to say "you have enough,
+  land it": an operator watching an agent that had already gathered what it
+  needed had to kill the turn and lose the answer. `/conclude` asks the loop
+  to stop reasoning at its next boundary and run the tool-free conclusion it
+  already owns — best answer from the evidence, plus an honest list of what
+  remains. An optional note ("just the table, skip the analysis") is quoted to
+  the model verbatim.
+  **It is a gateway verb, not a client feature**: `POST /commands
+  {type:"conclude"}` rides the durable steer sidecar (exactly-once, watermarked,
+  acked in the ledger), so the same request from AbstractObserver, the console
+  or a chat bridge does the same thing. The turn ends with
+  `stop_reason.code = "operator_conclude"` and `budget_exhausted: false` — it
+  is neither a failure nor a truncation the agent caused.
+
+### Removed (client iteration budget, 2026-08-21)
+
+- **This client no longer sets an iteration budget.** It injected 50 on every
+  run that did not ask for one, while the framework's ruled default is 20 —
+  so the same prompt got 50 here and 20 from every other client, and the
+  `stop_reason` advice talked about a ceiling only this client had set.
+  `--max-iterations` remains as an explicit operator *request* the runtime
+  clamps; absent it, the server's default applies to every client alike.
+
+### Changed (server-truth preference, 2026-08-21)
+
+- **The gateway's default workflow is obeyed when it sets one.**
+  `bundles[].is_default` + `default_entrypoint` now decide which agent runs
+  absent an operator preference; the client's benchmark-derived pick survives
+  only as a labelled fallback for gateways that mark no default. An operator
+  preference still overrides both — the default is set by the gateway and may
+  be overridden by a client on a NEW turn, never mid-turn.
+- **A flow's own declaration of an ask-user wait outranks its wording.**
+  Headless `exec` reads `details.kind` / `details.mode` first, so an
+  unattended driver on any client answers the same wait the same way; the
+  English-matching conclude-gate classifier remains only as a `#FALLBACK`
+  that names itself in the log until flows declare their ask kind.
+
+### Fixed (thin-client audit, 2026-08-21)
+
+- **Exit 125 no longer claims a cause it cannot know.** It was
+  `EXIT_ITERATION_BUDGET`; a stuck-loop stop — which the server marks
+  `budget_exhausted: false` — exited with it too, so harnesses reading the
+  code were told to raise a budget that was never spent. Same value, honest
+  name (`EXIT_STOPPED_SHORT` = the turn did not finish, for any reason the
+  loop reports), and `stop_reason.budget_exhausted` is now carried so the WHY
+  is available without re-deriving it.
+- **A turn that stopped short no longer drains the prompt queue.** It was
+  reported as `RunOutcome::Success`, so the next queued prompt stacked on top
+  of unfinished work while the chrome, the card and the exit code all called
+  the turn incomplete — contradicting `/help` ("halts on failure/cancel").
+  The queue now holds and says why.
+- **Server notice severity is respected.** `notices[]` arrives as
+  `{code, severity, text}`; only `text` was kept, so a `warn` and an `error`
+  rendered identically here and differently in the next client to show the
+  same run.
+
+### Changed (thin-client contract, 2026-08-21)
+
+- **The run's verdict is now written by the loop, not by this client.** The
+  terminal node ships `output.stop_reason` (`code`, `finished`, `label`,
+  `headline`, `remedy`) and `output.notices[]`; the TUI prints them verbatim —
+  `label` in the fixed chrome and the headless one-liner, `headline` +
+  `remedy` as the conclusion card, `finished` for the glyph and the exit code.
+  Deriving that verdict here would have obliged AbstractObserver, the web
+  client and any chat bridge to re-derive it identically, and this client's own
+  derivation was wrong for two days. Engines predating the contract get the
+  bare fact and **no invented remedy**. Contract: `docs/api.md`; seam pinned by
+  `tests/fixtures/stop_reason_stuck_live.json`, a verbatim capture from a live
+  run.
+
+### Fixed (stuck-loop stops, 2026-08-21)
+
+- **A stop caused by a stuck loop no longer tells you to raise the iteration
+  budget.** `outcome: "iteration_budget"` is the canonical turn-end enum for
+  the whole budget CLASS, and the loop reuses it when it kills a turn for
+  repeating one tool batch — naming the real cause in the additive
+  `conclusion_forced` key. This client read `outcome` alone, so a run that
+  stopped at **12 of 50** iterations was rendered as an exhausted budget with
+  "Raise `--max-iterations`" as the remedy (live: session `acode-bc425138014f`
+  — the model had invented three attachment ids and called `open_attachment`
+  with them until the loop's stuck detector fired). `RunVerdict` now carries
+  `conclusion_forced`, the card says *"stopped early … the agent repeated the
+  same tool batch N times … raising --max-iterations will not help"*, and the
+  fixed chrome line reads `stopped: repeated tool calls after N iterations`. A
+  genuine budget exhaustion keeps its original wording and remedy.
+  Full investigation, the two upstream defects it uncovered, and the live
+  A/B evidence: `docs/reports/2026-08-21-phantom-attachment-index-and-stuck-streak-policy.md`.
+
+
+### Parked (ambient run animations, 2026-08-21)
+
+- Three ambient run visuals (a run strip chart, a character piece where
+  every prop is a real number, and a field of the work's own vocabulary)
+  were built, reviewed and **parked without a way to launch them**: the
+  `/animation` command and its help entry do not exist, so nothing user-
+  facing changed. The code stays in `src/ui/animation/`, under test, and
+  the design record — what was built, why it did not clear the bar, which
+  shapes are worth reviving, and the two lines that re-open it — is
+  `docs/backlog/proposed/ambient-run-animations.md`.
+- Kept from that work because it is useful on its own: an append-fed run
+  feed that survives the transcript's 500-item truncation, one honest
+  run-state verdict (working / waiting on the model / waiting on you /
+  tools failing / gateway not answering) computed from the same signals
+  the activity strip uses, a shared tool-family classifier, a charset
+  gate for run-derived text, and an Esc rung that exits a full-pane view
+  BEFORE the cancel-arm ladder and clears it.
+
+### Changed (the idle lockup, 2026-08-21)
+
+- **The mark is ~25% smaller.** It leads the first screen; it no longer
+  dominates it (12/10/8 rows → 9/8/6, by viewport height).
+- **One light, not two shimmers.** The mark and the wordmark used to
+  animate on unrelated clocks, which reads as two things twitching rather
+  than one object being lit. A single slightly slanted band now crosses
+  the whole lockup on a slow loop — a specular pass over the mark, the
+  same pass over the letters — with a cosine edge and no motion of its
+  own. Its period is the WORDMARK's width, so the pass takes the same
+  ~11 s on a 60-column terminal and a 200-column one (a pane-width clock
+  made the same animation twice as slow on a wide screen).
+- **The shimmer is actually visible now.** The highlight's separation
+  floor against `text_muted` went from 1.35:1 to 1.9:1 — the walk still
+  saturates at each theme's own luminance pole, so themes that cannot
+  separate further land exactly where they always did; this raises the
+  ceiling for the ones that can (the house dark theme now peaks at 2.0:1
+  instead of a barely-there 1.4:1). The mark's own breath was reduced in
+  turn, so the light does the work and the pulse does not compete.
+
+### Changed (the boot handoff, 2026-08-21)
+
+- **The boot animation lands instead of cutting.** It now holds the
+  finished composition for half a second, then fades for half a second to
+  the theme's own ground; the app's first screen fades in off that same
+  ground over the following ~750 ms. The hard cut between the identity
+  and the client read as a glitch; this reads as an arrival.
+- **The idle screen carries the boot mark.** Where the pane can afford
+  the rows, the first screen's lockup is the animation's OWN mark at rest
+  — the same letterform it just assembled, drawn by the same rasterizer —
+  over the same wordmark and tagline. Shorter panes keep the compact `▲`
+  lockup unchanged, so the fact card never loses rows to it.
+
 ### Added (the boot animation, 2026-08-21)
 
 - **A launch animation.** Three brand-gradient planes fly in, overshoot

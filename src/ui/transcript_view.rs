@@ -1143,9 +1143,10 @@ fn is_visible(item: &Item, details: bool) -> bool {
 /// 2026-07-22). Info-only folds show the guidance WITH the notices
 /// below it — never instead of them.
 ///
-/// `splash` is read ONLY inside the empty branch (conditional signal
-/// tracking): once conversation starts, the pane carries no frame
-/// dependency and animation ticks can never remount the Scroll.
+/// `splash` is read ONLY inside the empty and restoring branches
+/// (conditional signal tracking): once conversation shows, the pane
+/// carries no frame dependency and animation ticks can never remount
+/// the Scroll.
 #[allow(clippy::too_many_arguments)]
 pub fn pane(
     _cx: Scope,
@@ -1157,6 +1158,8 @@ pub fn pane(
     follow: Signal<bool>,
     empty: abstracttui::reactive::Memo<bool>,
     splash: Signal<u64>,
+    anim: crate::ui::animation::FeedHandle,
+    anim_frame: Signal<u64>,
 ) -> View {
     let tokens = *t;
     let feed = feed.clone();
@@ -1180,6 +1183,22 @@ pub fn pane(
             .basis(Dimension::Cells(0))
             .padding(Edges::hv(1, 0)),
         move |scx| {
+            // `/animation` outranks both branches: it is an explicit act,
+            // and it replaces the pane only — chrome, composer, approvals
+            // and notices all stay live behind it.
+            if store.animation.get() > 0 {
+                return crate::ui::animation::pane(scx, store, anim.clone(), anim_frame);
+            }
+            // A session restore in flight (boot --resume, a /sessions
+            // pick): the pane IS the waiting surface — the animated
+            // loading screen (operator ask, 2026-08-28). Ordered ABOVE
+            // the empty branch: the probe's fold swap can land a frame
+            // before `restoring` clears, and that frame must stay the
+            // loading screen, never flash the splash's "describe a
+            // task" over a session whose history just arrived.
+            if store.restoring.get() {
+                return crate::ui::loading::view(&tokens, store, splash.get());
+            }
             if empty.get() {
                 let conn = store.conn.get();
                 let frame = splash.get();
@@ -1354,10 +1373,19 @@ fn empty_state(
     notices: &[String],
     frame: u64,
 ) -> View {
-    let muted = t.text_muted;
-    let faint = t.text_faint;
-    let text_ink = t.text;
-    let error = t.error;
+    // The ENTRANCE (2026-08-21): the boot animation fades its
+    // composition out to this exact ground, and the first app screen
+    // fades in off it over the same half second — the cut between the
+    // two used to be one hard frame, which read as a glitch rather than
+    // an arrival. `frame` resets to 0 on every splash entrance, so a
+    // return to the idle screen mid-session replays the same soft
+    // arrival. One curve, in `logo::boot_fade`.
+    let fade = crate::ui::logo::boot_fade(frame);
+    let dim = |c: Rgba| crate::ui::logo::lerp_ink(t.bg, c, fade);
+    let muted = dim(t.text_muted);
+    let faint = dim(t.text_faint);
+    let text_ink = dim(t.text);
+    let error = dim(t.error);
     // Every content row is shrink(0.0) and the outer column CLIPS
     // (refinement-pass P1, the engine's 0240 class relearned: default-
     // shrink fixed rows on a too-short pane crush to zero height but
@@ -1404,11 +1432,19 @@ fn empty_state(
     // INSIDE the lockup — brand metadata completes it instead of
     // competing with operational facts inside the card (refinement
     // pass; `status_card_rows` keeps the version row for /status).
-    col = col.child(crate::ui::logo::logo(
-        t,
-        frame,
-        &format!("{} · rendered by AbstractTUI", crate::cli::VERSION),
-    ));
+    let tagline = format!("{} · rendered by AbstractTUI", crate::cli::VERSION);
+    // CONTINUITY (2026-08-21): where the pane can afford the rows, the
+    // lockup carries the boot animation's OWN mark at rest — the same
+    // letterform the animation just assembled, not a second smaller mark
+    // that merely rhymes with it. `hero_rows` returns None on panes
+    // where those rows would come out of the fact card, and the compact
+    // `▲` lockup stands in unchanged.
+    col = col.child(
+        match crate::ui::logo::hero_rows(abstracttui::app::current_viewport().h) {
+            Some(mark_rows) => crate::ui::logo::hero(t, frame, &tagline, mark_rows, fade),
+            None => crate::ui::logo::logo(t, frame, &tagline, fade),
+        },
+    );
     if let crate::store::Conn::Down(msg, gone) = conn {
         // A dead connection must teach RECOVERY, not "describe a task".
         // The message is already evidence-worded by `GwError`'s Display

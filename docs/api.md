@@ -28,7 +28,7 @@ abstractcode-tui --help | --version
 | `--workspace-mode <M>` | Workspace access mode | server default |
 | `--theme <ID>` | Start theme | `ABSTRACTTUI_THEME`, else saved pick |
 | `--animation <on\|off>` | Launch animation; **persisted** to `prefs.json` (`animation`). Also skipped when stdout is not a tty, `NO_COLOR`/`TERM=dumb` is set, or `ABSTRACTTUI_NO_SPLASH` is set | on |
-| `--max-iterations <N>` | Agent iteration budget | 50 |
+| `--max-iterations <N>` | Ask the server for a specific iteration budget | none — **this client sets no budget**. Absent the flag the server's own default applies (the same one every client gets); the hard ceiling is the runtime's, enforced at run start |
 | `--replay-turns <N>` | Prior turns replayed in full detail at boot (0 disables) | 20 |
 | `--permissions <level>` | tool permissions for the invocation: `read` \| `write` \| `all` | prefs level |
 | `--require-approval <t>` | gate these tools regardless of level (comma list, repeatable); exec denies them | — |
@@ -66,6 +66,7 @@ abstractcode-tui --help | --version
 | `/skills` | Attach gateway skills to your runs (`Space` toggles; sent as `input_data.skills`) |
 | `/mcp` | The gateway's MCP server registry (read-only; their tools appear in `/tools` once declared) |
 | `/cache` | Prompt-cache + context metrics: route, latest call, run, session |
+| `/resources` | Gateway-host resources (`/host` is an alias): memory (RAM/device meter bars, GPU utilization when the host supports it, the gateway's process RSS, host name), resident models (modality label, tri-state residency — an unreported residency reads `unknown`, never "no" — size, `ctx N` with `*` = calibrated, 🔒 = residency lock, `default`), session prompt caches, totals. Admin actions on the selected model: `u` unload (two-step confirm; a 409 `model_locked` refusal offers `f` force), `k` lock/unlock, `e` context estimate, `r` refresh — keys under "Modal keys" below. Data is fetched at open, on `r`, and after a mutation — never polled; a failed refresh keeps the last snapshot marked STALE. Requires the gateway's declared `host_state` contract (`/discovery/capabilities`) — older gateways get an honest "not supported". Feeds the footer's `mem NN%` segment |
 | `/history [n\|all]` | Stream the PREVIOUS bloc of this session's turns from the gateway ledgers, prepended in full detail. Boot replays only the last bloc (`--replay-turns` sizes it, default 5); a stub line names how many earlier turns exist. **Scrolling to the top of the transcript auto-loads the previous bloc** — the stub becomes a live progress line and holding at the top cascades bloc-by-bloc until the session is fully loaded (Esc returns to the tail and stops the cascade). Failures name their cause — never a silent hole |
 | `/status` | The status card: workflow, route, workspace, session, connection, client phase + run id + last outcome, and a LIVE gateway run-status probe — the one place client view vs server truth is inspectable (wrapper roots legitimately stay `waiting` after your turn concluded) |
 | `/sessions` | Pick a recent session to continue (named by first prompt) |
@@ -79,6 +80,7 @@ abstractcode-tui --help | --version
 | `/pause` | Pause the run tree durably on the gateway (stops at the next step boundary; survives quitting the client) |
 | `/resume` | Resume a paused run tree |
 | `/cancel` | Cancel the active run |
+| `/conclude [note]` | Ask the agent to **wrap up now** and answer from what it already has — the missing verb between `/pause` (freeze) and `/cancel` (throw away). The loop stops reasoning at its next boundary and runs its tool-free conclusion, so the turn ends with a real answer plus what is left to do. A `note` is quoted to the model verbatim. Server-side verb (`POST /commands {type:"conclude"}`): the same request from AbstractObserver, the console or a chat bridge behaves identically, and the turn reports `stop_reason.code = "operator_conclude"` — not a failure, not a spent budget |
 | `/steer <text>` | Explicit steering (plain Enter during a run steers too; buffered until the run's first reasoning cycle when it has not started cycling yet). A send that hits a transport failure is retried once with the same command id — the gateway dedups on it, so the retry is exactly-once — and if it still fails your words are kept: they ride the error card and return to the composer when it is empty |
 | `/queue [text]` | Queue a prompt (FIFO): auto-runs after the current run **succeeds**; halts on failure/cancel (explicit resume). Persists per session and restores **paused** — a restore never auto-starts. Bare `/queue` opens the manager (keys under "Modal keys" below). Agent-lane only: under entity focus the visit's held-draft lane is the queue |
 | `/goal [text\|stop]` | Start a goal run on a goal workflow (`abstractcode.goal.v1`): loops until verified done or `max_cycles` (prefs `goal_max_cycles`, default 8). Bare `/goal` shows status; `/goal stop` cancels durably. Ships dark until a goal bundle is published on the gateway |
@@ -260,6 +262,7 @@ recovers it.
 | `/attach` manager | `↑↓` select · `Enter`/`p` preview · `x` remove · `c` clear · `b` browse (file picker) · `Esc` close |
 | attachment preview | `↑↓` scroll · `PgUp`/`PgDn` page · `Home`/`End` ends · `Enter`/`Esc` close |
 | `/attach` picker | type to filter · `↑↓` move · `Enter` descend into a folder / attach the file (marked set when non-empty) · `Space` mark files for multi-attach · `Backspace`/`←` parent folder (filter empty) · `Esc` close |
+| `/resources` | `↑↓` move (model, cache and totals rows are all reachable; admin keys act on the selected MODEL row) · `u` unload → `y`/`Enter` confirms · `f` force-unload (confirm labeled FORCED) · `n`/`Esc` cancel an armed confirm · `k` lock/unlock residency · `e` context estimate (inline result) · `r` refresh (re-probes capabilities while the contract is unconfirmed) · `Enter`/`Esc` close |
 | `/entities` | `↑↓` browse (the identity card follows) · `Enter` talk (`@name`) · `t` leave a task (title prompt) · `e` end that entity's open visit · `Ctrl+D` show per-section provenance · `Esc` close |
 | `/workspace` | `↑↓` move · `Space` select an access mode / remove an allowed path · type a path + `Enter` adds it (switches to `workspace_or_allowed` when needed) · `Esc` close |
 
@@ -320,6 +323,34 @@ entries, tools ran); the full memory digests sit behind the details toggle
 (`Ctrl+D`). Tool cards in entity transcripts come from the run's ledger
 (`tool_details`), never from reply prose.
 
+## What this client decides, and what it only shows
+
+AbstractCode's TUI is a **thin host**. The gateway is the single place run
+semantics live, because the same session is meant to be watched from
+AbstractObserver, a web client, or a chat bridge, and all of them must show the
+same answer to "did it finish, and what do I do about it?" A host that derives
+that answer locally has to be kept in sync with every other host by hand — and
+this one already got it wrong once, reading `outcome: "iteration_budget"` alone
+while the additive `conclusion_forced` sat beside it, telling operators to
+raise a budget that still had 38 of its 50 iterations unspent.
+
+So the loop's terminal node authors the verdict and this client renders it:
+
+| Field on `result.output` | Who writes it | What the host does |
+| --- | --- | --- |
+| `stop_reason.code` | agent loop | `final_answer`, `iteration_budget`, `stuck_repeat`, `stuck_oscillation` — carried, never interpreted for wording |
+| `stop_reason.finished` | agent loop | drives the ⚠/✓ glyph and the `exec` exit code |
+| `stop_reason.label` | agent loop | printed verbatim in the fixed chrome (`last run: …`) and as the headless one-liner |
+| `stop_reason.headline` + `.remedy` | agent loop | printed verbatim as the conclusion card |
+| `stop_reason.budget_exhausted` | agent loop | whether the iterations were actually SPENT — false for a stuck-loop stop; carried so no host re-derives the cause |
+| `notices[].{code,severity,text}` | agent loop | `text` printed verbatim; `severity` picks the ink (`error` renders as an error line, anything else as info); `code` is the stable key |
+
+**Legacy engines** (before this contract) send no `stop_reason`. The host then
+reports the bare fact — "the agent STOPPED, it did not finish" — and says
+explicitly that the engine reported no reason. It does not guess one: an
+exhausted budget and a stuck-loop stop both arrive as
+`outcome: "iteration_budget"`, and inventing the difference is the bug above.
+
 ## Status surfaces
 
 - **Header**: wordmark · workflow · route · entity chips · cockpit facts ·
@@ -348,7 +379,10 @@ entries, tools ran); the full memory digests sit behind the details toggle
   warn ink ≥75%, error ≥90%; no declaration = the honest absolute) ·
   session tokens (`N↑ N↓ tk session` when the provider reports the
   split; the honest `N tk session` total when it doesn't) · `gpu N%`
-  (when the `/gpu` meter is on) · `skills N` · `mcp N` ·
+  (when the `/gpu` meter is on) · `mem N%` (host RAM from the last
+  `/resources` fetch — graded on the rounded percent, warn ≥75% / error
+  ≥90%; `mem N%*` marks a stale snapshot after a failed refresh; absent
+  when no percent is known) · `skills N` · `mcp N` ·
   `? keys + commands`, plus theme + gateway host (+ error detail when
   the connection drops). The key legend lives behind `?` (bare `?` +
   Enter) and `/help`; the phase/focus teachings live in the composer

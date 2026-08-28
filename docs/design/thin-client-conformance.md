@@ -69,7 +69,9 @@ Operational consequences the audit enforces:
 | Image cache + decode-time downscale | `src/store.rs:upsert_image`, `src/runner.rs:downscale_for_transcript` | render caching of immutable artifacts |
 | Headless wait policy (`exec`: tier decides, ask-user refusal) | `src/exec.rs `resolve_approval`` | the operator's standing instruction where no human is present; every decision travels as a resume payload NAMING the rule |
 | Un-submitted intent: composer drafts, buffered steers, the prompt queue | `src/store.rs `Store::queue`` (see class ii for labeling) | plural composer text; becomes a traceable gateway run the moment it starts |
-| exec exit codes (0/1/130/124) | `src/exec.rs `exit_code_for_status`` | client mapping of server statuses for scripts; 124 leaves the run durable and says so |
+| exec exit codes (0/1/130/124/125) | `src/exec.rs `exit_code_for_status`` | client mapping of server statuses for scripts; 124 leaves the run durable and says so; **125 = the turn stopped before finishing, for ANY reason the loop reports** — it was named `EXIT_ITERATION_BUDGET` and that name was a claim the code cannot make. The WHY is `stop_reason.budget_exhausted`, carried in `RunVerdict` and never re-derived here (2026-08-21 audit finding 5) |
+| Turn verdict rendering (`stop_reason.label` / `.headline` / `.remedy`, `notices[].severity`) | `src/protocol.rs `RunVerdict``, `src/transcript.rs `push_verdict_note`` | **pure carriage**: the agent loop authors every word, this host picks the ink from the server's `severity` and prints the rest verbatim. Pre-contract engines get the bare enum and NO invented remedy (pinned by test) |
+| Queue release condition (`RunOutcome::for_conclusion`) | `src/store.rs` | a client-held queue needs a client-held gate, but the FACTS it reads are all server-reported (`failed`, `cancelled`, `stopped_short`). Extracted as a pure function so the decision is visible and tested — it previously read "unfinished counts as success" inside an async closure no test reached |
 
 ### Class (ii) — UX overlays on server truth (honest + labeled)
 
@@ -193,6 +195,38 @@ closed:
   present in prefs (verified: `session_queues`/`session_goals`/
   `recent_sessions` carry no message content beyond the first-prompt
   label); in-memory context is ledger-derived (class ii item 2).
+
+### Re-audit of 2026-08-21 (adversarial, `stop_reason` wave)
+
+Fixed in the same change: the verdict wording moved to the agent loop
+(class (i) carriage row above); `notices[].severity`/`code` are no longer
+parsed away; exit 125 no longer claims a cause it cannot know; a turn that
+stopped short no longer reports `Success` to the queue.
+
+**Open violations, deliberately NOT changed here — each alters agent
+behaviour and is the operator's call, not a refactor:**
+
+| # | What the client decides | Where | Should come from |
+|---|---|---|---|
+| ~~1~~ | ~~The iteration budget of every non-explicit run~~ — **FIXED 2026-08-21**: the client sets no budget at all. `--max-iterations` survives only as an explicit operator REQUEST riding `_limits`, which the runtime clamps; absent it the server's default applies to every client alike | `src/run_input.rs` | done |
+| ~~1a~~ | The iteration budget of every non-explicit run: **50**, while the ruled framework default is **20** (`abstractagent/adapters/generation_params.py`: "the ONE ruled framework default"). Since `react_runtime` began seeding `_limits` from the flat key (0029 #6) this client's 50 actually lands — so the same prompt gets 50 here and 20 from every other client | `src/run_input.rs:141`, `src/cli.rs:232` | send only when `--max-iterations` is explicit; a per-catalog default belongs on the bundle entrypoint row |
+| 2 | `review_mode: true` + `review_max_rounds` on every interactive run (server default is OFF), and **which bundles support review, inferred from a bundle-id prefix** (`!id.starts_with("memact")`) | `src/cli.rs:42`, `src/ui/mod.rs`, `src/discovery.rs:250` | agent loop for the default; gateway catalog for the capability flag |
+| 3 | ~~Which agent runs when the operator picked none~~ — **client half fixed 2026-08-21**: `served_default_workflow` obeys `bundles[].is_default` + `default_entrypoint` and an operator preference overrides it (the ruling: the gateway sets the default, a client may override it on NEW turns, never mid-turn). **Server half open**: no bundle on this gateway carries `is_default`, so the labelled client fallback (`coding-agent:coder`, from a client-run benchmark) is still what actually fires | `src/discovery.rs` `served_default_workflow` | gateway catalog must mark one entrypoint per interface |
+| 4 | ~~Whether an `ask_user` wait is a *conclude gate*, by substring-matching the agent's English~~ — **client half fixed 2026-08-21**: `details.kind`/`details.mode` is read first and outranks any wording; the prose match survives only as a `#FALLBACK` that says so in its own log line. **Server half open**: no flow declares an ask kind yet, so the fallback is still what fires. The wait is already durable and visible to every client (`WaitState.USER`); what is missing is its TYPE | `src/exec.rs` `resolve_headless_ask`, `src/protocol.rs` `ask_wait_kind` | the gate node in `react-coding@0.1.1` should set `details: {kind: "conclude_gate"}` — `WaitState.details` already exists and already carries `mode: "approval_required"` for tool approvals |
+| 5 | What a `degraded` moment count means for the reader ("the reply may be partial") | `src/convo.rs:582` | entity flow should author `notices[]`, same contract as the agent loop |
+| 6 | The approval gradient, incl. a `write_file`/`edit_file` exception applied on the SERVER-TRUTH path | `src/tool_policy.rs:194` | gateway should serve `auto_approve_at` directly |
+| 7 | Run-health words from client thresholds ("possibly stuck" at 900s, "tools failing" at 3-of-5) | `src/ui/chrome.rs:1046`, `src/ui/animation/mod.rs:476` | runtime/gateway `health: {state, since_ms, reason}` |
+| 8 | Conversation seed caps (40 messages / 24k chars), unlabelled and silent | `src/ui/mod.rs:709` | server seed bounds, or delete the client half once wrapper roots conclude |
+
+### New client state introduced 2026-08-21 (classified per rule 1)
+
+| Item | Class | Note |
+|---|---|---|
+| `/conclude [note]` → `Cmd::Conclude` → `POST /commands {type:"conclude"}` | (i) | a pure SURFACE for a gateway verb. The client sends the command and renders the result; the directive the model reads is authored in `abstractgateway/runner.py::_CONCLUDE_DIRECTIVE` and the turn's verdict in the loop's terminal node (`operator_conclude`). Any client can send the same command, and AbstractObserver already answers waits through the same `/commands` door |
+| `RunOutcome::StoppedShort` + `for_conclusion` | (i) | the queue's release gate, reading only server-reported facts; extracted as a pure function so the decision is testable |
+| `StopVerdict` / `Notice` carriage | (i) | server-authored strings held for rendering; no derivation |
+| `served_default_workflow` | (i) | reads the gateway's `is_default` + `default_entrypoint`; the client's own pick survives only as a labelled `#FALLBACK` |
+| `ask_wait_kind` | (i) | reads the flow's declared ask kind; the wording match is a labelled `#FALLBACK` that says so in its own log line |
 
 ## Rules for future changes
 

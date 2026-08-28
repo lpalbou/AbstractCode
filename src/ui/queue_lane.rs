@@ -285,10 +285,12 @@ pub(crate) fn wire_queue_drain(cx: Scope, store: Store, ctx: UiCtx) {
         }
         if outcome != RunOutcome::None {
             store.last_outcome.set(RunOutcome::None);
-            if matches!(outcome, RunOutcome::Failed | RunOutcome::Cancelled) {
+            if outcome.holds_the_queue() {
                 // Start-failure restore (cycle-2): nothing was spent.
                 let started_item = inflight.borrow_mut().take();
                 if let Some((item, armed_root)) = started_item {
+                    // Only a start FAILURE gives the prompt back — a turn that
+                    // ran and stopped short was spent, however incomplete.
                     if outcome == RunOutcome::Failed && fold_root == armed_root {
                         store.queue.update(|q| q.insert(0, item));
                     }
@@ -298,10 +300,13 @@ pub(crate) fn wire_queue_drain(cx: Scope, store: Store, ctx: UiCtx) {
                     store.queue_paused.set(true);
                     store.notify(format!(
                         "queue paused — run {} ({held} prompt(s) held · /queue then r resumes)",
-                        if outcome == RunOutcome::Cancelled {
-                            "cancelled"
-                        } else {
-                            "failed"
+                        match outcome {
+                            RunOutcome::Cancelled => "cancelled",
+                            // Named for what it was: the turn ended with work
+                            // outstanding, so the next prompt would stack on
+                            // top of it.
+                            RunOutcome::StoppedShort => "stopped before finishing",
+                            _ => "failed",
                         }
                     ));
                 }

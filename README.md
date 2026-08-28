@@ -7,12 +7,14 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.4.0** (the conclusion + presence wave: the "run never
-finishes" P0 class fixed at its roots, header/footer instrumentation
-with a declared context meter, `/gpu`, and `Ctrl+L`/`/redraw` screen
-recovery — on top of 0.3.0's control-and-collaboration wave: prompt
-queue, goal loops, summoned-entity conversations, tiered tool
-approvals, workspace scope).
+Status: **0.5.0** (the attachments + host-resources wave: file
+attachments with preview and drag & drop, the quit gate with durable
+pause/cancel delivery, `/conclude`, bloc history replay + `/history`,
+the reasoning dial, a launch animation, and `/resources` — the gateway
+host's memory, resident models and session caches, with model
+unload/lock and context-estimate actions and a footer `mem` meter — on
+top of 0.4.0's conclusion + presence wave: declared context meter,
+`/gpu`, `Ctrl+L`/`/redraw` screen recovery).
 
 ## What it looks like
 
@@ -98,14 +100,28 @@ approvals, workspace scope).
 - **Honest telemetry**: the header names what "gateway defaults" actually
   resolves to (and the model that served the last call) plus the working
   directory, workspace mode, and capability counts; the footer is a
-  persistent instrument row (context meter, session tokens, `/gpu` meter,
-  skills/MCP counts — the key legend lives behind `?`); the activity
+  persistent instrument row (context meter, session tokens, `/gpu` and
+  host `mem` meters, skills/MCP counts — the key legend lives behind
+  `?`); the activity
   strip shows live context size (`ctx`), cache hits, and the in-flight
   model call with its last-call tok/s; `/cache` is the detail panel:
   prompt-cache posture for the effective route (auto = on when available)
   plus exact metrics for the latest call, this run, and the whole session —
   hits, the derived new-vs-carried split, re-send amplification, peak
   context, resets, and model time.
+- **Host resources**: `/resources` (alias `/host`) opens the gateway
+  host's live picture — RAM and device memory with meter bars, GPU
+  utilization where the host supports it, the gateway's own RSS, every
+  resident model (modality, tri-state residency — an unreported
+  residency reads `unknown`, size, context length with `*` marking a
+  calibrated value, 🔒 marking a residency lock), session prompt
+  caches, and totals — plus admin actions on the selected model:
+  unload (two-step confirm; force offered when a lock refuses),
+  lock/unlock, and a context estimate. Fetched at open and on `r`,
+  never polled; unknown numbers are omitted, never invented. The
+  footer gains a `mem NN%` segment from the same fetch. Requires a
+  gateway that declares the `host_state` contract — older gateways get
+  an honest "not supported".
 - **A context meter you declare**: `/context 262k` declares the model's
   window (persisted; `--max-tokens` for one session) and the footer
   reads `ctx 41k/262k tk (15%, declared)` — warn at 75%, error at 90%.

@@ -16,8 +16,7 @@ use serde_json::json;
 use crate::cli::Args;
 use crate::config;
 use crate::discovery::{
-    agent_workflow_ids_from_bundles, agent_workflows_from_bundles, choose_workflow,
-    tools_from_discovery,
+    agent_workflow_ids_from_bundles, agent_workflows_from_bundles, tools_from_discovery,
 };
 use crate::gateway::GatewayClient;
 use crate::run_input::{build_input_data, StartOpts};
@@ -41,7 +40,30 @@ const ASK_REFUSAL: &str =
 /// requires an explicit `'accept' to finish` instruction plus another
 /// conclude-gate cue, so an unrelated user question never gets a false
 /// "accept".
-pub fn resolve_headless_ask(prompt: &str) -> (&'static str, &'static str) {
+pub fn resolve_headless_ask(prompt: &str, gate: &str) -> (&'static str, &'static str) {
+    // SERVER TRUTH FIRST. When the flow declares what this ask is, that is
+    // the answer — no prose is consulted, and a driver on any other client
+    // reaches the same decision from the same field.
+    match gate.trim() {
+        "" => {}
+        "conclude_gate" | "conclude" | "confirm_conclude" => {
+            return (
+                "accept",
+                "answering with the headless auto-accept — the flow declared this ask a conclude gate",
+            );
+        }
+        _ => {
+            return (
+                ASK_REFUSAL,
+                "answering with the headless refusal — the flow declared this ask a genuine question",
+            );
+        }
+    }
+    // LEGACY FALLBACK, and it must die: no flow declares its ask kind yet, so
+    // the conclude gate is recognised by matching the agent's English. The
+    // day that wording changes this silently flips to a refusal, and the
+    // refusal is fed back as steering — a client-side loop. The fix is a
+    // typed wait (`details.kind`), filed in the conformance audit.
     let lower = prompt.to_ascii_lowercase();
     let names_accept = lower.contains("reply 'accept' to finish")
         || lower.contains("reply \"accept\" to finish")
@@ -54,7 +76,8 @@ pub fn resolve_headless_ask(prompt: &str) -> (&'static str, &'static str) {
     if names_accept && looks_like_conclude_gate {
         (
             "accept",
-            "answering with the headless auto-accept for the conclude gate",
+            "#FALLBACK answering with the headless auto-accept for the conclude gate \
+             (recognised by wording — this flow declares no ask kind)",
         )
     } else {
         (ASK_REFUSAL, "answering with the headless refusal")
@@ -362,7 +385,13 @@ pub fn run(args: &Args) -> i32 {
         }
     };
     let workflows = agent_workflows_from_bundles(&bundles);
-    let workflow = match choose_workflow(&workflows, pref_bundle.as_deref(), pref_flow.as_deref()) {
+    let workflow = match crate::discovery::choose_workflow_with_served_default(
+        &workflows,
+        pref_bundle.as_deref(),
+        pref_flow.as_deref(),
+        &bundles,
+        crate::discovery::AGENT_INTERFACE_V1,
+    ) {
         Some(w) => w,
         None => {
             eprintln!("✗ no agent workflows (interface abstractcode.agent.v1) on this gateway");
@@ -758,9 +787,9 @@ pub fn run(args: &Args) -> i32 {
                         }
                     }
                 }
-                WaitKind::Ask { prompt } => {
+                WaitKind::Ask { prompt, gate } => {
                     eprintln!("agent asks: {prompt}");
-                    let (response, log) = resolve_headless_ask(prompt);
+                    let (response, log) = resolve_headless_ask(prompt, gate);
                     eprintln!("{log}");
                     match client.resume(&wait.run_id, &wait.wait_key, json!({"response": response}))
                     {
@@ -782,15 +811,11 @@ pub fn run(args: &Args) -> i32 {
         if fold.finished {
             let stats = &fold.stats;
             let failed = fold.failed;
-            let budget = fold.budget_exhausted;
+            let budget = fold.stopped_short;
             // Name the outcome honestly on the ONE line a piped caller reads.
             // "done" for a run the agent was cut off mid-task is the same lie
             // the chrome line told (transcript.rs `push_done_summary`).
-            let head = match budget {
-                Some(n) if n > 0 => format!("stopped: iteration budget ({n})"),
-                Some(_) => "stopped: iteration budget".to_string(),
-                None => "done".to_string(),
-            };
+            let head = stopped_head(budget, fold.stop.as_ref());
             eprintln!(
                 "{head} · {} llm calls · {} tools · {} (run {run_id} finalizes on the gateway)",
                 stats.llm_calls,
@@ -801,7 +826,7 @@ pub fn run(args: &Args) -> i32 {
                 return 1;
             }
             return if budget.is_some() {
-                EXIT_ITERATION_BUDGET
+                EXIT_STOPPED_SHORT
             } else {
                 0
             };
@@ -917,7 +942,7 @@ pub fn run(args: &Args) -> i32 {
                     );
                     return exit_code_for_status_with_verdict(
                         &status,
-                        fold.budget_exhausted.is_some(),
+                        fold.stopped_short.is_some(),
                     );
                 }
             }
@@ -928,16 +953,22 @@ pub fn run(args: &Args) -> i32 {
     }
 }
 
-/// Exit code for a run that STOPPED on its iteration budget instead of
-/// finishing. Distinct from both success and failure: nothing failed, and
-/// nothing finished — the agent was interrupted with work outstanding.
+/// Exit code for a turn that STOPPED before finishing — for ANY reason the
+/// loop reports: an exhausted iteration budget, or a stuck-loop stop that
+/// ended the turn with budget to spare. Distinct from both success and
+/// failure: nothing failed, and nothing finished.
 ///
 /// A dedicated code exists because `0` here is actively harmful. Every
-/// harness in `scripts/` scores success as `exit_code == 0`, so a
-/// budget-truncated Zelda run used to be recorded as a PASS — measuring an
-/// interrupted agent as a competent one. 125 is outside the shell's signal
-/// range and unused by this binary.
-pub const EXIT_ITERATION_BUDGET: i32 = 125;
+/// harness in `scripts/` scores success as `exit_code == 0`, so a truncated
+/// Zelda run used to be recorded as a PASS — measuring an interrupted agent
+/// as a competent one. 125 is outside the shell's signal range and unused by
+/// this binary; the value is unchanged, only the meaning is stated correctly.
+///
+/// It was called `EXIT_STOPPED_SHORT`, and the name was a claim this code
+/// cannot make: the WHY is `stop_reason.budget_exhausted`, which the server
+/// authors and this client now carries. Callers that need the distinction
+/// read the run output or the printed label, not the exit status.
+pub const EXIT_STOPPED_SHORT: i32 = 125;
 
 /// The documented exec exit-code truth table for a run/answer-source
 /// reaching a terminal status: completed → 0, cancelled → 130 (script
@@ -946,16 +977,36 @@ pub const EXIT_ITERATION_BUDGET: i32 = 125;
 /// pre-fix, a CANCELLED answer-source subrun concluded through the
 /// generic finished branch and exited 0 (cycle-2 review F2).
 ///
-/// `budget_exhausted` overrides a `completed` status: the RUN completed, the
-/// TURN did not (see `EXIT_ITERATION_BUDGET`).
-pub fn exit_code_for_status_with_verdict(status: &str, budget_exhausted: bool) -> i32 {
-    if status == "completed" && budget_exhausted {
-        return EXIT_ITERATION_BUDGET;
+/// `stopped_short` overrides a `completed` status: the RUN completed, the
+/// TURN did not (see `EXIT_STOPPED_SHORT`).
+pub fn exit_code_for_status_with_verdict(status: &str, stopped_short: bool) -> i32 {
+    if status == "completed" && stopped_short {
+        return EXIT_STOPPED_SHORT;
     }
     match status {
         "completed" => 0,
         "cancelled" => 130,
         _ => 1,
+    }
+}
+
+/// The ONE line a piped caller reads. "done" for a run the agent was cut off
+/// mid-task is the same lie the chrome line told (transcript.rs
+/// `push_done_summary`), so the outcome is named — in the SERVER's words.
+///
+/// The label is authored by the loop's terminal node and travels in
+/// `output.stop_reason.label`, so this line, the TUI chrome, AbstractObserver
+/// and any chat bridge all say the same thing. When an engine predates that
+/// contract there is no label, and this host reports the bare fact rather
+/// than guessing a cause for it.
+pub fn stopped_head(budget: Option<u64>, stop: Option<&crate::transcript::StopVerdict>) -> String {
+    match (budget, stop) {
+        (Some(_), Some(v)) if !v.label.is_empty() => v.label.clone(),
+        (Some(n), _) if n > 0 => {
+            format!("stopped after {n} iterations (engine reported no reason)")
+        }
+        (Some(_), _) => "stopped (engine reported no reason)".to_string(),
+        (None, _) => "done".to_string(),
     }
 }
 
@@ -1014,7 +1065,83 @@ fn print_new(fold: &Fold, printed: &mut usize, tool_state: &mut HashMap<usize, T
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_headless_ask, ASK_REFUSAL};
+    use super::{resolve_headless_ask, stopped_head, ASK_REFUSAL};
+    use crate::transcript::StopVerdict;
+
+    fn worded(label: &str) -> StopVerdict {
+        StopVerdict {
+            code: "stuck_repeat".into(),
+            finished: false,
+            budget_exhausted: false,
+            label: label.into(),
+            headline: "…".into(),
+            remedy: "…".into(),
+        }
+    }
+
+    /// A wait is a durable SERVER object that every client sees. What it
+    /// MEANS must come from the server too — otherwise this driver accepts a
+    /// gate that a CI script or a chat bridge refuses, from the same wait.
+    /// The declared kind wins over any wording, and an ask the flow declares
+    /// to be a real question is refused even if its prose happens to carry
+    /// the gate's phrases.
+    #[test]
+    fn a_flow_declared_ask_kind_outranks_its_wording() {
+        let gate_prose = "The coding agent believes the task is done after 2 cycle(s).\n\n\
+                          Reply 'accept' to finish, or describe what still needs to change \
+                          (your words are fed straight into the next cycle as operator steering).";
+
+        // Declared gate: accepted, and the log says the flow declared it.
+        let (r, log) = resolve_headless_ask("anything at all", "conclude_gate");
+        assert_eq!(r, "accept");
+        assert!(log.contains("declared this ask a conclude gate"), "{log}");
+
+        // Declared as something else: refused, wording notwithstanding.
+        let (r2, log2) = resolve_headless_ask(gate_prose, "operator_question");
+        assert_eq!(r2, ASK_REFUSAL);
+        assert!(
+            log2.contains("declared this ask a genuine question"),
+            "{log2}"
+        );
+
+        // Nothing declared: the legacy wording match still works, and SAYS it
+        // is a fallback so the debt is visible in the log.
+        let (r3, log3) = resolve_headless_ask(gate_prose, "");
+        assert_eq!(r3, "accept");
+        assert!(log3.contains("#FALLBACK"), "{log3}");
+        let (r4, _) = resolve_headless_ask("Which database should I use?", "");
+        assert_eq!(r4, ASK_REFUSAL);
+    }
+
+    /// The headless one-liner is what every `scripts/` harness greps. A
+    /// stuck-loop stop and an exhausted budget must not read the same, and a
+    /// verdict that carries no `span` must not print "0 batches".
+    #[test]
+    fn the_headless_head_line_repeats_the_servers_label_and_invents_nothing() {
+        assert_eq!(stopped_head(None, None), "done");
+        // Server-worded: its label, verbatim, exactly as the TUI chrome and
+        // every other host on this gateway show it.
+        assert_eq!(
+            stopped_head(
+                Some(12),
+                Some(&worded("stopped: repeated tool calls after 12 iterations"))
+            ),
+            "stopped: repeated tool calls after 12 iterations"
+        );
+        // Legacy engine: the fact, with no cause attached to it — this host
+        // cannot tell a spent budget from a stuck loop and must not pretend to.
+        let legacy = stopped_head(Some(50), None);
+        assert_eq!(
+            legacy,
+            "stopped after 50 iterations (engine reported no reason)"
+        );
+        assert!(!legacy.contains("budget") && !legacy.contains("repeated"));
+        // An empty label is not a label.
+        assert_eq!(
+            stopped_head(Some(7), Some(&worded(""))),
+            "stopped after 7 iterations (engine reported no reason)"
+        );
+    }
 
     #[test]
     fn conclude_gate_auto_accepts_in_headless_exec() {
@@ -1022,7 +1149,7 @@ mod tests {
                       WORKFLOW_CHECK\n\n\
                       Reply 'accept' to finish, or describe what still needs to change \
                       (your words are fed straight into the next cycle as operator steering).";
-        let (response, log) = resolve_headless_ask(prompt);
+        let (response, log) = resolve_headless_ask(prompt, "");
         assert_eq!(response, "accept");
         assert!(
             log.contains("auto-accept"),
@@ -1032,7 +1159,7 @@ mod tests {
 
     #[test]
     fn ordinary_user_question_keeps_the_headless_refusal() {
-        let (response, log) = resolve_headless_ask("Which one?");
+        let (response, log) = resolve_headless_ask("Which one?", "");
         assert_eq!(response, ASK_REFUSAL);
         assert!(
             log.contains("refusal"),

@@ -16,7 +16,10 @@
 
 use serde_json::Value;
 
-use crate::store::{McpServer, ProviderInfo, SkillInfo, ToolInfo, Workflow};
+use crate::store::{
+    HostContracts, HostFacts, McpServer, ProviderInfo, ResidencyRow, SessionCacheRow, SkillInfo,
+    ToolInfo, Workflow,
+};
 
 pub const AGENT_INTERFACE_V1: &str = "abstractcode.agent.v1";
 /// The goal-agent workflow interface (plan item 3). Bundles carrying only
@@ -251,6 +254,101 @@ pub fn workflow_is_review_capable(bundle_id: &str) -> bool {
     !bundle_id.starts_with("memact")
 }
 
+/// The gateway's OWN default entrypoint, when it marks one.
+///
+/// Operator ruling 2026-08-21: *"there is the default set by the gateway, but
+/// it can be overridden on new turns by a client. During a turn, a
+/// workflow/agent can't be changed."* Which agent runs is the single largest
+/// determinant of what a run means, so it must not be a client ruling: this
+/// TUI picking `coding-agent:coder` from its own benchmark while a web build
+/// or a bridge picks "the first agent flow" gives one durable session two
+/// different loops across turns.
+///
+/// Read from where the gateway already serves it: `bundles[].is_default`
+/// (the platform default) narrowed by `bundles[].default_entrypoint` (that
+/// bundle's default flow). Today no bundle carries `is_default` on this
+/// gateway, so this returns `None` and `choose_workflow` degrades to its
+/// labelled client fallback — the seam is here for the day the catalog marks
+/// one, and no client edit is needed then.
+pub fn served_default_workflow(v: &Value, interface_id: &str) -> Option<(String, String)> {
+    // Same array the interface filter walks (`items`); `bundles` tolerated
+    // because the console renders that spelling.
+    let bundles = v
+        .get("items")
+        .and_then(Value::as_array)
+        .or_else(|| v.get("bundles").and_then(Value::as_array))?;
+    for b in bundles {
+        if !b
+            .get("is_default")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let bundle_id = b.get("bundle_id").and_then(Value::as_str)?.trim();
+        let entry = b
+            .get("default_entrypoint")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if bundle_id.is_empty() || entry.is_empty() {
+            continue;
+        }
+        // Only when that entrypoint really declares the interface we run.
+        let declares = b
+            .get("entrypoints")
+            .and_then(Value::as_array)
+            .map(|eps| {
+                eps.iter().any(|ep| {
+                    ep.get("flow_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .trim()
+                        == entry
+                        && ep
+                            .get("interfaces")
+                            .and_then(Value::as_array)
+                            .map(|ifs| {
+                                ifs.iter().any(|i| {
+                                    i.as_str()
+                                        .map(|x| x.trim() == interface_id)
+                                        .unwrap_or(false)
+                                })
+                            })
+                            .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+        if declares {
+            return Some((bundle_id.to_string(), entry.to_string()));
+        }
+    }
+    None
+}
+
+/// `choose_workflow` with the gateway's served default consulted before the
+/// client's own fallback. Pass the raw bundles payload; everything else is
+/// unchanged, so an operator preference still wins over both.
+pub fn choose_workflow_with_served_default(
+    workflows: &[Workflow],
+    preferred_bundle: Option<&str>,
+    preferred_flow: Option<&str>,
+    bundles: &Value,
+    interface_id: &str,
+) -> Option<Workflow> {
+    if preferred_bundle.is_none() {
+        if let Some((b, f)) = served_default_workflow(bundles, interface_id) {
+            if let Some(w) = workflows
+                .iter()
+                .find(|w| w.bundle_id == b && w.flow_id == f)
+            {
+                return Some(w.clone());
+            }
+        }
+    }
+    choose_workflow(workflows, preferred_bundle, preferred_flow)
+}
+
 pub fn choose_workflow(
     workflows: &[Workflow],
     preferred_bundle: Option<&str>,
@@ -274,13 +372,15 @@ pub fn choose_workflow(
             }
         }
     }
-    // DEFAULT (operator ruling 2026-08-01, benchmark-backed): the verified
-    // coding workflow. Across a ~70-run campaign, `coding-agent:coder` had the
+    // #FALLBACK — no bundle is marked default on this gateway. Below is a
+    // CLIENT ruling (2026-08-01, benchmark-backed): the verified coding
+    // workflow. Across a ~70-run campaign, `coding-agent:coder` had the
     // highest quality floor of every loop design (0.795; the only heavy arm
     // with no sub-0.6 run in any era) and the best calls-to-artifact ratio —
-    // builder + independent verifier + deterministic gates. basic-agent stays
-    // the fallback where coder is not installed; a saved preference still
-    // wins above.
+    // builder + independent verifier + deterministic gates. It is a client
+    // ruling, which means another client picks differently for the same
+    // session: the benchmark is a fact about SERVER-installed bundles and
+    // belongs in the catalog as `is_default`. Filed in the conformance audit.
     if let Some(w) = workflows
         .iter()
         .find(|w| w.bundle_id == "coding-agent" && w.flow_id == "coder")
@@ -563,6 +663,250 @@ pub fn default_text_route(v: &Value) -> Option<(String, String)> {
     None
 }
 
+// ---------------------------------------------------------------------------
+// Host state + capability contracts (`/resources`)
+// ---------------------------------------------------------------------------
+//
+// Honesty contract (mirrors `gateway::gpu::meter_from_response`): an
+// absent or non-numeric field reads as UNKNOWN (`None`/empty), never as
+// a fabricated zero; `resident` is tri-state by wire contract (null =
+// the gateway does not know).
+
+/// `/discovery/capabilities` → which of the host/resource contracts this
+/// gateway declares (`contracts.common.{model_residency,host_state,
+/// session_caches}`) plus the modality display labels
+/// (`model_residency.modality_ui.colors` — hex colors dropped: theme
+/// inks only, modality distinguished by label TEXT).
+pub fn contracts_from_capabilities(v: &Value) -> HostContracts {
+    // The live endpoint wraps everything in a `capabilities` envelope
+    // (`{"capabilities": {"contracts": {"common": ...}}}`); tolerate the
+    // unwrapped shape too so a fixture or proxy that strips the envelope
+    // still parses.
+    let root = v.get("capabilities").filter(|c| c.is_object()).unwrap_or(v);
+    let common = root
+        .get("contracts")
+        .and_then(|c| c.get("common"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let has = |key: &str| common.get(key).is_some_and(Value::is_object);
+    let mut modality_labels: Vec<(String, String)> = Vec::new();
+    if let Some(colors) = common
+        .get("model_residency")
+        .and_then(|m| m.get("modality_ui"))
+        .and_then(|u| u.get("colors"))
+        .and_then(Value::as_object)
+    {
+        for (task, entry) in colors {
+            let label = entry
+                .get("label")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .unwrap_or(task)
+                .to_string();
+            modality_labels.push((task.clone(), label));
+        }
+        modality_labels.sort();
+    }
+    HostContracts {
+        model_residency: has("model_residency"),
+        host_state: has("host_state"),
+        session_caches: has("session_caches"),
+        modality_labels,
+    }
+}
+
+/// Read a string field tolerantly ("" when absent/blank).
+fn str_of(v: &Value, key: &str) -> String {
+    v.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
+/// Read a numeric field as `Option<u64>` — junk (negative, string,
+/// float-NaN) reads as UNKNOWN, never as zero.
+fn u64_of(v: &Value, key: &str) -> Option<u64> {
+    v.get(key).and_then(Value::as_u64)
+}
+
+/// `models[]` (row_v1) from a `/host/state` response. Tolerates an
+/// `items` spelling; rows without both provider and model are dropped
+/// (nothing actionable to render or unload).
+pub fn residency_rows_v1(v: &Value) -> Vec<ResidencyRow> {
+    let mut out = Vec::new();
+    let items = v
+        .get("models")
+        .and_then(Value::as_array)
+        .or_else(|| v.get("items").and_then(Value::as_array));
+    for m in items.unwrap_or(&Vec::new()) {
+        let provider = str_of(m, "provider");
+        let model = str_of(m, "model");
+        if provider.is_empty() && model.is_empty() {
+            continue;
+        }
+        out.push(ResidencyRow {
+            runtime_id: str_of(m, "runtime_id"),
+            task: str_of(m, "task"),
+            provider,
+            model,
+            source: str_of(m, "source"),
+            // TRI-STATE: null/absent = unknown — the view renders it
+            // distinct; folding to `false` here would fabricate a "no".
+            resident: m.get("resident").and_then(Value::as_bool),
+            state: str_of(m, "state"),
+            locked: m.get("locked").and_then(Value::as_bool).unwrap_or(false),
+            lockable: m.get("lockable").and_then(Value::as_bool).unwrap_or(false),
+            modalities: m
+                .get("modalities")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            size_bytes: u64_of(m, "size_bytes"),
+            size_vram_bytes: u64_of(m, "size_vram_bytes"),
+            context_length: u64_of(m, "context_length"),
+            calibrated_context_length: u64_of(m, "calibrated_context_length"),
+            context_calibrated: m
+                .get("context_calibrated")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            is_default: m.get("default").and_then(Value::as_bool).unwrap_or(false),
+            loaded_at: str_of(m, "loaded_at"),
+            last_used_at: str_of(m, "last_used_at"),
+        });
+    }
+    out
+}
+
+/// Fold one `/host/state` response into [`HostFacts`]. Pure and
+/// tolerant: every section is optional; a missing section means its
+/// rows/numbers simply do not exist (rendered as omission).
+pub fn host_state_from_response(v: &Value) -> HostFacts {
+    let memory = v.get("memory").cloned().unwrap_or(Value::Null);
+    let ram = memory.get("ram").cloned().unwrap_or(Value::Null);
+    let device = memory.get("device").cloned().unwrap_or(Value::Null);
+    let gpu = v.get("gpu").cloned().unwrap_or(Value::Null);
+    let mut caches = Vec::new();
+    for c in v
+        .get("session_caches")
+        .and_then(Value::as_array)
+        .unwrap_or(&Vec::new())
+    {
+        caches.push(SessionCacheRow {
+            key: str_of(c, "key"),
+            provider: str_of(c, "provider"),
+            model: str_of(c, "model"),
+            session_id: str_of(c, "session_id"),
+            bytes: u64_of(c, "bytes"),
+            token_count: u64_of(c, "token_count"),
+        });
+    }
+    let mut totals: Vec<(String, u64)> = v
+        .get("totals")
+        .and_then(Value::as_object)
+        .map(|o| {
+            o.iter()
+                .filter_map(|(k, val)| val.as_u64().map(|n| (k.clone(), n)))
+                .collect()
+        })
+        .unwrap_or_default();
+    totals.sort();
+    // Degraded lanes carry their reason when `reasons{}` names one.
+    let reasons = v.get("reasons").cloned().unwrap_or(Value::Null);
+    let degraded: Vec<String> = v
+        .get("degraded")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(
+                    |lane| match reasons.get(lane).and_then(Value::as_str).map(str::trim) {
+                        Some(why) if !why.is_empty() => format!("{lane}: {why}"),
+                        _ => lane.to_string(),
+                    },
+                )
+                .collect()
+        })
+        .unwrap_or_default();
+    let gpu_supported = gpu
+        .get("supported")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    HostFacts {
+        ts: str_of(v, "ts"),
+        host_name: memory
+            .get("host")
+            .map(|h| str_of(h, "host_name"))
+            .unwrap_or_default(),
+        ram_total: u64_of(&ram, "total_bytes"),
+        ram_used: u64_of(&ram, "used_bytes"),
+        ram_available: u64_of(&ram, "available_bytes"),
+        // Range-checked: a percent is only a percent inside 0..=100 —
+        // junk (250, NaN, negatives) reads as UNKNOWN, so the footer and
+        // the modal bar can never disagree over a clamped fabrication.
+        ram_percent: ram
+            .get("percent")
+            .and_then(Value::as_f64)
+            .filter(|p| p.is_finite() && (0.0..=100.0).contains(p)),
+        process_rss: memory
+            .get("process")
+            .and_then(|p| p.get("rss_bytes"))
+            .and_then(Value::as_u64),
+        device_backend: device
+            .get("backend")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+        device_allocated: u64_of(&device, "allocated_bytes"),
+        device_total: u64_of(&device, "total_bytes"),
+        device_free: u64_of(&device, "free_bytes"),
+        gpu_supported,
+        // A number is only a number when the host SUPPORTS the meter —
+        // `supported:false` with a stray field must not resurrect it.
+        gpu_util_pct: if gpu_supported {
+            gpu.get("utilization_gpu_pct").and_then(Value::as_f64)
+        } else {
+            None
+        },
+        models: residency_rows_v1(v),
+        caches,
+        totals,
+        degraded,
+    }
+}
+
+/// One display line for a `/models/context_estimate` answer:
+/// `confidence · predicted max context N · notes`. Unknowns are omitted,
+/// never zero-filled.
+pub fn context_estimate_line(v: &Value) -> String {
+    let confidence = v
+        .get("confidence")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .trim()
+        .to_string();
+    let mut parts = vec![confidence];
+    if let Some(n) = v.get("predicted_max_context").and_then(Value::as_u64) {
+        parts.push(format!("predicted max context {n}"));
+    }
+    let notes: Vec<&str> = v
+        .get("notes")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    if !notes.is_empty() {
+        parts.push(notes.join("; "));
+    }
+    parts.join(" · ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -660,6 +1004,68 @@ mod tests {
             ]
         );
         assert!(agent_workflow_ids_from_bundles(&json!({"items": []})).is_empty());
+    }
+
+    /// Which agent runs is the largest determinant of what a run means, so
+    /// the GATEWAY decides it: "there is the default set by the gateway, but
+    /// it can be overridden on new turns by a client" (operator, 2026-08-21).
+    /// A client ruling here gives one durable session two different loops
+    /// depending on which app opened the next turn.
+    #[test]
+    fn the_gateways_served_default_outranks_the_clients_own_pick() {
+        let bundles = json!({"items": [
+            {"bundle_id": "coding-agent", "default_entrypoint": "coder", "entrypoints": [
+                {"flow_id": "coder", "name": "coder", "interfaces": [AGENT_INTERFACE_V1]}]},
+            {"bundle_id": "house-agent", "is_default": true, "default_entrypoint": "house",
+             "entrypoints": [{"flow_id": "house", "name": "house", "interfaces": [AGENT_INTERFACE_V1]}]}
+        ]});
+        let flows = agent_workflows_from_bundles(&bundles);
+
+        assert_eq!(
+            served_default_workflow(&bundles, AGENT_INTERFACE_V1),
+            Some(("house-agent".to_string(), "house".to_string()))
+        );
+        let picked =
+            choose_workflow_with_served_default(&flows, None, None, &bundles, AGENT_INTERFACE_V1)
+                .unwrap();
+        assert_eq!(picked.bundle_id, "house-agent", "the server's default wins");
+
+        // An operator preference is an override and still wins over both.
+        let overridden = choose_workflow_with_served_default(
+            &flows,
+            Some("coding-agent"),
+            Some("coder"),
+            &bundles,
+            AGENT_INTERFACE_V1,
+        )
+        .unwrap();
+        assert_eq!(overridden.bundle_id, "coding-agent");
+
+        // No bundle marked default (today's gateway): unchanged behaviour,
+        // and the client fallback is reached exactly as before.
+        let unmarked = json!({"items": [
+            {"bundle_id": "coding-agent", "default_entrypoint": "coder", "entrypoints": [
+                {"flow_id": "coder", "name": "coder", "interfaces": [AGENT_INTERFACE_V1]}]}
+        ]});
+        assert_eq!(served_default_workflow(&unmarked, AGENT_INTERFACE_V1), None);
+        let flows2 = agent_workflows_from_bundles(&unmarked);
+        assert_eq!(
+            choose_workflow_with_served_default(&flows2, None, None, &unmarked, AGENT_INTERFACE_V1)
+                .unwrap()
+                .bundle_id,
+            "coding-agent"
+        );
+
+        // A default whose entrypoint does not declare our interface is not
+        // ours to run.
+        let wrong_iface = json!({"items": [
+            {"bundle_id": "other", "is_default": true, "default_entrypoint": "x",
+             "entrypoints": [{"flow_id": "x", "name": "x", "interfaces": ["something.else.v1"]}]}
+        ]});
+        assert_eq!(
+            served_default_workflow(&wrong_iface, AGENT_INTERFACE_V1),
+            None
+        );
     }
 
     #[test]
@@ -962,5 +1368,236 @@ mod tests {
             Some(("openai".into(), "gpt-5.2".into()))
         );
         assert_eq!(default_text_route(&json!({"routes": []})), None);
+    }
+
+    // --- host state + capability contracts (`/resources`) ---------------
+
+    #[test]
+    fn capability_contracts_read_presence_and_modality_labels() {
+        let v = json!({"contracts": {"common": {
+            "model_residency": {
+                "endpoints": {"loaded": "/models/loaded", "unload": "/models/unload"},
+                "row_schema": "row_v1",
+                "modality_ui": {"version": 1, "colors": {
+                    "text-generation": {"color": "#7aa2f7", "label": "LLM"},
+                    "image-generation": {"color": "#f7768e", "label": "IMG"},
+                    "label-less": {"color": "#000000"}
+                }}
+            },
+            "host_state": {"endpoints": {"state": "/host/state"}},
+            "session_caches": {"endpoints": {"list": "/x", "clear_all": "/y"}}
+        }}});
+        let c = contracts_from_capabilities(&v);
+        assert!(c.model_residency && c.host_state && c.session_caches);
+        assert_eq!(c.label_for("text-generation"), "LLM");
+        assert_eq!(c.label_for("image-generation"), "IMG");
+        // A label-less color entry falls back to the task id; unknown
+        // tasks read as themselves (never invented).
+        assert_eq!(c.label_for("label-less"), "label-less");
+        assert_eq!(c.label_for("audio"), "audio");
+
+        // An old gateway (no contracts at all): everything false — the
+        // gate then says "not supported", never a fabricated view.
+        let old = contracts_from_capabilities(&json!({"flows": []}));
+        assert!(!old.model_residency && !old.host_state && !old.session_caches);
+        assert!(old.modality_labels.is_empty());
+    }
+
+    #[test]
+    fn capability_contracts_read_the_live_capabilities_envelope() {
+        // The REAL endpoint wraps everything in `capabilities` — captured
+        // live from `GET /api/gateway/discovery/capabilities` (2026-08-28).
+        // The bare-`contracts` fixture above is the tolerated unwrapped
+        // shape; THIS is the wire truth, and reading only the top level
+        // regresses to "not supported by this gateway" on every real
+        // gateway.
+        let v = json!({"capabilities": {
+            "abstractcore": {"version": "2.13.40"},
+            "contracts": {"version": 1, "abstractcode": {}, "common": {
+                "model_residency": {
+                    "endpoints": {"loaded": "/api/gateway/models/loaded"},
+                    "row_schema": "model_residency_row_v1",
+                    "modality_ui": {"version": 1, "colors": {
+                        "text_generation": {"color": "#00D2FF", "label": "Text"}
+                    }}
+                },
+                "host_state": {
+                    "route_available": true, "available": true, "memory_available": true,
+                    "endpoints": {"state": "/api/gateway/host/state",
+                                   "memory": "/api/gateway/host/metrics/memory",
+                                   "gpu": "/api/gateway/host/metrics/gpu"}
+                },
+                "session_caches": {"endpoints": {"list": "/a", "clear_all": "/b"}}
+            }}
+        }});
+        let c = contracts_from_capabilities(&v);
+        assert!(c.model_residency && c.host_state && c.session_caches);
+        assert_eq!(c.label_for("text_generation"), "Text");
+
+        // A NON-OBJECT `capabilities` key (a stray flag on an unwrapped
+        // payload) must not hijack the root: fall back to the top level.
+        let odd = contracts_from_capabilities(
+            &json!({"capabilities": true, "contracts": {"common": {"host_state": {}}}}),
+        );
+        assert!(odd.host_state, "non-object capabilities falls back to top level");
+    }
+
+    fn full_host_state() -> Value {
+        json!({
+            "ok": true, "ts": "2026-08-27T10:00:00Z",
+            "memory": {
+                "ram": {"total_bytes": 137438953472u64, "available_bytes": 52200000000u64,
+                         "used_bytes": 85238953472u64, "percent": 62.0},
+                "process": {"rss_bytes": 512000000u64},
+                "device": {"backend": "mlx", "allocated_bytes": 21474836480u64,
+                            "total_bytes": 103079215104u64, "free_bytes": 81604378624u64},
+                "host": {"host_name": "studio.local"}
+            },
+            "gpu": {"supported": true, "utilization_gpu_pct": 21.0},
+            "models": [
+                {"runtime_id": "rt-1", "task": "text-generation", "provider": "lmstudio",
+                 "model": "qwen3-4b", "source": "config", "resident": true,
+                 "state": "loaded", "locked": true, "lockable": true,
+                 "modalities": ["text"], "size_bytes": 4508876800u64,
+                 "size_vram_bytes": 4508876800u64, "context_length": 32768,
+                 "calibrated_context_length": 28672, "context_calibrated": true,
+                 "default": true, "loaded_at": "2026-08-27T09:00:00Z",
+                 "last_used_at": "2026-08-27T09:59:00Z"},
+                {"task": "image-generation", "provider": "mlx-gen", "model": "flux",
+                 "resident": null, "state": null, "locked": null, "lockable": false,
+                 "size_bytes": null, "context_length": null}
+            ],
+            "session_caches": [
+                {"key": "k1", "provider": "lmstudio", "model": "qwen3-4b",
+                 "session_id": "acode-abc", "bytes": 1048576, "token_count": 2100}
+            ],
+            "totals": {"models_size_bytes": 4508876800u64, "resident_models": 1},
+            "degraded": [],
+            "reasons": {}
+        })
+    }
+
+    #[test]
+    fn host_state_parses_the_full_shape() {
+        let f = host_state_from_response(&full_host_state());
+        assert_eq!(f.ts, "2026-08-27T10:00:00Z", "served ts carried verbatim");
+        assert_eq!(f.host_name, "studio.local");
+        assert_eq!(f.ram_total, Some(137438953472));
+        assert_eq!(f.ram_percent, Some(62.0));
+        assert_eq!(f.process_rss, Some(512000000));
+        assert_eq!(f.device_backend, "mlx");
+        assert_eq!(f.device_allocated, Some(21474836480));
+        assert!(f.gpu_supported);
+        assert_eq!(f.gpu_util_pct, Some(21.0));
+        assert_eq!(f.models.len(), 2);
+        let m = &f.models[0];
+        assert_eq!(m.resident, Some(true));
+        assert!(m.locked && m.lockable && m.context_calibrated && m.is_default);
+        assert_eq!(m.calibrated_context_length, Some(28672));
+        assert_eq!(f.caches.len(), 1);
+        assert_eq!(f.caches[0].bytes, Some(1048576));
+        assert_eq!(
+            f.totals,
+            vec![
+                ("models_size_bytes".to_string(), 4508876800),
+                ("resident_models".to_string(), 1)
+            ]
+        );
+        assert!(f.degraded.is_empty());
+    }
+
+    #[test]
+    fn resident_null_stays_unknown_never_a_fabricated_no() {
+        // The tri-state contract: null resident is UNKNOWN. Folding it to
+        // false would render "no" for a state the gateway itself does not
+        // claim to know.
+        let f = host_state_from_response(&full_host_state());
+        let m = &f.models[1];
+        assert_eq!(m.resident, None, "null = unknown, not false");
+        assert!(m.state.is_empty(), "null state reads as absent");
+        assert!(
+            !m.locked,
+            "null locked reads as not-locked (no 🔒 invented)"
+        );
+        assert_eq!(m.size_bytes, None);
+        assert_eq!(m.context_length, None);
+    }
+
+    #[test]
+    fn degraded_gpu_and_missing_sections_read_as_absence() {
+        let v = json!({
+            "ok": true,
+            "memory": {"ram": {"total_bytes": 1000, "used_bytes": 620}},
+            "gpu": {"supported": false, "utilization_gpu_pct": 55.0},
+            "models": [],
+            "degraded": ["gpu", "device"],
+            "reasons": {"gpu": "ioreg unavailable"}
+        });
+        let f = host_state_from_response(&v);
+        assert!(!f.gpu_supported);
+        // A stray number under supported:false must NOT resurrect the
+        // meter (the gpu.rs honesty rule applied here).
+        assert_eq!(f.gpu_util_pct, None);
+        assert_eq!(f.ram_percent, None, "absent percent stays unknown");
+        assert_eq!(f.process_rss, None);
+        assert!(f.device_backend.is_empty());
+        assert_eq!(
+            f.degraded,
+            vec!["gpu: ioreg unavailable".to_string(), "device".to_string()],
+            "degraded lanes fold with their reason when named"
+        );
+    }
+
+    #[test]
+    fn junk_percents_read_as_unknown_never_clamped_truth() {
+        // A percent outside 0..=100 is junk, not a measurement — clamping
+        // it would fabricate a number the host never reported.
+        for junk in [-3.0f64, 100.1, 250.0, f64::NAN] {
+            let v = json!({"memory": {"ram": {"percent": junk}}});
+            assert_eq!(
+                host_state_from_response(&v).ram_percent,
+                None,
+                "{junk} must read unknown"
+            );
+        }
+        // The boundaries are real values.
+        for ok in [0.0f64, 62.0, 100.0] {
+            let v = json!({"memory": {"ram": {"percent": ok}}});
+            assert_eq!(host_state_from_response(&v).ram_percent, Some(ok));
+        }
+    }
+
+    #[test]
+    fn junk_sizes_read_as_unknown_never_zero() {
+        let v = json!({"models": [
+            {"provider": "p", "model": "m", "size_bytes": -5,
+             "size_vram_bytes": "big", "context_length": 3.7,
+             "calibrated_context_length": null},
+            {"provider": "", "model": ""}
+        ]});
+        let rows = residency_rows_v1(&v);
+        assert_eq!(rows.len(), 1, "a row with no identity is dropped");
+        let r = &rows[0];
+        assert_eq!(r.size_bytes, None, "negative = junk = unknown");
+        assert_eq!(r.size_vram_bytes, None, "string = junk = unknown");
+        assert_eq!(r.context_length, None, "non-integer = unknown");
+        assert_eq!(r.calibrated_context_length, None);
+    }
+
+    #[test]
+    fn context_estimate_line_renders_known_parts_only() {
+        assert_eq!(
+            context_estimate_line(&json!({
+                "confidence": "calibrated", "predicted_max_context": 28672,
+                "notes": ["measured on this host", "vram-bound"]
+            })),
+            "calibrated · predicted max context 28672 · measured on this host; vram-bound"
+        );
+        // Unknown answer: no invented number.
+        assert_eq!(
+            context_estimate_line(&json!({"confidence": "unknown"})),
+            "unknown"
+        );
+        assert_eq!(context_estimate_line(&json!({})), "unknown");
     }
 }

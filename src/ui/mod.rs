@@ -1,11 +1,13 @@
 //! Root view composition + orchestration (timers, toasts, modals).
 
+pub mod animation;
 pub mod approval_view;
 pub mod attachments;
 pub mod chrome;
 pub mod entity_actions;
 pub mod entity_modals;
 pub mod goal;
+pub mod loading;
 pub mod logo;
 pub mod modals;
 pub mod preview;
@@ -13,6 +15,7 @@ pub mod queue_lane;
 pub mod queue_modal;
 pub mod quit;
 pub mod splash;
+pub mod stance;
 pub mod thinking;
 pub mod transcript_view;
 
@@ -203,6 +206,15 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     // class this codebase has already paid for twice). "Splash" = the
     // agent lane with no conversation yet (boot Info notices only).
     let splash_visible = cx.memo(move || {
+        // A session restore in flight shows the loading screen
+        // (`ui::loading`), which shares the splash's frame clock — the
+        // ticker predicate below reads THIS memo, so both full-pane
+        // ambient surfaces arm the one interval (zero-wakeup rule kept
+        // in one predicate). The pane checks `restoring` before its
+        // splash branch, so the OR here never paints a splash early.
+        if store.restoring.get() {
+            return true;
+        }
         if matches!(store.focus.get(), crate::convo::Focus::Agent) {
             store
                 .fold
@@ -217,6 +229,24 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     // is the splash itself: a continuous logo shimmer is the point).
     let splash = cx.signal(0u64);
     wire_splash_ticker(cx, store, splash_visible, splash);
+    // `/animation`: the feed accumulates whether or not the pane is
+    // showing (opening it mid-run must show the run's whole history, not
+    // start from blank); the ticker exists only while it IS showing.
+    let anim_feed = animation::wire_feed(cx, store);
+    let anim_frame = cx.signal(0u64);
+    animation::wire_ticker(cx, store, anim_frame);
+    // `/stance` (2026-08-21): the Cognitive Monitor's conduct read, in
+    // the terminal. Session-scoped and off by default; the signal lives
+    // HERE rather than in `store` so the feature stays one directory
+    // plus three lines (see `ui::stance`'s removal note).
+    let stance_mode = cx.signal(stance::OFF);
+    let stance_frame = cx.signal(0u64);
+    wire_stance_ticker(cx, store, stance_mode, stance_frame);
+    // The read floats bottom-right as an OVERLAY rather than taking a
+    // row of the column: it paints over the transcript and routes no
+    // input, so scrolling and selecting the conversation underneath are
+    // untouched (`ui::stance::wire_overlay`).
+    stance::wire_overlay(cx, store, ctx.overlays.clone(), stance_mode, stance_frame);
 
     wire_camera_default_off(cx, store, ctx.clone());
     spawn_run_ticker(cx, store, spin);
@@ -278,7 +308,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
         let composer = composer.clone();
         move |text: &str| {
             follow.set(true); // sending jumps back to the tail
-            submit(cx, store, &ctx, &composer, text)
+            submit(cx, store, &ctx, &composer, text, stance_mode)
         }
     };
 
@@ -481,6 +511,36 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
             let composer = composer.clone();
             move |_| attachments::undo_drop(store, &composer)
         })
+        // A press ON the stance panel folds/unfolds it. The panel is a
+        // DRAW overlay — it routes no input, which is what keeps the
+        // transcript under it scrollable and selectable — so the click
+        // is caught HERE, at capture phase, and consumed only when it
+        // lands inside the panel's own box. Everything else passes
+        // through untouched.
+        .on(abstracttui::ui::Phase::Capture, move |ectx, ev| {
+            let abstracttui::ui::UiEvent::Mouse(m) = ev else {
+                return;
+            };
+            if !matches!(
+                m.kind,
+                abstracttui::ui::MouseKind::Down(abstracttui::ui::MouseButton::Left)
+            ) {
+                return;
+            }
+            let view = abstracttui::app::current_viewport();
+            if stance::hit(stance_mode.get_untracked(), view, m.pos) {
+                ectx.stop_propagation();
+                stance::command(stance_mode, None);
+            }
+        })
+        // Ctrl+G folds/unfolds the stance panel (same cycle as
+        // `/stance`): off → the folded strip → the card → off. A chord
+        // because "fold it away" is a thing you do mid-conversation, and
+        // typing a command to hide a read-out is not folding.
+        .shortcut(KeyChord::new(Mods::CTRL, Key::Char('g')), move |_| {
+            let line = stance::command(stance_mode, None);
+            store.notify(&line);
+        })
         .shortcut(KeyChord::plain(Key::Escape), {
             move |_| handle_escape(cx, store, &esc_ctx, &esc_composer, follow)
         })
@@ -532,6 +592,8 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                         follow,
                         splash_visible,
                         splash,
+                        anim_feed.clone(),
+                        anim_frame,
                     ))
                     // One breathing row between the transcript's last line
                     // and the control panel (operator ask, 2026-07-23). A
@@ -600,6 +662,10 @@ fn submit(
     ctx: &UiCtx,
     composer: &abstracttui::widgets::TextAreaState,
     text: &str,
+    // `/stance`'s mode lives in root scope, not in `store` (the feature
+    // owns no shared state — see `ui::stance`'s removal note), so it
+    // rides the two hops from the composer to the dispatcher.
+    stance_mode: Signal<u8>,
 ) {
     let text = text.trim().to_string();
     // `?` opens the keys + commands reference (REST-1): the status-bar
@@ -659,7 +725,7 @@ fn submit(
                 Phase::Idle => start_run_attaching(store, ctx, &text),
             }
         }
-        Some(cmd) => dispatch_command(cx, store, ctx, cmd),
+        Some(cmd) => dispatch_command(cx, store, ctx, cmd, stance_mode),
     }
 }
 
@@ -785,8 +851,13 @@ pub(crate) fn agent_start_opts(
             Some(ws_mode)
         },
         workspace_allowed: store.workspace_allowed.get_untracked(),
-        max_iterations: ctx.max_iterations,
-        max_iterations_explicit: ctx.max_iterations_explicit,
+        // The SIGNAL, not the UiCtx copy: `--max-iterations` seeds it at boot
+        // and `/iterations` edits it, so there is one authority (same rule as
+        // `workspace_mode` above). A budget is "explicit" whenever a number is
+        // in force from either source — absent one we send nothing and take
+        // the server's own, which is what every other client gets.
+        max_iterations: store.max_iterations.get_untracked(),
+        max_iterations_explicit: store.max_iterations.get_untracked() > 0,
         system: String::new(),
         // Verifier-before-conclude: the session posture (`/review`), always
         // STATED so a run's transcript records what was asked for rather
@@ -869,7 +940,7 @@ pub(crate) fn send_start(
     }
 }
 
-fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command) {
+fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_mode: Signal<u8>) {
     match cmd {
         Command::Help => modals::open_help(cx, ctx),
         Command::Quit => quit::request_quit(cx, store, ctx),
@@ -931,6 +1002,17 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command) {
             entity_actions::agent_command_notice(store, "/cancel");
             cancel_run(store, ctx)
         }
+        Command::Conclude(note) => {
+            entity_actions::agent_command_notice(store, "/conclude");
+            let run_id = store.run_id.get_untracked();
+            if run_id.is_empty() || store.phase.get_untracked() == Phase::Idle {
+                store.notify("no active run to conclude");
+            } else if store.paused.get_untracked() {
+                store.notify("the run is paused — /resume first, then /conclude");
+            } else {
+                ctx.send(Cmd::Conclude { run_id, note });
+            }
+        }
         Command::Pause => {
             entity_actions::agent_command_notice(store, "/pause");
             let run_id = store.run_id.get_untracked();
@@ -955,6 +1037,34 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command) {
         // (carries the dead-worker revert; two concurrent lanes landed
         // an arm each, folded here).
         Command::Gpu => toggle_gpu_meter(store, ctx),
+        Command::Resources => {
+            // GATED on the gateway's declared host_state contract: with
+            // the contract confirmed, fetch at the gesture (`/host/state`
+            // is slow by contract — open + `r` only, never polled); with
+            // contracts still unanswered, re-probe capabilities so the
+            // open modal can heal live; with the contract known-absent,
+            // fetch nothing — the modal says so honestly.
+            store.host_estimate.set(None);
+            match store.host_contracts.get_untracked() {
+                Some(c) if c.host_state => {
+                    // Held facts (fresh or stale) stay visible while the
+                    // open-time fetch runs; only a factless state shows
+                    // the Pending screen.
+                    if !matches!(
+                        store.host_state.get_untracked(),
+                        crate::store::HostState::Ready(_) | crate::store::HostState::Stale(_)
+                    ) {
+                        store.host_state.set(crate::store::HostState::Pending);
+                    }
+                    ctx.send(Cmd::LoadHostState);
+                }
+                None => {
+                    ctx.send(Cmd::LoadCapabilities);
+                }
+                Some(_) => {}
+            }
+            modals::open_resources(cx, store, ctx);
+        }
         Command::Details(arg) => match arg.as_deref().map(str::trim) {
             None | Some("") => toggle_details(store, ctx),
             Some("full") | Some("expand") | Some("on") => {
@@ -1144,6 +1254,11 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command) {
         }
         Command::Goal(arg) => goal::dispatch_goal(store, ctx, arg),
         Command::Context(arg) => set_context_window(store, ctx, arg),
+        Command::Iterations(arg) => set_max_iterations(store, ctx, arg),
+        Command::Stance(arg) => {
+            let line = stance::command(stance_mode, arg.as_deref());
+            store.notify(&line);
+        }
         Command::Redraw => abstracttui::app::request_full_redraw(),
         Command::Entities(name) => {
             // Async refresh behind the instantly-opened cached view.
@@ -1354,6 +1469,9 @@ fn reset_session_state(store: Store, ctx: &UiCtx, old_sid: &str, new_sid: &str, 
     store.history_cursor.set(None);
     store.older_turns.set(0);
     store.history_loading.set(false);
+    // A stale (done, total) from the old session's probe must not flash
+    // on the next loading screen; the new probe posts its own counters.
+    store.restore_progress.set(None);
     // Stale-clock hygiene (visibility review P0-1 path 2): a mid-run
     // session switch cancels the run, but its `finish()` clear is
     // fold-guarded and skipped after this reset — the anchor must die
@@ -1513,10 +1631,18 @@ pub fn switch_session(store: Store, ctx: &UiCtx, id: &str) {
         &id,
         format!("session switched to {id} — durable memory continues on the gateway"),
     );
-    ctx.send(Cmd::ProbeAttach {
+    if ctx.send(Cmd::ProbeAttach {
         session_id: id,
         replay_turns: ctx.replay_turns,
-    });
+    }) {
+        // Arm the loading screen NOW, on the UI thread: the worker may
+        // be mid-fetch elsewhere, and the waiting surface must appear
+        // the frame the picker closes, not when the worker reaches the
+        // probe. The runner re-arms (idempotent) and every one of its
+        // exit paths clears; a dead worker never arms a forever-lie.
+        store.restoring.set(true);
+        store.restore_progress.set(None);
+    }
 }
 
 /// `/permissions [read|write|all]` — THE tool-permission surface (the
@@ -1576,6 +1702,63 @@ pub fn cycle_permissions(store: Store, ctx: &UiCtx) {
 /// "declared" — this is the operator's statement, never a client-shipped
 /// capability table (the Python predecessor's own first resolution rung
 /// is exactly this, react_shell.py:1352-1381).
+/// `/iterations [N|off]` — the iteration budget this client REQUESTS.
+///
+/// The bare form answers the question the failure card raises and cannot
+/// answer itself: *whose* number was that? This client asks for nothing by
+/// default, so the budget a run actually gets is the server's, and on the
+/// published `basic-agent` bundles the server's is a pin inside the bundle —
+/// not a framework default anyone can read from here. So the report says
+/// only what this client KNOWS (what it asks for, or that it asks for
+/// nothing) and never invents the server's number. Fabricating a "current
+/// budget" from a client-side table is the 2026-07-17 class exactly.
+fn set_max_iterations(store: Store, ctx: &UiCtx, arg: Option<String>) {
+    // A ceiling on what we will ASK for. The server clamps or refuses by its
+    // own rules; this only stops a fat-fingered `/iterations 100000` from
+    // riding out as a serious request.
+    const MAX_REQUEST: u32 = 10_000;
+
+    match arg {
+        None => {
+            let asked = store.max_iterations.get_untracked();
+            if asked == 0 {
+                store.notify(
+                    "iteration budget: asking for nothing — the server's own applies \
+                     (the same one every client gets) · /iterations <n> requests one",
+                );
+            } else {
+                store.notify(format!(
+                    "iteration budget: asking for {asked} on new runs \
+                     (the server may clamp or refuse it) · /iterations off takes the server's"
+                ));
+            }
+        }
+        Some(w)
+            if w.eq_ignore_ascii_case("off")
+                || w.eq_ignore_ascii_case("clear")
+                || w.trim() == "0" =>
+        {
+            store.max_iterations.set(0);
+            persist_prefs(ctx, |p| p.max_iterations = 0);
+            store.notify("iteration budget cleared — new runs take the server's own");
+        }
+        Some(raw) => match raw.trim().parse::<u32>() {
+            Ok(n) if (1..=MAX_REQUEST).contains(&n) => {
+                store.max_iterations.set(n);
+                persist_prefs(ctx, |p| p.max_iterations = n);
+                store.notify(format!(
+                    "iteration budget: will ask for {n} — applies to the NEXT run, \
+                     not the one in flight"
+                ));
+            }
+            _ => store.notify(format!(
+                "not an iteration count: {raw} — try a whole number 1-{MAX_REQUEST} \
+                 (/iterations off takes the server's)"
+            )),
+        },
+    }
+}
+
 fn set_context_window(store: Store, ctx: &UiCtx, arg: Option<String>) {
     use crate::ui::chrome::fmt_tokens;
     match arg {
@@ -1794,6 +1977,19 @@ fn handle_escape(
     composer: &abstracttui::widgets::TextAreaState,
     follow: Signal<bool>,
 ) {
+    // The animation pane exits FIRST and CONSUMES the press. No command
+    // sets `store.animation` today (see
+    // `docs/backlog/proposed/ambient-run-animations.md`), so this rung is
+    // inert — it stays because it is the rung that makes the feature SAFE
+    // to switch back on: Esc here is already quadruple-loaded (clear
+    // draft, jump to tail, arm cancel, fire cancel), and a user tapping
+    // it twice to get the words back must never reach "cancel the run".
+    // Clearing `last_esc` on the way out is the second half of that.
+    if store.animation.get_untracked() > 0 {
+        store.animation.set(0);
+        store.last_esc.set(None);
+        return;
+    }
     if !composer.text().is_empty() {
         composer.clear();
         return;
@@ -2022,6 +2218,34 @@ fn spawn_run_ticker(cx: Scope, store: Store, spin: Signal<u64>) {
                 h.cancel();
             }
         }
+    });
+}
+
+/// The `/stance` breath ticker: armed ONLY while the figure is showing
+/// AND a run is live — the line view is static text, and a finished run
+/// does not breathe (the honesty gate the whole widget rests on). The
+/// engine's zero-wakeup idle guarantee is untouched everywhere else.
+fn wire_stance_ticker(cx: Scope, store: Store, mode: Signal<u8>, frame: Signal<u64>) {
+    let handle: Rc<RefCell<Option<abstracttui::reactive::IntervalHandle>>> =
+        Rc::new(RefCell::new(None));
+    cx.effect(move || {
+        let on = mode.get() == stance::FIGURE && store.phase.get() != Phase::Idle;
+        let mut slot = handle.borrow_mut();
+        if !on {
+            if let Some(h) = slot.take() {
+                h.cancel();
+            }
+            return;
+        }
+        if slot.is_some() {
+            return;
+        }
+        frame.set(0);
+        *slot = Some(abstracttui::reactive::interval(
+            cx,
+            Duration::from_millis(220),
+            move || frame.update(|f| *f = f.wrapping_add(1)),
+        ));
     });
 }
 

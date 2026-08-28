@@ -31,13 +31,16 @@ use abstracttui::reactive::{Backoff, WakeHandle};
 use serde_json::Value;
 
 use crate::discovery::{
-    agent_workflow_ids_from_bundles, agent_workflows_from_bundles, choose_workflow,
-    default_text_route, mcp_from_response, models_from_provider_models, providers_from_discovery,
-    skills_from_response, tools_from_discovery, workflows_with_interface, GOAL_INTERFACE_V1,
+    agent_workflow_ids_from_bundles, agent_workflows_from_bundles, context_estimate_line,
+    contracts_from_capabilities, default_text_route, host_state_from_response, mcp_from_response,
+    models_from_provider_models, providers_from_discovery, skills_from_response,
+    tools_from_discovery, workflows_with_interface, GOAL_INTERFACE_V1,
 };
 use crate::gateway::{GatewayClient, GwError};
 use crate::run_input::{build_input_data, StartOpts};
-use crate::store::{CacheInfo, Conn, ImageEntry, Phase, SessionTotals, Store, Workflow};
+use crate::store::{
+    CacheInfo, Conn, HostContracts, HostState, ImageEntry, Phase, SessionTotals, Store, Workflow,
+};
 use crate::transcript::{FoldEffect, Item, PendingWait};
 
 /// Inline-render ceiling for fetched artifacts (images and offloaded
@@ -231,6 +234,16 @@ pub enum Cmd {
     ResumePaused {
         run_id: String,
     },
+    /// Ask the agent to CONCLUDE now — the gateway `conclude` command.
+    /// Between pause (freeze) and cancel (throw away), this is how a turn
+    /// ends well: the loop stops reasoning at its next boundary and answers
+    /// from what it already has. Server-side verb, so an operator can send
+    /// it from this TUI, AbstractObserver, the console or a chat bridge and
+    /// the run behaves identically.
+    Conclude {
+        run_id: String,
+        note: String,
+    },
     Follow {
         root_run_id: String,
         run_id: String,
@@ -273,6 +286,37 @@ pub enum Cmd {
     /// The answer landed: stop following helper subruns (wrapper bundles can
     /// keep status-watcher subflows polling long after the agent finished).
     StopFollows,
+    /// Fetch `/discovery/capabilities` once (boot; `/resources` re-sends
+    /// while the store still holds None) — fills `store.host_contracts`,
+    /// the gate for the whole `/resources` surface.
+    LoadCapabilities,
+    /// Fetch `/host/state` (SLOW by contract): modal open + explicit
+    /// refresh only — no polling lane exists for it on purpose.
+    LoadHostState,
+    /// Unload one resident model (admin). HTTP 409 `model_locked` is a
+    /// refusal, not an error: the notice offers force/unlock.
+    UnloadModel {
+        provider: String,
+        model: String,
+        force: bool,
+    },
+    /// Lock a model resident (admin).
+    LockModel {
+        provider: String,
+        model: String,
+    },
+    /// Release a residency lock (admin).
+    UnlockModel {
+        provider: String,
+        model: String,
+    },
+    /// Probe `/models/context_estimate` for one route; the answer lands
+    /// in `store.host_estimate` for the `/resources` inline result line.
+    EstimateContext {
+        provider: String,
+        model: String,
+        context_length: Option<u64>,
+    },
     /// Start the `/gpu` meter poller (its OWN thread — `gateway::gpu`;
     /// the command exists because the client lives on this loop).
     GpuEnable,
@@ -558,6 +602,7 @@ pub(crate) fn apply_worker_death(store: &Store, msg: &str) {
     // History lanes tell the truth too: nothing can ever flip these
     // back once the command loop is gone.
     store.restoring.set(false);
+    store.restore_progress.set(None);
     if store.history_loading.get_untracked() {
         store.history_loading.set(false);
         let older = store.older_turns.get_untracked();
@@ -639,6 +684,7 @@ impl Runner {
                 self.probe_model_reasoning(provider, model)
             }
             Cmd::Pause { run_id } => self.pause(run_id),
+            Cmd::Conclude { run_id, note } => self.conclude(run_id, note),
             Cmd::ResumePaused { run_id } => self.resume_paused(run_id),
             Cmd::Follow {
                 root_run_id,
@@ -662,6 +708,20 @@ impl Runner {
                 artifact_id,
             } => self.fetch_answer(run_id, artifact_id),
             Cmd::LoadPreview { seq, path } => self.load_preview(seq, path),
+            Cmd::LoadCapabilities => self.load_capabilities(),
+            Cmd::LoadHostState => self.load_host_state(),
+            Cmd::UnloadModel {
+                provider,
+                model,
+                force,
+            } => self.unload_model(provider, model, force),
+            Cmd::LockModel { provider, model } => self.lock_model(provider, model, true),
+            Cmd::UnlockModel { provider, model } => self.lock_model(provider, model, false),
+            Cmd::EstimateContext {
+                provider,
+                model,
+                context_length,
+            } => self.estimate_context(provider, model, context_length),
             Cmd::StopFollows => self.stop_follow_streams(),
             // GPU meter lane: the poller runs on its own thread (a
             // metrics read must never starve Probe/Start on this loop).
@@ -840,10 +900,12 @@ impl Runner {
                 // fresh Folds rehydration builds worker-side.
                 let agent_ids = agent_workflow_ids_from_bundles(&v);
                 self.agent_workflow_ids = agent_ids.clone();
-                let chosen = choose_workflow(
+                let chosen = crate::discovery::choose_workflow_with_served_default(
                     &workflows,
                     preferred_bundle.as_deref(),
                     preferred_flow.as_deref(),
+                    &v,
+                    crate::discovery::AGENT_INTERFACE_V1,
                 );
                 // A workflow requested on the COMMAND LINE that resolved to
                 // something else must say so. `choose_workflow` degrades to
@@ -1047,6 +1109,69 @@ impl Runner {
                 self.post(move || store.mcp_note.set(format!("discovery failed: {msg}")));
             }
         }
+    }
+
+    /// `/discovery/capabilities` → `store.host_contracts` (the `/resources`
+    /// gate). A 404 is a VERDICT (old gateway: contracts known-absent, the
+    /// modal says "not supported"); a transient failure leaves `None`
+    /// (still probing) — `/resources` re-sends this command on open while
+    /// the store holds None, so a boot-time blip self-heals at the gesture.
+    fn load_capabilities(&self) {
+        let store = self.store;
+        match self.client.discovery_capabilities() {
+            Ok(v) => {
+                let contracts = contracts_from_capabilities(&v);
+                self.post(move || store.host_contracts.set(Some(contracts)));
+            }
+            Err(e) if e.status == Some(404) => {
+                self.post(move || store.host_contracts.set(Some(HostContracts::default())));
+            }
+            Err(_) => {} // still unknown — never a fabricated verdict
+        }
+    }
+
+    /// `/host/state` (modal open + `r` only) — OFF-LOOP: see
+    /// [`spawn_load_host_state`].
+    fn load_host_state(&self) {
+        spawn_load_host_state(self.client.clone(), self.wake.clone(), self.store);
+    }
+
+    /// `POST /models/unload` — OFF-LOOP: see [`spawn_unload_model`].
+    fn unload_model(&self, provider: String, model: String, force: bool) {
+        spawn_unload_model(
+            self.client.clone(),
+            self.wake.clone(),
+            self.store,
+            provider,
+            model,
+            force,
+        );
+    }
+
+    /// `POST /models/lock` / `/models/unlock` — OFF-LOOP: see
+    /// [`spawn_lock_model`].
+    fn lock_model(&self, provider: String, model: String, lock: bool) {
+        spawn_lock_model(
+            self.client.clone(),
+            self.wake.clone(),
+            self.store,
+            provider,
+            model,
+            lock,
+        );
+    }
+
+    /// `GET /models/context_estimate` — OFF-LOOP: see
+    /// [`spawn_estimate_context`].
+    fn estimate_context(&self, provider: String, model: String, context_length: Option<u64>) {
+        spawn_estimate_context(
+            self.client.clone(),
+            self.wake.clone(),
+            self.store,
+            provider,
+            model,
+            context_length,
+        );
     }
 
     fn load_cache_info(&self, provider: String, model: String) {
@@ -1300,11 +1425,19 @@ impl Runner {
         // probe is up to ~21 HTTP fetches, and "no runs yet" during it
         // was a lie about a session with history in flight (visibility
         // review P2-7). Cleared on EVERY exit path below.
-        self.post(move || store.restoring.set(true));
+        self.post(move || {
+            store.restoring.set(true);
+            store.restore_progress.set(None);
+        });
         // One RAII-ish guard: every `return` clears it via this closure.
         let clear_restoring = {
             let wake = self.wake.clone();
-            move || wake.post(move || store.restoring.set(false))
+            move || {
+                wake.post(move || {
+                    store.restoring.set(false);
+                    store.restore_progress.set(None);
+                })
+            }
         };
         // List WIDE (the list endpoint is light — run summaries only):
         // the boot fetches full bundles for the newest BLOC only, but
@@ -1396,6 +1529,16 @@ impl Runner {
                 text: history_stub_text(older_count),
             });
         }
+        // The loading screen's denominator, posted BEFORE the first
+        // bundle fetch: the bar turns determinate for the whole fetch
+        // window instead of sweeping through it (`ui::loading`).
+        let bloc_total = if replay_turns > 0 {
+            prior.len() - bloc_start
+        } else {
+            0
+        };
+        self.post(move || store.restore_progress.set(Some((0, bloc_total))));
+        let mut fetched = 0usize;
         if replay_turns > 0 {
             for run in prior.iter().skip(bloc_start) {
                 let rid = run.get("run_id").and_then(Value::as_str).unwrap_or("");
@@ -1428,6 +1571,12 @@ impl Runner {
                         failed_restores += 1;
                     }
                 }
+                // Both arms count: a failed fetch advances the bar too
+                // (its error is carded above) — a bar that sticks below
+                // its own denominator reads as a hang, not a failure.
+                fetched += 1;
+                let done = fetched;
+                self.post(move || store.restore_progress.set(Some((done, bloc_total))));
             }
         }
         if replayed > 0 || failed_restores > 0 {
@@ -1872,6 +2021,29 @@ impl Runner {
                         // fold no longer follows).
                         f.reopen_wait(restore.clone());
                     });
+                });
+            }
+        }
+    }
+
+    /// `/conclude` is a pure surface: the verb, the wording the model reads,
+    /// and the turn's resulting verdict are all authored server-side. This
+    /// posts the command and reports what the gateway said.
+    fn conclude(&self, run_id: String, note: String) {
+        let store = self.store;
+        let payload = if note.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::json!({ "note": note.trim() })
+        };
+        match self.client.submit_command(&run_id, "conclude", payload) {
+            Ok(_) => self.post(move || {
+                store.notify("conclude requested — the agent will answer with what it has");
+            }),
+            Err(e) => {
+                let msg = e.to_string();
+                self.post(move || {
+                    store.notify(format!("conclude failed: {msg}"));
                 });
             }
         }
@@ -2506,6 +2678,7 @@ pub(crate) fn apply_stream_records(
 ) {
     let mut finished_now = false;
     let mut finished_failed = false;
+    let mut finished_short = false;
     let mut session = crate::transcript::SessionStats::default();
     let mut current = false;
     store.fold.update(|f| {
@@ -2546,6 +2719,7 @@ pub(crate) fn apply_stream_records(
         }
         finished_now = f.finished && !was_finished;
         finished_failed = f.failed;
+        finished_short = f.stopped_short.is_some();
         // Thin-client honesty overlay: a conclusion folded from a
         // NON-ROOT stream means the wrapper root is still open on the
         // gateway (its own stream would have concluded the turn
@@ -2581,11 +2755,13 @@ pub(crate) fn apply_stream_records(
         // phase first ran the drain against an EMPTY mailbox
         // (test-caught: a failed run's queue drained instead of
         // pausing).
-        store.last_outcome.set(if finished_failed {
-            crate::store::RunOutcome::Failed
-        } else {
-            crate::store::RunOutcome::Success
-        });
+        store
+            .last_outcome
+            .set(crate::store::RunOutcome::for_conclusion(
+                finished_failed,
+                false,
+                finished_short,
+            ));
         store.run_started.set(None);
         store.phase.set(Phase::Idle);
         let _ = tx.send(Cmd::StopFollows);
@@ -2927,6 +3103,7 @@ fn finish(
         wake.post(move || {
             let mut concluded_now = false;
             let mut failed = false;
+            let mut short = false;
             store.fold.update(|f| {
                 if f.root_run_id() != root || !f.is_following(&rid) {
                     return; // stale stream from a previous run
@@ -2935,17 +3112,18 @@ fn finish(
                 f.subrun_terminal(&rid, &status);
                 concluded_now = f.finished && !was_finished;
                 failed = f.failed;
+                short = f.stopped_short.is_some();
             });
             if concluded_now {
                 // Same ordering contract as stream_run's finished_now
                 // branch: outcome mailbox BEFORE the phase flip.
-                store.last_outcome.set(if failed {
-                    crate::store::RunOutcome::Failed
-                } else if status == "cancelled" {
-                    crate::store::RunOutcome::Cancelled
-                } else {
-                    crate::store::RunOutcome::Success
-                });
+                store
+                    .last_outcome
+                    .set(crate::store::RunOutcome::for_conclusion(
+                        failed,
+                        status == "cancelled",
+                        short,
+                    ));
                 store.run_started.set(None);
                 store.phase.set(Phase::Idle);
                 let _ = tx.send(Cmd::StopFollows);
@@ -3406,6 +3584,185 @@ fn push_attachments_line(
     }
 }
 
+// ---------------------------------------------------------------------------
+// /resources lane: own-thread jobs (never the serial command loop)
+// ---------------------------------------------------------------------------
+//
+// `/host/state` is SLOW by contract and the control-plane read timeout
+// is 60s — running it (or the model mutations) synchronously on the
+// command loop would stall Cancel/Pause/Steer behind a hung gateway for
+// up to a minute, exactly the starvation the gpu/entities lanes were
+// moved off-loop to prevent. Each job is a ONE-SHOT thread (no polling;
+// the no-polling contract for /host/state holds) that posts its result
+// through the WakeHandle; a panic surfaces as a notice, never a silent
+// loss (the `spawn_named` discipline).
+
+/// Spawn one `/resources`-lane job on its own named thread with the
+/// worker panic surface. The seam the threading test pins: the BODY runs
+/// off the calling thread, and this call returns without waiting on it.
+pub(crate) fn spawn_host_thread(
+    name: &'static str,
+    wake: WakeHandle,
+    store: Store,
+    body: impl FnOnce() + Send + 'static,
+) {
+    let _ = std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+            if let Err(payload) = result {
+                let msg = panic_text(payload.as_ref());
+                wake.post(move || store.notify(format!("{name} thread died: {msg}")));
+            }
+        });
+}
+
+/// Fold one `/host/state` outcome into the store — UI THREAD ONLY
+/// (called from posted closures). The honesty arms mirror the gpu
+/// poller: 404 = Unsupported (a truth, not an error); another failure
+/// with an earlier fetch in hand marks it STALE (kept visible, marked —
+/// never indistinguishable from fresh) and says why; with nothing to
+/// keep, the honest Error state.
+pub(crate) fn apply_host_state_outcome(store: Store, outcome: Result<Value, GwError>) {
+    match outcome {
+        Ok(v) => store
+            .host_state
+            .set(HostState::Ready(host_state_from_response(&v))),
+        Err(e) if e.status == Some(404) => store.host_state.set(HostState::Unsupported(
+            "endpoint not on this gateway (404)".into(),
+        )),
+        Err(e) => {
+            let msg = e.to_string();
+            match store.host_state.get_untracked() {
+                HostState::Ready(f) | HostState::Stale(f) => {
+                    store.host_state.set(HostState::Stale(f));
+                    store.notify(format!(
+                        "host state refresh failed: {msg} — showing the last fetch (stale)"
+                    ));
+                }
+                _ => store.host_state.set(HostState::Error(msg)),
+            }
+        }
+    }
+}
+
+/// One-shot `/host/state` fetch on its own thread (modal open + `r`).
+pub(crate) fn spawn_load_host_state(client: GatewayClient, wake: WakeHandle, store: Store) {
+    let post_wake = wake.clone();
+    spawn_host_thread("host-state", wake, store, move || {
+        let outcome = client.host_state();
+        post_wake.post(move || apply_host_state_outcome(store, outcome));
+    });
+}
+
+/// The 409 arm's ONE discriminator: only the contract's own
+/// `{error:"model_locked"}` refusal teaches the force path — any other
+/// 409 (reload in progress, …) reports its own body text instead of a
+/// lock diagnosis the gateway never made. `err_from_ureq` carries the
+/// body's `error` field in `message`.
+pub(crate) fn unload_refusal_is_locked(e: &GwError) -> bool {
+    e.status == Some(409) && e.message.contains("model_locked")
+}
+
+/// `POST /models/unload` on its own thread. Success verifies by fetching
+/// host state IN THE SAME THREAD (ordering: the refreshed facts land
+/// after the mutation's notice, still off-loop).
+pub(crate) fn spawn_unload_model(
+    client: GatewayClient,
+    wake: WakeHandle,
+    store: Store,
+    provider: String,
+    model: String,
+    force: bool,
+) {
+    let post_wake = wake.clone();
+    spawn_host_thread("model-unload", wake, store, move || {
+        match client.unload_model(&provider, &model, force) {
+            Ok(_) => {
+                let forced = if force { " (forced)" } else { "" };
+                {
+                    let (provider, model) = (provider.clone(), model.clone());
+                    post_wake
+                        .post(move || store.notify(format!("unloaded {provider}/{model}{forced}")));
+                }
+                let refreshed = client.host_state();
+                post_wake.post(move || apply_host_state_outcome(store, refreshed));
+            }
+            Err(e) if unload_refusal_is_locked(&e) => {
+                post_wake.post(move || {
+                    store.notify(format!(
+                        "{provider}/{model} is locked — f force-unloads, or k unlocks first"
+                    ));
+                });
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                post_wake
+                    .post(move || store.notify(format!("unload {provider}/{model} failed: {msg}")));
+            }
+        }
+    });
+}
+
+/// `POST /models/lock|unlock` on its own thread; success verifies by
+/// fetching host state in the same thread.
+pub(crate) fn spawn_lock_model(
+    client: GatewayClient,
+    wake: WakeHandle,
+    store: Store,
+    provider: String,
+    model: String,
+    lock: bool,
+) {
+    let post_wake = wake.clone();
+    spawn_host_thread("model-lock", wake, store, move || {
+        let result = if lock {
+            client.lock_model(&provider, &model)
+        } else {
+            client.unlock_model(&provider, &model)
+        };
+        let verb = if lock { "locked" } else { "unlocked" };
+        match result {
+            Ok(_) => {
+                {
+                    let (provider, model) = (provider.clone(), model.clone());
+                    post_wake.post(move || store.notify(format!("{verb} {provider}/{model}")));
+                }
+                let refreshed = client.host_state();
+                post_wake.post(move || apply_host_state_outcome(store, refreshed));
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                post_wake.post(move || {
+                    store.notify(format!("{verb} {provider}/{model} failed: {msg}"));
+                });
+            }
+        }
+    });
+}
+
+/// `GET /models/context_estimate` on its own thread → `store.host_estimate`
+/// (the `/resources` inline result line). A failed probe is an honest
+/// failure line under the same subject — never a fabricated estimate.
+pub(crate) fn spawn_estimate_context(
+    client: GatewayClient,
+    wake: WakeHandle,
+    store: Store,
+    provider: String,
+    model: String,
+    context_length: Option<u64>,
+) {
+    let post_wake = wake.clone();
+    spawn_host_thread("ctx-estimate", wake, store, move || {
+        let subject = format!("{provider}/{model}");
+        let line = match client.context_estimate(&provider, &model, context_length) {
+            Ok(v) => context_estimate_line(&v),
+            Err(e) => format!("estimate failed: {e}"),
+        };
+        post_wake.post(move || store.host_estimate.set(Some((subject, line))));
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3624,6 +3981,7 @@ mod tests {
             let store = crate::store::Store::create(cx);
             store.phase.set(Phase::Running);
             store.restoring.set(true);
+            store.restore_progress.set(Some((2, 9)));
             store.history_loading.set(true);
             store.older_turns.set(4);
             store.fold.update(|f| {
@@ -3634,6 +3992,10 @@ mod tests {
             apply_worker_death(&store, "boom");
             assert_eq!(store.phase.get_untracked(), Phase::Idle);
             assert!(!store.restoring.get_untracked());
+            assert!(
+                store.restore_progress.get_untracked().is_none(),
+                "the loading screen's counters die with the worker"
+            );
             assert!(!store.history_loading.get_untracked());
             store.fold.with_untracked(|f| {
                 assert!(f.items.iter().any(
@@ -4332,6 +4694,142 @@ mod tests {
             assert_eq!(store.fold.with_untracked(|f| f.items.len()), before);
             assert_eq!(store.phase.get_untracked(), Phase::Running);
             assert_eq!(store.totals.get_untracked().input_tokens, 7);
+        });
+        root.dispose();
+    }
+
+    // --- /resources lane -------------------------------------------------
+
+    #[test]
+    fn only_the_model_locked_409_teaches_the_force_path() {
+        // The contract's refusal (body {error:"model_locked"} — carried in
+        // e.message by err_from_ureq, quoted) offers force…
+        assert!(unload_refusal_is_locked(&GwError::http(
+            409,
+            "\"model_locked\""
+        )));
+        // …any OTHER 409 must NOT be diagnosed as a lock the gateway
+        // never claimed; it falls through to the generic notice.
+        assert!(!unload_refusal_is_locked(&GwError::http(
+            409,
+            "reload already in progress"
+        )));
+        // And a lock-worded non-409 is not the refusal either.
+        assert!(!unload_refusal_is_locked(&GwError::http(
+            500,
+            "model_locked table corrupt"
+        )));
+        assert!(!unload_refusal_is_locked(&GwError::timeout("model_locked")));
+    }
+
+    #[test]
+    fn host_lane_jobs_run_off_the_calling_thread_and_return_promptly() {
+        // The starvation seam (review HIGH-2): every /resources handler
+        // routes through `spawn_host_thread`, so the command loop's part
+        // is spawn-and-return — a hung gateway can never stall
+        // Cancel/Pause/Steer behind a 60s host-state read. Pinned at the
+        // seam: the body runs on ANOTHER thread, and the call returns
+        // BEFORE the body completes.
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = crate::store::Store::create(cx);
+            let wake = abstracttui::reactive::wake_handle();
+            let caller = std::thread::current().id();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let started = std::time::Instant::now();
+            spawn_host_thread("probe-lane", wake, store, move || {
+                // A slow body: a synchronous implementation would make the
+                // spawn call itself take ≥300ms.
+                std::thread::sleep(Duration::from_millis(300));
+                let _ = tx.send(std::thread::current().id());
+            });
+            assert!(
+                started.elapsed() < Duration::from_millis(200),
+                "spawn returns without waiting on the body"
+            );
+            let body_thread = rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("body ran to completion");
+            assert_ne!(body_thread, caller, "the body ran off the calling thread");
+        });
+        root.dispose();
+    }
+
+    #[test]
+    fn host_state_load_posts_back_through_the_wake_queue() {
+        // End to end off-loop: a refused connect (dropped port — fast,
+        // deterministic) travels thread → wake.post → drain into the
+        // honest Error state. `drain_posted()` is the same pump
+        // `Driver::turn()` runs first every frame.
+        let port = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            l.local_addr().unwrap().port()
+        };
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = crate::store::Store::create(cx);
+            let wake = abstracttui::reactive::wake_handle();
+            let client = GatewayClient::new(&format!("http://127.0.0.1:{port}"), None);
+            spawn_load_host_state(client, wake, store);
+            let mut landed = false;
+            for _ in 0..500 {
+                abstracttui::reactive::drain_posted();
+                if matches!(store.host_state.get_untracked(), HostState::Error(_)) {
+                    landed = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(landed, "the fetch outcome landed through the wake queue");
+        });
+        root.dispose();
+    }
+
+    #[test]
+    fn a_failed_refresh_marks_last_good_facts_stale_never_fresh() {
+        // Staleness must be VISIBLE (review MEDIUM-5): last-good facts
+        // survive a failed refresh but land in the Stale state — footer
+        // and modal mark them — and a second failure stays Stale.
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = crate::store::Store::create(cx);
+            let facts = crate::store::HostFacts {
+                ts: "2026-08-27T10:00:00Z".into(),
+                ram_percent: Some(62.0),
+                ..Default::default()
+            };
+            store.host_state.set(HostState::Ready(facts.clone()));
+            apply_host_state_outcome(store, Err(GwError::timeout("slow host")));
+            match store.host_state.get_untracked() {
+                HostState::Stale(f) => assert_eq!(f, facts, "facts kept, marked stale"),
+                other => panic!("expected Stale, got {other:?}"),
+            }
+            assert!(store
+                .notices
+                .get_untracked()
+                .iter()
+                .any(|n| n.contains("stale")));
+            apply_host_state_outcome(store, Err(GwError::timeout("still slow")));
+            assert!(matches!(
+                store.host_state.get_untracked(),
+                HostState::Stale(_)
+            ));
+            // A later SUCCESS returns to fresh Ready.
+            apply_host_state_outcome(store, Ok(serde_json::json!({"ts": "t2"})));
+            match store.host_state.get_untracked() {
+                HostState::Ready(f) => assert_eq!(f.ts, "t2"),
+                other => panic!("expected Ready, got {other:?}"),
+            }
+            // With NOTHING in hand, a failure is the honest Error state
+            // and a 404 the honest Unsupported.
+            store.host_state.set(HostState::Pending);
+            apply_host_state_outcome(store, Err(GwError::timeout("nope")));
+            assert!(matches!(
+                store.host_state.get_untracked(),
+                HostState::Error(_)
+            ));
+            apply_host_state_outcome(store, Err(GwError::http(404, "no route")));
+            assert!(matches!(
+                store.host_state.get_untracked(),
+                HostState::Unsupported(_)
+            ));
         });
         root.dispose();
     }

@@ -40,7 +40,7 @@
 
 use abstracttui::anim::particles::{Burst, ParticleField};
 use abstracttui::anim::Easing;
-use abstracttui::base::{Rect, Rgba, Size};
+use abstracttui::base::{Point, Rect, Rgba, Size};
 use abstracttui::boot::identity::{brand_ramp, BRAND_FIELD};
 use abstracttui::boot::{play, SplashFrameSource, SplashOptions, SplashOutcome, TerminalIo};
 use abstracttui::gfx::{mosaic, Bitmap, MosaicCell, MosaicMode};
@@ -54,6 +54,7 @@ use abstracttui::three::texture::srgb8_to_linear;
 use abstracttui::three::{
     Camera, Framebuffer, Light, Mat4, MaterialData, MeshInstance, Model, Scene, SceneRenderer, Vec3,
 };
+use abstracttui::ui::StyledCanvas;
 
 use crate::ui::logo::{WORD_BOT, WORD_TOP};
 
@@ -61,12 +62,22 @@ use crate::ui::logo::{WORD_BOT, WORD_TOP};
 // The storyboard, as constants (ms from splash start)
 // ---------------------------------------------------------------------------
 
-/// Timeline length. Short enough that a returning user never waits on it,
-/// long enough for the three-beat arc to read.
-pub const TOTAL_MS: u32 = 1900;
+/// Timeline length: the composition lands at 1.7 s, HOLDS finished for
+/// half a second, then fades for half a second into the app's ground.
+/// The hold and the fade are the handoff — without them the last frame
+/// of the identity and the first frame of the client are one hard cut,
+/// which reads as a glitch rather than an arrival.
+pub const TOTAL_MS: u32 = HOLD_START_MS + HOLD_MS + FADE_OUT_MS;
 /// Unconditional wall ceiling handed to the player (a stalled terminal
 /// must never hold the app hostage).
-pub const HARD_CUTOFF_MS: u32 = 2400;
+pub const HARD_CUTOFF_MS: u32 = TOTAL_MS + 400;
+/// How long the finished composition sits still before it leaves.
+const HOLD_MS: u32 = 500;
+/// The handoff fade: every cell ramps to the theme ground, so the app's
+/// first paint arrives on a screen that is already its own background.
+const FADE_OUT_MS: u32 = 500;
+/// When the fade begins (absolute ms).
+const FADE_START_MS: u32 = HOLD_START_MS + HOLD_MS;
 
 /// Beat 1 → 2: the planes have travelled; alignment (and impact) here.
 const ALIGN_START_MS: u32 = 900;
@@ -300,6 +311,7 @@ impl SplashFrameSource for BootSplash {
 
         self.draw_sparks(t, size, &plan);
         self.draw_lockup(ms, size, &plan, theme);
+        self.fade_out(ms, size, theme);
         &self.surface
     }
 }
@@ -396,6 +408,37 @@ impl BootSplash {
         }
     }
 
+    /// The handoff: ramp the whole composition to the theme ground over
+    /// the last `FADE_OUT_MS`. Post-process on the finished frame — every
+    /// element fades together, including the ones drawn by the 3D pass,
+    /// and no drawing code has to know the timeline ends.
+    fn fade_out(&mut self, ms: f32, size: Size, theme: &Theme) {
+        let k = ease(
+            EASE_FADE,
+            window(ms, FADE_START_MS as f32, FADE_OUT_MS as f32),
+        );
+        if k <= 0.0 {
+            return;
+        }
+        let ground = theme.tokens.bg;
+        for y in 0..size.h {
+            for x in 0..size.w {
+                let Some(cell) = self.surface.get(x, y) else {
+                    continue;
+                };
+                if cell.is_continuation() {
+                    continue;
+                }
+                let faded = Cell {
+                    fg: mix(cell.fg, ground, k),
+                    bg: mix(cell.bg, ground, k),
+                    ..*cell
+                };
+                self.surface.set(x, y, faded);
+            }
+        }
+    }
+
     /// The three planes, rasterized with coverage antialiasing into a
     /// half-block bitmap (1 cell = 1 × 2 pixels) and mosaicked to cells.
     /// Only lit cells are written, so sparks under the mark survive.
@@ -411,35 +454,7 @@ impl BootSplash {
         if self.raster.width() != pw || self.raster.height() != ph {
             self.raster = Bitmap::new(pw, ph, Rgba::TRANSPARENT);
         }
-        self.raster.fill(Rgba::TRANSPARENT);
-
-        // The mark's own box, centered in the stage. Proportions are the
-        // letterform's, not the pane's: an A is taller than it is wide.
-        let mh = (ph as f32 * 0.88).min(pw as f32 * 0.85 / A_ASPECT);
-        let mw = mh * A_ASPECT;
-        let ox = (pw as f32 - mw) * 0.5;
-        let oy = (ph as f32 - mh) * 0.5;
-
-        for (i, plane) in planes(mw, mh).iter().enumerate() {
-            let start = (i as u32 * PLANE_STAGGER_MS) as f32;
-            let k = window(ms, start, PLANE_ARRIVAL_MS as f32);
-            if k <= 0.0 {
-                continue;
-            }
-            let travel = ease(EASE_SETTLE, k);
-            let alpha = ease(EASE_FADE, window(ms, start, PLANE_ARRIVAL_MS as f32 * 0.45));
-            let dx = ox + plane.from.0 * (1.0 - travel);
-            let dy = oy + plane.from.1 * (1.0 - travel);
-            stroke(
-                &mut self.raster,
-                (plane.a.0 + dx, plane.a.1 + dy),
-                (plane.b.0 + dx, plane.b.1 + dy),
-                plane.thickness,
-                alpha,
-                ox,
-                mw,
-            );
-        }
+        paint_planes(&mut self.raster, ms);
 
         // Afterglow: the previous frames, decayed, under the live one.
         let decay = self.trail_decay(ms);
@@ -574,6 +589,111 @@ impl BootSplash {
         self.field.render(&mut self.surface);
     }
 }
+
+/// Paint the three planes at their `ms` pose into a half-block bitmap,
+/// centered, at the letterform's own proportions. THE one place the flat
+/// mark's geometry lives — the splash's arrival and the idle screen's
+/// settled mark are the same call at different `ms`, so the app can
+/// never drift from the identity it just played.
+fn paint_planes(dst: &mut Bitmap, ms: f32) {
+    let (pw, ph) = (dst.width() as f32, dst.height() as f32);
+    dst.fill(Rgba::TRANSPARENT);
+    if pw < 4.0 || ph < 4.0 {
+        return;
+    }
+    let mh = (ph * 0.88).min(pw * 0.85 / A_ASPECT);
+    let mw = mh * A_ASPECT;
+    let ox = (pw - mw) * 0.5;
+    let oy = (ph - mh) * 0.5;
+    for (i, plane) in planes(mw, mh).iter().enumerate() {
+        let start = (i as u32 * PLANE_STAGGER_MS) as f32;
+        let k = window(ms, start, PLANE_ARRIVAL_MS as f32);
+        if k <= 0.0 {
+            continue; // not yet in flight
+        }
+        let travel = ease(EASE_SETTLE, k);
+        let alpha = ease(EASE_FADE, window(ms, start, PLANE_ARRIVAL_MS as f32 * 0.45));
+        let dx = ox + plane.from.0 * (1.0 - travel);
+        let dy = oy + plane.from.1 * (1.0 - travel);
+        stroke(
+            dst,
+            (plane.a.0 + dx, plane.a.1 + dy),
+            (plane.b.0 + dx, plane.b.1 + dy),
+            plane.thickness,
+            alpha,
+            ox,
+            mw,
+        );
+    }
+}
+
+/// The mark AT REST, drawn into `rect` on any canvas: what the splash
+/// ends on, so the idle screen can carry the same letterform instead of
+/// a different mark that merely rhymes with it (the operator's
+/// continuity ask, 2026-08-21).
+///
+/// `alpha` fades it toward `ground` (0 = invisible, 1 = full) — the
+/// caller owns the entrance; `heat` (0..=1) is a slow breath; `light`
+/// maps an absolute cell to how lit it is (0..=1), which is how the idle
+/// lockup runs ONE band of light across the mark and the wordmark
+/// together instead of two unrelated shimmers. Cheap enough for a 150 ms
+/// ticker: one small bitmap, one mosaic pass, ~`rect.w * rect.h` puts.
+pub fn draw_settled_mark(
+    canvas: &mut dyn StyledCanvas,
+    rect: Rect,
+    ground: Rgba,
+    alpha: f32,
+    heat: f32,
+    light: &dyn Fn(i32, i32) -> f32,
+) {
+    if rect.w < 6 || rect.h < 3 || alpha <= 0.0 {
+        return;
+    }
+    let mut raster = Bitmap::new(
+        rect.w as u32 * SS,
+        (rect.h * 2) as u32 * SS,
+        Rgba::TRANSPARENT,
+    );
+    paint_planes(&mut raster, SETTLED_MS);
+    let flat = downsample(&raster);
+    let grid = mosaic::render(&flat, rect.w as u32, rect.h as u32, MosaicMode::HalfBlock);
+    // The breath is deliberately small; the SHEEN is what reads. A mark
+    // that pulses hard looks like a warning light — a mark a slow band of
+    // light crosses looks like an object.
+    let breath = 0.02 + 0.07 * heat.clamp(0.0, 1.0);
+    for row in 0..rect.h {
+        for col in 0..rect.w {
+            let cell = grid
+                .get(col as u32, row as u32)
+                .copied()
+                .unwrap_or(MosaicCell::EMPTY);
+            if cell.fg.is_transparent() && cell.bg.is_transparent() {
+                continue; // bare ground stays the pane's own
+            }
+            let lift = breath + 0.24 * light(rect.x + col, rect.y + row).clamp(0.0, 1.0);
+            let ink = |c: Rgba| {
+                if c.is_transparent() {
+                    Rgba::TRANSPARENT
+                } else {
+                    mix(
+                        ground,
+                        mix(c.over(ground), Rgba::rgb(255, 255, 255), lift),
+                        alpha,
+                    )
+                }
+            };
+            canvas.put(
+                Point::new(rect.x + col, rect.y + row),
+                cell.ch,
+                ink(cell.fg),
+                ink(cell.bg),
+            );
+        }
+    }
+}
+
+/// The pose the mark rests in: past every arrival, before the fade.
+const SETTLED_MS: f32 = 1200.0;
 
 /// One arriving plane: a thick segment in mark-box pixel space plus the
 /// off-stage offset it flies in from.

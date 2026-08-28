@@ -22,6 +22,7 @@
 
 use abstracttui::prelude::*;
 use abstracttui::text;
+use abstracttui::ui::StyledCanvas;
 
 /// The two wordmark rows (half-block letterforms, one space between
 /// letters, three between the words). Both rows are the same display
@@ -60,19 +61,54 @@ pub fn lerp_ink(a: Rgba, b: Rgba, t: f32) -> Rgba {
     Rgba::new(ch(a.r, b.r), ch(a.g, b.g), ch(a.b, b.b), ch(a.a, b.a))
 }
 
-/// The shimmer weight for display column `col` at animation `frame`:
-/// a triangular window (half-width 6 cols) around a sweep position that
-/// crosses the wordmark once per `width + 2*PAD` frames (off-screen
-/// padding both sides, so the sweep visibly enters and leaves instead
-/// of wrapping mid-glyph). At ~150ms/frame a 48-col wordmark sweeps in
-/// ~11s — present, never busy.
+/// The wordmark's own view of [`sheen_weight`]: how lit display column
+/// `col` is at `frame`. Kept as its own name because the compact lockup
+/// and the audit suite both address the wordmark by column — but the
+/// light is the SAME light the mark is under, so the two can never fall
+/// out of step. At ~150 ms/frame a 48-column wordmark is crossed in
+/// ~11 s of a ~14 s loop: present, never busy.
 pub fn shimmer_weight(col: i32, width: i32, frame: u64) -> f32 {
-    const PAD: i32 = 12;
-    const HALF: f32 = 6.0;
-    let period = (width + 2 * PAD).max(1) as u64;
-    let pos = (frame % period) as i32 - PAD;
-    let d = (col - pos).abs() as f32;
-    (1.0 - d / HALF).clamp(0.0, 1.0)
+    sheen_weight(col, 0, sheen_pos(frame, width))
+}
+
+/// ONE LIGHT over the whole lockup.
+///
+/// The mark and the wordmark used to shimmer on unrelated clocks, which
+/// reads as two things twitching rather than one object being lit. Now a
+/// single slightly-slanted band crosses the lockup — mark first, then the
+/// letters — on a slow loop, and everything asks THIS function how lit it
+/// is. Discreet by construction: one pass every ~14 s at the 150 ms
+/// ticker, a soft cosine edge, and no motion of its own.
+///
+/// The band's leading edge is `x + y * SHEEN_SLANT`, so it leans like
+/// light falling across a surface instead of wiping like a progress bar.
+const SHEEN_SLANT: f32 = 0.45;
+/// Half-width of the band in cells: wide enough that a 48-column
+/// wordmark is never lit end to end, narrow enough to read as a pass.
+const SHEEN_HALF: f32 = 9.0;
+/// Cells the band travels beyond each edge, so it enters and leaves
+/// instead of appearing mid-glyph.
+const SHEEN_PAD: i32 = 14;
+
+/// Where the light is at `frame`, in cells relative to the lockup's left
+/// edge. Loops exactly: `width + 2 * SHEEN_PAD` frames per pass.
+pub fn sheen_pos(frame: u64, width: i32) -> f32 {
+    let period = (width + 2 * SHEEN_PAD).max(1) as u64;
+    ((frame % period) as i32 - SHEEN_PAD) as f32
+}
+
+/// How lit the cell at `(x, y)` — both relative to the lockup's top-left
+/// — is, given the band at `pos`. A raised cosine: no hard edge, no step.
+pub fn sheen_weight(x: i32, y: i32, pos: f32) -> f32 {
+    let u = x as f32 + y as f32 * SHEEN_SLANT;
+    let d = (u - pos).abs() / SHEEN_HALF;
+    if d >= 1.0 {
+        0.0
+    } else {
+        // cos² falloff: 1 at the centre, 0 at the edge, flat at both.
+        let k = (1.0 - d) * std::f32::consts::FRAC_PI_2;
+        k.sin().powi(2)
+    }
 }
 
 /// The mark's breath at `frame`: an exact-wrap raised cosine, 0 at the
@@ -80,6 +116,48 @@ pub fn shimmer_weight(col: i32, width: i32, frame: u64) -> f32 {
 pub fn pulse_weight(frame: u64) -> f32 {
     let ph = (frame % PULSE_PERIOD) as f32 / PULSE_PERIOD as f32 * std::f32::consts::TAU;
     0.5 - 0.5 * ph.cos()
+}
+
+/// The idle screen's ENTRANCE, in splash-ticker frames: the pane ramps
+/// up from the ground instead of appearing whole. It shares the boot
+/// animation's fade curve and lands in ~5 frames (~750 ms at the 150 ms
+/// cadence), so the hand-off reads as one continuous arrival —
+/// `ui::splash` fades its composition OUT to this same ground, and this
+/// fades the app's first screen IN off it.
+///
+/// The ticker resets to frame 0 on every splash entrance, so a return to
+/// the idle screen mid-session replays the same soft arrival.
+pub fn boot_fade(frame: u64) -> f32 {
+    const FRAMES: f32 = 5.0;
+    let k = ((frame as f32 + 1.0) / FRAMES).clamp(0.0, 1.0);
+    // Ease-out cubic: most of the ramp lands in the first two frames, so
+    // a 150 ms cadence still reads as a fade rather than a slideshow.
+    1.0 - (1.0 - k).powi(3)
+}
+
+/// Rows to give the HERO mark (the settled brand mark from the boot
+/// animation) on a viewport of `h` rows — `None` when the pane cannot
+/// afford it and the compact `▲` lockup should stand in.
+///
+/// The identity block is the FIRST thing in the idle column and the
+/// column clips from the bottom, so every row spent here is a row the
+/// fact card and the guidance lines do not get. These floors are the
+/// heights at which the card still fits whole.
+pub fn hero_rows(h: i32) -> Option<i32> {
+    // Sized DOWN ~25% (operator, 2026-08-21: "the A is too big"): the
+    // mark leads the lockup, it does not dominate the screen — at these
+    // heights it reads as a mark over a wordmark rather than a poster.
+    match h {
+        44.. => Some(9),
+        38..=43 => Some(8),
+        34..=37 => Some(6),
+        _ => None,
+    }
+}
+
+/// Total rows a hero lockup occupies: mark + wordmark (2) + tagline.
+pub fn hero_lockup_rows(mark_rows: i32) -> i32 {
+    mark_rows + 3
 }
 
 /// The animation's highlight inks with the SEPARATION FLOOR applied:
@@ -112,21 +190,31 @@ pub fn floored_highlights(t: &TokenSet) -> (Rgba, Rgba) {
             mix_until_contrast(first, pole, anchor, 0.0, 0.15, floor)
         }
     };
-    (separated(t.text_muted, 1.35), separated(t.text_faint, 1.6))
+    // The shimmer floor is deliberately HIGH (2026-08-21: the sweep was
+    // there but nobody could see it on the house theme). The walk
+    // saturates at the theme's own pole, so themes that cannot separate
+    // further simply land where they always did — this raises the
+    // ceiling, it never invents a color the theme does not own.
+    (separated(t.text_muted, 1.9), separated(t.text_faint, 1.6))
 }
 
 /// The splash logo view: two mark rows + two wordmark rows + the
 /// tagline (LOGO_ROWS; 1 centered row in the narrow fallback). Reads
 /// NO signals — the caller passes the current frame and re-builds per
 /// tick (the splash lives inside a dyn that already re-runs on the
-/// frame signal).
-pub fn logo(t: &TokenSet, frame: u64, tagline: &str) -> View {
+/// frame signal). `fade` is the entrance ramp ([`boot_fade`]): every ink
+/// here rides it, so the compact lockup arrives exactly like the hero
+/// one does.
+pub fn logo(t: &TokenSet, frame: u64, tagline: &str, fade: f32) -> View {
     let word_w = text::width(WORD_TOP);
-    let base = t.text_muted;
-    let mark_lo = t.text_faint;
-    let faint = t.text_faint;
+    let ground = t.bg;
+    let dim = move |c: Rgba| lerp_ink(ground, c, fade);
+    let base = dim(t.text_muted);
+    let mark_lo = dim(t.text_faint);
+    let faint = dim(t.text_faint);
     let tagline = tagline.to_string();
     let (hi, mark_hi) = floored_highlights(t);
+    let (hi, mark_hi) = (dim(hi), dim(mark_hi));
     Element::new()
         // shrink(0.0): the brand block is the LAST casualty on short
         // panes, never the first (the refinement pass caught the logo
@@ -162,34 +250,105 @@ pub fn logo(t: &TokenSet, frame: u64, tagline: &str) -> View {
                     Rgba::TRANSPARENT,
                 );
             }
-            // Wordmark rows: per-column shimmer. Half-block glyphs are
-            // all width-1, so char index == display column.
-            for (row_ix, row) in [WORD_TOP, WORD_BOT].into_iter().enumerate() {
-                let y = rect.y + 2 + row_ix as i32;
-                for (col, ch) in row.chars().enumerate() {
-                    if ch == ' ' {
-                        continue;
-                    }
-                    let w = shimmer_weight(col as i32, word_w, frame);
-                    let ink = lerp_ink(base, hi, w);
-                    canvas.print(
-                        Point::new(x0 + col as i32, y),
-                        &ch.to_string(),
-                        ink,
-                        Rgba::TRANSPARENT,
-                    );
-                }
+            // The light's clock is the WORDMARK's width, not the
+            // pane's: one pass every ~11 s on a 60-column terminal and
+            // on a 200-column one alike (a pane-width period made the
+            // same animation twice as slow on a wide screen).
+            let pos = sheen_pos(frame, word_w);
+            let light = |x: i32, y: i32| sheen_weight(x - x0, y - rect.y, pos);
+            draw_wordmark(canvas, x0, rect.y + 2, base, hi, &light);
+            draw_tagline(canvas, rect, rect.y + 4, &tagline, faint);
+        })
+        .build()
+}
+
+/// The two half-block wordmark rows at `(x0, y)`, lit by the lockup's
+/// ONE light (`light` maps an absolute cell to 0..=1). Half-block glyphs
+/// are all width-1, so char index == display column. One implementation:
+/// the compact lockup and the hero lockup draw the wordmark through
+/// this, so the two can never disagree about the art OR the light.
+fn draw_wordmark(
+    canvas: &mut dyn StyledCanvas,
+    x0: i32,
+    y: i32,
+    base: Rgba,
+    hi: Rgba,
+    light: &dyn Fn(i32, i32) -> f32,
+) {
+    for (row_ix, row) in [WORD_TOP, WORD_BOT].into_iter().enumerate() {
+        let y = y + row_ix as i32;
+        for (col, ch) in row.chars().enumerate() {
+            if ch == ' ' {
+                continue;
             }
-            // Tagline: faint, static (brand metadata completes the
-            // lockup — animating it would compete with the wordmark).
-            let fitted = text::truncate_ellipsis(&tagline, rect.w.max(4));
-            let tx = rect.x + ((rect.w - text::width(&fitted)) / 2).max(0);
-            canvas.print(
-                Point::new(tx, rect.y + 4),
-                &fitted,
-                faint,
-                Rgba::TRANSPARENT,
+            let x = x0 + col as i32;
+            let ink = lerp_ink(base, hi, light(x, y));
+            canvas.print(Point::new(x, y), &ch.to_string(), ink, Rgba::TRANSPARENT);
+        }
+    }
+}
+
+/// Tagline: faint, static (brand metadata completes the lockup —
+/// animating it would compete with the wordmark), centered and
+/// ellipsized to the pane.
+fn draw_tagline(canvas: &mut dyn StyledCanvas, rect: Rect, y: i32, tagline: &str, ink: Rgba) {
+    let fitted = text::truncate_ellipsis(tagline, rect.w.max(4));
+    let x = rect.x + ((rect.w - text::width(&fitted)) / 2).max(0);
+    canvas.print(Point::new(x, y), &fitted, ink, Rgba::TRANSPARENT);
+}
+
+/// The HERO lockup: the boot animation's own mark, at rest, over the
+/// same wordmark and tagline — so the first screen after the animation
+/// carries the letterform the animation just assembled instead of a
+/// second, smaller mark that merely rhymes with it.
+///
+/// `mark_rows` comes from [`hero_rows`] (None = this pane cannot afford
+/// it, use [`logo`]); `fade` is the entrance ramp from [`boot_fade`].
+/// Same contract as [`logo`]: pure rendering, no signal reads.
+pub fn hero(t: &TokenSet, frame: u64, tagline: &str, mark_rows: i32, fade: f32) -> View {
+    let word_w = text::width(WORD_TOP);
+    let ground = t.bg;
+    let dim = move |c: Rgba| lerp_ink(ground, c, fade);
+    let base = dim(t.text_muted);
+    let faint = dim(t.text_faint);
+    let (hi_raw, _) = floored_highlights(t);
+    let hi = dim(hi_raw);
+    let tagline = tagline.to_string();
+    let rows = hero_lockup_rows(mark_rows);
+    Element::new()
+        .style(
+            LayoutStyle::column()
+                .height(Dimension::Cells(rows))
+                .shrink(0.0),
+        )
+        .draw(move |canvas, rect| {
+            if rect.w < word_w || rect.h < rows {
+                return; // the caller sizes this; a clipped hero is not a hero
+            }
+            // ONE light for the whole lockup: a slow, slightly slanted
+            // band that crosses the mark and the letters as a single
+            // pass. The mark also breathes on the compact lockup's pulse
+            // underneath it — a lift through the brand ramp, not a blink.
+            let x0 = rect.x + ((rect.w - word_w) / 2).max(0);
+            let pos = sheen_pos(frame, word_w);
+            let light = |x: i32, y: i32| sheen_weight(x - x0, y - rect.y, pos);
+            let mark_w = (mark_rows as f32 * 2.0 * 0.75) as i32;
+            let mark = Rect::new(
+                rect.x + ((rect.w - mark_w) / 2).max(0),
+                rect.y,
+                mark_w.min(rect.w),
+                mark_rows,
             );
+            crate::ui::splash::draw_settled_mark(
+                canvas,
+                mark,
+                ground,
+                fade,
+                pulse_weight(frame),
+                &light,
+            );
+            draw_wordmark(canvas, x0, rect.y + mark_rows, base, hi, &light);
+            draw_tagline(canvas, rect, rect.y + mark_rows + 2, &tagline, faint);
         })
         .build()
 }
@@ -228,6 +387,36 @@ mod tests {
         assert_eq!(lerp_ink(a, b, 2.0), b, "clamps above");
         let mid = lerp_ink(a, b, 0.5);
         assert_eq!((mid.r, mid.g, mid.b), (110, 70, 60));
+    }
+
+    /// The light is ONE light: the mark and the wordmark must read the
+    /// same band at the same instant, or the lockup twitches in two
+    /// places instead of being lit in one.
+    #[test]
+    fn the_sheen_is_one_band_with_a_soft_edge() {
+        let pos = sheen_pos(30, 48);
+        // Centre is fully lit, the edges fall to nothing, and nothing
+        // outside the band is lit at all.
+        let at = |x: i32, y: i32| sheen_weight(x, y, pos);
+        let peak = at(pos as i32, 0);
+        assert!(peak > 0.99, "the band's centre is fully lit ({peak})");
+        assert_eq!(at(pos as i32 + 20, 0), 0.0, "outside the band: dark");
+        assert_eq!(at(pos as i32 - 20, 0), 0.0, "outside the band: dark");
+        // Soft edge: monotone falloff, no step.
+        let mut prev = peak;
+        for d in 1..9 {
+            let w = at(pos as i32 + d, 0);
+            assert!(w <= prev, "falloff is monotone at +{d} ({w} > {prev})");
+            prev = w;
+        }
+        // The band LEANS: a lower row is reached later, which is what
+        // makes it read as light raking across rather than a wipe.
+        assert!(
+            at(pos as i32, 4) < at(pos as i32, 0),
+            "the slant delays lower rows"
+        );
+        // It loops exactly, with no jump at the wrap.
+        assert_eq!(sheen_pos(0, 48), sheen_pos(48 + 2 * SHEEN_PAD as u64, 48));
     }
 
     #[test]

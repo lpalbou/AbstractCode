@@ -2147,6 +2147,119 @@ fn sessions_picker_switches_to_a_recent_session() {
     }
 }
 
+/// The session-loading screen (operator ask, 2026-08-28): picking a
+/// session in /sessions must show an ANIMATED waiting surface — spinner,
+/// a bar that goes determinate on the worker's counters, honest words —
+/// for the whole restore window, then hand off to the restored
+/// transcript. Before this the window rendered the splash, whose
+/// "describe a task below" guidance is a lie about a session with
+/// history in flight.
+#[test]
+fn session_pick_shows_the_animated_loading_screen_until_history_lands() {
+    let mut h = harness();
+    h.turn();
+    {
+        let mut prefs = h.prefs.borrow_mut();
+        prefs.touch_session("acode-old-session", Some("fix the parser"));
+        prefs.touch_session("acode-test-session", Some("current work"));
+    }
+    h.type_text("/sessions");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.turn(); // deferred modal close
+              // The pick armed the screen ON the UI thread — the waiting surface
+              // must not depend on when the worker reaches the probe.
+    assert!(
+        h.store.restoring.get_untracked(),
+        "restoring arms at the pick gesture"
+    );
+    let screen = h.turn();
+    assert!(
+        screen.contains("restoring session"),
+        "the loading label names the act:\n{screen}"
+    );
+    assert!(
+        screen.contains("old-session"),
+        "…and the session being loaded:\n{screen}"
+    );
+    assert!(
+        screen.contains("listing this session's runs"),
+        "unknown denominator = the honest indeterminate caption:\n{screen}"
+    );
+    assert!(
+        ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷']
+            .iter()
+            .any(|g| screen.contains(*g)),
+        "the braille spinner is on screen:\n{screen}"
+    );
+    // The worker posts the denominator + per-turn counters: the bar
+    // turns determinate and both caption and strip count honestly.
+    h.store.restore_progress.set(Some((3, 9)));
+    let screen = h.turn();
+    assert!(
+        screen.contains("restored 3 of 9 prior turn(s)"),
+        "determinate caption counts the fetches:\n{screen}"
+    );
+    assert!(
+        screen.contains("(turn 3 of 9)"),
+        "the strip repeats the counter:\n{screen}"
+    );
+    assert!(
+        screen.lines().any(|l| l.contains("██████████")),
+        "the bar carries real fill (a run no wordmark glyphs produce):\n{screen}"
+    );
+    // ANIMATED while restoring: the surface re-emits across ticker
+    // frames (same bounded poll as the splash-shimmer pin — any two
+    // consecutive frames cannot both be zero-delta).
+    for _ in 0..4 {
+        h.turn();
+    }
+    let mut emitted_any = false;
+    for _ in 0..10 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let t = h.driver.turn(&mut h.app, &mut h.term).expect("turn");
+        emitted_any |= t.emitted;
+        if emitted_any {
+            break;
+        }
+    }
+    assert!(emitted_any, "the loading screen animates while restoring");
+    // The restore lands — the fold swap posts, then the clear, exactly
+    // probe_attach's order: the loading surface hands off to the
+    // restored transcript, never to a splash flash.
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::User {
+            text: "prior turn".into(),
+        });
+        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+            text: "prior answer".into(),
+            final_answer: true,
+        });
+    });
+    let mid = h.turn();
+    assert!(
+        mid.contains("restoring session"),
+        "fold landed but restoring not yet cleared: STILL the loading screen:\n{mid}"
+    );
+    h.store.restoring.set(false);
+    h.store.restore_progress.set(None);
+    h.turn(); // the Scroll mounts on this frame…
+    let screen = h.turn(); // …and paints its content on the next
+    assert!(
+        !screen.contains("restoring session"),
+        "the loading surface leaves with the flag:\n{screen}"
+    );
+    assert!(
+        screen.contains("prior answer"),
+        "the restored transcript is on screen:\n{screen}"
+    );
+}
+
 #[test]
 fn header_names_what_gateway_defaults_resolves_to() {
     let mut h = harness();
@@ -2520,6 +2633,10 @@ fn session_switch_while_scrolled_up_shows_the_new_transcript() {
     h.press_enter();
     h.turn();
     h.turn(); // deferred modal close
+              // The pick arms the session-loading screen (`ui::loading`); this
+              // harness has no worker to run the probe, so complete it by hand —
+              // an empty session restores nothing and clears the flag.
+    h.store.restoring.set(false);
     h.turn();
     let screen = h.turn();
     assert_eq!(h.store.session_id.get_untracked(), "acode-other-session");
@@ -4179,6 +4296,10 @@ fn queue_stashes_on_session_switch_and_restores_paused() {
     );
 
     abstractcode_tui::ui::switch_session(store, &h.ctx, "acode-other-session");
+    // No worker in this harness: complete the armed session-loading
+    // screen by hand so the pane returns to the guidance view (where
+    // the stash echo below renders).
+    store.restoring.set(false);
     h.turn();
     assert_eq!(
         store.queue.with_untracked(|q| q.len()),
@@ -4198,6 +4319,7 @@ fn queue_stashes_on_session_switch_and_restores_paused() {
 
     // Switching BACK restores the stash PAUSED; nothing auto-starts.
     abstractcode_tui::ui::switch_session(store, &h.ctx, "acode-test-session");
+    store.restoring.set(false); // same hand-completed probe as above
     h.turn();
     h.turn();
     assert_eq!(
@@ -10264,5 +10386,527 @@ fn a_steer_restore_never_clobbers_a_draft() {
     assert!(
         !screen.contains("the failed steer"),
         "the restore stands down rather than overwrite it:\n{screen}"
+    );
+}
+
+/// Boot gallery (design review, 2026-08-21): the FIRST screen — the one
+/// the boot animation hands off to — captured at the sizes where the
+/// hero lockup is affordable and at the size where it degrades back to
+/// the compact `▲` lockup. Ignored by default like `render_gallery`;
+/// `GALLERY_DIR=… cargo test --test headless_ui boot_gallery -- --ignored`
+/// writes SVG + text so the handoff can be looked at, not guessed at.
+#[test]
+#[ignore = "render gallery: writes design-review screens, run explicitly"]
+fn boot_gallery() {
+    let dir = std::env::var("GALLERY_DIR").unwrap_or_else(|_| "target/gallery".into());
+    std::fs::create_dir_all(&dir).expect("gallery dir");
+    for (label, size) in [
+        ("boot-160x45", Size::new(160, 45)),
+        ("boot-120x40", Size::new(120, 40)),
+        ("boot-100x36", Size::new(100, 36)),
+        ("boot-100x30", Size::new(100, 30)),
+        ("boot-80x24", Size::new(80, 24)),
+    ] {
+        let mut h = harness_sized(size);
+        // Frame 0 is the entrance; step the ticker signal by hand so the
+        // capture shows the lockup fully arrived as well.
+        for frame in [0u64, 1, 4] {
+            h.store.fold.update(|_f| {});
+            h.turn();
+            let text = h.turn();
+            let svg = h.term.screen().screenshot().to_svg();
+            std::fs::write(format!("{dir}/{label}-f{frame}.txt"), &text).expect("txt");
+            std::fs::write(format!("{dir}/{label}-f{frame}.svg"), &svg).expect("svg");
+        }
+    }
+    eprintln!("boot gallery written to {dir}");
+}
+
+/// Animation gallery (design review, 2026-08-21): the three `/animation`
+/// variants over a synthetic run, at a normal and a small pane. Ignored
+/// like the other galleries; `GALLERY_DIR=… cargo test --test headless_ui
+/// animation_gallery -- --ignored` writes SVG + text.
+#[test]
+#[ignore = "render gallery: writes design-review screens, run explicitly"]
+fn animation_gallery() {
+    use abstractcode_tui::store::Phase;
+    use abstractcode_tui::transcript::{CallCost, Item, ToolStatus};
+    let dir = std::env::var("GALLERY_DIR").unwrap_or_else(|_| "target/gallery".into());
+    std::fs::create_dir_all(&dir).expect("gallery dir");
+
+    for (label, size) in [
+        ("anim-120x36", Size::new(120, 36)),
+        ("anim-80x24", Size::new(80, 24)),
+    ] {
+        let mut h = harness_sized(size);
+        h.turn();
+        gallery_fold(&h.store);
+        // A longer synthetic run so the chart has a shape: alternating
+        // cycles and tools, with a failing streak in the middle.
+        h.store.fold.update(|f| {
+            for i in 0..24u32 {
+                f.push_item(Item::Thinking {
+                    iteration: i,
+                    content: "…".into(),
+                    reasoning: String::new(),
+                    call: CallCost {
+                        gen_time_ms: Some(4000.0),
+                        input_tokens: 20_000 + i as u64 * 900,
+                        output_tokens: 120 + (i as u64 * 37) % 400,
+                        cached_tokens: 12_000,
+                    },
+                });
+                for k in 0..2u32 {
+                    let n = i * 2 + k;
+                    let (name, args) = match n % 5 {
+                        0 => ("read_file", "src/ui/mosaic.rs start_line=1"),
+                        1 => ("search_files", "pattern=quantize path=src"),
+                        2 => ("edit_file", "src/gfx/dither.rs"),
+                        3 => ("execute_command", "cargo test --quiet"),
+                        _ => ("fetch_url", "https://example.invalid/spec"),
+                    };
+                    f.push_item(Item::Tool {
+                        key: format!("gcall:{n}"),
+                        name: name.into(),
+                        args_preview: args.into(),
+                        args_full: String::new(),
+                        status: if (10..14).contains(&n) {
+                            ToolStatus::Failed
+                        } else {
+                            ToolStatus::Ok
+                        },
+                        result: "ok".into(),
+                        error: String::new(),
+                    });
+                }
+            }
+        });
+        h.store.phase.set(Phase::Running);
+        h.store.elapsed_secs.set(2_615);
+        h.store.context_window.set(262_144);
+        h.store.last_call_rate.set(Some(38.0));
+        for variant in 1..=3u8 {
+            h.store.animation.set(variant);
+            for _ in 0..6 {
+                h.turn();
+            }
+            let text = h.turn();
+            let svg = h.term.screen().screenshot().to_svg();
+            std::fs::write(format!("{dir}/{label}-v{variant}.txt"), &text).expect("txt");
+            std::fs::write(format!("{dir}/{label}-v{variant}.svg"), &svg).expect("svg");
+        }
+        h.store.animation.set(0);
+    }
+    eprintln!("animation gallery written to {dir}");
+}
+
+/// The ambient pane replaces the PANE and nothing else: the composer,
+/// the chrome and the status bar stay live behind it, and it says how to
+/// get out. (The feature's safety case rests on the exit being obvious
+/// and cheap.)
+///
+/// NOTE: no command sets `store.animation` today — the `/animation`
+/// surface is deliberately closed (`docs/backlog/proposed/
+/// ambient-run-animations.md`). The signal is set directly here so the
+/// pane, its exit and its honesty contract stay under test while the
+/// door is shut.
+#[test]
+fn animation_replaces_the_pane_and_says_how_to_leave() {
+    let mut h = harness_sized(Size::new(120, 36));
+    h.turn();
+    h.store.animation.set(1);
+    for _ in 0..4 {
+        h.turn();
+    }
+    let screen = h.turn();
+    assert!(
+        screen.contains("Esc or click returns to the transcript"),
+        "the way out is on screen:\n{screen}"
+    );
+    // The composer is still there: the animation never takes the input.
+    assert!(
+        screen.contains("Enter sends") || screen.contains("Enter steers"),
+        "the composer stays live:\n{screen}"
+    );
+}
+
+/// Esc leaves the animation, CONSUMES the press, and clears the cancel
+/// arm. Esc in this app is quadruple-loaded (clear draft, jump to tail,
+/// arm cancel, fire cancel) — a user tapping it twice to get the words
+/// back must never reach "cancel the run".
+#[test]
+fn escape_leaves_the_animation_without_arming_cancel() {
+    use abstractcode_tui::store::Phase;
+    let mut h = harness_sized(Size::new(120, 36));
+    h.turn();
+    h.store.phase.set(Phase::Running);
+    h.store.animation.set(2);
+    h.turn();
+    h.press_escape();
+    for _ in 0..3 {
+        h.turn();
+    }
+    assert_eq!(
+        h.store.animation.get_untracked(),
+        0,
+        "Esc returns to the transcript"
+    );
+    assert!(
+        h.store.last_esc.get_untracked().is_none(),
+        "the press is CONSUMED — the cancel arm must not be set by the exit"
+    );
+    // A second Esc arms cancel exactly as it always did (the ladder is
+    // intact, just one rung longer). The arm STATE is the assertion —
+    // its toast drains, as the older Esc test notes.
+    h.press_escape();
+    for _ in 0..3 {
+        h.turn();
+    }
+    assert!(
+        h.store.last_esc.get_untracked().is_some(),
+        "the normal cancel ladder still works after the exit"
+    );
+}
+
+/// A run that is DOWN or idle must never be drawn as working: the state
+/// line under every variant is computed from the same signals the
+/// activity strip uses, and it is the animation's honesty contract.
+#[test]
+fn the_animation_states_the_truth_about_a_dead_gateway() {
+    use abstractcode_tui::store::{Conn, Phase};
+    let mut h = harness_sized(Size::new(120, 36));
+    h.turn();
+    h.store.phase.set(Phase::Running);
+    h.store.animation.set(1);
+    h.store.conn.set(Conn::Down(
+        "gateway unreachable: connection refused".into(),
+        true,
+    ));
+    for _ in 0..3 {
+        h.turn();
+    }
+    let screen = h.turn();
+    assert!(
+        screen.contains("gateway not answering"),
+        "a dead gateway says so on the animation pane:\n{screen}"
+    );
+}
+
+/// A turn that STOPPED before finishing must not drain the queue.
+///
+/// `/help` promises the queue "auto-runs after the current run succeeds;
+/// halts on failure/cancel". A budget-exhausted or stuck-loop turn is neither
+/// success nor failure, and it used to be reported as `Success` — so the next
+/// queued prompt was stacked on top of incomplete work, which is the one
+/// outcome where continuing compounds the problem. The chrome, the card and
+/// the exit code all called that turn unfinished; only the queue disagreed.
+#[test]
+fn a_turn_that_stopped_short_holds_the_queue_instead_of_draining_it() {
+    let mut h = harness();
+    h.turn();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| f.begin_run("root"));
+    h.turn();
+    h.type_text("/queue follow-up work");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(store.queue.with_untracked(|q| q.len()), 1, "queued");
+
+    simulate_terminal(store, abstractcode_tui::store::RunOutcome::StoppedShort);
+    h.turn();
+    h.turn();
+
+    assert_eq!(
+        store.queue.with_untracked(|q| q.len()),
+        1,
+        "the held prompt must NOT be started on top of an unfinished turn"
+    );
+    assert!(
+        store.queue_paused.get_untracked(),
+        "the queue pauses, exactly as it does on failure/cancel"
+    );
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { prompt, .. } if prompt == "follow-up work"))
+            .is_none(),
+        "no start command was issued"
+    );
+}
+
+/// `/resources` end to end: contracts gate, the modal's honest rendering
+/// from parsed host facts, and the `u` → confirm → `Cmd::UnloadModel`
+/// action wiring (the tri-state residency and lock marker render on the
+/// real screen, not just in the pure row builder).
+#[test]
+fn resources_modal_renders_host_facts_and_unload_confirms_before_sending() {
+    use abstractcode_tui::store::{HostContracts, HostState};
+
+    let mut h = harness();
+    h.leave_splash();
+
+    // Contracts declared + a parsed /host/state snapshot (the same pure
+    // parser the worker uses, over the wire shape).
+    h.store.host_contracts.set(Some(HostContracts {
+        model_residency: true,
+        host_state: true,
+        session_caches: true,
+        modality_labels: vec![("text-generation".into(), "LLM".into())],
+    }));
+    let facts = abstractcode_tui::discovery::host_state_from_response(&serde_json::json!({
+        "ok": true,
+        "memory": {
+            "ram": {"total_bytes": 137438953472u64, "used_bytes": 85238953472u64,
+                     "percent": 62.0},
+            "host": {"host_name": "studio.local"}
+        },
+        "gpu": {"supported": true, "utilization_gpu_pct": 21.0},
+        "models": [
+            {"task": "text-generation", "provider": "lmstudio", "model": "qwen3-4b",
+             "resident": true, "state": "loaded", "locked": true, "lockable": true,
+             "size_bytes": 4508876800u64, "context_length": 32768,
+             "calibrated_context_length": 28672, "context_calibrated": true},
+            {"task": "text-generation", "provider": "ollama", "model": "phi4",
+             "resident": null, "locked": false, "lockable": true}
+        ],
+        "session_caches": [
+            {"key": "k1", "provider": "lmstudio", "model": "qwen3-4b",
+             "session_id": "acode-abc", "bytes": 1048576, "token_count": 2100}
+        ],
+        "totals": {"resident_models": 1}
+    }));
+    h.store.host_state.set(HostState::Ready(facts));
+
+    h.type_text("/resources");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        screen.contains("host resources") && screen.contains("studio.local"),
+        "modal opens on the host facts:\n{screen}"
+    );
+    assert!(
+        screen.contains("62%"),
+        "ram meter from served percent:\n{screen}"
+    );
+    assert!(
+        screen.contains("lmstudio/qwen3-4b") && screen.contains("🔒"),
+        "model row with lock marker:\n{screen}"
+    );
+    assert!(
+        screen.contains("ctx 28672*"),
+        "calibrated ctx starred:\n{screen}"
+    );
+    assert!(
+        screen.contains("resident unknown"),
+        "tri-state residency renders distinct:\n{screen}"
+    );
+    assert!(screen.contains("acode-abc"), "cache row:\n{screen}");
+    // The open dispatched a fresh fetch (open + r are the ONLY fetch
+    // moments — no polling lane exists for /host/state).
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::LoadHostState)).is_some(),
+        "opening /resources fetches host state"
+    );
+
+    // `u` on the selected (first) model ARMS a confirm — nothing sent yet.
+    h.type_text("u");
+    let screen = h.turn();
+    assert!(
+        screen.contains("unload lmstudio/qwen3-4b?"),
+        "confirm line armed:\n{screen}"
+    );
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::UnloadModel { .. }))
+            .is_none(),
+        "no unload before the confirm"
+    );
+    // `y` confirms → the exact command, force=false.
+    h.type_text("y");
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::UnloadModel { .. })) {
+        Some(Cmd::UnloadModel {
+            provider,
+            model,
+            force,
+        }) => {
+            assert_eq!(
+                (provider.as_str(), model.as_str()),
+                ("lmstudio", "qwen3-4b")
+            );
+            assert!(!force, "plain u never forces");
+        }
+        other => panic!("expected UnloadModel, got {:?}", other.map(|_| "cmd")),
+    }
+
+    // `k` on the locked row unlocks (the toggle reads the row's truth).
+    h.type_text("k");
+    h.turn();
+    assert!(
+        matches!(
+            h.find_cmd(|c| matches!(c, Cmd::UnlockModel { .. })),
+            Some(Cmd::UnlockModel { provider, model })
+                if provider == "lmstudio" && model == "qwen3-4b"
+        ),
+        "locked row + k = unlock"
+    );
+
+    // `e` probes the context estimate for the selected row.
+    h.type_text("e");
+    h.turn();
+    assert!(
+        matches!(
+            h.find_cmd(|c| matches!(c, Cmd::EstimateContext { .. })),
+            Some(Cmd::EstimateContext { provider, context_length, .. })
+                if provider == "lmstudio" && context_length == Some(32768)
+        ),
+        "e sends the estimate probe with the row's context length"
+    );
+
+    // `f` arms the FORCE confirm — labeled, still two-step — and `y`
+    // sends the same command with force:true.
+    h.type_text("f");
+    let screen = h.turn();
+    assert!(
+        screen.contains("FORCED"),
+        "force confirm is labeled as such:\n{screen}"
+    );
+    h.type_text("y");
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::UnloadModel { .. })) {
+        Some(Cmd::UnloadModel {
+            provider, force, ..
+        }) => {
+            assert_eq!(provider, "lmstudio");
+            assert!(force, "f + confirm sends force:true");
+        }
+        other => panic!(
+            "expected forced UnloadModel, got {:?}",
+            other.map(|_| "cmd")
+        ),
+    }
+
+    // The footer carries the host-RAM segment from the same fetch —
+    // present because the served percent is known, muted at 62%.
+    assert!(
+        screen.contains("mem 62%"),
+        "footer mem segment from the last fetch:\n{screen}"
+    );
+}
+
+/// The tail must be REACHABLE (review HIGH-1): with few models and many
+/// cache rows the windowed body used to pin at the top — cache and
+/// totals rows are cursor-reachable now, so ↓ walks the window to the
+/// tail. Also pins the shrink clamp (review MEDIUM-6): after the row set
+/// shrinks under a deep cursor, the action target is the row the
+/// highlight shows — never an out-of-range ghost.
+#[test]
+fn resources_tail_is_reachable_and_shrink_keeps_cursor_and_action_aligned() {
+    use abstractcode_tui::store::{HostContracts, HostState};
+
+    let mut h = harness();
+    h.leave_splash();
+    h.store.host_contracts.set(Some(HostContracts {
+        model_residency: true,
+        host_state: true,
+        session_caches: true,
+        modality_labels: Vec::new(),
+    }));
+    let caches: Vec<serde_json::Value> = (0..30)
+        .map(|i| {
+            serde_json::json!({
+                "key": format!("k{i}"), "provider": "lmstudio", "model": "qwen3-4b",
+                "session_id": format!("sess-{i:02}"), "bytes": 1024, "token_count": 10
+            })
+        })
+        .collect();
+    let facts = abstractcode_tui::discovery::host_state_from_response(&serde_json::json!({
+        "models": [
+            {"provider": "lmstudio", "model": "qwen3-4b", "resident": true},
+            {"provider": "ollama", "model": "phi4", "resident": true}
+        ],
+        "session_caches": caches,
+        "totals": {"resident_models": 2}
+    }));
+    h.store.host_state.set(HostState::Ready(facts));
+
+    h.type_text("/resources");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(screen.contains("host resources"), "modal opens:\n{screen}");
+    assert!(
+        !screen.contains("sess-29"),
+        "the tail overflows the window before scrolling:\n{screen}"
+    );
+    // ↓ through models + caches: the window follows the cursor to the tail.
+    for _ in 0..40 {
+        h.term.push_input(b"\x1b[B");
+    }
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("sess-29"),
+        "the last cache row is reachable by keyboard:\n{screen}"
+    );
+
+    // SHRINK under a deep cursor: one model remains; the clamped cursor
+    // and the action target agree — u confirms the row the highlight is on.
+    let solo = abstractcode_tui::discovery::host_state_from_response(&serde_json::json!({
+        "models": [{"provider": "solo", "model": "model-a", "resident": true}]
+    }));
+    h.store.host_state.set(HostState::Ready(solo));
+    h.turn();
+    h.type_text("u");
+    let screen = h.turn();
+    assert!(
+        screen.contains("unload solo/model-a?"),
+        "after the shrink the action targets the clamped row:\n{screen}"
+    );
+}
+
+/// The contracts GATE: an old gateway (contracts answered, host_state
+/// absent) gets an honest "not supported" modal and NO host-state fetch;
+/// still-probing contracts get the probing state + a capabilities retry.
+#[test]
+fn resources_modal_is_honest_when_the_contract_is_absent_or_unprobed() {
+    use abstractcode_tui::store::HostContracts;
+
+    // Known-absent: the gateway ANSWERED and declares no host_state.
+    let mut h = harness();
+    h.leave_splash();
+    h.store.host_contracts.set(Some(HostContracts::default()));
+    h.type_text("/resources");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        screen.contains("not supported by this gateway"),
+        "known-absent contract says so:\n{screen}"
+    );
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::LoadHostState)).is_none(),
+        "no fetch against a gateway that declared no contract"
+    );
+
+    // Still probing (None): honest probing state + a capabilities retry.
+    let mut h = harness();
+    h.leave_splash();
+    h.type_text("/resources");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        screen.contains("probing gateway capabilities"),
+        "unprobed contracts render the probing state:\n{screen}"
+    );
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::LoadCapabilities)).is_some(),
+        "the gesture retries the capabilities fetch"
+    );
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::LoadHostState)).is_none(),
+        "never a host-state fetch before the contract is confirmed"
     );
 }

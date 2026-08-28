@@ -271,6 +271,132 @@ pub enum GpuMeter {
     Error(String),
 }
 
+/// Which host/resource CONTRACTS this gateway declares
+/// (`/discovery/capabilities` → `contracts.common`). The `/resources`
+/// surface is gated on `host_state`: absent contract = the modal says
+/// "not supported by this gateway", never a fabricated view. `None` in
+/// the store means the capabilities fetch has not answered yet (still
+/// probing); `Some(default())` means the gateway ANSWERED and declares
+/// none of these.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HostContracts {
+    pub model_residency: bool,
+    pub host_state: bool,
+    pub session_caches: bool,
+    /// task → display label from `model_residency.modality_ui.colors`
+    /// (`{task: {color, label}}`). The hex color is deliberately DROPPED:
+    /// this client styles with theme inks only — modality is
+    /// distinguished by LABEL text.
+    pub modality_labels: Vec<(String, String)>,
+}
+
+impl HostContracts {
+    /// The served label for a task, or the task id itself.
+    pub fn label_for<'a>(&'a self, task: &'a str) -> &'a str {
+        self.modality_labels
+            .iter()
+            .find(|(t, _)| t == task)
+            .map(|(_, l)| l.as_str())
+            .unwrap_or(task)
+    }
+}
+
+/// One resident-model row (`/host/state` → `models[]`, row_v1). Every
+/// numeric field is `Option` — the wire fields are nullable and absence
+/// renders as absence, never as a fabricated zero. `resident` is
+/// TRI-STATE by contract: `None` = the gateway does not know — rendered
+/// distinct from "no".
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ResidencyRow {
+    pub runtime_id: String,
+    pub task: String,
+    pub provider: String,
+    pub model: String,
+    pub source: String,
+    pub resident: Option<bool>,
+    pub state: String,
+    pub locked: bool,
+    pub lockable: bool,
+    pub modalities: Vec<String>,
+    pub size_bytes: Option<u64>,
+    pub size_vram_bytes: Option<u64>,
+    pub context_length: Option<u64>,
+    pub calibrated_context_length: Option<u64>,
+    pub context_calibrated: bool,
+    pub is_default: bool,
+    pub loaded_at: String,
+    pub last_used_at: String,
+}
+
+/// One session prompt-cache row (`/host/state` → `session_caches[]`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SessionCacheRow {
+    pub key: String,
+    pub provider: String,
+    pub model: String,
+    pub session_id: String,
+    pub bytes: Option<u64>,
+    pub token_count: Option<u64>,
+}
+
+/// Parsed `/host/state` facts. Same honesty contract as [`GpuMeter`]:
+/// unknown → `None`/empty, never a fabricated number.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct HostFacts {
+    /// The gateway's own `ts` for this snapshot (served verbatim; "" =
+    /// not reported). Carried so staleness is VISIBLE: after a failed
+    /// refresh the view says "as of <ts>" instead of rendering last-good
+    /// numbers indistinguishable from fresh ones.
+    pub ts: String,
+    /// `memory.host.host_name` when served; "" = not reported.
+    pub host_name: String,
+    pub ram_total: Option<u64>,
+    pub ram_used: Option<u64>,
+    pub ram_available: Option<u64>,
+    pub ram_percent: Option<f64>,
+    /// This gateway process's RSS.
+    pub process_rss: Option<u64>,
+    /// `memory.device.backend` ("mlx", "cuda", …); "" = not reported.
+    pub device_backend: String,
+    pub device_allocated: Option<u64>,
+    pub device_total: Option<u64>,
+    pub device_free: Option<u64>,
+    /// `gpu.supported` — false/absent = no GPU number is rendered.
+    pub gpu_supported: bool,
+    pub gpu_util_pct: Option<f64>,
+    pub models: Vec<ResidencyRow>,
+    pub caches: Vec<SessionCacheRow>,
+    /// Numeric totals as served (key, value) — `*_bytes` keys humanize
+    /// at render; non-numeric totals are omitted (unknown = omission).
+    pub totals: Vec<(String, u64)>,
+    /// Degraded lanes, each folded with its reason when `reasons{}`
+    /// names one ("gpu: ioreg unavailable").
+    pub degraded: Vec<String>,
+}
+
+/// `/resources` host-state lane (the [`GpuMeter`] shape): written on the
+/// UI thread only; the worker posts transitions through the wake handle.
+/// `Unsupported` means the gateway SAID so (404 / contract absent) —
+/// the view never fabricates a state.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum HostState {
+    /// Never fetched (the modal open triggers the first fetch).
+    #[default]
+    Idle,
+    /// A fetch is in flight.
+    Pending,
+    Ready(HostFacts),
+    /// A refresh FAILED but an earlier fetch is still held: the facts
+    /// were true when taken and stay visible, MARKED stale (footer `*`,
+    /// modal banner) — last-good must never render indistinguishable
+    /// from fresh.
+    Stale(HostFacts),
+    /// The endpoint is not on this gateway (reason).
+    Unsupported(String),
+    /// The fetch failed (message); a later refresh may succeed.
+    Error(String),
+}
+
 /// Upper bound on retained image entries (F3): with decode-time
 /// downscaling (`runner::downscale_for_transcript`) each entry is
 /// ≤ ~0.7 MB, so the worst case stays ~22 MB instead of unbounded
@@ -349,8 +475,43 @@ pub enum RunOutcome {
     #[default]
     None,
     Success,
+    /// The turn ENDED without finishing — the loop stopped it (iteration
+    /// budget, stuck loop, …). Not a failure and not a success: the work is
+    /// incomplete, so the queue must not stack the next prompt on top of it.
+    /// `/help` promises the queue "auto-runs after the current run succeeds";
+    /// folding this into `Success` broke that promise on the one outcome
+    /// where continuing is most likely to compound the problem.
+    StoppedShort,
     Failed,
     Cancelled,
+}
+
+impl RunOutcome {
+    /// The ONE mapping from a concluded turn's facts to the outcome the
+    /// queue reads. A pure function on purpose: the two conclusion sites in
+    /// `runner.rs` live inside async closures that no test reaches, and the
+    /// decision they were making — "unfinished counts as success" — was
+    /// invisible until an auditor read it.
+    pub fn for_conclusion(failed: bool, cancelled: bool, stopped_short: bool) -> Self {
+        if failed {
+            RunOutcome::Failed
+        } else if cancelled {
+            RunOutcome::Cancelled
+        } else if stopped_short {
+            RunOutcome::StoppedShort
+        } else {
+            RunOutcome::Success
+        }
+    }
+
+    /// The turn did not complete its work: the queue must hold rather than
+    /// stack the next prompt on top of it.
+    pub fn holds_the_queue(self) -> bool {
+        matches!(
+            self,
+            RunOutcome::Failed | RunOutcome::Cancelled | RunOutcome::StoppedShort
+        )
+    }
 }
 
 /// Session-scope token totals (across runs; per-run stats live in the fold).
@@ -387,6 +548,22 @@ pub struct Store {
     pub review_mode: Signal<bool>,
     /// Verifier round budget (`_runtime.review_max_rounds`); `/review rounds N`.
     pub review_rounds: Signal<u32>,
+    /// Iteration budget REQUESTED for new runs (`_limits.max_iterations`);
+    /// `0` = ask for nothing and take the server's own, which is what every
+    /// other client gets.
+    ///
+    /// A signal, not a `UiCtx` copy, for the reason stated on
+    /// `workspace_mode`: the launch flag seeds it and `/iterations` edits it,
+    /// so there is exactly ONE authority and nothing to drift.
+    ///
+    /// Why it exists at all: when a turn dies on the budget the server's
+    /// remedy reads "Raise the iteration budget, or send the remaining work
+    /// as a follow-up turn." Until 2026-08-22 the first half of that named
+    /// an action this client could not perform — `--max-iterations` is a
+    /// LAUNCH flag, `--param max_iterations=` is refused as client-owned
+    /// (`cli.rs`), and no command, pref or modal touched it. The operator had
+    /// to quit and relaunch to follow the advice they were just given.
+    pub max_iterations: Signal<u32>,
     /// Reasoning effort override ("" = gateway default). The third leg
     /// of the route triple; provider/model changes reset it (coupling
     /// rule — an effort may only apply under the model it was chosen
@@ -420,6 +597,16 @@ pub struct Store {
     /// poller posts closures through the wake handle, generation-guarded
     /// in `gateway::gpu` so a disabled poller's late sample never lands).
     pub gpu: Signal<GpuMeter>,
+    /// `/resources` host state (memory + resident models + caches):
+    /// fetched on modal open + explicit refresh only — never polled
+    /// (`/host/state` is slow by contract).
+    pub host_state: Signal<HostState>,
+    /// Which host/resource contracts the gateway declares
+    /// (`/discovery/capabilities`); `None` until the boot fetch answers.
+    pub host_contracts: Signal<Option<HostContracts>>,
+    /// Latest `/models/context_estimate` answer for the `/resources`
+    /// modal's inline result line: (subject "provider/model", line).
+    pub host_estimate: Signal<Option<(String, String)>>,
     /// OPERATOR-DECLARED context window in tokens (CTX-0; 0 = not
     /// declared). Seeded from `--max-tokens`/prefs; `/context` edits +
     /// persists. Drives the `ctx N/M (P%)` meter — always labeled
@@ -458,6 +645,10 @@ pub struct Store {
     /// every called tool stay visible in BOTH states; this signal
     /// gates detail, never existence. Toggled by Ctrl+D / /details;
     /// /details full|fold set it directly.
+    /// `/animation` — 0 = the transcript, N = ambient variant N showing
+    /// in its place. Session-scoped and opt-in: nothing else writes it,
+    /// and Esc or a click puts it back to 0.
+    pub animation: Signal<u8>,
     pub show_details: Signal<bool>,
     /// The active run tree is PAUSED on the gateway (durable /pause).
     pub paused: Signal<bool>,
@@ -502,8 +693,16 @@ pub struct Store {
     /// Session-history rehydration in flight (boot / session switch):
     /// the idle strip says "restoring session history…" instead of the
     /// "no runs yet" lie while up to ~21 bundles fetch (visibility
-    /// review P2-7).
+    /// review P2-7), and the transcript pane shows the animated
+    /// loading screen (`ui::loading`, operator ask 2026-08-28).
     pub restoring: Signal<bool>,
+    /// The loading screen's counters: `(fetched, total)` prior-turn
+    /// bundles of the current ProbeAttach window, posted by the worker
+    /// as each bundle lands. `None` while the run list itself is in
+    /// flight (the bar sweeps, indeterminate — the denominator is not
+    /// yet a fact). Meaningful only while `restoring` is true; cleared
+    /// with it on every completion path.
+    pub restore_progress: Signal<Option<(usize, usize)>>,
     /// Drop-undo slot: (raw paste text, paths attached from it). Armed
     /// when a dropped-path paste is consumed into chips; Ctrl+O undoes —
     /// removes those chips and puts the RAW text into the composer
@@ -590,6 +789,7 @@ impl Store {
         Store {
             fold: cx.signal(Fold::new()),
             phase: cx.signal(Phase::Idle),
+            animation: cx.signal(0u8),
             conn: cx.signal(Conn::Unknown),
             session_id: cx.signal(String::new()),
             run_id: cx.signal(String::new()),
@@ -600,6 +800,9 @@ impl Store {
             gating_mode: cx.signal(String::new()),
             review_mode: cx.signal(crate::cli::DEFAULT_REVIEW_MODE),
             review_rounds: cx.signal(crate::cli::DEFAULT_REVIEW_ROUNDS),
+            // 0 = request nothing; the server's own default applies, the
+            // same one every other client gets.
+            max_iterations: cx.signal(0u32),
             reasoning: cx.signal(String::new()),
             reasoning_probe: cx.signal(None),
             providers: cx.signal(Vec::new()),
@@ -614,6 +817,9 @@ impl Store {
             mcp_note: cx.signal(String::new()),
             cache: cx.signal(None),
             gpu: cx.signal(GpuMeter::Off),
+            host_state: cx.signal(HostState::Idle),
+            host_contracts: cx.signal(None),
+            host_estimate: cx.signal(None),
             context_window: cx.signal(0),
             last_call_rate: cx.signal(None),
             default_route: cx.signal((String::new(), String::new())),
@@ -634,6 +840,7 @@ impl Store {
             history_cursor: cx.signal(None),
             older_turns: cx.signal(0),
             restoring: cx.signal(false),
+            restore_progress: cx.signal(None),
             pending_attachments: cx.signal(Vec::new()),
             max_attachment_bytes: cx.signal(0),
             paste_undo: cx.signal(None),
@@ -778,6 +985,28 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
+
+    /// The queue's contract in one place: only a turn that FINISHED lets the
+    /// next prompt start. A stop is not a failure, and it is not a success
+    /// either — reporting it as one drained the queue onto incomplete work
+    /// while every other surface of this client called the turn unfinished.
+    #[test]
+    fn only_a_finished_turn_releases_the_queue() {
+        use super::RunOutcome as O;
+        assert_eq!(O::for_conclusion(false, false, false), O::Success);
+        assert_eq!(O::for_conclusion(false, false, true), O::StoppedShort);
+        assert_eq!(O::for_conclusion(true, false, false), O::Failed);
+        assert_eq!(O::for_conclusion(false, true, false), O::Cancelled);
+        // Failure outranks the rest — a failed turn is reported as failed
+        // whatever else was true of it.
+        assert_eq!(O::for_conclusion(true, true, true), O::Failed);
+
+        assert!(!O::Success.holds_the_queue());
+        assert!(O::StoppedShort.holds_the_queue());
+        assert!(O::Failed.holds_the_queue());
+        assert!(O::Cancelled.holds_the_queue());
+    }
+
     use super::*;
     use abstracttui::widgets::Bitmap;
 

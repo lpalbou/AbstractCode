@@ -501,6 +501,68 @@ impl GatewayClient {
         self.get_json("/host/metrics/gpu")
     }
 
+    /// Gateway capability contracts (`/discovery/capabilities`) — the
+    /// server-declared contract set (`contracts.common.model_residency`
+    /// / `host_state` / `session_caches`). The `/resources` surface is
+    /// GATED on this: absent contract = the view says so, never guesses.
+    pub fn discovery_capabilities(&self) -> GwResult<Value> {
+        self.get_json("/discovery/capabilities")
+    }
+
+    /// Full host state (`/host/state`): memory, GPU, resident models
+    /// (row_v1), session caches, totals, degraded lanes. SLOW by
+    /// contract — fetched on modal open + explicit refresh only, never
+    /// polled.
+    pub fn host_state(&self) -> GwResult<Value> {
+        self.get_json("/host/state")
+    }
+
+    /// Unload one resident model (`POST /models/unload`, admin). A
+    /// locked model answers HTTP 409 `{error:"model_locked"}` — the
+    /// caller offers `force` then.
+    pub fn unload_model(&self, provider: &str, model: &str, force: bool) -> GwResult<Value> {
+        self.post_json(
+            "/models/unload",
+            &json!({"provider": provider, "model": model, "force": force}),
+        )
+    }
+
+    /// Lock a model resident (`POST /models/lock`, admin).
+    pub fn lock_model(&self, provider: &str, model: &str) -> GwResult<Value> {
+        self.post_json(
+            "/models/lock",
+            &json!({"provider": provider, "model": model}),
+        )
+    }
+
+    /// Release a residency lock (`POST /models/unlock`, admin).
+    pub fn unlock_model(&self, provider: &str, model: &str) -> GwResult<Value> {
+        self.post_json(
+            "/models/unlock",
+            &json!({"provider": provider, "model": model}),
+        )
+    }
+
+    /// Context-fit estimate for one route
+    /// (`GET /models/context_estimate`): `{confidence, predicted_max_context,
+    /// notes[]}`. `context_length` rides along when the caller knows it.
+    pub fn context_estimate(
+        &self,
+        provider: &str,
+        model: &str,
+        context_length: Option<u64>,
+    ) -> GwResult<Value> {
+        let mut path = format!(
+            "/models/context_estimate?provider={}&model={}",
+            url_encode(provider),
+            url_encode(model)
+        );
+        if let Some(n) = context_length {
+            path.push_str(&format!("&context_length={n}"));
+        }
+        self.get_json(&path)
+    }
+
     // -- runs ------------------------------------------------------------------
 
     pub fn start_run(

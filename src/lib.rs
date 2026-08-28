@@ -214,6 +214,9 @@ fn run_tui(args: &cli::Args) -> i32 {
         prefs.context_window
     };
     let max_iterations = args.max_iterations;
+    // Persisted `/iterations` declaration; 0 = ask for nothing. Read here
+    // beside the window because `prefs` is moved into the UiCtx below.
+    let prefs_max_iterations = prefs.max_iterations;
     let args_replay_turns = args.replay_turns;
 
     let client = gateway::GatewayClient::new(&conn.base_url, conn.token.as_deref());
@@ -290,6 +293,16 @@ fn run_tui(args: &cli::Args) -> i32 {
             .set(args.review.unwrap_or(cli::DEFAULT_REVIEW_MODE));
         store.review_rounds.set(args.review_rounds);
         store.context_window.set(context_window);
+        // Iteration budget: an explicit `--max-iterations` wins for this
+        // session; otherwise the persisted `/iterations` value; otherwise 0
+        // = ask for nothing and take the server's own. The flag does NOT
+        // rewrite prefs — a one-off launch override must not become a
+        // standing declaration.
+        store.max_iterations.set(if args.max_iterations_explicit {
+            args.max_iterations
+        } else {
+            prefs_max_iterations
+        });
         if let Some(details) = show_details_pref {
             store.show_details.set(details);
         }
@@ -335,6 +348,10 @@ fn run_tui(args: &cli::Args) -> i32 {
         // `mcp N` — without this load the count existed only after /mcp
         // was opened once. One cheap GET.
         let _ = tx.send(runner::Cmd::LoadMcp);
+        // Capability contracts at boot: `/resources` is GATED on them
+        // (host_state contract absent = the modal says so honestly).
+        // One cheap GET; a transient failure self-heals at the gesture.
+        let _ = tx.send(runner::Cmd::LoadCapabilities);
         let _ = tx.send(runner::Cmd::LoadEntities);
         let _ = tx.send(runner::Cmd::ProbeAttach {
             session_id: attach_session.clone(),

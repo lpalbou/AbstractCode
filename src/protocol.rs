@@ -76,6 +76,34 @@ pub fn wait_key(wait: &Value) -> String {
     s(wait, "wait_key")
 }
 
+/// The SERVER's own type for an ask-user wait, from the wait's `details`.
+///
+/// A wait is a durable server object every client sees; what it MEANS must
+/// come from the server too. `details.mode == "approval_required"` already
+/// works this way for tool approvals (see the module header) — an ask has no
+/// declared type yet, so headless `exec` classifies the *conclude gate* by
+/// matching the agent's English. That works only while the wording holds, and
+/// only in this client: an unattended bridge or CI driver invents its own
+/// phrases and answers the same wait differently.
+///
+/// Read `details.kind`, then `details.mode`. Empty = the flow declared none,
+/// and the caller must say so rather than pretend to know.
+pub fn ask_wait_kind(wait: &Value) -> String {
+    let details = match wait.get("details") {
+        Some(Value::Object(_)) => wait.get("details").unwrap(),
+        _ => return String::new(),
+    };
+    for key in ["kind", "mode", "wait_kind", "ask_kind"] {
+        if let Some(Value::String(v)) = details.get(key) {
+            let v = v.trim();
+            if !v.is_empty() {
+                return v.to_ascii_lowercase();
+            }
+        }
+    }
+    String::new()
+}
+
 pub fn wait_prompt(wait: &Value) -> String {
     s(wait, "prompt")
 }
@@ -522,14 +550,62 @@ const OUTPUT_TEXT_KEYS: [&str; 6] = ["answer", "response", "message", "text", "c
 /// that merely RAN OUT OF ITERATIONS mid-task was indistinguishable from one
 /// that finished — the reported "claims completion too early" symptom, in the
 /// client's own words rather than the model's.
+///
+/// `stop_reason` (2026-08-21) is where the WORDS come from, and this client
+/// does not second-guess them. The loop's terminal node authors `label`,
+/// `headline` and `remedy` because only it knows the ceiling, the spend,
+/// whether a stuck pattern forced the stop and whether the model was warned
+/// first. Every host on this gateway — the TUI, AbstractObserver, the web
+/// client, a chat bridge — renders the same sentence instead of each
+/// re-deriving one. The re-derivation is not hypothetical: for two days this
+/// client read `outcome: "iteration_budget"` alone, missed the additive
+/// `conclusion_forced` beside it, and told the operator to raise a budget
+/// that still had 38 of its 50 iterations unspent.
+///
+/// `outcome`, `iterations` and `review_skipped` are still read for the LEGACY
+/// path — an engine that predates the contract sends no `stop_reason`, and a
+/// host that then invents a remedy is exactly the bug above.
+/// One server-authored caveat about the answer (`output.notices[]`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Notice {
+    /// Stable machine key (`review_skipped`, …). Empty when the server sent none.
+    pub code: String,
+    /// `info` | `warn` | `error` — the SERVER decides how loud this is.
+    pub severity: String,
+    /// The sentence, rendered verbatim.
+    pub text: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RunVerdict {
     /// Verbatim `outcome` (empty = the flow authored none).
     pub outcome: String,
     /// Iterations the loop reported using.
     pub iterations: Option<u64>,
-    /// The verifier pass was requested but did not run.
+    /// The verifier pass was requested but did not run (legacy field; the
+    /// server now says it in `notices` too).
     pub review_skipped: bool,
+    /// `stop_reason.code` — `final_answer`, `iteration_budget`,
+    /// `stuck_repeat`, `stuck_oscillation`. Empty = pre-contract engine.
+    pub stop_code: String,
+    /// `stop_reason.finished` — did the loop finish the task?
+    pub stop_finished: bool,
+    /// `stop_reason.budget_exhausted` — the iterations were actually SPENT.
+    /// False for a stuck-loop stop, which ends the turn with budget to
+    /// spare. Carried because the exit-code channel must not call one the
+    /// other: harnesses read the code, not the sentence.
+    pub stop_budget_exhausted: bool,
+    /// `stop_reason.label` — the short line for fixed chrome, server-authored.
+    pub stop_label: String,
+    /// `stop_reason.headline` — one sentence for the operator, server-authored.
+    pub stop_headline: String,
+    /// `stop_reason.remedy` — what to do about it, server-authored.
+    pub stop_remedy: String,
+    /// `notices[]` — caveats about the ANSWER, carried whole: the server's
+    /// `severity` decides the ink and `code` is the stable key other hosts
+    /// branch on. Keeping only `text` made a `warn` and an `error` render
+    /// identically here and differently in AbstractObserver.
+    pub notices: Vec<Notice>,
 }
 
 impl RunVerdict {
@@ -539,9 +615,25 @@ impl RunVerdict {
         self.outcome == "iteration_budget"
     }
 
+    /// The server said how this turn ended. When false, only the legacy
+    /// enum is available and no explanation may be invented from it.
+    pub fn has_stop_reason(&self) -> bool {
+        !self.stop_code.is_empty()
+    }
+
+    /// The turn did NOT finish — the server's word when it gives one, the
+    /// legacy enum otherwise.
+    pub fn stopped_short(&self) -> bool {
+        if self.has_stop_reason() {
+            !self.stop_finished
+        } else {
+            self.budget_exhausted()
+        }
+    }
+
     /// Nothing worth telling the operator about.
     pub fn is_unremarkable(&self) -> bool {
-        !self.budget_exhausted() && !self.review_skipped
+        !self.stopped_short() && !self.review_skipped && self.notices.is_empty()
     }
 }
 
@@ -559,6 +651,14 @@ pub fn run_verdict(rec: &Value) -> Option<RunVerdict> {
     // One wrapper level down, same ladder as the text reader.
     let inner = obj.get("result").filter(|r| r.is_object()).unwrap_or(obj);
     let read = |key: &str| -> Option<&Value> { obj.get(key).or_else(|| inner.get(key)) };
+    let sr = read("stop_reason").filter(|v| v.is_object());
+    let str_field = |obj: Option<&Value>, key: &str| -> String {
+        obj.and_then(|o| o.get(key))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
     Some(RunVerdict {
         outcome: read("outcome")
             .and_then(Value::as_str)
@@ -569,6 +669,53 @@ pub fn run_verdict(rec: &Value) -> Option<RunVerdict> {
         review_skipped: read("review_skipped")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        // Lowercased: the wording branches on this string, and an unexpected
+        // casing must not silently render the wrong shape.
+        stop_code: sr
+            .and_then(|r| r.get("code"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase(),
+        stop_finished: sr
+            .and_then(|r| r.get("finished"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        stop_budget_exhausted: sr
+            .and_then(|r| r.get("budget_exhausted"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        stop_label: str_field(sr, "label"),
+        stop_headline: str_field(sr, "headline"),
+        stop_remedy: str_field(sr, "remedy"),
+        notices: read("notices")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|n| {
+                        let text = n.get("text").and_then(Value::as_str)?.trim().to_string();
+                        if text.is_empty() {
+                            return None;
+                        }
+                        Some(Notice {
+                            code: n
+                                .get("code")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .trim()
+                                .to_ascii_lowercase(),
+                            severity: n
+                                .get("severity")
+                                .and_then(Value::as_str)
+                                .unwrap_or("info")
+                                .trim()
+                                .to_ascii_lowercase(),
+                            text,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     })
 }
 

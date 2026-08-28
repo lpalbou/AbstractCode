@@ -137,8 +137,17 @@ pub enum Item {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WaitKind {
-    Approval { tool_calls: Vec<Value> },
-    Ask { prompt: String },
+    Approval {
+        tool_calls: Vec<Value>,
+    },
+    Ask {
+        prompt: String,
+        /// The flow's OWN declaration of what this ask is
+        /// (`details.kind`/`details.mode`), empty when it declared none.
+        /// Carried so unattended drivers answer from the server's word
+        /// instead of each inventing its own reading of the prose.
+        gate: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -590,6 +599,28 @@ fn value_block(v: Option<&Value>) -> String {
     }
 }
 
+/// The turn's verdict AS THE SERVER WORDED IT (`output.stop_reason`).
+///
+/// Carried, never composed. This host renders `label` in fixed chrome and
+/// `headline`/`remedy` in the card; it does not decide what a stop means,
+/// because every other host on this gateway would then have to decide the
+/// same thing again and could decide it differently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopVerdict {
+    /// `final_answer` | `iteration_budget` | `stuck_repeat` | `stuck_oscillation`.
+    pub code: String,
+    /// The loop finished the task.
+    pub finished: bool,
+    /// The iteration budget was actually SPENT (false for a stuck-loop stop).
+    pub budget_exhausted: bool,
+    /// Short line for the status chrome.
+    pub label: String,
+    /// One sentence for the operator.
+    pub headline: String,
+    /// What to do about it (may be empty).
+    pub remedy: String,
+}
+
 #[derive(Default)]
 pub struct Fold {
     pub items: Vec<Item>,
@@ -674,9 +705,12 @@ pub struct Fold {
     pub finished: bool,
     /// True when the ROOT (or answer-source run) recorded a failure.
     pub failed: bool,
-    /// The loop STOPPED on its iteration budget rather than FINISHING
-    /// (`outcome: "iteration_budget"`), with the iteration count when the
-    /// verdict carried one.
+    /// The turn STOPPED before finishing, with the iteration count when the
+    /// verdict carried one. Named for the FACT, not for one of its causes:
+    /// while this was called `budget_exhausted` the exit-code channel
+    /// collapsed every unfinished stop into "raise the budget", including
+    /// stuck-loop stops the server had explicitly marked
+    /// `budget_exhausted: false`. The cause lives in `stop`.
     ///
     /// Separate from `failed` on purpose: nothing failed — the agent was
     /// interrupted mid-task, which is a THIRD outcome beside "finished" and
@@ -686,7 +720,11 @@ pub struct Fold {
     /// still exited 0 — so a truncated run was indistinguishable from a
     /// completed one to both the operator and every script, and
     /// `zelda_headless_bench.py` scored it as a PASS.
-    pub budget_exhausted: Option<u64>,
+    pub stopped_short: Option<u64>,
+    /// The server's own verdict for this turn, latched for the conclusion
+    /// line and the exit code. `None` = the engine predates the contract, and
+    /// this host must NOT invent an explanation to fill the gap.
+    pub stop: Option<StopVerdict>,
     /// Turn wall clock (set at `begin_run`) — feeds the done summary's
     /// elapsed. Meaningless during ledger REPLAY (`replay` suppresses
     /// the elapsed segment, never the summary itself).
@@ -784,7 +822,8 @@ impl Fold {
         // clean run still rendered "stopped: iteration budget (N)" in the
         // fixed chrome. A honesty fix that lies in the other direction is
         // still a lying client.
-        self.budget_exhausted = None;
+        self.stopped_short = None;
+        self.stop = None;
         self.activity.clear();
         self.cycle = 0;
         self.cycles.clear();
@@ -1821,24 +1860,66 @@ impl Fold {
             Some(v) if !v.is_unremarkable() => v,
             _ => return,
         };
-        if verdict.budget_exhausted() {
+        if verdict.stopped_short() {
             // Latch it so the CONCLUSION word and the exit code can tell the
             // truth too — an error card at the transcript tail is not where
             // "did it finish?" gets answered.
-            self.budget_exhausted = Some(verdict.iterations.unwrap_or(0));
-            let iters = verdict
-                .iterations
-                .map(|n| format!(" after {n} iterations"))
-                .unwrap_or_default();
-            self.push_item(Item::Error {
-                text: format!(
-                    "iteration budget exhausted{iters} — the agent STOPPED, \
-                     it did not finish. Raise --max-iterations, or send the \
-                     remaining work as a follow-up turn."
-                ),
-            });
+            self.stopped_short = Some(verdict.iterations.unwrap_or(0));
+            if verdict.has_stop_reason() {
+                self.stop = Some(StopVerdict {
+                    code: verdict.stop_code.clone(),
+                    finished: verdict.stop_finished,
+                    budget_exhausted: verdict.stop_budget_exhausted,
+                    label: verdict.stop_label.clone(),
+                    headline: verdict.stop_headline.clone(),
+                    remedy: verdict.stop_remedy.clone(),
+                });
+                let mut text = verdict.stop_headline.clone();
+                if !verdict.stop_remedy.is_empty() {
+                    if !text.is_empty() {
+                        text.push(' ');
+                    }
+                    text.push_str(&verdict.stop_remedy);
+                }
+                if !text.is_empty() {
+                    self.push_item(Item::Error { text });
+                }
+            } else {
+                // LEGACY ENGINE (pre-`stop_reason`). Report the enum and
+                // nothing more: this host cannot tell an exhausted budget
+                // from a stuck-loop stop — both arrive as
+                // `outcome: "iteration_budget"` — and guessing is how it came
+                // to advise raising a budget that was never spent.
+                self.stop = None;
+                let iters = verdict
+                    .iterations
+                    .map(|n| format!(" after {n} iterations"))
+                    .unwrap_or_default();
+                self.push_item(Item::Error {
+                    text: format!(
+                        "the agent STOPPED{iters}, it did not finish — this engine reports no \
+                         stop reason, so there is nothing more this client can tell you about why."
+                    ),
+                });
+            }
         }
-        if verdict.review_skipped {
+        for notice in &verdict.notices {
+            // The SERVER decides how loud a caveat is. Flattening every
+            // notice to Info made a `warn` and an `error` look identical
+            // here and different in the next host to render the same run.
+            let item = match notice.severity.as_str() {
+                "error" | "critical" | "fatal" => Item::Error {
+                    text: notice.text.clone(),
+                },
+                _ => Item::Info {
+                    text: notice.text.clone(),
+                },
+            };
+            self.push_item(item);
+        }
+        if verdict.review_skipped && verdict.notices.is_empty() {
+            // Legacy only: engines that send `notices` say this themselves,
+            // in their own words, to every host at once.
             self.push_item(Item::Info {
                 text: "#FALLBACK: the verifier pass was requested but did not run — \
                        this answer was not checked against the tool outputs."
@@ -1853,16 +1934,15 @@ impl Fold {
         // The verdict overrides the word so the one line the operator reads
         // from fixed chrome (`last run: …`, sourced from `done_note`) cannot
         // say "done" about work that was cut off.
-        let (glyph, word) = match (outcome, self.budget_exhausted) {
+        let (glyph, word) = match (outcome, self.stopped_short) {
             ("completed", Some(iters)) => (
                 "⚠",
-                if iters > 0 {
-                    // `iterations` is the count USED (react_runtime sets it from
-                    // `current_iteration`), not the ceiling — "budget (7)" read
-                    // as if 7 were the limit.
-                    format!("stopped: iteration budget after {iters} iterations")
-                } else {
-                    "stopped: iteration budget".to_string()
+                match self.stop.as_ref() {
+                    // The server worded it; this host repeats it.
+                    Some(v) if !v.label.is_empty() => v.label.clone(),
+                    // Legacy engine: the enum, with no cause attached to it.
+                    _ if iters > 0 => format!("stopped after {iters} iterations"),
+                    _ => "stopped".to_string(),
                 },
             ),
             ("completed", None) => ("✓", "done".to_string()),
@@ -2532,7 +2612,10 @@ impl Fold {
                 run_id: run_id.to_string(),
                 wait_key: wk,
                 step_id: step_id.to_string(),
-                kind: WaitKind::Ask { prompt },
+                kind: WaitKind::Ask {
+                    prompt,
+                    gate: protocol::ask_wait_kind(wait),
+                },
             });
         }
     }
@@ -3942,16 +4025,14 @@ mod tests {
         ));
     }
 
-    /// A run that STOPPED on its iteration budget must not read as one that
-    /// FINISHED — in the scrollback card, in `done_note` (the only source for
-    /// the fixed chrome `last run: …` line), or in the glyph.
-    ///
-    /// This is the operator's original complaint in its purest form: the agent
-    /// claimed completion it had not earned. Before this test the verdict
-    /// reached an `Item::Error` only, while `done_note` still said `done` —
-    /// so the one line built to answer "did it finish?" answered wrong.
+    /// LEGACY ENGINE (no `stop_reason` on the wire): a run that STOPPED must
+    /// not read as one that FINISHED — and this host must not invent a reason
+    /// it cannot know. An exhausted budget and a stuck-loop stop both arrive
+    /// as `outcome: "iteration_budget"`, so any remedy composed here is a
+    /// guess, and guessing is what sent operators to `--max-iterations` for a
+    /// run with 38 of its 50 iterations unspent.
     #[test]
-    fn iteration_budget_stop_never_renders_or_reports_as_done() {
+    fn a_legacy_stop_is_reported_without_inventing_a_cause() {
         let mut fold = Fold::new();
         fold.begin_run("root");
         fold.apply(
@@ -3963,45 +4044,280 @@ mod tests {
                         "iterations": 50}}}),
         );
         assert!(fold.finished);
-        assert_eq!(
-            fold.budget_exhausted,
-            Some(50),
-            "the verdict latches with its iteration count"
-        );
-        // NOT a failure: nothing errored, the agent was interrupted.
+        assert_eq!(fold.stopped_short, Some(50));
+        assert!(fold.stop.is_none(), "no server verdict was sent");
+        assert!(!fold.failed, "a stop is a third outcome, not a failure");
         assert!(
-            !fold.failed,
-            "budget exhaustion is a third outcome, not a failure"
-        );
-        // The conclusion word itself must carry the truth.
-        assert!(
-            fold.done_note.contains("stopped: iteration budget"),
-            "done_note drives the fixed chrome line; got {:?}",
+            fold.done_note.contains("stopped after 50 iterations"),
+            "got {:?}",
             fold.done_note
         );
+        assert!(!fold.done_note.starts_with("done"));
+        let card = fold
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Error { text } if text.contains("STOPPED") => Some(text.clone()),
+                _ => None,
+            })
+            .expect("the stop is still announced");
         assert!(
-            fold.done_note.contains("50"),
-            "the budget that was hit is named: {:?}",
-            fold.done_note
+            !card.contains("max-iterations") && !card.to_lowercase().contains("raise"),
+            "a host must not invent a remedy it cannot derive: {card:?}"
         );
-        assert!(
-            !fold.done_note.starts_with("done"),
-            "a truncated run must never announce itself as done: {:?}",
-            fold.done_note
-        );
-        // The explanatory card still fires, with the remedy.
-        assert!(
-            fold.items.iter().any(|i| matches!(i, Item::Error { text }
-                if text.contains("STOPPED") && text.contains("max-iterations"))),
-            "the verdict card explains the stop and how to raise the budget"
-        );
-        // And the exec exit code separates it from success AND from failure.
         assert_eq!(
             crate::exec::exit_code_for_status_with_verdict("completed", true),
-            crate::exec::EXIT_ITERATION_BUDGET
+            crate::exec::EXIT_STOPPED_SHORT
         );
-        assert_ne!(crate::exec::EXIT_ITERATION_BUDGET, 0);
-        assert_ne!(crate::exec::EXIT_ITERATION_BUDGET, 1);
+        assert_ne!(crate::exec::EXIT_STOPPED_SHORT, 0);
+        assert_ne!(crate::exec::EXIT_STOPPED_SHORT, 1);
+    }
+
+    /// THE ARCHITECTURE RULE. `abstractcode-tui` is a thin host: it shows what
+    /// the gateway sends. The loop's terminal node authors the verdict, so this
+    /// TUI, AbstractObserver, the web client and any chat bridge all show the
+    /// SAME sentence. This pins that the card is the server's two fields
+    /// concatenated and nothing else — no shape word, no count, no advice
+    /// composed here.
+    #[test]
+    fn the_stop_card_is_exactly_what_the_server_worded() {
+        let headline =
+            "The agent stopped early after 12 iterations: it repeated the same tool batch 5 times.";
+        let remedy = "The iteration budget was not the limit, so raising it will not help.";
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "node_id": "max_iterations", "status": "completed",
+                    "result": {"completed": true, "output": {
+                        "answer": "Progress report…",
+                        "outcome": "iteration_budget",
+                        "iterations": 12,
+                        "conclusion_forced": {"kind": "repeat", "span": 5, "nudged": true},
+                        "stop_reason": {
+                            "code": "stuck_repeat", "finished": false, "budget_exhausted": false,
+                            "iterations": 12,
+                            "label": "stopped: repeated tool calls after 12 iterations",
+                            "headline": headline, "remedy": remedy}}}}),
+        );
+        let stop = fold.stop.as_ref().expect("the server verdict latches");
+        assert_eq!(stop.code, "stuck_repeat");
+        assert!(!stop.finished);
+        assert!(
+            fold.done_note
+                .contains("stopped: repeated tool calls after 12 iterations"),
+            "the chrome line is the server's label: {:?}",
+            fold.done_note
+        );
+        let card = fold
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Error { text } if text.starts_with("The agent stopped early") => {
+                    Some(text.clone())
+                }
+                _ => None,
+            })
+            .expect("the stop card fires");
+        assert_eq!(card, format!("{headline} {remedy}"));
+    }
+
+    /// SEAM TEST against a REAL server payload. The fixture is a verbatim
+    /// capture from a live `gpt-5.4-mini` run on `endpoint:airelay` whose loop
+    /// hit the stuck guillotine — not a hand-written approximation of the
+    /// contract, which is how a client and a server drift apart while both
+    /// their own test suites stay green. Regenerate it by re-running the
+    /// capture, never by editing it to match this client.
+    #[test]
+    fn a_live_server_verdict_folds_into_the_card_and_the_chrome_line() {
+        let raw = include_str!("../tests/fixtures/stop_reason_stuck_live.json");
+        let rec: Value = serde_json::from_str(raw).expect("fixture parses");
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply("root", &rec);
+
+        let stop = fold
+            .stop
+            .as_ref()
+            .expect("the live payload carries a server verdict this client can read");
+        assert_eq!(stop.code, "stuck_repeat");
+        assert!(!stop.finished);
+        assert!(!stop.label.is_empty() && !stop.headline.is_empty() && !stop.remedy.is_empty());
+        // Chrome and card are the server's own strings.
+        assert!(
+            fold.done_note.contains(&stop.label),
+            "got {:?}",
+            fold.done_note
+        );
+        let card = fold
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Error { text } => Some(text.clone()),
+                _ => None,
+            })
+            .expect("a stop card fires");
+        assert_eq!(card, format!("{} {}", stop.headline, stop.remedy));
+        assert_eq!(
+            crate::exec::stopped_head(fold.stopped_short, fold.stop.as_ref()),
+            stop.label
+        );
+    }
+
+    /// A server-worded plain budget stop carries the SERVER's remedy — the
+    /// client neither adds to it nor swaps in the stuck wording.
+    #[test]
+    fn a_server_worded_budget_stop_carries_the_server_remedy() {
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "node_id": "max_iterations", "status": "completed",
+                    "result": {"completed": true, "output": {
+                        "answer": "…", "outcome": "iteration_budget", "iterations": 50,
+                        "stop_reason": {
+                            "code": "iteration_budget", "finished": false, "budget_exhausted": true,
+                            "iterations": 50,
+                            "label": "stopped: iteration budget after 50 iterations",
+                            "headline": "The agent ran out of iterations and STOPPED — it did not finish.",
+                            "remedy": "Raise the iteration budget, or send the remaining work as a follow-up turn."}}}}),
+        );
+        assert_eq!(
+            fold.stop.as_ref().map(|v| v.code.as_str()),
+            Some("iteration_budget")
+        );
+        assert!(fold
+            .done_note
+            .contains("stopped: iteration budget after 50 iterations"));
+        assert!(fold.items.iter().any(|i| matches!(i, Item::Error { text }
+            if text.contains("Raise the iteration budget"))));
+        assert!(
+            !fold.items.iter().any(|i| matches!(i, Item::Error { text }
+                if text.contains("repeated the same tool batch"))),
+            "the stuck wording must never appear for a budget stop"
+        );
+    }
+
+    /// The forced latch must not survive into a LATER verdict in the same
+    /// turn. `push_verdict_note` runs at every conclusion record — subruns
+    /// included, since `finish_on_root_only` defaults to false — so a
+    /// loop-forced subrun followed by a genuinely budget-exhausted root would
+    /// otherwise keep the subrun's word for the whole turn.
+    #[test]
+    fn a_forced_subrun_does_not_relabel_a_later_plain_budget_verdict() {
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        let worded = json!({"run_id": "sub", "node_id": "max_iterations", "status": "completed",
+                    "result": {"completed": true, "output": {
+                        "answer": "sub", "outcome": "iteration_budget", "iterations": 5,
+                        "stop_reason": {"code": "stuck_repeat", "finished": false,
+                                        "label": "stopped: repeated tool calls after 5 iterations",
+                                        "headline": "It repeated a batch.",
+                                        "remedy": "Try another route."}}}});
+        let unworded = json!({"run_id": "root", "node_id": "max_iterations", "status": "completed",
+                    "result": {"completed": true, "output": {
+                        "answer": "root", "outcome": "iteration_budget", "iterations": 50}}});
+        // Unit-level on purpose: which records REACH `push_verdict_note`
+        // depends on the answer-source/root routing above, and the latch must
+        // be safe regardless of that routing.
+        fold.push_verdict_note(&worded);
+        assert!(fold.stop.is_some(), "the server verdict latches");
+        // A later verdict with NO server wording must not inherit the previous
+        // one — the chrome line would then describe the wrong turn.
+        fold.push_verdict_note(&unworded);
+        assert!(
+            fold.stop.is_none(),
+            "an unworded verdict must clear the latch, not inherit the previous wording"
+        );
+        fold.push_done_summary("completed");
+        assert!(
+            fold.done_note.contains("stopped after 50 iterations"),
+            "got {:?}",
+            fold.done_note
+        );
+    }
+
+    /// The server says how loud a caveat is, and how a stop ended. Both were
+    /// being thrown away: `severity` was flattened to Info for every notice,
+    /// and `stop_reason.budget_exhausted` — the field that separates a spent
+    /// budget from a stuck-loop stop — was never read at all, so the
+    /// machine-readable exit channel could still call one the other.
+    #[test]
+    fn the_servers_severity_and_budget_facts_survive_the_fold() {
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "node_id": "max_iterations", "status": "completed",
+                    "result": {"completed": true, "output": {
+                        "answer": "…", "outcome": "iteration_budget", "iterations": 12,
+                        "notices": [
+                            {"code": "review_skipped", "severity": "warn", "text": "warn line"},
+                            {"code": "evidence_missing", "severity": "error", "text": "error line"}],
+                        "stop_reason": {
+                            "code": "stuck_repeat", "finished": false, "budget_exhausted": false,
+                            "iterations": 12, "label": "stopped: repeated tool calls",
+                            "headline": "It repeated a batch.", "remedy": "Try another route."}}}}),
+        );
+        let stop = fold.stop.as_ref().expect("verdict latches");
+        assert!(
+            !stop.budget_exhausted,
+            "the server said the budget was NOT spent; this host must carry that"
+        );
+        // Severity picks the ink: the warn is an info line, the error is not.
+        assert!(fold
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Info { text } if text == "warn line")));
+        assert!(fold
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Error { text } if text == "error line")));
+        // And the live capture agrees on the same field.
+        let raw = include_str!("../tests/fixtures/stop_reason_stuck_live.json");
+        let rec: Value = serde_json::from_str(raw).expect("fixture parses");
+        let v = crate::protocol::run_verdict(&rec).expect("verdict");
+        assert!(
+            !v.stop_budget_exhausted,
+            "a live stuck stop spent no budget"
+        );
+        assert!(!v.stop_finished);
+    }
+
+    /// Server-authored `notices` render verbatim, and the legacy client-side
+    /// sentence yields to them rather than doubling up.
+    #[test]
+    fn notices_are_rendered_verbatim_and_never_doubled_by_the_legacy_line() {
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "node_id": "done", "status": "completed",
+                    "result": {"completed": true, "output": {
+                        "answer": "…", "outcome": "final_answer", "iterations": 4,
+                        "review_skipped": true,
+                        "notices": [{"code": "review_skipped", "severity": "warn",
+                                     "text": "The verifier pass was requested but did not run."}],
+                        "stop_reason": {"code": "final_answer", "finished": true,
+                                        "label": "done", "headline": "", "remedy": ""}}}}),
+        );
+        let infos: Vec<String> = fold
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Info { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(infos
+            .iter()
+            .any(|t| t == "The verifier pass was requested but did not run."));
+        assert!(!infos.iter().any(|t| t.contains("#FALLBACK")), "{infos:?}");
+        assert!(
+            fold.done_note.starts_with("done"),
+            "got {:?}",
+            fold.done_note
+        );
     }
 
     /// The mirror: an ordinary completion is untouched by the new branch —
@@ -4016,7 +4332,7 @@ mod tests {
                     "result": {"completed": true, "output": {"answer": "Done."}}}),
         );
         assert!(fold.finished);
-        assert_eq!(fold.budget_exhausted, None);
+        assert_eq!(fold.stopped_short, None);
         assert!(
             fold.done_note.starts_with("done"),
             "got {:?}",

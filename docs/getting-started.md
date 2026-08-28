@@ -91,7 +91,11 @@ gateway until you answer.
 
 6. **Instruments.** Declare your model's context window once —
    `/context 262k` — and the footer meter becomes `ctx used/window (%)`
-   (warns at 75%). `/gpu` toggles a gateway-host GPU meter. If your
+   (warns at 75%). `/gpu` toggles a gateway-host GPU meter, and
+   `/resources` (alias `/host`) opens the gateway host's memory +
+   resident-model panel — with model unload/lock and a context
+   estimate — and feeds a footer `mem NN%` segment (on gateways that
+   declare the `host_state` contract). If your
    terminal ever gets externally cleared (Cmd+K), `Ctrl+L` (or
    `/redraw`) repaints everything, and the screen also heals itself at
    the next focus round-trip (click away and back).

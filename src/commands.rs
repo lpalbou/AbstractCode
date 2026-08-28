@@ -63,6 +63,10 @@ pub enum Command {
     Pause,
     Resume,
     Cancel,
+    /// `/conclude [note]` — ask the agent to stop and answer from what it
+    /// already has. The verb and its consequences live on the gateway
+    /// (`POST /commands {type:"conclude"}`), so every client has it.
+    Conclude(String),
     Steer(String),
     /// `/entities [name]` — roster modal; a name deep-links to its card.
     Entities(Option<String>),
@@ -92,11 +96,30 @@ pub enum Command {
     Goal(Option<String>),
     /// `/gpu` — toggle the gateway-host GPU meter (OBS-6).
     Gpu,
+    /// `/resources` (alias `/host`) — gateway-host memory, resident
+    /// models (row_v1) and session caches, with unload/lock/estimate
+    /// actions. `/models` was NOT reusable: it aliases `/model`. Gated on
+    /// the gateway's declared `host_state` contract — an old gateway gets
+    /// an honest "not supported" modal, never a fabricated view.
+    Resources,
     /// `/context [tokens|off]` — the operator-declared context window
     /// (CTX-0). `None` reports the current declaration + usage; a token
     /// count declares; `off`/`0` clears. Persisted.
     Context(Option<String>),
+    /// `/iterations [N|off]` — the iteration budget REQUESTED for new runs
+    /// (`_limits.max_iterations`). `None` reports what is in force and where
+    /// it came from; `N` requests that budget; `off`/`0` requests nothing and
+    /// takes the server's own. Persisted; applies to the NEXT run, never
+    /// mid-turn.
+    ///
+    /// Exists so the server's own remedy ("Raise the iteration budget") names
+    /// an action this client can actually perform — see `Store::max_iterations`.
+    Iterations(Option<String>),
     /// `/redraw` — force a full-screen repaint (HDR-2; Ctrl+L twin).
+    /// `/stance [line|figure|off]` — the Cognitive Monitor's conduct read
+    /// for the current turn (effort, action, attention, rigor), as one
+    /// line or as the figure. Bare cycles; session-scoped.
+    Stance(Option<String>),
     /// Recovers from external screen clears the damage tracker cannot see.
     Redraw,
     Quit,
@@ -164,6 +187,7 @@ pub fn parse(text: &str) -> Option<Command> {
         "/pause" => Command::Pause,
         "/resume" | "/continue" => Command::Resume,
         "/cancel" | "/stop" => Command::Cancel,
+        "/conclude" | "/wrapup" => Command::Conclude(rest),
         "/steer" => Command::Steer(rest),
         // The whole rest is the prompt TEXT (no subcommands on purpose: a
         // queued prompt legitimately starts with words like "clear").
@@ -171,7 +195,12 @@ pub fn parse(text: &str) -> Option<Command> {
         "/queue" => Command::Queue(if rest.is_empty() { None } else { Some(rest) }),
         "/goal" => Command::Goal(if rest.is_empty() { None } else { Some(rest) }),
         "/gpu" => Command::Gpu,
+        "/resources" | "/host" => Command::Resources,
         "/context" | "/ctx" => Command::Context(if rest.is_empty() { None } else { Some(rest) }),
+        "/iterations" | "/iters" => {
+            Command::Iterations(if rest.is_empty() { None } else { Some(rest) })
+        }
+        "/stance" | "/conduct" => Command::Stance(if rest.is_empty() { None } else { Some(rest) }),
         "/redraw" => Command::Redraw,
         "/entities" | "/entity" => {
             Command::Entities(if rest.is_empty() { None } else { Some(rest) })
@@ -246,6 +275,10 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
     ("pause", "pause the run durably"),
     ("resume", "resume a paused run"),
     ("cancel", "cancel the active run"),
+    (
+        "conclude",
+        "ask the agent to wrap up now and answer with what it has · optional note",
+    ),
     ("steer", "steer the active run"),
     (
         "queue",
@@ -257,8 +290,16 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
     ),
     ("gpu", "toggle the gateway-host GPU meter"),
     (
+        "resources",
+        "gateway-host memory, resident models + session caches (/host too)",
+    ),
+    (
         "context",
         "declare the model context window (drives ctx N/M %) · /context off clears",
+    ),
+    (
+        "iterations",
+        "iteration budget asked for on new runs · /iterations off takes the server's",
     ),
     ("redraw", "repaint the whole screen (Ctrl+L)"),
     ("entities", "entity roster + identity cards"),
@@ -384,8 +425,20 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "toggle the gateway-host GPU meter (polls ~3s active / ~30s idle)",
     ),
     (
+        "/resources",
+        "gateway-host resources: memory, resident models (u unload · f force · k lock/unlock · e context estimate), session caches — fetched at open + r refresh, never polled; /host is an alias",
+    ),
+    (
         "/context [n|off]",
         "declare the model context window in tokens (262144 / 262k) — the footer shows ctx used/window (%); labeled \"declared\", warns ≥75%; off clears; persisted",
+    ),
+    (
+        "/iterations [n|off]",
+        "iteration budget REQUESTED for new runs (_limits.max_iterations) — bare reports what is in force and where it came from; off asks for nothing and takes the server's own; applies to the NEXT run, never mid-turn; persisted",
+    ),
+    (
+        "/stance [line|figure|off]",
+        "how this turn is going, from mechanical facts: EFF effort (think time + output vs this session's median) · ACT calls · RIG verify-shaped share of call names (ATT memories only on an entity visit). Floats bottom-right over the transcript; Ctrl+G folds/unfolds it",
     ),
     (
         "/redraw",
@@ -569,6 +622,15 @@ mod tests {
             Some(Command::Theme(Some("nord".into())))
         );
         assert_eq!(parse("/theme"), Some(Command::Theme(None)));
+        // `/animation` is DELIBERATELY not a command (2026-08-21): the
+        // ambient-pane variants stay in the tree behind
+        // `docs/backlog/proposed/ambient-run-animations.md`, but nothing
+        // ships a way to launch them. This assertion is the lock — if a
+        // parse arm comes back, it comes back on purpose.
+        assert_eq!(
+            parse("/animation"),
+            Some(Command::Unknown("/animation".into()))
+        );
         assert_eq!(
             parse("/steer focus on tests"),
             Some(Command::Steer("focus on tests".into()))
@@ -584,6 +646,18 @@ mod tests {
         );
         assert_eq!(parse("/nope"), Some(Command::Unknown("/nope".into())));
         assert_eq!(parse("/CANCEL"), Some(Command::Cancel));
+        // `/conclude` is a pure SURFACE for a gateway verb: the client sends
+        // the command and nothing else. What the model is told, and how the
+        // turn is then reported, are authored server-side so an operator gets
+        // the same behaviour from the TUI, AbstractObserver or a bridge.
+        assert_eq!(parse("/conclude"), Some(Command::Conclude(String::new())));
+        assert_eq!(
+            parse("/conclude just the table, skip the analysis"),
+            Some(Command::Conclude(
+                "just the table, skip the analysis".into()
+            ))
+        );
+        assert_eq!(parse("/wrapup"), Some(Command::Conclude(String::new())));
     }
 
     #[test]
@@ -613,6 +687,7 @@ mod tests {
             "queue",
             "goal",
             "gpu",
+            "resources",
             "context",
             "redraw",
             "workspace",
@@ -701,11 +776,43 @@ mod tests {
         assert_eq!(parse("/redraw"), Some(Command::Redraw));
     }
 
+    /// The server's budget-exhaustion remedy says "Raise the iteration
+    /// budget". Before this command the only route was `--max-iterations` at
+    /// LAUNCH — the operator had to quit and relaunch to follow advice they
+    /// were just given mid-session.
+    #[test]
+    fn iterations_parses_report_set_and_clear() {
+        assert_eq!(parse("/iterations"), Some(Command::Iterations(None)));
+        assert_eq!(
+            parse("/iterations 60"),
+            Some(Command::Iterations(Some("60".into())))
+        );
+        assert_eq!(
+            parse("/iters off"),
+            Some(Command::Iterations(Some("off".into())))
+        );
+        // The rest is kept raw so the dispatcher owns validation and can
+        // report the usage hint instead of the command vanishing as Unknown.
+        assert_eq!(
+            parse("/iterations lots"),
+            Some(Command::Iterations(Some("lots".into())))
+        );
+    }
+
     #[test]
     fn gpu_toggle_parses() {
         assert_eq!(parse("/gpu"), Some(Command::Gpu));
         // Trailing junk still toggles (no argument surface to protect).
         assert_eq!(parse("/gpu on"), Some(Command::Gpu));
+    }
+
+    #[test]
+    fn resources_parses_with_host_alias_and_models_stays_taken() {
+        assert_eq!(parse("/resources"), Some(Command::Resources));
+        assert_eq!(parse("/host"), Some(Command::Resources));
+        // `/models` was ALREADY an alias of /model — the resources verb
+        // must never steal it (muscle memory + the picker's own aliases).
+        assert_eq!(parse("/models"), Some(Command::Model));
     }
 
     #[test]

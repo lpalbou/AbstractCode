@@ -32,7 +32,7 @@
 - [Reference](docs/api.md): Every CLI option and env var, slash commands
   (including `@name`, `/entities`, `/task`, `/end`, `/queue`, `/goal`,
   `/permissions`, `/workspace`, `/attach`, `/export`, `/context`, `/gpu`,
-  `/redraw`), key bindings (incl. `Ctrl+L` repaint, `Ctrl+J` newline,
+  `/resources`, `/redraw`), key bindings (incl. `Ctrl+L` repaint, `Ctrl+J` newline,
   `Ctrl+O` drop-undo, `Alt+E` conversation focus, the composer's editor
   chords, `?` reference), the type-to-focus rule (typing, pasting or
   dropping a file returns focus to the composer and keeps the input),
@@ -60,7 +60,12 @@
   is the conclusion + presence wave: offloaded/failed-answer conclusion
   fixes, header facts + instrument footer, /context declared window,
   /gpu meter, Ctrl+L//redraw screen recovery — engine-owned full redraw
-  + redraw-on-focus-gained since abstracttui 0.2.6).
+  + redraw-on-focus-gained since abstracttui 0.2.6; 0.5.0 is the
+  attachments + host-resources wave: /attach with preview and drag &
+  drop, the quit gate, /conclude, bloc history replay + /history, the
+  reasoning dial, a launch animation, and /resources — gateway-host
+  memory, resident models + session caches with unload/lock/estimate
+  actions and a footer mem meter).
 - [Contributing](CONTRIBUTING.md): Build/test gates, the layering rules
   (signal ownership, pure protocol layer, replay-safe fold), which test to
   write for which change.

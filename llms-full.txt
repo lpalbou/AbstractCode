@@ -18,12 +18,14 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.4.0** (the conclusion + presence wave: the "run never
-finishes" P0 class fixed at its roots, header/footer instrumentation
-with a declared context meter, `/gpu`, and `Ctrl+L`/`/redraw` screen
-recovery — on top of 0.3.0's control-and-collaboration wave: prompt
-queue, goal loops, summoned-entity conversations, tiered tool
-approvals, workspace scope).
+Status: **0.5.0** (the attachments + host-resources wave: file
+attachments with preview and drag & drop, the quit gate with durable
+pause/cancel delivery, `/conclude`, bloc history replay + `/history`,
+the reasoning dial, a launch animation, and `/resources` — the gateway
+host's memory, resident models and session caches, with model
+unload/lock and context-estimate actions and a footer `mem` meter — on
+top of 0.4.0's conclusion + presence wave: declared context meter,
+`/gpu`, `Ctrl+L`/`/redraw` screen recovery).
 
 ## What it looks like
 
@@ -109,11 +111,28 @@ approvals, workspace scope).
 - **Honest telemetry**: the header names what "gateway defaults" actually
   resolves to (and the model that served the last call) plus the working
   directory, workspace mode, and capability counts; the footer is a
-  persistent instrument row (context meter, session tokens, `/gpu` meter,
-  skills/MCP counts — the key legend lives behind `?`); the activity
+  persistent instrument row (context meter, session tokens, `/gpu` and
+  host `mem` meters, skills/MCP counts — the key legend lives behind
+  `?`); the activity
   strip shows live context size (`ctx`), cache hits, and the in-flight
-  model call with its last-call tok/s; `/cache` reports the prompt-cache
-  posture for the effective route (auto = on when available).
+  model call with its last-call tok/s; `/cache` is the detail panel:
+  prompt-cache posture for the effective route (auto = on when available)
+  plus exact metrics for the latest call, this run, and the whole session —
+  hits, the derived new-vs-carried split, re-send amplification, peak
+  context, resets, and model time.
+- **Host resources**: `/resources` (alias `/host`) opens the gateway
+  host's live picture — RAM and device memory with meter bars, GPU
+  utilization where the host supports it, the gateway's own RSS, every
+  resident model (modality, tri-state residency — an unreported
+  residency reads `unknown`, size, context length with `*` marking a
+  calibrated value, 🔒 marking a residency lock), session prompt
+  caches, and totals — plus admin actions on the selected model:
+  unload (two-step confirm; force offered when a lock refuses),
+  lock/unlock, and a context estimate. Fetched at open and on `r`,
+  never polled; unknown numbers are omitted, never invented. The
+  footer gains a `mem NN%` segment from the same fetch. Requires a
+  gateway that declares the `host_state` contract — older gateways get
+  an honest "not supported".
 - **A context meter you declare**: `/context 262k` declares the model's
   window (persisted; `--max-tokens` for one session) and the footer
   reads `ctx 41k/262k tk (15%, declared)` — warn at 75%, error at 90%.
@@ -203,6 +222,8 @@ runs never stall.
 --provider <P> --model <M>        route override (default: gateway defaults)
 --workspace <PATH>                requested workspace root (see note)
 --theme <ID>                      start theme (ABSTRACTTUI_THEME works too)
+--animation <on|off>              launch animation (default: on) — SAVED, so
+                                  `--animation off` once disables it for good
 --caps                            print the terminal capability report
 ```
 
@@ -396,7 +417,11 @@ gateway until you answer.
 
 6. **Instruments.** Declare your model's context window once —
    `/context 262k` — and the footer meter becomes `ctx used/window (%)`
-   (warns at 75%). `/gpu` toggles a gateway-host GPU meter. If your
+   (warns at 75%). `/gpu` toggles a gateway-host GPU meter, and
+   `/resources` (alias `/host`) opens the gateway host's memory +
+   resident-model panel — with model unload/lock and a context
+   estimate — and feeds a footer `mem NN%` segment (on gateways that
+   declare the `host_state` contract). If your
    terminal ever gets externally cleared (Cmd+K), `Ctrl+L` (or
    `/redraw`) repaints everything, and the screen also heals itself at
    the next focus round-trip (click away and back).
@@ -481,6 +506,13 @@ Three ways to hand the agent a file:
   already staged it opens the pending manager instead.
 - **`exec --attach <path>`** — headless parity (repeatable; any upload
   failure exits 1 before the run starts).
+
+The chips row is interactive: **click a file's name** to preview it,
+**click the `×`** to unstage it. Preview opens the file itself — a
+scrolling, line-numbered view for text documents, the picture for PNG
+and JPEG. **`/attach preview <path>`** works on any file, staged or not;
+inside the pending manager, `p` (or `Enter`) previews the chip under the
+cursor and `x` removes it.
 
 Chips upload at SEND time and ride the run as `context.attachments`.
 Text-like files inline straight into the model's context (up to 120 KB
@@ -701,7 +733,8 @@ abstractcode-tui --help | --version
 | `--no-workspace` | Send no workspace root | — |
 | `--workspace-mode <M>` | Workspace access mode | server default |
 | `--theme <ID>` | Start theme | `ABSTRACTTUI_THEME`, else saved pick |
-| `--max-iterations <N>` | Agent iteration budget | 50 |
+| `--animation <on\|off>` | Launch animation; **persisted** to `prefs.json` (`animation`). Also skipped when stdout is not a tty, `NO_COLOR`/`TERM=dumb` is set, or `ABSTRACTTUI_NO_SPLASH` is set | on |
+| `--max-iterations <N>` | Ask the server for a specific iteration budget | none — **this client sets no budget**. Absent the flag the server's own default applies (the same one every client gets); the hard ceiling is the runtime's, enforced at run start |
 | `--replay-turns <N>` | Prior turns replayed in full detail at boot (0 disables) | 20 |
 | `--permissions <level>` | tool permissions for the invocation: `read` \| `write` \| `all` | prefs level |
 | `--require-approval <t>` | gate these tools regardless of level (comma list, repeatable); exec denies them | — |
@@ -717,6 +750,7 @@ abstractcode-tui --help | --version
 | `ABSTRACTCODE_GATEWAY_CONNECTION_FILE` | Login store path (default `~/.abstractcode/gateway.json`) |
 | `ABSTRACTCODE_TUI_PREFS_FILE` | Preferences path (default `~/.abstractcode-tui/prefs.json`) |
 | `ABSTRACTTUI_THEME` | Start theme id |
+| `ABSTRACTTUI_NO_SPLASH` | Set to anything but `0` to skip the launch animation for one run (the persisted switch is `--animation off`) |
 
 ### Exit codes (`exec`)
 
@@ -737,21 +771,23 @@ abstractcode-tui --help | --version
 | `/workspace` | Inspect + edit the filesystem scope tools may touch: root (from `--workspace`/cwd), access mode, allowed paths. Mode + paths persist and ride every run |
 | `/skills` | Attach gateway skills to your runs (`Space` toggles; sent as `input_data.skills`) |
 | `/mcp` | The gateway's MCP server registry (read-only; their tools appear in `/tools` once declared) |
-| `/cache` | Prompt-cache + context status for the effective route |
+| `/cache` | Prompt-cache + context metrics: route, latest call, run, session |
+| `/resources` | Gateway-host resources (`/host` is an alias): memory (RAM/device meter bars, GPU utilization when the host supports it, the gateway's process RSS, host name), resident models (modality label, tri-state residency — an unreported residency reads `unknown`, never "no" — size, `ctx N` with `*` = calibrated, 🔒 = residency lock, `default`), session prompt caches, totals. Admin actions on the selected model: `u` unload (two-step confirm; a 409 `model_locked` refusal offers `f` force), `k` lock/unlock, `e` context estimate, `r` refresh — keys under "Modal keys" below. Data is fetched at open, on `r`, and after a mutation — never polled; a failed refresh keeps the last snapshot marked STALE. Requires the gateway's declared `host_state` contract (`/discovery/capabilities`) — older gateways get an honest "not supported". Feeds the footer's `mem NN%` segment |
 | `/history [n\|all]` | Stream the PREVIOUS bloc of this session's turns from the gateway ledgers, prepended in full detail. Boot replays only the last bloc (`--replay-turns` sizes it, default 5); a stub line names how many earlier turns exist. **Scrolling to the top of the transcript auto-loads the previous bloc** — the stub becomes a live progress line and holding at the top cascades bloc-by-bloc until the session is fully loaded (Esc returns to the tail and stops the cascade). Failures name their cause — never a silent hole |
 | `/status` | The status card: workflow, route, workspace, session, connection, client phase + run id + last outcome, and a LIVE gateway run-status probe — the one place client view vs server truth is inspectable (wrapper roots legitimately stay `waiting` after your turn concluded) |
 | `/sessions` | Pick a recent session to continue (named by first prompt) |
 | `/session [id]` | Show or switch the session id (switching probes for a live run to reattach) |
-| `/details [full\|fold]` | Toggle the clean answers view (`Ctrl+D`): reasoning folds away and tool cards drop their DETAIL (argument line + result body) — the tool CALL stays as a one-line header, so the trace is never hidden; active, failed, and denied tools plus errors always keep their bodies. Thinking cards render as one-line gists by default — `/details full` expands them (content plus the labeled reasoning channel), `/details fold` returns to gists |
+| `/details [full\|fold]` | Toggle transcript verbosity (`Ctrl+D`): `fold` (the default) renders each tool call as ONE line — glyph, name, status word (`ok`/`failed`/`running`/…), faint args hint — and thinking as a capped gist; `full` expands the whole card UNCUT (arguments in full on their own rows, the `│`-guttered result body entire, thinking content plus the labeled reasoning channel — nothing shortened). Thinking and every called tool stay visible in BOTH states — the toggle gates detail, never existence; errors always keep their `↳` bodies |
 | `/gating [auto\|wait]` | Approval gating for gating-capable workflows (the multi-agent coder): `auto` runs unattended (skips the workflow's human-approval pauses), `wait` re-gates (the default). Selecting the coder also opens a gated/unattended choice. Rides `input_data.gating_mode`; tool approval is a SEPARATE axis (`/permissions`) |
 | `/reasoning [level]` | Reasoning effort for the current route (`none\|minimal\|low\|medium\|high\|xhigh\|auto`; `default` clears). Bare `/reasoning` opens the dial — also stage 3 of `/model`: pick provider, then model, then effort. Non-reasoning models show a locked `none` (set-anyway override available while capability provenance is unserved); the choice is pair-coupled — changing provider or model resets it. Rides the run as `_runtime.thinking` (absent = gateway default) |
 | `/export [md\|jsonl] [--details] [path]` | Export the agent transcript to a file: `md` (default) = archival markdown; `jsonl` = SFT training lines. `--details` adds reasoning + full tool cards. Bare `/export` auto-names in the cwd; never overwrites — see "Transcript export" below |
-| `/attach [path\|clear]` | Stage a file for your NEXT message (chips above the composer; uploaded at send as `context.attachments`; **session uploads are permanent** server-side). Accepts `~`, quotes, escaped spaces, `file://`, relative paths. Bare `/attach` opens the file browser (nothing staged) or the pending manager (chips staged); `clear` discards. Dropping a file onto the terminal attaches directly — `Ctrl+O` undoes (chips out, path text back). Agent-lane only (v1) — see "Attachments" below |
+| `/attach [path\|preview\|clear]` | Stage a file for your NEXT message (chips above the composer; uploaded at send as `context.attachments`; **session uploads are permanent** server-side). Accepts `~`, quotes, escaped spaces, `file://`, relative paths. Bare `/attach` opens the file browser (nothing staged) or the pending manager (chips staged); `preview [n\|path]` opens the file itself (text or PNG/JPEG — staged or not); `clear` discards. Dropping a file onto the terminal attaches directly — `Ctrl+O` undoes (chips out, path text back). Agent-lane only (v1) — see "Attachments" below |
 | `/auto` | Removed (the session blanket had latent holes) — opens the `/permissions` report teaching the replacement |
 | `/pause` | Pause the run tree durably on the gateway (stops at the next step boundary; survives quitting the client) |
 | `/resume` | Resume a paused run tree |
 | `/cancel` | Cancel the active run |
-| `/steer <text>` | Explicit steering (plain Enter during a run steers too; buffered until the run's first reasoning cycle when it has not started cycling yet) |
+| `/conclude [note]` | Ask the agent to **wrap up now** and answer from what it already has — the missing verb between `/pause` (freeze) and `/cancel` (throw away). The loop stops reasoning at its next boundary and runs its tool-free conclusion, so the turn ends with a real answer plus what is left to do. A `note` is quoted to the model verbatim. Server-side verb (`POST /commands {type:"conclude"}`): the same request from AbstractObserver, the console or a chat bridge behaves identically, and the turn reports `stop_reason.code = "operator_conclude"` — not a failure, not a spent budget |
+| `/steer <text>` | Explicit steering (plain Enter during a run steers too; buffered until the run's first reasoning cycle when it has not started cycling yet). A send that hits a transport failure is retried once with the same command id — the gateway dedups on it, so the retry is exactly-once — and if it still fails your words are kept: they ride the error card and return to the composer when it is empty |
 | `/queue [text]` | Queue a prompt (FIFO): auto-runs after the current run **succeeds**; halts on failure/cancel (explicit resume). Persists per session and restores **paused** — a restore never auto-starts. Bare `/queue` opens the manager (keys under "Modal keys" below). Agent-lane only: under entity focus the visit's held-draft lane is the queue |
 | `/goal [text\|stop]` | Start a goal run on a goal workflow (`abstractcode.goal.v1`): loops until verified done or `max_cycles` (prefs `goal_max_cycles`, default 8). Bare `/goal` shows status; `/goal stop` cancels durably. Ships dark until a goal bundle is published on the gateway |
 | `/context [n\|off]` | Declare the model's context window in tokens (`262144`, `262k`, `1m`) — the footer meter becomes `ctx used/window tk (%, declared)`, warn ≥75% / error ≥90%, and the declaration rides runs as `_limits.max_tokens`. Bare `/context` reports; `off` clears. Persisted (`context_window`); `--max-tokens` declares for one session. Source-labeled "declared" — never a client capability table |
@@ -797,8 +833,8 @@ never changes the output. v1 exports the **agent-lane** transcript
   provider-hostile — and counted in the notice, never written to the
   file. Default lines carry **only** `messages` (strict validators
   accept them as-is); `--details` adds a `details` side field (that
-  turn's tools/cycles/steers as preview-bounded strings — deliberately
-  not fabricated `tool_calls`: the client holds display previews, not
+  turn's tools/cycles/steers as full strings — deliberately
+  not fabricated `tool_calls`: the client holds a humane rendering, not
   wire-faithful call structures; full traces live in the gateway run
   ledgers).
 
@@ -819,6 +855,12 @@ server-side (120 KB/item), PDFs extract on `open_attachment`, images
 need a vision-capable route, other binaries are listable-not-readable
 (the attach notice says which).
 
+- **The chips row is interactive**: a staged file's NAME opens its
+  preview, and the `×` beside it unstages the file. Removing a chip
+  before the send is a true no-op (nothing has been uploaded yet).
+  Names are capped at 20 characters plus an ellipsis so one long
+  filename cannot own the row; the preview header and the manager spell
+  the full name out.
 - **Custody**: an upload or start failure blocks the send and KEEPS the
   chips (error card names the server detail); refs minted before the
   failure are cached, so the retry never duplicates artifacts. Chips
@@ -838,6 +880,23 @@ need a vision-capable route, other binaries are listable-not-readable
   they ride a run (and again on session restore) — you see exactly
   what was attached. Reminder: the image reaches the MODEL only on a
   vision-capable route.
+- **Preview** (click the chip, `/attach preview [n|path]`, or `p`/`Enter`
+  in the manager) opens the file's real bytes BEFORE it rides anything: a
+  scrolling, line-numbered document for text-like files, or the picture
+  itself for PNG/JPEG (same mosaic ladder as the transcript). Magic
+  bytes decide the kind, never the extension. It is a look, not an
+  attach — `/attach preview <path>` works on a file that is not staged
+  and stages nothing. Bounds are stated, never silent: text previews
+  the first 512 KB of a larger file and the header says so; invalid
+  UTF-8 is labeled; tabs expand to 4 columns; long lines WRAP (the
+  wrapped tail carries no line number, so the numbers stay a true index
+  into the file) and re-wrap when the terminal is resized. ANSI escape
+  sequences are removed so colored logs read, and the header says they
+  were; BOM'd UTF-16 is transcoded and labeled. Known limit: BOM-less
+  UTF-16 is indistinguishable from binary and refuses as such. The engine draws PNG and JPEG only — GIF/WebP/BMP/TIFF
+  and PDFs say so by name and remind you the attachment itself still
+  uploads and works. Reading and decoding run on their own thread, so a
+  large photo shows `reading…` rather than freezing the interface.
 - **Boundaries**: session uploads are PERMANENT server-side (the
   session's attachment index has no delete surface). `/new` and session
   switches discard pending chips with a notice. Chips never ride
@@ -905,36 +964,98 @@ recovers it.
 | ask (agent question) | `Enter` send the answer · `Esc` keeps the run waiting |
 | `/tools` | `Space` toggle · `a` all on · `n` all off · `p` cycle the per-tool pin (none → auto → ask → none; a pin beats the tier both ways) · `t` cycle the approval tier (read → write → all, persisted) · `Enter`/`Esc` close |
 | `/queue` | `↑↓` select · `x` remove · `u`/`d` move up/down · `c` clear all · `r` resume a paused queue · `e` pop the prompt into the composer for editing · `Enter`/`Esc` close |
-| `/attach` manager | `↑↓` select · `x` remove · `c` clear · `b` browse (file picker) · `Enter`/`Esc` close |
+| chips row | click a staged file's name to preview it · click its `×` to unstage it |
+| `/attach` manager | `↑↓` select · `Enter`/`p` preview · `x` remove · `c` clear · `b` browse (file picker) · `Esc` close |
+| attachment preview | `↑↓` scroll · `PgUp`/`PgDn` page · `Home`/`End` ends · `Enter`/`Esc` close |
 | `/attach` picker | type to filter · `↑↓` move · `Enter` descend into a folder / attach the file (marked set when non-empty) · `Space` mark files for multi-attach · `Backspace`/`←` parent folder (filter empty) · `Esc` close |
+| `/resources` | `↑↓` move (model, cache and totals rows are all reachable; admin keys act on the selected MODEL row) · `u` unload → `y`/`Enter` confirms · `f` force-unload (confirm labeled FORCED) · `n`/`Esc` cancel an armed confirm · `k` lock/unlock residency · `e` context estimate (inline result) · `r` refresh (re-probes capabilities while the contract is unconfirmed) · `Enter`/`Esc` close |
 | `/entities` | `↑↓` browse (the identity card follows) · `Enter` talk (`@name`) · `t` leave a task (title prompt) · `e` end that entity's open visit · `Ctrl+D` show per-section provenance · `Esc` close |
 | `/workspace` | `↑↓` move · `Space` select an access mode / remove an allowed path · type a path + `Enter` adds it (switches to `workspace_or_allowed` when needed) · `Esc` close |
 
 ## Transcript vocabulary
 
-| Glyph | Item |
+The transcript reads as TURNS: a `══ you ══…` rule opens each one, a
+`══ assistant ══…` rule closes it with the answer (markdown), and the
+reasoning cycles between them are delimited by `── cycle N · 41s ·
+29k↑ 512↓ tk · 92% cached ──…` rules carrying that model call's
+duration, token cost, and — when the provider reports it — how much of
+the prompt was served from cache instead of recomputed. The model's own
+thinking leads every cycle; the cycle's tool calls stack directly
+beneath it, one line each.
+
+| Element | Item |
 | --- | --- |
-| `❯ you` | Your task |
-| `∴ cycle N` | One reasoning cycle's model output (dim) |
-| `? name · awaiting approval` | Tool paused on approval |
-| `» name · running` | Tool executing on the gateway |
-| `✓` / `✗` / `⊘` | Tool succeeded / failed / denied |
-| `✦ assistant` | Answer (markdown; `(update)` for mid-run messages) |
+| `══ you ══…` | Your task (turn opener) |
+| `── cycle N · cost ──…` | One reasoning cycle: the thinking, then its tools |
+| `✓ name · ok  args…` | Tool call: glyph, name, status word, faint args hint |
+| `? · awaiting approval` / `» · running` | Tool paused / executing |
+| `✗ · failed` / `⊘ · denied` / `◌ · interrupted` | Failed / denied / run ended first |
+| `↳ …` | A tool error, attached under its row (error ink) |
+| `│ …` | Tool result output (full mode gutter) |
+| `══ assistant ══…` | The answer (markdown; `✦ assistant (update)` mid-run) |
 | `↪ steer` | Guidance you sent mid-run |
 | `▦` | Generated image (unicode mosaic) |
 | `·` | Informational notice |
 
-Previews are bounded; anything cut is labeled (`… (+N more lines …)` or
-`[#TRUNCATION …]`). Toggle `/details full` to expand in place, or
-`/export` to write the full transcript to a file. (Asks TO you are never
-truncated — a question you cannot fully read is a question you cannot
-answer.)
+Three voices, three markings: bare indented prose is the model
+thinking, `│` is tool output, `↳` is an error. `/details` (or `Ctrl+D`)
+toggles verbosity — folded shows one-line tool calls with status tags
+and thinking gists; full shows args, result bodies, and the labeled
+reasoning channel. Thinking and every called tool stay visible in BOTH
+states.
+
+**`/details full` truncates nothing** (2026-08-20). *Every* body renders
+whole: your own prompts and steers, tool arguments, result bodies, tool
+errors, thinking and its reasoning channel, error and info notices,
+memory-probe digests, and an image's fetch error. No row cap, no
+`[#TRUNCATION …]`, no elision of any kind. The client keeps the full
+text the ledger reported — nothing is shortened on the way in either —
+so the full view has everything to show; use the scrollback (or
+`/export`, which writes the uncut arguments in its detailed mode) to
+read a long one. A failed tool shows its error AND its output: the
+error says that it failed, the body says why.
+
+The FOLDED view is a summary by definition: there, bodies are bounded
+and anything cut is labeled (`… (+N more lines)`, `… (+N words of
+reasoning · /details)`) — result bodies elide middle-out so their final
+lines (the `wc` total, the test verdict) survive, and a tool row stays
+one line. Asks TO you are never truncated in either mode, and neither
+is the approval modal's `f` JSON view — a question you cannot fully
+read is a question you cannot answer.
 
 Entity conversations reuse the same vocabulary. After each entity turn a
 `·` line counts what the probe reported (memories in context, diary
 entries, tools ran); the full memory digests sit behind the details toggle
 (`Ctrl+D`). Tool cards in entity transcripts come from the run's ledger
 (`tool_details`), never from reply prose.
+
+## What this client decides, and what it only shows
+
+AbstractCode's TUI is a **thin host**. The gateway is the single place run
+semantics live, because the same session is meant to be watched from
+AbstractObserver, a web client, or a chat bridge, and all of them must show the
+same answer to "did it finish, and what do I do about it?" A host that derives
+that answer locally has to be kept in sync with every other host by hand — and
+this one already got it wrong once, reading `outcome: "iteration_budget"` alone
+while the additive `conclusion_forced` sat beside it, telling operators to
+raise a budget that still had 38 of its 50 iterations unspent.
+
+So the loop's terminal node authors the verdict and this client renders it:
+
+| Field on `result.output` | Who writes it | What the host does |
+| --- | --- | --- |
+| `stop_reason.code` | agent loop | `final_answer`, `iteration_budget`, `stuck_repeat`, `stuck_oscillation` — carried, never interpreted for wording |
+| `stop_reason.finished` | agent loop | drives the ⚠/✓ glyph and the `exec` exit code |
+| `stop_reason.label` | agent loop | printed verbatim in the fixed chrome (`last run: …`) and as the headless one-liner |
+| `stop_reason.headline` + `.remedy` | agent loop | printed verbatim as the conclusion card |
+| `stop_reason.budget_exhausted` | agent loop | whether the iterations were actually SPENT — false for a stuck-loop stop; carried so no host re-derives the cause |
+| `notices[].{code,severity,text}` | agent loop | `text` printed verbatim; `severity` picks the ink (`error` renders as an error line, anything else as info); `code` is the stable key |
+
+**Legacy engines** (before this contract) send no `stop_reason`. The host then
+reports the bare fact — "the agent STOPPED, it did not finish" — and says
+explicitly that the engine reported no reason. It does not guess one: an
+exhausted budget and a stuck-loop stop both arrive as
+`outcome: "iteration_budget"`, and inventing the difference is the bug above.
 
 ## Status surfaces
 
@@ -964,7 +1085,10 @@ entries, tools ran); the full memory digests sit behind the details toggle
   warn ink ≥75%, error ≥90%; no declaration = the honest absolute) ·
   session tokens (`N↑ N↓ tk session` when the provider reports the
   split; the honest `N tk session` total when it doesn't) · `gpu N%`
-  (when the `/gpu` meter is on) · `skills N` · `mcp N` ·
+  (when the `/gpu` meter is on) · `mem N%` (host RAM from the last
+  `/resources` fetch — graded on the rounded percent, warn ≥75% / error
+  ≥90%; `mem N%*` marks a stale snapshot after a failed refresh; absent
+  when no percent is known) · `skills N` · `mcp N` ·
   `? keys + commands`, plus theme + gateway host (+ error detail when
   the connection drops). The key legend lives behind `?` (bare `?` +
   Enter) and `/help`; the phase/focus teachings live in the composer
@@ -978,11 +1102,33 @@ entries, tools ran); the full memory digests sit behind the details toggle
 
 The gateway enables prompt caching automatically per run when the provider
 supports it. Interactive sessions take the server default; there is nothing to
-configure. `/cache` reports: the effective route, whether that provider/model
-supports prompt caching (and in which mode), cache hits observed this run, and
-the context size of the latest model call. Local providers (e.g. LM Studio)
-often cache without reporting hit counts — the panel says so rather than
-inventing zeros.
+configure. `/cache` is a scrollable panel (`↑↓`/`PgUp`/`PgDn`) reporting three
+scopes:
+
+- **route** — the requested route, the model that actually served the run,
+  whether that provider/model supports prompt caching (and in which mode), the
+  pair the capability probe asked about, and how many calls carried a
+  provider-reported hit count.
+- **latest model call** — context sent, its new-vs-carried split with
+  percentages, cache hits, output tokens, call time and output tok/s.
+- **this run** and **session (every run in this conversation)** — model and
+  tool calls, token totals, re-send amplification (input sent per output
+  token), cache hits against reported input, cumulative new-vs-carried,
+  peak context with a count of context resets, and model time with the
+  per-call average.
+
+Token counts are exact (`29,200`), not the chrome's rounded `29k`: the panel is
+the detail view opened when the rounded number was not enough.
+
+Two kinds of number live there and are never mixed silently. Cache hits are
+provider-reported; local providers (e.g. LM Studio) often cache without
+reporting hit counts, and the panel says "never reported by this provider"
+rather than inventing a zero that would read as a cold cache — once any call
+reports a count, a later zero is labeled as a real miss. The new-vs-carried
+split is DERIVED client-side from consecutive context sizes (the carried part
+is the prefix a cache can serve), and is labeled "derived" everywhere it
+appears. A context that shrank is counted as a reset, and credits nothing as
+carried — the cached prefix is gone.
 
 ### `--no-prompt-cache`
 
@@ -1105,9 +1251,14 @@ session totals across runs.
 **Is prompt caching on?**
 The gateway enables prompt caching automatically for every run when the
 provider supports it — nothing to configure client-side. `/cache` shows the
-posture for the effective route (supported + mode), observed cache hits, and
-the latest context size. Local providers (LM Studio) often cache without
-reporting hit counts; the panel says so instead of inventing zeros.
+posture for the effective route (supported + mode) and then the numbers, at
+three scopes: the latest model call, this run, and the whole session. Per
+scope: cache hits against reported input, the derived new-vs-carried split
+(how much of what you send is a reusable prefix), re-send amplification, peak
+context and context resets, and model time. The panel scrolls (`↑↓`/`PgUp`/
+`PgDn`). Local providers (LM Studio) often cache without reporting hit counts;
+the panel says "never reported by this provider" instead of inventing a zero —
+and the derived split still tells you what a cache could save.
 
 **Can I turn prompt caching off to compare?**
 `exec --no-prompt-cache` opts a headless run out, which is enough to A/B one
@@ -1647,6 +1798,323 @@ All notable changes to this project are documented here. The format follows
 [SemVer](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.5.0] - 2026-08-27
+
+### Added (`/resources` — gateway-host memory, models + caches, 2026-08-27)
+
+- **`/resources` (alias `/host`) — the gateway host's memory, resident
+  models and session prompt caches, with admin actions.** The panel reads
+  `GET /host/state` and renders: a MEMORY section (RAM used/total with a
+  meter bar from the served percent, the compute device and backend's
+  allocation, GPU utilization where the host supports it, the gateway
+  process's own RSS, the host name — each row only when reported), a
+  MODELS section (one selectable row per model: modality label text such
+  as `[LLM]`, tri-state residency — `resident yes` / `no` / `unknown`,
+  a null never folded into "no" — state, humanized size (+ VRAM when it
+  differs), context length with `*` marking a calibrated value, a 🔒
+  residency-lock marker, `default`), SESSION CACHES, and TOTALS. Absent
+  numbers are omitted, never zero-filled; junk values read as unknown,
+  never as a clamped truth; degraded collector lanes render first with
+  their reasons.
+- **Admin actions on the selected model row**: `u` unloads through a
+  two-step in-modal confirm (`y`/`Enter` fires, `n`/`Esc` backs out);
+  `f` force-unloads (confirm labeled FORCED). A locked model's HTTP 409
+  `model_locked` refusal teaches the force path; any other refusal
+  reports its own text. `k` locks/unlocks residency, `e` asks the
+  gateway for a context estimate (inline result line under the models
+  section), `r` refreshes. `↑↓` walk every row — caches and totals
+  included, so the tail is always reachable in a long panel.
+- **Fetched at the gesture, never polled**: `/host/state` is read at
+  open, on `r`, and after a successful mutation — no background polling.
+  Host-state reads and mutations run on their own one-shot threads, so a
+  slow host answer never stalls run control. A failed refresh keeps the
+  last snapshot and MARKS it: the title reads `STALE — refresh failed ·
+  as of HH:MM:SS` instead of passing old numbers off as fresh.
+- **Contract-gated honestly**: boot fetches `GET
+  /discovery/capabilities` once, and `/resources` opens only into what
+  the gateway declared — a still-unanswered probe shows "probing gateway
+  capabilities…" and re-probes (the modal heals live when the answer
+  lands); a gateway that declares no `host_state` contract gets "not
+  supported by this gateway" and no host-state fetch ever fires. An
+  empty caches section says "none" only under a declared session-caches
+  contract — otherwise "not reported by this gateway".
+- **Footer `mem` meter**: a `mem NN%` segment beside the GPU meter
+  carries the host's served RAM percent from the last `/resources`
+  fetch — graded on the rounded percent like the context meter (warn
+  ≥ 75%, error ≥ 90%), starred (`mem 62%*`) when the snapshot is stale,
+  absent when no percent is known.
+
+### Added (`/conclude`, 2026-08-21)
+
+- **`/conclude [note]` — end a long turn well.** Between `/pause` (freeze) and
+  `/cancel` (throw the work away) there was no way to say "you have enough,
+  land it": an operator watching an agent that had already gathered what it
+  needed had to kill the turn and lose the answer. `/conclude` asks the loop
+  to stop reasoning at its next boundary and run the tool-free conclusion it
+  already owns — best answer from the evidence, plus an honest list of what
+  remains. An optional note ("just the table, skip the analysis") is quoted to
+  the model verbatim.
+  **It is a gateway verb, not a client feature**: `POST /commands
+  {type:"conclude"}` rides the durable steer sidecar (exactly-once, watermarked,
+  acked in the ledger), so the same request from AbstractObserver, the console
+  or a chat bridge does the same thing. The turn ends with
+  `stop_reason.code = "operator_conclude"` and `budget_exhausted: false` — it
+  is neither a failure nor a truncation the agent caused.
+
+### Removed (client iteration budget, 2026-08-21)
+
+- **This client no longer sets an iteration budget.** It injected 50 on every
+  run that did not ask for one, while the framework's ruled default is 20 —
+  so the same prompt got 50 here and 20 from every other client, and the
+  `stop_reason` advice talked about a ceiling only this client had set.
+  `--max-iterations` remains as an explicit operator *request* the runtime
+  clamps; absent it, the server's default applies to every client alike.
+
+### Changed (server-truth preference, 2026-08-21)
+
+- **The gateway's default workflow is obeyed when it sets one.**
+  `bundles[].is_default` + `default_entrypoint` now decide which agent runs
+  absent an operator preference; the client's benchmark-derived pick survives
+  only as a labelled fallback for gateways that mark no default. An operator
+  preference still overrides both — the default is set by the gateway and may
+  be overridden by a client on a NEW turn, never mid-turn.
+- **A flow's own declaration of an ask-user wait outranks its wording.**
+  Headless `exec` reads `details.kind` / `details.mode` first, so an
+  unattended driver on any client answers the same wait the same way; the
+  English-matching conclude-gate classifier remains only as a `#FALLBACK`
+  that names itself in the log until flows declare their ask kind.
+
+### Fixed (thin-client audit, 2026-08-21)
+
+- **Exit 125 no longer claims a cause it cannot know.** It was
+  `EXIT_ITERATION_BUDGET`; a stuck-loop stop — which the server marks
+  `budget_exhausted: false` — exited with it too, so harnesses reading the
+  code were told to raise a budget that was never spent. Same value, honest
+  name (`EXIT_STOPPED_SHORT` = the turn did not finish, for any reason the
+  loop reports), and `stop_reason.budget_exhausted` is now carried so the WHY
+  is available without re-deriving it.
+- **A turn that stopped short no longer drains the prompt queue.** It was
+  reported as `RunOutcome::Success`, so the next queued prompt stacked on top
+  of unfinished work while the chrome, the card and the exit code all called
+  the turn incomplete — contradicting `/help` ("halts on failure/cancel").
+  The queue now holds and says why.
+- **Server notice severity is respected.** `notices[]` arrives as
+  `{code, severity, text}`; only `text` was kept, so a `warn` and an `error`
+  rendered identically here and differently in the next client to show the
+  same run.
+
+### Changed (thin-client contract, 2026-08-21)
+
+- **The run's verdict is now written by the loop, not by this client.** The
+  terminal node ships `output.stop_reason` (`code`, `finished`, `label`,
+  `headline`, `remedy`) and `output.notices[]`; the TUI prints them verbatim —
+  `label` in the fixed chrome and the headless one-liner, `headline` +
+  `remedy` as the conclusion card, `finished` for the glyph and the exit code.
+  Deriving that verdict here would have obliged AbstractObserver, the web
+  client and any chat bridge to re-derive it identically, and this client's own
+  derivation was wrong for two days. Engines predating the contract get the
+  bare fact and **no invented remedy**. Contract: `docs/api.md`; seam pinned by
+  `tests/fixtures/stop_reason_stuck_live.json`, a verbatim capture from a live
+  run.
+
+### Fixed (stuck-loop stops, 2026-08-21)
+
+- **A stop caused by a stuck loop no longer tells you to raise the iteration
+  budget.** `outcome: "iteration_budget"` is the canonical turn-end enum for
+  the whole budget CLASS, and the loop reuses it when it kills a turn for
+  repeating one tool batch — naming the real cause in the additive
+  `conclusion_forced` key. This client read `outcome` alone, so a run that
+  stopped at **12 of 50** iterations was rendered as an exhausted budget with
+  "Raise `--max-iterations`" as the remedy (live: session `acode-bc425138014f`
+  — the model had invented three attachment ids and called `open_attachment`
+  with them until the loop's stuck detector fired). `RunVerdict` now carries
+  `conclusion_forced`, the card says *"stopped early … the agent repeated the
+  same tool batch N times … raising --max-iterations will not help"*, and the
+  fixed chrome line reads `stopped: repeated tool calls after N iterations`. A
+  genuine budget exhaustion keeps its original wording and remedy.
+  Full investigation, the two upstream defects it uncovered, and the live
+  A/B evidence: `docs/reports/2026-08-21-phantom-attachment-index-and-stuck-streak-policy.md`.
+
+
+### Parked (ambient run animations, 2026-08-21)
+
+- Three ambient run visuals (a run strip chart, a character piece where
+  every prop is a real number, and a field of the work's own vocabulary)
+  were built, reviewed and **parked without a way to launch them**: the
+  `/animation` command and its help entry do not exist, so nothing user-
+  facing changed. The code stays in `src/ui/animation/`, under test, and
+  the design record — what was built, why it did not clear the bar, which
+  shapes are worth reviving, and the two lines that re-open it — is
+  `docs/backlog/proposed/ambient-run-animations.md`.
+- Kept from that work because it is useful on its own: an append-fed run
+  feed that survives the transcript's 500-item truncation, one honest
+  run-state verdict (working / waiting on the model / waiting on you /
+  tools failing / gateway not answering) computed from the same signals
+  the activity strip uses, a shared tool-family classifier, a charset
+  gate for run-derived text, and an Esc rung that exits a full-pane view
+  BEFORE the cancel-arm ladder and clears it.
+
+### Changed (the idle lockup, 2026-08-21)
+
+- **The mark is ~25% smaller.** It leads the first screen; it no longer
+  dominates it (12/10/8 rows → 9/8/6, by viewport height).
+- **One light, not two shimmers.** The mark and the wordmark used to
+  animate on unrelated clocks, which reads as two things twitching rather
+  than one object being lit. A single slightly slanted band now crosses
+  the whole lockup on a slow loop — a specular pass over the mark, the
+  same pass over the letters — with a cosine edge and no motion of its
+  own. Its period is the WORDMARK's width, so the pass takes the same
+  ~11 s on a 60-column terminal and a 200-column one (a pane-width clock
+  made the same animation twice as slow on a wide screen).
+- **The shimmer is actually visible now.** The highlight's separation
+  floor against `text_muted` went from 1.35:1 to 1.9:1 — the walk still
+  saturates at each theme's own luminance pole, so themes that cannot
+  separate further land exactly where they always did; this raises the
+  ceiling for the ones that can (the house dark theme now peaks at 2.0:1
+  instead of a barely-there 1.4:1). The mark's own breath was reduced in
+  turn, so the light does the work and the pulse does not compete.
+
+### Changed (the boot handoff, 2026-08-21)
+
+- **The boot animation lands instead of cutting.** It now holds the
+  finished composition for half a second, then fades for half a second to
+  the theme's own ground; the app's first screen fades in off that same
+  ground over the following ~750 ms. The hard cut between the identity
+  and the client read as a glitch; this reads as an arrival.
+- **The idle screen carries the boot mark.** Where the pane can afford
+  the rows, the first screen's lockup is the animation's OWN mark at rest
+  — the same letterform it just assembled, drawn by the same rasterizer —
+  over the same wordmark and tagline. Shorter panes keep the compact `▲`
+  lockup unchanged, so the fact card never loses rows to it.
+
+### Added (the boot animation, 2026-08-21)
+
+- **A launch animation.** Three brand-gradient planes fly in, overshoot
+  and lock into the ascending **A** of the Abstract house mark; the
+  impact throws sparks and fires a hairline across the stage; the
+  `ABSTRACT CODE` wordmark then resolves under it in the SAME half-block
+  letterforms the idle screen carries — so the splash does not cut to
+  the app, it lands into it. ~1.9 s, and **any key skips it**. Two
+  renderers behind one storyboard: truecolor terminals get the real
+  software-3D mark (perspective slabs, lambert shading, depth fog,
+  motion afterglow, 2× supersampled), everything else gets the same
+  three planes rasterized with coverage antialiasing and mosaicked to
+  half-blocks. Typography, timeline and beats are shared, so the two
+  lanes cannot drift. Preview either without launching the client:
+  `cargo run --example splash -- --2d|--3d`.
+- **`--animation <on|off>`, and it STICKS.** The flag sets the launch
+  animation and PERSISTS the choice to `prefs.json` (`animation`), so
+  `abstractcode-tui --animation off` once disables it for good. The
+  engine's boot gate still applies on top and can only ever say no
+  harder: no tty, `NO_COLOR`, `TERM=dumb`, `ABSTRACTTUI_NO_SPLASH` or a
+  terminal that reports itself dumb all skip it silently. The animation
+  plays BETWEEN mount and run — the gateway probe, catalog, tool
+  inventory and entity roster are already in flight while it plays, so
+  it spends wall-clock the client was spending anyway.
+
+### Fixed (the chips row and the strip, 2026-08-21)
+
+- **The attachment chip IS the button now.** Clicking a staged file's
+  name opens its preview; the row no longer carries an instruction tail
+  telling you which command to type. Each chip is its own element, so
+  the layout owns the hit rectangles and the click lands on the file you
+  pointed at. When more chips are staged than the terminal can show, the
+  row ends in `+N more` rather than cutting a staged file off the edge.
+- **Chip names are capped at 20 characters** (the rest is an ellipsis),
+  so one long filename — a screenshot, a dated report — no longer owns
+  the row that is supposed to show every staged file. Display only: the
+  chip still previews its own file, and the full name is spelled out in
+  the preview header and the `/attach` manager (which also carries the
+  whole path).
+- **Each chip carries a `×` that unstages it.** Removing a file no
+  longer means opening the manager: click the `×` beside its name. The
+  glyph is its own element with destructive ink on hover, so a click
+  can never resolve to the wrong action, and it goes through the same
+  removal authority as the manager's `x` — including the rule that
+  clears an armed drop-undo, which must never outlive the chips it
+  names. Both chip actions key on the file's canonical PATH rather than
+  its position in the row, so a click always acts on the file you
+  pointed at even if the staged set changed underneath it.
+- **The strip no longer puts one cycle's words in another cycle's
+  mouth.** A reasoning cycle's text reaches the client only in its
+  RESULT record, so while cycle 2 was thinking, the newest words the
+  client held were cycle 1's — and the strip printed them as
+  `thinking (cycle 2) — "I'll inspect the project structure…"` while
+  cycle 2 was actually writing something else. The words are still
+  shown, now attributed: the live cycle's own words keep the em-dash,
+  and anything earlier reads `· last: "…"`. Attribution is by RUN as
+  well as by number — cycle counts are per run while the displayed
+  number is a maximum across them, so in a delegate tree or a goal loop
+  the old comparison could name another agent's cycle. A gist from a
+  run that is not the one cycling is neither shown nor allowed to
+  displace the cycling lane's own words, and a tool-only cycle (calls,
+  no prose) no longer blanks the label.
+
+### Added (look at an attachment before it rides a run, 2026-08-21)
+
+- **Attachments preview: text documents and pictures, from the real
+  bytes on disk.** The engine can draw images and wrap text, and a chip
+  was still only a filename and a byte count taken on trust — a wrong
+  file, or a picture that turned out to be a screenshot of the wrong
+  window, only became visible after the upload was permanent.
+  `/attach preview` now opens the file itself: a scrolling, line-
+  numbered document for text (source, markdown, JSON, logs, SVG, CSV),
+  or the picture drawn in the mosaic ladder for PNG and JPEG.
+- Three ways in, all the same preview: `/attach preview` (the staged
+  chip), `/attach preview <n>` (one of several staged chips, 1-based),
+  and `/attach preview <path>` — any local file, which is the useful
+  one BEFORE attaching. Inside the attachment manager, `p` or `Enter`
+  previews the chip under the cursor; `Esc` closes as everywhere else.
+  `↑↓`, `PgUp`/`PgDn` and `Home`/`End` scroll, and the hint row keeps
+  saying which row of how many you are on.
+- The preview never claims more than it read. A file bigger than 512 KB
+  previews its first 512 KB and the header SAYS so (`showing the first
+  512.0 KB of 3.1 MB`); invalid UTF-8 is labeled, not silently
+  swallowed; tabs expand so indented source previews as it is written.
+- A format the engine cannot draw is NAMED, and named as a preview
+  limit rather than an attachment problem: GIF, WebP, BMP and TIFF say
+  "the preview draws PNG and JPEG; this file still attaches and uploads
+  normally", and a PDF says the gateway extracts its text server-side.
+  Magic bytes decide, never the extension — a `.txt` holding PNG bytes
+  previews as the picture it is.
+- Reading and decoding happen on their own worker thread, so opening a
+  100 MP photo paints "reading…" instead of freezing the frame, and a
+  slow load that lands after you moved to another file is dropped
+  instead of repainting the newer preview.
+- What the preview CHANGES to make a file readable, it also says: an
+  ANSI-colored build log renders as text with "ANSI color codes hidden"
+  in the header rather than as `[32mok` garbage, and a UTF-16 document
+  is transcoded and labeled instead of being dismissed as binary.
+  Carriage-return line endings split into lines (a CR-only file used to
+  preview as one run-on line), and line numbers size themselves to the
+  file so a 120 000-line log numbers its rows truthfully.
+- Resizing the terminal re-wraps the document instead of cutting each
+  row at the width the modal originally asked for, the preview fits
+  terminals down to 20×8, and the body is freed as soon as its modal
+  goes — including when another modal replaces it.
+
+### Fixed (engine bump `abstracttui` 0.3.3 → 0.3.6, 2026-08-20)
+
+- **Ordinary photos render instead of an error.** Progressive JPEG is
+  what phone cameras, image editors and "save for web" write by
+  default, and the engine's decoder read only baseline frames — so an
+  image dropped on the composer, or an image artifact a tool produced,
+  came back as `image decode failed: parse: jpeg: progressive JPEG not
+  supported (baseline only)` in the card where the picture belonged.
+  Progressive frames now decode, to the same picture and the same
+  quality as the baseline encode of it. Multi-scan sequential JPEGs
+  decode too. PNG and baseline JPEG are byte-for-byte unchanged.
+- The decoder's message for a format it genuinely cannot read now names
+  what it can: `image: unrecognized format (magic ...); PNG and JPEG
+  decode, GIF/WebP/AVIF/TIFF do not`. GIF, WebP, AVIF and TIFF still do
+  not decode — the message just stops saying "baseline JPEG".
+- Transcript pictures already chose their cell density from the
+  terminal's proved capabilities (quadrants on a Unicode + truecolor
+  terminal, half blocks otherwise), and `tests/image_pipeline.rs` now
+  pins that end to end alongside the decode floor.
+- Headless SVG captures no longer distort in Chromium-based viewers
+  (engine `Screenshot::to_svg` run-padding fix); test tooling only.
 
 ### Added (typing anywhere reaches the prompt, 2026-08-17)
 

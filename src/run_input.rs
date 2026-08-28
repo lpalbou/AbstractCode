@@ -134,12 +134,32 @@ pub struct StartOpts {
 }
 
 pub fn build_input_data(prompt: &str, opts: &StartOpts) -> Value {
+    // NO CLIENT ITERATION BUDGET (operator ruling 2026-08-21: "remove the
+    // limit from client, only the limit on the runtime should remain").
+    //
+    // This used to inject 50 on every run that did not ask for a number. The
+    // framework's ruled default is 20 (`abstractagent/adapters/
+    // generation_params.py`), and since `react_runtime` began seeding
+    // `_limits` from the flat key the injected 50 actually landed — so the
+    // same prompt got 50 from this TUI and 20 from AbstractObserver, a
+    // bridge, or a script. The hard ceiling (100) is the runtime's, enforced
+    // once at `Runtime.start()`.
+    //
+    // What remains is an operator REQUEST, not a client limit: an explicit
+    // `--max-iterations` rides `_limits.max_iterations` below, where the
+    // runtime clamps it. Absent that, this client says nothing about
+    // iterations and the server's default applies to every client alike.
     let mut input = json!({
         "prompt": prompt,
         "context": { "task": prompt },
         "use_session_history": true,
-        "max_iterations": if opts.max_iterations == 0 { 50 } else { opts.max_iterations },
     });
+    if opts.max_iterations_explicit && opts.max_iterations > 0 {
+        // The legacy flat key, kept ONLY for the explicit case: older engines
+        // read it, newer ones seed `_limits` from it (0029 #6), and the
+        // `_limits` entry below is authoritative on both.
+        input["max_iterations"] = json!(opts.max_iterations);
+    }
     if !opts.messages.is_empty() {
         input["context"]["messages"] = Value::Array(
             opts.messages
@@ -245,6 +265,17 @@ pub fn build_input_data(prompt: &str, opts: &StartOpts) -> Value {
     // `_limits`: the runtime's canonical limits namespace, top-level (root
     // run vars; subflows inherit parent `_limits`).
     //
+    // STALE AS OF 0029 #6 — read this whole comment as history, not as
+    // current behaviour. `abstractagent/adapters/react_runtime.py` now seeds
+    // `limits["max_iterations"]` from the flat/legacy key when the caller did
+    // not set `_limits` itself, so the flat key DOES land. The live
+    // consequence is the opposite of the one this comment was written to
+    // prevent: an implicit run from this client now imposes 50 where every
+    // other client gets the ruled framework default of 20
+    // (`generation_params.py`). Filed as finding 1 of the 2026-08-21 re-audit
+    // in `docs/design/thin-client-conformance.md`; not changed here because
+    // it alters every run's budget.
+    //
     // The iteration budget MUST ride here, not only as the flat
     // `max_iterations` key above. The flat key alone is silently discarded:
     // when `_limits` is absent from the start vars, abstractruntime seeds it
@@ -334,7 +365,9 @@ mod tests {
         let input = build_input_data("hello", &StartOpts::default());
         assert_eq!(input["prompt"], json!("hello"));
         assert_eq!(input["use_session_history"], json!(true));
-        assert_eq!(input["max_iterations"], json!(50));
+        // The client no longer states a budget of its own.
+        assert!(input.get("max_iterations").is_none());
+        assert!(input.get("_limits").is_none());
         assert!(
             input.get("provider").is_none(),
             "empty provider stays absent"
@@ -498,7 +531,7 @@ mod tests {
             "the client's own default must not suppress server seeding"
         );
         // The flat key still rides for loops that read it directly.
-        assert_eq!(implicit["max_iterations"], json!(50));
+        assert!(implicit.get("max_iterations").is_none());
 
         let explicit = build_input_data(
             "go",

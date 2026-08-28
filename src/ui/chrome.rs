@@ -420,7 +420,15 @@ pub fn activity_strip(t: &TokenSet, store: Store, spin: Signal<u64>, follow: Sig
                 // Same surface, two windows: the boot rehydration and a
                 // history-bloc stream (scroll-top auto-load / /history).
                 let summary = if store.restoring.get() {
-                    "restoring session history from the gateway…".to_string()
+                    // The loading screen above carries the bar; this row
+                    // repeats the counter so the fact survives even at
+                    // pane heights where the caption rows clip away.
+                    match store.restore_progress.get() {
+                        Some((done, total)) if total > 0 => format!(
+                            "restoring session history from the gateway… (turn {done} of {total})"
+                        ),
+                        _ => "restoring session history from the gateway…".to_string(),
+                    }
                 } else {
                     format!(
                         "streaming earlier history from the gateway… ({} turn(s) remain)",
@@ -1060,6 +1068,34 @@ pub fn tool_call_segment(elapsed_secs: u64, label: Option<&str>) -> String {
     seg
 }
 
+/// The footer's host-RAM segment from the LAST `/resources` fetch —
+/// rendered only when a served percent is KNOWN (no polling lane feeds
+/// this; it updates when the modal fetches). A STALE snapshot (refresh
+/// failed) is marked `*` — last-good must never render indistinguishable
+/// from fresh. Severity grades the ROUNDED percent the user actually
+/// reads (89.5 displays "90%" and must grade as 90): ≥90 error, ≥75
+/// warn, else muted. Pure so a unit test pins presence, grading, the
+/// stale marker, and absence under every factless state.
+pub(crate) fn mem_segment(state: &crate::store::HostState) -> Option<(String, u8)> {
+    use crate::store::HostState;
+    let (facts, stale) = match state {
+        HostState::Ready(f) => (f, false),
+        HostState::Stale(f) => (f, true),
+        _ => return None,
+    };
+    let pct = facts.ram_percent?;
+    let shown = pct.round();
+    let sev = if shown >= 90.0 {
+        2
+    } else if shown >= 75.0 {
+        1
+    } else {
+        0
+    };
+    let mark = if stale { "*" } else { "" };
+    Some((format!("mem {shown:.0}%{mark}"), sev))
+}
+
 /// Status bar: the always-visible instrument row (REST-1) —
 /// `ctx used/window (%) · session tokens · gpu · skills · mcp · ? help`
 /// — plus theme + gateway on the right. The key legend moved behind `?`
@@ -1110,6 +1146,10 @@ pub fn status_bar(t: &TokenSet, store: Store, ctx: &UiCtx) -> View {
             crate::store::GpuMeter::Pending => segs.push(("gpu …".into(), 0)),
             crate::store::GpuMeter::Error(_) => segs.push(("gpu err".into(), 1)),
             crate::store::GpuMeter::Off | crate::store::GpuMeter::Unsupported(_) => {}
+        }
+        // Host RAM from the LAST /resources fetch (see `mem_segment`).
+        if let Some(seg) = mem_segment(&store.host_state.get()) {
+            segs.push(seg);
         }
         let skills = store.selected_skills.with(|s| s.len());
         if skills > 0 {
@@ -1428,5 +1468,44 @@ mod tests {
             assert_eq!(route_label(store), "openai · gpt-5.2");
         });
         root.dispose();
+    }
+
+    #[test]
+    fn mem_segment_grades_the_rounded_percent_and_marks_stale() {
+        use crate::store::{HostFacts, HostState};
+        let with_pct = |p: Option<f64>| HostFacts {
+            ram_percent: p,
+            ..Default::default()
+        };
+        // Presence + muted below the warn floor.
+        assert_eq!(
+            mem_segment(&HostState::Ready(with_pct(Some(62.0)))),
+            Some(("mem 62%".into(), 0))
+        );
+        // Severity grades the ROUNDED number the user reads: 89.5 shows
+        // "90%" and must grade as 90 (error), 74.6 shows "75%" → warn.
+        assert_eq!(
+            mem_segment(&HostState::Ready(with_pct(Some(89.5)))),
+            Some(("mem 90%".into(), 2))
+        );
+        assert_eq!(
+            mem_segment(&HostState::Ready(with_pct(Some(74.6)))),
+            Some(("mem 75%".into(), 1))
+        );
+        assert_eq!(
+            mem_segment(&HostState::Ready(with_pct(Some(74.4)))),
+            Some(("mem 74%".into(), 0))
+        );
+        // A stale snapshot is MARKED — never indistinguishable from fresh.
+        assert_eq!(
+            mem_segment(&HostState::Stale(with_pct(Some(62.0)))),
+            Some(("mem 62%*".into(), 0))
+        );
+        // Absence is omission: no percent, or no facts at all.
+        assert_eq!(mem_segment(&HostState::Ready(with_pct(None))), None);
+        assert_eq!(mem_segment(&HostState::Idle), None);
+        assert_eq!(mem_segment(&HostState::Pending), None);
+        assert_eq!(mem_segment(&HostState::Unsupported("no".into())), None);
+        assert_eq!(mem_segment(&HostState::Error("boom".into())), None);
     }
 }

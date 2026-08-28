@@ -173,7 +173,8 @@ OPTIONS:
                           for good. Also skipped, without the flag, when
                           stdout is not a tty, NO_COLOR or TERM=dumb is set,
                           or ABSTRACTTUI_NO_SPLASH is set.
-  --max-iterations <N>    agent iteration budget (default: 50)
+  --max-iterations <N>    ask the server for a specific iteration budget
+                          (default: the server's own — this client sets none)
   --max-tokens <N>        declare the model's context window in tokens
                           (e.g. 262144 or 262k) — drives the ctx N/M (%)
                           meter and rides runs as _limits.max_tokens;
@@ -229,7 +230,7 @@ to the store shared with the Python CLI: ~/.abstractcode/gateway.json.
 
 pub fn parse(argv: &[String]) -> Result<Args, String> {
     let mut args = Args {
-        max_iterations: 50,
+        max_iterations: 0,
         // Parity with abstractcode's ReAct default (`react_shell.py:252`).
         review_rounds: DEFAULT_REVIEW_ROUNDS,
         replay_turns: crate::runner::REHYDRATE_DEFAULT_TURNS,
@@ -537,7 +538,11 @@ mod tests {
     fn parse_defaults_and_flags() {
         let args = parse(&[]).unwrap();
         assert!(args.subcommand.is_none());
-        assert_eq!(args.max_iterations, 50);
+        // No client-side budget: absent `--max-iterations`, this client says
+        // nothing and the SERVER's default applies — the same one every other
+        // client gets (operator ruling 2026-08-21).
+        assert_eq!(args.max_iterations, 0);
+        assert!(!args.max_iterations_explicit);
         assert_eq!(args.max_tokens, 0, "window undeclared by default");
         assert_eq!(
             args.timeout_secs, 7200,
