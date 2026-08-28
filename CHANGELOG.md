@@ -6,6 +6,48 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (clickable paths/URLs + right-click menus, 2026-08-28)
+
+- **File paths and URLs in tool cards are OSC-8 hyperlinks**
+  (`ui::linkify`). The folded row's args hint and the details card's
+  argument/result bodies attach `file://` and `http(s)://` targets to
+  their path/URL tokens — same cells, same inks, zero added visual
+  noise; the affordance is the terminal's own (Cmd/Ctrl-click,
+  hover-underline where supported; terminals without OSC 8 ignore the
+  bytes). Honesty rules: a URL links as itself, an absolute path links
+  verbatim, a RELATIVE path links only when it exists under the
+  workspace root (a gateway-side path must not become a local link to
+  nothing), and `path.rs:12:5` line anchors stay in the text but leave
+  the URI. Prose bodies (user text, thinking, notices) deliberately
+  stay plain.
+- **Right-click on a transcript item opens its action menu**
+  (`ui::item_menu`, the engine's `ContextMenu`): copy a message/answer/
+  thinking/notice, quote a message or answer into the composer
+  (replaces the draft — the seed's documented contract), and on tool
+  cards copy arguments, result, error (only when one exists), or the
+  first path in the args (shown as the row's hint). Disabled rows say
+  "nothing here" (empty result); a press on the gap between items opens
+  nothing. Copies go out as OSC 52 with a notice naming what left;
+  arrows/Enter/Escape work inside the open menu. Agent lane only for
+  now; `/sessions` rows need a Picker-level hook (follow-up).
+
+### Changed (engine 0.6.0, 2026-08-28)
+
+- **AbstractTUI 0.3.6 → 0.6.0** (crossing the 0.4.0 and 0.5.0 majors).
+  One source break reached this crate: `gfx::ImageFormat` gained `Gif`
+  and went `#[non_exhaustive]` — `/attach preview` now DRAWS GIFs (an
+  animated GIF previews as its first frame) instead of refusing them by
+  name, unknown future formats route to the decoder with a generic
+  label, and `named_binary` dropped its now-unreachable GIF row (its
+  wording names the real decoder family: PNG, JPEG and GIF). Inherited
+  without wiring: scrollbar drags no longer start text selections in
+  select mode, `Feed` reports its true height on the first frame (the
+  Scroll remount/offset clamp class), grounds stay distinct on
+  256-color terminals, wrap/grid layout honors margins, and hover tips
+  gained keyboard reachability for any future adoption. Tests moved
+  with the truth: GIF left the "formats the engine cannot draw" pins
+  and gained a drawable-family pin (decode + verbatim decoder errors).
+
 ### Added (session-loading screen, 2026-08-28)
 
 - **An animated loading screen for session restores** (`ui::loading`).

@@ -731,6 +731,14 @@ fn u64_of(v: &Value, key: &str) -> Option<u64> {
     v.get(key).and_then(Value::as_u64)
 }
 
+/// Epoch seconds → a UTC "HH:MM:SS" clock string (the same clock the GPU
+/// lane's ISO timestamps yield through `short_ts`). Callers guard
+/// finiteness/positivity; this only does the modular arithmetic.
+fn clock_from_epoch(secs: f64) -> String {
+    let s = secs as u64 % 86_400;
+    format!("{:02}:{:02}:{:02}", s / 3_600, (s % 3_600) / 60, s % 60)
+}
+
 /// `models[]` (row_v1) from a `/host/state` response. Tolerates an
 /// `items` spelling; rows without both provider and model are dropped
 /// (nothing actionable to render or unload).
@@ -839,7 +847,19 @@ pub fn host_state_from_response(v: &Value) -> HostFacts {
         .and_then(Value::as_bool)
         .unwrap_or(false);
     HostFacts {
-        ts: str_of(v, "ts"),
+        // The live route serves `ts` as an epoch FLOAT (`time.time()`);
+        // an ISO string is tolerated for older/other emitters. A float is
+        // pre-formatted to a UTC clock here so the modal's `short_ts`
+        // (which extracts HH:MM:SS from ISO strings and passes anything
+        // else through) renders it unchanged.
+        ts: match v.get("ts") {
+            Some(Value::Number(n)) => n
+                .as_f64()
+                .filter(|s| s.is_finite() && *s > 0.0)
+                .map(clock_from_epoch)
+                .unwrap_or_default(),
+            _ => str_of(v, "ts"),
+        },
         host_name: memory
             .get("host")
             .map(|h| str_of(h, "host_name"))
@@ -886,6 +906,15 @@ pub fn host_state_from_response(v: &Value) -> HostFacts {
 /// `confidence · predicted max context N · notes`. Unknowns are omitted,
 /// never zero-filled.
 pub fn context_estimate_line(v: &Value) -> String {
+    // An in-band failure (`{ok:false, error:...}`, e.g. facade
+    // unavailable) carries no confidence — surface the served error
+    // instead of a bare "unknown" that reads like an estimator verdict.
+    if v.get("ok").and_then(Value::as_bool) == Some(false) {
+        let why = str_of(v, "error");
+        if !why.is_empty() {
+            return format!("estimate unavailable: {why}");
+        }
+    }
     let confidence = v
         .get("confidence")
         .and_then(Value::as_str)
@@ -1439,12 +1468,17 @@ mod tests {
         let odd = contracts_from_capabilities(
             &json!({"capabilities": true, "contracts": {"common": {"host_state": {}}}}),
         );
-        assert!(odd.host_state, "non-object capabilities falls back to top level");
+        assert!(
+            odd.host_state,
+            "non-object capabilities falls back to top level"
+        );
     }
 
     fn full_host_state() -> Value {
         json!({
-            "ok": true, "ts": "2026-08-27T10:00:00Z",
+            // Live wire truth: `ts` is an epoch FLOAT (`time.time()`),
+            // captured 2026-08-28. 1787894010.297934 % 86400 → 05:13:30 UTC.
+            "ok": true, "ts": 1787894010.297934f64,
             "memory": {
                 "ram": {"total_bytes": 137438953472u64, "available_bytes": 52200000000u64,
                          "used_bytes": 85238953472u64, "percent": 62.0},
@@ -1471,7 +1505,7 @@ mod tests {
                 {"key": "k1", "provider": "lmstudio", "model": "qwen3-4b",
                  "session_id": "acode-abc", "bytes": 1048576, "token_count": 2100}
             ],
-            "totals": {"models_size_bytes": 4508876800u64, "resident_models": 1},
+            "totals": {"model_bytes": 4508876800u64, "models_resident": 1},
             "degraded": [],
             "reasons": {}
         })
@@ -1480,7 +1514,16 @@ mod tests {
     #[test]
     fn host_state_parses_the_full_shape() {
         let f = host_state_from_response(&full_host_state());
-        assert_eq!(f.ts, "2026-08-27T10:00:00Z", "served ts carried verbatim");
+        assert_eq!(f.ts, "05:13:30", "epoch-float ts formatted to a UTC clock");
+        // An ISO-string ts (older/other emitters) still carries verbatim
+        // for `short_ts` to trim; junk numbers read as absent.
+        let iso = host_state_from_response(&json!({"ts": "2026-08-27T10:00:00Z"}));
+        assert_eq!(iso.ts, "2026-08-27T10:00:00Z");
+        let junk = host_state_from_response(&json!({"ts": -5.0}));
+        assert_eq!(
+            junk.ts, "",
+            "negative epoch reads as absent, never fabricated"
+        );
         assert_eq!(f.host_name, "studio.local");
         assert_eq!(f.ram_total, Some(137438953472));
         assert_eq!(f.ram_percent, Some(62.0));
@@ -1499,8 +1542,8 @@ mod tests {
         assert_eq!(
             f.totals,
             vec![
-                ("models_size_bytes".to_string(), 4508876800),
-                ("resident_models".to_string(), 1)
+                ("model_bytes".to_string(), 4508876800),
+                ("models_resident".to_string(), 1)
             ]
         );
         assert!(f.degraded.is_empty());
@@ -1599,5 +1642,13 @@ mod tests {
             "unknown"
         );
         assert_eq!(context_estimate_line(&json!({})), "unknown");
+        // In-band failure surfaces the served error, never a bare
+        // "unknown" masquerading as an estimator verdict.
+        assert_eq!(
+            context_estimate_line(&json!({"ok": false, "error": "context_estimate_unavailable"})),
+            "estimate unavailable: context_estimate_unavailable"
+        );
+        // ok:false with no error text falls through to the honest default.
+        assert_eq!(context_estimate_line(&json!({"ok": false})), "unknown");
     }
 }

@@ -18,9 +18,10 @@
 //!   preview that quietly shows half a file is a lie about the file.
 //!   The same rule governs what we CHANGE to make the text readable:
 //!   an ANSI-stripped log and a transcoded UTF-16 document both say so.
-//! - The engine decodes PNG and JPEG only. GIF/WebP/BMP/TIFF attach and
-//!   upload perfectly well, so the refusal names the format and says so
-//!   — never "unsupported file", which reads as "your attachment is
+//! - The engine decodes PNG, JPEG and GIF (0.6.0 — an animated GIF
+//!   previews as its first frame). WebP/BMP/TIFF attach and upload
+//!   perfectly well, so the refusal names the format and says so —
+//!   never "unsupported file", which reads as "your attachment is
 //!   broken".
 //! - Decoder errors pass through VERBATIM (`gfx::decode_image`'s
 //!   messages are already named and prefixed). This is the second such
@@ -207,6 +208,14 @@ fn load_image(path: &str, total: u64) -> PreviewBody {
     let format = match abstracttui::gfx::sniff_format(&bytes) {
         Some(abstracttui::gfx::ImageFormat::Png) => "PNG",
         Some(abstracttui::gfx::ImageFormat::Jpeg) => "JPEG",
+        // 0.6.0: GIF sniffs as an image (an animated one decodes below
+        // as its first frame — the honest still for a preview pane).
+        Some(abstracttui::gfx::ImageFormat::Gif) => "GIF",
+        // `ImageFormat` is #[non_exhaustive] (0.4.0's own migration
+        // note): a format this build has no name for still routes to
+        // `decode_image` below; only the LABEL degrades to the generic
+        // word, never the preview.
+        Some(_) => "image",
         // The prefix sniffed as an image and the full read did not:
         // the file changed under us between the two reads.
         None => {
@@ -428,7 +437,7 @@ fn expand_tabs(line: &str) -> String {
 fn named_binary(head: &[u8]) -> Option<String> {
     let named = |what: &str| {
         Some(format!(
-            "{what} — the preview draws PNG and JPEG; this file still attaches and uploads normally"
+            "{what} — the preview draws PNG, JPEG and GIF; this file still attaches and uploads normally"
         ))
     };
     if head.starts_with(b"%PDF") {
@@ -437,9 +446,8 @@ fn named_binary(head: &[u8]) -> Option<String> {
                 .into(),
         );
     }
-    if head.starts_with(b"GIF87a") || head.starts_with(b"GIF89a") {
-        return named("GIF image");
-    }
+    // No GIF arm: since 0.6.0 the engine DECODES GIF, so `sniff_format`
+    // claims it upstream and this function can never see one.
     if head.len() >= 12 && head.starts_with(b"RIFF") && &head[8..12] == b"WEBP" {
         return named("WebP image");
     }
@@ -605,14 +613,40 @@ mod tests {
 
     #[test]
     fn formats_the_engine_cannot_draw_are_named_not_dismissed() {
-        let gif = tmp("anim.gif", b"GIF89a\x01\x00\x01\x00\x00\x00\x00;");
-        let r = reason_of(&load(&gif));
-        assert!(r.contains("GIF"), "{r}");
-        assert!(r.contains("attaches"), "the attachment is still fine: {r}");
         let pdf = tmp("paper.pdf", b"%PDF-1.7\n\x00\x00binary");
         assert!(reason_of(&load(&pdf)).contains("PDF"));
         let webp = tmp("shot.webp", b"RIFF\x24\x00\x00\x00WEBPVP8 ");
-        assert!(reason_of(&load(&webp)).contains("WebP"));
+        let r = reason_of(&load(&webp));
+        assert!(r.contains("WebP"), "{r}");
+        assert!(r.contains("attaches"), "the attachment is still fine: {r}");
+    }
+
+    /// GIF crossed the fence in 0.6.0: it is a format the engine DRAWS
+    /// now. A real GIF previews as an image labeled GIF; a corrupt one
+    /// carries the decoder's own named error — never the old
+    /// "cannot draw" refusal, which would now be a lie about the engine.
+    #[test]
+    fn gif_previews_as_an_image_since_0_6() {
+        // The canonical 1×1 GIF89a (2-color palette, one clear pixel).
+        let one_px: &[u8] = &[
+            0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x21, 0xF9, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2C,
+            0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00,
+            0x3B,
+        ];
+        let p = tmp("dot.gif", one_px);
+        match load(&p) {
+            PreviewBody::Image(i) => {
+                assert_eq!(i.format, "GIF");
+                assert_eq!(i.source_px, (1, 1));
+            }
+            other => panic!("expected an image, got {}", reason_of(&other)),
+        }
+        // A GIF header with no image data: the decoder's named error
+        // passes through verbatim, same contract as PNG/JPEG.
+        let broken = tmp("anim.gif", b"GIF89a\x01\x00\x01\x00\x00\x00\x00;");
+        let r = reason_of(&load(&broken));
+        assert!(r.starts_with("GIF decode failed: "), "{r}");
     }
 
     #[test]

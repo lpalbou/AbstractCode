@@ -2260,6 +2260,64 @@ fn session_pick_shows_the_animated_loading_screen_until_history_lands() {
     );
 }
 
+/// Right-click on a transcript item (operator ask, 2026-08-28): a
+/// secondary press on a tool row opens the engine ContextMenu with the
+/// card's own actions; Enter commits the highlighted one, the copy
+/// lands as an OSC 52 write, and the notice names what left. A press
+/// on the inter-item gap opens nothing (honest geometry).
+#[test]
+fn right_click_on_a_tool_row_opens_its_action_menu() {
+    let mut h = harness();
+    h.turn();
+    h.leave_splash();
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::Tool {
+            key: "t1".into(),
+            name: "read_file".into(),
+            // Absolute path: relative ones only link/copy when they
+            // exist under the workspace root (linkify's honesty rule),
+            // and this harness's /tmp/ws holds nothing.
+            args_preview: "/etc/hosts head".into(),
+            args_full: "path: /etc/hosts".into(),
+            status: abstractcode_tui::transcript::ToolStatus::Ok,
+            result: "fn main() {}".into(),
+            error: String::new(),
+        });
+    });
+    for _ in 0..3 {
+        h.turn();
+    }
+    let screen = h.turn();
+    let row0 = screen
+        .lines()
+        .position(|l| l.contains("read_file"))
+        .expect("tool row on screen");
+    let (x, y) = (4, row0 as i32 + 1); // SGR coordinates are 1-based
+    h.term.push_input(format!("\x1b[<2;{x};{y}M").as_bytes());
+    h.turn();
+    h.term.push_input(format!("\x1b[<2;{x};{y}m").as_bytes());
+    let screen = h.turn();
+    assert!(
+        screen.contains("Copy arguments") && screen.contains("Copy result"),
+        "the tool card's menu is open:\n{screen}"
+    );
+    assert!(
+        screen.contains("Copy path"),
+        "an args path affords its own copy:\n{screen}"
+    );
+    h.press_enter(); // first enabled action: Copy arguments
+    let screen = h.turn();
+    assert!(
+        !screen.contains("Copy arguments"),
+        "the menu closed on commit:\n{screen}"
+    );
+    let notices = h.store.notices.get_untracked();
+    assert!(
+        notices.iter().any(|n| n.contains("copied arguments")),
+        "the copy is announced by name: {notices:?}"
+    );
+}
+
 #[test]
 fn header_names_what_gateway_defaults_resolves_to() {
     let mut h = harness();
@@ -7473,7 +7531,10 @@ fn attach_preview_draws_a_picture_and_names_its_pixels() {
 
 #[test]
 fn a_format_the_engine_cannot_draw_is_named_and_the_attachment_still_stands() {
-    let (dir, path) = attach_tempfile("anim.gif", b"GIF89a\x01\x00\x01\x00\x00\x00\x00;");
+    // WebP: still outside the decoder family (engine 0.6.0 moved GIF
+    // INSIDE it — a GIF here would now exercise the decoder-error path
+    // instead; that path is pinned in preview::tests).
+    let (dir, path) = attach_tempfile("shot.webp", b"RIFF\x24\x00\x00\x00WEBPVP8 ");
     let mut h = harness();
     h.turn();
     // Stage it FIRST: the refusal must never read as "your attachment
@@ -7490,7 +7551,7 @@ fn a_format_the_engine_cannot_draw_is_named_and_the_attachment_still_stands() {
     let (seq, p) = take_load_preview(&mut h);
     deliver_preview(&h, seq, &p);
     let screen = h.turn();
-    assert!(screen.contains("GIF"), "the FORMAT is named:\n{screen}");
+    assert!(screen.contains("WebP"), "the FORMAT is named:\n{screen}");
     assert!(
         screen.contains("attaches"),
         "and the attachment is explicitly still fine:\n{screen}"

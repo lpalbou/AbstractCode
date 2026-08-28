@@ -13,9 +13,9 @@ dependencies = [
 
 [[package]]
 name = "abstracttui"
-version = "0.3.6"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3731f6ef439a6e948f91dcb0f1f200e34d788c3e91da39b41adb19efc0869cb9"
+checksum = "898eddd042ea7e5db015fad15430cd4583b5a79657cd6315e369140cb9f69bce"
 dependencies = [
  "libc",
  "miniz_oxide 0.9.1",

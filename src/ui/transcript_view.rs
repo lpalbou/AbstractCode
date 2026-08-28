@@ -154,6 +154,9 @@ struct ToolRow {
     word_ink: Rgba,
     error: String,
     error_ink: Rgba,
+    /// Workspace root for `linkify`: the hint's path/URL tokens carry
+    /// OSC-8 targets (same cells, same inks — see `ui::linkify`).
+    link_root: Option<Rc<str>>,
 }
 
 impl ToolRow {
@@ -220,11 +223,16 @@ impl ToolRow {
                 let hint_avail = rect.right() - x;
                 if hint_avail >= 4 && !spec.hint.is_empty() {
                     let fitted = text::truncate_ellipsis(&spec.hint, hint_avail);
-                    canvas.print(
+                    // Same cells and ink as a plain print; path/URL
+                    // tokens additionally carry OSC-8 targets. The
+                    // FITTED string is what segments, so a token the
+                    // ellipsis cut simply is not a token any more.
+                    crate::ui::linkify::print_linked(
+                        canvas,
                         Point::new(x, rect.y),
                         &fitted,
                         spec.hint_ink,
-                        Rgba::TRANSPARENT,
+                        spec.link_root.as_ref(),
                     );
                 }
                 for (i, line) in spec.error_lines(rect.w).iter().enumerate() {
@@ -277,6 +285,14 @@ struct CappedBody {
     /// no cap, no `… (+N more lines)`. The fold's caps stay for the
     /// FOLDED view, which is a summary by definition.
     uncapped: bool,
+    /// This body's path/URL tokens carry OSC-8 links (`ui::linkify` —
+    /// tool ARGS and RESULTS only; prose bodies stay plain prints).
+    /// `wrap_rows` breaks at words, so tokens survive wrapping whole
+    /// and classify on their own line.
+    link: bool,
+    /// Workspace root for relative-path resolution; absolute paths and
+    /// URLs link without one.
+    link_root: Option<Rc<str>>,
 }
 
 impl CappedBody {
@@ -292,7 +308,16 @@ impl CappedBody {
             bar: false,
             keep_tail: false,
             uncapped: false,
+            link: false,
+            link_root: None,
         }
+    }
+
+    /// Hyperlink this body's path/URL tokens (tool args/results).
+    fn linked(mut self, root: Option<&Rc<str>>) -> CappedBody {
+        self.link = true;
+        self.link_root = root.cloned();
+        self
     }
 
     /// Render every row: `/details` truncates nothing.
@@ -391,12 +416,18 @@ impl CappedBody {
                 let top = rect.y + i32::from(spec.lead);
                 let lines = spec.lines_at(rect.w);
                 for (i, line) in lines.iter().enumerate() {
-                    canvas.print(
-                        Point::new(rect.x + spec.indent, top + i as i32),
-                        line,
-                        spec.ink,
-                        Rgba::TRANSPARENT,
-                    );
+                    let p = Point::new(rect.x + spec.indent, top + i as i32);
+                    if spec.link {
+                        crate::ui::linkify::print_linked(
+                            canvas,
+                            p,
+                            line,
+                            spec.ink,
+                            spec.link_root.as_ref(),
+                        );
+                    } else {
+                        canvas.print(p, line, spec.ink, Rgba::TRANSPARENT);
+                    }
                 }
                 if let Some((s, ink)) = &spec.suffix {
                     let fitted = text::truncate_ellipsis(s, (rect.w - spec.indent).max(4));
@@ -543,7 +574,13 @@ fn image_block(bitmap: Arc<abstracttui::widgets::Bitmap>) -> FeedBlock {
 
 /// Render one fold item. `None` = hidden in the current view (the
 /// clean answers-only mode folds thinking + finished-OK tool cards).
-fn render_item(t: &TokenSet, item: &Item, store: Store, details: bool) -> Option<FeedItem> {
+fn render_item(
+    t: &TokenSet,
+    item: &Item,
+    store: Store,
+    details: bool,
+    link_root: Option<&Rc<str>>,
+) -> Option<FeedItem> {
     match item {
         // TURN-weight rule (adversarial review finding 3): the user's
         // ask opens the turn and must outrank the cycle rules inside
@@ -695,6 +732,7 @@ fn render_item(t: &TokenSet, item: &Item, store: Store, details: bool) -> Option
                             // flattens here — `/details` shows all of it.
                             error: crate::transcript::one_line(error, 200),
                             error_ink: t.error,
+                            link_root: link_root.cloned(),
                         }
                         .block(),
                     ),
@@ -727,6 +765,7 @@ fn render_item(t: &TokenSet, item: &Item, store: Store, details: bool) -> Option
                 fi = fi.block(
                     CappedBody::new(args_body, t.text_faint, TOOL_RESULT_MAX_ROWS)
                         .uncapped(true)
+                        .linked(link_root)
                         .block(),
                 );
             }
@@ -752,6 +791,7 @@ fn render_item(t: &TokenSet, item: &Item, store: Store, details: bool) -> Option
                         .bar()
                         .keep_tail()
                         .uncapped(true)
+                        .linked(link_root)
                         .block(),
                 );
             }
@@ -990,7 +1030,9 @@ impl Fnv {
 /// existing key order is exactly fold order. Same O(window) cost as a
 /// rebuild, correct either way (test-pinned:
 /// `truncation_drains_keep_the_feed_in_sync_with_fold_order`).
-pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState) {
+/// `link_root`: the workspace root `ui::linkify` resolves relative
+/// paths against (None = only absolute paths and URLs link).
+pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState, link_root: Option<Rc<str>>) {
     struct SyncState {
         /// (fingerprint, visible) per source item index.
         seen: Vec<(u64, bool)>,
@@ -1051,7 +1093,7 @@ pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState) {
                 feed.clear();
                 for (i, item) in items.iter().enumerate() {
                     let fp = fingerprint(item, &store);
-                    match render_item(&t, item, store, details) {
+                    match render_item(&t, item, store, details, link_root.as_ref()) {
                         Some(fi) => {
                             feed.push(format!("i{i}"), fi);
                             st.seen.push((fp, true));
@@ -1067,7 +1109,7 @@ pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState) {
                 if known && st.seen[i] == (fp, is_visible(item, details)) {
                     continue; // unchanged
                 }
-                match render_item(&t, item, store, details) {
+                match render_item(&t, item, store, details, link_root.as_ref()) {
                     Some(fi) => {
                         // Existing key -> in-place replace; new key ->
                         // append (source items only ever append, so a new
@@ -1149,7 +1191,7 @@ fn is_visible(item: &Item, details: bool) -> bool {
 /// the Scroll.
 #[allow(clippy::too_many_arguments)]
 pub fn pane(
-    _cx: Scope,
+    cx: Scope,
     t: &TokenSet,
     store: Store,
     ctx: &crate::ui::UiCtx,
@@ -1165,6 +1207,11 @@ pub fn pane(
     let feed = feed.clone();
     let gateway_label = ctx.gateway_label.clone();
     let workspace_root = ctx.workspace_root.clone().unwrap_or_default();
+    // Right-click context menu inputs (operator ask, 2026-08-28): the
+    // overlay store the engine popup opens in, and the linkify root for
+    // the menu's "Copy path" row.
+    let overlays = ctx.overlays.clone();
+    let link_root: Option<Rc<str>> = ctx.workspace_root.as_deref().map(Rc::from);
     // `basis(Cells(0))` beside `grow(1.0)` (2026-08-20): without it this
     // wrapper's basis is AUTO — measured from its content, i.e. the whole
     // transcript — so the chrome column overflowed by hundreds of rows the
@@ -1237,11 +1284,68 @@ pub fn pane(
             }
             // gap 0: spacing lives INSIDE items (`gap_row`), so tool
             // rows pack under their cycle while sections keep air.
-            abstracttui::widgets::Scroll::new(Feed::new(&feed).gap(0).view(scx))
+            let scroll = abstracttui::widgets::Scroll::new(Feed::new(&feed).gap(0).view(scx))
                 .offset_y(offset)
                 .follow_tail(follow)
                 .layout(LayoutStyle::default().grow(1.0))
                 .element(scx, &tokens)
+                .build();
+            // Right-click on an item opens its action menu
+            // (`ui::item_menu`). A wrapper element rather than a Feed
+            // hook: the engine's Feed exposes left-press only (its
+            // `on_item_press`), so the wrapper hears the secondary
+            // press on bubble, maps the pane row back to the item
+            // through `FeedState::item_at_row` + the live scroll
+            // offset, and opens the engine ContextMenu at the pointer.
+            // `basis(Cells(0))` on the wrapper: the 2026-08-20 lesson —
+            // an auto-sized ancestor of a Scroll re-derives a
+            // content-sized basis and overflows the chrome column.
+            let ui_feed = feed.clone();
+            let menu_overlays = overlays.clone();
+            let menu_root = link_root.clone();
+            Element::new()
+                .style(LayoutStyle::column().grow(1.0).basis(Dimension::Cells(0)))
+                .on(abstracttui::ui::Phase::Bubble, move |ectx, ev| {
+                    let abstracttui::ui::UiEvent::Mouse(m) = ev else {
+                        return;
+                    };
+                    let abstracttui::ui::MouseKind::Down(abstracttui::ui::MouseButton::Right) =
+                        m.kind
+                    else {
+                        return;
+                    };
+                    let rect = ectx.current_rect();
+                    let row = m.pos.y - rect.y + offset.get_untracked();
+                    let Some((key, _)) = ui_feed.item_at_row(row) else {
+                        return; // a gap or past-the-end press affords nothing
+                    };
+                    let Some(ix) = key.strip_prefix('i').and_then(|s| s.parse::<usize>().ok())
+                    else {
+                        return;
+                    };
+                    // Agent lane only: entity conversations use other
+                    // item sources under the same keys.
+                    if !matches!(store.focus.get_untracked(), Focus::Agent) {
+                        return;
+                    }
+                    let Some(item) = store.fold.with_untracked(|f| f.items.get(ix).cloned()) else {
+                        return;
+                    };
+                    let actions = crate::ui::item_menu::items_for(&item, menu_root.as_deref());
+                    if actions.is_empty() {
+                        return;
+                    }
+                    ectx.stop_propagation();
+                    let act_root = menu_root.clone();
+                    let _ = abstracttui::app::ContextMenu::new(actions)
+                        .access_label("transcript item actions")
+                        .overlays(&menu_overlays)
+                        .on_action(move |k| {
+                            crate::ui::item_menu::act(store, &item, k, act_root.as_deref())
+                        })
+                        .open(cx, m.pos);
+                })
+                .child(scroll)
                 .build()
         },
     )
@@ -1594,7 +1698,7 @@ mod tests {
                 for item in &items {
                     assert_eq!(
                         is_visible(item, details),
-                        render_item(&t, item, store, details).is_some(),
+                        render_item(&t, item, store, details, None).is_some(),
                         "visibility mirror diverged for {item:?} details={details}"
                     );
                 }

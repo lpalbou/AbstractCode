@@ -3,8 +3,8 @@ name = "abstractcode-tui"
 version = "0.5.0"
 edition = "2021"
 license = "MIT"
-# MSRV floor comes from the locked dependency set (abstracttui 0.3.3
-# declares 1.87 — `is_multiple_of`; ureq 2.12 declares 1.71).
+# MSRV floor comes from the locked dependency set (abstracttui 0.6.0
+# declares 1.87 — unchanged since 0.3.3; ureq 2.12 declares 1.71).
 rust-version = "1.87"
 authors = ["Laurent-Philippe Albou <contact@abstractframework.ai>"]
 description = "A reactive terminal client for AbstractGateway: durable coding-agent runs with live activity, tool approvals, steering, and sessions — rendered by AbstractTUI."
@@ -67,7 +67,19 @@ path = "src/main.rs"
 # (`ui::transcript_view`, the image block's error line); 0.3.5 reworded
 # the unsupported-format message, and that site prints it verbatim
 # rather than matching on it.
-abstracttui = "0.3.6"
+#
+# 0.6.0 (2026-08-28 upgrade from 0.3.6, crossing 0.4.0/0.5.0): one
+# source break reached us — `gfx::ImageFormat` gained `Gif` and went
+# #[non_exhaustive] (preview.rs grew the GIF arm + a wildcard; GIF now
+# PREVIEWS instead of refusing by name, so `named_binary` dropped its
+# dead GIF row and two tests moved GIF to the drawable family). The
+# 0.5.0 `RunConfig::extra_grounds` break never touched us (no
+# exhaustive literal). Inherited free: scrollbar drags no longer start
+# text selections, `Feed` answers its intrinsic height on the FIRST
+# frame (the remount/offset_y clamp class our loading→transcript
+# handoff exercises), tooltips work on hover and keyboard, grounds stay
+# distinct at 256 colors, and layout honors margins in wrap/grid.
+abstracttui = "0.6.0"
 # HTTP client (blocking, small): gateway calls + SSE ledger streaming.
 # The explicit feature set = ureq's defaults, pinned deliberately: "tls" is
 # rustls (remote HTTPS gateways work with zero system OpenSSL — the

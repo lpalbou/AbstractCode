@@ -7,6 +7,8 @@ pub mod chrome;
 pub mod entity_actions;
 pub mod entity_modals;
 pub mod goal;
+pub mod item_menu;
+pub mod linkify;
 pub mod loading;
 pub mod logo;
 pub mod modals;
@@ -262,7 +264,12 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     wire_pending_steer(cx, store, ctx.clone());
     goal::wire_goal(cx, store, ctx.clone());
     quit::wire_quit(cx, store, &ctx);
-    transcript_view::wire_feed(cx, store, &feed);
+    transcript_view::wire_feed(
+        cx,
+        store,
+        &feed,
+        ctx.workspace_root.as_deref().map(std::rc::Rc::from),
+    );
     entity_actions::wire_poller_view(cx, store);
     entity_actions::wire_focus_follow(cx, store, follow);
     wire_history_autoload(cx, store, &ctx, follow, scroll_offset);

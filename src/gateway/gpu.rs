@@ -162,7 +162,14 @@ fn poll_loop(client: GatewayClient, wake: WakeHandle, store: Store, my_gen: u64)
 pub fn meter_from_response(v: &Value) -> GpuMeter {
     let supported = v.get("supported").and_then(Value::as_bool).unwrap_or(false);
     if !supported {
-        let source = v.get("source").and_then(Value::as_str).unwrap_or("");
+        // The gateway's unsupported payload carries its why under
+        // `reason` (host_metrics.py); `source` is the older spelling.
+        let source = v
+            .get("reason")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| v.get("source").and_then(Value::as_str))
+            .unwrap_or("");
         return GpuMeter::Unsupported(if source.is_empty() {
             "host reports no GPU metrics".to_string()
         } else {
