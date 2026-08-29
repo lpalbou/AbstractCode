@@ -6,6 +6,160 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed (`/resources` operator refinements, 2026-08-28)
+
+- **`/resources` byte sizes are binary math with BINARY labels** (`B` / `KiB` /
+  `MiB` / `GiB` / `TiB`, one decimal). `human_bytes` always divided by 1024;
+  calling the result `GB` made this client disagree with the AbstractGateway
+  web console, which really did divide by 1e9 — one 89,986,353,824-byte GGUF
+  read `83.8 GB` here and `89.99 GB` there, and a 128 GiB machine's RAM read
+  `128.0 GB` here and `137.44 GB` there. Memory is binary wherever it is
+  configured or reported (`sysctl iogpu.wired_limit_mb=110000` is 107.4 GiB),
+  so the math stays and the units are corrected; the web console,
+  the gateway console-TUI, abstractflow and
+  `@abstractframework/monitor-memory` moved to the same spelling in the same
+  wave, pinned by a shared six-value assertion set. The ATTACHMENT surface
+  (`paths::human_size`, used by `exec.rs`/`runner.rs`/the preview header) is
+  untouched and keeps its own `KB`/`MB` spelling, so `/resources` no longer
+  borrows it for sub-GiB sizes.
+
+- **The device meter told the truth about the wrong pool.** On Metal,
+  `memory.device.allocated_bytes` is PROCESS-LOCAL: the live host serves
+  `allocated_bytes: 0` while a 93 GB GGUF is resident under LM Studio.
+  The line now prefers `host_in_use_bytes / wired_limit_bytes` and is
+  labelled **`Accelerator heap · <backend> (all processes)`**, falling
+  back to the allocated/total pair labelled **(this process only)** — a
+  "0 B allocated" beside a full machine can no longer be drawn
+  (`HostFacts::accelerator_figure`). It is NOT the machine's memory use
+  and NOT a denominator for "how full is this host": the counter is blind
+  to memory-mapped GGUF weights, and a dim sub-line says so verbatim —
+  *memory-mapped GGUF weights are not counted here*. The footer's `mem`
+  segment is unchanged: it reports host RAM percent, which was never wrong.
+- **Every resident line offers the lock verb**, sweep/externally-loaded
+  rows included: `POST /models/lock` now ADOPTS them, so `lockable` is
+  parsed TRI-STATE (`Option<bool>`) — a null is an unknown the gateway
+  answers, not the refusal this client used to invent by folding it to
+  `false`. `locked` outranks residency (a locked-but-evicted row keeps
+  Unlock); a row the host says it is NOT holding gets no lock and no
+  unload, naming the reason. Each row prints the verb `k` will perform,
+  read from the same `store::lock_action` the key handler uses.
+- **Per-model footprint.** One coalesce for every surface: `size_bytes` →
+  `size_vram_bytes` → `est_weights_bytes`, the third MARKED `~3.1 GB`
+  against a reported `3.1 GB` (documented in the panel's hint row). Rows
+  carrying only `est_weights_bytes` — every externally-loaded model —
+  used to print no size at all. `cache_bytes` rides beside it as its own
+  figure, never folded into the size.
+- **A memory breakdown under the meters**, in three KINDS of line keyed
+  and ordered identically on every surface: ITEMS the framework measured
+  (`model:<runtime_id>` per resident model, `model_caches`,
+  `session_caches`, `process_rss`), each naming what it measures and
+  which field supplied it; then, under a rule, REFERENCES that are
+  separate counters and NOT summable with them (`sum_model_weights`,
+  `ram`, `accelerator`); then a NOTE when `Σ model weights` exceeds the
+  accelerator heap, which is the normal memory-mapped-GGUF case. A line
+  is emitted when its value is KNOWN and omitted when unknown; a known
+  `0` IS emitted.
+- **The `unattributed` remainder is DELETED.** It subtracted
+  RAM-dimensioned quantities (weights, caches, RSS) from an accelerator
+  counter that cannot see memory-mapped weights: live it computed −79 GB,
+  clamped to `0 B`, and blamed "overlap" for a category error. No second
+  remainder replaces it — attribution against RAM would need per-process
+  accounting the framework does not have.
+- **Adopt wording keys on `source == "provider_server"`** — the one
+  marker the wire stamps on a host-sweep row. `lockable: true` rides on
+  those rows too, so it can never be the selector; the tolerated
+  `sweep`/`external` aliases (which the wire never emits) are gone.
+- **Model rows WRAP instead of truncating**, and the panel scrolls the
+  cursor INTO VIEW instead of centring it: a row now carries its
+  footprint, cache and verb, and centring on the first model target
+  scrolled the meters — the thing the panel is opened for — off the top.
+  The memory section no longer repeats the host name (it is in the title)
+  or the RSS (the breakdown itemizes it one line below).
+- **The meters are a PINNED head, and the body opens at its own top.**
+  The window follows the CURSOR, so rows above the first cursor target
+  can never be scrolled back to — `↑` stops at the first target. That was
+  invisible while the preamble was shorter than the window; with the
+  accelerator meter, its note and the itemized breakdown above the first
+  model row, the preamble outgrew the window and stranded the meters
+  behind an `↑ N more` no key could move. The meters block is now held
+  out of the scroll (`draw_rows_pinned`) so it renders at every cursor
+  position, and the body anchors at its own top while the cursor is on
+  the first target so the itemization is not stranded one level down. The
+  trade: the first target's own highlight can sit below the fold at rest.
+  That is safe because every action key NAMES the row it will act on
+  ("unload lmstudio/qwen3-4b?"), so the target is stated, never guessed.
+
+Fixtures for all of the above are pinned from a LIVE `/host/state`
+capture (allocated 0, 98.5 GB of accelerator heap in use across all
+processes, a `source: provider_server` / `lockable: true` sweep row with
+only an estimate), not written to match the parser. The breakdown's keys,
+order and byte values are pinned against the shared cross-surface payload
+(89.99 GB of itemized weights beside a 1.04 GB accelerator heap — the
+GGUF case the old remainder got wrong).
+
+### Fixed (adversarial review of the 2026-08-28 work)
+
+- **A stale probe's progress no longer lands on the session you just
+  picked.** `probe_attach`'s restoring/progress posts were unguarded
+  while the fold-swap post beside them was session-guarded. Picking a
+  second session inside the first restore window — the exact window
+  this feature exists for — rendered probe A's counters on session B's
+  loading screen (*"restored 4 of 9 prior turn(s)"* for a restore that
+  had not begun), then let A's clear drop `restoring` while B's fold
+  was still Info-only, handing the pane back to the splash's *"describe
+  a task below"* over a session with history in flight. Every post in
+  the probe now carries the same guard the fold swap always had.
+- **Right-clicking a streaming, scrolled transcript no longer opens the
+  wrong item's menu.** The handler sat outside the `Scroll` and added
+  `offset_y` to the row — but `Scroll` bottom-anchors its content while
+  the tail is pinned and syncs that signal only a turn later ("the pin
+  IS the position"), so during a live run the offset lagged one append
+  and the menu resolved an earlier item, then copied it under a notice
+  that sounded correct. The handler moved INSIDE the Scroll and now
+  uses the engine's own formula (`pos.y - rect.y`, no offset), immune
+  to the lag by construction.
+- **The loading screen no longer paints over an entity conversation.**
+  Its pane branch ran before any focus check, so opening an entity lane
+  during a restore (Alt+E, `/focus`, `@name` — none consult
+  `restoring`) showed *"restoring session <agent-session>…"* above that
+  entity's own composer placeholder. Gated to the agent lane.
+- **A copy notice can no longer claim a write that did not happen.**
+  The engine's `copy_to_clipboard` refuses all-whitespace text, but the
+  menu gated on `is_empty()` — so a `"\n"` stdout (`mkdir -p out`,
+  `touch x`) offered an enabled "Copy result", dropped the write, and
+  announced *"copied result (1 chars)"*. Every offer and payload now
+  gates on `trim().is_empty()`, and each row's enablement mirrors its
+  payload's gate, so an enabled row can never resolve to nothing.
+- **A right-click with nothing to offer says so.** An all-disabled menu
+  makes `ContextMenu::open` return `None`; the press was consumed and
+  nothing appeared, which reads as a flaky menu since the same card
+  works once its result lands. Inert cards and a refused open both
+  notify now.
+- **Link URIs are charset-gated at the source.** `register_link`
+  interns a URI verbatim and the presenter writes its bytes between
+  `ESC]8;;` and `ESC\`, so a control character inside a token escapes
+  the sequence (measured: an embedded `ESC]0;…BEL` sets the window
+  title). Both call sites happened to launder text through
+  `text::wrap`/`truncate_ellipsis` first, but that is the engine's
+  incidental behavior, not this module's contract — tokens carrying a
+  control character are now refused outright.
+- **Off-screen rows are culled before drawing.** A custom block gets its
+  FULL rect and the canvas clips, so an uncapped `/details` result body
+  drew thousands of invisible rows — and `linkify` stats every relative
+  path token it is handed. Measured at 10.35 ms per repaint on a
+  3000-line path-dense body, against one repaint per streamed ledger
+  record. Cost now tracks the viewport, not the body.
+- **Three tests that could not fail were rewritten.** The path-guard
+  test probed relative paths, which `file_uri` refuses anyway for want
+  of a root, so it passed with the guards deleted (it uses absolute
+  paths now); the scan-band test asserted a wrap that holds for *every*
+  integer step, pinning nothing about the constant it named (it now
+  pins that the band advances and crosses the bar); and the right-click
+  test used a fold that fit the pane, so the offset term was never
+  exercised — which is how the defect above survived the suite (it
+  scrolls now). Each fix was verified by reintroducing the defect and
+  watching the test go red.
+
 ### Added (clickable paths/URLs + right-click menus, 2026-08-28)
 
 - **File paths and URLs in tool cards are OSC-8 hyperlinks**

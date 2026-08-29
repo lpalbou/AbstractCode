@@ -765,7 +765,11 @@ pub fn residency_rows_v1(v: &Value) -> Vec<ResidencyRow> {
             resident: m.get("resident").and_then(Value::as_bool),
             state: str_of(m, "state"),
             locked: m.get("locked").and_then(Value::as_bool).unwrap_or(false),
-            lockable: m.get("lockable").and_then(Value::as_bool).unwrap_or(false),
+            // TRI-STATE like `resident`: null/absent = the gateway did
+            // not say. Folding it to `false` here would refuse the lock
+            // on exactly the rows lock now ADOPTS (sweep/externally
+            // loaded models arrive with a null `lockable`).
+            lockable: m.get("lockable").and_then(Value::as_bool),
             modalities: m
                 .get("modalities")
                 .and_then(Value::as_array)
@@ -778,6 +782,11 @@ pub fn residency_rows_v1(v: &Value) -> Vec<ResidencyRow> {
                 .unwrap_or_default(),
             size_bytes: u64_of(m, "size_bytes"),
             size_vram_bytes: u64_of(m, "size_vram_bytes"),
+            // Additive row_v1 fields — nullable by contract, so absence
+            // stays absence (`display_size` coalesces, marking the
+            // estimate; `cache_bytes` renders as its own second figure).
+            est_weights_bytes: u64_of(m, "est_weights_bytes"),
+            cache_bytes: u64_of(m, "cache_bytes"),
             context_length: u64_of(m, "context_length"),
             calibrated_context_length: u64_of(m, "calibrated_context_length"),
             context_calibrated: m
@@ -887,6 +896,8 @@ pub fn host_state_from_response(v: &Value) -> HostFacts {
         device_allocated: u64_of(&device, "allocated_bytes"),
         device_total: u64_of(&device, "total_bytes"),
         device_free: u64_of(&device, "free_bytes"),
+        device_host_in_use: u64_of(&device, "host_in_use_bytes"),
+        device_wired_limit: u64_of(&device, "wired_limit_bytes"),
         gpu_supported,
         // A number is only a number when the host SUPPORTS the meter —
         // `supported:false` with a stray field must not resurrect it.
@@ -1483,8 +1494,14 @@ mod tests {
                 "ram": {"total_bytes": 137438953472u64, "available_bytes": 52200000000u64,
                          "used_bytes": 85238953472u64, "percent": 62.0},
                 "process": {"rss_bytes": 512000000u64},
-                "device": {"backend": "mlx", "allocated_bytes": 21474836480u64,
-                            "total_bytes": 103079215104u64, "free_bytes": 81604378624u64},
+                // The live device block, verbatim: `allocated_bytes` is
+                // PROCESS-LOCAL and reads 0 while ~98 GB of weights are
+                // resident. `host_in_use_bytes` / `wired_limit_bytes`
+                // are the all-processes pair the meter must prefer.
+                "device": {"backend": "mlx", "allocated_bytes": 0u64,
+                            "total_bytes": 137438953472u64, "free_bytes": 31694962688u64,
+                            "host_in_use_bytes": 105743990784u64,
+                            "wired_limit_bytes": 115343360000u64},
                 "host": {"host_name": "studio.local"}
             },
             "gpu": {"supported": true, "utilization_gpu_pct": 21.0},
@@ -1493,19 +1510,33 @@ mod tests {
                  "model": "qwen3-4b", "source": "config", "resident": true,
                  "state": "loaded", "locked": true, "lockable": true,
                  "modalities": ["text"], "size_bytes": 4508876800u64,
-                 "size_vram_bytes": 4508876800u64, "context_length": 32768,
+                 "size_vram_bytes": 4508876800u64, "est_weights_bytes": 4400000000u64,
+                 "cache_bytes": 268435456u64, "context_length": 32768,
                  "calibrated_context_length": 28672, "context_calibrated": true,
                  "default": true, "loaded_at": "2026-08-27T09:00:00Z",
                  "last_used_at": "2026-08-27T09:59:00Z"},
                 {"task": "image-generation", "provider": "mlx-gen", "model": "flux",
                  "resident": null, "state": null, "locked": null, "lockable": false,
-                 "size_bytes": null, "context_length": null}
+                 "size_bytes": null, "est_weights_bytes": null, "cache_bytes": null,
+                 "context_length": null},
+                // The host-sweep row EXACTLY as the wire emits it: LM
+                // Studio loaded it, so the gateway stamps
+                // `source: "provider_server"` and `lockable: true`, and a
+                // lock ADOPTS it. No measured size — only an ESTIMATE.
+                {"runtime_id": null, "task": "text-generation", "provider": "lmstudio",
+                 "model": "glm-4.6-gguf", "source": "provider_server", "resident": true,
+                 "state": "provider_loaded", "locked": false, "lockable": true,
+                 "size_bytes": null, "size_vram_bytes": null,
+                 "est_weights_bytes": 99857989632u64, "cache_bytes": 2147483648u64,
+                 "context_length": 131072, "default": false}
             ],
             "session_caches": [
                 {"key": "k1", "provider": "lmstudio", "model": "qwen3-4b",
                  "session_id": "acode-abc", "bytes": 1048576, "token_count": 2100}
             ],
-            "totals": {"model_bytes": 4508876800u64, "models_resident": 1},
+            "totals": {"model_bytes": 4508876800u64, "models_resident": 2,
+                        "cache_bytes_models": 2415919104u64,
+                        "session_cache_bytes": 1048576u64},
             "degraded": [],
             "reasons": {}
         })
@@ -1529,24 +1560,185 @@ mod tests {
         assert_eq!(f.ram_percent, Some(62.0));
         assert_eq!(f.process_rss, Some(512000000));
         assert_eq!(f.device_backend, "mlx");
-        assert_eq!(f.device_allocated, Some(21474836480));
+        assert_eq!(f.device_allocated, Some(0), "the wire really serves 0");
+        assert_eq!(f.device_host_in_use, Some(105743990784));
+        assert_eq!(f.device_wired_limit, Some(115343360000));
         assert!(f.gpu_supported);
         assert_eq!(f.gpu_util_pct, Some(21.0));
-        assert_eq!(f.models.len(), 2);
+        assert_eq!(f.models.len(), 3);
         let m = &f.models[0];
         assert_eq!(m.resident, Some(true));
-        assert!(m.locked && m.lockable && m.context_calibrated && m.is_default);
+        assert!(m.locked && m.lockable == Some(true) && m.context_calibrated && m.is_default);
         assert_eq!(m.calibrated_context_length, Some(28672));
+        // The additive row_v1 numbers fold, and the coalesce prefers the
+        // MEASURED size over the estimate that rides beside it.
+        assert_eq!(m.est_weights_bytes, Some(4400000000));
+        assert_eq!(m.cache_bytes, Some(268435456));
+        assert_eq!(m.display_size(), Some((4508876800, false)));
+        let sweep = &f.models[2];
+        assert_eq!(sweep.size_bytes, None, "the sweep row measured nothing");
+        assert_eq!(
+            sweep.display_size(),
+            Some((99857989632, true)),
+            "…so the ESTIMATE renders, flagged as one"
+        );
+        assert_eq!(
+            sweep.source, "provider_server",
+            "the wire's ONE sweep marker — the adopt selector keys on it"
+        );
+        assert_eq!(
+            sweep.lockable,
+            Some(true),
+            "the wave stamps sweep rows lockable:true — so `lockable` can\
+             never be the adopt selector"
+        );
         assert_eq!(f.caches.len(), 1);
         assert_eq!(f.caches[0].bytes, Some(1048576));
         assert_eq!(
             f.totals,
             vec![
+                ("cache_bytes_models".to_string(), 2415919104),
                 ("model_bytes".to_string(), 4508876800),
-                ("models_resident".to_string(), 1)
+                ("models_resident".to_string(), 2),
+                ("session_cache_bytes".to_string(), 1048576),
             ]
         );
         assert!(f.degraded.is_empty());
+    }
+
+    /// THE METAL BUG: `allocated_bytes` is process-local and reads 0
+    /// with ~98 GB resident. The meter prefers the ALL-PROCESSES pair and
+    /// names its scope; the process-local pair is the labelled fallback.
+    #[test]
+    fn device_meter_prefers_the_all_processes_figure_over_the_process_local_zero() {
+        use crate::store::DeviceScope;
+        let f = host_state_from_response(&full_host_state());
+        assert_eq!(
+            f.device_meter(),
+            Some((105743990784, 115343360000, DeviceScope::AllProcesses))
+        );
+        // Spec PART A3: the scope words are exactly these two. No
+        // spelling of "host" survives as a scope name for this figure.
+        assert_eq!(DeviceScope::AllProcesses.label(), "all processes");
+        assert_eq!(DeviceScope::Process.label(), "this process only");
+
+        // No host figure → the process-local pair, LABELLED as such.
+        let older = host_state_from_response(&json!({
+            "memory": {"device": {"backend": "cuda", "allocated_bytes": 5000,
+                                   "total_bytes": 50000}}
+        }));
+        assert_eq!(
+            older.device_meter(),
+            Some((5000, 50000, DeviceScope::Process))
+        );
+        // An all-processes figure with no wired limit still outranks it.
+        let no_limit = host_state_from_response(&json!({
+            "memory": {"device": {"allocated_bytes": 0, "total_bytes": 50000,
+                                   "host_in_use_bytes": 40000}}
+        }));
+        assert_eq!(
+            no_limit.device_meter(),
+            Some((40000, 50000, DeviceScope::AllProcesses))
+        );
+        // Nothing known → nothing drawn.
+        assert_eq!(HostFacts::default().device_meter(), None);
+        // A used figure with NO ceiling is still a fact — it just cannot
+        // draw a bar (spec PART B2 renders it as the bare `used`).
+        let no_ceiling = host_state_from_response(&json!({
+            "memory": {"device": {"backend": "metal", "host_in_use_bytes": 4096}}
+        }));
+        assert_eq!(no_ceiling.device_meter(), None, "no denominator, no bar");
+        assert_eq!(
+            no_ceiling.accelerator_figure(),
+            Some((4096, None, DeviceScope::AllProcesses))
+        );
+    }
+
+    /// Refinement 1 + spec PART D1: every RESIDENT line offers the lock
+    /// verb, sweep rows included (`POST /models/lock` adopts them), and
+    /// the ADOPT wording keys on `source == "provider_server"` — the one
+    /// marker the wire actually stamps. Locked outranks residency; a
+    /// non-resident row gets no lock and no unload, with the reason named.
+    #[test]
+    fn lock_action_follows_residency_and_adopts_provider_server_rows() {
+        use crate::store::{lock_action, unload_refusal, LockAction, ResidencyRow};
+        let f = host_state_from_response(&full_host_state());
+        assert_eq!(lock_action(&f.models[0]), LockAction::Unlock, "locked row");
+        assert_eq!(
+            lock_action(&f.models[2]),
+            LockAction::Lock { adopt: true },
+            "the wire's `source: provider_server` row locks by ADOPTING"
+        );
+        // `lockable: true` rides on the sweep row too, so it can never be
+        // the adopt selector — and no other source string adopts.
+        assert_eq!(
+            lock_action(&ResidencyRow {
+                resident: Some(true),
+                lockable: Some(true),
+                source: "config".into(),
+                ..Default::default()
+            }),
+            LockAction::Lock { adopt: false },
+            "a gateway-loaded row locks WITHOUT adopting"
+        );
+        for other in ["sweep", "external", "PROVIDER_SERVER", ""] {
+            assert_eq!(
+                lock_action(&ResidencyRow {
+                    resident: Some(true),
+                    source: other.into(),
+                    ..Default::default()
+                }),
+                LockAction::Lock { adopt: false },
+                "only the exact `provider_server` adopts, not {other:?}"
+            );
+        }
+        assert!(matches!(
+            lock_action(&f.models[1]),
+            LockAction::Refused(_)
+        ));
+        assert!(unload_refusal(&f.models[2]).is_none());
+        assert!(
+            unload_refusal(&f.models[1]).is_none(),
+            "resident:null is UNKNOWN, not a 'no' — the gateway decides"
+        );
+
+        let evicted = ResidencyRow {
+            locked: true,
+            resident: Some(false),
+            ..Default::default()
+        };
+        assert_eq!(
+            lock_action(&evicted),
+            LockAction::Unlock,
+            "a locked-but-evicted row keeps its Unlock"
+        );
+        let cold = ResidencyRow {
+            resident: Some(false),
+            ..Default::default()
+        };
+        assert!(matches!(lock_action(&cold), LockAction::Refused(_)));
+        assert!(unload_refusal(&cold).is_some());
+        let refused = ResidencyRow {
+            resident: Some(true),
+            lockable: Some(false),
+            ..Default::default()
+        };
+        assert!(matches!(lock_action(&refused), LockAction::Refused(_)));
+        // THE GATE OUTRANKS THE WORDING. This is the live shape on this
+        // machine — LM Studio's row is `provider_server` AND
+        // `lockable: false` — so no lock affordance renders at all and
+        // the adopt wording never gets the chance to. The two selectors
+        // stay independent; the gate is unchanged by spec PART D1.
+        let gated = ResidencyRow {
+            resident: Some(true),
+            source: "provider_server".into(),
+            lockable: Some(false),
+            ..Default::default()
+        };
+        assert!(
+            matches!(lock_action(&gated), LockAction::Refused(_)),
+            "a provider_server row the gateway calls not-lockable gets NO lock verb"
+        );
     }
 
     #[test]
@@ -1557,6 +1749,9 @@ mod tests {
         let f = host_state_from_response(&full_host_state());
         let m = &f.models[1];
         assert_eq!(m.resident, None, "null = unknown, not false");
+        assert_eq!(m.est_weights_bytes, None, "null size fields stay unknown");
+        assert_eq!(m.cache_bytes, None);
+        assert_eq!(m.display_size(), None, "nothing known: no size at all");
         assert!(m.state.is_empty(), "null state reads as absent");
         assert!(
             !m.locked,

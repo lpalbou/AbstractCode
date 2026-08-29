@@ -415,8 +415,23 @@ impl CappedBody {
             move |canvas, rect| {
                 let top = rect.y + i32::from(spec.lead);
                 let lines = spec.lines_at(rect.w);
+                // A custom block gets its FULL rect (its top may sit
+                // above the visible band) and the canvas clips. Cull
+                // off-screen rows OURSELVES (adversarial review
+                // 2026-08-28, B): an uncapped `/details` result body is
+                // thousands of lines of which ~20 are on screen, and
+                // `linkify` stats every relative path token it is
+                // handed — measured at 10.35 ms per repaint on a
+                // 3000-line, path-dense body, against a repaint per
+                // streamed ledger record. Clipped, the cost tracks the
+                // viewport instead of the body.
+                let clip = canvas.clip_rect();
                 for (i, line) in lines.iter().enumerate() {
-                    let p = Point::new(rect.x + spec.indent, top + i as i32);
+                    let y = top + i as i32;
+                    if y < clip.y || y >= clip.bottom() {
+                        continue;
+                    }
+                    let p = Point::new(rect.x + spec.indent, y);
                     if spec.link {
                         crate::ui::linkify::print_linked(
                             canvas,
@@ -1243,7 +1258,16 @@ pub fn pane(
             // before `restoring` clears, and that frame must stay the
             // loading screen, never flash the splash's "describe a
             // task" over a session whose history just arrived.
-            if store.restoring.get() {
+            //
+            // AGENT LANE ONLY (adversarial review 2026-08-28, E): the
+            // restore belongs to the agent conversation, and nothing
+            // stops the operator from opening an entity lane during it
+            // (Alt+E, `/focus`, `@name` — none of them consult
+            // `restoring`). Ungated, the pane claimed "restoring
+            // session <agent-session>…" over an entity conversation
+            // that has nothing to do with the restore, while the
+            // composer below it showed that entity's own placeholder.
+            if store.restoring.get() && matches!(store.focus.get(), Focus::Agent) {
                 return crate::ui::loading::view(&tokens, store, splash.get());
             }
             if empty.get() {
@@ -1282,29 +1306,31 @@ pub fn pane(
                     frame,
                 );
             }
-            // gap 0: spacing lives INSIDE items (`gap_row`), so tool
-            // rows pack under their cycle while sections keep air.
-            let scroll = abstracttui::widgets::Scroll::new(Feed::new(&feed).gap(0).view(scx))
-                .offset_y(offset)
-                .follow_tail(follow)
-                .layout(LayoutStyle::default().grow(1.0))
-                .element(scx, &tokens)
-                .build();
             // Right-click on an item opens its action menu
             // (`ui::item_menu`). A wrapper element rather than a Feed
-            // hook: the engine's Feed exposes left-press only (its
-            // `on_item_press`), so the wrapper hears the secondary
-            // press on bubble, maps the pane row back to the item
-            // through `FeedState::item_at_row` + the live scroll
-            // offset, and opens the engine ContextMenu at the pointer.
-            // `basis(Cells(0))` on the wrapper: the 2026-08-20 lesson —
-            // an auto-sized ancestor of a Scroll re-derives a
-            // content-sized basis and overflows the chrome column.
+            // hook: the engine's Feed exposes LEFT press only (its
+            // `on_item_press`), so this hears the secondary press on
+            // bubble and maps the row back through
+            // `FeedState::item_at_row`.
+            //
+            // The wrapper sits INSIDE the Scroll, wrapping the Feed
+            // (adversarial review 2026-08-28, C). Outside it, the row
+            // needed a `+ offset` term — and that term is WRONG while a
+            // run streams into a scrolled transcript: `Scroll`
+            // bottom-anchors its content whenever the tail is pinned and
+            // syncs the bound `offset_y` only a turn later ("the pin IS
+            // the position", scroll.rs), so the signal lags the drawn
+            // position by one append and the menu opened on an EARLIER
+            // item — then copied it under a notice that sounded right.
+            // Inside, the wrapper's own rect IS the scrolled content
+            // rect, so `pos.y - rect.y` is the content row directly:
+            // the engine's own formula in `Feed::on_item_press`, immune
+            // to the pin lag by construction.
             let ui_feed = feed.clone();
             let menu_overlays = overlays.clone();
             let menu_root = link_root.clone();
-            Element::new()
-                .style(LayoutStyle::column().grow(1.0).basis(Dimension::Cells(0)))
+            let content = Element::new()
+                .style(LayoutStyle::column().width(Dimension::Percent(1.0)))
                 .on(abstracttui::ui::Phase::Bubble, move |ectx, ev| {
                     let abstracttui::ui::UiEvent::Mouse(m) = ev else {
                         return;
@@ -1314,8 +1340,7 @@ pub fn pane(
                     else {
                         return;
                     };
-                    let rect = ectx.current_rect();
-                    let row = m.pos.y - rect.y + offset.get_untracked();
+                    let row = m.pos.y - ectx.current_rect().y;
                     let Some((key, _)) = ui_feed.item_at_row(row) else {
                         return; // a gap or past-the-end press affords nothing
                     };
@@ -1332,20 +1357,40 @@ pub fn pane(
                         return;
                     };
                     let actions = crate::ui::item_menu::items_for(&item, menu_root.as_deref());
-                    if actions.is_empty() {
+                    // Nothing to act on is SAID, never silent (review I-2):
+                    // `ContextMenu::open` also returns None for an
+                    // all-disabled menu, and the press is consumed either
+                    // way — an unexplained dead right-click reads as a
+                    // flaky menu, since the same card affords actions the
+                    // moment its result lands.
+                    let inert = actions.is_empty() || actions.iter().all(|a| a.disabled);
+                    ectx.stop_propagation();
+                    if inert {
+                        store.notify("nothing to copy from this card yet");
                         return;
                     }
-                    ectx.stop_propagation();
                     let act_root = menu_root.clone();
-                    let _ = abstracttui::app::ContextMenu::new(actions)
+                    let opened = abstracttui::app::ContextMenu::new(actions)
                         .access_label("transcript item actions")
                         .overlays(&menu_overlays)
                         .on_action(move |k| {
                             crate::ui::item_menu::act(store, &item, k, act_root.as_deref())
                         })
                         .open(cx, m.pos);
+                    if opened.is_none() {
+                        // No overlay context, or a viewport with no room.
+                        store.notify("no room to open the item menu here");
+                    }
                 })
-                .child(scroll)
+                .child(Feed::new(&feed).gap(0).view(scx))
+                .build();
+            // gap 0: spacing lives INSIDE items (`gap_row`), so tool
+            // rows pack under their cycle while sections keep air.
+            abstracttui::widgets::Scroll::new(content)
+                .offset_y(offset)
+                .follow_tail(follow)
+                .layout(LayoutStyle::default().grow(1.0))
+                .element(scx, &tokens)
                 .build()
         },
     )

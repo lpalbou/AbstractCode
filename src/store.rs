@@ -316,16 +316,113 @@ pub struct ResidencyRow {
     pub resident: Option<bool>,
     pub state: String,
     pub locked: bool,
-    pub lockable: bool,
+    /// TRI-STATE like `resident`: `None` = the gateway did not say.
+    /// It must NOT read as "not lockable" — `POST /models/lock` now
+    /// ADOPTS externally-loaded (sweep) models, and those rows are
+    /// exactly the ones that arrive with a null here.
+    pub lockable: Option<bool>,
     pub modalities: Vec<String>,
     pub size_bytes: Option<u64>,
     pub size_vram_bytes: Option<u64>,
+    /// The gateway's ESTIMATE of the weight footprint (derived from the
+    /// artifact, not measured on the host) — the last resort of
+    /// [`ResidencyRow::display_size`], and why that helper hands back an
+    /// "estimated" flag instead of a bare number.
+    pub est_weights_bytes: Option<u64>,
+    /// KV/prompt cache the runtime holds FOR THIS MODEL — a SECOND
+    /// figure beside the weights, never folded into the size.
+    pub cache_bytes: Option<u64>,
     pub context_length: Option<u64>,
     pub calibrated_context_length: Option<u64>,
     pub context_calibrated: bool,
     pub is_default: bool,
     pub loaded_at: String,
     pub last_used_at: String,
+}
+
+impl ResidencyRow {
+    /// THE DISPLAY-SIZE COALESCE, shared by every surface that prints a
+    /// per-model footprint: first KNOWN of `size_bytes` →
+    /// `size_vram_bytes` → `est_weights_bytes`. The flag is `true` only
+    /// for the third — an estimate, not a measurement — so no renderer
+    /// can present it as reported (the `~` marker).
+    pub fn display_size(&self) -> Option<(u64, bool)> {
+        self.display_size_source().map(|(b, est, _)| (b, est))
+    }
+
+    /// [`ResidencyRow::display_size`] plus WHICH FIELD supplied the
+    /// number, spelled as the breakdown's source phrase. Defined here —
+    /// and `display_size` defined in terms of it — so the coalesce order
+    /// and the sentence naming it can never drift apart.
+    pub fn display_size_source(&self) -> Option<(u64, bool, &'static str)> {
+        self.size_bytes
+            .map(|b| (b, false, "reported by the model server (size_bytes)"))
+            .or(self
+                .size_vram_bytes
+                .map(|b| (b, false, "reported by the model server (size_vram_bytes)")))
+            .or(self
+                .est_weights_bytes
+                .map(|b| (b, true, "estimated on-disk weight size (est_weights_bytes)")))
+    }
+
+    /// Does this row CLAIM residency? `resident` is tri-state: only an
+    /// explicit `true` is a yes (a null is unknown, never a yes).
+    pub fn is_resident(&self) -> bool {
+        self.resident == Some(true)
+    }
+}
+
+/// What the `k` key offers on a row — the ONE authority behind the key
+/// handler, the row's own hint and the tests.
+///
+/// The rule: EVERY resident line offers the lock verb, sweep rows
+/// included, because `POST /models/lock` now ADOPTS a model LM Studio or
+/// ollama loaded. `locked` outranks residency, so a locked-but-evicted
+/// row keeps its Unlock. A row that is not resident carries no lock verb
+/// at all — and the refusal names why rather than being a dead key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LockAction {
+    Unlock,
+    /// Lock; `adopt` when the row looks externally loaded.
+    Lock { adopt: bool },
+    Refused(&'static str),
+}
+
+pub fn lock_action(r: &ResidencyRow) -> LockAction {
+    if r.locked {
+        return LockAction::Unlock;
+    }
+    if !r.is_resident() {
+        return LockAction::Refused(match r.resident {
+            Some(false) => "not resident — only a loaded model can be locked",
+            _ => "residency unknown — r refreshes before locking",
+        });
+    }
+    if r.lockable == Some(false) {
+        return LockAction::Refused("this gateway reports the model as not lockable");
+    }
+    // `lockable: null` is UNKNOWN, never a "no": the gateway is the
+    // authority, and it adopts externally-loaded models.
+    LockAction::Lock {
+        // `provider_server` is the ONE string the gateway stamps on a
+        // host-sweep row (core `server/app.py`, runtime
+        // `_merge_host_sweep_into_text_records`), and the ONE selector
+        // every surface keys the adopt wording off (spec PART D1).
+        // `sweep`/`external` were tolerated aliases the wire never emits;
+        // accepting them only made a fixture disagree with the wire.
+        adopt: r.source == "provider_server",
+    }
+}
+
+/// May the unload verb target this row? A row the host says is NOT
+/// resident has nothing to unload; an UNKNOWN residency still may — the
+/// tri-state's third answer is not a "no", and the gateway is the
+/// authority on what it holds.
+pub fn unload_refusal(r: &ResidencyRow) -> Option<&'static str> {
+    match r.resident {
+        Some(false) => Some("not resident — there is nothing to unload"),
+        _ => None,
+    }
 }
 
 /// One session prompt-cache row (`/host/state` → `session_caches[]`).
@@ -358,9 +455,20 @@ pub struct HostFacts {
     pub process_rss: Option<u64>,
     /// `memory.device.backend` ("mlx", "cuda", …); "" = not reported.
     pub device_backend: String,
+    /// PROCESS-LOCAL allocation. On Metal this counts only what THIS
+    /// gateway process allocated: the live host serves `0` here while a
+    /// 93 GB GGUF is resident under LM Studio. Never the meter's first
+    /// choice — see [`HostFacts::device_meter`].
     pub device_allocated: Option<u64>,
     pub device_total: Option<u64>,
     pub device_free: Option<u64>,
+    /// ACCELERATOR-HEAP bytes in use across ALL PROCESSES (ioreg "In use
+    /// system memory"), and the OS's wired limit for it. It is a genuine
+    /// accelerator counter — and it is BLIND to memory-mapped GGUF
+    /// weights, so it is never the machine's memory use and never a
+    /// denominator for "how full is this host".
+    pub device_host_in_use: Option<u64>,
+    pub device_wired_limit: Option<u64>,
     /// `gpu.supported` — false/absent = no GPU number is rendered.
     pub gpu_supported: bool,
     pub gpu_util_pct: Option<f64>,
@@ -372,6 +480,59 @@ pub struct HostFacts {
     /// Degraded lanes, each folded with its reason when `reasons{}`
     /// names one ("gpu: ioreg unavailable").
     pub degraded: Vec<String>,
+}
+
+/// WHOSE accelerator-heap bytes a meter is showing. The scope MUST ride
+/// with the number: a process-local figure presented as everyone's is
+/// the exact lie that made this meter read "0 B allocated" beside a full
+/// machine. The scope words are `all processes` / `this process only` —
+/// never the word "host" in any spelling, and nothing else that reads as
+/// whole-system usage, because this counter is the ACCELERATOR HEAP and
+/// is blind to memory-mapped GGUF weights (spec PART A3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceScope {
+    /// `host_in_use_bytes / wired_limit_bytes` — every process.
+    AllProcesses,
+    /// `allocated_bytes / total_bytes` — this gateway process only.
+    Process,
+}
+
+impl DeviceScope {
+    pub fn label(self) -> &'static str {
+        match self {
+            DeviceScope::AllProcesses => "all processes",
+            DeviceScope::Process => "this process only",
+        }
+    }
+}
+
+impl HostFacts {
+    /// THE ACCELERATOR FIGURE (spec PART A2): the all-processes reading
+    /// wins wherever it exists; the process-local one is the LABELLED
+    /// fallback; absence of both is `None` — a figure is never drawn
+    /// from nothing. The ceiling is OPTIONAL: a `used` with no ceiling
+    /// is still a fact, it just cannot draw a bar.
+    pub fn accelerator_figure(&self) -> Option<(u64, Option<u64>, DeviceScope)> {
+        let ceiling = |c: Option<u64>| c.filter(|t| *t > 0);
+        if let Some(used) = self.device_host_in_use {
+            // An all-processes figure with no wired limit still beats the
+            // process-local one: the device total is its denominator.
+            return Some((
+                used,
+                ceiling(self.device_wired_limit).or_else(|| ceiling(self.device_total)),
+                DeviceScope::AllProcesses,
+            ));
+        }
+        self.device_allocated
+            .map(|used| (used, ceiling(self.device_total), DeviceScope::Process))
+    }
+
+    /// THE DEVICE-METER RULE: [`HostFacts::accelerator_figure`] narrowed
+    /// to the pairs that can actually draw a BAR (a known ceiling).
+    pub fn device_meter(&self) -> Option<(u64, u64, DeviceScope)> {
+        self.accelerator_figure()
+            .and_then(|(used, ceiling, scope)| ceiling.map(|t| (used, t, scope)))
+    }
 }
 
 /// `/resources` host-state lane (the [`GpuMeter`] shape): written on the

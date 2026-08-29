@@ -20,6 +20,13 @@
 //! - **Token-bounded.** Classification is per whitespace token, so a
 //!   wrapped line can at worst split a token and lose its link — a
 //!   degraded affordance, never a wrong screen.
+//! - **The URI is a wire, not text.** `register_link` interns a URI
+//!   verbatim and the presenter emits its bytes between `ESC]8;;` and
+//!   `ESC\`, so a control character inside one escapes the sequence and
+//!   speaks to the terminal directly. Any token carrying one is refused
+//!   outright ([`classify`]) — this module never relies on a caller
+//!   having sanitized first, which is why `print_linked` is a drop-in
+//!   for `canvas.print` in cells and inks but NOT in trust.
 
 use std::rc::Rc;
 
@@ -93,6 +100,21 @@ fn classify(tok: &str, root: Option<&str>) -> Option<(usize, usize, String)> {
         core = trimmed;
     }
     if core.is_empty() {
+        return None;
+    }
+    // THE charset gate for the URI (adversarial review 2026-08-28, A′).
+    // `register_link` interns a URI verbatim and the presenter writes
+    // its bytes verbatim between `ESC]8;;` and `ESC\`, so an ESC or BEL
+    // inside a token would close the OSC-8 string early and hand the
+    // terminal the rest as a command (`ESC]0;title BEL` was measured
+    // setting the window title). Today both call sites happen to
+    // launder their text through `text::wrap`/`truncate_ellipsis`,
+    // which strip control characters — but that is the ENGINE's
+    // incidental behavior, not this module's contract, and the next
+    // call site that skips it (a rich block, a markdown body) would
+    // reopen the hole in silence. ESC is not `is_whitespace`, so it
+    // never splits a token: the gate has to be here.
+    if core.chars().any(char::is_control) {
         return None;
     }
     if let Some(uri) = url_uri(core) {
@@ -268,21 +290,58 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// Argument-shaped tokens never link: flags, key=value, versions.
+    /// Argument-shaped tokens never link: flags and key=value.
+    ///
+    /// Probed with ABSOLUTE paths deliberately (adversarial review
+    /// 2026-08-28, H-1): the first cut used relative ones, which
+    /// `file_uri` refuses anyway for want of a root — so the assertions
+    /// passed with the `=`/`-` guards DELETED, and the test proved
+    /// nothing. An absolute path is the control that makes the guard
+    /// observable: bare, it links; wearing a flag, it must not.
     #[test]
-    fn non_paths_stay_plain() {
+    fn argument_shaped_tokens_never_link() {
+        assert!(
+            link_of("/tmp/x", None).is_some(),
+            "control: a bare absolute path links"
+        );
         for line in [
-            "--features=a/b",
-            "-p/x",
-            "ratio 3/4 done",
-            "a=b/c",
+            "--features=/tmp/x",
+            "-p/tmp/x",
+            "a=/tmp/x",
             "just words here",
         ] {
-            // `ratio 3/4` DOES look path-shaped; it only links if a file
-            // named `3/4` exists under the root — which is the existence
-            // rule doing its job, so probe it rootless.
             assert!(link_of(line, None).is_none(), "{line:?}");
         }
+    }
+
+    /// A control character inside a token would escape the OSC-8 string
+    /// and speak to the terminal (`ESC]0;title BEL` sets the window
+    /// title). Such a token is refused OUTRIGHT — never linked, and
+    /// never with the control character laundered out, which would link
+    /// a path the text does not name.
+    #[test]
+    fn control_characters_refuse_the_link_entirely() {
+        for hostile in [
+            "/tmp/\u{1b}]0;PWNED\u{7}/x.txt",
+            "https://x.dev/\u{1b}\\evil",
+            "/tmp/a\u{0}b/c",
+        ] {
+            assert!(
+                link_of(&format!("wrote {hostile} ok"), None).is_none(),
+                "{hostile:?} must not link"
+            );
+        }
+        // The cells still render — refusing the LINK is not dropping
+        // the text (segmentation stays lossless).
+        let line = "wrote /tmp/\u{1b}]0;x\u{7}/a.txt ok";
+        let joined: String = segments(line, None)
+            .iter()
+            .map(|s| match s {
+                Seg::Plain(t) => t.as_str(),
+                Seg::Link { text, .. } => text.as_str(),
+            })
+            .collect();
+        assert_eq!(joined, line);
     }
 
     #[test]

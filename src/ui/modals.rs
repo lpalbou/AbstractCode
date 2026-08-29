@@ -1384,6 +1384,34 @@ struct RowSpec {
 }
 
 fn draw_rows(rows: Vec<RowSpec>, cursor: usize, selectable: Vec<usize>) -> View {
+    draw_rows_pinned(rows, cursor, selectable, 0)
+}
+
+/// [`draw_rows`] with the first `pinned` rows held as a NON-SCROLLING
+/// head above the windowed body.
+///
+/// WHY A PINNED HEAD EXISTS: the window follows the CURSOR, so rows above
+/// the first cursor target can never be scrolled into view — `↑` stops at
+/// the first target. While the preamble was shorter than the window that
+/// was invisible; once `/resources` grew its accelerator meter, the
+/// meter's GGUF note and the itemized breakdown, the preamble outgrew the
+/// window and stranded the meters and the note FOR GOOD — the two things
+/// the panel is opened for. Anchoring the window at row 0 whenever the
+/// cursor sits on the first target would trade that for a worse bug: the
+/// selected model would then be off-screen while `u`/`k` act on it, which
+/// is exactly the "the action target is the row the highlight shows"
+/// invariant (review MEDIUM-6) this panel is built around. Holding the
+/// head OUT of the scroll keeps both: the meters always render, and the
+/// body still scrolls the highlighted row into view.
+///
+/// The head never takes more than half the window — a head taller than
+/// the body it introduces only moves the problem down one row.
+fn draw_rows_pinned(
+    rows: Vec<RowSpec>,
+    cursor: usize,
+    selectable: Vec<usize>,
+    pinned: usize,
+) -> View {
     let t = abstracttui::app::current_theme().tokens;
     let cursor_row = selectable.get(cursor).copied();
     Element::new()
@@ -1395,26 +1423,57 @@ fn draw_rows(rows: Vec<RowSpec>, cursor: usize, selectable: Vec<usize>) -> View 
             // cut and the window never scrolled because it believed
             // everything fit).
             let h = rect.h.max(1) as usize;
-            let anchor = cursor_row.unwrap_or(0);
-            let start = if rows.len() <= h {
+            let head = pinned.min(rows.len()).min(h / 2);
+            let body_h = h - head;
+            let body_len = rows.len() - head;
+            // The cursor's row, expressed in the BODY's coordinates. No
+            // target ever lands in the head (the head is the preamble), so
+            // a cursor below it is the only case.
+            let anchor = cursor_row.unwrap_or(head).max(head) - head;
+            let start = if body_len <= body_h || cursor == 0 {
+                // AT REST (cursor on the FIRST target) the body shows its
+                // own top. The window follows the cursor, so body rows
+                // above the first target can never be scrolled back to —
+                // with a tall preamble that stranded the whole itemized
+                // breakdown. The first target's highlight can then sit
+                // below the fold at rest; that is the deliberate trade,
+                // and it is safe because every action key NAMES the row
+                // it will act on ("unload lmstudio/qwen3-4b?"), so the
+                // target is stated, never guessed.
                 0
             } else {
-                anchor.saturating_sub(h / 2).min(rows.len() - h)
+                // Scroll the cursor INTO VIEW — do not centre it. One row
+                // of lookahead keeps the next row visible while walking
+                // down.
+                let pad = 1usize;
+                if anchor + pad < body_h {
+                    0
+                } else {
+                    (anchor + pad + 1 - body_h).min(body_len - body_h)
+                }
             };
-            let shown = h.min(rows.len() - start);
+            let shown = body_h.min(body_len - start);
             let cut_above = start;
-            let cut_below = rows.len() - start - shown;
-            for (line, (row_ix, row)) in rows.iter().enumerate().skip(start).take(h).enumerate() {
+            let cut_below = body_len - start - shown;
+            // The head at the top, then the body's window. `line` is the
+            // screen row; `row_ix` indexes `rows` (so the cursor
+            // comparison and the ink rules below are unchanged).
+            let plan = (0..head)
+                .map(|i| (i, i))
+                .chain((0..shown).map(|k| (head + k, head + start + k)));
+            for (line, row_ix) in plan {
+                let row = &rows[row_ix];
                 let y = rect.y + line as i32;
                 if y >= rect.bottom() {
                     break;
                 }
-                // Honest overflow markers on the window's edge rows: more
-                // rows exist above/below (a silently cut list read as
-                // "the rest is missing" — live finding).
-                let edge_note = if line == 0 && cut_above > 0 {
+                // Honest overflow markers on the BODY window's edge rows:
+                // more rows exist above/below (a silently cut list read as
+                // "the rest is missing" — live finding). The head is never
+                // cut, so it never carries one.
+                let edge_note = if line == head && cut_above > 0 {
                     Some(format!("↑ {cut_above} more"))
-                } else if line + 1 == shown && cut_below > 0 {
+                } else if line + 1 == head + shown && cut_below > 0 {
                     Some(format!("↓ {cut_below} more"))
                 } else {
                     None
@@ -2942,17 +3001,40 @@ fn cache_effect_rows(
 // Host resources (/resources): memory + resident models + session caches
 // ---------------------------------------------------------------------------
 
-/// Bytes humanized up to TB. `paths::human_size` stops at MB (attachment
-/// scale); a 4.5 GB model must not read "4508.9 MB".
+/// Bytes humanized up to TiB. `paths::human_size` stops at MB (attachment
+/// scale); a 4.5 GiB model must not read "4508.9 MiB".
+///
+/// BINARY math with BINARY labels (IEC), byte-identical to the gateway console
+/// (`_fmtBytes`), console-tui (`store::human_bytes`), abstractflow
+/// (`formatBytes`) and `@abstractframework/monitor-memory`. Memory is binary
+/// wherever it is configured or reported — this host reads 137,438,953,472 B =
+/// 128.0 GiB exactly, and `sysctl iogpu.wired_limit_mb=110000` lands on
+/// 115,343,360,000 B = 107.4 GiB — so the `/1024` was always right here. The
+/// `GB`/`MB`/`KB` LABELS were the bug: they read as decimal, and the web
+/// console really did divide by 1e9, so one 89,986,353,824 B GGUF rendered
+/// `89.99 GB` there and `83.8 GB` here. Same math, same units, one decimal
+/// place, on all five surfaces. Do not relabel back to `GB`.
+///
+/// It no longer delegates the sub-GiB tail to `paths::human_size`: that helper
+/// serves the ATTACHMENT surface (`exec.rs`, `runner.rs`), which is out of this
+/// unification's scope and keeps its own `KB`/`MB` spelling. Borrowing it here
+/// would have put `MB` and `GiB` in one memory panel.
 fn human_bytes(bytes: u64) -> String {
-    const G: f64 = 1024.0 * 1024.0 * 1024.0;
+    const K: f64 = 1024.0;
+    const M: f64 = 1024.0 * K;
+    const G: f64 = 1024.0 * M;
+    const T: f64 = 1024.0 * G;
     let b = bytes as f64;
-    if b >= 1024.0 * G {
-        format!("{:.1} TB", b / (1024.0 * G))
+    if b >= T {
+        format!("{:.1} TiB", b / T)
     } else if b >= G {
-        format!("{:.1} GB", b / G)
+        format!("{:.1} GiB", b / G)
+    } else if b >= M {
+        format!("{:.1} MiB", b / M)
+    } else if b >= K {
+        format!("{:.1} KiB", b / K)
     } else {
-        crate::paths::human_size(bytes)
+        format!("{bytes} B")
     }
 }
 
@@ -2967,6 +3049,17 @@ fn meter_bar(pct: f64) -> String {
         "#".repeat(filled.min(SLOTS)),
         "-".repeat(SLOTS - filled.min(SLOTS))
     )
+}
+
+/// A size with the ESTIMATE MARKER, one spelling for every surface here:
+/// `3.1 GB` is a figure the host REPORTED, `~3.1 GB` one it ESTIMATED
+/// from the artifact. The `/resources` hint row documents the marker.
+fn size_marked(bytes: u64, estimated: bool) -> String {
+    if estimated {
+        format!("~{}", human_bytes(bytes))
+    } else {
+        human_bytes(bytes)
+    }
 }
 
 /// One resident-model row's display text. TRI-STATE residency renders
@@ -2992,13 +3085,22 @@ fn residency_row_text(
     if !m.state.is_empty() {
         parts.push(m.state.clone());
     }
-    if let Some(size) = m.size_bytes {
+    // THE FOOTPRINT: the coalesce (`size_bytes` → `size_vram_bytes` →
+    // `est_weights_bytes`) with the estimate MARKED. Before this rule a
+    // row carrying only `est_weights_bytes` — every externally-loaded
+    // model — printed NO size at all.
+    if let Some((size, estimated)) = m.display_size() {
         let vram = m
             .size_vram_bytes
             .filter(|v| *v != size)
             .map(|v| format!(" (vram {})", human_bytes(v)))
             .unwrap_or_default();
-        parts.push(format!("{}{vram}", human_bytes(size)));
+        parts.push(format!("{}{vram}", size_marked(size, estimated)));
+    }
+    // The per-model KV cache: a SECOND figure beside the weights, never
+    // folded into the size.
+    if let Some(cache) = m.cache_bytes {
+        parts.push(format!("cache {}", human_bytes(cache)));
     }
     // ctx: the calibrated number wins and is starred; an uncalibrated
     // declared length renders bare; unknown renders nothing.
@@ -3014,7 +3116,264 @@ fn residency_row_text(
     if m.is_default {
         parts.push("default".into());
     }
+    // What `k` DOES on this line — every resident row carries the verb,
+    // adoption included, and a refusal names its reason instead of
+    // leaving a dead key. Same authority the handler reads.
+    parts.push(match crate::store::lock_action(m) {
+        crate::store::LockAction::Unlock => "k unlocks".into(),
+        crate::store::LockAction::Lock { adopt: true } => "k locks (adopts it)".to_string(),
+        crate::store::LockAction::Lock { adopt: false } => "k locks".into(),
+        crate::store::LockAction::Refused(why) => format!("no lock ({why})"),
+    });
     parts.join(" · ")
+}
+
+/// THE ACCELERATOR NOTE (spec PART A2) — one spelling, carried by the
+/// meter's dim sub-line AND by the breakdown's `accelerator` reference.
+/// Without it the figure reads as the machine's memory use, which it is
+/// not: llama.cpp mmaps a `.gguf` and wraps the pages with
+/// `newBufferWithBytesNoCopy`, so they never become driver-allocated
+/// accelerator memory and never appear in this counter.
+const ACCELERATOR_NOTE: &str = "memory-mapped GGUF weights are not counted here";
+
+/// THE GGUF NOTE (spec PART B3) — emitted only when the itemized weights
+/// EXCEED the accelerator heap, which is the normal GGUF case and not an
+/// inconsistency. Verbatim; surfaces may wrap it, never reword it.
+const GGUF_NOTE: &str = "Σ model weights exceeds the accelerator heap. That is the normal case for memory-mapped GGUF weights: llama.cpp maps them from disk, so they are resident as process RSS and are not counted in the accelerator heap.";
+
+/// THE PART A2 LABEL — EXACT: `Accelerator heap · <backend> (<scope>)`.
+/// An unknown/empty backend is the literal `device`. The scope words come
+/// from [`crate::store::DeviceScope::label`] and never name the host.
+fn accelerator_label(backend: &str, scope: crate::store::DeviceScope) -> String {
+    let backend = backend.trim();
+    let backend = if backend.is_empty() { "device" } else { backend };
+    format!("Accelerator heap · {backend} ({})", scope.label())
+}
+
+/// What a breakdown line IS. The reader must never mix them: `Item`s are
+/// measured contributors that DO add up, `Reference`s are SEPARATE
+/// counters that do NOT, and the `Note` explains why the two disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BreakdownKind {
+    Item,
+    Reference,
+    Note,
+}
+
+/// One line of the memory breakdown, KEYED so every surface emits the
+/// same set in the same order from the same payload (spec PART B).
+#[derive(Debug, Clone, PartialEq)]
+struct BreakdownLine {
+    /// Stable identity — `model:<runtime_id>`, `model_caches`,
+    /// `session_caches`, `process_rss`, `sum_model_weights`, `ram`,
+    /// `accelerator`, `gguf_note`.
+    key: String,
+    kind: BreakdownKind,
+    /// The line's display name (for the note: the note's own text).
+    name: String,
+    /// The line's PRIMARY figure — the `used` half where the line shows
+    /// a pair. `None` only for the note, which counts nothing.
+    bytes: Option<u64>,
+    /// `bytes` formatted for this surface (a pair for `ram` and
+    /// `accelerator`); "" when the line carries no number.
+    size: String,
+    detail: String,
+}
+
+/// THE MEMORY BREAKDOWN (spec PART B) — three KINDS of line, keyed and
+/// ordered identically on every surface:
+///
+/// * `Item` — facts the framework knows, each labelled with WHAT IT
+///   MEASURES: one line per resident model with a known display size
+///   (`model:<runtime_id>`), then `model_caches`, `session_caches`,
+///   `process_rss`.
+/// * `Reference` — SEPARATE counters that are not summable with the
+///   items: `sum_model_weights`, `ram`, the `accelerator` heap.
+/// * `Note` — why `Σ model weights` may exceed the accelerator heap.
+///
+/// THE EMISSION RULE, identical everywhere: a line is emitted when its
+/// value is KNOWN and omitted when unknown. A known `0` IS emitted. No
+/// line is "always emitted", and none is conditional on being non-zero.
+///
+/// There is NO remainder. The old one subtracted RAM-dimensioned
+/// quantities (weights, caches, RSS) from an ACCELERATOR counter that is
+/// blind to memory-mapped GGUF weights: live it computed −79 GB, clamped
+/// to `0 B`, and blamed "overlap" for a category error. Attribution
+/// against RAM would need per-process accounting the framework does not
+/// have, so no second remainder replaces it. Pure, so the arithmetic and
+/// the honesty rules live where a unit test reaches them (the
+/// `cache_rows` discipline).
+fn memory_breakdown(facts: &crate::store::HostFacts) -> Vec<BreakdownLine> {
+    let mut out: Vec<BreakdownLine> = Vec::new();
+    let mut item = |key: String, name: String, bytes: u64, size: String, detail: String| {
+        out.push(BreakdownLine {
+            key,
+            kind: BreakdownKind::Item,
+            name,
+            bytes: Some(bytes),
+            size,
+            detail,
+        });
+    };
+
+    // 1..n — the resident models. A row that is resident but reported NO
+    // size at all is SKIPPED: an invented zero is not an item.
+    let mut sum_weights: Option<u64> = None;
+    // The sum INHERITS the estimate marker: a total that any estimate
+    // contributed to is an estimate, and printing it bare would launder
+    // the `~` off the very number the note is about to compare.
+    let mut sum_estimated = false;
+    for m in facts.models.iter().filter(|m| m.is_resident()) {
+        let Some((bytes, estimated, source)) = m.display_size_source() else {
+            continue;
+        };
+        sum_estimated |= estimated;
+        item(
+            // THE KEY RULE, shared by all four surfaces: the runtime id
+            // when the row carries one, else `model:<provider>:<model>`.
+            // Real sweep rows arrive with `runtime_id: null`, so the
+            // fallback is the common case, not the exotic one. No index
+            // suffix and no task segment: two rows that genuinely share a
+            // provider AND a model collide, and seeing that is the point.
+            if m.runtime_id.is_empty() {
+                format!("model:{}:{}", m.provider, m.model)
+            } else {
+                format!("model:{}", m.runtime_id)
+            },
+            m.model.clone(),
+            bytes,
+            size_marked(bytes, estimated),
+            format!("resident model weights · {source}"),
+        );
+        sum_weights = Some(sum_weights.unwrap_or(0).saturating_add(bytes));
+    }
+
+    // n+1 — the served total wins; the per-row sum is the fallback, and
+    // an unknown is an OMISSION, never a zero.
+    let model_caches = totals_of(facts, "cache_bytes_models").or_else(|| {
+        let known: Vec<u64> = facts
+            .models
+            .iter()
+            .filter(|m| m.is_resident())
+            .filter_map(|m| m.cache_bytes)
+            .collect();
+        (!known.is_empty()).then(|| known.iter().sum())
+    });
+    if let Some(b) = model_caches {
+        item(
+            "model_caches".into(),
+            "model KV caches".into(),
+            b,
+            human_bytes(b),
+            "prompt-cache bytes held for resident models".into(),
+        );
+    }
+    // n+2 — same rule against the session-cache list.
+    let session_caches = totals_of(facts, "session_cache_bytes").or_else(|| {
+        let known: Vec<u64> = facts.caches.iter().filter_map(|c| c.bytes).collect();
+        (!known.is_empty()).then(|| known.iter().sum())
+    });
+    if let Some(b) = session_caches {
+        item(
+            "session_caches".into(),
+            "session caches".into(),
+            b,
+            human_bytes(b),
+            "prompt-cache bytes held by gateway sessions".into(),
+        );
+    }
+    // n+3 — the gateway's own RSS, which is where a memory-mapped GGUF
+    // actually shows up.
+    if let Some(b) = facts.process_rss {
+        item(
+            "process_rss".into(),
+            "gateway process RSS".into(),
+            b,
+            human_bytes(b),
+            "resident set size of the gateway process — includes memory-mapped GGUF weights"
+                .into(),
+        );
+    }
+
+    // --- references: separate counters, NOT summable with the items ---
+    let mut reference = |key: &str, name: String, bytes: u64, size: String, detail: &str| {
+        out.push(BreakdownLine {
+            key: key.into(),
+            kind: BreakdownKind::Reference,
+            name,
+            bytes: Some(bytes),
+            size,
+            detail: detail.into(),
+        });
+    };
+    if let Some(sum) = sum_weights {
+        reference(
+            "sum_model_weights",
+            "Σ model weights".into(),
+            sum,
+            size_marked(sum, sum_estimated),
+            "sum of the resident model weights above",
+        );
+    }
+    if let Some(used) = facts.ram_used {
+        reference(
+            "ram",
+            "RAM used".into(),
+            used,
+            pair_text(used, facts.ram_total),
+            "system memory in use / installed",
+        );
+    }
+    let accelerator = facts.accelerator_figure();
+    if let Some((used, ceiling, scope)) = accelerator {
+        reference(
+            "accelerator",
+            accelerator_label(&facts.device_backend, scope),
+            used,
+            pair_text(used, ceiling),
+            ACCELERATOR_NOTE,
+        );
+    }
+
+    // --- the note: ONLY when the items really do exceed the heap ------
+    if let (Some(sum), Some((used, _, _))) = (sum_weights, accelerator) {
+        if sum > used {
+            out.push(BreakdownLine {
+                key: "gguf_note".into(),
+                kind: BreakdownKind::Note,
+                name: GGUF_NOTE.into(),
+                bytes: None,
+                size: String::new(),
+                detail: String::new(),
+            });
+        }
+    }
+    out
+}
+
+/// The breakdown lines of one KIND, in emission order — the renderer's
+/// three passes and the tests read the set through this one helper.
+fn of_kind(lines: &[BreakdownLine], kind: BreakdownKind) -> Vec<&BreakdownLine> {
+    lines.iter().filter(|l| l.kind == kind).collect()
+}
+
+/// A served numeric total by key, or `None` — the gateway's own figure
+/// always outranks anything this client can re-derive.
+fn totals_of(facts: &crate::store::HostFacts, key: &str) -> Option<u64> {
+    facts
+        .totals
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| *v)
+}
+
+/// `used / ceiling`, or the bare `used` when there is no ceiling — an
+/// absent denominator is never invented.
+fn pair_text(used: u64, ceiling: Option<u64>) -> String {
+    match ceiling {
+        Some(t) => format!("{} / {}", human_bytes(used), human_bytes(t)),
+        None => human_bytes(used),
+    }
 }
 
 /// One cursor-reachable row of the `/resources` panel: its row index
@@ -3032,18 +3391,26 @@ struct ResTarget {
 
 /// Build the `/resources` panel rows from parsed host facts. Pure (the
 /// `cache_rows` discipline: the arithmetic and honesty rules live where
-/// a unit test reaches them). Returns the rows plus the cursor targets —
+/// a unit test reaches them). Returns the rows, the cursor targets —
 /// every model/cache/totals row is reachable; action keys act only when
-/// the target carries a model index.
+/// the target carries a model index — and the HEAD COUNT: how many
+/// leading rows are the meters block, which
+/// [`draw_rows_pinned`] holds out of the scroll so a tall panel can never
+/// strand the numbers it was opened for.
 fn resources_rows(
     facts: &crate::store::HostFacts,
     contracts: &crate::store::HostContracts,
     estimate: Option<&(String, String)>,
     width: i32,
-) -> (Vec<RowSpec>, Vec<ResTarget>) {
+) -> (Vec<RowSpec>, Vec<ResTarget>, usize) {
     let mut rows: Vec<RowSpec> = Vec::new();
     let mut selectable: Vec<ResTarget> = Vec::new();
-    let wrap_w = (width - 2).max(24);
+    // The draw budget, not the rect: `draw_rows` prints a two-space
+    // prefix and truncates at `rect.w - 1`, so text wider than
+    // `width - 3` loses its tail to an ellipsis. Wrapping to the same
+    // budget is what keeps the lock marker and the default flag from
+    // silently falling off the right edge.
+    let wrap_w = (width - 4).max(24);
     let section = |rows: &mut Vec<RowSpec>, title: String| {
         if !rows.is_empty() {
             rows.push(RowSpec {
@@ -3096,29 +3463,39 @@ fn resources_rows(
         );
         any_memory = true;
     }
-    if let Some(alloc) = facts.device_allocated {
-        let backend = if facts.device_backend.is_empty() {
-            "device".to_string()
-        } else {
-            format!("device ({})", facts.device_backend)
-        };
-        let total = facts
-            .device_total
-            .map(|t| format!(" / {}", human_bytes(t)))
+    // THE ACCELERATOR HEAP (spec PART A2), never "the device" and never
+    // the machine's memory: the all-processes pair wins, the
+    // process-local one is the LABELLED fallback, and the scope rides in
+    // the label. `allocated_bytes` is process-local on Metal — it reads 0
+    // while a 93 GB GGUF is resident, which is how this line came to say
+    // "0 B". The ceiling may be absent; the bar then is too.
+    if let Some((used, ceiling, scope)) = facts.accelerator_figure() {
+        let bar = ceiling
+            .map(|t| format!("  {}", meter_bar(used as f64 * 100.0 / t as f64)))
             .unwrap_or_default();
-        let bar = facts
-            .device_total
-            .filter(|t| *t > 0)
-            .map(|t| format!("  {}", meter_bar(alloc as f64 * 100.0 / t as f64)))
-            .unwrap_or_default();
-        line(
-            &mut rows,
-            format!(
-                "  {backend:<8} {} allocated{total}{bar}",
-                human_bytes(alloc)
+        for (i, l) in text::wrap(
+            &format!(
+                "{}  {}{bar}",
+                accelerator_label(&facts.device_backend, scope),
+                pair_text(used, ceiling)
             ),
-            false,
-        );
+            wrap_w,
+        )
+        .into_iter()
+        .enumerate()
+        {
+            line(
+                &mut rows,
+                format!("  {}{l}", if i == 0 { "" } else { "  " }),
+                false,
+            );
+        }
+        // The note rides WITH the number — dim, but never absent. Without
+        // it this counter reads as "how full is this machine", which it
+        // is not.
+        for l in text::wrap(ACCELERATOR_NOTE, wrap_w) {
+            line(&mut rows, format!("    {l}"), true);
+        }
         any_memory = true;
     }
     if facts.gpu_supported {
@@ -3127,20 +3504,96 @@ fn resources_rows(
             any_memory = true;
         }
     }
-    if let Some(rss) = facts.process_rss {
-        line(
-            &mut rows,
-            format!("  process  {} rss (the gateway itself)", human_bytes(rss)),
-            false,
-        );
+    // The gateway's own RSS is NOT repeated here: the breakdown right
+    // below itemizes it ("gateway process"), and the same number twice
+    // on adjacent lines only costs a row this panel needs.
+    if facts.process_rss.is_some() {
         any_memory = true;
     }
+    // The host NAME is identity, not memory, and the modal title
+    // already carries it ("host resources · studio.local") — a second
+    // copy only costs a row this panel needs for the breakdown.
     if !facts.host_name.is_empty() {
-        line(&mut rows, format!("  host     {}", facts.host_name), false);
         any_memory = true;
     }
     if !any_memory {
         line(&mut rows, "  not reported by this gateway".into(), true);
+    }
+    // THE PINNED HEAD ends here: the degraded lanes and the meters —
+    // including the accelerator label and its GGUF note, which the reader
+    // opened this panel for. Everything below scrolls with the cursor.
+    let head = rows.len();
+
+    // --- what is consuming it ----------------------------------------
+    // The itemization sits directly under the meters and facts it
+    // explains. It needs at least one ITEM: references alone are the
+    // meters above restated, and nothing at all is nothing to explain,
+    // not a blank section.
+    let breakdown = memory_breakdown(facts);
+    if !of_kind(&breakdown, BreakdownKind::Item).is_empty() {
+        // A header WITHOUT the usual separating blank: this section
+        // explains the meters immediately above it, and the blank row is
+        // one the panel would rather spend on a model.
+        rows.push(RowSpec {
+            text: "consuming memory".into(),
+            header: true,
+            checked: None,
+            dim: false,
+        });
+        let mut emit = |l: &BreakdownLine, dim: bool| {
+            let detail = if l.detail.is_empty() {
+                String::new()
+            } else {
+                format!("  ·  {}", l.detail)
+            };
+            for (i, s) in text::wrap(
+                &format!("{:<26} {:>10}{detail}", l.name, l.size),
+                wrap_w,
+            )
+            .into_iter()
+            .enumerate()
+            {
+                rows.push(RowSpec {
+                    text: format!("  {}{s}", if i == 0 { "" } else { "  " }),
+                    header: false,
+                    checked: None,
+                    dim,
+                });
+            }
+        };
+        for l in of_kind(&breakdown, BreakdownKind::Item) {
+            emit(l, false);
+        }
+        // THE RULE between the halves (spec PART B2): what follows are
+        // SEPARATE counters. Adding them to the items above is the exact
+        // category error the deleted remainder used to commit.
+        if !of_kind(&breakdown, BreakdownKind::Reference).is_empty() {
+            emit(
+                &BreakdownLine {
+                    key: String::new(),
+                    kind: BreakdownKind::Reference,
+                    name: "── separate counters".into(),
+                    bytes: None,
+                    size: String::new(),
+                    detail: "not additive with the items above".into(),
+                },
+                true,
+            );
+            for l in of_kind(&breakdown, BreakdownKind::Reference) {
+                emit(l, true);
+            }
+        }
+        // The note last, WRAPPED — never truncated, never reworded.
+        for l in of_kind(&breakdown, BreakdownKind::Note) {
+            for s in text::wrap(&l.name, wrap_w) {
+                rows.push(RowSpec {
+                    text: format!("  {s}"),
+                    header: false,
+                    checked: None,
+                    dim: true,
+                });
+            }
+        }
     }
 
     // --- models ------------------------------------------------------
@@ -3153,7 +3606,17 @@ fn resources_rows(
             row: rows.len(),
             model: Some(i),
         });
-        line(&mut rows, residency_row_text(m, contracts), false);
+        // WRAPPED, like the degraded and estimate lines: a row now
+        // carries its footprint, its cache and the verb `k` will perform,
+        // and a truncated tail silently dropped the lock marker and the
+        // default flag off the right edge. The cursor target is the
+        // FIRST line, so the selection still maps to the model.
+        for (n, l) in text::wrap(&residency_row_text(m, contracts), wrap_w)
+            .into_iter()
+            .enumerate()
+        {
+            line(&mut rows, if n == 0 { l } else { format!("    {l}") }, false);
+        }
     }
     if let Some((subject, text)) = estimate {
         // Only the in-flight "estimating…" line is dim (status, not
@@ -3223,7 +3686,7 @@ fn resources_rows(
             line(&mut rows, format!("  {key:<24} {shown}"), false);
         }
     }
-    (rows, selectable)
+    (rows, selectable, head)
 }
 
 /// "HH:MM:SS" from an ISO timestamp; anything unrecognized passes
@@ -3247,7 +3710,9 @@ fn short_ts(ts: &str) -> &str {
 pub fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
     use crate::store::HostState;
     let ctx2 = ctx.clone();
-    let size = modal_size(96, 30);
+    // Tall: the panel now carries the meters, the memory breakdown and
+    // the model rows, and the reader must see the meters it opens for.
+    let size = modal_size(100, 34);
     let content_w = size.w - 4;
     ctx.open_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
@@ -3283,7 +3748,7 @@ pub fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
             };
             let contracts = store.host_contracts.get_untracked().unwrap_or_default();
             let estimate = store.host_estimate.get_untracked();
-            let (_, targets) = resources_rows(&facts, &contracts, estimate.as_ref(), content_w);
+            let (_, targets, _) = resources_rows(&facts, &contracts, estimate.as_ref(), content_w);
             (targets, facts)
         };
         let selected_model = move || -> Option<crate::store::ResidencyRow> {
@@ -3313,6 +3778,13 @@ pub fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
                 store.notify("no model selected — ↑↓ onto a model row first");
                 return;
             };
+            // A row the host says it is NOT holding has nothing to
+            // unload; an UNKNOWN residency still may (the tri-state's
+            // third answer is not a "no").
+            if let Some(why) = crate::store::unload_refusal(&row) {
+                store.notify(format!("{}/{}: {why}", row.provider, row.model));
+                return;
+            }
             confirm.set(Some((row.provider, row.model, force)));
         };
         let confirm_pending = {
@@ -3367,6 +3839,11 @@ pub fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
                 }
             })
             .shortcut(KeyChord::plain(Key::Char('n')), move |_| confirm.set(None))
+            // `k` — EVERY resident line offers this verb, sweep rows
+            // included (`POST /models/lock` adopts an externally-loaded
+            // model). `crate::store::lock_action` is the one authority:
+            // the row's own hint text reads it too, so what the line
+            // promises and what the key does can never diverge.
             .shortcut(KeyChord::plain(Key::Char('k')), {
                 let ctx = ctx2.clone();
                 move |_| {
@@ -3374,21 +3851,28 @@ pub fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
                         store.notify("no model selected — ↑↓ onto a model row first");
                         return;
                     };
-                    if row.locked {
-                        ctx.send(Cmd::UnlockModel {
-                            provider: row.provider,
-                            model: row.model,
-                        });
-                    } else if row.lockable {
-                        ctx.send(Cmd::LockModel {
-                            provider: row.provider,
-                            model: row.model,
-                        });
-                    } else {
-                        store.notify(format!(
-                            "{}/{} is not lockable on this gateway",
-                            row.provider, row.model
-                        ));
+                    match crate::store::lock_action(&row) {
+                        crate::store::LockAction::Unlock => {
+                            ctx.send(Cmd::UnlockModel {
+                                provider: row.provider,
+                                model: row.model,
+                            });
+                        }
+                        crate::store::LockAction::Lock { adopt } => {
+                            if adopt {
+                                store.notify(format!(
+                                    "locking {}/{} — adopting a model this gateway did not load",
+                                    row.provider, row.model
+                                ));
+                            }
+                            ctx.send(Cmd::LockModel {
+                                provider: row.provider,
+                                model: row.model,
+                            });
+                        }
+                        crate::store::LockAction::Refused(why) => {
+                            store.notify(format!("{}/{}: {why}", row.provider, row.model));
+                        }
                     }
                 }
             })
@@ -3499,12 +3983,15 @@ pub fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
                     }
                     match store.host_state.get() {
                         HostState::Ready(facts) | HostState::Stale(facts) => {
-                            let (rows, targets) =
+                            let (rows, targets, head) =
                                 resources_rows(&facts, &contracts, estimate.as_ref(), content_w);
                             let cur = cursor.get().min(targets.len().saturating_sub(1));
                             let selectable: Vec<usize> =
                                 targets.iter().map(|t| t.row).collect();
-                            draw_rows(rows, cur, selectable)
+                            // The meters are PINNED: no cursor position
+                            // can scroll them away, because no cursor
+                            // position could ever scroll them back.
+                            draw_rows_pinned(rows, cur, selectable, head)
                         }
                         HostState::Idle | HostState::Pending => plain(
                             "fetching host state… (a slow endpoint by contract — fetched \
@@ -3557,7 +4044,9 @@ pub fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
             .child(hint_row(
                 &t,
                 "admin actions apply on the GATEWAY host · a locked model refuses unload \
-                 (409) — force or unlock first · ctx values with * are calibrated"
+                 (409) — force or unlock first · ctx values with * are calibrated · sizes \
+                 with ~ are ESTIMATED, not measured · the device meter says whose memory \
+                 it counts"
                     .into(),
             ))
             .build()
@@ -4350,7 +4839,7 @@ mod tests {
     // rendered UNKNOWN, never "no"), absent numbers are omitted (never
     // zero-filled), locks are marked, calibrated contexts are starred.
 
-    use super::resources_rows;
+    use super::{memory_breakdown, of_kind, resources_rows, BreakdownKind};
     use crate::store::{HostContracts, HostFacts, ResidencyRow, SessionCacheRow};
 
     fn host_contracts() -> HostContracts {
@@ -4365,6 +4854,11 @@ mod tests {
         }
     }
 
+    /// The fixture facts, folded from the SAME live wire capture the
+    /// discovery parser is pinned against (2026-08-28): the device block
+    /// really serves `allocated_bytes: 0` beside an all-processes
+    /// 98.5 GB in use, and the sweep row carries only an ESTIMATE of its
+    /// weights.
     fn host_facts() -> HostFacts {
         HostFacts {
             ts: "2026-08-27T10:00:00Z".into(),
@@ -4375,9 +4869,11 @@ mod tests {
             ram_percent: Some(62.0),
             process_rss: Some(512_000_000),
             device_backend: "mlx".into(),
-            device_allocated: Some(21_474_836_480),
-            device_total: Some(103_079_215_104),
-            device_free: Some(81_604_378_624),
+            device_allocated: Some(0),
+            device_total: Some(137_438_953_472),
+            device_free: Some(31_694_962_688),
+            device_host_in_use: Some(105_743_990_784),
+            device_wired_limit: Some(115_343_360_000),
             gpu_supported: true,
             gpu_util_pct: Some(21.0),
             models: vec![
@@ -4388,8 +4884,9 @@ mod tests {
                     resident: Some(true),
                     state: "loaded".into(),
                     locked: true,
-                    lockable: true,
+                    lockable: Some(true),
                     size_bytes: Some(4_508_876_800),
+                    cache_bytes: Some(268_435_456),
                     context_length: Some(32_768),
                     calibrated_context_length: Some(28_672),
                     context_calibrated: true,
@@ -4403,6 +4900,24 @@ mod tests {
                     resident: None,
                     ..Default::default()
                 },
+                // The host-sweep row AS THE WIRE EMITS IT: externally
+                // loaded, so `source: provider_server` and
+                // `lockable: true` — lock ADOPTS it. No measured size.
+                ResidencyRow {
+                    runtime_id: "rt-glm".into(),
+                    task: "text-generation".into(),
+                    provider: "lmstudio".into(),
+                    model: "glm-4.6-gguf".into(),
+                    source: "provider_server".into(),
+                    resident: Some(true),
+                    state: "provider_loaded".into(),
+                    locked: false,
+                    lockable: Some(true),
+                    est_weights_bytes: Some(99_857_989_632),
+                    cache_bytes: Some(2_147_483_648),
+                    context_length: Some(131_072),
+                    ..Default::default()
+                },
             ],
             caches: vec![SessionCacheRow {
                 key: "k1".into(),
@@ -4412,53 +4927,404 @@ mod tests {
                 bytes: Some(1_048_576),
                 token_count: Some(2_100),
             }],
-            totals: vec![("models_size_bytes".into(), 4_508_876_800)],
+            totals: vec![
+                ("models_size_bytes".into(), 4_508_876_800),
+                ("session_cache_bytes".into(), 1_048_576),
+            ],
             degraded: Vec::new(),
         }
     }
 
     fn resources_text(f: &HostFacts) -> String {
-        let (rows, _) = resources_rows(f, &host_contracts(), None, 92);
+        let (rows, _, _) = resources_rows(f, &host_contracts(), None, 92);
         rows.into_iter()
             .map(|r| r.text)
             .collect::<Vec<_>>()
             .join("\n")
     }
 
+    /// One model row's WHOLE text: the panel wraps long rows (nothing is
+    /// truncated off the right edge), so a per-row assertion must rejoin
+    /// the continuation lines — which are the ones indented by four.
+    fn model_row_text(out: &str, needle: &str) -> String {
+        let mut lines = out.lines().skip_while(|l| !l.contains(needle));
+        let first = lines
+            .next()
+            .unwrap_or_else(|| panic!("no row for {needle}:\n{out}"))
+            .to_string();
+        let rest: Vec<String> = lines
+            .take_while(|l| l.starts_with("    ") && !l.trim().is_empty())
+            .map(|l| l.trim().to_string())
+            .collect();
+        format!("{first} {}", rest.join(" "))
+    }
+
     #[test]
     fn resources_rows_render_the_honest_full_picture() {
         let f = host_facts();
-        let (rows, targets) = resources_rows(&f, &host_contracts(), None, 92);
+        let (rows, targets, _) = resources_rows(&f, &host_contracts(), None, 92);
         // EVERY model/cache/totals row is cursor-reachable (the tail must
         // scroll — review HIGH-1); only model targets carry a model index,
         // in models[] order.
-        assert_eq!(targets.len(), 2 + 1 + 1, "2 models + 1 cache + 1 totals");
+        assert_eq!(targets.len(), 3 + 1 + 2, "3 models + 1 cache + 2 totals");
         assert_eq!(targets[0].model, Some(0));
         assert_eq!(targets[1].model, Some(1));
+        assert_eq!(targets[2].model, Some(2));
         assert!(rows[targets[0].row].text.contains("lmstudio/qwen3-4b"));
         assert!(rows[targets[1].row].text.contains("mlx-gen/flux"));
-        assert_eq!(targets[2].model, None, "cache row: reachable, no action");
-        assert!(rows[targets[2].row].text.contains("acode-abc"));
-        assert_eq!(targets[3].model, None, "totals row: reachable, no action");
-        assert!(rows[targets[3].row].text.contains("models_size_bytes"));
+        assert!(rows[targets[2].row].text.contains("lmstudio/glm-4.6-gguf"));
+        assert_eq!(targets[3].model, None, "cache row: reachable, no action");
+        assert!(rows[targets[3].row].text.contains("acode-abc"));
+        assert_eq!(targets[4].model, None, "totals row: reachable, no action");
+        assert!(rows[targets[4].row].text.contains("models_size_bytes"));
 
         let out = resources_text(&f);
         // Memory: humanized bytes + the text bar from the SERVED percent.
-        assert!(out.contains("79.4 GB / 128.0 GB"), "{out}");
+        assert!(out.contains("79.4 GiB / 128.0 GiB"), "{out}");
         assert!(out.contains("[#####---] 62%"), "{out}");
-        assert!(out.contains("device (mlx)"), "{out}");
-        assert!(out.contains("studio.local"), "{out}");
+        assert!(
+            out.contains("Accelerator heap · mlx (all processes)"),
+            "{out}"
+        );
+        // The host NAME lives in the modal title, not twice in the rows.
+        assert!(!out.contains("studio.local"), "{out}");
         // Models: modality LABEL text, lock marker, starred calibrated ctx.
         assert!(out.contains("[LLM]"), "{out}");
         assert!(out.contains("[IMG]"), "{out}");
         assert!(out.contains("🔒"), "{out}");
-        assert!(out.contains("ctx 28672*"), "calibrated ctx starred: {out}");
-        assert!(out.contains("4.2 GB"), "model size humanized: {out}");
+        // The panel WRAPS, so a row assertion must rejoin the continuation
+        // lines — `model_row_text` exists for exactly that. This one used to
+        // read `out` directly and got away with it only because the row
+        // happened to fit; the binary unit strings are one cell wider than the
+        // `GB` they replaced, and the fold moved between `ctx` and `28672*`.
+        assert!(
+            model_row_text(&out, "· lmstudio/qwen3-4b ·").contains("ctx 28672*"),
+            "calibrated ctx starred: {out}"
+        );
+        assert!(out.contains("4.2 GiB"), "model size humanized: {out}");
         assert!(out.contains("default"), "{out}");
         // Caches + totals.
         assert!(out.contains("acode-abc"), "{out}");
         assert!(out.contains("2100 tk"), "{out}");
         assert!(out.contains("models_size_bytes"), "{out}");
+    }
+
+    /// THE METAL BUG (operator point 5) + spec PART A2/A3:
+    /// `allocated_bytes` is PROCESS-LOCAL and reads 0 while ~98 GB of
+    /// weights are resident. The line must show the all-processes pair,
+    /// carry the EXACT accelerator label with its scope, and print the
+    /// GGUF note as a sub-line — this figure is the accelerator heap,
+    /// never "the device" and never how full the machine is.
+    #[test]
+    fn the_accelerator_line_names_its_scope_and_carries_the_gguf_note() {
+        let out = resources_text(&host_facts());
+        let ix = out
+            .lines()
+            .position(|l| l.contains("Accelerator heap"))
+            .expect("the accelerator line renders");
+        let dev = out.lines().nth(ix).unwrap();
+        assert!(
+            dev.contains("Accelerator heap · mlx (all processes)"),
+            "the EXACT PART A2 label: {dev}"
+        );
+        assert!(dev.contains("98.5 GiB / 107.4 GiB"), "{dev}");
+        assert!(!dev.contains("0 B"), "never the process-local zero: {dev}");
+        assert!(!dev.contains("allocated"), "that word named the wrong pool: {dev}");
+        // PART A3: no spelling of the old scope word survives anywhere.
+        assert!(!out.contains("host-wide"), "{out}");
+        assert!(
+            out.lines()
+                .nth(ix + 1)
+                .is_some_and(|l| l.contains("memory-mapped GGUF weights are not counted here")),
+            "the note is the sub-line directly under the meter:\n{out}"
+        );
+
+        // An older gateway that serves no all-processes figure falls back
+        // to the process-local pair — LABELLED, never silently rescoped.
+        let older = HostFacts {
+            device_host_in_use: None,
+            device_wired_limit: None,
+            device_allocated: Some(21_474_836_480),
+            device_total: Some(103_079_215_104),
+            ..host_facts()
+        };
+        let dev = resources_text(&older)
+            .lines()
+            .find(|l| l.contains("Accelerator heap"))
+            .expect("the fallback line renders")
+            .to_string();
+        assert!(dev.contains("20.0 GiB / 96.0 GiB"), "{dev}");
+        assert!(
+            dev.contains("Accelerator heap · mlx (this process only)"),
+            "{dev}"
+        );
+
+        // No backend string → the literal `device`, never an empty pair
+        // of parentheses.
+        let nameless = HostFacts {
+            device_backend: String::new(),
+            ..host_facts()
+        };
+        assert!(
+            resources_text(&nameless).contains("Accelerator heap · device (all processes)"),
+            "an unknown backend is the literal `device`"
+        );
+    }
+
+    /// Refinement 2: every resident row prints its footprint through the
+    /// COALESCE, and an estimate is marked `~` so it is never read as a
+    /// measurement. The row that carries only `est_weights_bytes` — the
+    /// externally-loaded one — used to print no size at all.
+    #[test]
+    fn resident_rows_print_a_marked_footprint_and_their_cache() {
+        let out = resources_text(&host_facts());
+        let measured = model_row_text(&out, "· lmstudio/qwen3-4b ·");
+        assert!(measured.contains(" 4.2 GiB"), "reported size is bare: {measured}");
+        assert!(!measured.contains("~4.2 GiB"), "{measured}");
+        assert!(measured.contains("cache 256.0 MiB"), "{measured}");
+        let swept = model_row_text(&out, "· lmstudio/glm-4.6-gguf ·");
+        assert!(
+            swept.contains("~93.0 GiB"),
+            "the estimate renders, MARKED: {swept}"
+        );
+        assert!(swept.contains("cache 2.0 GiB"), "{swept}");
+    }
+
+    /// Refinement 1: every resident line carries the lock verb it will
+    /// actually perform — including the sweep row lock now ADOPTS — and
+    /// a row without the verb says why instead of being a dead key.
+    #[test]
+    fn every_resident_line_offers_its_lock_verb() {
+        let out = resources_text(&host_facts());
+        let line_of = |needle: &str| model_row_text(&out, needle);
+        assert!(line_of("· lmstudio/qwen3-4b ·").contains("k unlocks"));
+        assert!(
+            line_of("· lmstudio/glm-4.6-gguf ·").contains("k locks (adopts it)"),
+            "the sweep row is offered the lock (adoption)"
+        );
+        let unknown = line_of("· mlx-gen/flux ·");
+        assert!(unknown.contains("no lock ("), "{unknown}");
+        assert!(
+            unknown.contains("residency unknown"),
+            "the refusal names its reason: {unknown}"
+        );
+    }
+
+    /// SPEC PART C — the SHARED FIXTURE, verbatim from this machine's
+    /// live `/host/state`, folded through the same parser the worker
+    /// uses. It pins the breakdown's keys, order and BYTE VALUES (never
+    /// the formatted strings — the four surfaces format bytes
+    /// differently), and it pins the two DELETIONS: no remainder in any
+    /// spelling, no `host-wide` anywhere.
+    ///
+    /// The payload is the GGUF case the old remainder got wrong: 89.99 GB
+    /// of itemized weights beside a 1.04 GB accelerator heap. Subtracting
+    /// one from the other computed −79 GB and clamped to `0 B`; the note
+    /// EXPLAINS the gap instead.
+    #[test]
+    fn the_breakdown_pins_the_shared_fixture_and_owns_no_remainder() {
+        let f = crate::discovery::host_state_from_response(&serde_json::json!({
+          "ok": true,
+          "memory": {
+            "ram": {"total_bytes": 137438953472u64, "available_bytes": 96368312320u64,
+                    "used_bytes": 33741111296u64, "percent": 29.9},
+            "process": {"rss_bytes": 76762775552u64},
+            "device": {"backend": "metal", "allocated_bytes": 0u64,
+                       "total_bytes": 137438953472u64, "free_bytes": null,
+                       "host_in_use_bytes": 1042120704u64,
+                       "wired_limit_bytes": 115343360000u64}
+          },
+          "models": [
+            {"runtime_id": "local:text_generation:huggingface:unsloth/Qwen3.8-Flash-Next-GGUF:UD-Q3_K_XL",
+             "task": "text_generation", "provider": "huggingface",
+             "model": "unsloth/Qwen3.8-Flash-Next-GGUF:UD-Q3_K_XL",
+             "source": "provider_server", "resident": true, "state": "provider_loaded",
+             "locked": false, "lockable": true,
+             "est_weights_bytes": 89986353824u64, "cache_bytes": 2147483648u64,
+             "details": {"est_weights_bytes": 89986353824u64, "cache_bytes": 2147483648u64}}
+          ],
+          "totals": {"models": 1, "models_resident": 1, "model_bytes": 89986353824u64,
+                     "session_caches": 3, "session_cache_bytes": 4352519172u64}
+        }));
+        let b = memory_breakdown(&f);
+        let items = of_kind(&b, BreakdownKind::Item);
+
+        // 1. Item keys, in order.
+        assert_eq!(
+            items.iter().map(|l| l.key.as_str()).collect::<Vec<_>>(),
+            vec![
+                "model:local:text_generation:huggingface:unsloth/Qwen3.8-Flash-Next-GGUF:UD-Q3_K_XL",
+                "model_caches",
+                "session_caches",
+                "process_rss",
+            ]
+        );
+        // 2. Their BYTE values, in order. `model_caches` falls back to
+        // the per-row sum (this payload serves no `cache_bytes_models`).
+        assert_eq!(
+            items.iter().map(|l| l.bytes).collect::<Vec<_>>(),
+            vec![
+                Some(89_986_353_824),
+                Some(2_147_483_648),
+                Some(4_352_519_172),
+                Some(76_762_775_552),
+            ]
+        );
+        // 3. Reference keys, in order — SEPARATE counters, after the items.
+        let refs = of_kind(&b, BreakdownKind::Reference);
+        assert_eq!(
+            refs.iter().map(|l| l.key.as_str()).collect::<Vec<_>>(),
+            vec!["sum_model_weights", "ram", "accelerator"]
+        );
+        // 4. The sum of the model items.
+        assert_eq!(refs[0].bytes, Some(89_986_353_824));
+        // 5. The accelerator reference carries the EXACT PART A2 label
+        // and the EXACT note.
+        assert!(
+            refs[2].name.contains("Accelerator heap · metal (all processes)"),
+            "{}",
+            refs[2].name
+        );
+        assert_eq!(
+            refs[2].detail,
+            "memory-mapped GGUF weights are not counted here"
+        );
+        // 6. The note IS present (89986353824 > 1042120704), verbatim.
+        let notes = of_kind(&b, BreakdownKind::Note);
+        assert_eq!(notes.len(), 1, "the weights exceed the accelerator heap");
+        assert_eq!(
+            notes[0].name,
+            "Σ model weights exceeds the accelerator heap. That is the normal case for \
+             memory-mapped GGUF weights: llama.cpp maps them from disk, so they are \
+             resident as process RSS and are not counted in the accelerator heap."
+        );
+        // 7 + 8. The remainder is GONE, and so is the old scope word.
+        for l in &b {
+            for s in [&l.key, &l.name, &l.size, &l.detail] {
+                assert!(!s.contains("nattributed"), "the remainder is deleted: {s}");
+                assert!(!s.contains("host-wide"), "PART A3: {s}");
+            }
+        }
+        // …and each item says WHAT IT MEASURES: this one is an estimate,
+        // marked `~` and naming the field it came from.
+        assert_eq!(items[0].size, "~83.8 GiB");
+        assert_eq!(
+            items[0].detail,
+            "resident model weights · estimated on-disk weight size (est_weights_bytes)"
+        );
+        assert_eq!(
+            items[3].detail,
+            "resident set size of the gateway process — includes memory-mapped GGUF weights"
+        );
+    }
+
+    /// The RENDERED section: items, then a visible rule, then the
+    /// references — so no reader adds the two halves together. The note
+    /// appears only when the weights really do exceed the heap (here
+    /// 97.2 GB of weights against a 98.5 GB heap: no note).
+    #[test]
+    fn the_breakdown_renders_items_then_a_rule_then_the_references() {
+        let f = host_facts();
+        let out = resources_text(&f);
+        assert!(out.contains("consuming memory"), "{out}");
+        let after = out
+            .split("consuming memory")
+            .nth(1)
+            .expect("the breakdown section")
+            .split("models (")
+            .next()
+            .expect("bounded by the models section")
+            .to_string();
+        // Items: the row's own model name, the MARKED estimate, and the
+        // field each figure came from.
+        assert!(after.contains("qwen3-4b"), "{after}");
+        assert!(after.contains("~93.0 GiB"), "the estimate is MARKED: {after}");
+        assert!(after.contains("(size_bytes)"), "{after}");
+        assert!(after.contains("(est_weights_bytes)"), "{after}");
+        assert!(
+            !after.contains("flux"),
+            "an unknown residency is not an item: {after}"
+        );
+        assert!(after.contains("model KV caches"), "{after}");
+        assert!(after.contains("session caches"), "{after}");
+        assert!(after.contains("gateway process RSS"), "{after}");
+        // The rule, then the references — in that order.
+        let ix = |needle: &str| {
+            after
+                .find(needle)
+                .unwrap_or_else(|| panic!("no {needle} in:\n{after}"))
+        };
+        assert!(ix("gateway process RSS") < ix("separate counters"));
+        assert!(ix("separate counters") < ix("Σ model weights"));
+        assert!(ix("Σ model weights") < ix("RAM used"));
+        assert!(after.contains("not additive with the items above"), "{after}");
+        // 97.2 GB of weights under a 98.5 GB heap → NO note.
+        assert!(!after.contains("exceeds the accelerator heap"), "{after}");
+        // PART B4: no remainder, in any spelling, ever again.
+        assert!(!out.contains("nattributed"), "{out}");
+
+        // No accelerator figure → the reference and the note simply do
+        // not exist; the items still render everything known.
+        let blind = HostFacts {
+            device_host_in_use: None,
+            device_allocated: None,
+            ..f.clone()
+        };
+        let out = resources_text(&blind);
+        assert!(out.contains("consuming memory"), "{out}");
+        assert!(!out.contains("Accelerator heap"), "{out}");
+
+        // Nothing to itemize at all → no section, not an empty one.
+        let empty = HostFacts::default();
+        assert!(
+            !resources_text(&empty).contains("consuming memory"),
+            "an empty breakdown is omitted, never a blank section"
+        );
+    }
+
+    /// The panel states the gateway process RSS exactly ONCE, as the
+    /// `process_rss` breakdown item. A standalone RSS line beside the
+    /// meters would put the same number twice on one screen — the exact
+    /// double-count this section exists to remove (abstractflow hit it
+    /// and cut its duplicate; this guard keeps ours from growing one).
+    #[test]
+    fn the_panel_states_the_gateway_process_rss_exactly_once() {
+        let f = host_facts();
+        let out = resources_text(&f);
+        let rss = super::human_bytes(f.process_rss.expect("the fixture reports an RSS"));
+        assert_eq!(rss, "488.3 MiB");
+        assert_eq!(
+            out.matches(&rss).count(),
+            1,
+            "the RSS figure appears once, and only as the breakdown item:\n{out}"
+        );
+        let stated = out
+            .lines()
+            .find(|l| l.contains(&rss))
+            .expect("the RSS line renders");
+        assert!(stated.contains("gateway process RSS"), "{stated}");
+    }
+
+    /// THE KEY RULE for a row with no `runtime_id` — the common case on
+    /// the live wire, where sweep rows arrive with `runtime_id: null`.
+    #[test]
+    fn a_row_without_a_runtime_id_keys_on_provider_and_model() {
+        let f = HostFacts {
+            models: vec![ResidencyRow {
+                provider: "lmstudio".into(),
+                model: "qwen/qwen3-vl-4b".into(),
+                resident: Some(true),
+                size_bytes: Some(4_000_000_000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let b = memory_breakdown(&f);
+        assert_eq!(
+            of_kind(&b, BreakdownKind::Item)[0].key,
+            "model:lmstudio:qwen/qwen3-vl-4b",
+            "no index suffix, no task segment, no empty leading segment"
+        );
     }
 
     #[test]
@@ -4483,7 +5349,7 @@ mod tests {
             degraded: vec!["gpu: ioreg unavailable".into()],
             ..Default::default()
         };
-        let (rows, targets) = resources_rows(&f, &HostContracts::default(), None, 92);
+        let (rows, targets, _) = resources_rows(&f, &HostContracts::default(), None, 92);
         assert!(targets.is_empty());
         let out = rows
             .into_iter()
@@ -4508,7 +5374,7 @@ mod tests {
     fn empty_caches_say_none_only_under_the_declared_contract() {
         let f = HostFacts::default();
         let declared = host_contracts();
-        let (rows, _) = resources_rows(&f, &declared, None, 92);
+        let (rows, _, _) = resources_rows(&f, &declared, None, 92);
         let out = rows
             .iter()
             .map(|r| r.text.as_str())
@@ -4518,7 +5384,7 @@ mod tests {
             out.contains("session caches (0)") && out.contains("  none"),
             "declared contract + empty list = a true 'none': {out}"
         );
-        let (rows, _) = resources_rows(&f, &HostContracts::default(), None, 92);
+        let (rows, _, _) = resources_rows(&f, &HostContracts::default(), None, 92);
         let cache_ix = rows
             .iter()
             .position(|r| r.text.contains("session caches"))
@@ -4536,7 +5402,7 @@ mod tests {
             "lmstudio/qwen3-4b".to_string(),
             "calibrated · predicted max context 28672".to_string(),
         );
-        let (rows, _) = resources_rows(&host_facts(), &host_contracts(), Some(&est), 92);
+        let (rows, _, _) = resources_rows(&host_facts(), &host_contracts(), Some(&est), 92);
         let result_row = rows
             .iter()
             .find(|r| r.text.contains("estimate lmstudio/qwen3-4b: calibrated"))
@@ -4549,14 +5415,14 @@ mod tests {
             "lmstudio/qwen3-4b".to_string(),
             "estimate failed: gateway HTTP 500: boom".to_string(),
         );
-        let (rows, _) = resources_rows(&host_facts(), &host_contracts(), Some(&fail), 92);
+        let (rows, _, _) = resources_rows(&host_facts(), &host_contracts(), Some(&fail), 92);
         let fail_row = rows
             .iter()
             .find(|r| r.text.contains("estimate failed"))
             .expect("failure line renders");
         assert!(!fail_row.dim, "a failure is information, not chrome");
         let pending = ("lmstudio/qwen3-4b".to_string(), "estimating…".to_string());
-        let (rows, _) = resources_rows(&host_facts(), &host_contracts(), Some(&pending), 92);
+        let (rows, _, _) = resources_rows(&host_facts(), &host_contracts(), Some(&pending), 92);
         let pending_row = rows
             .iter()
             .find(|r| r.text.contains("estimating…"))
@@ -4572,15 +5438,46 @@ mod tests {
         assert_eq!(super::short_ts(""), "");
     }
 
+    /// BINARY math, BINARY labels, every tier — and the labels are the point.
+    /// The math here was always `/1024`; calling the result `GB` made this
+    /// panel disagree with the gateway web console, which really did divide by
+    /// 1e9. One 89,986,353,824 B GGUF read `83.8 GB` here and `89.99 GB`
+    /// there, for the same model, on the same machine.
     #[test]
-    fn byte_humanizing_scales_to_gb_and_tb() {
+    fn byte_humanizing_is_binary_with_binary_labels() {
         assert_eq!(super::human_bytes(512), "512 B");
-        assert_eq!(super::human_bytes(4_508_876_800), "4.2 GB");
-        assert_eq!(super::human_bytes(137_438_953_472), "128.0 GB");
-        assert_eq!(super::human_bytes(2_199_023_255_552), "2.0 TB");
+        assert_eq!(super::human_bytes(1024), "1.0 KiB");
+        assert_eq!(super::human_bytes(12_700), "12.4 KiB");
+        assert_eq!(super::human_bytes(1_258_291), "1.2 MiB");
+        assert_eq!(super::human_bytes(4_508_876_800), "4.2 GiB");
+        assert_eq!(super::human_bytes(2_199_023_255_552), "2.0 TiB");
         // The meter bar clamps and rounds honestly.
         assert_eq!(super::meter_bar(62.0), "[#####---] 62%");
         assert_eq!(super::meter_bar(0.0), "[--------] 0%");
         assert_eq!(super::meter_bar(140.0), "[########] 100%");
+    }
+
+    /// THE CROSS-SURFACE PIN. These six byte counts are the shared set: the
+    /// same assertions exist in `abstractgateway/console-tui`
+    /// (`store::human_bytes`), the gateway web console (`_fmtBytes`),
+    /// abstractflow (`formatBytes`) and `@abstractframework/monitor-memory`
+    /// (`formatBytes`). If this test and its four siblings do not agree
+    /// string-for-string, the operator is being shown two different sizes for
+    /// one model, which is the defect this set exists to prevent.
+    #[test]
+    fn byte_humanizing_matches_every_other_surface_on_the_shared_set() {
+        // the operator's sharded GGUF
+        assert_eq!(super::human_bytes(89_986_353_824), "83.8 GiB");
+        // Σ model weights
+        assert_eq!(super::human_bytes(93_096_269_257), "86.7 GiB");
+        // `sysctl iogpu.wired_limit_mb=110000`
+        assert_eq!(super::human_bytes(115_343_360_000), "107.4 GiB");
+        // this machine's RAM total — exactly 128 GiB, which is what the
+        // hardware is sold as and why binary is the right math here
+        assert_eq!(super::human_bytes(137_438_953_472), "128.0 GiB");
+        // lmstudio qwen3-vl-4b
+        assert_eq!(super::human_bytes(3_109_915_433), "2.9 GiB");
+        // session caches
+        assert_eq!(super::human_bytes(4_352_519_172), "4.1 GiB");
     }
 }

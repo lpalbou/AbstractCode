@@ -527,7 +527,12 @@ impl GatewayClient {
         )
     }
 
-    /// Lock a model resident (`POST /models/lock`, admin).
+    /// Lock a model resident (`POST /models/lock`, admin). The gateway
+    /// ADOPTS externally-loaded models here — a model LM Studio or
+    /// ollama put in memory (the residency sweep's rows, which arrive
+    /// with `lockable: null`) becomes this gateway's to hold. So a null
+    /// `lockable` is an UNKNOWN for the server to answer, never a
+    /// refusal this client should make on its behalf.
     pub fn lock_model(&self, provider: &str, model: &str) -> GwResult<Value> {
         self.post_json(
             "/models/lock",

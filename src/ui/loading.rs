@@ -196,19 +196,45 @@ mod tests {
         assert!(caption(Some((9, 9))).contains("restored 9 of 9"));
     }
 
-    /// The scanner clock: the band's position wraps exactly at the
-    /// sheen's own period, so an arbitrarily long restore never sees a
-    /// discontinuity (`sheen_pos` handles the modulo; this pins that
-    /// the SCAN_STEP multiplier keeps the wrap exact).
+    /// The scanner MOVES, and crosses the whole bar.
+    ///
+    /// The first cut asserted only that the band's position wraps —
+    /// which `sheen_pos`'s own modulo guarantees for EVERY integer
+    /// multiplier, so it held with `SCAN_STEP` set to 1, 100 or 4097
+    /// and pinned nothing about the constant it named (adversarial
+    /// review 2026-08-28, H-2). What actually matters is that
+    /// consecutive ticker frames differ (a bar that repeats its
+    /// position reads as frozen — the honest-motion contract) and that
+    /// a sweep takes a human-scaled few seconds rather than a blur.
     #[test]
-    fn the_scan_band_wraps_exactly() {
+    fn the_scan_band_advances_every_frame_and_sweeps_the_bar() {
         let w = BAR_W;
-        let period = (w + 28) as u64; // sheen period: width + 2 * pad
-        for f in 0..period {
-            assert_eq!(
-                logo::sheen_pos(f.wrapping_mul(SCAN_STEP), w),
-                logo::sheen_pos((f + period).wrapping_mul(SCAN_STEP), w),
-            );
+        // Every frame moves the band: SCAN_STEP=0 would freeze it.
+        for f in 0..64u64 {
+            let now = logo::sheen_pos(f.wrapping_mul(SCAN_STEP), w);
+            let next = logo::sheen_pos((f + 1).wrapping_mul(SCAN_STEP), w);
+            assert_ne!(now, next, "the band is static at frame {f}");
         }
+        // Every column is BRIGHTLY lit at some frame of one pass: the
+        // scanner crosses the whole bar rather than pacing one end.
+        // The floor is 0.9, not 1.0, because the band advances in
+        // SCAN_STEP-cell jumps and so does not land dead-centre on
+        // every column (measured: column 0 peaks at 0.970). A column
+        // the band never reaches scores 0.0, which is what this
+        // catches; demanding a perfect 1.0 would only be asserting
+        // that SCAN_STEP divides the period.
+        let frames = ((w + 2 * 14) as u64).div_ceil(SCAN_STEP) + 1;
+        for x in 0..w {
+            let peak = (0..frames)
+                .map(|f| logo::sheen_weight(x, 0, logo::sheen_pos(f * SCAN_STEP, w)))
+                .fold(0.0f32, f32::max);
+            assert!(peak > 0.9, "column {x} never lit (peak {peak})");
+        }
+        // A pass lands in seconds at the ~150 ms ticker, not frames.
+        let secs = frames as f32 * 0.150;
+        assert!(
+            (2.0..8.0).contains(&secs),
+            "a sweep takes {secs:.1}s — too fast to read or too slow to reassure"
+        );
     }
 }

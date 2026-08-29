@@ -2263,14 +2263,28 @@ fn session_pick_shows_the_animated_loading_screen_until_history_lands() {
 /// Right-click on a transcript item (operator ask, 2026-08-28): a
 /// secondary press on a tool row opens the engine ContextMenu with the
 /// card's own actions; Enter commits the highlighted one, the copy
-/// lands as an OSC 52 write, and the notice names what left. A press
-/// on the inter-item gap opens nothing (honest geometry).
+/// lands as an OSC 52 write, and the notice names what left.
+///
+/// SCROLLED, deliberately (adversarial review 2026-08-28, H-3): the
+/// first cut used a short fold that fit the pane, so the scroll offset
+/// was always 0 and the row mapping was never really tested — the
+/// handler's `+ offset` term could be deleted and this still passed,
+/// which is exactly how the pin-lag defect survived the suite. With
+/// filler pushing the content past the viewport, the press must still
+/// land on the row under the cursor.
 #[test]
 fn right_click_on_a_tool_row_opens_its_action_menu() {
     let mut h = harness();
     h.turn();
     h.leave_splash();
     h.store.fold.update(|f| {
+        // Enough content to scroll: the mapping is only meaningful
+        // once the viewport shows a window, not the whole fold.
+        for i in 0..40 {
+            f.push_item(abstractcode_tui::transcript::Item::User {
+                text: format!("filler line {i}"),
+            });
+        }
         f.push_item(abstractcode_tui::transcript::Item::Tool {
             key: "t1".into(),
             name: "read_file".into(),
@@ -2284,10 +2298,14 @@ fn right_click_on_a_tool_row_opens_its_action_menu() {
             error: String::new(),
         });
     });
-    for _ in 0..3 {
+    for _ in 0..4 {
         h.turn();
     }
     let screen = h.turn();
+    assert!(
+        !screen.contains("filler line 0"),
+        "the transcript is genuinely scrolled (row 0 is off-screen):\n{screen}"
+    );
     let row0 = screen
         .lines()
         .position(|l| l.contains("read_file"))
@@ -2299,7 +2317,9 @@ fn right_click_on_a_tool_row_opens_its_action_menu() {
     let screen = h.turn();
     assert!(
         screen.contains("Copy arguments") && screen.contains("Copy result"),
-        "the tool card's menu is open:\n{screen}"
+        "the TOOL card's menu is open — not a filler line's (a filler \
+         item offers Copy message/Quote, so this also pins that the row \
+         mapping resolved the right item):\n{screen}"
     );
     assert!(
         screen.contains("Copy path"),
@@ -2315,6 +2335,49 @@ fn right_click_on_a_tool_row_opens_its_action_menu() {
     assert!(
         notices.iter().any(|n| n.contains("copied arguments")),
         "the copy is announced by name: {notices:?}"
+    );
+}
+
+/// A right-click that resolves to no item, and one on a card with
+/// nothing to copy, both SAY so rather than dying silently: the press
+/// is consumed either way, and an unexplained dead gesture reads as a
+/// broken menu (adversarial review 2026-08-28, I-2).
+#[test]
+fn a_right_click_with_nothing_to_offer_says_so() {
+    let mut h = harness();
+    h.turn();
+    h.leave_splash();
+    h.store.fold.update(|f| {
+        // A no-argument tool still Running: no args, no result, no
+        // error — every row it could offer is disabled, so the engine's
+        // ContextMenu would refuse to open and the press would vanish.
+        f.push_item(abstractcode_tui::transcript::Item::Tool {
+            key: "t2".into(),
+            name: "list_entities".into(),
+            args_preview: String::new(),
+            args_full: String::new(),
+            status: abstractcode_tui::transcript::ToolStatus::Running,
+            result: String::new(),
+            error: String::new(),
+        });
+    });
+    for _ in 0..3 {
+        h.turn();
+    }
+    let screen = h.turn();
+    let row = screen
+        .lines()
+        .position(|l| l.contains("list_entities"))
+        .expect("tool row on screen") as i32
+        + 1;
+    h.term.push_input(format!("\x1b[<2;4;{row}M").as_bytes());
+    h.turn();
+    h.term.push_input(format!("\x1b[<2;4;{row}m").as_bytes());
+    h.turn();
+    let notices = h.store.notices.get_untracked();
+    assert!(
+        notices.iter().any(|n| n.contains("nothing to copy")),
+        "an inert card explains itself instead of ignoring the press: {notices:?}"
     );
 }
 
@@ -10696,6 +10759,34 @@ fn a_turn_that_stopped_short_holds_the_queue_instead_of_draining_it() {
     );
 }
 
+/// One panel row's WHOLE text, rejoined. The resources panel WRAPS long
+/// rows (nothing is truncated off the right edge), so a two-word claim like
+/// `ctx 28672*` or `cache 2.0 GiB` can straddle the fold — and the fold moves
+/// whenever a cell's width changes, as it did when the binary unit strings
+/// (`GiB`, one cell wider than `GB`) landed. An assertion here is about the
+/// TEXT, never about where the terminal happened to break it. Continuation
+/// lines are the ones indented past the row's own indent; the right-hand
+/// scrollbar/border glyphs are dropped.
+fn panel_row_text(screen: &str, needle: &str) -> String {
+    fn clean(l: &str) -> &str {
+        l.trim_end_matches(['█', '▌', '▐', ' ']).trim_start()
+    }
+    let mut lines = screen.lines().skip_while(|l| !l.contains(needle));
+    let first = lines
+        .next()
+        .unwrap_or_else(|| panic!("no row for {needle}:\n{screen}"));
+    let indent = first.len() - first.trim_start().len();
+    let mut parts = vec![clean(first).to_string()];
+    for l in lines {
+        let body = l.trim_start();
+        if body.is_empty() || l.len() - body.len() <= indent {
+            break;
+        }
+        parts.push(clean(l).to_string());
+    }
+    parts.join(" ").split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// `/resources` end to end: contracts gate, the modal's honest rendering
 /// from parsed host facts, and the `u` → confirm → `Cmd::UnloadModel`
 /// action wiring (the tri-state residency and lock marker render on the
@@ -10720,22 +10811,40 @@ fn resources_modal_renders_host_facts_and_unload_confirms_before_sending() {
         "memory": {
             "ram": {"total_bytes": 137438953472u64, "used_bytes": 85238953472u64,
                      "percent": 62.0},
+            "process": {"rss_bytes": 512000000u64},
+            // The LIVE device block: `allocated_bytes` is PROCESS-LOCAL
+            // and reads 0 while ~98 GB of weights are resident.
+            "device": {"backend": "metal", "allocated_bytes": 0u64,
+                        "total_bytes": 137438953472u64,
+                        "host_in_use_bytes": 105743990784u64,
+                        "wired_limit_bytes": 115343360000u64},
             "host": {"host_name": "studio.local"}
         },
         "gpu": {"supported": true, "utilization_gpu_pct": 21.0},
         "models": [
             {"task": "text-generation", "provider": "lmstudio", "model": "qwen3-4b",
              "resident": true, "state": "loaded", "locked": true, "lockable": true,
-             "size_bytes": 4508876800u64, "context_length": 32768,
+             "size_bytes": 4508876800u64, "cache_bytes": 268435456u64,
+             "context_length": 32768,
              "calibrated_context_length": 28672, "context_calibrated": true},
             {"task": "text-generation", "provider": "ollama", "model": "phi4",
-             "resident": null, "locked": false, "lockable": true}
+             "resident": null, "locked": false, "lockable": true},
+            // The host-sweep row AS THE WIRE EMITS IT: LM Studio holds
+            // it, so the gateway stamps `source: "provider_server"` and
+            // `lockable: true` — the adopt wording keys on the SOURCE,
+            // never on `lockable`. Only an ESTIMATE of its weights was
+            // ever reported.
+            {"runtime_id": "rt-glm", "task": "text-generation", "provider": "lmstudio",
+             "model": "glm-4.6-gguf",
+             "source": "provider_server", "resident": true, "state": "provider_loaded",
+             "locked": false, "lockable": true, "size_bytes": null,
+             "est_weights_bytes": 95563022336u64, "cache_bytes": 2147483648u64}
         ],
         "session_caches": [
             {"key": "k1", "provider": "lmstudio", "model": "qwen3-4b",
              "session_id": "acode-abc", "bytes": 1048576, "token_count": 2100}
         ],
-        "totals": {"resident_models": 1}
+        "totals": {"resident_models": 2}
     }));
     h.store.host_state.set(HostState::Ready(facts));
 
@@ -10751,19 +10860,43 @@ fn resources_modal_renders_host_facts_and_unload_confirms_before_sending() {
         screen.contains("62%"),
         "ram meter from served percent:\n{screen}"
     );
+    // THE METAL BUG: the accelerator line shows the all-processes pair
+    // and names its scope in the EXACT spec label — never the
+    // process-local 0 beside a full machine, and never a word that reads
+    // as the whole machine's memory.
+    let dev = screen
+        .lines()
+        .find(|l| l.contains("Accelerator heap"))
+        .expect("the accelerator line renders");
+    assert!(dev.contains("98.5 GiB / 107.4 GiB"), "{dev}");
+    assert!(dev.contains("Accelerator heap · metal (all processes)"), "{dev}");
     assert!(
-        screen.contains("lmstudio/qwen3-4b") && screen.contains("🔒"),
-        "model row with lock marker:\n{screen}"
+        !dev.contains("0 B"),
+        "the process-local zero is not the bar: {dev}"
     );
+    assert!(!screen.contains("host-wide"), "spec PART A3:\n{screen}");
+    // The note is the DIM SUB-LINE directly under the meter — without it
+    // the figure reads as "how full is this machine", which it is not.
+    let note = screen
+        .lines()
+        .position(|l| l.contains("Accelerator heap"))
+        .map(|ix| screen.lines().nth(ix + 1).unwrap_or_default().to_string())
+        .expect("the accelerator line renders");
     assert!(
-        screen.contains("ctx 28672*"),
-        "calibrated ctx starred:\n{screen}"
+        note.contains("memory-mapped GGUF weights are not counted here"),
+        "the note rides with the number:\n{screen}"
     );
-    assert!(
-        screen.contains("resident unknown"),
-        "tri-state residency renders distinct:\n{screen}"
-    );
-    assert!(screen.contains("acode-abc"), "cache row:\n{screen}");
+    // Under the meters: WHAT is consuming the memory, itemized — and NO
+    // remainder, in any spelling (spec PART B4).
+    assert!(screen.contains("consuming memory"), "{screen}");
+    assert!(!screen.contains("nattributed"), "{screen}");
+    // The items render AT REST, on the default terminal: the body opens
+    // at its own top, so nothing above the first cursor target is
+    // stranded behind a "↓ N more" no key could move.
+    assert!(screen.contains("qwen3-4b"), "{screen}");
+    assert!(screen.contains("~89.0 GiB"), "the MARKED estimate:\n{screen}");
+    assert!(screen.contains("model KV caches"), "{screen}");
+    assert!(screen.contains("gateway process RSS"), "{screen}");
     // The open dispatched a fresh fetch (open + r are the ONLY fetch
     // moments — no polling lane exists for /host/state).
     assert!(
@@ -10849,10 +10982,170 @@ fn resources_modal_renders_host_facts_and_unload_confirms_before_sending() {
     }
 
     // The footer carries the host-RAM segment from the same fetch —
-    // present because the served percent is known, muted at 62%.
+    // present because the served percent is known, muted at 62%. RAM is
+    // deliberately what it shows: the device meter's host figure lives
+    // in the modal, where it can name its own scope.
     assert!(
         screen.contains("mem 62%"),
         "footer mem segment from the last fetch:\n{screen}"
+    );
+
+    // ↓ walks the panel one target at a time. This panel is TALLER than
+    // the terminal, so each row is asserted where the cursor reaches it —
+    // which is the point: every row is reachable, and the pinned meters
+    // never scroll away while walking.
+    let meters_still_pinned = |screen: &str| {
+        assert!(
+            screen.contains("Accelerator heap · metal (all processes)")
+                && screen.contains("memory-mapped GGUF weights are not counted here"),
+            "the meters and their note are PINNED — no cursor position \
+             scrolls them away:\n{screen}"
+        );
+    };
+    h.term.push_input(b"\x1b[B"); // ↓ onto the unknown-residency row
+    let screen = h.turn();
+    meters_still_pinned(&screen);
+    assert!(
+        screen.contains("lmstudio/qwen3-4b")
+            && panel_row_text(&screen, "· lmstudio/qwen3-4b ·").contains("ctx 28672*"),
+        "the first model row, with its starred calibrated ctx:\n{screen}"
+    );
+    assert!(
+        screen.contains("🔒") && screen.contains("k unlocks"),
+        "the locked row keeps its marker and names its verb:\n{screen}"
+    );
+    assert!(
+        screen.contains("resident unknown") && screen.contains("no lock ("),
+        "tri-state residency stays distinct and says why it cannot lock:\n{screen}"
+    );
+    h.term.push_input(b"\x1b[B\x1b[B"); // ↓↓ on to the cache row
+    let screen = h.turn();
+    meters_still_pinned(&screen);
+    // The corrected fixture still exercises ADOPT: the wire's
+    // `source: provider_server` is the ONE selector for that wording —
+    // `lockable: true` rides on the row too, so it can never be it.
+    assert!(
+        screen.contains("k locks (adopts it)"),
+        "the externally-loaded provider_server row is offered the lock:\n{screen}"
+    );
+    // The row itself wraps; rejoined, it carries the marked estimate and the
+    // cache figure beside it (`cache 2.0 GiB` straddles the fold at this
+    // width — the unit string is what the fold moved on, not the content).
+    let swept = panel_row_text(&screen, "lmstudio/glm-4.6-gguf");
+    assert!(swept.contains("~89.0 GiB"), "estimate MARKED with ~: {swept}");
+    assert!(swept.contains("cache 2.0 GiB"), "{swept}");
+    // The tail is reachable in the same breath: the cursor is ON the
+    // session-cache row, which is a cursor target with no action.
+    assert!(screen.contains("acode-abc"), "cache row:\n{screen}");
+
+    // ↑ back onto the sweep row: `k` there sends the LOCK. The gateway
+    // ADOPTS a model it did not load; this client never invents a
+    // refusal for one.
+    h.term.push_input(b"\x1b[A");
+    h.turn();
+    h.type_text("k");
+    h.turn();
+    assert!(
+        matches!(
+            h.find_cmd(|c| matches!(c, Cmd::LockModel { .. })),
+            Some(Cmd::LockModel { provider, model })
+                if provider == "lmstudio" && model == "glm-4.6-gguf"
+        ),
+        "a sweep-resident row locks (adoption)"
+    );
+}
+
+/// The HEAD must be REACHABLE too, at the DEFAULT terminal size and with
+/// the cursor where it opens. The window follows the cursor, so rows
+/// above the first cursor target can never be scrolled back to: once
+/// `/resources` grew the accelerator meter, its GGUF note and the
+/// itemized breakdown, the preamble outgrew the window and stranded the
+/// meters — the very thing the panel is opened for — behind an `↑ N more`
+/// no key could move. The meters are now a PINNED head (they render at
+/// every cursor position) and the body opens at its own top (so the
+/// itemization is not stranded one level down).
+///
+/// This is the regression test for that fix: 100x30, no scrolling, no
+/// resizing — just open it and look.
+#[test]
+fn resources_head_is_visible_at_the_default_size_and_never_scrolls_away() {
+    use abstractcode_tui::store::{HostContracts, HostState};
+
+    let mut h = harness();
+    h.leave_splash();
+    h.store.host_contracts.set(Some(HostContracts {
+        model_residency: true,
+        host_state: true,
+        session_caches: true,
+        modality_labels: Vec::new(),
+    }));
+    // Enough rows that the panel is comfortably taller than the window.
+    let caches: Vec<serde_json::Value> = (0..20)
+        .map(|i| {
+            serde_json::json!({
+                "key": format!("k{i}"), "provider": "lmstudio", "model": "qwen3-4b",
+                "session_id": format!("sess-{i:02}"), "bytes": 1024, "token_count": 10
+            })
+        })
+        .collect();
+    let facts = abstractcode_tui::discovery::host_state_from_response(&serde_json::json!({
+        "memory": {
+            "ram": {"total_bytes": 137438953472u64, "used_bytes": 33741111296u64,
+                     "percent": 29.9},
+            "process": {"rss_bytes": 76762775552u64},
+            "device": {"backend": "metal", "allocated_bytes": 0u64,
+                        "total_bytes": 137438953472u64,
+                        "host_in_use_bytes": 1042120704u64,
+                        "wired_limit_bytes": 115343360000u64}
+        },
+        "models": [
+            {"runtime_id": "rt-a", "provider": "huggingface", "model": "big-gguf",
+             "source": "provider_server", "resident": true, "lockable": true,
+             "est_weights_bytes": 89986353824u64, "cache_bytes": 2147483648u64}
+        ],
+        "session_caches": caches,
+        "totals": {"session_cache_bytes": 4352519172u64}
+    }));
+    h.store.host_state.set(HostState::Ready(facts));
+
+    h.type_text("/resources");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    // THE PIN: the accelerator label and its note, at the cursor's
+    // initial position, with nothing touched.
+    assert!(
+        screen.contains("Accelerator heap · metal (all processes)"),
+        "the accelerator label renders at rest:\n{screen}"
+    );
+    assert!(
+        screen.contains("memory-mapped GGUF weights are not counted here"),
+        "and so does its note:\n{screen}"
+    );
+    // The panel really is taller than the window — otherwise this test
+    // would pass for the wrong reason.
+    assert!(
+        screen.contains("↓ ") && screen.contains(" more"),
+        "the fixture must overflow the window, or this proves nothing:\n{screen}"
+    );
+    // The itemization is not stranded one level down either.
+    assert!(screen.contains("consuming memory"), "{screen}");
+    assert!(screen.contains("gateway process RSS"), "{screen}");
+
+    // …and the head survives every cursor position, including the last.
+    for _ in 0..40 {
+        h.term.push_input(b"\x1b[B");
+    }
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("sess-19"),
+        "the tail is still reachable:\n{screen}"
+    );
+    assert!(
+        screen.contains("Accelerator heap · metal (all processes)")
+            && screen.contains("memory-mapped GGUF weights are not counted here"),
+        "the pinned head does not scroll away at the tail:\n{screen}"
     );
 }
 

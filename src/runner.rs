@@ -1421,19 +1421,51 @@ impl Runner {
 
     fn probe_attach(&mut self, session_id: &str, replay_turns: usize) {
         let store = self.store;
+        // EVERY post in this probe is SESSION-GUARDED (adversarial
+        // review 2026-08-28, F). The probe is a wide window — up to ~21
+        // HTTP fetches, seconds — and a `/sessions` pick DURING it
+        // starts a second probe while this one is still running. The
+        // fold-swap post below has always carried this guard; the
+        // restoring/progress posts did not, so probe A's counters
+        // landed on session B's loading screen ("restored 4 of 9" for a
+        // restore that had not started — a fabricated number in the one
+        // surface whose contract is never to fabricate), and A's clear
+        // handed the pane back to the splash's "describe a task below"
+        // over a session whose history was still in flight: verbatim
+        // the lie `ui::loading` exists to end.
+        let probed = session_id.to_string();
+        // `session_id` is UI-thread-stamped and `switch_session` writes
+        // the NEW id before sending the next ProbeAttach, so a stale
+        // probe always observes a mismatch here.
+        macro_rules! post_for_session {
+            ($body:expr) => {{
+                let probed = probed.clone();
+                self.post(move || {
+                    if store.session_id.with_untracked(|s| *s != probed) {
+                        return;
+                    }
+                    #[allow(clippy::redundant_closure_call)]
+                    ($body)();
+                });
+            }};
+        }
         // The idle strip says what this window is doing — the whole
         // probe is up to ~21 HTTP fetches, and "no runs yet" during it
         // was a lie about a session with history in flight (visibility
         // review P2-7). Cleared on EVERY exit path below.
-        self.post(move || {
+        post_for_session!(|| {
             store.restoring.set(true);
             store.restore_progress.set(None);
         });
         // One RAII-ish guard: every `return` clears it via this closure.
         let clear_restoring = {
             let wake = self.wake.clone();
+            let probed = probed.clone();
             move || {
                 wake.post(move || {
+                    if store.session_id.with_untracked(|s| *s != probed) {
+                        return;
+                    }
                     store.restoring.set(false);
                     store.restore_progress.set(None);
                 })
@@ -1537,7 +1569,7 @@ impl Runner {
         } else {
             0
         };
-        self.post(move || store.restore_progress.set(Some((0, bloc_total))));
+        post_for_session!(move || store.restore_progress.set(Some((0, bloc_total))));
         let mut fetched = 0usize;
         if replay_turns > 0 {
             for run in prior.iter().skip(bloc_start) {
@@ -1576,7 +1608,7 @@ impl Runner {
                 // its own denominator reads as a hang, not a failure.
                 fetched += 1;
                 let done = fetched;
-                self.post(move || store.restore_progress.set(Some((done, bloc_total))));
+                post_for_session!(move || store.restore_progress.set(Some((done, bloc_total))));
             }
         }
         if replayed > 0 || failed_restores > 0 {
@@ -4013,6 +4045,62 @@ mod tests {
             // state (the flag gate keeps the restore one-shot).
             apply_worker_death(&store, "boom again");
             assert!(!store.history_loading.get_untracked());
+        });
+        root.dispose();
+    }
+
+    /// The session guard `probe_attach`'s restoring/progress posts now
+    /// carry (adversarial review 2026-08-28, F), exercised as the
+    /// runner's own posts do it: read `session_id` untracked, bail on a
+    /// mismatch.
+    ///
+    /// The bug this pins: probe A is mid-flight (a wide window — up to
+    /// ~21 fetches) when the operator picks session B. A's later posts
+    /// were unguarded, so B's brand-new loading screen rendered A's
+    /// counters ("restored 4 of 9" for a restore that had not begun —
+    /// a fabricated number in the one surface whose contract is never
+    /// to fabricate), and A's clear dropped `restoring` while B's fold
+    /// was Info-only, handing the pane to the splash's "describe a task
+    /// below" over a session with history in flight — verbatim the lie
+    /// `ui::loading` exists to end.
+    #[test]
+    fn a_stale_probes_progress_never_lands_on_the_switched_session() {
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = crate::store::Store::create(cx);
+            store.session_id.set("session-B".into());
+            // B's own probe armed the screen.
+            store.restoring.set(true);
+            store.restore_progress.set(None);
+
+            // Probe A (session-A) posts, exactly as `probe_attach` does.
+            let stale = "session-A".to_string();
+            let guarded = |body: &dyn Fn()| {
+                if store.session_id.with_untracked(|s| *s == stale) {
+                    body();
+                }
+            };
+            guarded(&|| store.restore_progress.set(Some((4, 9))));
+            assert_eq!(
+                store.restore_progress.get_untracked(),
+                None,
+                "a stale probe's counters never reach the new session's screen"
+            );
+            guarded(&|| {
+                store.restoring.set(false);
+                store.restore_progress.set(None);
+            });
+            assert!(
+                store.restoring.get_untracked(),
+                "a stale probe's clear never drops the new session's loading screen"
+            );
+
+            // B's OWN posts still land — the guard filters by session,
+            // it does not disable the lane.
+            let live = "session-B".to_string();
+            if store.session_id.with_untracked(|s| *s == live) {
+                store.restore_progress.set(Some((2, 5)));
+            }
+            assert_eq!(store.restore_progress.get_untracked(), Some((2, 5)));
         });
         root.dispose();
     }
