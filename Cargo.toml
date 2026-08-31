@@ -1,0 +1,11 @@
+# AbstractCode ships two clients against the same AbstractGateway control
+# plane: the terminal client in `tui/`, and the browser client in `web/`
+# (npm `@abstractframework/code`, built with its own toolchain).
+#
+# Keeping the crate as a workspace member rather than at the repo root means
+# `cargo` scopes its packaging and dirty-tree checks to `tui/`, so ordinary
+# churn under `web/` can never block a release — while `target/` still resolves
+# at the repo root for scripts and CI.
+[workspace]
+resolver = "2"
+members = ["tui"]

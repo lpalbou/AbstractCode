@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>probe: backward fire</title>
+<style>body{background:#111;margin:0}canvas{display:block;margin:20px auto;image-rendering:pixelated}</style>
+</head>
+<body>
+<canvas id="screen" width="480" height="360"></canvas>
+<script>
+// PROBE FIXTURE for S1_fire_direction. A game that is genuinely playable in
+// every mechanical sense the rubric measures — the ship answers the arrows,
+// a key demonstrably renders projectiles, the stage scrolls, kills persist —
+// EXCEPT that the weapon fires BACKWARD (leftward, away from the enemies).
+// This is the defect the operator reported on a real product, and the rubric
+// scored that product's weapon at full marks. The suite asserts
+// S1_fire_direction == 0.0 here; everything else about the fixture is
+// ordinary on purpose, so the only thing it can fail is direction.
+//
+// Single file, no modules: the fixture must also pass the delivery gate, so
+// that its score isolates the S1 deduction.
+(function () {
+  const canvas = document.getElementById('screen');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  let state = 'title';
+  const held = Object.create(null);
+  const ship = { x: 90, y: H / 2, w: 22, h: 12, speed: 240 };
+  const shots = [], enemies = [], stars = [];
+  let frame = 0, cooldown = 0, last = -1;
+  for (let i = 0; i < 40; i++) {
+    stars.push({ x: (i * 97) % W, y: (i * 61) % H, s: 30 + (i % 3) * 40 });
+  }
+  window.addEventListener('keydown', function (e) {
+    held[e.code] = true;
+    if (e.code === 'Enter' && state === 'title') state = 'play';
+    if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+  });
+  window.addEventListener('keyup', function (e) { held[e.code] = false; });
+
+  function update(dt) {
+    if (state !== 'play') return;
+    const dx = (held.ArrowRight ? 1 : 0) - (held.ArrowLeft ? 1 : 0);
+    const dy = (held.ArrowDown ? 1 : 0) - (held.ArrowUp ? 1 : 0);
+    ship.x = Math.max(60, Math.min(W - 160, ship.x + dx * ship.speed * dt));
+    ship.y = Math.max(16, Math.min(H - 16, ship.y + dy * ship.speed * dt));
+    cooldown -= 1;
+    if ((held.Space || held.KeyZ) && cooldown <= 0) {
+      // THE DEFECT UNDER TEST: the shot leaves the ship's TAIL and travels
+      // LEFT, off the screen, away from everything it could ever hit.
+      shots.push({ x: ship.x - 6, y: ship.y - 1, vx: -430 });
+      cooldown = 4;
+    }
+    for (const s of shots) s.x += s.vx * dt;
+    for (let i = shots.length - 1; i >= 0; i--) if (shots[i].x < -12) shots.splice(i, 1);
+    if (frame % 34 === 0) {
+      enemies.push({ x: W + 12, y: 20 + ((frame * 37) % (H - 40)), base: 20 + ((frame * 37) % (H - 40)), age: 0 });
+    }
+    for (const e of enemies) {
+      e.age += dt;
+      e.x -= 92 * dt;
+      e.y = e.base + Math.sin(e.age * 3) * 24;
+    }
+    for (let i = enemies.length - 1; i >= 0; i--) if (enemies[i].x < -20) enemies.splice(i, 1);
+    for (const st of stars) { st.x -= 40 * dt; if (st.x < 0) st.x += W; }
+    frame++;
+  }
+
+  function render() {
+    ctx.fillStyle = '#0b0f1a';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#3a4a6a';
+    for (const st of stars) ctx.fillRect(st.x | 0, st.y | 0, 2, 2);
+    if (state === 'title') {
+      ctx.fillStyle = '#dfe9ff';
+      ctx.font = '20px monospace';
+      ctx.fillText('REVERSE GUN PROBE', 130, 150);
+      ctx.font = '12px monospace';
+      ctx.fillText('Press Enter', 200, 190);
+      return;
+    }
+    ctx.fillStyle = '#c86bff';
+    for (const e of enemies) ctx.fillRect(e.x | 0, (e.y - 8) | 0, 16, 16);
+    ctx.fillStyle = '#ff5f5f';
+    for (const s of shots) ctx.fillRect(s.x | 0, s.y | 0, 10, 3);
+    ctx.fillStyle = '#8fd2ff';
+    ctx.fillRect(ship.x | 0, (ship.y - 6) | 0, ship.w, 12);
+    ctx.fillStyle = '#dfe9ff';
+    ctx.font = '12px monospace';
+    ctx.fillText('SCORE 0', 8, 14);
+  }
+
+  function loop(now) {
+    if (last < 0) last = now;
+    const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+    last = now;
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

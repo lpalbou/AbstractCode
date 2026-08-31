@@ -1,0 +1,89 @@
+[package]
+name = "abstractcode-tui"
+version = "0.5.0"
+edition = "2021"
+license = "MIT"
+# MSRV floor comes from the locked dependency set (abstracttui 0.6.0
+# declares 1.87 — unchanged since 0.3.3; ureq 2.12 declares 1.71).
+rust-version = "1.87"
+authors = ["Laurent-Philippe Albou <contact@abstractframework.ai>"]
+description = "A reactive terminal client for AbstractGateway: durable coding-agent runs with live activity, tool approvals, steering, and sessions — rendered by AbstractTUI."
+repository = "https://github.com/lpalbou/abstractcode-tui"
+homepage = "https://github.com/lpalbou/abstractcode-tui"
+readme = "README.md"
+categories = ["command-line-interface", "development-tools"]
+keywords = ["tui", "agent", "llm", "terminal", "gateway"]
+
+[lib]
+name = "abstractcode_tui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "abstractcode-tui"
+path = "src/main.rs"
+
+[dependencies]
+# The rendering engine — published crate, exactly what any user installs.
+# 0.3.1: the CLIPBOARD floor. Through 0.2.x the engine's only copy route
+# was OSC 52, fire-and-forget — and the env pass advertises it for the
+# kitty/WezTerm/ghostty/foot/iTerm2/Windows Terminal lineage only, so on
+# macOS Terminal.app, VS Code/Cursor terminals and Warp EVERY selection
+# copy was dropped on the floor behind a one-time "copies may be
+# ignored" notice (field report 2026-08-16). 0.2.25 added the host
+# clipboard fallback (`pbcopy`/`wl-copy`/`xclip`/`clip.exe`), on by
+# default via `RunConfig::platform_clipboard` — which `App::run()` uses,
+# so this bump needs no code change here. 0.3.0 is the version that
+# fallback shipped in for real (0.2.27 was yanked: the two new
+# `RunConfig` fields break exhaustive struct literals, which we do not
+# write).
+#
+# 0.3.3: the SELECTION floor — a live screen selection freezes
+# follow-tail scrollers, so a drag over a streaming transcript copies
+# the cells it highlighted instead of whatever scrolled under them by
+# release. Engine-side; no app wiring. Ships beside the Codex editor
+# chords, which the composer now consumes — see the Alt+E note in
+# `ui::root` — plus a scrollbar-thumb minimum and a copy notice that
+# reports the size copied. 0.3.2 carried the same feature set but was
+# tagged without reaching crates.io, so 0.3.3 is the resolvable floor.
+#
+# 0.3.6: the IMAGE floor. 0.3.5 taught `gfx::decode_image` PROGRESSIVE
+# JPEG (SOF2: spectral selection, successive approximation, EOB runs,
+# restart markers) plus single-component non-interleaved scans.
+# Progressive is what phone cameras, editors and "save for web" emit by
+# DEFAULT, so through 0.3.4 an ordinary photo dropped into `/attach` —
+# or any progressive JPEG artifact a tool wrote — reached
+# `Runner::fetch_image`, failed with `jpeg: progressive JPEG not
+# supported`, and rendered as an error card where the picture belonged.
+# No app wiring: our decode call site is unchanged and the sequential
+# path is byte-identical. 0.3.6 also makes `widgets::Image` and markdown
+# image blocks follow `MosaicMode::auto` instead of pinning half blocks
+# (~3 dB PSNR on a photo) — that one does NOT touch our in-feed picture,
+# which draws through `gfx::mosaic::render_to_cells` and has resolved
+# the family from live caps since 0.2.2; we inherit it only if we ever
+# adopt the widget. 0.3.4 fixed `Screenshot::to_svg` runs that distort
+# in Chromium viewers, which our headless SVG captures emit.
+#
+# One call site renders a decode failure as user-facing text
+# (`ui::transcript_view`, the image block's error line); 0.3.5 reworded
+# the unsupported-format message, and that site prints it verbatim
+# rather than matching on it.
+#
+# 0.6.0 (2026-08-28 upgrade from 0.3.6, crossing 0.4.0/0.5.0): one
+# source break reached us — `gfx::ImageFormat` gained `Gif` and went
+# #[non_exhaustive] (preview.rs grew the GIF arm + a wildcard; GIF now
+# PREVIEWS instead of refusing by name, so `named_binary` dropped its
+# dead GIF row and two tests moved GIF to the drawable family). The
+# 0.5.0 `RunConfig::extra_grounds` break never touched us (no
+# exhaustive literal). Inherited free: scrollbar drags no longer start
+# text selections, `Feed` answers its intrinsic height on the FIRST
+# frame (the remount/offset_y clamp class our loading→transcript
+# handoff exercises), tooltips work on hover and keyboard, grounds stay
+# distinct at 256 colors, and layout honors margins in wrap/grid.
+abstracttui = "0.6.0"
+# HTTP client (blocking, small): gateway calls + SSE ledger streaming.
+# The explicit feature set = ureq's defaults, pinned deliberately: "tls" is
+# rustls (remote HTTPS gateways work with zero system OpenSSL — the
+# `cargo install` path stays self-contained), "gzip" matches server defaults.
+ureq = { version = "2.12", default-features = false, features = ["tls", "gzip"] }
+# JSON: gateway payloads carry arbitrary user text; battle-tested parsing.
+serde_json = "1"
