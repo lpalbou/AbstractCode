@@ -339,9 +339,10 @@ impl ToolRow {
         let spec = Rc::new(self);
         let h_spec = spec.clone();
         FeedBlock::Custom(CustomBlock::new(
-            move |width| {
-                1 + h_spec.error_lines(width).len() as i32 + h_spec.body_lines(width).len() as i32
-            },
+            // Delegates, so the height a test can call IS the height
+            // the engine gets. Inlining the arithmetic here left
+            // `height_at` orphaned and its test a tautology.
+            move |width| h_spec.height_at(width),
             move |canvas, rect| {
                 if rect.w <= 0 || rect.h <= 0 {
                     return;

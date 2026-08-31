@@ -253,7 +253,13 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     wire_camera_default_off(cx, store, ctx.clone());
     spawn_run_ticker(cx, store, spin);
     spawn_probe_ticker(cx, store, ctx.tx.clone());
-    wire_conn_self_heal(cx, store, ctx.tx.clone(), ctx.prefs.clone());
+    wire_conn_self_heal(
+        cx,
+        store,
+        ctx.tx.clone(),
+        ctx.prefs.clone(),
+        ctx.replay_turns,
+    );
     wire_gpu_cadence(cx, store);
     wire_llm_meter(cx, store);
     wire_toasts(cx, store, ctx.overlays.clone());
@@ -1479,6 +1485,8 @@ fn reset_session_state(store: Store, ctx: &UiCtx, old_sid: &str, new_sid: &str, 
     // A stale (done, total) from the old session's probe must not flash
     // on the next loading screen; the new probe posts its own counters.
     store.restore_progress.set(None);
+    // …and a failure notice belongs to the session it was about.
+    store.restore_failed.set(None);
     // Stale-clock hygiene (visibility review P0-1 path 2): a mid-run
     // session switch cancels the run, but its `finish()` clear is
     // fold-guarded and skipped after this reset — the anchor must die
@@ -2335,13 +2343,30 @@ fn spawn_probe_ticker(cx: Scope, store: Store, tx: Sender<Cmd>) {
 ///
 /// Takes `tx`/`prefs` rather than `UiCtx` so the headless test needs no
 /// overlay/quitter scaffolding.
-fn wire_conn_self_heal(cx: Scope, store: Store, tx: Sender<Cmd>, prefs: Rc<RefCell<Prefs>>) {
+fn wire_conn_self_heal(
+    cx: Scope,
+    store: Store,
+    tx: Sender<Cmd>,
+    prefs: Rc<RefCell<Prefs>>,
+    replay_turns: usize,
+) {
     let was_down = Rc::new(Cell::new(false));
     cx.effect(move || {
         let conn = store.conn.get();
         let now_down = matches!(conn, Conn::Down(..));
         let before = was_down.replace(now_down);
         if before && conn == Conn::Ok {
+            // The restore is retried too, not just the catalog. A
+            // failed rehydration is exactly the thing a reconnection
+            // fixes, and telling the operator to `/sessions` and
+            // re-select by hand (which the old error card did) asked
+            // them to do what this edge can do for them.
+            if store.restore_failed.get_untracked().is_some() {
+                let _ = tx.send(Cmd::ProbeAttach {
+                    session_id: store.session_id.get_untracked(),
+                    replay_turns,
+                });
+            }
             let (preferred_bundle, preferred_flow) = {
                 let p = prefs.borrow();
                 (p.bundle_id.clone(), p.flow_id.clone())
@@ -2584,7 +2609,7 @@ mod tests {
                 flow_id: Some("81795ea9".into()),
                 ..Default::default()
             };
-            wire_conn_self_heal(cx, store, tx, Rc::new(RefCell::new(prefs)));
+            wire_conn_self_heal(cx, store, tx, Rc::new(RefCell::new(prefs)), 20);
 
             // Healthy boot (Unknown → Ok): the boot sequence already
             // loads; the heal must stay quiet.

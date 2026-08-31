@@ -413,6 +413,31 @@ pub fn activity_strip(t: &TokenSet, store: Store, spin: Signal<u64>, follow: Sig
         };
         if phase == Phase::Idle {
             let totals = store.totals.get();
+            // A restore that failed and may yet succeed: shown WHILE
+            // the condition holds and gone the moment it resolves
+            // (operator, 2026-08-31 — an ephemeral fault does not
+            // belong in the transcript, which is a permanent record).
+            // The reconnect retries it, so the words promise the
+            // recovery this client actually performs rather than
+            // asking the operator to re-select by hand.
+            if let Some(reason) = store.restore_failed.get() {
+                let summary = format!(
+                    "session history not restored ({reason}) — retrying when the gateway answers"
+                );
+                return Element::new()
+                    .style(LayoutStyle::line(1))
+                    .draw(move |canvas, rect| {
+                        let fitted =
+                            abstracttui::text::truncate_ellipsis(&summary, (rect.w - 2).max(4));
+                        canvas.print(
+                            Point::new(rect.x + 1, rect.y),
+                            &fitted,
+                            t.warn,
+                            Rgba::TRANSPARENT,
+                        );
+                    })
+                    .build();
+            }
             // Boot/switch rehydration window says what it is doing —
             // "no runs yet" during up-to-21 bundle fetches was a lie
             // about a session with history in flight (review P2-7).

@@ -89,6 +89,28 @@ board claiming things it had no standing to claim.
   sessions that were perfectly fine — prefs only ever remembered the 15
   sessions this client itself started.
 
+### Changed (a failed restore is a transient condition, 2026-08-31)
+
+- **A restore that fails no longer writes a permanent transcript card.**
+  Losing the gateway for a moment pushed an `Item::Error` reading
+  "session history could not be restored … — /sessions and re-select to
+  retry", which was wrong three ways: a permanent entry for a transient
+  fault, it outlived the reconnection that fixed it, and it asked the
+  operator to do by hand what this client already does automatically.
+  It is now an ephemeral condition (`store.restore_failed`) shown as a
+  strip line while it holds and gone the moment it resolves.
+- **The reconnect retries the restore.** The Down→Ok edge re-issued the
+  catalog and tool loads but never the rehydration — the one thing a
+  reconnection actually fixes. It does now, so the notice resolves
+  itself.
+- **The message carries no URL.** It rendered `GwError`'s Display,
+  which includes the full request URL (`http://…/api/gateway/runs?…`);
+  it now uses the `compact_reason()` form built for text that is shown.
+  The URL-free choice lives inside `apply_restore_failure`, which takes
+  the error rather than a string — handed a string, a caller could pass
+  Display and nothing would catch it (measured: that sabotage survived
+  a green suite).
+
 ### Fixed (adversarial review of the `/sessions` board)
 
 - **Enter on the waiting board switched sessions and CANCELLED the live

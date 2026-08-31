@@ -2819,6 +2819,73 @@ fn the_board_labels_from_the_gateway_and_names_what_it_did_not_fetch() {
     );
 }
 
+/// A failed restore is an EPHEMERAL condition, not a transcript entry
+/// (operator, 2026-08-31: "those kinds of ephemeral warnings/errors
+/// would be better served as temporary modal that disappear if the
+/// connexion is re-established").
+///
+/// It used to be an `Item::Error` card: permanent, carrying the full
+/// request URL, outliving the reconnection that fixed it, and telling
+/// the operator to `/sessions` and re-select by hand. Now it shows
+/// while the condition holds, names no URL, and the reconnect RETRIES
+/// the restore rather than delegating that to the human.
+#[test]
+fn a_failed_restore_is_transient_and_retried_on_reconnect() {
+    let mut h = harness();
+    h.turn();
+    h.leave_splash();
+    // The worker reports a connectivity-class failure (URL-free, as
+    // `GwError::compact_reason()` produces).
+    h.store
+        .restore_failed
+        .set(Some("gateway unreachable".into()));
+    h.store.conn.set(abstractcode_tui::store::Conn::Down(
+        "gateway unreachable: …".into(),
+        true,
+    ));
+    let screen = h.turn();
+    assert!(
+        screen.contains("session history not restored"),
+        "the condition is visible while it holds:\n{screen}"
+    );
+    assert!(
+        screen.contains("retrying when the gateway answers"),
+        "…and promises the recovery this client actually performs:\n{screen}"
+    );
+    assert!(
+        !screen.contains("http://") && !screen.contains("/runs?"),
+        "no request URL on screen — a failure label carrying the \
+         gateway's own endpoint is an instruction kit:\n{screen}"
+    );
+    assert!(
+        !screen.contains("re-select"),
+        "it must not ask the operator to do what the reconnect does:\n{screen}"
+    );
+    // It is NOT a transcript entry: nothing was written to the fold.
+    assert!(
+        h.store.fold.with_untracked(|f| !f
+            .items
+            .iter()
+            .any(|i| matches!(i, abstractcode_tui::transcript::Item::Error { .. }))),
+        "an ephemeral fault never becomes a permanent card"
+    );
+    // The gateway comes back: the app retries the restore itself…
+    h.store.conn.set(abstractcode_tui::store::Conn::Ok);
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::ProbeAttach { .. }))
+            .is_some(),
+        "the reconnect retries the restore instead of asking the user to"
+    );
+    // …and the notice goes away with the condition.
+    h.store.restore_failed.set(None);
+    let screen = h.turn();
+    assert!(
+        !screen.contains("session history not restored"),
+        "the notice disappears once the condition resolves:\n{screen}"
+    );
+}
+
 /// Enter on the WAITING board does nothing — it must not switch
 /// sessions, and it must not cancel the live run.
 ///

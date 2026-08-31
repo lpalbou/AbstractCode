@@ -610,6 +610,9 @@ pub(crate) fn apply_worker_death(store: &Store, msg: &str) {
     // back once the command loop is gone.
     store.restoring.set(false);
     store.restore_progress.set(None);
+    // Nothing can retry once the command loop is gone, so a "retrying
+    // when the gateway answers" notice would be a forever-lie.
+    store.restore_failed.set(None);
     if store.history_loading.get_untracked() {
         store.history_loading.set(false);
         let older = store.older_turns.get_untracked();
@@ -707,6 +710,23 @@ pub(crate) fn fold_session_rows(items: &[Value]) -> Vec<crate::store::SessionRow
     // board's order matches the page's membership.
     out.sort_by(|a, b| b.last_at.cmp(&a.last_at));
     out
+}
+
+/// A restore failed: record it as an EPHEMERAL condition.
+///
+/// Extracted so the choice itself is testable (the `apply_worker_death`
+/// pattern): what matters is not only the text but that the fold is NOT
+/// touched. The previous shape pushed an `Item::Error`, which made a
+/// transient fault a permanent transcript entry that outlived the
+/// reconnection fixing it. If this helper ever stops being called, the
+/// `dead_code` lint says so — which is exactly how the last silent
+/// mis-wiring in this file was caught.
+/// Takes the ERROR, not a string: the URL-free choice belongs here,
+/// not at the call site. Handed a `String`, a caller could pass
+/// `GwError`'s Display — which carries the request URL — and nothing
+/// would catch it (measured: that sabotage survived a green suite).
+pub(crate) fn apply_restore_failure(store: &Store, e: &crate::gateway::GwError) {
+    store.restore_failed.set(Some(e.compact_reason()));
 }
 
 /// Best-effort extraction of a panic payload's message.
@@ -1558,6 +1578,9 @@ impl Runner {
         post_for_session!(|| {
             store.restoring.set(true);
             store.restore_progress.set(None);
+            // This probe IS the retry: drop any prior failure notice
+            // so it cannot outlive the attempt that supersedes it.
+            store.restore_failed.set(None);
         });
         // One RAII-ish guard: every `return` clears it via this closure.
         let clear_restoring = {
@@ -1584,18 +1607,18 @@ impl Runner {
             Err(e) => {
                 clear_restoring();
                 // A silent return here resumed the session EMPTY with no
-                // hint that history exists (adversary P1-4): say so where
-                // the user reads.
-                let msg = e.to_string();
-                self.post(move || {
-                    store.fold.update(|f| {
-                        f.push_item(Item::Error {
-                            text: format!(
-                                "session history could not be restored from the gateway ({msg}) — /sessions and re-select to retry"
-                            ),
-                        });
-                    });
-                });
+                // hint that history exists (adversary P1-4): say so —
+                // but as an EPHEMERAL condition, not a transcript card.
+                //
+                // A restore failure is almost always the gateway being
+                // briefly unreachable, and this client reconnects on
+                // its own; a permanent `Item::Error` outlived the
+                // reconnection that fixed it and told the operator to
+                // re-select by hand (operator, 2026-08-31). It also
+                // rendered `GwError`'s Display — which carries the
+                // request URL — where `compact_reason()` is the
+                // URL-free form built for text that is shown.
+                self.post(move || apply_restore_failure(&store, &e));
                 return;
             }
         };
@@ -4380,6 +4403,44 @@ mod tests {
             // state (the flag gate keeps the restore one-shot).
             apply_worker_death(&store, "boom again");
             assert!(!store.history_loading.get_untracked());
+        });
+        root.dispose();
+    }
+
+    /// A failed restore records an EPHEMERAL condition and leaves the
+    /// transcript ALONE.
+    ///
+    /// The fold assertion is the load-bearing half: the old shape
+    /// pushed an `Item::Error`, so a gateway that was briefly
+    /// unreachable left a permanent card telling the operator to
+    /// `/sessions` and re-select — surviving the reconnection that
+    /// fixed it (operator, 2026-08-31). The text is also checked for a
+    /// URL, because `GwError`'s Display carries the request URL and
+    /// `compact_reason()` is the form built for text that is shown.
+    #[test]
+    fn a_restore_failure_records_a_condition_not_a_transcript_card() {
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = crate::store::Store::create(cx);
+            let e = crate::gateway::GwError::unreachable(
+                "/runs?limit=200&session_id=acode-1d5116d2ffce: \
+                 http://127.0.0.1:8080/api/gateway/runs?limit=200: Connection refused",
+            );
+            apply_restore_failure(&store, &e);
+
+            let shown = store.restore_failed.get_untracked().expect("condition set");
+            assert_eq!(shown, "gateway unreachable");
+            assert!(
+                !shown.contains("http://") && !shown.contains("/runs?"),
+                "the shown reason carries no URL: {shown}"
+            );
+            store.fold.with_untracked(|f| {
+                assert!(
+                    f.items.is_empty(),
+                    "an ephemeral fault writes NOTHING to the transcript, which is \
+                     a permanent record: {:?}",
+                    f.items.len()
+                );
+            });
         });
         root.dispose();
     }

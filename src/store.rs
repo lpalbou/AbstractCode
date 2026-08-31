@@ -994,6 +994,23 @@ pub struct Store {
     /// review P2-7), and the transcript pane shows the animated
     /// loading screen (`ui::loading`, operator ask 2026-08-28).
     pub restoring: Signal<bool>,
+    /// A session restore that FAILED and may yet succeed — an
+    /// EPHEMERAL condition, not a transcript entry (operator,
+    /// 2026-08-31: "those kinds of ephemeral warnings/errors would be
+    /// better served as temporary modal that disappear if the
+    /// connexion is re-established").
+    ///
+    /// It used to be an `Item::Error` pushed into the fold, which is
+    /// the wrong shape three ways: a permanent card for a transient
+    /// fact, it survived the reconnection that resolved it, and it
+    /// told the user to `/sessions` and re-select by hand when the app
+    /// reconnects on its own. The text is `compact_reason()`-class —
+    /// URL-free, because a failure label carrying the gateway's own
+    /// endpoint is an instruction kit on a screen-share (2026-07-23).
+    ///
+    /// Cleared by: a successful restore, the Down→Ok reconnect (which
+    /// also RETRIES it), a session switch, and `/new`.
+    pub restore_failed: Signal<Option<String>>,
     /// The loading screen's counters: `(fetched, total)` prior-turn
     /// bundles of the current ProbeAttach window, posted by the worker
     /// as each bundle lands. `None` while the run list itself is in
@@ -1140,6 +1157,7 @@ impl Store {
             history_cursor: cx.signal(None),
             older_turns: cx.signal(0),
             restoring: cx.signal(false),
+            restore_failed: cx.signal(None),
             restore_progress: cx.signal(None),
             pending_attachments: cx.signal(Vec::new()),
             max_attachment_bytes: cx.signal(0),
