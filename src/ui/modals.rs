@@ -730,6 +730,21 @@ struct Picker {
     /// Caller-computed (each picker's height arithmetic differs).
     size: Size,
     hint: Option<String>,
+    /// LIVE hint, same contract as `live` rows: re-rendered from the
+    /// signals it reads. A static `hint` beside an async fetch would
+    /// freeze on "asking the gateway…" and never correct itself —
+    /// a stale line about a finished request, which is the class ADR
+    /// 0001 exists to prevent. Outranks `hint` when set.
+    live_hint: Option<Rc<dyn Fn() -> String>>,
+    /// Extra keys this picker binds while it is open, with the label
+    /// already promised in its title. Empty for every picker that
+    /// promises none — a key advertised and unbound is worse than one
+    /// never offered.
+    keys: Vec<(KeyChord, Rc<dyn Fn()>)>,
+    /// Called once with the MODAL's scope. Lets a picker own effects
+    /// and tickers that must die with it — the sessions board arms its
+    /// waiting animation here, so nothing ticks once the modal closes.
+    on_mount: Option<Box<dyn Fn(Scope)>>,
     on_selection: Option<Box<dyn Fn(usize)>>,
     on_choose: Box<dyn Fn(usize)>,
     on_cancel: Option<Box<dyn Fn()>>,
@@ -750,6 +765,9 @@ fn open_picker(cx: Scope, ctx: &UiCtx, picker: Picker) {
             let ctx = ctx2.clone();
             Box::new(move || ctx.close_modal())
         });
+        if let Some(mount) = picker.on_mount {
+            mount(mcx);
+        }
         let list_layout = LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0));
         let list: View = match picker.live.clone() {
             Some(rows_of) => {
@@ -785,10 +803,27 @@ fn open_picker(cx: Scope, ctx: &UiCtx, picker: Picker) {
         let mut root = Element::new()
             .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
             .shortcut(KeyChord::plain(Key::Escape), move |_| cancel())
-            .child(title_row(&t, picker.title))
-            .child(list);
-        if let Some(hint) = picker.hint {
-            root = root.child(hint_row(&t, hint));
+            .child(title_row(&t, picker.title));
+        for (chord, action) in picker.keys {
+            root = root.shortcut(chord, move |_| action());
+        }
+        root = root.child(list);
+        match picker.live_hint {
+            Some(hint_of) => {
+                root = root.child(dyn_view_scoped(
+                    LayoutStyle::line(1).shrink(0.0),
+                    move |hcx| {
+                        let t2 = abstracttui::app::current_theme().tokens;
+                        let _ = hcx;
+                        hint_row(&t2, hint_of())
+                    },
+                ));
+            }
+            None => {
+                if let Some(hint) = picker.hint {
+                    root = root.child(hint_row(&t, hint));
+                }
+            }
         }
         root.build()
     });
@@ -820,6 +855,9 @@ pub fn open_theme_picker(cx: Scope, store: Store, ctx: &UiCtx) {
             hint: Some("↑↓ previews live · Enter keeps · Esc reverts".into()),
             // Live preview: moving the selection applies the theme
             // immediately (movement observer, never a commitment).
+            live_hint: None,
+            keys: Vec::new(),
+            on_mount: None,
             on_selection: Some(Box::new(|ix| {
                 if let Some(th) = abstracttui::theme::themes().get(ix) {
                     abstracttui::app::set_theme_by_id(th.id);
@@ -918,6 +956,9 @@ pub fn open_workflow_picker(cx: Scope, store: Store, ctx: &UiCtx) {
             start,
             size,
             hint: None,
+            live_hint: None,
+            keys: Vec::new(),
+            on_mount: None,
             on_selection: None,
             on_choose: Box::new(move |ix| {
                 // Re-read at activation: the rows rebuilt from this
@@ -989,6 +1030,9 @@ pub fn open_gating_modal(cx: Scope, store: Store, ctx: &UiCtx) {
             start: if cur_auto { 1 } else { 0 },
             size,
             hint: None,
+            live_hint: None,
+            keys: Vec::new(),
+            on_mount: None,
             on_selection: None,
             on_choose: Box::new(move |ix| {
                 if ix == 1 {
@@ -1088,6 +1132,9 @@ pub fn open_model_picker(cx: Scope, store: Store, ctx: &UiCtx) {
             start,
             size,
             hint: None,
+            live_hint: None,
+            keys: Vec::new(),
+            on_mount: None,
             on_selection: None,
             on_choose: Box::new(move |ix| {
                 let ctx = &choose_ctx;
@@ -1222,6 +1269,9 @@ pub fn open_reasoning_stage(cx: Scope, store: Store, ctx: &UiCtx) {
             start: 0,
             size,
             hint: None,
+            live_hint: None,
+            keys: Vec::new(),
+            on_mount: None,
             on_selection: None,
             on_choose: Box::new(move |ix| {
                 let rows = reasoning_choices(rows_store);
@@ -1343,6 +1393,9 @@ fn open_model_stage(cx: Scope, store: Store, ctx: &UiCtx, provider: crate::store
             start,
             size,
             hint: None,
+            live_hint: None,
+            keys: Vec::new(),
+            on_mount: None,
             on_selection: None,
             on_choose: Box::new(move |ix| {
                 if ix == 0 {
@@ -2008,59 +2061,459 @@ pub fn open_skills(cx: Scope, store: Store, ctx: &UiCtx) {
     });
 }
 
-/// `/sessions` — pick a recent session to continue (durable server-side).
-pub fn open_sessions(cx: Scope, store: Store, ctx: &UiCtx) {
-    let entries = ctx.prefs.borrow().recent_sessions.clone();
-    if entries.is_empty() {
-        store.notify("no remembered sessions yet — /new mints one");
-        return;
+/// One row of the `/sessions` board: a session id, where the client
+/// learned of it, and everything either side knows about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionPick {
+    pub id: String,
+    /// The session's first prompt. Local knowledge only — the gateway's
+    /// run listing carries no prompt — so a gateway-only row has none
+    /// and renders as such rather than as a blank that reads like an
+    /// empty conversation.
+    pub label: String,
+    /// `None` = the gateway did not list this session (either the fetch
+    /// has not answered, or it answered and this id was not in it).
+    pub state: Option<crate::store::SessionState>,
+    /// Turns (root runs) the gateway listed for this session.
+    pub turns: usize,
+    /// The "when": the gateway's newest-run timestamp where it listed
+    /// one, else the client's own last-used stamp. `from_gateway` says
+    /// WHICH, so the column never passes local memory off as server
+    /// truth.
+    pub when: String,
+    pub from_gateway: bool,
+}
+
+/// Merge what the GATEWAY says exists with what this client REMEMBERS
+/// being called what.
+///
+/// The rule that matters: existence comes from the gateway, labels come
+/// from prefs. A session the gateway lists and this client has never
+/// seen still appears — that is the whole point of the change, because
+/// pointing a fresh client at a remote gateway used to render an empty
+/// list over a gateway holding live work. A session prefs remembers and
+/// the gateway did not list still appears too, with no live state
+/// rather than a fabricated one.
+pub fn merge_session_rows(
+    gateway: Option<&[crate::store::SessionRow]>,
+    local: &[crate::config::SessionEntry],
+) -> Vec<SessionPick> {
+    let mut out: Vec<SessionPick> = Vec::new();
+    if let Some(rows) = gateway {
+        for r in rows {
+            // The GATEWAY's prompt outranks this client's memory of
+            // it: the gateway's is the session's real opening words,
+            // the local one is a cache that only exists for sessions
+            // this client itself started.
+            let label = r.prompt.clone().unwrap_or_else(|| {
+                local
+                    .iter()
+                    .find(|e| e.id == r.id)
+                    .map(|e| e.label.clone())
+                    .unwrap_or_default()
+            });
+            out.push(SessionPick {
+                id: r.id.clone(),
+                label,
+                state: Some(r.state),
+                turns: r.turns,
+                when: r.last_at.clone(),
+                from_gateway: true,
+            });
+        }
     }
+    for e in local {
+        if out.iter().any(|p| p.id == e.id) {
+            continue;
+        }
+        out.push(SessionPick {
+            id: e.id.clone(),
+            label: e.label.clone(),
+            state: None,
+            turns: 0,
+            when: e.last_used.clone(),
+            from_gateway: false,
+        });
+    }
+    // Live sessions first (they want something), then newest — the
+    // SAME order `runner::session_board_order` fetches prompts in, so
+    // the rows you can see are the rows that get labeled.
+    out.sort_by(|a, b| {
+        let live = |p: &SessionPick| p.state.map(|s| !s.is_live()).unwrap_or(true);
+        live(a).cmp(&live(b)).then_with(|| b.when.cmp(&a.when))
+    });
+    out
+}
+
+/// The waiting glyph, same braille cycle the engine's `Spinner` uses —
+/// the board draws it into a List row, which takes strings, so the
+/// frames live here rather than in the widget.
+/// How many ROOT RUNS the board asks for. The listing is per-run, so
+/// this must cover the whole store for the board's claims to hold: at
+/// 500 the operator's gateway (119 sessions, thousands of turns)
+/// returned a slice that missed most sessions — each rendered "not on
+/// the gateway" — and truncated every surviving session's turn count
+/// to "1+". The route documents no server ceiling; `has_more` still
+/// says when even this was not enough.
+/// What it MEANS that the gateway's listing did not contain a row —
+/// three different facts that read identically if you let them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Absence {
+    /// The listing was complete, so absence is proof.
+    Proven,
+    /// The listing was truncated: the session may well be there, just
+    /// not in this page. Saying "not on the gateway" here was the lie
+    /// the operator caught on a 119-session gateway.
+    OutsideListing,
+    /// No listing answered at all — nothing is known either way.
+    Unknown,
+}
+
+impl Absence {
+    fn of(index: &crate::store::SessionIndex) -> Absence {
+        match index {
+            crate::store::SessionIndex::Loaded {
+                truncated: false, ..
+            } => Absence::Proven,
+            crate::store::SessionIndex::Loaded { .. } => Absence::OutsideListing,
+            _ => Absence::Unknown,
+        }
+    }
+}
+
+const SESSION_LIST_LIMIT: u32 = 5000;
+
+const SPINNER: [char; 8] = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'];
+
+/// `HH:MM` from an RFC3339 stamp, or `MM-DD` when it is not today —
+/// the compact "when" the board's column shows.
+fn session_when(stamp: &str, today: &str) -> String {
+    if stamp.len() < 16 {
+        return String::new();
+    }
+    if stamp.get(..10) == Some(today) {
+        stamp.get(11..16).unwrap_or("").to_string()
+    } else {
+        stamp.get(5..10).unwrap_or("").to_string()
+    }
+}
+
+/// `/sessions` — the session board.
+///
+/// Sessions are discovered from the GATEWAY (2026-08-28), not from the
+/// local prefs file: the client is meant to attach to a remote gateway,
+/// and a picker rendering `~/.config` showed nothing there. Prefs stay
+/// as the LABEL cache (the gateway's run listing carries no prompt) and
+/// as the fallback rows when the gateway cannot be reached — marked, in
+/// both cases, so nothing local is passed off as server truth.
+///
+/// Fetched at the gesture and on `r`, never polled (the `/resources`
+/// rule). One HTTP call for the whole board.
+pub fn open_sessions(cx: Scope, store: Store, ctx: &UiCtx) {
+    let local = ctx.prefs.borrow().recent_sessions.clone();
+    // Ask the gateway NOW; the picker renders whatever has landed.
+    ctx.send(crate::runner::Cmd::LoadSessions {
+        limit: SESSION_LIST_LIMIT,
+    });
     let current = store.session_id.get_untracked();
-    let labels: Vec<String> = entries
+    // `YYYY-MM-DD` of now, so a row from today shows a clock time and
+    // an older one shows its date (same stamp grammar as prefs).
+    let today: String = crate::config::now_iso_utc().chars().take(10).collect();
+
+    // Rows are LIVE: the fetch lands while the picker is open and the
+    // board fills in without a reopen.
+    // The waiting animation's clock. Armed by `on_mount` below ONLY
+    // while the fetch is in flight and only while this modal is open,
+    // so the app's zero-wakeup idle guarantee is untouched everywhere
+    // else.
+    // The waiting animation's clock lives on the MODAL's scope, so it
+    // is freed with the modal. Creating it on the app scope leaked one
+    // arena node per `/sessions` open — signals are freed only when
+    // their scope is disposed, and the app scope never is (review D9).
+    // The Picker is built before the modal exists, so `on_mount` mints
+    // it into this slot and the row closures read it from there; mount
+    // runs before the list is built, so it is always present by then.
+    let frame_slot: Rc<std::cell::RefCell<Option<Signal<u64>>>> =
+        Rc::new(std::cell::RefCell::new(None));
+    let rows_frame = frame_slot.clone();
+    let rows_local = local.clone();
+    let rows_today = today.clone();
+    let rows_current = current.clone();
+    let live_rows: Rc<dyn Fn() -> Vec<String>> = Rc::new(move || {
+        let index = store.session_index.get();
+        // WHILE THE FETCH IS IN FLIGHT the board shows the WAITING
+        // surface, not a table (operator, 2026-08-29: "this is a bad
+        // display when loading… you already have a loading screen, use
+        // it"). Rendering the local rows here meant rendering a state
+        // column nobody had asked the gateway about yet, and every one
+        // of them read "not on the gateway" — a claim about a server
+        // that had not been contacted.
+        if matches!(
+            index,
+            crate::store::SessionIndex::Unfetched | crate::store::SessionIndex::Loading
+        ) {
+            // Reading the signal is what animates this row; absent
+            // (mount has not run) it renders frame 0 rather than
+            // panicking.
+            let f = rows_frame
+                .borrow()
+                .as_ref()
+                .map(|sig| sig.get() as usize)
+                .unwrap_or(0);
+            let spin = SPINNER[f % SPINNER.len()];
+            return vec![
+                String::new(),
+                format!("        {spin}  asking the gateway which sessions exist…"),
+            ];
+        }
+        let absence = Absence::of(&index);
+        let picks = session_picks(store, &rows_local);
+        if picks.is_empty() {
+            // An empty board means different things and must say which:
+            // "the gateway has none" is a FACT only once it answered.
+            return vec![match index {
+                crate::store::SessionIndex::Loaded { .. } => {
+                    "  no sessions on the gateway yet — /new mints one".to_string()
+                }
+                _ => "  nothing remembered here, and the gateway did not answer".to_string(),
+            }];
+        }
+        picks
+            .iter()
+            .map(|p| session_row_text(p, &rows_current, &rows_today, absence))
+            .collect()
+    });
+
+    let open_rows = live_rows();
+    let start = session_picks(store, &local)
         .iter()
-        .map(|e| {
-            let marker = if e.id == current { "● " } else { "  " };
-            let when = e
-                .last_used
-                .get(5..16)
-                .map(|s| s.replace('T', " "))
-                .unwrap_or_default();
-            let label = if e.label.is_empty() {
-                "(no prompt yet)".to_string()
-            } else {
-                e.label.clone()
-            };
-            format!("{marker}{}  {when}  {label}", e.id)
-        })
-        .collect();
-    let start = entries.iter().position(|e| e.id == current).unwrap_or(0);
-    // Height: padding 2 + title 1 + hint 1 + inter-child gaps 2 = 6 fixed
-    // rows; every session needs its own line on top of that.
-    let size = modal_size(84, (labels.len() as i32 + 8).min(22));
+        .position(|p| p.id == current)
+        .unwrap_or(0);
+    // Height is sized for the board the GATEWAY may return, not for
+    // the rows on hand at open: the modal's size is fixed when it
+    // opens, and the fetch lands after — sizing to the open-time count
+    // clipped a two-session board to one row (the local row) the
+    // moment the answer arrived. The floor leaves room for ~10 gateway
+    // rows even when this client remembers none; beyond that the List
+    // scrolls under ↑↓, so nothing is lost, and `modal_size` clamps to
+    // the viewport on small terminals.
+    let rows_guess = (open_rows.len() as i32).max(10);
+    let size = modal_size(92, (rows_guess + 8).min(24));
     let choose_ctx = ctx.clone();
+    let choose_local = local.clone();
+    let refresh_ctx = ctx.clone();
     open_picker(
         cx,
         ctx,
         Picker {
-            title: "sessions — ↑↓ browse · Enter continues · Esc closes".into(),
-            labels,
-            live: None,
+            title: "sessions — ↑↓ browse · Enter continues · r refresh · Esc closes".into(),
+            labels: open_rows,
+            live: Some(live_rows),
             start,
             size,
-            hint: Some(
-                "memory is durable on the gateway; switching reattaches to a live run if one exists"
-                    .into(),
-            ),
+            hint: None,
+            // The board's provenance line follows the fetch: "asking
+            // the gateway…" must become the answer, or a refusal, in
+            // place — never freeze on the question.
+            live_hint: Some(Rc::new(move || session_hint(store))),
+            // The waiting animation's ticker, armed ONLY while the
+            // fetch is in flight and cancelled the moment it lands —
+            // and scoped to the modal, so closing the board stops it.
+            // Idle costs nothing, which is the whole rule.
+            on_mount: Some(Box::new(move |mcx: Scope| {
+                let frame = mcx.signal(0u64);
+                *frame_slot.borrow_mut() = Some(frame);
+                let handle: Rc<std::cell::RefCell<Option<abstracttui::reactive::IntervalHandle>>> =
+                    Rc::new(std::cell::RefCell::new(None));
+                mcx.effect(move || {
+                    let pending = matches!(
+                        store.session_index.get(),
+                        crate::store::SessionIndex::Unfetched | crate::store::SessionIndex::Loading
+                    );
+                    let mut slot = handle.borrow_mut();
+                    match (pending, slot.is_some()) {
+                        (true, false) => {
+                            *slot = Some(abstracttui::reactive::interval(
+                                mcx,
+                                std::time::Duration::from_millis(120),
+                                move || frame.update(|f| *f = f.wrapping_add(1)),
+                            ));
+                        }
+                        (false, true) => {
+                            if let Some(h) = slot.take() {
+                                h.cancel();
+                            }
+                        }
+                        _ => {}
+                    }
+                });
+            })),
+            // `r` re-asks. Promised in the title, bound here.
+            keys: vec![(
+                KeyChord::plain(Key::Char('r')),
+                Rc::new(move || {
+                    // No compounding: `r` held down queued one pass per
+                    // press, and each is a listing plus up to 40 prompt
+                    // fetches (review D2). One in flight is enough.
+                    if matches!(
+                        store.session_index.get_untracked(),
+                        crate::store::SessionIndex::Loading
+                    ) {
+                        return;
+                    }
+                    refresh_ctx.send(crate::runner::Cmd::LoadSessions {
+                        limit: SESSION_LIST_LIMIT,
+                    });
+                }) as Rc<dyn Fn()>,
+            )],
             on_selection: None,
+            // RE-READ at activation (the live-picker contract): the row
+            // order changes as the fetch lands, so an open-time snapshot
+            // would switch to the wrong session.
             on_choose: Box::new(move |ix| {
-                if let Some(e) = entries.get(ix) {
-                    crate::ui::switch_session(store, &choose_ctx, &e.id);
+                // NOTHING is selectable while the board is waiting.
+                //
+                // The waiting surface renders a 2-row placeholder while
+                // `on_choose` reads the MERGED list — two different
+                // index spaces — and the engine clamps the activation
+                // index into the RENDERED rows. So Enter (or Space, or
+                // a double-click) on a screen showing only a spinner
+                // resolved to a real session, switched to it, and
+                // `switch_session` CANCELLED the live run on the way
+                // out. Destructive, on a screen with nothing selectable
+                // (adversarial review 2026-08-29, D1).
+                if matches!(
+                    store.session_index.get_untracked(),
+                    crate::store::SessionIndex::Unfetched | crate::store::SessionIndex::Loading
+                ) {
+                    return;
+                }
+                let picks = session_picks(store, &choose_local);
+                if let Some(p) = picks.get(ix) {
+                    crate::ui::switch_session(store, &choose_ctx, &p.id);
                 }
                 choose_ctx.close_modal();
             }),
             on_cancel: None,
         },
     );
+}
+
+/// The merged board, read from the live signal (a tracked read: the
+/// picker's `live` closure re-runs when the fetch lands).
+fn session_picks(store: Store, local: &[crate::config::SessionEntry]) -> Vec<SessionPick> {
+    match store.session_index.get() {
+        crate::store::SessionIndex::Loaded { rows, .. } => merge_session_rows(Some(&rows), local),
+        _ => merge_session_rows(None, local),
+    }
+}
+
+/// The hint line states PROVENANCE — which column came from where, and
+/// what is still missing. It is the surface's honesty contract: the
+/// board mixes a server fact (state) with a client memory (label).
+fn session_hint(store: Store) -> String {
+    match store.session_index.get() {
+        crate::store::SessionIndex::Unfetched | crate::store::SessionIndex::Loading => {
+            "asking the gateway which sessions exist… · rows below are this client's own memory"
+                .into()
+        }
+        crate::store::SessionIndex::Failed(msg) => {
+            // Lead with the fact and leave room for the EVIDENCE: the
+            // old wording spent 74 columns before `msg`, so the
+            // gateway's own reason was always the part that got cut.
+            format!("gateway did not answer — local rows only · {msg}")
+        }
+        crate::store::SessionIndex::Loaded {
+            rows,
+            truncated,
+            labeled,
+        } => {
+            // SHORT enough to survive the hint row (adversarial review
+            // 2026-08-29, D5): the modal caps at 92 columns and the
+            // hint ellipsizes at ~87, so the previous sentence was
+            // already 85 columns and the truncation clause it appended
+            // could never be seen at ANY terminal width — silent
+            // truncation of the truncation notice.
+            //
+            // `has_more` is the gateway's word for older RUNS beyond
+            // this page, not older sessions; say what it said.
+            // Provenance, in the space a ~87-column hint actually
+            // has. Prompts are the GATEWAY's now (fetched per session
+            // from `input_data`), with this client's remembered label
+            // as the fallback — so the old "prompt=local" was stale.
+            let more = if truncated {
+                " · partial: +older runs, counts are floors"
+            } else {
+                " · complete listing"
+            };
+            // NAME the prompt bound: fetching a prompt costs one
+            // request per session, so only the top `labeled` rows have
+            // one. Unsaid, the `—` on row 41 was indistinguishable
+            // from "this session has no prompt" (ADR 0001).
+            let unlabeled = rows.len().saturating_sub(labeled);
+            let cut = if unlabeled > 0 {
+                format!(" · prompts: top {labeled}, {unlabeled} unfetched")
+            } else {
+                String::new()
+            };
+            format!("{} sessions on the gateway{more}{cut}", rows.len())
+        }
+    }
+}
+
+/// One board row, column-aligned so the eye can scan a state down the
+/// page. Degradation is the List's own ellipsis, right to left: the
+/// label goes first because it is last in the row, and the id is
+/// `tail_ellipsis`-cut to 22 chars at every width — session ids differ
+/// at the END, so the tail is the readable half.
+///
+/// `absence` says what a row the gateway did not list actually MEANS —
+/// see [`Absence`]. Only a complete listing can support "not on the
+/// gateway".
+fn session_row_text(p: &SessionPick, current: &str, today: &str, absence: Absence) -> String {
+    let marker = if p.id == *current { "●" } else { " " };
+    let id = crate::ui::chrome::tail_ellipsis(&p.id, 22);
+    // The `when` column mixes two sources — a gateway `updated_at` and
+    // this client's own `last_used` — and rendered them identically,
+    // so local memory read as server truth (adversarial review
+    // 2026-08-29, D10). A gateway time is bare; a remembered one wears
+    // `~`, the same "this is ours, not theirs" mark the row's state
+    // column carries.
+    let when = match session_when(&p.when, today) {
+        w if w.is_empty() => String::new(),
+        w if p.from_gateway => w,
+        w => format!("~{w}"),
+    };
+    // A row the gateway did not list means two very different things,
+    // and saying the strong one unconditionally was a LIE the operator
+    // caught on a live gateway (2026-08-29): every one of those
+    // sessions WAS on the gateway — they were simply outside a listing
+    // this client had capped at 500 runs. "not on the gateway" is a
+    // claim only a COMPLETE listing can support.
+    let state = match (p.state, absence) {
+        (Some(s), _) => s.label().to_string(),
+        (None, Absence::Proven) => "not on the gateway".to_string(),
+        (None, Absence::OutsideListing) => "outside this listing".to_string(),
+        (None, Absence::Unknown) => "state unknown".to_string(),
+    };
+    // Root runs ARE turns. Exact when the listing was complete; a
+    // floor (`+`) when it was not — never a page-bounded number passed
+    // off as a total.
+    let turns = match (p.turns, absence) {
+        (0, _) => String::new(),
+        (n, Absence::Proven) => format!("{n} turns"),
+        (n, _) => format!("{n}+ turns"),
+    };
+    // No prompt is a QUIET absence: the gateway's listing carries none
+    // and the fetch is bounded, so a loud "(no prompt remembered)" on
+    // most rows said "this client failed" about a session that is
+    // perfectly fine.
+    let label = if p.label.is_empty() {
+        "—".to_string()
+    } else {
+        p.label.clone()
+    };
+    format!("{marker} {id:<24} {when:>6}  {state:<20} {turns:<10} {label}")
 }
 
 /// `/mcp` — the gateway's MCP server registry (read-only; gateway-owned).
@@ -3146,7 +3599,11 @@ const GGUF_NOTE: &str = "Σ model weights exceeds the accelerator heap. That is 
 /// from [`crate::store::DeviceScope::label`] and never name the host.
 fn accelerator_label(backend: &str, scope: crate::store::DeviceScope) -> String {
     let backend = backend.trim();
-    let backend = if backend.is_empty() { "device" } else { backend };
+    let backend = if backend.is_empty() {
+        "device"
+    } else {
+        backend
+    };
     format!("Accelerator heap · {backend} ({})", scope.label())
 }
 
@@ -3290,8 +3747,7 @@ fn memory_breakdown(facts: &crate::store::HostFacts) -> Vec<BreakdownLine> {
             "gateway process RSS".into(),
             b,
             human_bytes(b),
-            "resident set size of the gateway process — includes memory-mapped GGUF weights"
-                .into(),
+            "resident set size of the gateway process — includes memory-mapped GGUF weights".into(),
         );
     }
 
@@ -3360,11 +3816,7 @@ fn of_kind(lines: &[BreakdownLine], kind: BreakdownKind) -> Vec<&BreakdownLine> 
 /// A served numeric total by key, or `None` — the gateway's own figure
 /// always outranks anything this client can re-derive.
 fn totals_of(facts: &crate::store::HostFacts, key: &str) -> Option<u64> {
-    facts
-        .totals
-        .iter()
-        .find(|(k, _)| k == key)
-        .map(|(_, v)| *v)
+    facts.totals.iter().find(|(k, _)| k == key).map(|(_, v)| *v)
 }
 
 /// `used / ceiling`, or the bare `used` when there is no ceiling — an
@@ -3546,12 +3998,9 @@ fn resources_rows(
             } else {
                 format!("  ·  {}", l.detail)
             };
-            for (i, s) in text::wrap(
-                &format!("{:<26} {:>10}{detail}", l.name, l.size),
-                wrap_w,
-            )
-            .into_iter()
-            .enumerate()
+            for (i, s) in text::wrap(&format!("{:<26} {:>10}{detail}", l.name, l.size), wrap_w)
+                .into_iter()
+                .enumerate()
             {
                 rows.push(RowSpec {
                     text: format!("  {}{s}", if i == 0 { "" } else { "  " }),
@@ -3615,7 +4064,11 @@ fn resources_rows(
             .into_iter()
             .enumerate()
         {
-            line(&mut rows, if n == 0 { l } else { format!("    {l}") }, false);
+            line(
+                &mut rows,
+                if n == 0 { l } else { format!("    {l}") },
+                false,
+            );
         }
     }
     if let Some((subject, text)) = estimate {
@@ -4524,6 +4977,104 @@ mod tests {
     use super::normalize_allowed_path;
     use std::path::Path;
 
+    /// THE bug this change exists to fix (operator, 2026-08-28: "if
+    /// /sessions is reading from a local file, that's very bad since we
+    /// should be able to connect to a remote gateway").
+    ///
+    /// Existence comes from the GATEWAY; labels come from prefs. A
+    /// session the gateway lists and this client has never heard of
+    /// MUST appear — that is the remote-gateway case, where the old
+    /// picker rendered an empty local file over a gateway full of live
+    /// work.
+    #[test]
+    fn a_session_this_client_never_saw_still_appears() {
+        use super::merge_session_rows;
+        use crate::store::{SessionRow, SessionState};
+        let gateway = vec![
+            SessionRow {
+                id: "acode-remote".into(),
+                state: SessionState::Waiting,
+                last_at: "2026-08-28T12:00:00Z".into(),
+                turns: 3,
+                first_run: String::new(),
+                prompt: None,
+            },
+            SessionRow {
+                id: "acode-known".into(),
+                state: SessionState::Done,
+                last_at: "2026-08-28T09:00:00Z".into(),
+                turns: 1,
+                first_run: String::new(),
+                prompt: None,
+            },
+        ];
+        let local = vec![crate::config::SessionEntry {
+            id: "acode-known".into(),
+            label: "port the tests".into(),
+            last_used: "2026-08-28T09:00:00Z".into(),
+        }];
+        let picks = merge_session_rows(Some(&gateway), &local);
+        let remote = picks.iter().find(|p| p.id == "acode-remote").expect(
+            "a gateway session this client has never seen must be offered — the whole point",
+        );
+        assert!(remote.from_gateway);
+        assert_eq!(remote.state, Some(SessionState::Waiting));
+        assert!(
+            remote.label.is_empty(),
+            "no label is honest: the run listing carries no prompt"
+        );
+        // The known one keeps its locally-remembered prompt.
+        let known = picks.iter().find(|p| p.id == "acode-known").unwrap();
+        assert_eq!(known.label, "port the tests");
+        // Live sessions sort above finished ones.
+        assert_eq!(picks[0].id, "acode-remote");
+    }
+
+    /// The CONSTANT the board actually sends, not just the string
+    /// builder around it.
+    ///
+    /// The pinned query test guards `session_listing_path`, so
+    /// reverting `SESSION_LIST_LIMIT` to the 500 that WAS the
+    /// operator's bug left the whole suite green (adversarial review
+    /// 2026-08-29, D6). `/runs` pages ROOT RUNS, not sessions, so the
+    /// limit has to cover the store: at 500 a 119-session gateway
+    /// returned a slice that missed most sessions — each rendered
+    /// "not on the gateway" — and truncated every surviving count.
+    #[test]
+    fn the_board_asks_for_enough_runs_to_cover_a_real_store() {
+        assert!(
+            super::SESSION_LIST_LIMIT >= 5000,
+            "the listing must cover a real store; 500 was the live bug"
+        );
+        // And it reaches the query unclamped — no ceiling on the way.
+        let p = crate::gateway::GatewayClient::session_listing_path(super::SESSION_LIST_LIMIT);
+        assert!(
+            p.contains(&format!("limit={}", super::SESSION_LIST_LIMIT)),
+            "{p}"
+        );
+    }
+
+    /// A session prefs remembers but the gateway did not list is NOT
+    /// dropped and NOT given an invented state — it is marked.
+    #[test]
+    fn a_local_session_the_gateway_did_not_list_is_marked_never_faked() {
+        use super::merge_session_rows;
+        let local = vec![crate::config::SessionEntry {
+            id: "acode-orphan".into(),
+            label: "old work".into(),
+            last_used: "2026-08-01T09:00:00Z".into(),
+        }];
+        // Gateway answered, and this id was not in it.
+        let picks = merge_session_rows(Some(&[]), &local);
+        assert_eq!(picks.len(), 1);
+        assert!(!picks[0].from_gateway);
+        assert_eq!(picks[0].state, None, "absent state, never a fabricated one");
+        // Gateway has not answered at all: same rows, still unmarked as
+        // live — the hint line is what says the fetch is pending.
+        let picks = merge_session_rows(None, &local);
+        assert_eq!(picks[0].state, None);
+    }
+
     #[test]
     fn normalize_strips_trailing_slashes_so_dupes_collapse() {
         let home = Path::new("/home/me");
@@ -5029,7 +5580,10 @@ mod tests {
         );
         assert!(dev.contains("98.5 GiB / 107.4 GiB"), "{dev}");
         assert!(!dev.contains("0 B"), "never the process-local zero: {dev}");
-        assert!(!dev.contains("allocated"), "that word named the wrong pool: {dev}");
+        assert!(
+            !dev.contains("allocated"),
+            "that word named the wrong pool: {dev}"
+        );
         // PART A3: no spelling of the old scope word survives anywhere.
         assert!(!out.contains("host-wide"), "{out}");
         assert!(
@@ -5079,7 +5633,10 @@ mod tests {
     fn resident_rows_print_a_marked_footprint_and_their_cache() {
         let out = resources_text(&host_facts());
         let measured = model_row_text(&out, "· lmstudio/qwen3-4b ·");
-        assert!(measured.contains(" 4.2 GiB"), "reported size is bare: {measured}");
+        assert!(
+            measured.contains(" 4.2 GiB"),
+            "reported size is bare: {measured}"
+        );
         assert!(!measured.contains("~4.2 GiB"), "{measured}");
         assert!(measured.contains("cache 256.0 MiB"), "{measured}");
         let swept = model_row_text(&out, "· lmstudio/glm-4.6-gguf ·");
@@ -5181,7 +5738,9 @@ mod tests {
         // 5. The accelerator reference carries the EXACT PART A2 label
         // and the EXACT note.
         assert!(
-            refs[2].name.contains("Accelerator heap · metal (all processes)"),
+            refs[2]
+                .name
+                .contains("Accelerator heap · metal (all processes)"),
             "{}",
             refs[2].name
         );
@@ -5238,7 +5797,10 @@ mod tests {
         // Items: the row's own model name, the MARKED estimate, and the
         // field each figure came from.
         assert!(after.contains("qwen3-4b"), "{after}");
-        assert!(after.contains("~93.0 GiB"), "the estimate is MARKED: {after}");
+        assert!(
+            after.contains("~93.0 GiB"),
+            "the estimate is MARKED: {after}"
+        );
         assert!(after.contains("(size_bytes)"), "{after}");
         assert!(after.contains("(est_weights_bytes)"), "{after}");
         assert!(
@@ -5257,7 +5819,10 @@ mod tests {
         assert!(ix("gateway process RSS") < ix("separate counters"));
         assert!(ix("separate counters") < ix("Σ model weights"));
         assert!(ix("Σ model weights") < ix("RAM used"));
-        assert!(after.contains("not additive with the items above"), "{after}");
+        assert!(
+            after.contains("not additive with the items above"),
+            "{after}"
+        );
         // 97.2 GB of weights under a 98.5 GB heap → NO note.
         assert!(!after.contains("exceeds the accelerator heap"), "{after}");
         // PART B4: no remainder, in any spelling, ever again.

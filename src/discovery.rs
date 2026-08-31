@@ -1692,10 +1692,7 @@ mod tests {
                 "only the exact `provider_server` adopts, not {other:?}"
             );
         }
-        assert!(matches!(
-            lock_action(&f.models[1]),
-            LockAction::Refused(_)
-        ));
+        assert!(matches!(lock_action(&f.models[1]), LockAction::Refused(_)));
         assert!(unload_refusal(&f.models[2]).is_none());
         assert!(
             unload_refusal(&f.models[1]).is_none(),

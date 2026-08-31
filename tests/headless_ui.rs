@@ -186,6 +186,20 @@ impl Harness {
     }
 }
 
+/// The board refuses activation until the gateway answers (the D1
+/// guard). These harnesses have no worker, so answer for them: an
+/// empty COMPLETE listing still offers the local rows, marked.
+fn settle_session_board(h: &mut Harness) {
+    h.store
+        .session_index
+        .set(abstractcode_tui::store::SessionIndex::Loaded {
+            rows: Vec::new(),
+            truncated: false,
+            labeled: 0,
+        });
+    h.turn();
+}
+
 fn fixture_records() -> Vec<(String, Value)> {
     let raw = include_str!("fixtures/agent_subrun_ledger.json");
     let records: Vec<Value> = serde_json::from_str(raw).expect("fixture parses");
@@ -2125,6 +2139,18 @@ fn sessions_picker_switches_to_a_recent_session() {
     h.type_text("/sessions");
     h.turn();
     h.press_enter();
+    h.turn();
+    // The board waits on the gateway before it renders rows; this
+    // harness has no worker, so answer for it. An empty LOADED listing
+    // is the "gateway has nothing" case, which still offers the local
+    // rows (marked) so a switch is possible.
+    h.store
+        .session_index
+        .set(abstractcode_tui::store::SessionIndex::Loaded {
+            rows: Vec::new(),
+            truncated: false,
+            labeled: 0,
+        });
     let screen = h.turn();
     assert!(
         screen.contains("fix the parser"),
@@ -2167,6 +2193,7 @@ fn session_pick_shows_the_animated_loading_screen_until_history_lands() {
     h.turn();
     h.press_enter();
     h.turn();
+    settle_session_board(&mut h);
     h.term.push_input(b"\x1b[B");
     h.turn();
     h.press_enter();
@@ -2378,6 +2405,576 @@ fn a_right_click_with_nothing_to_offer_says_so() {
     assert!(
         notices.iter().any(|n| n.contains("nothing to copy")),
         "an inert card explains itself instead of ignoring the press: {notices:?}"
+    );
+}
+
+/// The disclosure marker (operator ask, 2026-08-28). A folded tool card
+/// NAMES the output it is hiding, clicking that marker expands it in
+/// place, and clicking again puts it away — without flipping the whole
+/// transcript to `/details`.
+#[test]
+fn a_tool_card_names_its_hidden_output_and_expands_on_the_marker() {
+    let mut h = harness();
+    h.turn();
+    h.leave_splash();
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::Tool {
+            key: "run-1:node:0:call-a".into(),
+            name: "execute_command".into(),
+            args_preview: "cargo build".into(),
+            args_full: "command: cargo build".into(),
+            status: abstractcode_tui::transcript::ToolStatus::Ok,
+            result: "compiling\nwarning: unused\nFinished in 41s".into(),
+            error: String::new(),
+        });
+    });
+    for _ in 0..3 {
+        h.turn();
+    }
+    let screen = h.turn();
+    assert!(
+        screen.contains("▸ 3 lines"),
+        "the folded row names what it hides:\n{screen}"
+    );
+    assert!(
+        !screen.contains("Finished in 41s"),
+        "…and is not showing it yet:\n{screen}"
+    );
+    // Click the marker itself (right-aligned on the tool row).
+    let row = screen
+        .lines()
+        .position(|l| l.contains("▸ 3 lines"))
+        .expect("marker row");
+    let mx = screen
+        .lines()
+        .nth(row)
+        .unwrap()
+        .find('▸')
+        .expect("marker x")
+        + 2;
+    h.term
+        .push_input(format!("\x1b[<0;{mx};{}M", row + 1).as_bytes());
+    h.turn();
+    h.term
+        .push_input(format!("\x1b[<0;{mx};{}m", row + 1).as_bytes());
+    for _ in 0..2 {
+        h.turn();
+    }
+    let screen = h.turn();
+    assert!(
+        screen.contains("Finished in 41s"),
+        "the marker expanded THIS card in place:\n{screen}"
+    );
+    assert!(
+        screen.contains("▾ 3 lines"),
+        "the arrow reflects the open state:\n{screen}"
+    );
+    assert!(
+        !h.store.show_details.get_untracked(),
+        "per-card expansion never flips the GLOBAL details mode"
+    );
+    // Clicking again collapses it.
+    h.term
+        .push_input(format!("\x1b[<0;{mx};{}M", row + 1).as_bytes());
+    h.turn();
+    h.term
+        .push_input(format!("\x1b[<0;{mx};{}m", row + 1).as_bytes());
+    for _ in 0..2 {
+        h.turn();
+    }
+    let screen = h.turn();
+    assert!(
+        !screen.contains("Finished in 41s"),
+        "clicking the marker again puts the body away:\n{screen}"
+    );
+}
+
+/// The marker's hit box is the marker's CELLS, nothing more. Screen
+/// text-selection is enabled app-wide, and the engine's own
+/// `Feed::on_item_press` consumes every press that lands on an item —
+/// wiring that would have killed drag-to-select across the whole
+/// transcript, so this pins that a press on the row's TEXT does not
+/// toggle anything.
+#[test]
+fn a_press_off_the_marker_never_toggles_the_card() {
+    let mut h = harness();
+    h.turn();
+    h.leave_splash();
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::Tool {
+            key: "run-1:node:0:call-b".into(),
+            name: "execute_command".into(),
+            args_preview: "cargo build".into(),
+            args_full: String::new(),
+            status: abstractcode_tui::transcript::ToolStatus::Ok,
+            result: "compiling\nFinished".into(),
+            error: String::new(),
+        });
+    });
+    for _ in 0..3 {
+        h.turn();
+    }
+    let screen = h.turn();
+    let row = screen
+        .lines()
+        .position(|l| l.contains("▸ 2 lines"))
+        .expect("marker row");
+    // Press on the tool NAME, far left of the marker.
+    h.term
+        .push_input(format!("\x1b[<0;4;{}M", row + 1).as_bytes());
+    h.turn();
+    h.term
+        .push_input(format!("\x1b[<0;4;{}m", row + 1).as_bytes());
+    for _ in 0..2 {
+        h.turn();
+    }
+    let screen = h.turn();
+    assert!(
+        screen.contains("▸ 2 lines") && !screen.contains("│ Finished"),
+        "a press on the row's text selects, it does not expand:\n{screen}"
+    );
+    assert!(
+        h.store.expanded_tools.get_untracked().is_empty(),
+        "nothing was toggled"
+    );
+}
+
+/// `/sessions` asks the GATEWAY which sessions exist (operator,
+/// 2026-08-28). The board renders a session this client has never
+/// heard of, states where each column came from, and never passes the
+/// local file off as server truth.
+#[test]
+fn the_sessions_board_shows_gateway_sessions_and_names_its_sources() {
+    let mut h = harness();
+    h.turn();
+    {
+        let mut prefs = h.prefs.borrow_mut();
+        prefs.touch_session("acode-test-session", Some("current work"));
+    }
+    h.type_text("/sessions");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    // Opening ASKS the gateway.
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::LoadSessions { .. }))
+            .is_some(),
+        "the board fetches at the gesture"
+    );
+    assert!(
+        screen.contains("asking the gateway"),
+        "…and says the live column has not landed yet:\n{screen}"
+    );
+    // The worker answers with a session this client has never seen.
+    h.store
+        .session_index
+        .set(abstractcode_tui::store::SessionIndex::Loaded {
+            rows: vec![
+                abstractcode_tui::store::SessionRow {
+                    id: "acode-never-seen".into(),
+                    state: abstractcode_tui::store::SessionState::Waiting,
+                    last_at: "2026-08-28T12:00:00Z".into(),
+                    turns: 4,
+                    first_run: String::new(),
+                    prompt: None,
+                },
+                abstractcode_tui::store::SessionRow {
+                    id: "acode-test-session".into(),
+                    state: abstractcode_tui::store::SessionState::Done,
+                    last_at: "2026-08-28T09:00:00Z".into(),
+                    turns: 1,
+                    first_run: String::new(),
+                    prompt: None,
+                },
+            ],
+            truncated: false,
+            labeled: 0,
+        });
+    let screen = h.turn();
+    assert!(
+        screen.contains("never-seen"),
+        "a gateway session absent from the local file is offered:\n{screen}"
+    );
+    assert!(
+        screen.contains("waiting on you"),
+        "its live state is the gateway's word:\n{screen}"
+    );
+    assert!(
+        screen.contains("current work"),
+        "the locally-remembered prompt still labels the row it belongs to:\n{screen}"
+    );
+    // Provenance is stated — server state vs client memory — and short
+    // enough to actually FIT the hint row (review D5: the long form
+    // ellipsized away at every terminal width).
+    assert!(
+        screen.contains("sessions on the gateway"),
+        "provenance is stated — server state vs client memory:\n{screen}"
+    );
+}
+
+/// On a pane too narrow to DRAW the marker, no cell on that row is a
+/// control.
+///
+/// The draw drops a marker it cannot fit; the hit-test used to have no
+/// such term, so at ~34 columns a left click on the args hint silently
+/// expanded the body AND swallowed the press that would have started a
+/// text selection — a control with no glyph on screen (adversarial
+/// review 2026-08-29, D1). Both sides read one layout function now;
+/// this pins that the wiring honors it.
+#[test]
+fn a_narrow_pane_that_cannot_draw_the_marker_has_no_hidden_control() {
+    // 34 pane columns is the measured drop threshold for this row
+    // (glyph + `execute_command` + `· ok` + a 9-cell marker); the
+    // terminal is wider than the pane by its padding and scrollbar.
+    let mut h = harness_sized(Size::new(36, 24));
+    h.turn();
+    h.leave_splash();
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode_tui::transcript::Item::Tool {
+            key: "run-1:node:0:narrow".into(),
+            name: "execute_command".into(),
+            args_preview: "cargo build".into(),
+            args_full: String::new(),
+            status: abstractcode_tui::transcript::ToolStatus::Ok,
+            result: "one\ntwo\nthree".into(),
+            error: String::new(),
+        });
+    });
+    for _ in 0..3 {
+        h.turn();
+    }
+    let screen = h.turn();
+    // The name ellipsizes at this width, so find the row by its tag.
+    let row = screen
+        .lines()
+        .position(|l| l.contains("· ok"))
+        .expect("tool row on screen");
+    assert!(
+        !screen.lines().nth(row).unwrap().contains('▸'),
+        "this pane is too narrow to draw a marker (that is the premise):\n{screen}"
+    );
+    // Click every cell across the row, including the far right where a
+    // marker WOULD have been. Nothing may toggle.
+    for x in 1..=36 {
+        h.term
+            .push_input(format!("\x1b[<0;{x};{}M", row + 1).as_bytes());
+        h.turn();
+        h.term
+            .push_input(format!("\x1b[<0;{x};{}m", row + 1).as_bytes());
+        h.turn();
+    }
+    assert!(
+        h.store.expanded_tools.get_untracked().is_empty(),
+        "no cell on a markerless row is a control — found {:?}",
+        h.store.expanded_tools.get_untracked()
+    );
+}
+
+/// While the fetch is in flight the board shows the WAITING surface,
+/// not a table (operator, 2026-08-29: "this is a bad display when
+/// loading… you already have a loading screen, use it").
+///
+/// The bug: local rows rendered a state column nobody had asked the
+/// gateway about yet, so every one of them read "not on the gateway" —
+/// a claim about a server that had not been contacted.
+#[test]
+fn the_board_waits_before_it_claims_anything_about_the_gateway() {
+    let mut h = harness();
+    h.turn();
+    {
+        let mut prefs = h.prefs.borrow_mut();
+        prefs.touch_session("acode-remembered", Some("older work"));
+    }
+    h.type_text("/sessions");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        screen.contains("asking the gateway"),
+        "the waiting surface is shown:\n{screen}"
+    );
+    assert!(
+        !screen.contains("not on the gateway"),
+        "NOTHING is claimed about the gateway before it answers:\n{screen}"
+    );
+    assert!(
+        !screen.contains("older work"),
+        "and no half-populated table leaks through the wait:\n{screen}"
+    );
+    // The answer lands: now the board renders, and the local row is
+    // marked with what the listing actually proved.
+    h.store
+        .session_index
+        .set(abstractcode_tui::store::SessionIndex::Loaded {
+            rows: Vec::new(),
+            truncated: false,
+            labeled: 0,
+        });
+    let screen = h.turn();
+    assert!(
+        screen.contains("older work") && screen.contains("not on the gateway"),
+        "a COMPLETE listing makes absence provable, so now it may be said:\n{screen}"
+    );
+}
+
+/// A truncated listing may not call a missing session absent — it only
+/// proves the session was not in THIS page. On the operator's gateway
+/// (119 sessions) a 500-run cap made every missing session read "not on
+/// the gateway" when all of them were there.
+#[test]
+fn a_truncated_listing_never_claims_a_session_is_missing() {
+    let mut h = harness();
+    h.turn();
+    {
+        let mut prefs = h.prefs.borrow_mut();
+        prefs.touch_session("acode-elsewhere", Some("older work"));
+    }
+    h.type_text("/sessions");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.store
+        .session_index
+        .set(abstractcode_tui::store::SessionIndex::Loaded {
+            rows: vec![abstractcode_tui::store::SessionRow {
+                id: "acode-listed".into(),
+                state: abstractcode_tui::store::SessionState::Running,
+                last_at: "2026-08-29T12:00:00Z".into(),
+                turns: 2,
+                first_run: "r1".into(),
+                prompt: Some("a real prompt from the gateway".into()),
+            }],
+            truncated: true,
+            labeled: 1,
+        });
+    let screen = h.turn();
+    assert!(
+        screen.contains("outside this listing"),
+        "a session missing from a TRUNCATED page is not proven absent:\n{screen}"
+    );
+    assert!(
+        !screen.contains("not on the gateway"),
+        "…and must never be called absent:\n{screen}"
+    );
+    assert!(
+        screen.contains("2+ turns"),
+        "counts from a partial page are floors:\n{screen}"
+    );
+    assert!(
+        screen.contains("a real prompt from"),
+        "the gateway's own prompt labels the row:\n{screen}"
+    );
+}
+
+/// Prompts come from the GATEWAY, the board names how many it fetched,
+/// and turn counts read as exact only when the listing was complete.
+///
+/// The whole prompt feature had zero coverage: dropping the fetch,
+/// setting its bound to zero, or making every count a floor all left
+/// the suite green (adversarial review 2026-08-29, D6).
+#[test]
+fn the_board_labels_from_the_gateway_and_names_what_it_did_not_fetch() {
+    let mut h = harness();
+    h.turn();
+    h.type_text("/sessions");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let row = |id: &str, prompt: Option<&str>, turns: usize| abstractcode_tui::store::SessionRow {
+        id: id.into(),
+        state: abstractcode_tui::store::SessionState::Done,
+        last_at: "2026-08-29T09:00:00Z".into(),
+        turns,
+        first_run: "r".into(),
+        prompt: prompt.map(str::to_string),
+    };
+    h.store
+        .session_index
+        .set(abstractcode_tui::store::SessionIndex::Loaded {
+            rows: vec![
+                row("acode-labeled", Some("port the tests to rstest"), 4),
+                row("acode-unlabeled", None, 2),
+            ],
+            truncated: false,
+            labeled: 1,
+        });
+    let screen = h.turn();
+    assert!(
+        screen.contains("port the tests to"),
+        "the gateway's own prompt labels the row:\n{screen}"
+    );
+    assert!(
+        screen.contains("4 turns") && screen.contains("2 turns"),
+        "a COMPLETE listing gives exact turn counts, not floors:\n{screen}"
+    );
+    assert!(
+        !screen.contains("4+ turns"),
+        "…and must not mark an exact count as a floor:\n{screen}"
+    );
+    // The unfetched remainder is NAMED: one glyph must not silently
+    // mean "still arriving", "outside the bound" and "none at all".
+    assert!(
+        screen.contains("prompts: top 1, 1 unfetched"),
+        "the prompt bound is stated:\n{screen}"
+    );
+}
+
+/// Enter on the WAITING board does nothing — it must not switch
+/// sessions, and it must not cancel the live run.
+///
+/// The waiting surface renders a 2-row placeholder while `on_choose`
+/// read the MERGED list — two different index spaces — and the engine
+/// clamps the activation index into the RENDERED rows, so Enter on a
+/// screen showing only a spinner resolved to a real session, switched
+/// to it, and `switch_session` cancelled the in-flight run on the way
+/// out. Destructive, first-open reachable (adversarial review
+/// 2026-08-29, D1).
+#[test]
+fn enter_on_the_waiting_board_cannot_switch_or_cancel() {
+    let mut h = harness();
+    h.turn();
+    {
+        let mut prefs = h.prefs.borrow_mut();
+        // Ordered so the CURRENT session sorts LAST: rows 0 and 1 —
+        // the only indices the 2-row placeholder can clamp to — are
+        // both other sessions. With the current session at row 0,
+        // `switch_session` early-returns on "same id" and the test
+        // passes for the wrong reason (measured: the first cut did).
+        prefs.touch_session("acode-test-session", Some("current work"));
+        prefs.touch_session("acode-elsewhere", Some("older work"));
+        prefs.touch_session("acode-yak", Some("yak shaving"));
+    }
+    // A run is in flight — the thing a stray switch would destroy.
+    h.store.phase.set(abstractcode_tui::store::Phase::Running);
+    h.store.run_id.set("run-live".into());
+    h.turn();
+    h.type_text("/sessions");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        screen.contains("asking the gateway"),
+        "premise: the board is waiting:\n{screen}"
+    );
+    // Every activation gesture the List offers, on the placeholder.
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.turn();
+    assert_eq!(
+        h.store.session_id.get_untracked(),
+        "acode-test-session",
+        "no session switch from a screen with nothing selectable"
+    );
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Cancel { .. })).is_none(),
+        "and above all: the live run was NOT cancelled"
+    );
+    assert_eq!(
+        h.store.phase.get_untracked(),
+        abstractcode_tui::store::Phase::Running,
+        "the run is still running"
+    );
+}
+
+/// `r` re-asks the gateway. The title promises it, so it must be
+/// bound — removing the binding left the whole suite green while the
+/// title still advertised it (adversarial review 2026-08-29).
+#[test]
+fn r_refreshes_the_session_board() {
+    let mut h = harness();
+    h.turn();
+    h.type_text("/sessions");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    // Drain the open-time fetch.
+    assert!(h
+        .find_cmd(|c| matches!(c, Cmd::LoadSessions { .. }))
+        .is_some());
+    h.type_text("r");
+    h.turn();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::LoadSessions { .. }))
+            .is_some(),
+        "`r` re-asks — the key the title promises is bound"
+    );
+}
+
+/// The board says when its list is a PAGE, not the whole gateway.
+/// `has_more` reached the store and then died on screen: the hint
+/// sentence was already ~85 columns against an ~87-column budget, so
+/// the truncation clause could not render at ANY width — silent
+/// truncation of the truncation notice (adversarial review, D5).
+#[test]
+fn a_truncated_session_listing_says_so_on_screen() {
+    let mut h = harness();
+    h.turn();
+    h.type_text("/sessions");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.store
+        .session_index
+        .set(abstractcode_tui::store::SessionIndex::Loaded {
+            rows: vec![abstractcode_tui::store::SessionRow {
+                id: "acode-a".into(),
+                state: abstractcode_tui::store::SessionState::Done,
+                last_at: "2026-08-29T09:00:00Z".into(),
+                turns: 1,
+                first_run: String::new(),
+                prompt: None,
+            }],
+            truncated: true,
+            labeled: 1,
+        });
+    let screen = h.turn();
+    assert!(
+        screen.contains("+older runs"),
+        "the page boundary is VISIBLE, not just modelled:\n{screen}"
+    );
+    assert!(
+        screen.contains("counts are floors"),
+        "…and the turn counts say they are page-bounded:\n{screen}"
+    );
+}
+
+/// A gateway that will not answer leaves the board honest: local rows
+/// render, the failure is named, and no row claims a live state.
+#[test]
+fn a_failed_session_fetch_says_so_instead_of_showing_an_empty_gateway() {
+    let mut h = harness();
+    h.turn();
+    {
+        let mut prefs = h.prefs.borrow_mut();
+        prefs.touch_session("acode-remembered", Some("older work"));
+    }
+    h.type_text("/sessions");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.store
+        .session_index
+        .set(abstractcode_tui::store::SessionIndex::Failed(
+            "gateway unreachable: connection refused".into(),
+        ));
+    let screen = h.turn();
+    assert!(
+        screen.contains("gateway did not answer"),
+        "the refusal is named:\n{screen}"
+    );
+    assert!(
+        screen.contains("older work"),
+        "remembered sessions still render:\n{screen}"
+    );
+    assert!(
+        screen.contains("state unknown"),
+        "…marked as UNKNOWN — a fetch that never answered proves nothing \
+         about whether the session is there:\n{screen}"
     );
 }
 
@@ -2749,6 +3346,7 @@ fn session_switch_while_scrolled_up_shows_the_new_transcript() {
     h.turn();
     h.press_enter();
     h.turn();
+    settle_session_board(&mut h);
     h.term.push_input(b"\x1b[B"); // Down -> the other session
     h.turn();
     h.press_enter();
@@ -10784,7 +11382,11 @@ fn panel_row_text(screen: &str, needle: &str) -> String {
         }
         parts.push(clean(l).to_string());
     }
-    parts.join(" ").split_whitespace().collect::<Vec<_>>().join(" ")
+    parts
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// `/resources` end to end: contracts gate, the modal's honest rendering
@@ -10869,7 +11471,10 @@ fn resources_modal_renders_host_facts_and_unload_confirms_before_sending() {
         .find(|l| l.contains("Accelerator heap"))
         .expect("the accelerator line renders");
     assert!(dev.contains("98.5 GiB / 107.4 GiB"), "{dev}");
-    assert!(dev.contains("Accelerator heap · metal (all processes)"), "{dev}");
+    assert!(
+        dev.contains("Accelerator heap · metal (all processes)"),
+        "{dev}"
+    );
     assert!(
         !dev.contains("0 B"),
         "the process-local zero is not the bar: {dev}"
@@ -10894,7 +11499,10 @@ fn resources_modal_renders_host_facts_and_unload_confirms_before_sending() {
     // at its own top, so nothing above the first cursor target is
     // stranded behind a "↓ N more" no key could move.
     assert!(screen.contains("qwen3-4b"), "{screen}");
-    assert!(screen.contains("~89.0 GiB"), "the MARKED estimate:\n{screen}");
+    assert!(
+        screen.contains("~89.0 GiB"),
+        "the MARKED estimate:\n{screen}"
+    );
     assert!(screen.contains("model KV caches"), "{screen}");
     assert!(screen.contains("gateway process RSS"), "{screen}");
     // The open dispatched a fresh fetch (open + r are the ONLY fetch
@@ -11032,7 +11640,10 @@ fn resources_modal_renders_host_facts_and_unload_confirms_before_sending() {
     // cache figure beside it (`cache 2.0 GiB` straddles the fold at this
     // width — the unit string is what the fold moved on, not the content).
     let swept = panel_row_text(&screen, "lmstudio/glm-4.6-gguf");
-    assert!(swept.contains("~89.0 GiB"), "estimate MARKED with ~: {swept}");
+    assert!(
+        swept.contains("~89.0 GiB"),
+        "estimate MARKED with ~: {swept}"
+    );
     assert!(swept.contains("cache 2.0 GiB"), "{swept}");
     // The tail is reachable in the same breath: the cursor is ON the
     // session-cache row, which is a cursor target with no action.

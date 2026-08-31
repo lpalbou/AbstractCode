@@ -39,7 +39,8 @@ use crate::discovery::{
 use crate::gateway::{GatewayClient, GwError};
 use crate::run_input::{build_input_data, StartOpts};
 use crate::store::{
-    CacheInfo, Conn, HostContracts, HostState, ImageEntry, Phase, SessionTotals, Store, Workflow,
+    CacheInfo, Conn, HostContracts, HostState, ImageEntry, Phase, SessionIndex, SessionTotals,
+    Store, Workflow,
 };
 use crate::transcript::{FoldEffect, Item, PendingWait};
 
@@ -213,6 +214,12 @@ pub enum Cmd {
         session_id: String,
         before: String,
         count: usize,
+    },
+    /// `/sessions` discovery: one `/runs` listing, grouped by
+    /// `session_id` into [`crate::store::SessionRow`]s. At the gesture
+    /// (open + `r`), never polled.
+    LoadSessions {
+        limit: u32,
     },
     /// `/status` server-truth probe: one `get_run`, result posted into
     /// `store.run_status_probe` (review P2-5 — client phase vs gateway
@@ -610,6 +617,98 @@ pub(crate) fn apply_worker_death(store: &Store, msg: &str) {
     }
 }
 
+/// How many sessions' prompts the board fetches (one request each).
+/// Sized to a screenful plus a scroll's worth: enough that what you
+/// look at is labeled, small enough that opening `/sessions` against a
+/// gateway with hundreds of sessions is not a request storm.
+const SESSION_PROMPT_MAX: usize = 40;
+/// Prompts land in batches this size, so the board fills progressively
+/// rather than after the last fetch.
+const SESSION_PROMPT_BATCH: usize = 8;
+
+/// Fold `/runs` summaries into one row per session, newest first.
+///
+/// PURE over the gateway's own JSON so it is testable without a
+/// gateway, and so the state rule lives in one readable place: a
+/// session is as LIVE as its liveliest run — waiting outranks running
+/// outranks failed — because that is the order in which a session
+/// wants a human. (There is no Paused rung: the listing hardcodes
+/// `paused: false`, so it could never be derived. See `SessionState`.) A run whose status the gateway did
+/// not report contributes nothing rather than a guess.
+pub(crate) fn fold_session_rows(items: &[Value]) -> Vec<crate::store::SessionRow> {
+    use crate::store::{SessionRow, SessionState};
+    let mut out: Vec<SessionRow> = Vec::new();
+    for run in items {
+        let sid = run
+            .get("session_id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if sid.is_empty() {
+            continue; // a run with no session is not a session row
+        }
+        // `paused` is deliberately NOT read: the listing hardcodes it
+        // false (see `SessionState`'s note), so a Paused branch would
+        // be a dead arm whose absent-input case silently passes.
+        let state = match run.get("status").and_then(Value::as_str).unwrap_or("") {
+            "waiting" => SessionState::Waiting,
+            "running" => SessionState::Running,
+            "failed" | "cancelled" => SessionState::Failed,
+            "completed" => SessionState::Done,
+            // An unreported or unrecognized status is NOT a verdict —
+            // rendering it as "done" told the operator that a live
+            // session had finished (adversarial review, D3).
+            _ => SessionState::Unknown,
+        };
+        // `updated_at`, not `created_at`: the gateway PAGES by
+        // `updated_at DESC` (`storage/base.py:54` and both stores), so
+        // sorting by creation put a session touched a minute ago BELOW
+        // one created today and long dead (adversarial review, D7).
+        let at = run
+            .get("updated_at")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .or_else(|| run.get("created_at").and_then(Value::as_str))
+            .unwrap_or("")
+            .to_string();
+        let run_id = run
+            .get("run_id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        match out.iter_mut().find(|r| r.id == sid) {
+            Some(row) => {
+                row.turns += 1;
+                if state.rank() < row.state.rank() {
+                    row.state = state;
+                }
+                if at > row.last_at {
+                    row.last_at = at;
+                }
+                // The listing is newest-first, so the LAST run seen for
+                // a session is its oldest — its first turn, whose
+                // prompt is the session's opening words.
+                if !run_id.is_empty() {
+                    row.first_run = run_id;
+                }
+            }
+            None => out.push(SessionRow {
+                id: sid,
+                state,
+                last_at: at,
+                turns: 1,
+                first_run: run_id,
+                prompt: None,
+            }),
+        }
+    }
+    // Newest first by the SAME field the gateway paged on, so the
+    // board's order matches the page's membership.
+    out.sort_by(|a, b| b.last_at.cmp(&a.last_at));
+    out
+}
+
 /// Best-effort extraction of a panic payload's message.
 pub(crate) fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
@@ -679,6 +778,9 @@ impl Runner {
                 before,
                 count,
             } => self.load_history(&session_id, &before, count),
+            Cmd::LoadSessions { limit } => {
+                spawn_load_sessions(self.client.clone(), self.wake.clone(), self.store, limit)
+            }
             Cmd::ProbeRunStatus { run_id } => self.probe_run_status(run_id),
             Cmd::ProbeModelReasoning { provider, model } => {
                 self.probe_model_reasoning(provider, model)
@@ -3678,6 +3780,128 @@ pub(crate) fn apply_host_state_outcome(store: Store, outcome: Result<Value, GwEr
     }
 }
 
+/// `/sessions` discovery, ON ITS OWN THREAD.
+///
+/// OFF-LOOP, deliberately (adversarial review 2026-08-29, D2). The
+/// runner's command loop is a single `recv()` that handles `Steer`,
+/// `Cancel`, `Pause`, `Resume` (approval) and `Start` INLINE — this
+/// file's own rule, already applied to the GPU and entity lanes, is
+/// that a long read must never starve them. This pass makes one
+/// listing request plus up to `SESSION_PROMPT_MAX` prompt fetches;
+/// at the client's 60 s read timeout that is tens of minutes of a dead
+/// command loop in the worst case, with the transcript still streaming
+/// (ledger SSE has its own threads) so the UI would look alive while
+/// every control gesture silently queued.
+pub(crate) fn spawn_load_sessions(
+    client: GatewayClient,
+    wake: WakeHandle,
+    store: Store,
+    limit: u32,
+) {
+    let post = wake.clone();
+    spawn_host_thread("sessions", wake, store, move || {
+        post.post(move || store.session_index.set(SessionIndex::Loading));
+        let v = match client.list_recent_runs(limit) {
+            Ok(v) => v,
+            Err(e) => {
+                // Evidence-worded by GwError's Display; rendered
+                // verbatim beside rows that still come from prefs.
+                let msg = e.to_string();
+                post.post(move || store.session_index.set(SessionIndex::Failed(msg)));
+                return;
+            }
+        };
+        let items = v
+            .get("items")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        // `has_more` is the gateway's own word for "older runs exist
+        // beyond this page". ABSENT defaults to TRUNCATED, not
+        // complete: an unread signal must not license the strongest
+        // claim the board can make ("not on the gateway") — review D7.
+        let truncated = v.get("has_more").and_then(Value::as_bool).unwrap_or(true);
+        let mut rows = fold_session_rows(&items);
+        // Prompts are fetched in the order the BOARD renders — live
+        // sessions first, then newest — not the fold's order. They
+        // differed, so on a busy gateway the row at the top of the
+        // screen (a session waiting on a human since last month) went
+        // unlabeled while forty finished sessions below it were
+        // labeled (review D3).
+        let mut order: Vec<usize> = (0..rows.len()).collect();
+        order.sort_by(|&a, &b| session_board_order(&rows[a], &rows[b]));
+        order.truncate(SESSION_PROMPT_MAX);
+
+        {
+            let rows = rows.clone();
+            let labeled = order.len();
+            post.post(move || {
+                store.session_index.set(SessionIndex::Loaded {
+                    rows,
+                    truncated,
+                    labeled,
+                })
+            });
+        }
+
+        // The session's OPENING words name it — so the prompt comes
+        // from its FIRST turn, not its newest (review D4: labeling a
+        // session by its latest turn rendered "yes" for a session that
+        // began "port the tests to rstest").
+        for chunk in order.chunks(SESSION_PROMPT_BATCH) {
+            for &i in chunk {
+                let run = rows[i].first_run.clone();
+                if run.is_empty() {
+                    continue;
+                }
+                rows[i].prompt = session_prompt(&client, &run);
+            }
+            let snapshot = rows.clone();
+            post.post(move || {
+                // Guarded by IDENTITY: an `r` refresh or a second
+                // `/sessions` replaces the whole enum, and these
+                // prompts belong to the listing they were fetched for.
+                store.session_index.update(|ix| {
+                    if let SessionIndex::Loaded { rows, .. } = ix {
+                        let same = rows.len() == snapshot.len()
+                            && rows.iter().zip(snapshot.iter()).all(|(a, b)| a.id == b.id);
+                        if same {
+                            *rows = snapshot.clone();
+                        }
+                    }
+                });
+            });
+        }
+    });
+}
+
+/// One session's OPENING prompt, from its first turn's `input_data`.
+/// `None` on any failure — a session whose prompt we could not read
+/// renders without one, never with a guess.
+fn session_prompt(client: &GatewayClient, run_id: &str) -> Option<String> {
+    let v = client.input_data(run_id).ok()?;
+    // The same shape the attach path reads: `input_data.prompt`, or a
+    // bare `prompt` on older gateways.
+    let raw = ["input_data", ""].iter().find_map(|k| {
+        let node = if k.is_empty() { Some(&v) } else { v.get(*k) };
+        node.and_then(|n| n.get("prompt")).and_then(Value::as_str)
+    })?;
+    let one = crate::transcript::one_line(raw, 200);
+    (!one.trim().is_empty()).then_some(one)
+}
+
+/// THE board's row order, shared by the renderer and the prompt
+/// fetcher so the rows you can SEE are the rows that get labeled:
+/// sessions that want a human first, then newest.
+pub(crate) fn session_board_order(
+    a: &crate::store::SessionRow,
+    b: &crate::store::SessionRow,
+) -> std::cmp::Ordering {
+    (!a.state.is_live())
+        .cmp(&!b.state.is_live())
+        .then_with(|| b.last_at.cmp(&a.last_at))
+}
+
 /// One-shot `/host/state` fetch on its own thread (modal open + `r`).
 pub(crate) fn spawn_load_host_state(client: GatewayClient, wake: WakeHandle, store: Store) {
     let post_wake = wake.clone();
@@ -3862,6 +4086,117 @@ mod tests {
             "a new session's transcript gets the note once too"
         );
         assert!(!announce_workspace_note(&mut last, "s2", "trust OFF — x"));
+    }
+
+    /// `/sessions` discovery folds the gateway's RUN listing into one
+    /// row per session.
+    ///
+    /// The liveliness rule is the interesting part, and it is written
+    /// so a "last run wins" implementation FAILS: the live run is the
+    /// OLDEST in its session and the finished one is newest, so a rule
+    /// that just takes the latest status would answer "done" for a
+    /// session that is waiting on a human. (The first cut ordered them
+    /// the other way round, and the sabotage passed — adversarial
+    /// review 2026-08-29, test-quality matrix.)
+    #[test]
+    fn session_rows_fold_by_liveliness_not_by_recency() {
+        let run = |sid: &str, status: &str, at: &str| {
+            serde_json::json!({
+                "run_id": format!("r-{sid}-{at}"), "session_id": sid,
+                "status": status, "updated_at": at
+            })
+        };
+        let rows = fold_session_rows(&[
+            // A: the WAITING run is the older one; the newer finished.
+            run("A", "waiting", "2026-08-28T10:00:00Z"),
+            run("A", "completed", "2026-08-28T11:00:00Z"),
+            // B: running (older) then failed (newer) — running wins.
+            run("B", "failed", "2026-08-28T12:30:00Z"),
+            run("B", "running", "2026-08-28T12:00:00Z"),
+            // C: genuinely all done.
+            run("C", "completed", "2026-08-27T09:00:00Z"),
+            // A run with no session is not a session.
+            serde_json::json!({"run_id": "orphan", "status": "running"}),
+        ]);
+        let by = |id: &str| rows.iter().find(|r| r.id == id).cloned().expect(id);
+        assert_eq!(
+            by("A").state,
+            crate::store::SessionState::Waiting,
+            "a waiting run outranks a NEWER finished one — recency is not liveliness"
+        );
+        assert_eq!(by("B").state, crate::store::SessionState::Running);
+        assert_eq!(by("C").state, crate::store::SessionState::Done);
+        assert_eq!(by("A").turns, 2, "both runs counted");
+        assert_eq!(
+            by("A").last_at,
+            "2026-08-28T11:00:00Z",
+            "the session's time is its NEWEST run, whatever its state"
+        );
+        assert_eq!(rows.len(), 3, "the sessionless run made no row");
+        // Newest first, by the same field the gateway paged on.
+        assert_eq!(
+            rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            ["B", "A", "C"]
+        );
+    }
+
+    /// The board sorts and stamps by `updated_at` — the field the
+    /// gateway PAGES by — falling back to `created_at` only where the
+    /// listing omitted it. Sorting by creation put a session touched a
+    /// minute ago below one created today and long dead (review D7).
+    #[test]
+    fn session_rows_follow_the_gateways_own_ordering_field() {
+        let rows = fold_session_rows(&[
+            serde_json::json!({
+                "run_id": "old-but-hot", "session_id": "HOT", "status": "running",
+                "created_at": "2026-08-01T09:00:00Z", "updated_at": "2026-08-29T12:00:00Z"
+            }),
+            serde_json::json!({
+                "run_id": "new-but-cold", "session_id": "COLD", "status": "completed",
+                "created_at": "2026-08-29T08:00:00Z", "updated_at": "2026-08-29T08:00:00Z"
+            }),
+        ]);
+        assert_eq!(
+            rows[0].id, "HOT",
+            "a session created in August but touched a minute ago sorts FIRST"
+        );
+        assert_eq!(rows[0].last_at, "2026-08-29T12:00:00Z");
+        // Fallback: a listing with no updated_at still orders.
+        let rows = fold_session_rows(&[serde_json::json!({
+            "run_id": "r", "session_id": "S", "status": "completed",
+            "created_at": "2026-08-20T09:00:00Z"
+        })]);
+        assert_eq!(rows[0].last_at, "2026-08-20T09:00:00Z");
+    }
+
+    /// A status the gateway did not report is never turned into a
+    /// verdict: it renders as unknown and it never drags a live
+    /// session down (review D3 — it used to render as "done").
+    #[test]
+    fn unreported_status_is_not_a_verdict() {
+        let rows = fold_session_rows(&[serde_json::json!({
+            "run_id": "r1", "session_id": "S", "updated_at": "2026-08-28T10:00:00Z"
+        })]);
+        assert_eq!(rows[0].state, crate::store::SessionState::Unknown);
+        assert_eq!(rows[0].state.label(), "—", "absent renders as absent");
+        // An empty status string is what a malformed index row emits.
+        let rows = fold_session_rows(&[serde_json::json!({
+            "run_id": "r2", "session_id": "S", "status": "",
+            "updated_at": "2026-08-28T10:00:00Z"
+        })]);
+        assert_eq!(rows[0].state, crate::store::SessionState::Unknown);
+        // And it loses to any real answer in the fold.
+        let rows = fold_session_rows(&[
+            serde_json::json!({"run_id": "a", "session_id": "S", "status": "queued",
+                               "updated_at": "2026-08-28T10:00:00Z"}),
+            serde_json::json!({"run_id": "b", "session_id": "S", "status": "waiting",
+                               "updated_at": "2026-08-28T09:00:00Z"}),
+        ]);
+        assert_eq!(
+            rows[0].state,
+            crate::store::SessionState::Waiting,
+            "an unknown status contributes nothing rather than a guess"
+        );
     }
 
     #[test]

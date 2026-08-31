@@ -115,6 +115,122 @@ pub struct ToolInfo {
     pub why_disabled: String,
 }
 
+/// What a session's runs say it is doing RIGHT NOW, folded from the
+/// gateway's own run summaries — never from anything this client
+/// remembers. Ordered by how much it wants a human: a session with one
+/// paused run and nine finished ones is Paused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionState {
+    /// A run is blocked on a human — an approval or an ask. (A PAUSED
+    /// run reaches the client as `waiting` too: `GET /runs` hardcodes
+    /// `"paused": False` on its index-row fast path
+    /// — `routes/gateway.py:8007`, the only `paused` in the whole
+    /// listing response — so a separate Paused state could never be
+    /// derived here. It was removed rather than left as a variant
+    /// nothing can produce; reading real pause state needs the gateway
+    /// to report it on the listing.)
+    Waiting,
+    Running,
+    Failed,
+    /// Every run reached a terminal state.
+    Done,
+    /// The gateway reported a status this client has no word for (an
+    /// empty string from a malformed index row, or a status added
+    /// server-side since this build). NOT a verdict: it never beats a
+    /// known state in the fold, and it renders as absent.
+    Unknown,
+}
+
+impl SessionState {
+    pub fn label(self) -> &'static str {
+        match self {
+            SessionState::Waiting => "waiting on you",
+            SessionState::Running => "running",
+            SessionState::Failed => "failed",
+            SessionState::Done => "done",
+            SessionState::Unknown => "—",
+        }
+    }
+
+    /// How much this state wants a human — lower folds over higher, so
+    /// one waiting run makes the whole session "waiting on you".
+    /// `Unknown` ranks LAST: an unreported status contributes nothing
+    /// rather than dragging a live session down to a guess.
+    pub fn rank(self) -> u8 {
+        match self {
+            SessionState::Waiting => 0,
+            SessionState::Running => 1,
+            SessionState::Failed => 2,
+            SessionState::Done => 3,
+            SessionState::Unknown => 4,
+        }
+    }
+
+    /// True where the session still wants something from you — the
+    /// rows the picker sorts to the top.
+    pub fn is_live(self) -> bool {
+        matches!(self, SessionState::Waiting | SessionState::Running)
+    }
+}
+
+/// One session as the GATEWAY reports it (`/sessions` discovery). The
+/// human label is NOT here: it is the session's first prompt, which
+/// only the local prefs remember, and merging the two is the picker's
+/// job — so a row this client has never seen still renders honestly
+/// with its id and its live state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionRow {
+    pub id: String,
+    pub state: SessionState,
+    /// `updated_at` of the session's NEWEST root run (RFC3339, as the
+    /// gateway wrote it) — the sort key and the "when" column. The
+    /// gateway pages by this field, so the board's order matches the
+    /// page's membership.
+    pub last_at: String,
+    /// Root runs the gateway listed for this session. A root run IS a
+    /// turn, so this is the session's turn count — EXACT when the
+    /// listing was complete (`SessionIndex::Loaded.truncated == false`)
+    /// and a floor when it was not. The picker says which.
+    pub turns: usize,
+    /// The session's FIRST root run — the turn whose prompt names the
+    /// session. (Its newest run is not needed once the board sorts and
+    /// stamps by `last_at`.)
+    pub first_run: String,
+    /// The session's opening prompt, FROM THE GATEWAY (`input_data`).
+    /// `None` = not fetched (the listing itself carries no prompt: the
+    /// `/runs` summary has no such field, and neither does the session
+    /// turn list, so it costs one request per session and is bounded).
+    pub prompt: Option<String>,
+}
+
+/// The gateway's session listing, as a THREE-state fact — the absence
+/// of an answer is never rendered as an empty gateway (ADR 0001: a
+/// blank list would say "you have no sessions there" about a fetch that
+/// has not happened or has failed).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionIndex {
+    /// Never asked (the picker asks at open).
+    Unfetched,
+    /// A request is in flight — the picker shows local rows and says
+    /// the live column is still arriving.
+    Loading,
+    /// The gateway answered. `truncated` = the listing hit its limit,
+    /// so older sessions exist beyond these rows and the picker says so.
+    Loaded {
+        rows: Vec<SessionRow>,
+        truncated: bool,
+        /// How many of `rows` the prompt pass covers. Beyond this the
+        /// board has no prompt to show and SAYS so, instead of leaving
+        /// one glyph to mean "still arriving", "outside the bound" and
+        /// "genuinely none" at once (review D3).
+        labeled: usize,
+    },
+    /// The gateway refused or could not be reached; the message is the
+    /// evidence-worded one from `GwError`. Local rows still render —
+    /// with the live column marked unavailable, never faked.
+    Failed(String),
+}
+
 /// The two durable verbs the quit modal can send (leave sends nothing).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuitVerb {
@@ -384,7 +500,9 @@ impl ResidencyRow {
 pub enum LockAction {
     Unlock,
     /// Lock; `adopt` when the row looks externally loaded.
-    Lock { adopt: bool },
+    Lock {
+        adopt: bool,
+    },
     Refused(&'static str),
 }
 
@@ -811,6 +929,25 @@ pub struct Store {
     /// and Esc or a click puts it back to 0.
     pub animation: Signal<u8>,
     pub show_details: Signal<bool>,
+    /// Tool cards whose OUTPUT is expanded inline in the collapsed view
+    /// — the per-card override of `show_details` (operator ask,
+    /// 2026-08-28: "an icon (+) or equivalent where we could see more
+    /// information about a cycle or tool call"). Keyed by
+    /// `Fold::tool_key` (`run_id:node_id:index:call_id`), the code's
+    /// single authority for card identity: the feed's own `i{index}`
+    /// keys are POSITIONS and a truncation drain shifts every one of
+    /// them, which would silently move an expansion onto a different
+    /// call. A `Vec` rather than a set because it holds a handful of
+    /// entries and is cloned once per sync pass.
+    ///
+    /// Session-scoped and never persisted: expansion is a reading
+    /// gesture, not a preference. `/details full` outranks it (every
+    /// card is expanded, and the markers stop rendering).
+    pub expanded_tools: Signal<Vec<String>>,
+    /// The GATEWAY's session listing, fetched when `/sessions` opens
+    /// and on `r` — never polled (the `/resources` rule). See
+    /// [`SessionIndex`] for why absence is its own state.
+    pub session_index: Signal<SessionIndex>,
     /// The active run tree is PAUSED on the gateway (durable /pause).
     pub paused: Signal<bool>,
     /// Files staged for the NEXT plain-prompt send (chips above the
@@ -993,6 +1130,8 @@ impl Store {
             // Collapsed by default: the readable scan view (thinking
             // gists + tagged one-line tool calls); /details expands.
             show_details: cx.signal(false),
+            expanded_tools: cx.signal(Vec::new()),
+            session_index: cx.signal(SessionIndex::Unfetched),
             paused: cx.signal(false),
             quit_state: cx.signal(QuitState::None),
             verb_ack: cx.signal(None),

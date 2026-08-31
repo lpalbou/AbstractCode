@@ -818,6 +818,46 @@ impl GatewayClient {
         )
     }
 
+    /// The gateway's OWN view of recent work, across every session
+    /// (`/sessions` discovery, 2026-08-28). No `session_id` filter: the
+    /// answer carries `session_id` on each row, so grouping it yields
+    /// the sessions this GATEWAY knows about — which is the only
+    /// honest source when the client is pointed at a remote gateway it
+    /// has never talked to before. The picker used to render a local
+    /// prefs file, so a fresh client saw an empty list against a
+    /// gateway holding a hundred live sessions.
+    ///
+    /// `root_only=true` (a session's turns are its root runs) and
+    /// `include_ledger_len=false` (the gateway line-reads every listed
+    /// run's whole ledger for that field on file-backed stores — a
+    /// per-call cost linear in ledger bytes, for a field nothing here
+    /// reads). One request, at the gesture, never polled.
+    pub fn list_recent_runs(&self, limit: u32) -> GwResult<Value> {
+        self.get_json(&Self::session_listing_path(limit))
+    }
+
+    /// The exact query the session board sends. Extracted so it can be
+    /// PINNED: the gateway REFUSES unknown query parameters with a 400
+    /// (`routes/gateway.py`, the c5253 filter-typo fix), so a renamed
+    /// or mistyped param does not degrade — it kills the board. A
+    /// sabotage of this string left the whole suite green.
+    pub(crate) fn session_listing_path(limit: u32) -> String {
+        // NO client-side ceiling. The route documents "No server
+        // ceiling — an explicit larger ask is served", and a self-
+        // imposed clamp of 500 was the bug behind the board's two
+        // worst lies (2026-08-29): the page covers the most recent N
+        // ROOT RUNS across all sessions, so on a store with 119
+        // sessions it missed most of them entirely — every missing one
+        // rendered "not on the gateway" — and it saw only a slice of
+        // each surviving session's turns, so every count read "1+".
+        // Asking for the whole store makes the counts TOTALS and makes
+        // absence provable; `has_more` says when it still is not.
+        format!(
+            "/runs?limit={}&root_only=true&include_ledger_len=false",
+            limit.max(1)
+        )
+    }
+
     /// One document for a whole run TREE: `input_data` (the prompt),
     /// `ledgers` keyed by run id, and the root `run` record. The gateway
     /// documents this route as THE thin-client replay surface ("render/
@@ -1086,6 +1126,30 @@ pub fn url_encode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The session board's query is PINNED, param by param.
+    ///
+    /// The gateway REFUSES unknown query parameters with a 400 rather
+    /// than ignoring them (its own filter-typo fix), so a renamed or
+    /// camel-cased param does not degrade the board — it kills it. A
+    /// sabotage that rewrote this string to `?rootOnly=true&sort=desc`
+    /// left the whole suite green (adversarial review 2026-08-29), so
+    /// the exact spelling is asserted here.
+    #[test]
+    fn the_session_listing_query_is_exactly_what_the_gateway_accepts() {
+        let p = GatewayClient::session_listing_path(200);
+        assert_eq!(p, "/runs?limit=200&root_only=true&include_ledger_len=false");
+        // No session filter: the whole point is discovering sessions
+        // this client has never heard of.
+        assert!(!p.contains("session_id"));
+        // Only the FLOOR is clamped (`ge=1` on the route). There is
+        // deliberately no ceiling: the route documents that an
+        // explicit larger ask is served, and a self-imposed cap of 500
+        // was what made the board miss most of a 119-session gateway
+        // and report every turn count as "1+".
+        assert!(GatewayClient::session_listing_path(0).contains("limit=1"));
+        assert!(GatewayClient::session_listing_path(5000).contains("limit=5000"));
+    }
 
     #[test]
     fn capped_reader_parses_big_bodies_and_refuses_over_cap_honestly() {

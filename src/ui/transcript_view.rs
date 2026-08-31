@@ -143,6 +143,105 @@ fn rule_block(ch: char, label: String, label_ink: Rgba, line_ink: Rgba) -> FeedB
 /// same block, so no typeset-rhythm blank can detach it from its `✗`
 /// (adversarial review round 2, F4): `↳ ` first line, hang-indented
 /// continuations, capped with the honest marker.
+/// THE disclosure marker for a folded tool card — `None` when the card
+/// hides nothing. ONE function, called by both the draw and the click
+/// hit-test, because a marker the renderer draws at a width the hit-test
+/// computes differently is a control that misses its own target.
+///
+/// Why it exists at all (operator ask 2026-08-28, and an ADR 0001 gap
+/// that predates it): the folded row shows glyph, name, status word,
+/// args hint and error — and the tool's OUTPUT not at all. A call that
+/// printed 214 lines rendered identically to one that printed nothing.
+/// Every other lane in this transcript names what it is holding back —
+/// the thinking card says `… (+441 words of reasoning · /details)`, and
+/// every capped body says `… (+K more lines)` — so the tool row was the
+/// one place the house rule was not applied to itself.
+///
+/// The count is the RESULT's line count and nothing else: that is the
+/// body the folded view omits entirely, and it is exactly what
+/// expanding reveals, so the number the marker promises and the rows it
+/// delivers are the same number. Args and errors are already on screen
+/// (previewed and one-lined, each with its own ellipsis), so folding
+/// them in here would inflate the promise.
+pub fn tool_marker(result: &str, status: ToolStatus, expanded: bool, width: i32) -> Option<String> {
+    // A running call has produced nothing YET — a marker there would
+    // claim hidden output that does not exist.
+    if status == ToolStatus::Running {
+        return None;
+    }
+    marker_text(tool_body_rows(result, width).len(), expanded)
+}
+
+/// THE body of an expanded tool card, at a width — the one place the
+/// rows are computed, so the marker's number and the drawn rows cannot
+/// disagree (adversarial review 2026-08-29, D2: counting
+/// `result.lines()` promised `▸ 3 lines` for `"\n\n\n"` and delivered
+/// ZERO rows, because wrapping pops trailing blanks; a 300-column line
+/// promised 1 and delivered 5). Width-dependent by construction, which
+/// is also how the engine's own `… (+K more lines)` behaves.
+///
+/// The `│ ` gutter marks tool OUTPUT — the same voice `/details` uses.
+fn tool_body_rows(result: &str, width: i32) -> Vec<String> {
+    if result.is_empty() {
+        return Vec::new();
+    }
+    wrap_rows(result, (width - 4).max(4))
+        .iter()
+        .map(|l| format!("│ {l}"))
+        .collect()
+}
+
+fn marker_text(rows: usize, expanded: bool) -> Option<String> {
+    if rows == 0 {
+        return None;
+    }
+    let arrow = if expanded { '▾' } else { '▸' };
+    let unit = if rows == 1 { "line" } else { "lines" };
+    Some(format!("{arrow} {rows} {unit}"))
+}
+
+/// The folded tool row's horizontal layout, in offsets from the row's
+/// left edge. Computed ONCE and consumed by BOTH the draw and the click
+/// hit-test, because they disagreed: the draw drops a marker it cannot
+/// fit, the hit-test had no such term, and on a narrow pane a left
+/// click on ordinary row text silently expanded the body and swallowed
+/// the press that would have started a text selection — a control where
+/// no glyph was drawn (adversarial review 2026-08-29, D1).
+struct RowLayout {
+    hint_x: i32,
+    hint_avail: i32,
+    marker_x: i32,
+    /// The marker is DRAWN here. When false those cells carry nothing
+    /// and are not a control.
+    marker_fits: bool,
+}
+
+fn tool_row_layout(
+    w: i32,
+    glyph: &str,
+    name: &str,
+    word_seg: &str,
+    marker: Option<&str>,
+) -> RowLayout {
+    let word_w = text::width(word_seg);
+    let mut x = text::width(glyph) + 1;
+    let name_avail = w - x - word_w - 1;
+    if name_avail > 0 {
+        x += text::width(&text::truncate_ellipsis(name, name_avail)) + 1;
+    }
+    x += word_w + 2;
+    let marker_w = marker.map(text::width).unwrap_or(0);
+    let marker_x = w - marker_w;
+    let marker_fits = marker_w > 0 && marker_x > x + 1;
+    let hint_avail = if marker_fits { marker_x - 1 - x } else { w - x };
+    RowLayout {
+        hint_x: x,
+        hint_avail,
+        marker_x,
+        marker_fits,
+    }
+}
+
 struct ToolRow {
     glyph: &'static str,
     glyph_ink: Rgba,
@@ -157,9 +256,66 @@ struct ToolRow {
     /// Workspace root for `linkify`: the hint's path/URL tokens carry
     /// OSC-8 targets (same cells, same inks — see `ui::linkify`).
     link_root: Option<Rc<str>>,
+    /// The output this folded row hides — drawn inline (with the `│`
+    /// gutter that marks tool OUTPUT, the same voice `/details` uses)
+    /// when `expanded`, and counted by [`tool_marker`] when not.
+    result: String,
+    result_ink: Rgba,
+    marker_ink: Rgba,
+    status: ToolStatus,
+    expanded: bool,
+    /// Width-keyed memo of the wrapped body. The draw runs on EVERY
+    /// repaint — a streaming run repaints per ledger record — and a
+    /// custom block is handed its FULL rect, so re-wrapping an expanded
+    /// 30k-line result per frame measured 51 ms/frame (adversarial
+    /// review 2026-08-29, D6). The clip cull skips the PRINTS; only
+    /// this skips the wrap.
+    rows: RefCell<Option<(i32, Rc<Vec<String>>)>>,
 }
 
 impl ToolRow {
+    /// The body at `width`, wrapped at most once per width.
+    fn rows_at(&self, width: i32) -> Rc<Vec<String>> {
+        if let Some((w, rows)) = self.rows.borrow().as_ref() {
+            if *w == width {
+                return rows.clone();
+            }
+        }
+        let rows = Rc::new(tool_body_rows(&self.result, width));
+        *self.rows.borrow_mut() = Some((width, rows.clone()));
+        rows
+    }
+
+    fn marker(&self, width: i32) -> Option<String> {
+        if self.status == ToolStatus::Running {
+            return None;
+        }
+        marker_text(self.rows_at(width).len(), self.expanded)
+    }
+
+    /// The block's declared height. NAMED (not inlined in the
+    /// `CustomBlock` closure) so a test can call the real arithmetic:
+    /// the engine keeps `CustomBlock::height` private, and a test that
+    /// re-adds the terms itself is a tautology — deleting the body term
+    /// from the closure left the whole suite green.
+    ///
+    /// Must cover EVERY row the draw paints, or the block paints over
+    /// the item below it.
+    fn height_at(&self, width: i32) -> i32 {
+        1 + self.error_lines(width).len() as i32 + self.body_lines(width).len() as i32
+    }
+
+    /// The rows expansion adds. UNCAPPED on purpose: expanding is a
+    /// deliberate act on ONE card, so it obeys the same rule
+    /// `/details` does — "details means details" (operator directive
+    /// 2026-08-20). The marker counts exactly these rows.
+    fn body_lines(&self, width: i32) -> Rc<Vec<String>> {
+        if !self.expanded {
+            return Rc::new(Vec::new());
+        }
+        self.rows_at(width)
+    }
+
     fn error_lines(&self, width: i32) -> Vec<String> {
         if self.error.is_empty() {
             return Vec::new();
@@ -183,13 +339,14 @@ impl ToolRow {
         let spec = Rc::new(self);
         let h_spec = spec.clone();
         FeedBlock::Custom(CustomBlock::new(
-            move |width| 1 + h_spec.error_lines(width).len() as i32,
+            move |width| {
+                1 + h_spec.error_lines(width).len() as i32 + h_spec.body_lines(width).len() as i32
+            },
             move |canvas, rect| {
                 if rect.w <= 0 || rect.h <= 0 {
                     return;
                 }
                 let word_seg = format!("· {}", spec.word);
-                let word_w = text::width(&word_seg);
                 let mut x = rect.x;
                 canvas.print(
                     Point::new(x, rect.y),
@@ -202,7 +359,7 @@ impl ToolRow {
                 // right edge minus the status word and its separator. On
                 // a pane too narrow for any name, the tag still prints
                 // (the operator's directive is the tag, clipped if must).
-                let name_avail = rect.right() - x - word_w - 1;
+                let name_avail = rect.right() - x - text::width(&word_seg) - 1;
                 if name_avail > 0 {
                     let fitted_name = text::truncate_ellipsis(&spec.name, name_avail);
                     canvas.print(
@@ -219,27 +376,71 @@ impl ToolRow {
                     spec.word_ink,
                     Rgba::TRANSPARENT,
                 );
-                x += word_w + 2;
-                let hint_avail = rect.right() - x;
-                if hint_avail >= 4 && !spec.hint.is_empty() {
-                    let fitted = text::truncate_ellipsis(&spec.hint, hint_avail);
+                // The disclosure marker is RIGHT-ALIGNED and outranks
+                // the args hint for space. The hint is a preview that
+                // already ellipsizes when squeezed; the marker is the
+                // ADR-0001 statement that a whole body is off screen,
+                // and it is bounded where the hint is elastic. On a pane
+                // too narrow for both, the marker survives and the hint
+                // shrinks — and where even the marker cannot fit it is
+                // DROPPED WHOLE (honest degradation), which is exactly
+                // the case the hit-test must agree about, so BOTH read
+                // the same `tool_row_layout`.
+                let marker = spec.marker(rect.w);
+                let lay =
+                    tool_row_layout(rect.w, spec.glyph, &spec.name, &word_seg, marker.as_deref());
+                let hx = rect.x + lay.hint_x;
+                if lay.hint_avail >= 4 && !spec.hint.is_empty() {
+                    let fitted = text::truncate_ellipsis(&spec.hint, lay.hint_avail);
                     // Same cells and ink as a plain print; path/URL
                     // tokens additionally carry OSC-8 targets. The
                     // FITTED string is what segments, so a token the
                     // ellipsis cut simply is not a token any more.
                     crate::ui::linkify::print_linked(
                         canvas,
-                        Point::new(x, rect.y),
+                        Point::new(hx, rect.y),
                         &fitted,
                         spec.hint_ink,
                         spec.link_root.as_ref(),
                     );
                 }
-                for (i, line) in spec.error_lines(rect.w).iter().enumerate() {
+                if lay.marker_fits {
+                    if let Some(m) = &marker {
+                        canvas.print(
+                            Point::new(rect.x + lay.marker_x, rect.y),
+                            m,
+                            spec.marker_ink,
+                            Rgba::TRANSPARENT,
+                        );
+                    }
+                }
+                let errors = spec.error_lines(rect.w);
+                for (i, line) in errors.iter().enumerate() {
                     canvas.print(
                         Point::new(rect.x + 2, rect.y + 1 + i as i32),
                         line,
                         spec.error_ink,
+                        Rgba::TRANSPARENT,
+                    );
+                }
+                // The expanded body, below the error (the same order
+                // `/details` renders: what failed, then what it said).
+                // Off-screen rows are culled here for the same reason
+                // `CappedBody` culls them: a custom block is handed its
+                // FULL rect and an expanded 3000-line result would
+                // otherwise re-wrap and print every invisible row on
+                // every repaint.
+                let clip = canvas.clip_rect();
+                let body_top = rect.y + 1 + errors.len() as i32;
+                for (i, line) in spec.body_lines(rect.w).iter().enumerate() {
+                    let y = body_top + i as i32;
+                    if y < clip.y || y >= clip.bottom() {
+                        continue;
+                    }
+                    canvas.print(
+                        Point::new(rect.x + 2, y),
+                        line,
+                        spec.result_ink,
                         Rgba::TRANSPARENT,
                     );
                 }
@@ -516,13 +717,29 @@ fn wrap_capped_tail(source: &str, width: i32, cap: usize) -> Vec<String> {
 }
 
 fn tool_glyph(t: &TokenSet, status: ToolStatus) -> (&'static str, Rgba) {
+    (tool_glyph_str(status), tool_glyph_ink(t, status))
+}
+
+/// The glyph alone — the click hit-test needs the row's geometry and
+/// has no theme in hand.
+fn tool_glyph_str(status: ToolStatus) -> &'static str {
     match status {
-        ToolStatus::AwaitingApproval => ("?", t.warn),
-        ToolStatus::Running => ("»", t.accent),
-        ToolStatus::Ok => ("✓", t.ok),
-        ToolStatus::Failed => ("✗", t.error),
-        ToolStatus::Denied => ("⊘", t.text_muted),
-        ToolStatus::Interrupted => ("◌", t.text_muted),
+        ToolStatus::AwaitingApproval => "?",
+        ToolStatus::Running => "»",
+        ToolStatus::Ok => "✓",
+        ToolStatus::Failed => "✗",
+        ToolStatus::Denied => "⊘",
+        ToolStatus::Interrupted => "◌",
+    }
+}
+
+fn tool_glyph_ink(t: &TokenSet, status: ToolStatus) -> Rgba {
+    match status {
+        ToolStatus::AwaitingApproval => t.warn,
+        ToolStatus::Running => t.accent,
+        ToolStatus::Ok => t.ok,
+        ToolStatus::Failed => t.error,
+        ToolStatus::Denied | ToolStatus::Interrupted => t.text_muted,
     }
 }
 
@@ -589,12 +806,17 @@ fn image_block(bitmap: Arc<abstracttui::widgets::Bitmap>) -> FeedBlock {
 
 /// Render one fold item. `None` = hidden in the current view (the
 /// clean answers-only mode folds thinking + finished-OK tool cards).
+/// `expanded` = this ONE item's per-card override (the disclosure
+/// marker was activated). Meaningful only for a folded tool card;
+/// `/details` outranks it, so under full detail everything is expanded
+/// and no marker renders.
 fn render_item(
     t: &TokenSet,
     item: &Item,
     store: Store,
     details: bool,
     link_root: Option<&Rc<str>>,
+    expanded: bool,
 ) -> Option<FeedItem> {
     match item {
         // TURN-weight rule (adversarial review finding 3): the user's
@@ -748,6 +970,12 @@ fn render_item(
                             error: crate::transcript::one_line(error, 200),
                             error_ink: t.error,
                             link_root: link_root.cloned(),
+                            result: result.clone(),
+                            result_ink: t.text_faint,
+                            marker_ink: t.text_faint,
+                            status: *status,
+                            expanded,
+                            rows: RefCell::new(None),
                         }
                         .block(),
                     ),
@@ -888,7 +1116,12 @@ fn render_item(
 
 /// Cheap content fingerprint (FNV-1a) over everything `render_item`
 /// reads, so the sync effect re-renders exactly the items that changed.
-fn fingerprint(item: &Item, store: &Store) -> u64 {
+/// `expanded` rides the fingerprint so a disclosure toggle repaints
+/// exactly the card that changed. It changes an item's HEIGHT, never
+/// its visibility, so the sync stays on the keyed fast path — the
+/// `clear()` rebuild is reserved for visibility flips, where feed order
+/// (push order) would otherwise strand a mid-list key.
+fn fingerprint(item: &Item, store: &Store, expanded: bool) -> u64 {
     let mut h = Fnv::new();
     match item {
         Item::User { text } => {
@@ -932,6 +1165,7 @@ fn fingerprint(item: &Item, store: &Store) -> u64 {
             h.byte(*status as u8);
             h.body(result);
             h.body(error);
+            h.byte(u8::from(expanded));
         }
         Item::Assistant { text, final_answer } => {
             h.byte(5);
@@ -1076,6 +1310,18 @@ pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState, link_root: Option<Rc
         // Focus FIRST: a mismatch rebuilds exactly like a theme change
         // (the engine's documented clear() rebuild seam).
         let focus = store.focus.get();
+        // Per-card disclosure, read ONCE per pass (a tracked read, so a
+        // toggle re-runs this effect) rather than per item — the set
+        // holds a handful of keys and cloning it per card would be the
+        // most expensive thing in the sync.
+        let expanded_keys = store.expanded_tools.get();
+        // `/details` outranks the per-card override: under full detail
+        // every card already shows its body, so nothing is "expanded"
+        // and no marker renders.
+        let is_expanded = |item: &Item| -> bool {
+            !details
+                && matches!(item, Item::Tool { key, .. } if expanded_keys.iter().any(|k| k == key))
+        };
 
         // ONE sync body over whichever item source the focus names.
         // Reactive property this buys: signal reads are dynamic per run,
@@ -1107,8 +1353,9 @@ pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState, link_root: Option<Rc
                 st.seen.clear();
                 feed.clear();
                 for (i, item) in items.iter().enumerate() {
-                    let fp = fingerprint(item, &store);
-                    match render_item(&t, item, store, details, link_root.as_ref()) {
+                    let ex = is_expanded(item);
+                    let fp = fingerprint(item, &store, ex);
+                    match render_item(&t, item, store, details, link_root.as_ref(), ex) {
                         Some(fi) => {
                             feed.push(format!("i{i}"), fi);
                             st.seen.push((fp, true));
@@ -1120,11 +1367,12 @@ pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState, link_root: Option<Rc
             }
             for (i, item) in items.iter().enumerate() {
                 let known = i < st.seen.len();
-                let fp = fingerprint(item, &store);
+                let ex = is_expanded(item);
+                let fp = fingerprint(item, &store, ex);
                 if known && st.seen[i] == (fp, is_visible(item, details)) {
                     continue; // unchanged
                 }
-                match render_item(&t, item, store, details, link_root.as_ref()) {
+                match render_item(&t, item, store, details, link_root.as_ref(), ex) {
                     Some(fi) => {
                         // Existing key -> in-place replace; new key ->
                         // append (source items only ever append, so a new
@@ -1335,6 +1583,23 @@ pub fn pane(
                     let abstracttui::ui::UiEvent::Mouse(m) = ev else {
                         return;
                     };
+                    // LEFT press: the disclosure marker, and ONLY its
+                    // cells. Screen text-selection is enabled app-wide
+                    // (`lib.rs`), and the engine's own
+                    // `Feed::on_item_press` stops propagation for any
+                    // press that lands on an item — wiring that would
+                    // have killed drag-to-select across the whole
+                    // transcript. Consuming a ~11-cell right-aligned
+                    // target instead leaves every other cell selectable.
+                    if let abstracttui::ui::MouseKind::Down(abstracttui::ui::MouseButton::Left) =
+                        m.kind
+                    {
+                        let rect = ectx.current_rect();
+                        if toggle_marker_at(store, &ui_feed, rect, m.pos) {
+                            ectx.stop_propagation();
+                        }
+                        return;
+                    }
                     let abstracttui::ui::MouseKind::Down(abstracttui::ui::MouseButton::Right) =
                         m.kind
                     else {
@@ -1394,6 +1659,93 @@ pub fn pane(
                 .build()
         },
     )
+}
+
+/// A left press on a folded tool card's disclosure marker toggles that
+/// card's output. Returns whether the press was CONSUMED — false for
+/// every other cell, which is what keeps drag-to-select alive over the
+/// rest of the transcript.
+///
+/// The hit box is derived from [`tool_marker`], the same function the
+/// row draws with, so the target can never drift from the glyph. The
+/// row's own geometry supplies the rest: the marker is right-aligned at
+/// `rect.right() - width`, on the item's FIRST row.
+fn toggle_marker_at(
+    store: Store,
+    feed: &FeedState,
+    rect: abstracttui::base::Rect,
+    pos: Point,
+) -> bool {
+    // Agent lane only: entity conversations key other item sources
+    // under the same `i{index}` feed keys.
+    if !matches!(store.focus.get_untracked(), Focus::Agent) {
+        return false;
+    }
+    // `/details` shows every body already — there is no marker to hit.
+    if store.show_details.get_untracked() {
+        return false;
+    }
+    let Some((key, within)) = feed.item_at_row(pos.y - rect.y) else {
+        return false;
+    };
+    // Row 0 of the item is the tool row; the error and body rows below
+    // it carry no control.
+    if within != 0 {
+        return false;
+    }
+    let Some(ix) = key.strip_prefix('i').and_then(|s| s.parse::<usize>().ok()) else {
+        return false;
+    };
+    let Some((tool_key, marker, name, status)) =
+        store.fold.with_untracked(|f| match f.items.get(ix) {
+            Some(Item::Tool {
+                key,
+                name,
+                status,
+                result,
+                ..
+            }) => {
+                let expanded = store
+                    .expanded_tools
+                    .with_untracked(|e| e.iter().any(|k| k == key));
+                tool_marker(result, *status, expanded, rect.w)
+                    .map(|m| (key.clone(), m, name.clone(), *status))
+            }
+            _ => None,
+        })
+    else {
+        return false;
+    };
+    // THE SAME layout the row drew with — including its `marker_fits`
+    // term. Without it the hit box existed on rows that drew no marker
+    // (measured: at 34 columns a click on the args hint expanded the
+    // body and swallowed the text-selection press, with nothing on
+    // screen to explain either).
+    let word_seg = format!("· {}", tool_status_word(status));
+    let lay = tool_row_layout(
+        rect.w,
+        tool_glyph_str(status),
+        &name,
+        &word_seg,
+        Some(marker.as_str()),
+    );
+    if !lay.marker_fits {
+        return false;
+    }
+    let mx = rect.x + lay.marker_x;
+    if pos.x < mx || pos.x >= rect.right() {
+        return false;
+    }
+    // Toggle by the STABLE tool key, never the positional feed key.
+    store
+        .expanded_tools
+        .update(|e| match e.iter().position(|k| *k == tool_key) {
+            Some(i) => {
+                e.remove(i);
+            }
+            None => e.push(tool_key),
+        });
+    true
 }
 
 /// The boot/idle identity card's rows (IDLE-1) — the Python banner's
@@ -1686,6 +2038,240 @@ fn empty_state(
 mod tests {
     use super::*;
 
+    /// The disclosure marker is a MEASUREMENT, not decoration: it
+    /// appears only where output actually exists, its number is the
+    /// result's own line count, and a running call — which has produced
+    /// nothing yet — never claims hidden output.
+    #[test]
+    fn the_marker_counts_only_output_that_exists() {
+        // The gap this closes: a finished call with output.
+        let m = tool_marker("a\nb\nc", ToolStatus::Ok, false, 100).expect("marker");
+        assert_eq!(m, "▸ 3 lines");
+        // Expanded flips the arrow and keeps the count — the row still
+        // says how much is on screen.
+        assert_eq!(
+            tool_marker("a\nb\nc", ToolStatus::Ok, true, 100).as_deref(),
+            Some("▾ 3 lines")
+        );
+        // A call that printed nothing (write_file, mkdir) gets NO
+        // marker: a "+0 lines" on a wall of successes is noise.
+        assert_eq!(tool_marker("", ToolStatus::Ok, false, 100), None);
+        // Still running: output does not exist YET, so claiming it
+        // would be the fabrication the marker exists to prevent.
+        assert_eq!(tool_marker("a\nb", ToolStatus::Running, false, 100), None);
+        // A failed call's output is still output.
+        assert!(tool_marker("boom", ToolStatus::Failed, false, 100).is_some());
+    }
+
+    /// The number the marker PROMISES is the number expanding
+    /// DELIVERS. If these two ever disagree the marker is a lie, so
+    /// they are pinned against each other rather than separately.
+    #[test]
+    fn the_marker_promise_matches_the_expansion() {
+        let result = (1..=7)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let row = |expanded: bool| ToolRow {
+            rows: RefCell::new(None),
+            glyph: "✓",
+            glyph_ink: Rgba::TRANSPARENT,
+            name: "execute_command".into(),
+            name_ink: Rgba::TRANSPARENT,
+            hint: "cargo build".into(),
+            hint_ink: Rgba::TRANSPARENT,
+            word: "ok",
+            word_ink: Rgba::TRANSPARENT,
+            error: String::new(),
+            error_ink: Rgba::TRANSPARENT,
+            link_root: None,
+            result: result.clone(),
+            result_ink: Rgba::TRANSPARENT,
+            marker_ink: Rgba::TRANSPARENT,
+            status: ToolStatus::Ok,
+            expanded,
+        };
+        assert_eq!(row(false).marker(100).as_deref(), Some("▸ 7 lines"));
+        // Collapsed: the body is not drawn.
+        assert_eq!(row(false).body_lines(100).len(), 0);
+        // Every delivered row wears the tool-OUTPUT gutter.
+        assert!(row(true)
+            .body_lines(100)
+            .iter()
+            .all(|l| l.starts_with("│ ")));
+    }
+
+    /// The promise holds AT EVERY WIDTH and for hostile bodies.
+    ///
+    /// The first cut compared them once, at width 100, with 7 short
+    /// lines — so it could not see that the marker counted SOURCE lines
+    /// while the body counted WRAPPED rows (adversarial review
+    /// 2026-08-29, D2): `"\n\n\n"` promised 3 and delivered 0 (wrapping
+    /// pops trailing blanks), and one 300-column line promised 1 and
+    /// delivered 5. Both sides now read `tool_body_rows`, so parity is
+    /// structural — this sweeps widths and shapes to keep it that way.
+    #[test]
+    fn the_marker_and_the_body_agree_at_every_width() {
+        let bodies = [
+            "one line",
+            "a\nb\nc",
+            "\n\n\n",
+            "   \n  \n",
+            "hello\n\n",
+            &"x".repeat(300),
+            &format!("{}\nshort\n", "y".repeat(300)),
+        ];
+        for body in bodies {
+            for w in [20, 34, 40, 72, 100, 200] {
+                let row = ToolRow {
+                    rows: RefCell::new(None),
+                    glyph: "✓",
+                    glyph_ink: Rgba::TRANSPARENT,
+                    name: "execute_command".into(),
+                    name_ink: Rgba::TRANSPARENT,
+                    hint: String::new(),
+                    hint_ink: Rgba::TRANSPARENT,
+                    word: "ok",
+                    word_ink: Rgba::TRANSPARENT,
+                    error: String::new(),
+                    error_ink: Rgba::TRANSPARENT,
+                    link_root: None,
+                    result: body.to_string(),
+                    result_ink: Rgba::TRANSPARENT,
+                    marker_ink: Rgba::TRANSPARENT,
+                    status: ToolStatus::Ok,
+                    expanded: true,
+                };
+                let delivered = row.body_lines(w).len();
+                // TWO paths compute this marker: the row's memoised
+                // method (what the draw shows) and the free
+                // `tool_marker` (what the CLICK hit-test measures its
+                // target from). They must agree at every width, or the
+                // control sits somewhere other than the glyph — pinned
+                // here because sabotaging only the free function left
+                // the sweep green.
+                assert_eq!(
+                    row.marker(w),
+                    tool_marker(body, ToolStatus::Ok, true, w),
+                    "w={w} body={body:?}: draw and hit-test disagree about the marker"
+                );
+                match row.marker(w) {
+                    Some(m) => {
+                        let n: usize = m
+                            .split_whitespace()
+                            .nth(1)
+                            .and_then(|s| s.parse().ok())
+                            .expect("marker carries a count");
+                        assert_eq!(
+                            n, delivered,
+                            "w={w} body={body:?}: promised {n}, delivered {delivered}"
+                        );
+                        // Singular reads as singular.
+                        assert!(
+                            m.ends_with(if n == 1 { " line" } else { " lines" }),
+                            "w={w}: {m}"
+                        );
+                    }
+                    None => assert_eq!(
+                        delivered, 0,
+                        "w={w} body={body:?}: no marker, so nothing may be delivered"
+                    ),
+                }
+            }
+        }
+    }
+
+    /// The block's declared HEIGHT covers everything it draws.
+    ///
+    /// A custom block that under-reports paints over the item below it.
+    /// The suite could not see this: deleting `body_lines` from the
+    /// height callback left 656 tests green (adversarial review
+    /// 2026-08-29, test-quality matrix), because nothing compared the
+    /// two. This does.
+    #[test]
+    fn the_declared_height_covers_every_row_drawn() {
+        for (result, error, expanded) in [
+            ("", "", false),
+            ("a\nb\nc", "", false),
+            ("a\nb\nc", "", true),
+            ("a\nb\nc", "boom\nsecond line", true),
+            (&"z".repeat(400), "e", true),
+        ] {
+            for w in [30, 72, 120] {
+                let row = ToolRow {
+                    rows: RefCell::new(None),
+                    glyph: "✓",
+                    glyph_ink: Rgba::TRANSPARENT,
+                    name: "execute_command".into(),
+                    name_ink: Rgba::TRANSPARENT,
+                    hint: String::new(),
+                    hint_ink: Rgba::TRANSPARENT,
+                    word: "ok",
+                    word_ink: Rgba::TRANSPARENT,
+                    error: error.into(),
+                    error_ink: Rgba::TRANSPARENT,
+                    link_root: None,
+                    result: result.to_string(),
+                    result_ink: Rgba::TRANSPARENT,
+                    marker_ink: Rgba::TRANSPARENT,
+                    status: ToolStatus::Ok,
+                    expanded,
+                };
+                // What the draw paints: the row, the errors, the body.
+                let drawn = 1 + row.error_lines(w).len() + row.body_lines(w).len();
+                // What the block DECLARES — the real arithmetic the
+                // `CustomBlock` closure delegates to, not a restatement
+                // of it (the first cut re-added the terms itself, which
+                // is a tautology: deleting the body term from the
+                // closure left the suite green).
+                let declared = row.height_at(w);
+                assert_eq!(
+                    declared as usize, drawn,
+                    "w={w} expanded={expanded}: declared {declared}, draws {drawn}"
+                );
+                // And the body only exists when expanded.
+                if !expanded {
+                    assert_eq!(row.body_lines(w).len(), 0);
+                }
+            }
+        }
+    }
+
+    /// The hit box exists exactly where the marker is DRAWN.
+    ///
+    /// The draw drops a marker it cannot fit; the hit-test had no such
+    /// term, so on a narrow pane a click on ordinary row text expanded
+    /// the body and swallowed the press that would have started a text
+    /// selection — a control with no glyph (adversarial review
+    /// 2026-08-29, D1). Both sides read this one function now.
+    #[test]
+    fn the_hit_box_exists_only_where_the_marker_is_drawn() {
+        let marker = "▸ 3 lines";
+        let mut narrow_dropped = false;
+        for w in 10..120 {
+            let lay = tool_row_layout(w, "✓", "execute_command", "· ok", Some(marker));
+            if !lay.marker_fits {
+                narrow_dropped = true;
+                continue;
+            }
+            // Drawn: the marker sits flush right and never overlaps the
+            // hint the row also printed.
+            assert_eq!(lay.marker_x, w - text::width(marker), "w={w}");
+            assert!(
+                lay.hint_x + lay.hint_avail <= lay.marker_x,
+                "w={w}: hint runs into the marker"
+            );
+        }
+        assert!(
+            narrow_dropped,
+            "some width must be too narrow — otherwise this proves nothing"
+        );
+        // The specific width the review measured: no marker drawn, so
+        // no cell on that row may be a control.
+        let lay = tool_row_layout(34, "✓", "execute_command", "· ok", Some(marker));
+        assert!(!lay.marker_fits, "34 cols cannot fit name + tag + marker");
+    }
+
     /// Every renderable item shape × details mode: `is_visible` must
     /// answer exactly `render_item(..).is_some()` — a mismatch lets the
     /// sync effect append a mid-list key at the feed tail (feed order is
@@ -1743,7 +2329,7 @@ mod tests {
                 for item in &items {
                     assert_eq!(
                         is_visible(item, details),
-                        render_item(&t, item, store, details, None).is_some(),
+                        render_item(&t, item, store, details, None, false).is_some(),
                         "visibility mirror diverged for {item:?} details={details}"
                     );
                 }
@@ -1812,7 +2398,7 @@ mod tests {
                 result: "r".into(),
                 error: String::new(),
             };
-            let fp = |i: &Item| fingerprint(i, &store);
+            let fp = |i: &Item| fingerprint(i, &store, false);
             let mut m = base.clone();
             if let Item::Tool { name, .. } = &mut m {
                 *name = "n2".into();

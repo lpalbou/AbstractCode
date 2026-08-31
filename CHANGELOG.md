@@ -6,6 +6,185 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (tool-card disclosure + gateway-backed `/sessions`, 2026-08-29)
+
+- **A folded tool card now NAMES the output it is hiding, and expands in
+  place.** The collapsed row used to render glyph, name, status word,
+  args hint and error — and the tool's result not at all, so a call that
+  printed 214 lines looked exactly like one that printed nothing. Every
+  other lane in this transcript already named what it held back (the
+  thinking card's `… (+441 words of reasoning · /details)`, every capped
+  body's `… (+K more lines)`), so this was the one place the house rule
+  was not applied to itself. The row now carries a right-aligned
+  `▸ N lines`; clicking it expands THAT card inline under the `│`
+  output gutter and flips it to `▾ N lines`. The number the marker
+  promises is the number expanding delivers — pinned against each other
+  by test, because a marker that disagrees with its own body is a lie.
+  A running call gets no marker (its output does not exist yet) and a
+  call that printed nothing gets none either.
+  - Per-card state is keyed by `tool_key(run_id,node_id,index,call_id)`
+    — the code's single authority for card identity — never by the
+    feed's positional `i{index}` keys, which a truncation drain shifts
+    onto a different call.
+  - `/details` still outranks it: under full detail every body is shown
+    and no marker renders. Expansion is a reading gesture, not a
+    preference, so it is session-scoped and never persisted.
+  - The click consumes ONLY the marker's cells. Screen text-selection
+    is enabled app-wide and the engine's own `Feed::on_item_press`
+    stops propagation for any press landing on an item, so wiring that
+    would have killed drag-to-select across the entire transcript.
+- **`/sessions` asks the GATEWAY which sessions exist.** The picker
+  rendered `prefs.recent_sessions` — a local file — so pointing this
+  client at a remote gateway showed an empty list over a gateway full of
+  live work. It now fetches `GET /runs?root_only=true` once at open (and
+  on `r`), folds the answer into one row per session, and renders a
+  board: id, time, live state, run count, and the prompt.
+  - **Existence comes from the gateway; labels come from prefs.** A
+    session the gateway lists and this client has never heard of is
+    offered, with no label rather than a blank that would read as an
+    empty conversation. A session prefs remembers that the gateway did
+    not list is kept and MARKED, never given an invented state.
+  - A session is as live as its liveliest run — waiting on you, then
+    running — because that is the order in which it wants a human;
+    live sessions sort to the top.
+  - The hint line states provenance and the fetch's own state: asking,
+    the count and whether the listing was complete, or the refusal
+    verbatim. Absence is never drawn as an empty gateway. Fetched at
+    the gesture, never polled.
+- `Picker` gained a live hint (a static one beside an async fetch would
+  freeze on "asking the gateway…") and bindable extra keys, so the `r`
+  its title promises is actually bound.
+
+### Fixed (`/sessions` board, against a live 119-session gateway, 2026-08-29)
+
+Three defects the operator caught on a real gateway, all of them the
+board claiming things it had no standing to claim.
+
+- **The board lied while it was still asking.** Local rows rendered a
+  state column before the gateway had been contacted, so every one of
+  them read `not on the gateway` about a server no request had reached
+  yet. The board now shows a WAITING surface — a braille spinner and
+  "asking the gateway which sessions exist…" — until the listing lands,
+  and claims nothing until it does. The ticker is armed only while the
+  fetch is in flight and dies with the modal, so idle still costs
+  nothing.
+- **Sessions that WERE on the gateway were reported missing.** The
+  listing pages ROOT RUNS, not sessions, and the client clamped it to
+  500 — so on a store with 119 sessions most of them fell outside the
+  page and every one rendered `not on the gateway`. The clamp's ceiling
+  is gone (the route documents "No server ceiling"), the board asks for
+  5000, and absence is now three-way: only a listing the gateway marked
+  COMPLETE may say `not on the gateway`; a truncated one says `outside
+  this listing`; a fetch that never answered says `state unknown`.
+  Defaulting to the strongest claim was the whole bug.
+- **`1+ runs` became `N turns`, and prompts come from the gateway.** A
+  root run IS a turn, so the count is now labelled as such — exact when
+  the listing is complete, a floor (`N+`) when it is not. And the
+  prompt is no longer whatever this client happened to remember:
+  `/sessions` fetches each session's opening words from the gateway
+  (`input_data` on its newest root run), bounded to the newest 40
+  sessions and posted in batches so the board fills in progressively.
+  A row with no prompt renders a quiet `—` instead of a loud
+  "(no prompt remembered)", which said "this client failed" about
+  sessions that were perfectly fine — prefs only ever remembered the 15
+  sessions this client itself started.
+
+### Fixed (adversarial review of the `/sessions` board)
+
+- **Enter on the waiting board switched sessions and CANCELLED the live
+  run.** The waiting surface renders a two-row placeholder while
+  `on_choose` read the merged session list — two different index
+  spaces — and the engine clamps the activation index into the
+  *rendered* rows. So Enter, Space, or a double-click on a screen
+  showing nothing but a spinner resolved to a real session, switched to
+  it, and `switch_session` cancelled the in-flight run on the way out.
+  Reachable on first open and again after every `r`. Activation is now
+  refused until the gateway answers.
+- **The fetch ran inline on the single command loop.** `Steer`,
+  `Cancel`, `Pause` and approval `Resume` are handled on that same
+  loop, so one `/sessions` open (a listing plus up to 40 prompt
+  fetches, each with a 60 s read timeout) could queue every control
+  gesture behind it while the transcript kept streaming from its own
+  threads — the UI looking alive with its controls dead. Moved to its
+  own thread, the pattern the GPU and entity lanes already use, and `r`
+  is a no-op while a pass is in flight instead of queueing another.
+- **Prompts were fetched for a different 40 rows than the board shows.**
+  The fetch used the fold's order; the board sorts live-sessions-first.
+  A session waiting on a human since last month sat at row 0 unlabeled
+  while forty finished sessions below it were labeled. Both now use one
+  shared ordering, and the hint NAMES the bound (`prompts: top 40, 79
+  unfetched`) — without it, one `—` meant "still arriving", "outside
+  the bound" and "genuinely none" at once.
+- **The label was the session's NEWEST prompt, not its opening one** —
+  so a session begun "port the tests to rstest" whose last turn was
+  "yes" rendered as `yes`, and three doc sites said "opening"/"first".
+  It now reads the session's first turn.
+- **A missing `has_more` defaulted to the strongest claim.** Absent, it
+  read as a complete listing, which licenses "not on the gateway". It
+  now defaults to truncated.
+- The waiting animation's frame signal was created on the app scope,
+  leaking one arena node per `/sessions` open; it lives on the modal
+  scope now.
+- **Five sabotages that left the suite green now fail**: reverting the
+  run limit to the 500 that caused the operator's bug, dropping the
+  prompt fetch, zeroing its bound, marking exact turn counts as floors,
+  and dropping the unfetched-count from the hint. Each was verified by
+  reintroducing the defect. One of my own new pins also passed for the
+  wrong reason — its fixture put the current session at row 0, where
+  `switch_session` early-returns — and was rewritten until it bit.
+
+### Fixed (adversarial review of the 2026-08-29 work)
+
+- **The marker's click target existed where no marker was drawn.** The
+  draw drops a marker it cannot fit; the hit-test had no such term, so
+  on a pane around 34 columns a left click on the args hint silently
+  expanded the body AND swallowed the press that would have started a
+  text selection — a control with no glyph on screen. Both sides now
+  read one `tool_row_layout`.
+- **The marker promised rows expanding never delivered.** It counted
+  `result.lines()` while the body counted WRAPPED rows: `"\n\n\n"`
+  promised 3 and delivered 0 (wrapping pops trailing blanks), and one
+  300-column line promised 1 and delivered 5. Both sides read one
+  `tool_body_rows` now, so parity is structural rather than asserted,
+  and a single-line result reads `1 line` instead of `1 lines`.
+- **Expanding re-wrapped the whole result on every repaint.** The clip
+  cull skipped the prints, not the wrap; a 30k-line expanded card under
+  a streaming run measured ~51 ms/frame. The wrap is memoised per width.
+- **A status the gateway did not report rendered as "done".** An empty
+  status from a malformed index row — or any status added server-side
+  since this build — told the operator a live session had finished. It
+  is now `SessionState::Unknown`, renders as `—`, and ranks last so it
+  never drags a live session down.
+- **`SessionState::Paused` was unreachable and has been removed.** `GET
+  /runs` hardcodes `"paused": false` on its index-row fast path
+  (`routes/gateway.py:8007` — the only `paused` in the whole listing
+  response), so the branch could never fire; `unwrap_or(false)` made it
+  silent. Reading real pause state needs the gateway to report it.
+- **The board sorted by the wrong field.** It ordered by `created_at`
+  while the gateway pages by `updated_at DESC`, so a session created in
+  August but touched a minute ago sorted below one created today and
+  long dead.
+- **The truncation notice could not fit on screen.** The hint sentence
+  was ~85 columns against an ~87-column budget, so ` · older sessions
+  exist beyond this page` ellipsized away at every terminal width —
+  silent truncation of the truncation notice. Both hints are short now,
+  the failure hint leads with the fact so the gateway's own reason
+  survives, and `has_more` is reported as *older runs*, which is what
+  the gateway actually said.
+- **`N run(s)` was a page-bounded floor rendered as a total**, and the
+  `when` column rendered a gateway timestamp and a locally-remembered
+  one identically. Counts read `N+ runs`, remembered times wear `~`, and
+  the hint says `counts page-only`.
+- Removed a dead `Picker::quiet()` helper (never called, two new clippy
+  warnings) and an unreachable match arm in the row renderer.
+- **Six tests that could not fail were rewritten or added.** Deleting
+  the body term from the height callback, counting source lines in the
+  marker, replacing the liveliness fold with "last run wins", mangling
+  the `/runs` query, and removing the `r` binding all left the full
+  suite green. Each now has a pin verified by reintroducing the defect
+  and watching it go red — including the height test, which had been
+  restating the arithmetic it meant to check.
+
 ### Changed (`/resources` operator refinements, 2026-08-28)
 
 - **`/resources` byte sizes are binary math with BINARY labels** (`B` / `KiB` /
