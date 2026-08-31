@@ -21,8 +21,8 @@
 
 use serde_json::Value;
 
-use abstractcode_tui::runner::rehydrate_run_into;
-use abstractcode_tui::transcript::{Fold, Item, ToolStatus};
+use abstractcode::runner::rehydrate_run_into;
+use abstractcode::transcript::{Fold, Item, ToolStatus};
 
 fn fold_fixture() -> Fold {
     let raw = include_str!("fixtures/history_bundle_restore.json");

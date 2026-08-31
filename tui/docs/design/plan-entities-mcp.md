@@ -456,7 +456,7 @@ and gate checking (the walkthrough-gate lane). Rules:
 - Live visit tests target doorcheck ONLY. castor, mnemosyne, hypnos,
   ephemeral are real lives — never open visits on them from tests.
 - Opening WAKES an asleep doorcheck (B1); every test closes with
-  closed_by=operator, reason="abstractcode-tui live gate", in a
+  closed_by=operator, reason="abstractcode live gate", in a
   finally-style guard, restoring his sleep via the close's prior-state
   restore.
 - The live gate is MANUAL (operator-run, one visit per gate run), never

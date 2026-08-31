@@ -1,4 +1,4 @@
-# abstractcode-tui — Roadmap (final, sign-able)
+# abstractcode — Roadmap (final, sign-able)
 
 Status: synthesis of the five roadmap documents (2026-07-22), for maintainer
 sign-off. Detail backing lives in the five sources — item ids are carried
@@ -30,7 +30,7 @@ M 1–3 days · L > 3 days.
 
 ## 1. Identity and thesis (the strategic frame)
 
-**Ruling: abstractcode-tui is mission control for agents that outlive your
+**Ruling: abstractcode is mission control for agents that outlive your
 terminal — a durable-gateway cockpit and a fleet seat. It is not a codex
 clone and will not compete on standalone-agent polish.**
 

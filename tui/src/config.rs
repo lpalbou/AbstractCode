@@ -41,9 +41,8 @@ fn trimmed_env(name: &str) -> Option<String> {
     }
 }
 
-/// The login store shared with the Python `abstractcode` CLI
-/// (`~/.abstractcode/gateway.json`, written by `abstractcode login` or
-/// `abstractcode-tui login`).
+/// The login store (`~/.abstractcode/gateway.json`), written by
+/// `abstractcode login`.
 pub fn login_store_path() -> PathBuf {
     if let Some(p) = trimmed_env("ABSTRACTCODE_GATEWAY_CONNECTION_FILE") {
         return PathBuf::from(p);
@@ -51,12 +50,31 @@ pub fn login_store_path() -> PathBuf {
     home_dir().join(".abstractcode").join("gateway.json")
 }
 
-/// Preferences owned by this app (theme, workflow, model, session).
+/// Preferences owned by this app (theme, workflow, model, session):
+/// `~/.abstractcode/prefs.json`, beside the login store.
+///
+/// Preferences used to live in `~/.abstractcode-tui/`, from when this client
+/// shipped under that name. If only the old file exists, it is still read, so
+/// an existing install keeps its theme and session on first launch after the
+/// rename. Writes always go to the current path.
 pub fn prefs_path() -> PathBuf {
+    if let Some(p) = trimmed_env("ABSTRACTCODE_PREFS_FILE") {
+        return PathBuf::from(p);
+    }
     if let Some(p) = trimmed_env("ABSTRACTCODE_TUI_PREFS_FILE") {
         return PathBuf::from(p);
     }
-    home_dir().join(".abstractcode-tui").join("prefs.json")
+    home_dir().join(".abstractcode").join("prefs.json")
+}
+
+/// The pre-rename preferences location, read only when [`prefs_path`] has no
+/// file yet. Returns `None` once the current path exists.
+pub fn legacy_prefs_path() -> Option<PathBuf> {
+    if prefs_path().exists() {
+        return None;
+    }
+    let legacy = home_dir().join(".abstractcode-tui").join("prefs.json");
+    legacy.exists().then_some(legacy)
 }
 
 pub fn home_dir() -> PathBuf {
@@ -336,7 +354,18 @@ pub struct Prefs {
 
 impl Prefs {
     pub fn load() -> Prefs {
-        Prefs::load_from(prefs_path())
+        // Read the pre-rename file when the current one does not exist yet, so
+        // an install from before this client was named `abstractcode` keeps its
+        // theme, model and session. `path` stays the CURRENT location, so the
+        // first save migrates the file forward.
+        match legacy_prefs_path() {
+            Some(legacy) => {
+                let mut prefs = Prefs::load_from(legacy);
+                prefs.path = Some(prefs_path());
+                prefs
+            }
+            None => Prefs::load_from(prefs_path()),
+        }
     }
 
     pub fn load_from(path: PathBuf) -> Prefs {

@@ -312,9 +312,9 @@ commons 4302; proposed verdict schema
 `{goal_met: bool, evidence: string, remaining: [string]}`) — (cycle-2:) the
 same ask now carries the interim-results constraint from (a) above.
 
-## Item 4 — Native agora integration (`abstractcode-tui serve`)
+## Item 4 — Native agora integration (`abstractcode serve`)
 
-DECISION: `abstractcode-tui serve` — a JSONL protocol-v1-parity subcommand
+DECISION: `abstractcode serve` — a JSONL protocol-v1-parity subcommand
 so the EXISTING Python `abstractcode bridge --executable` drives this
 client as its fleet child. Do NOT re-port the adversary-hardened bridge
 policy to Rust (deferred until a Python-free deployment is named).

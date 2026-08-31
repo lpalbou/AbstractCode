@@ -21,7 +21,7 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-BIN = REPO / "target" / "release" / "abstractcode-tui"
+BIN = REPO / "target" / "release" / "abstractcode"
 TOKEN = "AGENTS-MD-SEEN-7Q4X"
 WORKFLOW = sys.argv[1] if len(sys.argv) > 1 else "basic-agent"
 PROVIDER = os.environ.get("WFP_PROVIDER", "lmstudio")

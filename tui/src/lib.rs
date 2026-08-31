@@ -1,4 +1,4 @@
-//! abstractcode-tui — AbstractCode on AbstractTUI, speaking to AbstractGateway.
+//! abstractcode — AbstractCode on AbstractTUI, speaking to AbstractGateway.
 //!
 //! The agent runs durably on the gateway; this crate is a reactive terminal
 //! client: it starts runs, streams ledgers live, renders cycles/tools/
@@ -54,7 +54,7 @@ pub fn run_cli(argv: &[String]) -> i32 {
     let args = match cli::parse(argv) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("abstractcode-tui: {e}");
+            eprintln!("abstractcode: {e}");
             eprintln!("{}", cli::usage());
             return 2;
         }
@@ -64,7 +64,7 @@ pub fn run_cli(argv: &[String]) -> i32 {
         return 0;
     }
     if args.show_version {
-        println!("abstractcode-tui {}", cli::VERSION);
+        println!("abstractcode {}", cli::VERSION);
         return 0;
     }
     if args.show_caps {
@@ -112,7 +112,7 @@ fn resolve_animation(prefs: &mut config::Prefs, flag: Option<bool>) -> bool {
 
 fn run_tui(args: &cli::Args) -> i32 {
     if !abstracttui::term::have_tty() {
-        eprintln!("abstractcode-tui: needs an interactive terminal (use `exec` for headless runs)");
+        eprintln!("abstractcode: needs an interactive terminal (use `exec` for headless runs)");
         return 2;
     }
 
@@ -125,7 +125,7 @@ fn run_tui(args: &cli::Args) -> i32 {
         .or_else(|| prefs.theme.clone());
     if let Some(id) = start_theme {
         if !abstracttui::app::set_theme_by_id(&id) {
-            eprintln!("abstractcode-tui: unknown theme {id:?} — using the default");
+            eprintln!("abstractcode: unknown theme {id:?} — using the default");
         }
     }
 
@@ -397,7 +397,7 @@ fn run_tui(args: &cli::Args) -> i32 {
         ui::root(cx, store, ctx, &actions)
     });
     if let Err(e) = mount_result {
-        eprintln!("abstractcode-tui: mount failed: {e:?}");
+        eprintln!("abstractcode: mount failed: {e:?}");
         return 1;
     }
     // The boot animation, between mount and run: mounting has already
@@ -421,7 +421,7 @@ fn run_tui(args: &cli::Args) -> i32 {
         let leftover = queue_echo.borrow();
         if !leftover.is_empty() {
             eprintln!(
-                "abstractcode-tui: {} queued prompt(s) saved with this session — they restore PAUSED on the next launch (/queue then r resumes):",
+                "abstractcode: {} queued prompt(s) saved with this session — they restore PAUSED on the next launch (/queue then r resumes):",
                 leftover.len()
             );
             for text in leftover.iter() {
@@ -434,12 +434,12 @@ fn run_tui(args: &cli::Args) -> i32 {
     // exited with no confirmation at all). One line, post-teardown,
     // where the user can still read it.
     if let Some(line) = quit_echo.borrow().as_ref() {
-        eprintln!("abstractcode-tui: {line}");
+        eprintln!("abstractcode: {line}");
     }
     match outcome {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("abstractcode-tui: {e:?}");
+            eprintln!("abstractcode: {e:?}");
             1
         }
     }

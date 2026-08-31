@@ -17,13 +17,13 @@ From install to your first gateway-hosted agent run.
 ## Install
 
 ```sh
-cargo install abstractcode-tui
+cargo install abstractcode
 ```
 
 ## Connect once
 
 ```sh
-abstractcode-tui login --gateway http://127.0.0.1:8080 --token <your-token>
+abstractcode login --gateway http://127.0.0.1:8080 --token <your-token>
 ```
 
 `login` takes the URL and token from flags or environment (it never prompts),
@@ -36,7 +36,7 @@ override the store when set.
 Check the connection end to end:
 
 ```sh
-abstractcode-tui doctor
+abstractcode doctor
 # [1/3] reachability   ✓ server up (auth enforced)
 # [2/3] authentication ✓ ping ok
 # [3/3] catalog        ✓ 10 agent workflow(s): basic-agent:81795ea9, …
@@ -50,7 +50,7 @@ wrong gateway.
 ## First run
 
 ```sh
-abstractcode-tui
+abstractcode
 ```
 
 Type a task and press Enter:
@@ -136,7 +136,7 @@ it — pins gate even at `all`, and gateway-disabled tools never run.
 For scripts and CI:
 
 ```sh
-abstractcode-tui exec "List the files in the workspace and summarize them" \
+abstractcode exec "List the files in the workspace and summarize them" \
   --permissions all --timeout 300
 ```
 

@@ -11,7 +11,7 @@
     "messages": [
      {
       "role": "user",
-      "content": "<runtime_metadata>{\"display\":\"[2026-07-21 15:06:25]\",\"local_datetime\":\"2026-07-21T15:06:25+02:00\"}</runtime_metadata>\nCreate a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE.\n\n[loop] iteration 1 of 50."
+      "content": "<runtime_metadata>{\"display\":\"[2026-07-21 15:06:25]\",\"local_datetime\":\"2026-07-21T15:06:25+02:00\"}</runtime_metadata>\nCreate a file named hello.txt containing exactly 'hello from abstractcode', then reply DONE.\n\n[loop] iteration 1 of 50."
      }
     ],
     "tools": [
@@ -538,7 +538,7 @@
     "messages": [
      {
       "role": "user",
-      "content": "<runtime_metadata>{\"display\":\"[2026-07-21 15:06:25]\",\"local_datetime\":\"2026-07-21T15:06:25+02:00\"}</runtime_metadata>\nCreate a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE.\n\n[loop] iteration 1 of 50."
+      "content": "<runtime_metadata>{\"display\":\"[2026-07-21 15:06:25]\",\"local_datetime\":\"2026-07-21T15:06:25+02:00\"}</runtime_metadata>\nCreate a file named hello.txt containing exactly 'hello from abstractcode', then reply DONE.\n\n[loop] iteration 1 of 50."
      }
     ],
     "tools": {
@@ -592,7 +592,7 @@
          "id": "775257785",
          "function": {
           "name": "write_file",
-          "arguments": "{\"file_path\":\"hello.txt\",\"content\":\"hello from abstractcode-tui\",\"mode\":\"w\"}"
+          "arguments": "{\"file_path\":\"hello.txt\",\"content\":\"hello from abstractcode\",\"mode\":\"w\"}"
          }
         }
        ]
@@ -614,7 +614,7 @@
      "name": "write_file",
      "arguments": {
       "file_path": "hello.txt",
-      "content": "hello from abstractcode-tui",
+      "content": "hello from abstractcode",
       "mode": "w"
      },
      "call_id": "775257785"
@@ -641,7 +641,7 @@
        },
        {
         "role": "user",
-        "content": "Create a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE.\n\n[loop] iteration 1 of 50."
+        "content": "Create a file named hello.txt containing exactly 'hello from abstractcode', then reply DONE.\n\n[loop] iteration 1 of 50."
        },
        {
         "role": "user",
@@ -1015,7 +1015,7 @@
       "messages": [
        {
         "role": "user",
-        "content": "<runtime_metadata>{\"display\":\"[2026-07-21 15:06:25]\",\"local_datetime\":\"2026-07-21T15:06:25+02:00\"}</runtime_metadata>\nCreate a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE.\n\n[loop] iteration 1 of 50."
+        "content": "<runtime_metadata>{\"display\":\"[2026-07-21 15:06:25]\",\"local_datetime\":\"2026-07-21T15:06:25+02:00\"}</runtime_metadata>\nCreate a file named hello.txt containing exactly 'hello from abstractcode', then reply DONE.\n\n[loop] iteration 1 of 50."
        },
        {
         "role": "system",
@@ -1165,7 +1165,7 @@
       "name": "write_file",
       "arguments": {
        "file_path": "hello.txt",
-       "content": "hello from abstractcode-tui",
+       "content": "hello from abstractcode",
        "mode": "w"
       },
       "call_id": "775257785",
@@ -1212,7 +1212,7 @@
       "name": "write_file",
       "arguments": {
        "file_path": "hello.txt",
-       "content": "hello from abstractcode-tui",
+       "content": "hello from abstractcode",
        "mode": "w"
       },
       "call_id": "775257785",
@@ -1251,7 +1251,7 @@
        "name": "write_file",
        "arguments": {
         "file_path": "/srv/gateway/runtime/workspaces/540313ab1c0542d49b79ad04f53e7a28/hello.txt",
-        "content": "hello from abstractcode-tui",
+        "content": "hello from abstractcode",
         "mode": "w"
        },
        "call_id": "775257785",
@@ -1326,7 +1326,7 @@
       "name": "write_file",
       "arguments": {
        "file_path": "hello.txt",
-       "content": "hello from abstractcode-tui",
+       "content": "hello from abstractcode",
        "mode": "w"
       },
       "call_id": "775257785",
@@ -1426,7 +1426,7 @@
     "messages": [
      {
       "role": "user",
-      "content": "Create a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE."
+      "content": "Create a file named hello.txt containing exactly 'hello from abstractcode', then reply DONE."
      },
      {
       "role": "assistant",
@@ -1437,7 +1437,7 @@
         "id": "775257785",
         "function": {
          "name": "write_file",
-         "arguments": "{\"file_path\": \"hello.txt\", \"content\": \"hello from abstractcode-tui\", \"mode\": \"w\"}"
+         "arguments": "{\"file_path\": \"hello.txt\", \"content\": \"hello from abstractcode\", \"mode\": \"w\"}"
         }
        }
       ]
@@ -1977,7 +1977,7 @@
     "messages": [
      {
       "role": "user",
-      "content": "Create a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE."
+      "content": "Create a file named hello.txt containing exactly 'hello from abstractcode', then reply DONE."
      },
      {
       "role": "assistant",
@@ -1988,7 +1988,7 @@
         "id": "775257785",
         "function": {
          "name": "write_file",
-         "arguments": "{\"file_path\": \"hello.txt\", \"content\": \"hello from abstractcode-tui\", \"mode\": \"w\"}"
+         "arguments": "{\"file_path\": \"hello.txt\", \"content\": \"hello from abstractcode\", \"mode\": \"w\"}"
         }
        }
       ]
@@ -2085,7 +2085,7 @@
        },
        {
         "role": "user",
-        "content": "Create a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE."
+        "content": "Create a file named hello.txt containing exactly 'hello from abstractcode', then reply DONE."
        },
        {
         "role": "assistant",
@@ -2096,7 +2096,7 @@
           "id": "775257785",
           "function": {
            "name": "write_file",
-           "arguments": "{\"file_path\": \"hello.txt\", \"content\": \"hello from abstractcode-tui\", \"mode\": \"w\"}"
+           "arguments": "{\"file_path\": \"hello.txt\", \"content\": \"hello from abstractcode\", \"mode\": \"w\"}"
           }
          }
         ]
@@ -2482,7 +2482,7 @@
       "messages": [
        {
         "role": "user",
-        "content": "Create a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE."
+        "content": "Create a file named hello.txt containing exactly 'hello from abstractcode', then reply DONE."
        },
        {
         "role": "assistant",
@@ -2493,7 +2493,7 @@
           "id": "775257785",
           "function": {
            "name": "write_file",
-           "arguments": "{\"file_path\": \"hello.txt\", \"content\": \"hello from abstractcode-tui\", \"mode\": \"w\"}"
+           "arguments": "{\"file_path\": \"hello.txt\", \"content\": \"hello from abstractcode\", \"mode\": \"w\"}"
           }
          }
         ]
@@ -2653,12 +2653,12 @@
    "completed": true,
    "output": {
     "answer": "DONE",
-    "report": "task: Create a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE.\ncycles: 2\n\ncycle 1\n- actions:\n  - write_file(file_path='hello.txt', mode='w', content=<str len=27 sha256=3ae436366891>)\n- observations:\n  - [write_file] OK: \u2705 Successfully written to '/srv/gateway/runtime/workspaces/540313ab1c0542d49b79ad04f53e7a28/hello.txt' (27 bytes, 1 lines)\n\ncycle 2\n- thought: DONE",
+    "report": "task: Create a file named hello.txt containing exactly 'hello from abstractcode', then reply DONE.\ncycles: 2\n\ncycle 1\n- actions:\n  - write_file(file_path='hello.txt', mode='w', content=<str len=27 sha256=3ae436366891>)\n- observations:\n  - [write_file] OK: \u2705 Successfully written to '/srv/gateway/runtime/workspaces/540313ab1c0542d49b79ad04f53e7a28/hello.txt' (27 bytes, 1 lines)\n\ncycle 2\n- thought: DONE",
     "iterations": 2,
     "messages": [
      {
       "role": "user",
-      "content": "Create a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE.",
+      "content": "Create a file named hello.txt containing exactly 'hello from abstractcode', then reply DONE.",
       "timestamp": "2026-07-21T13:06:25.107534+00:00",
       "metadata": {
        "message_id": "msg_0ff603b597d2456f9e6a69b932eb4594"
@@ -2679,7 +2679,7 @@
         "id": "775257785",
         "function": {
          "name": "write_file",
-         "arguments": "{\"file_path\": \"hello.txt\", \"content\": \"hello from abstractcode-tui\", \"mode\": \"w\"}"
+         "arguments": "{\"file_path\": \"hello.txt\", \"content\": \"hello from abstractcode\", \"mode\": \"w\"}"
         }
        }
       ]
@@ -2717,7 +2717,7 @@
          "name": "write_file",
          "arguments": {
           "file_path": "hello.txt",
-          "content": "hello from abstractcode-tui",
+          "content": "hello from abstractcode",
           "mode": "w"
          },
          "call_id": "775257785"

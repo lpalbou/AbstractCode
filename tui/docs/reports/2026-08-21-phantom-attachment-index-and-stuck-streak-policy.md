@@ -1,7 +1,7 @@
 # A phantom attachment index made the model invent artifact ids, and a hard-stop detector ended the turn at 12 of 50
 
 Date: 2026-08-21
-Investigator seat: abstractcode-tui (client seat; three of the four defects are upstream)
+Investigator seat: abstractcode (client seat; three of the four defects are upstream)
 Status: **fixed and live-verified** — see §7 (implementation) and §8 (live evidence on
 `endpoint:airelay` / `gpt-5.4-mini`)
 Session under study: `acode-bc425138014f` — run `6673613e-1bbf-44da-acac-41d5eec749c5`
@@ -269,7 +269,7 @@ asserts the string never reaches the payload.
   line with no loop vocabulary, matching the existing suppressed conclude
   directive (c2447 chrome class).
 
-### abstractcode-tui — the card that sent the operator the wrong way
+### abstractcode — the card that sent the operator the wrong way
 
 `RunVerdict` reads `conclusion_forced`. A stuck-loop stop now renders
 *"stopped early after N iterations: the agent repeated the same tool batch M
@@ -546,7 +546,7 @@ than the first response.
 
 ## 12. Where the logic belongs — the client was holding it, and now it isn't
 
-**Operator, 2026-08-21:** *"abstractcode-tui is a thin client, essentially
+**Operator, 2026-08-21:** *"abstractcode is a thin client, essentially
 showing and forwarding information to the gateway. It MUST NOT hold logic …
 we could want to visualise an ongoing session in another tool (AbstractObserver,
 the web version of AbstractCode, WhatsApp, Telegram), so they ALL must leverage

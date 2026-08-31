@@ -25,7 +25,7 @@ python3 scripts/zelda_headless_bench.py code-1
 
 Lane arguments are `code-1`, `code-tui-1`, `code-2`, and `code-tui-2`. With no
 lane argument, the script runs all four. TUI lanes use the release binary at
-`target/release/abstractcode-tui` and therefore require `cargo build
+`target/release/abstractcode` and therefore require `cargo build
 --release` first.
 
 ## Output and artifacts

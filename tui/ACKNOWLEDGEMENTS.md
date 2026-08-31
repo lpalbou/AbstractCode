@@ -1,6 +1,6 @@
 # Acknowledgements
 
-abstractcode-tui stands on a small, deliberate dependency set and two sibling
+abstractcode stands on a small, deliberate dependency set and two sibling
 projects.
 
 ## Direct dependencies

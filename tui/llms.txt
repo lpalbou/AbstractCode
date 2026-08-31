@@ -1,6 +1,6 @@
-# abstractcode-tui
+# abstractcode
 
-> abstractcode-tui is a reactive terminal client for the AbstractGateway
+> abstractcode is a reactive terminal client for the AbstractGateway
 > control plane, built on the AbstractTUI rendering engine. The coding agent
 > runs durably on the gateway; this binary starts runs, streams their
 > ledgers live (SSE with a polling fallback), renders reasoning cycles,

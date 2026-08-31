@@ -1,7 +1,7 @@
 # Flow-brain entity conversations — evidence report (operator tasking, c5190/c5280)
 
 **Task** (operator 2026-07-24 17:21, re-tasked by flow at c5280 ask 2): prove
-abstractcode-tui can hold a live conversation with a flow-brained entity —
+abstractcode can hold a live conversation with a flow-brained entity —
 teach a fact, have a *fresh* conversation recall it — with tests,
 screenshots, a done-rule report, and one fable5 adversary folded.
 

@@ -634,7 +634,7 @@ GGUF case the old remainder got wrong).
   `cargo run --example splash -- --2d|--3d`.
 - **`--animation <on|off>`, and it STICKS.** The flag sets the launch
   animation and PERSISTS the choice to `prefs.json` (`animation`), so
-  `abstractcode-tui --animation off` once disables it for good. The
+  `abstractcode --animation off` once disables it for good. The
   engine's boot gate still applies on top and can only ever say no
   harder: no tty, `NO_COLOR`, `TERM=dumb`, `ABSTRACTTUI_NO_SPLASH` or a
   terminal that reports itself dumb all skip it silently. The animation
@@ -2825,7 +2825,7 @@ folded below rather than shipped as known issues.
 - `cargo test` could overwrite the operator's real preferences file: the
   headless harness persisted through the default prefs path, clobbering the
   saved theme and writing fixture routes ("qwen-a") into
-  `~/.abstractcode-tui/prefs.json`. Preferences now carry their path
+  `~/.abstractcode/prefs.json`. Preferences now carry their path
   explicitly and default-constructed prefs are ephemeral no-ops — the
   pollution class is structurally dead (regression-tested).
 - Selector modals (`/tools`, `/skills`) could silently cut the bottom of a

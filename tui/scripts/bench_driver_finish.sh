@@ -8,7 +8,7 @@
 #   phase 5: rebuild the web page
 # Each phase prints a PHASE line for the monitor; any failure prints FAILED.
 set -u
-cd /Users/albou/tmp/abstractframework/abstractcode-tui
+cd /Users/albou/tmp/abstractframework/abstractcode
 
 echo "PHASE 1: waiting for the 15-cell matrix"
 while pgrep -f "bench_workflows.py$" >/dev/null 2>&1 || pgrep -f "bench_workflows.py >" >/dev/null 2>&1; do sleep 20; done

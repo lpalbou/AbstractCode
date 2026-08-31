@@ -1,29 +1,29 @@
-# abstractcode vs abstractcode-tui — why one iterates and the other stops
+# abstractcode vs abstractcode — why one iterates and the other stops
 
 **Date:** 2026-07-30 · **Method:** three adversarial fable5 lanes (iteration/persistence,
 workflow conformance, context delta) + live probing of the running gateway at
 `127.0.0.1:8080` + wire inspection of 39 run-state files.
-**Repos:** `abstractcode` (Python, local loop) vs `abstractcode-tui` @ `6c0c8c8` (Rust, gateway client).
+**Repos:** `abstractcode` (Python, local loop) vs `abstractcode` @ `6c0c8c8` (Rust, gateway client).
 
 ---
 
 ## The one-paragraph story
 
-**abstractcode-tui is not a worse coder. It is a client that never asked for the two
+**abstractcode is not a worse coder. It is a client that never asked for the two
 things that make abstractcode iterate.** Both clients run *the same Python ReAct loop* —
 `abstractagent.adapters.react_runtime.create_react_workflow` — reached locally by
 abstractcode and, for `react-agent@0.1.0`, materialized from a manifest-only bundle on
 the gateway. The loop has a strict **verifier pass** that re-reads the transcript before
 any tool-call-free answer is accepted as final and can force more tool calls; it is gated
 on `_runtime.review_mode`, which **defaults to OFF**. abstractcode has always set it to
-`True` with 3 rounds. abstractcode-tui sent the key nowhere: `review_mode` appeared in
+`True` with 3 rounds. abstractcode sent the key nowhere: `review_mode` appeared in
 **zero of 31** gateway react runs, `review_count: 0` in every one — the verifier had
 never run once on this lane. Second, the client's `--max-iterations` was **silently
 discarded**: it rode as a flat top-level key, so abstractruntime seeded `_limits` with its
 own default and abstractagent's resolver — which reads `_limits` first and treats
 "the key is present" as proof the caller set it — obeyed **20**, not 50. Wire proof: 31
 runs launched with `--max-iterations 50` all carry `scratchpad.max_iterations: 50` beside
-`_limits.max_iterations: 20`. Mean iterations reached: **abstractcode 8.4, abstractcode-tui
+`_limits.max_iterations: 20`. Mean iterations reached: **abstractcode 8.4, abstractcode
 2.5**. Third, the client sent **no system prompt at all** (`system: String::new()` at both
 call sites) while abstractcode injects project instructions every run. All three are now
 fixed and verified on the wire.
@@ -32,7 +32,7 @@ fixed and verified on the wire.
 
 ## 1. What the two projects actually are
 
-| | abstractcode | abstractcode-tui |
+| | abstractcode | abstractcode |
 | --- | --- | --- |
 | Language / size | Python, 34k LOC (`react_shell.py` alone is 14.5k) | Rust, 35k LOC |
 | Where the agent runs | **in-process**, local loop | **on the gateway**, as a workflow bundle |
@@ -66,7 +66,7 @@ it is explicitly told that *an artifact that was never executed is not verified*
 `review_mode` appears **nowhere** in abstractruntime or abstractgateway (verified by
 exhaustive grep), so the client is the only possible sender.
 
-**Owners:** abstractcode-tui (didn't send it — **fixed**), abstractagent (facade defaults
+**Owners:** abstractcode (didn't send it — **fixed**), abstractagent (facade defaults
 ON, workflow defaults OFF, and the native-loop factory picks the *workflow* default — so
 every gateway react run silently loses the facade's behavior), abstractruntime (compiler
 doesn't inherit the key for flow-graph bundles).
@@ -87,7 +87,7 @@ A three-package seam:
 got its budget honored, purely because `_limits` then existed and the runtime skipped its
 seeding. `--max-iterations` only worked when `--max-tokens` was also set.
 
-**Owners:** abstractcode-tui (**fixed** — budget now rides `_limits`), abstractagent (the
+**Owners:** abstractcode (**fixed** — budget now rides `_limits`), abstractagent (the
 caller-intent proxy is wrong whenever a runtime materializes defaults before the first
 node, i.e. always on the gateway path), abstractruntime (seeding a *default* into the
 namespace callers use to express *intent* destroys the distinction).
@@ -106,7 +106,7 @@ construction sites (`ui/mod.rs`, `exec.rs`). abstractcode composes
 
 **Honest caveat, found adversarially:** in *this* monorepo the AGENTS.md half is inert —
 the framework root file is 362,790 chars, over the 200k cap both clients enforce, and
-`abstractcode-tui/` is its own git repo with no AGENTS.md, so the upward walk stops
+`abstractcode/` is its own git repo with no AGENTS.md, so the upward walk stops
 immediately. The fix is correct and live-verified, but its value here is for *other*
 workspaces; it does not by itself change behavior in this repo.
 
@@ -266,7 +266,7 @@ improves flow-graph coding runs *today*.
 
 ---
 
-## 4. What I changed in abstractcode-tui
+## 4. What I changed in abstractcode
 
 All shipped on `verify-cap-file`. **501 tests pass** (was 489; +12), clippy clean, fmt clean.
 

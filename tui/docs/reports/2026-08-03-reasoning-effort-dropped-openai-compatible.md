@@ -1,7 +1,7 @@
 # `reasoning_effort` never reaches the wire on `openai-compatible` — R-Type bench fairness defect
 
 Date: 2026-08-03
-Investigator seat: abstractcode-tui (adversary F)
+Investigator seat: abstractcode (adversary F)
 Status of every claim below: **CONFIRMED** unless explicitly marked PLAUSIBLE or UNKNOWN.
 
 ---
@@ -103,7 +103,7 @@ all. The five relay arms ran at reasoning off.
 
 ### 2.2 Live reproduction, 2026-08-03
 
-`abstractcode-tui exec --workflow basic-agent --provider endpoint:airelay --model gpt-5.4
+`abstractcode exec --workflow basic-agent --provider endpoint:airelay --model gpt-5.4
 --reasoning medium` (the exact `tui-basic` invocation shape), run `8ea55553-…`:
 
 - Gateway run store `/Users/albou/tmp/abstractframework/runtime/run_8ea55553-….json`
@@ -399,7 +399,7 @@ put `reasoning_effort` on the wire.
 >    no `reasoning_effort`.
 >
 > **Blast radius if fixed:** every abstractruntime/abstractgateway host and every
-> abstractcode/abstractcode-tui arm pointed at an OpenAI-compatible reasoning endpoint
+> abstractcode/abstractcode arm pointed at an OpenAI-compatible reasoning endpoint
 > starts honouring the reasoning dial. Payload bytes change for those routes, so warm
 > prompt-cache prefixes for them will be invalidated once.
 
@@ -418,7 +418,7 @@ put `reasoning_effort` on the wire.
 
 ---
 
-## 5. Defect in this repo's own harness (`abstractcode-tui`, ours to fix)
+## 5. Defect in this repo's own harness (`abstractcode`, ours to fix)
 
 `scripts/bench_clients.py:512-520`:
 

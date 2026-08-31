@@ -5,8 +5,8 @@
 //! baseline, a light turn, a heavy turn, a failing turn, a turn with no
 //! tools at all) to SVG plus an index.html.
 
-use abstractcode_tui::ui::stance::conduct::{self, Baseline, Facts, ToolCall};
-use abstractcode_tui::ui::stance::{self, Turn};
+use abstractcode::ui::stance::conduct::{self, Baseline, Facts, ToolCall};
+use abstractcode::ui::stance::{self, Turn};
 use abstracttui::base::{Rect, Size};
 use abstracttui::render::{Cell, Glyph, Screenshot, Surface};
 use abstracttui::theme;

@@ -132,14 +132,14 @@ pub struct Args {
 
 pub fn usage() -> String {
     format!(
-        r#"abstractcode-tui {VERSION} — AbstractCode on AbstractTUI (gateway client)
+        r#"abstractcode {VERSION} — AbstractCode on AbstractTUI (gateway client)
 
 USAGE:
-  abstractcode-tui [OPTIONS]                    launch the TUI
-  abstractcode-tui exec "<prompt>" [OPTIONS]    headless one-shot run (prints events)
-  abstractcode-tui login [OPTIONS]              verify + persist gateway credentials
-  abstractcode-tui doctor [OPTIONS]             diagnose the gateway connection
-  abstractcode-tui --caps                       print the terminal capability report
+  abstractcode [OPTIONS]                    launch the TUI
+  abstractcode exec "<prompt>" [OPTIONS]    headless one-shot run (prints events)
+  abstractcode login [OPTIONS]              verify + persist gateway credentials
+  abstractcode doctor [OPTIONS]             diagnose the gateway connection
+  abstractcode --caps                       print the terminal capability report
 
 OPTIONS:
   --gateway <URL>         gateway base url (default: login store or http://127.0.0.1:8080)
@@ -219,7 +219,7 @@ ENVIRONMENT:
   ABSTRACTCODE_GATEWAY_TOKEN / ABSTRACTGATEWAY_AUTH_TOKEN / ABSTRACTFLOW_GATEWAY_AUTH_TOKEN
       bearer token
   ABSTRACTCODE_GATEWAY_CONNECTION_FILE   login store path (default ~/.abstractcode/gateway.json)
-  ABSTRACTCODE_TUI_PREFS_FILE            preferences path (default ~/.abstractcode-tui/prefs.json)
+  ABSTRACTCODE_PREFS_FILE            preferences path (default ~/.abstractcode/prefs.json)
   ABSTRACTTUI_THEME                      start theme
 
 `login` takes credentials from flags/env (it never prompts) and persists them
@@ -448,7 +448,7 @@ pub fn login(args: &Args) -> i32 {
 pub fn doctor(args: &Args) -> i32 {
     let url = config::resolve_gateway_url(args.gateway.as_deref());
     let (token, token_source) = config::resolve_gateway_token(args.token.as_deref());
-    println!("abstractcode-tui ⇄ gateway doctor");
+    println!("abstractcode ⇄ gateway doctor");
     println!("  URL:   {}   (source: {})", url.value, url.source);
     println!(
         "  Token: {}   (source: {})",
@@ -487,7 +487,7 @@ pub fn doctor(args: &Args) -> i32 {
             true
         }
         Err(e) => {
-            println!("  [2/3] authentication ✗ {e} — run `abstractcode-tui login`");
+            println!("  [2/3] authentication ✗ {e} — run `abstractcode login`");
             false
         }
     };

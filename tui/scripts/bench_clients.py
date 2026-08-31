@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Cross-client Zelda benchmark: abstractcode, abstractcode-tui, opencode, pi.
+"""Cross-client Zelda benchmark: abstractcode, abstractcode, opencode, pi.
 
 Answers the operator's ORIGINAL question — "is abstractcode a better coder than
-abstractcode-tui?" — which the review_mode A/B could not, because that varied
+abstractcode?" — which the review_mode A/B could not, because that varied
 one flag inside one client.
 
 Route, identical for every client: gpt-5.4 on the local airelays relay
@@ -12,7 +12,7 @@ schema demands the field; the relay ignores it. Verified: no *_API_KEY is
 exported into any child.
 
 KNOWN ASYMMETRY, recorded rather than hidden — reasoning effort:
-  abstractcode-tui  medium, applied via the gateway's `_runtime.thinking`  (CONFIRMED)
+  abstractcode  medium, applied via the gateway's `_runtime.thinking`  (CONFIRMED)
   opencode          `--variant medium`                                     (declared)
   pi                `--model gpt-5.4:medium`                               (declared)
   abstractcode      REQUESTED but NOT APPLIED. abstractcore's
@@ -55,13 +55,13 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "untracked" / os.environ.get("CB_OUT", "client-bench")
-TUI_BIN = REPO / "target" / "release" / "abstractcode-tui"
+TUI_BIN = REPO / "target" / "release" / "abstractcode"
 RUNTIME_STORE = Path(os.environ.get(
     "CB_RUNTIME_STORE", "/Users/albou/tmp/abstractframework/runtime"))
 # Arms that execute through the gateway and therefore leave a durable
 # run_<id>.json whose `_runtime` block is the ONLY trustworthy route evidence.
 GATEWAY_ARMS = {"tui-basic", "tui-coder", "tui-multi",
-                "abstractcode-basic", "abstractcode-coder", "abstractcode-tui"}
+                "abstractcode-basic", "abstractcode-coder", "abstractcode"}
 
 MODEL = os.environ.get("CB_MODEL", "gpt-5.4")
 REASONING = os.environ.get("CB_REASONING", "medium")
@@ -257,7 +257,7 @@ def build_cmd(client: str, prompt: str, ws: Path) -> tuple[list[str], str, str]:
             "--max-iterations", "120", "--timeout", str(WALL_S),
         ], "coding-agent:coder (gateway, via abstractcode)",
             "NOT APPLIED locally; the gateway lane applies it")
-    if client == "abstractcode-tui":
+    if client == "abstractcode":
         gw = json.loads((Path.home() / ".abstractcode/gateway.json").read_text())
         return ([
             str(TUI_BIN), "exec", prompt,
@@ -635,7 +635,7 @@ def main() -> int:
     versions = {
         "abstractcode": client_version([sys.executable, "-c",
                                         "import abstractcode;print(abstractcode.__version__)"]),
-        "abstractcode-tui": client_version([str(TUI_BIN), "--version"]),
+        "abstractcode": client_version([str(TUI_BIN), "--version"]),
         "opencode": client_version(["opencode", "--version"]),
         "pi": client_version(["pi", "--version"]),
         "codex": client_version(["codex", "--version"]),
@@ -666,7 +666,7 @@ def main() -> int:
                                   "gateway lane applies it'. It does not: the gateway "
                                   "run it creates records _runtime.thinking = None, "
                                   "i.e. the relay default, not medium",
-            "abstractcode-tui": "applied via gateway _runtime.thinking "
+            "abstractcode": "applied via gateway _runtime.thinking "
                                 "(CONFIRMED: run store shows thinking='medium')",
             # `--variant` does NOT appear in `opencode run --help` on 1.18.10,
             # so it looked like a silently-dropped no-op. Smoke-tested instead

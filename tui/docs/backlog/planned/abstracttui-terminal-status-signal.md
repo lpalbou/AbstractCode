@@ -1,7 +1,7 @@
 # abstracttui ask: app-level terminal status signal
 
 - Status: drafted, ready to send to the abstracttui seat
-- Source: abstractcode-tui, operator request 2026-08-19 ("show our status as
+- Source: abstractcode, operator request 2026-08-19 ("show our status as
   an icon in the terminal shell — thinking, question, done")
 
 ## What we want
@@ -48,7 +48,7 @@ support where it is known.
 
 | App state | Title | Progress |
 | --- | --- | --- |
-| idle | `abstractcode-tui — <session>` | `Off` |
+| idle | `abstractcode — <session>` | `Off` |
 | running | `🤔 <workflow> — <elapsed>` | `Indeterminate` |
 | approval or ask pending | `❓ needs you — <what>` | `Paused` |
 | run concluded | `✅ done — <outcome>` | `Off` |

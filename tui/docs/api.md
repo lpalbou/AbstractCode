@@ -3,12 +3,12 @@
 ## CLI
 
 ```
-abstractcode-tui [OPTIONS]                    launch the TUI
-abstractcode-tui exec "<prompt>" [OPTIONS]    headless one-shot run
-abstractcode-tui login [OPTIONS]              verify + persist credentials
-abstractcode-tui doctor [OPTIONS]             diagnose the connection
-abstractcode-tui --caps                       terminal capability report
-abstractcode-tui --help | --version
+abstractcode [OPTIONS]                    launch the TUI
+abstractcode exec "<prompt>" [OPTIONS]    headless one-shot run
+abstractcode login [OPTIONS]              verify + persist credentials
+abstractcode doctor [OPTIONS]             diagnose the connection
+abstractcode --caps                       terminal capability report
+abstractcode --help | --version
 ```
 
 ### Options
@@ -42,7 +42,7 @@ abstractcode-tui --help | --version
 | `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTFLOW_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` | Gateway URL (first set wins; beats the login store) |
 | `ABSTRACTCODE_GATEWAY_TOKEN` / `ABSTRACTGATEWAY_AUTH_TOKEN` / `ABSTRACTFLOW_GATEWAY_AUTH_TOKEN` | Bearer token |
 | `ABSTRACTCODE_GATEWAY_CONNECTION_FILE` | Login store path (default `~/.abstractcode/gateway.json`) |
-| `ABSTRACTCODE_TUI_PREFS_FILE` | Preferences path (default `~/.abstractcode-tui/prefs.json`) |
+| `ABSTRACTCODE_PREFS_FILE` | Preferences path (default `~/.abstractcode/prefs.json`) |
 | `ABSTRACTTUI_THEME` | Start theme id |
 | `ABSTRACTTUI_NO_SPLASH` | Set to anything but `0` to skip the launch animation for one run (the persisted switch is `--animation off`) |
 
@@ -433,7 +433,7 @@ an A/B measurement: the cached and uncached lanes then differ only by that key.
 
 ```bash
 # uncached lane
-abstractcode-tui exec "<prompt>" --session bench-off --workflow react-agent:react \
+abstractcode exec "<prompt>" --session bench-off --workflow react-agent:react \
   --provider mlx --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
   --no-project-context --no-review --permissions read --max-iterations 4 \
   --no-prompt-cache

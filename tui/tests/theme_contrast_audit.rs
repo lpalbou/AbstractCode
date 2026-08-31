@@ -60,7 +60,7 @@ fn splash_animation_endpoints_separate_on_every_theme() {
     let mut failures: Vec<String> = Vec::new();
     for theme in abstracttui::theme::themes() {
         let t = theme.tokens;
-        let (shimmer_hi, mark_hi) = abstractcode_tui::ui::logo::floored_highlights(&t);
+        let (shimmer_hi, mark_hi) = abstractcode::ui::logo::floored_highlights(&t);
         // Audit floors sit just UNDER the weakest theme's achievable
         // ceiling (measured 2026-07-23: monokai's muted↔pole tops out
         // at 1.30 — its muted ink is already near-white, so no

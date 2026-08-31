@@ -173,7 +173,7 @@ Tier vocabulary: **must** = gates trust or the daily face, do first · **high**
 
 ## 4. Strategic recommendation
 
-**Identity: codex is a brilliant agent in your terminal; abstractcode-tui is
+**Identity: codex is a brilliant agent in your terminal; abstractcode is
 mission control for agents that outlive your terminal.**
 
 The app cannot and should not try to out-codex codex on standalone-agent UX —

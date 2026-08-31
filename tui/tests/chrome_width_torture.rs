@@ -21,12 +21,12 @@ use abstracttui::app::Driver;
 use abstracttui::prelude::*;
 use abstracttui::testing::CaptureTerm;
 
-use abstractcode_tui::config::Prefs;
-use abstractcode_tui::runner::Cmd;
-use abstractcode_tui::store::{
+use abstractcode::config::Prefs;
+use abstractcode::runner::Cmd;
+use abstractcode::store::{
     Conn, GpuMeter, GpuSample, McpServer, SessionTotals, Store, Workflow,
 };
-use abstractcode_tui::ui::{self, UiCtx};
+use abstractcode::ui::{self, UiCtx};
 
 struct SizedHarness {
     app: App,
@@ -60,7 +60,7 @@ fn harness_sized(w: i32, h: i32) -> SizedHarness {
         });
         let ctx = UiCtx {
             tx,
-            client: abstractcode_tui::gateway::GatewayClient::new("http://127.0.0.1:1", None),
+            client: abstractcode::gateway::GatewayClient::new("http://127.0.0.1:1", None),
             overlays: overlays.clone(),
             quitter: quitter.clone(),
             prefs: Rc::new(RefCell::new(Prefs::default())),
@@ -151,8 +151,8 @@ fn load_everything(store: &Store) {
         auth_required: false,
     }]);
     store.convos.update(|cs| {
-        let mut c = abstractcode_tui::convo::EntityConvo::opening("castor", "awake");
-        c.status = abstractcode_tui::convo::ConvoStatus::Parked;
+        let mut c = abstractcode::convo::EntityConvo::opening("castor", "awake");
+        c.status = abstractcode::convo::ConvoStatus::Parked;
         cs.push(c);
     });
 }
@@ -273,11 +273,11 @@ fn idle_strip_summary_ellipsizes_at_narrow_widths() {
     // AND lengthens it (the paused suffix) for the overflow assertion.
     h.store.queue_paused.set(true);
     h.store.queue.update(|q| {
-        q.push(abstractcode_tui::store::QueuedPrompt {
+        q.push(abstractcode::store::QueuedPrompt {
             id: 1,
             text: "later task".into(),
         });
-        q.push(abstractcode_tui::store::QueuedPrompt {
+        q.push(abstractcode::store::QueuedPrompt {
             id: 2,
             text: "even later".into(),
         });

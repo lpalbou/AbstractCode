@@ -5,8 +5,8 @@
 //! gateway: the crate-external harness proves the DENY payload names the
 //! real rule (the bridge lesson — a controller that gates must say why).
 
-use abstractcode_tui::exec::resolve_approval;
-use abstractcode_tui::tool_policy::ToolClass;
+use abstractcode::exec::resolve_approval;
+use abstractcode::tool_policy::ToolClass;
 use serde_json::json;
 
 fn call(name: &str, args: serde_json::Value) -> serde_json::Value {
@@ -158,7 +158,7 @@ fn exit_codes_match_the_documented_truth_table() {
     // cancelled run. One authority now serves both terminal branches:
     // completed → 0, cancelled → 130, anything else → 1 (timeout stays
     // 124 at its own site; missing prompt stays 2).
-    use abstractcode_tui::exec::exit_code_for_status;
+    use abstractcode::exec::exit_code_for_status;
     assert_eq!(exit_code_for_status("completed"), 0);
     assert_eq!(exit_code_for_status("cancelled"), 130);
     assert_eq!(exit_code_for_status("failed"), 1);
@@ -172,8 +172,8 @@ fn explicit_missing_workflow_refuses_instead_of_silently_substituting() {
     // silently ran basic-agent with exit 0 — automation pinning a specific
     // agent never noticed a DIFFERENT one ran. The refusal is a pure
     // predicate over (request, resolved, catalog).
-    use abstractcode_tui::exec::explicit_workflow_mismatch;
-    use abstractcode_tui::store::Workflow;
+    use abstractcode::exec::explicit_workflow_mismatch;
+    use abstractcode::store::Workflow;
 
     let wf = |b: &str, f: &str| Workflow {
         bundle_id: b.into(),

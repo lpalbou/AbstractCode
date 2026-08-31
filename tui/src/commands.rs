@@ -513,7 +513,7 @@ pub const HELP_EXTRA: &[(&str, &str)] = &[
     ),
     (
         "connection",
-        "CLI: abstractcode-tui doctor / abstractcode-tui login",
+        "CLI: abstractcode doctor / abstractcode login",
     ),
     (
         "workspace",

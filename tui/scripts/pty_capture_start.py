@@ -52,7 +52,7 @@ def main():
     if pid == 0:
         env = dict(os.environ)
         env["TERM"] = "xterm-256color"
-        env["ABSTRACTCODE_TUI_PREFS_FILE"] = prefs_path
+        env["ABSTRACTCODE_PREFS_FILE"] = prefs_path
         cmd = [
             os.path.abspath(BIN),
             "--gateway", f"http://127.0.0.1:{PORT}",

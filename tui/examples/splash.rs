@@ -7,7 +7,7 @@
 //! SVG plus an index.html — the same frames the beat tests assert on,
 //! in a form a human (or an agent with a browser) can look at.
 
-use abstractcode_tui::ui::splash::{BootSplash, Lane, HARD_CUTOFF_MS, TOTAL_MS};
+use abstractcode::ui::splash::{BootSplash, Lane, HARD_CUTOFF_MS, TOTAL_MS};
 use abstracttui::base::{Rect, Size};
 use abstracttui::boot::{play, SplashFrameSource, SplashOptions, SplashOutcome, TerminalIo};
 use abstracttui::render::Screenshot;
@@ -148,7 +148,7 @@ fn lane_slug(lane: Lane) -> &'static str {
 /// the same public light functions, so what this shows is what the app
 /// draws.
 fn lockup_sheet(dir: &str, size: Size, theme: &'static abstracttui::theme::Theme) {
-    use abstractcode_tui::ui::logo;
+    use abstractcode::ui::logo;
     use abstracttui::render::{Cell, Glyph, Style, Surface};
     let _ = std::fs::create_dir_all(dir);
     let t = &theme.tokens;
@@ -180,7 +180,7 @@ fn lockup_sheet(dir: &str, size: Size, theme: &'static abstracttui::theme::Theme
         let light = |x: i32, y: i32| logo::sheen_weight(x - x0, y - 1, pos);
         let mark_w = (mark_rows as f32 * 2.0 * 0.75) as i32;
         let mark = Rect::new((size.w - mark_w) / 2, 1, mark_w, mark_rows);
-        abstractcode_tui::ui::splash::draw_settled_mark(
+        abstractcode::ui::splash::draw_settled_mark(
             &mut s,
             mark,
             t.bg,

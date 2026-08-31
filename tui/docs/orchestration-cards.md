@@ -3,7 +3,7 @@
 One card per orchestration. "Measured profile" = Zelda benchmark, gpt-5.4 medium,
 n=3 post-fix runs unless noted (v2 numbers from the 2026-08-01 v2 matrix, n=2).
 All are gateway bundles, `abstractcode.agent.v1` chat entries, runnable as
-`abstractcode-tui exec "<prompt>" --workflow <bundle:flow>`.
+`abstractcode exec "<prompt>" --workflow <bundle:flow>`.
 
 ---
 

@@ -21,7 +21,7 @@ screen and verifies the three cycle-3 feature waves end-to-end:
           -> /tools tier write display -> clean exit.
 
 Budget: 4 live LLM runs total (2 + 1 + 1). Prefs are ISOLATED to a state
-dir via ABSTRACTCODE_TUI_PREFS_FILE (the operator's real prefs are never
+dir via ABSTRACTCODE_PREFS_FILE (the operator's real prefs are never
 touched); the entity roster cache lands in the same dir. Evidence
 (screen snapshots + raw transcript + CHECK lines) goes to
 untracked/cycle3b/<batch>/.
@@ -54,7 +54,7 @@ except ImportError:
 TOKEN = os.environ.get("ACODE_GATEWAY_TOKEN", "")
 URL = os.environ.get("ACODE_GATEWAY_URL", "http://127.0.0.1:8080").rstrip("/")
 STATE = os.environ.get("ACODE_C3B_STATE", "/tmp/acode-c3b-state")
-BIN = os.environ.get("ACODE_TUI_BIN", os.path.join(STATE, "bin-abstractcode-tui"))
+BIN = os.environ.get("ACODE_TUI_BIN", os.path.join(STATE, "bin-abstractcode"))
 PROVIDER = os.environ.get("ACODE_PROVIDER", "lmstudio")
 MODEL = os.environ.get("ACODE_MODEL", "qwen/qwen3.6-35b-a3b")
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -109,7 +109,7 @@ class Driver:
         if self.pid == 0:
             env = dict(os.environ)
             env["TERM"] = "xterm-256color"
-            env["ABSTRACTCODE_TUI_PREFS_FILE"] = prefs_path
+            env["ABSTRACTCODE_PREFS_FILE"] = prefs_path
             os.execvpe(cmd[0], cmd, env)
             os._exit(127)
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))

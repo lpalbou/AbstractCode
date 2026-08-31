@@ -1,7 +1,7 @@
 # 10.6% of tool calls failed across 14 sessions — four defects fixed, three refusals defended
 
 Date: 2026-08-21
-Investigator seat: abstractcode-tui (client seat; every defect below is in
+Investigator seat: abstractcode (client seat; every defect below is in
 `abstractcore` or `abstractruntime`)
 Corpus: 14 most recent gateway sessions — 900 runs listed, 1,668 ledger records
 harvested, **461 tool results, 49 failures (10.6%)**, 8,539,623 tokens
@@ -217,7 +217,7 @@ New tests: 4 files, 40 cases.
 
 - **abstractruntime**: 2,008 passed, 25 skipped, 1 failed — `test_data_registry_facade` , pre-existing, in the operator's uncommitted work, in a file this change never opened.
 - **abstractcore `tests/tools`**: pristine tree 7 failures / with these changes 6. **Zero introduced**; the delta is one `analyze_code` test that flaps run to run in the operator's uncommitted `code_analysis.py` work.
-- **abstractcode-tui**: 14 suites green, untouched by this work.
+- **abstractcode**: 14 suites green, untouched by this work.
 - Every fix mutation-checked: reverting it turns its test red, and the tree restores byte-identically by checksum.
 
 ## 7. Deployment

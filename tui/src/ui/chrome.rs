@@ -1407,7 +1407,7 @@ mod tests {
         // Full house at rest.
         assert_eq!(
             header_facts(
-                "abstractcode-tui",
+                "abstractcode",
                 "workspace_or_allowed",
                 2,
                 1,
@@ -1415,7 +1415,7 @@ mod tests {
                 128_000
             ),
             vec![
-                "⌂ abstractcode-tui".to_string(),
+                "⌂ abstractcode".to_string(),
                 "workspace_or_allowed".to_string(),
                 "skills 2".to_string(),
                 "mcp 1".to_string(),

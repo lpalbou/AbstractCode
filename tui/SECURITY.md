@@ -8,12 +8,12 @@ remediation plan; coordinated disclosure is appreciated.
 
 ## Scope
 
-abstractcode-tui is a network client for an AbstractGateway you control.
+abstractcode is a network client for an AbstractGateway you control.
 Security-relevant surfaces:
 
 - **Credentials at rest**: the login store (`~/.abstractcode/gateway.json`,
   shared with the Python CLI) holds the gateway bearer token and is written
-  with mode 0600 on unix. Preferences (`~/.abstractcode-tui/prefs.json`)
+  with mode 0600 on unix. Preferences (`~/.abstractcode/prefs.json`)
   hold no secrets.
 - **Credentials in transit**: the token rides the `Authorization: Bearer`
   header. Use HTTPS gateway URLs for non-loopback deployments; TLS is

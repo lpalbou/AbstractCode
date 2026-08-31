@@ -30,7 +30,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--workspace-root",
-        default="abstractcode-tui",
+        default="abstractcode",
         help="Gateway workspace_root basename stored on runs",
     )
     parser.add_argument(

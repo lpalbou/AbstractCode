@@ -87,7 +87,7 @@ def main() -> int:
         type=Path,
         default=Path(__file__).resolve().parents[2],
     )
-    parser.add_argument("--workspace-root", default="abstractcode-tui")
+    parser.add_argument("--workspace-root", default="abstractcode")
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args()
 

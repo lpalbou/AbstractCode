@@ -1,7 +1,7 @@
 # The composer stopped at 2 rows and typing went blind — chrome-column overflow, and the row that dies is the caret's
 
 Date: 2026-08-20
-Investigator seat: abstractcode-tui (framework seat, operator session)
+Investigator seat: abstractcode (framework seat, operator session)
 Status of every claim below: **CONFIRMED** by measurement unless marked otherwise.
 
 ---

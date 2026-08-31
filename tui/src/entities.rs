@@ -803,7 +803,7 @@ pub fn format_mcp_note(note: &str) -> Vec<String> {
 // Roster cache (instant /entities + '@' completion without a fetch)
 // ---------------------------------------------------------------------------
 
-/// Cache path beside the prefs file (honors `ABSTRACTCODE_TUI_PREFS_FILE`
+/// Cache path beside the prefs file (honors `ABSTRACTCODE_PREFS_FILE`
 /// for test isolation — a test harness's cache lands in its temp dir).
 pub fn roster_cache_path() -> PathBuf {
     let prefs = crate::config::prefs_path();
@@ -1185,7 +1185,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         // Point the prefs path (and thus the cache) at the temp dir.
         std::env::set_var(
-            "ABSTRACTCODE_TUI_PREFS_FILE",
+            "ABSTRACTCODE_PREFS_FILE",
             dir.join("prefs.json").display().to_string(),
         );
         let entities = vec![EntityInfo {
@@ -1201,7 +1201,7 @@ mod tests {
         }];
         save_cached_roster(&entities, "12:30");
         let (loaded, as_of) = load_cached_roster();
-        std::env::remove_var("ABSTRACTCODE_TUI_PREFS_FILE");
+        std::env::remove_var("ABSTRACTCODE_PREFS_FILE");
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(as_of, "12:30");
         assert_eq!(loaded.len(), 1);

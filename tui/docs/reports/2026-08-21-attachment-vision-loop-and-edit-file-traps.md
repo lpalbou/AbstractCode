@@ -1,7 +1,7 @@
 # 25% of a session's tool calls failed: an attachment/file namespace split, a one-shot image, and two `edit_file` traps
 
 Date: 2026-08-21
-Investigator seat: abstractcode-tui (client seat; the defects are NOT ours)
+Investigator seat: abstractcode (client seat; the defects are NOT ours)
 Session under study: `acode-c8aae4e559a6` — 28 runs, 374 ledger records, 1,193,723 tokens
 Status of every claim below: **CONFIRMED** by measurement against the live gateway
 ledger unless marked otherwise. Claims marked **REFUTED** are hypotheses this
@@ -257,7 +257,7 @@ Two seats own everything above. Requests are written to be forwarded verbatim.
 5. `_extract_agent_tool_activity`: treat a `$artifact` map as *unknown*, not zero
    (§8).
 
-**abstractcode-tui (this seat): no code change.** The client uploaded correctly,
+**abstractcode (this seat): no code change.** The client uploaded correctly,
 the artifact ids and handles it minted resolve, and no failure traces to it. One
 observation for a later UX pass, not a defect: chips say *"rides your next
 message"*, which is exactly true — and the consequence, that the model cannot

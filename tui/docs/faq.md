@@ -102,12 +102,12 @@ agent's next reasoning cycle; the in-flight LLM call is never cut.
 **Which terminals work?**
 Anything VT100-descended. AbstractTUI detects capabilities and degrades in
 the open (truecolor → 256 → 16; images → unicode mosaic). Check what your
-terminal offers with `abstractcode-tui --caps`.
+terminal offers with `abstractcode --caps`.
 
 **Where are my settings?**
 Connection: `~/.abstractcode/gateway.json` (shared with the Python CLI).
 Preferences (theme, workflow, route, session, tool/skill selections, recent
-sessions): `~/.abstractcode-tui/prefs.json`.
+sessions): `~/.abstractcode/prefs.json`.
 
 **Why did my queued prompt not start?**
 The queue only advances after the current run **succeeds** — a failure or a

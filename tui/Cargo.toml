@@ -1,5 +1,5 @@
 [package]
-name = "abstractcode-tui"
+name = "abstractcode"
 version = "0.5.0"
 edition = "2021"
 license = "MIT"
@@ -8,18 +8,34 @@ license = "MIT"
 rust-version = "1.87"
 authors = ["Laurent-Philippe Albou <contact@abstractframework.ai>"]
 description = "A reactive terminal client for AbstractGateway: durable coding-agent runs with live activity, tool approvals, steering, and sessions — rendered by AbstractTUI."
-repository = "https://github.com/lpalbou/abstractcode-tui"
-homepage = "https://github.com/lpalbou/abstractcode-tui"
+repository = "https://github.com/lpalbou/abstractcode"
+homepage = "https://github.com/lpalbou/abstractcode"
 readme = "README.md"
 categories = ["command-line-interface", "development-tools"]
 keywords = ["tui", "agent", "llm", "terminal", "gateway"]
+# Allowlist, not a denylist: this repo also holds the web client and a large
+# script/doc tree, and an `exclude` would silently start shipping anything
+# added later. tests/fixtures is required — 19 `include_str!` sites in src/
+# read it, so a consumer who unpacks the .crate can still `cargo test`.
+# Patterns are gitignore-style and match at ANY depth unless anchored with a
+# leading slash — unanchored "README.md" also pulls in docs/README.md.
+include = [
+    "/src/**/*.rs",
+    "/tests/*.rs",
+    "/tests/fixtures/**",
+    "/examples/*.rs",
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+]
 
 [lib]
-name = "abstractcode_tui"
+name = "abstractcode"
 path = "src/lib.rs"
 
 [[bin]]
-name = "abstractcode-tui"
+name = "abstractcode"
 path = "src/main.rs"
 
 [dependencies]

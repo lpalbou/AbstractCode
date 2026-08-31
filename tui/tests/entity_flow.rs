@@ -12,13 +12,13 @@ use abstracttui::app::Driver;
 use abstracttui::prelude::*;
 use abstracttui::testing::CaptureTerm;
 
-use abstractcode_tui::config::Prefs;
-use abstractcode_tui::convo::{self, ConvoStatus, EntityConvo, Focus};
-use abstractcode_tui::entities::{EntityInfo, VisitOpen};
-use abstractcode_tui::runner::Cmd;
-use abstractcode_tui::store::{Phase, Store, Workflow};
-use abstractcode_tui::transcript::Item;
-use abstractcode_tui::ui::{self, UiCtx};
+use abstractcode::config::Prefs;
+use abstractcode::convo::{self, ConvoStatus, EntityConvo, Focus};
+use abstractcode::entities::{EntityInfo, VisitOpen};
+use abstractcode::runner::Cmd;
+use abstractcode::store::{Phase, Store, Workflow};
+use abstractcode::transcript::Item;
+use abstractcode::ui::{self, UiCtx};
 
 struct Harness {
     app: App,
@@ -52,7 +52,7 @@ fn harness() -> Harness {
         });
         let ctx = UiCtx {
             tx,
-            client: abstractcode_tui::gateway::GatewayClient::new("http://127.0.0.1:1", None),
+            client: abstractcode::gateway::GatewayClient::new("http://127.0.0.1:1", None),
             overlays: overlays.clone(),
             quitter: quitter.clone(),
             // Path-less Prefs: ephemeral, never touches the real file.
@@ -530,11 +530,11 @@ fn focused_chip_always_renders_even_from_the_overflow_tail() {
     );
     // Paint order is presentation only: Alt+E from "fifth" (last in the
     // convos vec) cycles back to the AGENT, exactly as identity order says.
-    abstractcode_tui::ui::entity_actions::cycle_focus(store);
+    abstractcode::ui::entity_actions::cycle_focus(store);
     assert_eq!(store.focus.get_untracked(), Focus::Agent);
     // And from agent it enters at convo 1 ("alpha"), never the painted-first
     // chip.
-    abstractcode_tui::ui::entity_actions::cycle_focus(store);
+    abstractcode::ui::entity_actions::cycle_focus(store);
     assert_eq!(store.focus.get_untracked(), Focus::Entity("alpha".into()));
 }
 
@@ -1277,10 +1277,10 @@ fn flow_reply_edge_shapes_render_honestly() {
     });
     // While the turn runs, the visit poller view must NOT include the
     // flow convo (its run_id would be a completed run, not a visit).
-    abstractcode_tui::gateway::entities::sync_poller_view(
+    abstractcode::gateway::entities::sync_poller_view(
         &h.store.convos.with_untracked(|cs| cs.clone()),
     );
-    let view = abstractcode_tui::gateway::entities::poller_view();
+    let view = abstractcode::gateway::entities::poller_view();
     assert!(
         view.lock().unwrap().open.is_empty(),
         "flow convos never enter the visit poller"
@@ -1317,7 +1317,7 @@ fn flow_reply_edge_shapes_render_honestly() {
 
 #[test]
 fn summon_output_parse_reads_the_structured_contract() {
-    use abstractcode_tui::gateway::entities::parse_summon_output;
+    use abstractcode::gateway::entities::parse_summon_output;
     let v = serde_json::json!({
         "status": "completed",
         "output": {"answer": "hi", "degraded": 2, "moment_error": "x"}

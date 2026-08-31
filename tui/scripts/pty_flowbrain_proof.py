@@ -12,7 +12,7 @@ Gates on STRUCTURE (the chip's ◆name ready/✎ states), with exactly ONE
 content assertion — the recalled token — because recall IS the thing
 being proven. Frames are saved as text + PNG screenshots.
 
-Env: ACODE_TUI_BIN (default target/release/abstractcode-tui),
+Env: ACODE_TUI_BIN (default target/release/abstractcode),
      ACODE_GATEWAY_URL (default http://127.0.0.1:8080),
      ACODE_GATEWAY_TOKEN (required).
 """

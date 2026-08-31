@@ -20,13 +20,13 @@ Test–retest of the scorer on the new cells: 14/15 exact, max |Δ| 0.024, mean 
 | arm | harness | flow | n | mean | SD | range | wall s | LLM | tools | files real | KB real | clean exits |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | codex | codex-cli | native | 3 | **0.822** | 0.088 | 0.720–0.883 | 461 | ? | ? | 12–16 | 38–50 | 3/3 |
-| tui-multi | abstractcode-tui | multiagent-coding:multiagent-coder | 3 | **0.818** | 0.061 | 0.754–0.875 | 1242 | 45 | 136 | 13–16 | 71–80 | 3/3 |
+| tui-multi | abstractcode | multiagent-coding:multiagent-coder | 3 | **0.818** | 0.061 | 0.754–0.875 | 1242 | 45 | 136 | 13–16 | 71–80 | 3/3 |
 | pi | pi | native | 3 | 0.790 | 0.067 | 0.714–0.835 | 450 | ? | ? | 11–14 | 32–39 | 3/3 |
 | abstractcode-coder | abstractcode | coding-agent:coding-agent | 3 | 0.749 | 0.015 | 0.737–0.766 | 499 | ? | ? | 6–8 | 34–44 | **0/3** |
-| tui-basic | abstractcode-tui | basic-agent | 3 | 0.745 | 0.056 | 0.681–0.787 | **321** | **9** | 23 | 9–11 | 30–34 | 3/3 |
+| tui-basic | abstractcode | basic-agent | 3 | 0.745 | 0.056 | 0.681–0.787 | **321** | **9** | 23 | 9–11 | 30–34 | 3/3 |
 | abstractcode-basic | abstractcode | local loop | 3 | 0.743 | 0.119 | 0.614–0.848 | 638 | ? | ? | 10–15 | 33–69 | 3/3 |
 | opencode | opencode | native | 3 | 0.713 | 0.138 | 0.556–0.814 | 465 | ? | ? | 13–17 | 40–48 | 3/3 |
-| tui-coder | abstractcode-tui | coding-agent:coder | 3 | 0.708 | 0.092 | 0.617–0.800 | **1902** | 64 | 151 | 6–16 | 39–76 | 3/3 |
+| tui-coder | abstractcode | coding-agent:coder | 3 | 0.708 | 0.092 | 0.617–0.800 | **1902** | 64 | 151 | 6–16 | 39–76 | 3/3 |
 
 `?` = client prints no counts (UNKNOWN, not zero). Files/KB exclude agent dot-dirs.
 codex/opencode/pi walls are from the earlier matrix (different machine-load regime; indicative).

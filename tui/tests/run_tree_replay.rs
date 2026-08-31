@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use serde_json::{json, Value};
 
-use abstractcode_tui::transcript::{Fold, FoldEffect, Item};
+use abstractcode::transcript::{Fold, FoldEffect, Item};
 
 #[test]
 fn real_run_tree_reaches_the_answer() {
@@ -160,7 +160,7 @@ fn offloaded_answer_tree_concludes_and_fetches_the_words() {
     );
 
     // The placeholder card is the final answer until the fetch lands…
-    let placeholder = abstractcode_tui::transcript::offload_placeholder(&artifact_id);
+    let placeholder = abstractcode::transcript::offload_placeholder(&artifact_id);
     assert!(
         fold.items.iter().any(
             |i| matches!(i, Item::Assistant { text, final_answer: true } if *text == placeholder)
@@ -171,7 +171,7 @@ fn offloaded_answer_tree_concludes_and_fetches_the_words() {
     // …then the fetched artifact content (the REAL bytes' shape: the
     // serialized output object) swaps the words in.
     let content = br#"{"answer": "You were right. I tested the game myself in headless Chrome.", "report": "task: ...", "iterations": 12}"#;
-    let text = abstractcode_tui::protocol::answer_text_from_artifact(content, "application/json")
+    let text = abstractcode::protocol::answer_text_from_artifact(content, "application/json")
         .expect("artifact carries the answer");
     fold.resolve_offloaded_answer(&artifact_id, Ok(text));
     assert!(

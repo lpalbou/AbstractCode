@@ -9,7 +9,7 @@ defended against.
 Scope compared: Python `abstractcode/fullscreen_ui.py` (4,368 lines),
 `react_shell.py` (13,516 lines), `cli.py`, `theme.py`, `terminal_markdown.py`,
 `cache_meter.py`, `tool_permissions.py` (~20.7k lines of core) vs Rust
-`abstractcode-tui/src/**` (~21.0k lines) on the `abstracttui` engine.
+`abstractcode/src/**` (~21.0k lines) on the `abstracttui` engine.
 
 ---
 

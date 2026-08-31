@@ -4073,7 +4073,7 @@ mod tests {
         assert_ne!(crate::exec::EXIT_STOPPED_SHORT, 1);
     }
 
-    /// THE ARCHITECTURE RULE. `abstractcode-tui` is a thin host: it shows what
+    /// THE ARCHITECTURE RULE. `abstractcode` is a thin host: it shows what
     /// the gateway sends. The loop's terminal node authors the verdict, so this
     /// TUI, AbstractObserver, the web client and any chat bridge all show the
     /// SAME sentence. This pins that the card is the server's two fields

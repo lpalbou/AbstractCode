@@ -687,7 +687,7 @@ impl GatewayClient {
             "run_id": run_id,
             "type": typ,
             "payload": payload,
-            "client_id": "abstractcode-tui",
+            "client_id": "abstractcode",
         });
         self.post_json("/commands", &body)
     }
@@ -751,7 +751,7 @@ impl GatewayClient {
             "run_id": run_id,
             "type": typ,
             "payload": payload,
-            "client_id": "abstractcode-tui",
+            "client_id": "abstractcode",
         });
         // A throwaway agent owns an empty pool, so this cannot reuse the
         // socket the first attempt just broke. Same timeouts as the

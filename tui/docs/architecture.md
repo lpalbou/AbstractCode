@@ -1,6 +1,6 @@
 # Architecture
 
-abstractcode-tui is a **thin client**: the agent executes on an
+abstractcode is a **thin client**: the agent executes on an
 AbstractGateway, and this process renders the run's durable ledger as it
 grows. Nothing intelligent happens client-side — that is the design. The
 run survives client crashes; two clients can watch the same run; the
@@ -10,7 +10,7 @@ transcript's source of truth is the gateway's ledger, never client memory.
 
 ```mermaid
 flowchart LR
-  subgraph terminal [abstractcode-tui process]
+  subgraph terminal [abstractcode process]
     UI[UI thread<br/>AbstractTUI app<br/>signals + views]
     W[gateway-runner thread<br/>owns all HTTP]
     S1[ledger stream thread<br/>root run SSE]

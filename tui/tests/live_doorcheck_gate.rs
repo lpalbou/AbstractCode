@@ -11,13 +11,13 @@
 //! ABSTRACTCODE_GATEWAY_TOKEN=... cargo test --test live_doorcheck_gate -- --ignored --nocapture
 //! ```
 
-use abstractcode_tui::convo::{self, ConvoStatus, EntityConvo};
-use abstractcode_tui::entities::{
+use abstractcode::convo::{self, ConvoStatus, EntityConvo};
+use abstractcode::entities::{
     close_from_response, cognition_from_response, transcript_from_response, turn_from_response,
     visit_open_from_response, visit_status_from_response,
 };
-use abstractcode_tui::gateway::entities::EntityClient;
-use abstractcode_tui::transcript::Item;
+use abstractcode::gateway::entities::EntityClient;
+use abstractcode::transcript::Item;
 
 #[test]
 #[ignore = "manual live gate: spends tokens on the sanctioned doorcheck entity"]
@@ -98,7 +98,7 @@ fn one_visit_cycle_against_doorcheck() {
 
     // CLOSE with closed_by=operator — reflection runs; prior state restores.
     let cv = client
-        .visit_close("doorcheck", &run_id, "abstractcode-tui live gate")
+        .visit_close("doorcheck", &run_id, "abstractcode live gate")
         .expect("close HTTP");
     let close = close_from_response(&cv);
     println!("close status={} summary={:?}", close.status, close.summary);

@@ -8,9 +8,9 @@
 //! Deliberately its own file (no shared harness): the feature is meant
 //! to be removable in one directory plus three lines.
 
-use abstractcode_tui::store::Store;
-use abstractcode_tui::transcript::{CallCost, Item, ToolStatus};
-use abstractcode_tui::ui::stance::{self, conduct};
+use abstractcode::store::Store;
+use abstractcode::transcript::{CallCost, Item, ToolStatus};
+use abstractcode::ui::stance::{self, conduct};
 use abstracttui::base::{Rect, Size};
 use abstracttui::render::{Cell, Surface};
 
@@ -292,7 +292,7 @@ fn the_agent_lane_drops_the_read_it_can_never_make() {
         // An entity visit has the fact, so it keeps all four.
         store
             .focus
-            .set(abstractcode_tui::convo::Focus::Entity("castor".into()));
+            .set(abstractcode::convo::Focus::Entity("castor".into()));
         assert!(stance::lane_has_recall(store));
         assert_eq!(stance::visible(store, all).len(), 4);
     });

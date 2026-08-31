@@ -131,7 +131,7 @@ overclaims found beyond the already-corrected HDR-2b one.
   loads as posted mpsc commands (LoadMcp never blocks paint) → queue
   restore PAUSED → goal restore} → run. `wire_startup_notices` surfaces
   the engine diagnostics lane. Pty env isolation intact
-  (`ABSTRACTCODE_TUI_PREFS_FILE`, `ABSTRACTCODE_GATEWAY_*`,
+  (`ABSTRACTCODE_PREFS_FILE`, `ABSTRACTCODE_GATEWAY_*`,
   config.rs:48-67).
 - **gateway/entities.rs**: no drift observed — entity lane surface
   unchanged tonight, `stop_poller` still on the runner Shutdown path

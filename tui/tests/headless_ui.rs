@@ -24,10 +24,10 @@ use abstracttui::prelude::*;
 use abstracttui::testing::CaptureTerm;
 use serde_json::Value;
 
-use abstractcode_tui::config::Prefs;
-use abstractcode_tui::runner::Cmd;
-use abstractcode_tui::store::{Phase, Store, Workflow};
-use abstractcode_tui::ui::{self, UiCtx};
+use abstractcode::config::Prefs;
+use abstractcode::runner::Cmd;
+use abstractcode::store::{Phase, Store, Workflow};
+use abstractcode::ui::{self, UiCtx};
 
 struct Harness {
     app: App,
@@ -74,7 +74,7 @@ fn harness_sized(size: Size) -> Harness {
         });
         let ctx = UiCtx {
             tx,
-            client: abstractcode_tui::gateway::GatewayClient::new("http://127.0.0.1:1", None),
+            client: abstractcode::gateway::GatewayClient::new("http://127.0.0.1:1", None),
             overlays: overlays.clone(),
             quitter: quitter.clone(),
             prefs: prefs_for_ctx.clone(),
@@ -164,7 +164,7 @@ impl Harness {
     /// as the emission under test.
     fn leave_splash(&mut self) {
         self.store.fold.update(|f| {
-            f.push_item(abstractcode_tui::transcript::Item::User {
+            f.push_item(abstractcode::transcript::Item::User {
                 text: "settle".into(),
             });
         });
@@ -192,7 +192,7 @@ impl Harness {
 fn settle_session_board(h: &mut Harness) {
     h.store
         .session_index
-        .set(abstractcode_tui::store::SessionIndex::Loaded {
+        .set(abstractcode::store::SessionIndex::Loaded {
             rows: Vec::new(),
             truncated: false,
             labeled: 0,
@@ -276,7 +276,7 @@ fn splash_logo_centers_and_animates_only_while_visible() {
     // Conversation starts: the splash predicate flips, the ticker
     // cancels, and the app is byte-idle again even across a tick period.
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "first task".into(),
         })
     });
@@ -320,16 +320,16 @@ fn splash_short_pane_clips_whole_rows_and_keeps_the_logo() {
             description: String::new(),
         });
         store.fold.update(|f| {
-            f.push_item(abstractcode_tui::transcript::Item::Info {
+            f.push_item(abstractcode::transcript::Item::Info {
                 text: "session acode-probe-session · durable memory lives on the gateway".into(),
             });
-            f.push_item(abstractcode_tui::transcript::Item::Info {
+            f.push_item(abstractcode::transcript::Item::Info {
                 text: "workspace: gateway-managed — files land in the gateway's workspace".into(),
             });
         });
         let ctx = UiCtx {
             tx,
-            client: abstractcode_tui::gateway::GatewayClient::new("http://127.0.0.1:1", None),
+            client: abstractcode::gateway::GatewayClient::new("http://127.0.0.1:1", None),
             overlays: overlays.clone(),
             quitter: quitter.clone(),
             prefs: Rc::new(RefCell::new(Prefs::default())),
@@ -613,11 +613,11 @@ fn model_picker_browses_without_selecting_and_confirms_on_enter() {
     let mut h = harness();
     h.turn();
     h.store.providers.set(vec![
-        abstractcode_tui::store::ProviderInfo {
+        abstractcode::store::ProviderInfo {
             name: "lmstudio".into(),
             models: vec!["qwen-a".into(), "qwen-b".into()],
         },
-        abstractcode_tui::store::ProviderInfo {
+        abstractcode::store::ProviderInfo {
             name: "ollama".into(),
             models: vec![],
         },
@@ -685,11 +685,11 @@ fn model_picker_handoff_keys_never_land_on_the_stale_stage_one_layer() {
     let mut h = harness();
     h.turn();
     h.store.providers.set(vec![
-        abstractcode_tui::store::ProviderInfo {
+        abstractcode::store::ProviderInfo {
             name: "lmstudio".into(),
             models: vec!["qwen-a".into(), "qwen-b".into()],
         },
-        abstractcode_tui::store::ProviderInfo {
+        abstractcode::store::ProviderInfo {
             name: "ollama".into(),
             models: vec![],
         },
@@ -746,11 +746,11 @@ fn model_stage_two_stays_interactive_when_an_approval_lands_behind_the_picker() 
     store.run_id.set("root".into());
     store.fold.update(|f| f.begin_run("root"));
     store.providers.set(vec![
-        abstractcode_tui::store::ProviderInfo {
+        abstractcode::store::ProviderInfo {
             name: "lmstudio".into(),
             models: vec!["qwen-a".into(), "qwen-b".into()],
         },
-        abstractcode_tui::store::ProviderInfo {
+        abstractcode::store::ProviderInfo {
             name: "ollama".into(),
             models: vec![],
         },
@@ -844,11 +844,11 @@ fn model_picker_defaults_row_and_empty_provider_apply_without_stage_two() {
     let mut h = harness();
     h.turn();
     h.store.providers.set(vec![
-        abstractcode_tui::store::ProviderInfo {
+        abstractcode::store::ProviderInfo {
             name: "lmstudio".into(),
             models: vec!["qwen-a".into()],
         },
-        abstractcode_tui::store::ProviderInfo {
+        abstractcode::store::ProviderInfo {
             name: "endpoint:airelay".into(),
             models: vec![],
         },
@@ -1022,21 +1022,21 @@ fn details_toggle_keeps_thinking_visible_and_start_carries_context() {
     let store = h.store;
     // A finished first turn in the fold.
     store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "first question".into(),
         });
-        f.push_item(abstractcode_tui::transcript::Item::Thinking {
+        f.push_item(abstractcode::transcript::Item::Thinking {
             iteration: 1,
             content: "let me think about xyzzy".into(),
             reasoning: String::new(),
-            call: abstractcode_tui::transcript::CallCost {
+            call: abstractcode::transcript::CallCost {
                 gen_time_ms: Some(5_000.0),
                 input_tokens: 10_000,
                 output_tokens: 250,
                 cached_tokens: 9_000,
             },
         });
-        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+        f.push_item(abstractcode::transcript::Item::Assistant {
             text: "first answer".into(),
             final_answer: true,
         });
@@ -1101,19 +1101,19 @@ fn tools_selector_toggles_and_start_carries_allowlist() {
     let mut h = harness();
     h.turn();
     h.store.tools.set(vec![
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "read_file".into(),
             description: "Read a file".into(),
             toolset: "files".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "web_search".into(),
             description: "Search the web".into(),
             toolset: "web".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "write_file".into(),
             description: "Write a file".into(),
             toolset: "files".into(),
@@ -1171,19 +1171,19 @@ fn tools_category_toggle_flips_a_whole_toolset() {
     let mut h = harness();
     h.turn();
     h.store.tools.set(vec![
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "read_file".into(),
             description: "Read a file".into(),
             toolset: "files".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "write_file".into(),
             description: "Write a file".into(),
             toolset: "files".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "web_search".into(),
             description: "Search the web".into(),
             toolset: "web".into(),
@@ -1230,19 +1230,19 @@ fn camera_tools_seed_off_for_a_fresh_session() {
     // boot, so arm it the same way.
     h.store.camera_seed_pending.set(true);
     h.store.tools.set(vec![
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "read_file".into(),
             description: "Read a file".into(),
             toolset: "files".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "camera_open".into(),
             description: "Turn a camera on".into(),
             toolset: "camera".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "camera_capture_photo".into(),
             description: "Take a photo".into(),
             toolset: "camera".into(),
@@ -1284,7 +1284,7 @@ fn served_disabled_tools_render_with_gate_and_are_never_grantable() {
     // gate turned it off; the name persists in prefs/disabled_tools.
     h.store.disabled_tools.set(vec!["send_email".into()]);
     h.store.tools.set(vec![
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "send_email".into(),
             description: "Send an email".into(),
             toolset: "comms".into(),
@@ -1293,13 +1293,13 @@ fn served_disabled_tools_render_with_gate_and_are_never_grantable() {
             why_disabled: "registered but disabled on this gateway".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "read_file".into(),
             description: "Read a file".into(),
             toolset: "files".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "write_file".into(),
             description: "Write a file".into(),
             toolset: "files".into(),
@@ -1396,7 +1396,7 @@ fn all_off_excludes_served_disabled_rows_from_the_user_set() {
     let mut h = harness();
     h.turn();
     h.store.tools.set(vec![
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "send_email".into(),
             description: "Send an email".into(),
             toolset: "comms".into(),
@@ -1404,13 +1404,13 @@ fn all_off_excludes_served_disabled_rows_from_the_user_set() {
             enable_gate: "ABSTRACT_ENABLE_COMMS_TOOLS".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "read_file".into(),
             description: "Read a file".into(),
             toolset: "files".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "write_file".into(),
             description: "Write a file".into(),
             toolset: "files".into(),
@@ -1441,7 +1441,7 @@ fn approval_modal_names_the_gate_on_a_served_disabled_call() {
     let mut h = harness();
     h.turn();
     let store = h.store;
-    store.tools.set(vec![abstractcode_tui::store::ToolInfo {
+    store.tools.set(vec![abstractcode::store::ToolInfo {
         name: "send_email".into(),
         description: "Send an email".into(),
         toolset: "comms".into(),
@@ -1483,13 +1483,13 @@ fn tools_modal_pins_cycle_persist_and_reach_the_start_policy() {
     let mut h = harness();
     h.turn();
     h.store.tools.set(vec![
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "read_file".into(),
             description: "Read a file".into(),
             toolset: "files".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "fetch_url".into(),
             description: "Fetch a URL".into(),
             toolset: "web".into(),
@@ -1598,7 +1598,7 @@ fn approve_all_sets_permissions_all_and_covers_later_batches() {
     let mut h = harness();
     h.turn();
     let store = h.store;
-    store.phase.set(abstractcode_tui::store::Phase::Running);
+    store.phase.set(abstractcode::store::Phase::Running);
     store.run_id.set("root".into());
     store.fold.update(|f| f.begin_run("root"));
 
@@ -1707,7 +1707,7 @@ fn tools_selector_windows_long_lists_with_overflow_markers() {
     h.turn();
     let mut tools = Vec::new();
     for i in 0..30 {
-        tools.push(abstractcode_tui::store::ToolInfo {
+        tools.push(abstractcode::store::ToolInfo {
             name: format!("tool_{i:02}"),
             description: "does things".into(),
             toolset: if i < 15 { "files".into() } else { "web".into() },
@@ -1759,7 +1759,7 @@ fn pause_and_resume_commands_ride_the_gateway_and_own_the_strip() {
     h.turn();
     assert!(h.find_cmd(|c| matches!(c, Cmd::Pause { .. })).is_none());
 
-    store.phase.set(abstractcode_tui::store::Phase::Running);
+    store.phase.set(abstractcode::store::Phase::Running);
     store.run_id.set("root".into());
     h.type_text("/pause");
     h.turn();
@@ -1795,7 +1795,7 @@ fn pending_wait_survives_covering_modals_and_defers_visibly() {
     let mut h = harness();
     h.turn();
     let store = h.store;
-    store.phase.set(abstractcode_tui::store::Phase::Running);
+    store.phase.set(abstractcode::store::Phase::Running);
     store.run_id.set("root".into());
     store.fold.update(|f| f.begin_run("root"));
     store.fold.update(|f| {
@@ -1812,14 +1812,14 @@ fn pending_wait_survives_covering_modals_and_defers_visibly() {
     assert!(screen.contains("approve (a)"), "prompt opens:\n{screen}");
 
     // A picker opened OVER the prompt replaces it…
-    h.store.tools.set(vec![abstractcode_tui::store::ToolInfo {
+    h.store.tools.set(vec![abstractcode::store::ToolInfo {
         name: "read_file".into(),
         description: "Read".into(),
         toolset: "files".into(),
         ..Default::default()
     }]);
     let (cx, ctx) = (h.cx, h.ctx.clone());
-    abstractcode_tui::ui::modals::open_tools(cx, store, &ctx);
+    abstractcode::ui::modals::open_tools(cx, store, &ctx);
     let screen = h.turn();
     assert!(
         screen.contains("gateway tools"),
@@ -1870,7 +1870,7 @@ fn stale_disabled_tools_never_underflow_or_force_allowlist_mode() {
     // count as UNTOUCHED (workflow defaults), not explicit-allowlist mode.
     let mut h = harness();
     h.turn();
-    h.store.tools.set(vec![abstractcode_tui::store::ToolInfo {
+    h.store.tools.set(vec![abstractcode::store::ToolInfo {
         name: "read_file".into(),
         description: "Read".into(),
         toolset: "files".into(),
@@ -1975,34 +1975,34 @@ fn details_command_immediately_rerenders_mixed_content() {
     let mut h = harness();
     h.turn();
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "run the suite".into(),
         });
-        f.push_item(abstractcode_tui::transcript::Item::Thinking {
+        f.push_item(abstractcode::transcript::Item::Thinking {
             iteration: 1,
             content: "pondering the xyzzy strategy".into(),
             reasoning: String::new(),
-            call: abstractcode_tui::transcript::CallCost::default(),
+            call: abstractcode::transcript::CallCost::default(),
         });
-        f.push_item(abstractcode_tui::transcript::Item::Tool {
+        f.push_item(abstractcode::transcript::Item::Tool {
             key: "call:1".into(),
             name: "execute_command".into(),
             args_preview: "cargo test".into(),
             args_full: String::new(),
-            status: abstractcode_tui::transcript::ToolStatus::Ok,
+            status: abstractcode::transcript::ToolStatus::Ok,
             result: "result-plugh-lines".into(),
             error: String::new(),
         });
-        f.push_item(abstractcode_tui::transcript::Item::Tool {
+        f.push_item(abstractcode::transcript::Item::Tool {
             key: "call:2".into(),
             name: "broken_tool".into(),
             args_preview: String::new(),
             args_full: String::new(),
-            status: abstractcode_tui::transcript::ToolStatus::Failed,
+            status: abstractcode::transcript::ToolStatus::Failed,
             result: String::new(),
             error: "exploded".into(),
         });
-        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+        f.push_item(abstractcode::transcript::Item::Assistant {
             text: "all green".into(),
             final_answer: true,
         });
@@ -2074,13 +2074,13 @@ fn skills_selector_attaches_and_start_carries_skills() {
     let mut h = harness();
     h.turn();
     h.store.skills_catalog.set(vec![
-        abstractcode_tui::store::SkillInfo {
+        abstractcode::store::SkillInfo {
             name: "coredoc".into(),
             description: "Documentation discipline".into(),
             trust: "adopted".into(),
             blocked: false,
         },
-        abstractcode_tui::store::SkillInfo {
+        abstractcode::store::SkillInfo {
             name: "sketchy".into(),
             description: "Not trusted".into(),
             trust: "unknown".into(),
@@ -2146,7 +2146,7 @@ fn sessions_picker_switches_to_a_recent_session() {
     // rows (marked) so a switch is possible.
     h.store
         .session_index
-        .set(abstractcode_tui::store::SessionIndex::Loaded {
+        .set(abstractcode::store::SessionIndex::Loaded {
             rows: Vec::new(),
             truncated: false,
             labeled: 0,
@@ -2260,10 +2260,10 @@ fn session_pick_shows_the_animated_loading_screen_until_history_lands() {
     // probe_attach's order: the loading surface hands off to the
     // restored transcript, never to a splash flash.
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "prior turn".into(),
         });
-        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+        f.push_item(abstractcode::transcript::Item::Assistant {
             text: "prior answer".into(),
             final_answer: true,
         });
@@ -2308,11 +2308,11 @@ fn right_click_on_a_tool_row_opens_its_action_menu() {
         // Enough content to scroll: the mapping is only meaningful
         // once the viewport shows a window, not the whole fold.
         for i in 0..40 {
-            f.push_item(abstractcode_tui::transcript::Item::User {
+            f.push_item(abstractcode::transcript::Item::User {
                 text: format!("filler line {i}"),
             });
         }
-        f.push_item(abstractcode_tui::transcript::Item::Tool {
+        f.push_item(abstractcode::transcript::Item::Tool {
             key: "t1".into(),
             name: "read_file".into(),
             // Absolute path: relative ones only link/copy when they
@@ -2320,7 +2320,7 @@ fn right_click_on_a_tool_row_opens_its_action_menu() {
             // and this harness's /tmp/ws holds nothing.
             args_preview: "/etc/hosts head".into(),
             args_full: "path: /etc/hosts".into(),
-            status: abstractcode_tui::transcript::ToolStatus::Ok,
+            status: abstractcode::transcript::ToolStatus::Ok,
             result: "fn main() {}".into(),
             error: String::new(),
         });
@@ -2378,12 +2378,12 @@ fn a_right_click_with_nothing_to_offer_says_so() {
         // A no-argument tool still Running: no args, no result, no
         // error — every row it could offer is disabled, so the engine's
         // ContextMenu would refuse to open and the press would vanish.
-        f.push_item(abstractcode_tui::transcript::Item::Tool {
+        f.push_item(abstractcode::transcript::Item::Tool {
             key: "t2".into(),
             name: "list_entities".into(),
             args_preview: String::new(),
             args_full: String::new(),
-            status: abstractcode_tui::transcript::ToolStatus::Running,
+            status: abstractcode::transcript::ToolStatus::Running,
             result: String::new(),
             error: String::new(),
         });
@@ -2418,12 +2418,12 @@ fn a_tool_card_names_its_hidden_output_and_expands_on_the_marker() {
     h.turn();
     h.leave_splash();
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::Tool {
+        f.push_item(abstractcode::transcript::Item::Tool {
             key: "run-1:node:0:call-a".into(),
             name: "execute_command".into(),
             args_preview: "cargo build".into(),
             args_full: "command: cargo build".into(),
-            status: abstractcode_tui::transcript::ToolStatus::Ok,
+            status: abstractcode::transcript::ToolStatus::Ok,
             result: "compiling\nwarning: unused\nFinished in 41s".into(),
             error: String::new(),
         });
@@ -2501,12 +2501,12 @@ fn a_press_off_the_marker_never_toggles_the_card() {
     h.turn();
     h.leave_splash();
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::Tool {
+        f.push_item(abstractcode::transcript::Item::Tool {
             key: "run-1:node:0:call-b".into(),
             name: "execute_command".into(),
             args_preview: "cargo build".into(),
             args_full: String::new(),
-            status: abstractcode_tui::transcript::ToolStatus::Ok,
+            status: abstractcode::transcript::ToolStatus::Ok,
             result: "compiling\nFinished".into(),
             error: String::new(),
         });
@@ -2568,19 +2568,19 @@ fn the_sessions_board_shows_gateway_sessions_and_names_its_sources() {
     // The worker answers with a session this client has never seen.
     h.store
         .session_index
-        .set(abstractcode_tui::store::SessionIndex::Loaded {
+        .set(abstractcode::store::SessionIndex::Loaded {
             rows: vec![
-                abstractcode_tui::store::SessionRow {
+                abstractcode::store::SessionRow {
                     id: "acode-never-seen".into(),
-                    state: abstractcode_tui::store::SessionState::Waiting,
+                    state: abstractcode::store::SessionState::Waiting,
                     last_at: "2026-08-28T12:00:00Z".into(),
                     turns: 4,
                     first_run: String::new(),
                     prompt: None,
                 },
-                abstractcode_tui::store::SessionRow {
+                abstractcode::store::SessionRow {
                     id: "acode-test-session".into(),
-                    state: abstractcode_tui::store::SessionState::Done,
+                    state: abstractcode::store::SessionState::Done,
                     last_at: "2026-08-28T09:00:00Z".into(),
                     turns: 1,
                     first_run: String::new(),
@@ -2630,12 +2630,12 @@ fn a_narrow_pane_that_cannot_draw_the_marker_has_no_hidden_control() {
     h.turn();
     h.leave_splash();
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::Tool {
+        f.push_item(abstractcode::transcript::Item::Tool {
             key: "run-1:node:0:narrow".into(),
             name: "execute_command".into(),
             args_preview: "cargo build".into(),
             args_full: String::new(),
-            status: abstractcode_tui::transcript::ToolStatus::Ok,
+            status: abstractcode::transcript::ToolStatus::Ok,
             result: "one\ntwo\nthree".into(),
             error: String::new(),
         });
@@ -2705,7 +2705,7 @@ fn the_board_waits_before_it_claims_anything_about_the_gateway() {
     // marked with what the listing actually proved.
     h.store
         .session_index
-        .set(abstractcode_tui::store::SessionIndex::Loaded {
+        .set(abstractcode::store::SessionIndex::Loaded {
             rows: Vec::new(),
             truncated: false,
             labeled: 0,
@@ -2735,10 +2735,10 @@ fn a_truncated_listing_never_claims_a_session_is_missing() {
     h.turn();
     h.store
         .session_index
-        .set(abstractcode_tui::store::SessionIndex::Loaded {
-            rows: vec![abstractcode_tui::store::SessionRow {
+        .set(abstractcode::store::SessionIndex::Loaded {
+            rows: vec![abstractcode::store::SessionRow {
                 id: "acode-listed".into(),
-                state: abstractcode_tui::store::SessionState::Running,
+                state: abstractcode::store::SessionState::Running,
                 last_at: "2026-08-29T12:00:00Z".into(),
                 turns: 2,
                 first_run: "r1".into(),
@@ -2780,9 +2780,9 @@ fn the_board_labels_from_the_gateway_and_names_what_it_did_not_fetch() {
     h.turn();
     h.press_enter();
     h.turn();
-    let row = |id: &str, prompt: Option<&str>, turns: usize| abstractcode_tui::store::SessionRow {
+    let row = |id: &str, prompt: Option<&str>, turns: usize| abstractcode::store::SessionRow {
         id: id.into(),
-        state: abstractcode_tui::store::SessionState::Done,
+        state: abstractcode::store::SessionState::Done,
         last_at: "2026-08-29T09:00:00Z".into(),
         turns,
         first_run: "r".into(),
@@ -2790,7 +2790,7 @@ fn the_board_labels_from_the_gateway_and_names_what_it_did_not_fetch() {
     };
     h.store
         .session_index
-        .set(abstractcode_tui::store::SessionIndex::Loaded {
+        .set(abstractcode::store::SessionIndex::Loaded {
             rows: vec![
                 row("acode-labeled", Some("port the tests to rstest"), 4),
                 row("acode-unlabeled", None, 2),
@@ -2839,7 +2839,7 @@ fn a_failed_restore_is_transient_and_retried_on_reconnect() {
     h.store
         .restore_failed
         .set(Some("gateway unreachable".into()));
-    h.store.conn.set(abstractcode_tui::store::Conn::Down(
+    h.store.conn.set(abstractcode::store::Conn::Down(
         "gateway unreachable: …".into(),
         true,
     ));
@@ -2866,11 +2866,11 @@ fn a_failed_restore_is_transient_and_retried_on_reconnect() {
         h.store.fold.with_untracked(|f| !f
             .items
             .iter()
-            .any(|i| matches!(i, abstractcode_tui::transcript::Item::Error { .. }))),
+            .any(|i| matches!(i, abstractcode::transcript::Item::Error { .. }))),
         "an ephemeral fault never becomes a permanent card"
     );
     // The gateway comes back: the app retries the restore itself…
-    h.store.conn.set(abstractcode_tui::store::Conn::Ok);
+    h.store.conn.set(abstractcode::store::Conn::Ok);
     h.turn();
     assert!(
         h.find_cmd(|c| matches!(c, Cmd::ProbeAttach { .. }))
@@ -2912,7 +2912,7 @@ fn enter_on_the_waiting_board_cannot_switch_or_cancel() {
         prefs.touch_session("acode-yak", Some("yak shaving"));
     }
     // A run is in flight — the thing a stray switch would destroy.
-    h.store.phase.set(abstractcode_tui::store::Phase::Running);
+    h.store.phase.set(abstractcode::store::Phase::Running);
     h.store.run_id.set("run-live".into());
     h.turn();
     h.type_text("/sessions");
@@ -2942,7 +2942,7 @@ fn enter_on_the_waiting_board_cannot_switch_or_cancel() {
     );
     assert_eq!(
         h.store.phase.get_untracked(),
-        abstractcode_tui::store::Phase::Running,
+        abstractcode::store::Phase::Running,
         "the run is still running"
     );
 }
@@ -2987,10 +2987,10 @@ fn a_truncated_session_listing_says_so_on_screen() {
     h.turn();
     h.store
         .session_index
-        .set(abstractcode_tui::store::SessionIndex::Loaded {
-            rows: vec![abstractcode_tui::store::SessionRow {
+        .set(abstractcode::store::SessionIndex::Loaded {
+            rows: vec![abstractcode::store::SessionRow {
                 id: "acode-a".into(),
-                state: abstractcode_tui::store::SessionState::Done,
+                state: abstractcode::store::SessionState::Done,
                 last_at: "2026-08-29T09:00:00Z".into(),
                 turns: 1,
                 first_run: String::new(),
@@ -3026,7 +3026,7 @@ fn a_failed_session_fetch_says_so_instead_of_showing_an_empty_gateway() {
     h.turn();
     h.store
         .session_index
-        .set(abstractcode_tui::store::SessionIndex::Failed(
+        .set(abstractcode::store::SessionIndex::Failed(
             "gateway unreachable: connection refused".into(),
         ));
     let screen = h.turn();
@@ -3118,15 +3118,15 @@ fn feed_order_survives_mid_list_visibility_flips() {
     store.show_details.set(false); // collapsed view: probe bodies hidden
     store.fold.update(|f| f.begin_run("root"));
     store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "AAA-question".into(),
         });
         // A probe body between the two visible items: hidden now.
-        f.push_item(abstractcode_tui::transcript::Item::Probe {
+        f.push_item(abstractcode::transcript::Item::Probe {
             title: "zz_marker_probe".into(),
             body: "probe body lines".into(),
         });
-        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+        f.push_item(abstractcode::transcript::Item::Assistant {
             text: "BBB-update".into(),
             final_answer: false,
         });
@@ -3177,7 +3177,7 @@ fn feed_order_survives_mid_list_visibility_flips() {
 /// items gone.
 #[test]
 fn truncation_drains_keep_the_feed_in_sync_with_fold_order() {
-    use abstractcode_tui::transcript::{Item, MAX_ITEMS, TRUNCATE_CHUNK};
+    use abstractcode::transcript::{Item, MAX_ITEMS, TRUNCATE_CHUNK};
     let mut h = harness();
     h.turn();
     let store = h.store;
@@ -3320,18 +3320,18 @@ fn details_shrink_while_scrolled_up_never_blanks_the_pane() {
         .collect::<Vec<_>>()
         .join("\n");
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "FIRST-QUESTION".into(),
         });
         for i in 0..40 {
-            f.push_item(abstractcode_tui::transcript::Item::Thinking {
+            f.push_item(abstractcode::transcript::Item::Thinking {
                 iteration: i + 1,
                 content: long_content.clone(),
                 reasoning: String::new(),
-                call: abstractcode_tui::transcript::CallCost::default(),
+                call: abstractcode::transcript::CallCost::default(),
             });
         }
-        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+        f.push_item(abstractcode::transcript::Item::Assistant {
             text: "THE-FINAL-ANSWER".into(),
             final_answer: true,
         });
@@ -3393,7 +3393,7 @@ fn session_switch_while_scrolled_up_shows_the_new_transcript() {
     // (review correction, 2026-07-22).
     h.store.fold.update(|f| {
         for i in 0..60 {
-            f.push_item(abstractcode_tui::transcript::Item::User {
+            f.push_item(abstractcode::transcript::Item::User {
                 text: format!("filler line {i}"),
             });
         }
@@ -3439,7 +3439,7 @@ fn session_switch_while_scrolled_up_shows_the_new_transcript() {
     // offset — the shrink clamp must snap back into content instead of
     // leaving a blank pane (follow is still disengaged from the PageUps).
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "RESTORED-TURN".into(),
         });
     });
@@ -3463,7 +3463,7 @@ fn assistant_diff_fences_tint_added_and_removed_lines() {
     let mut h = harness();
     h.turn();
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+        f.push_item(abstractcode::transcript::Item::Assistant {
             text: "Patch:\n\n```diff\n+added-marker line\n-removed-marker line\n unchanged-marker line\n```\n"
                 .into(),
             final_answer: true,
@@ -3745,25 +3745,25 @@ fn start_carries_server_side_tool_policy_expanded_from_the_tier() {
     let mut h = harness();
     h.turn();
     h.store.tools.set(vec![
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "read_file".into(),
             description: "Read".into(),
             toolset: "files".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "write_file".into(),
             description: "Write".into(),
             toolset: "files".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "execute_command".into(),
             description: "Shell".into(),
             toolset: "system".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "fetch_url".into(),
             description: "Fetch".into(),
             toolset: "web".into(),
@@ -4346,8 +4346,8 @@ fn workspace_path_entry_normalizes_and_refuses_relative() {
 /// signal write flushes effects synchronously, and the drain effect keys
 /// on "phase Idle" — the ordering contract documented in runner.rs).
 fn simulate_terminal(
-    store: abstractcode_tui::store::Store,
-    outcome: abstractcode_tui::store::RunOutcome,
+    store: abstractcode::store::Store,
+    outcome: abstractcode::store::RunOutcome,
 ) {
     store.last_outcome.set(outcome);
     store.run_started.set(None);
@@ -4545,7 +4545,7 @@ fn buffered_steer_disposes_visibly_when_the_run_ends_without_a_cycle() {
     assert!(store.pending_steer.get_untracked().is_some());
     // The run concludes with no cycle ever landing.
     store.fold.update(|f| f.run_terminal("completed"));
-    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Success);
+    simulate_terminal(store, abstractcode::store::RunOutcome::Success);
     h.turn();
     assert!(store.pending_steer.get_untracked().is_none());
     let screen = h.turn();
@@ -4566,7 +4566,7 @@ fn queue_drains_next_as_a_new_run_with_the_prior_answer_in_context() {
     store.run_id.set("rootA".into());
     store.fold.update(|f| {
         f.begin_run("rootA");
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "first task".into(),
         });
         let rec = serde_json::json!({"run_id": "rootA", "node_id": "end", "status": "completed",
@@ -4583,7 +4583,7 @@ fn queue_drains_next_as_a_new_run_with_the_prior_answer_in_context() {
 
     // A finishes successfully (the runner's finished_now post). The
     // dequeue is a DEFERRED job (after ZERO): give it a turn.
-    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Success);
+    simulate_terminal(store, abstractcode::store::RunOutcome::Success);
     h.turn();
     h.turn();
     // The drain started B as a NEW run whose context carries A's turn
@@ -4621,7 +4621,7 @@ fn queue_halts_on_failure_and_cancel_and_resumes_explicitly() {
     h.turn();
 
     // The run FAILS: queue pauses, items kept, nothing starts.
-    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Failed);
+    simulate_terminal(store, abstractcode::store::RunOutcome::Failed);
     h.turn();
     h.turn();
     assert!(store.queue_paused.get_untracked(), "failure pauses");
@@ -4651,7 +4651,7 @@ fn queue_manual_run_while_paused_proceeds_without_resuming() {
     let store = h.store;
     store.queue_paused.set(true);
     store.queue.update(|q| {
-        q.push(abstractcode_tui::store::QueuedPrompt {
+        q.push(abstractcode::store::QueuedPrompt {
             id: 99,
             text: "parked".into(),
         })
@@ -4668,7 +4668,7 @@ fn queue_manual_run_while_paused_proceeds_without_resuming() {
         "manual runs proceed while the queue is paused"
     );
     // Its SUCCESS still does not auto-resume (explicit resume only).
-    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Success);
+    simulate_terminal(store, abstractcode::store::RunOutcome::Success);
     h.turn();
     h.turn();
     assert!(store.queue_paused.get_untracked(), "no auto-resume");
@@ -4692,11 +4692,11 @@ fn queue_start_refusal_restores_the_item_and_pauses() {
     drop(dead);
 
     store.queue.update(|q| {
-        q.push(abstractcode_tui::store::QueuedPrompt {
+        q.push(abstractcode::store::QueuedPrompt {
             id: 1,
             text: "will not start".into(),
         });
-        q.push(abstractcode_tui::store::QueuedPrompt {
+        q.push(abstractcode::store::QueuedPrompt {
             id: 2,
             text: "second".into(),
         });
@@ -4726,11 +4726,11 @@ fn queue_http_start_failure_restores_at_head_and_pauses() {
     h.turn();
     let store = h.store;
     store.queue.update(|q| {
-        q.push(abstractcode_tui::store::QueuedPrompt {
+        q.push(abstractcode::store::QueuedPrompt {
             id: 1,
             text: "gateway will refuse this".into(),
         });
-        q.push(abstractcode_tui::store::QueuedPrompt {
+        q.push(abstractcode::store::QueuedPrompt {
             id: 2,
             text: "second".into(),
         });
@@ -4751,7 +4751,7 @@ fn queue_http_start_failure_restores_at_head_and_pauses() {
     // The runner's Err post: outcome BEFORE phase; begin_run never ran.
     store
         .last_outcome
-        .set(abstractcode_tui::store::RunOutcome::Failed);
+        .set(abstractcode::store::RunOutcome::Failed);
     store.phase.set(Phase::Idle);
     h.turn();
     assert!(store.queue_paused.get_untracked(), "start failure pauses");
@@ -4777,7 +4777,7 @@ fn queue_http_start_failure_restores_at_head_and_pauses() {
     store.fold.update(|f| f.begin_run("rootX"));
     store.phase.set(Phase::Running);
     h.turn();
-    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Failed);
+    simulate_terminal(store, abstractcode::store::RunOutcome::Failed);
     h.turn();
     assert_eq!(
         store
@@ -4798,9 +4798,9 @@ fn queue_client_refusal_without_workflow_keeps_the_item() {
     let store = h.store;
     store
         .workflow
-        .set(abstractcode_tui::store::Workflow::default());
+        .set(abstractcode::store::Workflow::default());
     store.queue.update(|q| {
-        q.push(abstractcode_tui::store::QueuedPrompt {
+        q.push(abstractcode::store::QueuedPrompt {
             id: 1,
             text: "workflowless".into(),
         })
@@ -4853,7 +4853,7 @@ fn queue_drain_holds_while_a_wait_is_pending_and_resumes_after() {
                                      "prompt": "Deploy too?"}}}),
         );
     });
-    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Success);
+    simulate_terminal(store, abstractcode::store::RunOutcome::Success);
     h.turn();
     h.turn();
     assert!(
@@ -4890,7 +4890,7 @@ fn queue_refused_under_entity_focus_and_hints_stay_agent_scoped() {
     h.turn();
     let store = h.store;
     store.queue.update(|q| {
-        q.push(abstractcode_tui::store::QueuedPrompt {
+        q.push(abstractcode::store::QueuedPrompt {
             id: 7,
             text: "agent work".into(),
         })
@@ -4898,7 +4898,7 @@ fn queue_refused_under_entity_focus_and_hints_stay_agent_scoped() {
     store.queue_paused.set(true); // hold it so the drain leaves it alone
     store
         .focus
-        .set(abstractcode_tui::convo::Focus::Entity("castor".into()));
+        .set(abstractcode::convo::Focus::Entity("castor".into()));
     h.turn();
 
     h.type_text("/queue do something");
@@ -4925,7 +4925,7 @@ fn queue_refused_under_entity_focus_and_hints_stay_agent_scoped() {
     );
 
     // Back under agent focus the hint returns.
-    store.focus.set(abstractcode_tui::convo::Focus::Agent);
+    store.focus.set(abstractcode::convo::Focus::Agent);
     let screen = h.turn();
     assert!(
         screen.contains("1 queued"),
@@ -4942,14 +4942,14 @@ fn queue_drain_runs_regardless_of_focus() {
     h.turn();
     let store = h.store;
     store.queue.update(|q| {
-        q.push(abstractcode_tui::store::QueuedPrompt {
+        q.push(abstractcode::store::QueuedPrompt {
             id: 1,
             text: "background agent work".into(),
         })
     });
     store
         .focus
-        .set(abstractcode_tui::convo::Focus::Entity("castor".into()));
+        .set(abstractcode::convo::Focus::Entity("castor".into()));
     h.turn();
     h.turn();
     assert!(
@@ -5064,11 +5064,11 @@ fn queue_stashes_on_session_switch_and_restores_paused() {
     store.run_id.set("root".into());
     store.fold.update(|f| f.begin_run("root"));
     store.queue.update(|q| {
-        q.push(abstractcode_tui::store::QueuedPrompt {
+        q.push(abstractcode::store::QueuedPrompt {
             id: 1,
             text: "queued one".into(),
         });
-        q.push(abstractcode_tui::store::QueuedPrompt {
+        q.push(abstractcode::store::QueuedPrompt {
             id: 2,
             text: "queued two".into(),
         });
@@ -5081,7 +5081,7 @@ fn queue_stashes_on_session_switch_and_restores_paused() {
         "every mutation writes through to the session slot"
     );
 
-    abstractcode_tui::ui::switch_session(store, &h.ctx, "acode-other-session");
+    abstractcode::ui::switch_session(store, &h.ctx, "acode-other-session");
     // No worker in this harness: complete the armed session-loading
     // screen by hand so the pane returns to the guidance view (where
     // the stash echo below renders).
@@ -5104,7 +5104,7 @@ fn queue_stashes_on_session_switch_and_restores_paused() {
     );
 
     // Switching BACK restores the stash PAUSED; nothing auto-starts.
-    abstractcode_tui::ui::switch_session(store, &h.ctx, "acode-test-session");
+    abstractcode::ui::switch_session(store, &h.ctx, "acode-test-session");
     store.restoring.set(false); // same hand-completed probe as above
     h.turn();
     h.turn();
@@ -5141,7 +5141,7 @@ fn queue_boot_restore_loads_paused_and_never_starts() {
     h.prefs
         .borrow_mut()
         .set_session_queue("acode-test-session", &["saved task".to_string()]);
-    abstractcode_tui::ui::restore_session_queue(store, &h.ctx, "acode-test-session");
+    abstractcode::ui::restore_session_queue(store, &h.ctx, "acode-test-session");
     h.turn();
     h.turn();
     assert_eq!(
@@ -5174,7 +5174,7 @@ fn queue_modal_removes_reorders_resumes_and_pops_to_composer() {
     store.queue_paused.set(true);
     store.queue.update(|q| {
         for (id, text) in [(1u64, "alpha task"), (2, "beta task"), (3, "gamma task")] {
-            q.push(abstractcode_tui::store::QueuedPrompt {
+            q.push(abstractcode::store::QueuedPrompt {
                 id,
                 text: text.into(),
             });
@@ -5356,10 +5356,10 @@ fn assistant_answer_tables_typeset_instead_of_raw_pipes() {
     h.turn();
     let store = h.store;
     store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "compare".into(),
         });
-        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+        f.push_item(abstractcode::transcript::Item::Assistant {
             text: "Here:\n\n| crate | tests |\n| --- | --- |\n| abstracttui | 1660 |\n".into(),
             final_answer: true,
         });
@@ -5382,10 +5382,10 @@ fn assistant_answer_tables_typeset_instead_of_raw_pipes() {
 // /goal (plan item 3 — client half; dark until the flow seat publishes)
 // ---------------------------------------------------------------------------
 
-fn seed_goal_workflow(store: abstractcode_tui::store::Store) {
+fn seed_goal_workflow(store: abstractcode::store::Store) {
     store
         .goal_workflows
-        .set(vec![abstractcode_tui::store::Workflow {
+        .set(vec![abstractcode::store::Workflow {
             bundle_id: "goal-agent".into(),
             flow_id: "goal-loop".into(),
             name: "goal-loop".into(),
@@ -5547,7 +5547,7 @@ fn goal_start_binds_the_run_and_sets_finish_on_root_only() {
         );
     });
     assert!(store.fold.with_untracked(|f| f.finished));
-    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Success);
+    simulate_terminal(store, abstractcode::store::RunOutcome::Success);
     h.turn();
     assert!(
         store.goal.get_untracked().is_none(),
@@ -5565,7 +5565,7 @@ fn goal_stop_cancels_durably_and_clears_the_slot() {
     let mut h = harness();
     h.turn();
     let store = h.store;
-    store.goal.set(Some(abstractcode_tui::store::GoalState {
+    store.goal.set(Some(abstractcode::store::GoalState {
         text: "long goal".into(),
         run_id: "goalrun".into(),
     }));
@@ -5673,7 +5673,7 @@ fn goal_holds_the_queue_and_drains_it_after_the_goal_root_ends() {
         );
     });
     assert!(store.fold.with_untracked(|f| f.finished));
-    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Success);
+    simulate_terminal(store, abstractcode::store::RunOutcome::Success);
     h.turn();
     h.turn(); // deferred dequeue job
     match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
@@ -5715,19 +5715,19 @@ fn goal_runs_carry_the_current_tier_policy_and_shared_start_opts() {
     let store = h.store;
     seed_goal_workflow(store);
     store.tools.set(vec![
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "read_file".into(),
             description: "Read".into(),
             toolset: "files".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "write_file".into(),
             description: "Write".into(),
             toolset: "files".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "fetch_url".into(),
             description: "Fetch".into(),
             toolset: "web".into(),
@@ -5780,13 +5780,13 @@ fn queued_items_drain_with_the_tier_policy_current_at_drain_time() {
     h.turn();
     let store = h.store;
     store.tools.set(vec![
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "read_file".into(),
             description: "Read".into(),
             toolset: "files".into(),
             ..Default::default()
         },
-        abstractcode_tui::store::ToolInfo {
+        abstractcode::store::ToolInfo {
             name: "write_file".into(),
             description: "Write".into(),
             toolset: "files".into(),
@@ -5812,7 +5812,7 @@ fn queued_items_drain_with_the_tier_policy_current_at_drain_time() {
     assert_eq!(h.prefs.borrow().tool_accepted_tier, "write");
 
     // The run succeeds; the drain builds the queued run's opts NOW.
-    simulate_terminal(store, abstractcode_tui::store::RunOutcome::Success);
+    simulate_terminal(store, abstractcode::store::RunOutcome::Success);
     h.turn();
     h.turn();
     match h.find_cmd(|c| matches!(c, Cmd::Start { prompt, .. } if prompt == "write the docs")) {
@@ -5841,14 +5841,14 @@ fn agent_approvals_prompt_and_auto_approve_under_entity_focus() {
     let store = h.store;
     // An entity conversation holds the focus.
     store.convos.update(|cs| {
-        let mut c = abstractcode_tui::convo::EntityConvo::opening("castor", "awake");
+        let mut c = abstractcode::convo::EntityConvo::opening("castor", "awake");
         c.run_id = "visit-run".into();
-        c.status = abstractcode_tui::convo::ConvoStatus::Parked;
+        c.status = abstractcode::convo::ConvoStatus::Parked;
         cs.push(c);
     });
     store
         .focus
-        .set(abstractcode_tui::convo::Focus::Entity("castor".into()));
+        .set(abstractcode::convo::Focus::Entity("castor".into()));
     // An agent run is live behind it.
     store.phase.set(Phase::Running);
     store.run_id.set("root".into());
@@ -5922,7 +5922,7 @@ fn agent_approvals_prompt_and_auto_approve_under_entity_focus() {
     }
     assert_eq!(
         store.focus.get_untracked(),
-        abstractcode_tui::convo::Focus::Entity("castor".into()),
+        abstractcode::convo::Focus::Entity("castor".into()),
         "approval plumbing never steals the focus"
     );
 }
@@ -6052,7 +6052,7 @@ fn session_boundaries_reset_exactly_the_right_lanes() {
     store.phase.set(Phase::Running);
     store.run_id.set("goalrun".into());
     store.fold.update(|f| f.begin_run("goalrun"));
-    store.goal.set(Some(abstractcode_tui::store::GoalState {
+    store.goal.set(Some(abstractcode::store::GoalState {
         text: "long goal".into(),
         run_id: "goalrun".into(),
     }));
@@ -6079,14 +6079,14 @@ fn session_boundaries_reset_exactly_the_right_lanes() {
     assert!(store.pending_steer.get_untracked().is_some());
     // An entity conversation, focused:
     store.convos.update(|cs| {
-        let mut c = abstractcode_tui::convo::EntityConvo::opening("castor", "awake");
+        let mut c = abstractcode::convo::EntityConvo::opening("castor", "awake");
         c.run_id = "visit-run".into();
-        c.status = abstractcode_tui::convo::ConvoStatus::Parked;
+        c.status = abstractcode::convo::ConvoStatus::Parked;
         cs.push(c);
     });
     store
         .focus
-        .set(abstractcode_tui::convo::Focus::Entity("castor".into()));
+        .set(abstractcode::convo::Focus::Entity("castor".into()));
     h.turn();
 
     // /new — the boundary. (Commands parse before entity routing, so it
@@ -6147,7 +6147,7 @@ fn session_boundaries_reset_exactly_the_right_lanes() {
     assert_eq!(store.convos.with_untracked(|cs| cs.len()), 1);
     assert_eq!(
         store.focus.get_untracked(),
-        abstractcode_tui::convo::Focus::Agent
+        abstractcode::convo::Focus::Agent
     );
 
     // Switch BACK to the old session: the stash restores PAUSED, the goal
@@ -6165,7 +6165,7 @@ fn session_boundaries_reset_exactly_the_right_lanes() {
     );
     assert_eq!(
         store.goal.get_untracked(),
-        Some(abstractcode_tui::store::GoalState {
+        Some(abstractcode::store::GoalState {
             text: "long goal".into(),
             run_id: "goalrun".into(),
         }),
@@ -6208,7 +6208,7 @@ fn header_carries_cockpit_facts_and_footer_carries_instruments() {
         .set(vec!["coredoc".into(), "agora-channels".into()]);
     h.store
         .mcp_servers
-        .set(vec![abstractcode_tui::store::McpServer {
+        .set(vec![abstractcode::store::McpServer {
             name: "context7".into(),
             url: "https://mcp.example".into(),
             description: String::new(),
@@ -6217,7 +6217,7 @@ fn header_carries_cockpit_facts_and_footer_carries_instruments() {
     // Session totals at rest reach both header and footer. A provider
     // that reports the split renders it (the ↑/↓ vocabulary); the
     // splitless case is pinned in the drop test below.
-    h.store.totals.set(abstractcode_tui::store::SessionTotals {
+    h.store.totals.set(abstractcode::store::SessionTotals {
         input_tokens: 100_000,
         output_tokens: 28_000,
         total_tokens: 128_000,
@@ -6346,7 +6346,7 @@ fn declared_window_rides_run_starts_as_limits() {
     match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
         Some(Cmd::Start { opts, .. }) => {
             assert_eq!(opts.context_window, 32_000);
-            let input = abstractcode_tui::run_input::build_input_data("x", &opts);
+            let input = abstractcode::run_input::build_input_data("x", &opts);
             assert_eq!(input["_limits"]["max_tokens"], serde_json::json!(32_000));
         }
         other => panic!("expected Start, got {:?}", other.map(|_| "cmd")),
@@ -6708,12 +6708,12 @@ fn gpu_toggle_round_trip_and_footer_render() {
     );
     assert!(matches!(
         h.store.gpu.get_untracked(),
-        abstractcode_tui::store::GpuMeter::Pending
+        abstractcode::store::GpuMeter::Pending
     ));
     // A sample lands (posted by the poller in production; the store
     // signal is the seam) — the footer renders the percentage.
-    h.store.gpu.set(abstractcode_tui::store::GpuMeter::Ready(
-        abstractcode_tui::store::GpuSample {
+    h.store.gpu.set(abstractcode::store::GpuMeter::Ready(
+        abstractcode::store::GpuSample {
             util_pct: 42.0,
             name: "Apple M5 Max".into(),
         },
@@ -6723,7 +6723,7 @@ fn gpu_toggle_round_trip_and_footer_render() {
     // Unsupported is honest: the segment leaves the bar entirely.
     h.store
         .gpu
-        .set(abstractcode_tui::store::GpuMeter::Unsupported(
+        .set(abstractcode::store::GpuMeter::Unsupported(
             "host reports no GPU metrics".into(),
         ));
     let screen = h.turn();
@@ -6739,7 +6739,7 @@ fn gpu_toggle_round_trip_and_footer_render() {
     );
     assert!(matches!(
         h.store.gpu.get_untracked(),
-        abstractcode_tui::store::GpuMeter::Off
+        abstractcode::store::GpuMeter::Off
     ));
 }
 
@@ -6766,14 +6766,14 @@ fn status_bar_drops_whole_segments_never_self_ellipsis() {
     });
     // Splitless totals (the coder-run provider shape): the footer shows
     // the honest total, never fabricated "0↑ 0↓".
-    h.store.totals.set(abstractcode_tui::store::SessionTotals {
+    h.store.totals.set(abstractcode::store::SessionTotals {
         input_tokens: 0,
         output_tokens: 0,
         total_tokens: 128_000,
         runs: 3,
     });
-    h.store.gpu.set(abstractcode_tui::store::GpuMeter::Ready(
-        abstractcode_tui::store::GpuSample {
+    h.store.gpu.set(abstractcode::store::GpuMeter::Ready(
+        abstractcode::store::GpuSample {
             util_pct: 42.0,
             name: "Apple M5 Max".into(),
         },
@@ -6783,7 +6783,7 @@ fn status_bar_drops_whole_segments_never_self_ellipsis() {
         .set(vec!["coredoc".into(), "agora-channels".into()]);
     h.store
         .mcp_servers
-        .set(vec![abstractcode_tui::store::McpServer {
+        .set(vec![abstractcode::store::McpServer {
             name: "context7".into(),
             url: "https://mcp.example".into(),
             description: String::new(),
@@ -6828,13 +6828,13 @@ fn header_facts_drop_whole_before_workflow_and_route() {
         .set(vec!["coredoc".into(), "agora-channels".into()]);
     h.store
         .mcp_servers
-        .set(vec![abstractcode_tui::store::McpServer {
+        .set(vec![abstractcode::store::McpServer {
             name: "context7".into(),
             url: "https://mcp.example".into(),
             description: String::new(),
             auth_required: false,
         }]);
-    h.store.totals.set(abstractcode_tui::store::SessionTotals {
+    h.store.totals.set(abstractcode::store::SessionTotals {
         input_tokens: 100_000,
         output_tokens: 28_000,
         total_tokens: 128_000,
@@ -7242,7 +7242,7 @@ fn down_state_card_teaches_recovery_with_one_wordmark() {
     // Production messages are worded by GwError's kind-aware Display —
     // the splash renders them VERBATIM now (it used to stamp its own
     // "gateway unreachable —" prefix over every Down, timeouts included).
-    h.store.conn.set(abstractcode_tui::store::Conn::Down(
+    h.store.conn.set(abstractcode::store::Conn::Down(
         "gateway unreachable: connection refused (os error 61)".into(),
         true,
     ));
@@ -7271,7 +7271,7 @@ fn down_state_card_teaches_recovery_with_one_wordmark() {
 fn soft_down_says_not_responding_never_unreachable() {
     let mut h = harness();
     h.turn();
-    h.store.conn.set(abstractcode_tui::store::Conn::Down(
+    h.store.conn.set(abstractcode::store::Conn::Down(
         "gateway timed out: no response in 30s".into(),
         false,
     ));
@@ -7303,13 +7303,13 @@ fn paused_strip_names_the_agent_lane_in_entity_focus() {
     let mut h = harness();
     h.turn();
     h.store.convos.update(|cs| {
-        let mut c = abstractcode_tui::convo::EntityConvo::opening("castor", "awake");
-        c.status = abstractcode_tui::convo::ConvoStatus::Parked;
+        let mut c = abstractcode::convo::EntityConvo::opening("castor", "awake");
+        c.status = abstractcode::convo::ConvoStatus::Parked;
         cs.push(c);
     });
     h.store
         .focus
-        .set(abstractcode_tui::convo::Focus::Entity("castor".into()));
+        .set(abstractcode::convo::Focus::Entity("castor".into()));
     h.store.paused.set(true);
     let screen = h.turn();
     assert!(
@@ -7317,7 +7317,7 @@ fn paused_strip_names_the_agent_lane_in_entity_focus() {
         "entity focus names the paused LANE:\n{screen}"
     );
     // Agent focus needs no prefix — the lane is unambiguous there.
-    h.store.focus.set(abstractcode_tui::convo::Focus::Agent);
+    h.store.focus.set(abstractcode::convo::Focus::Agent);
     let screen = h.turn();
     assert!(
         screen.contains("⏸ run paused durably") && !screen.contains("agent: run paused"),
@@ -7334,7 +7334,7 @@ fn idle_strip_summary_omits_unmeasured_tokens() {
     let mut h = harness();
     h.turn();
     // Runs counted, zero receipts (e.g. failed before the first call).
-    h.store.totals.set(abstractcode_tui::store::SessionTotals {
+    h.store.totals.set(abstractcode::store::SessionTotals {
         input_tokens: 0,
         output_tokens: 0,
         total_tokens: 0,
@@ -7350,7 +7350,7 @@ fn idle_strip_summary_omits_unmeasured_tokens() {
         "no fabricated zero split for unmeasured sessions:\n{screen}"
     );
     // Splitless providers: the honest total.
-    h.store.totals.set(abstractcode_tui::store::SessionTotals {
+    h.store.totals.set(abstractcode::store::SessionTotals {
         input_tokens: 0,
         output_tokens: 0,
         total_tokens: 3180,
@@ -7362,7 +7362,7 @@ fn idle_strip_summary_omits_unmeasured_tokens() {
         "splitless total renders honestly:\n{screen}"
     );
     // Split providers: the split.
-    h.store.totals.set(abstractcode_tui::store::SessionTotals {
+    h.store.totals.set(abstractcode::store::SessionTotals {
         input_tokens: 12_000,
         output_tokens: 900,
         total_tokens: 12_900,
@@ -7608,19 +7608,19 @@ fn export_command_writes_markdown_and_refuses_overwrite() {
 
     // Seed one complete turn + a tool, then export to an explicit path.
     store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "write hello.txt".into(),
         });
-        f.push_item(abstractcode_tui::transcript::Item::Tool {
+        f.push_item(abstractcode::transcript::Item::Tool {
             key: "k1".into(),
             name: "write_file".into(),
             args_preview: "{\"path\":\"hello.txt\"}".into(),
             args_full: String::new(),
-            status: abstractcode_tui::transcript::ToolStatus::Ok,
+            status: abstractcode::transcript::ToolStatus::Ok,
             result: "ok".into(),
             error: String::new(),
         });
-        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+        f.push_item(abstractcode::transcript::Item::Assistant {
             text: "done — hello.txt written".into(),
             final_answer: true,
         });
@@ -7688,20 +7688,20 @@ fn export_jsonl_details_writes_training_lines() {
     h.turn();
     let store = h.store;
     store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User { text: "q1".into() });
-        f.push_item(abstractcode_tui::transcript::Item::Thinking {
+        f.push_item(abstractcode::transcript::Item::User { text: "q1".into() });
+        f.push_item(abstractcode::transcript::Item::Thinking {
             iteration: 1,
             content: String::new(),
             reasoning: "think first".into(),
-            call: abstractcode_tui::transcript::CallCost::default(),
+            call: abstractcode::transcript::CallCost::default(),
         });
-        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+        f.push_item(abstractcode::transcript::Item::Assistant {
             text: "a1".into(),
             final_answer: true,
         });
         // A dangling second prompt (no answer): skipped from the file,
         // counted in the notice.
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "q2-unanswered".into(),
         });
     });
@@ -7827,7 +7827,7 @@ fn attach_command_stages_chips_and_start_carries_custody() {
         "chips KEPT until the run starts (custody rule — the assistant's optimistic-clear defect)"
     );
     // Simulate the worker's started post: sent batch leaves, 📎 records.
-    abstractcode_tui::runner::clear_sent_attachments(&h.store, &h.ctx.tx.clone(), &sent);
+    abstractcode::runner::clear_sent_attachments(&h.store, &h.ctx.tx.clone(), &sent);
     let screen = h.turn();
     assert_eq!(
         h.store.pending_attachments.with_untracked(|p| p.len()),
@@ -7926,7 +7926,7 @@ fn entity_focus_refuses_attach_and_suppresses_the_drop_hook() {
     h.turn();
     h.store
         .focus
-        .set(abstractcode_tui::convo::Focus::Entity("castor".into()));
+        .set(abstractcode::convo::Focus::Entity("castor".into()));
     h.turn();
     // /attach refuses on the entity lane.
     h.type_text(&format!("/attach {path}"));
@@ -8165,8 +8165,8 @@ fn take_load_preview(h: &mut Harness) -> (u64, String) {
 /// Run the REAL loader (the worker's body) and post it back the way the
 /// worker's wake closure does.
 fn deliver_preview(h: &Harness, seq: u64, path: &str) {
-    let body = abstractcode_tui::preview::load(path);
-    abstractcode_tui::runner::apply_preview(&h.store, seq, body);
+    let body = abstractcode::preview::load(path);
+    abstractcode::runner::apply_preview(&h.store, seq, body);
 }
 
 #[test]
@@ -8791,7 +8791,7 @@ fn another_modal_taking_the_slot_frees_the_preview_body() {
     assert!(h.store.preview.with_untracked(|p| p.is_some()));
     // Any other modal replaces this one — Esc is not the only exit, and
     // a decoded bitmap must not outlive the modal that showed it.
-    abstractcode_tui::ui::modals::open_help(h.cx, &h.ctx);
+    abstractcode::ui::modals::open_help(h.cx, &h.ctx);
     h.turn();
     assert!(
         h.store.preview.with_untracked(|p| p.is_none()),
@@ -8815,7 +8815,7 @@ fn opening_a_second_preview_never_wipes_the_one_that_replaced_it() {
     let _ = take_load_preview(&mut h);
     // Straight into the second preview via the UI entry point (the
     // composer is behind the modal's focus trap).
-    abstractcode_tui::ui::preview::open_path(h.cx, h.store, &h.ctx, &second);
+    abstractcode::ui::preview::open_path(h.cx, h.store, &h.ctx, &second);
     h.turn();
     let (seq, path) = take_load_preview(&mut h);
     assert_eq!(path, second);
@@ -8840,7 +8840,7 @@ fn preview_works_in_an_entity_lane_because_it_stages_nothing() {
     h.turn();
     h.store
         .focus
-        .set(abstractcode_tui::convo::Focus::Entity("someone".into()));
+        .set(abstractcode::convo::Focus::Entity("someone".into()));
     h.turn();
     h.type_text(&format!("/attach preview {path}"));
     h.turn();
@@ -8932,7 +8932,7 @@ fn ctrl_o_after_the_chips_rode_a_run_is_a_dead_key() {
     let sent = h.store.pending_attachments.get_untracked();
     assert_eq!(sent.len(), 1);
     // Simulate the worker's started post (custody transfer).
-    abstractcode_tui::runner::clear_sent_attachments(&h.store, &h.ctx.tx.clone(), &sent);
+    abstractcode::runner::clear_sent_attachments(&h.store, &h.ctx.tx.clone(), &sent);
     h.turn();
     assert!(
         h.store.paste_undo.get_untracked().is_none(),
@@ -8958,7 +8958,7 @@ fn ctrl_o_after_the_chips_rode_a_run_is_a_dead_key() {
 /// counts as uploaded.
 #[test]
 fn merge_cached_refs_and_session_predicates_hold_custody() {
-    use abstractcode_tui::store::PendingAttachment;
+    use abstractcode::store::PendingAttachment;
     let h = harness();
     let mk = |path: &str, uploaded: Option<(&str, &str)>| PendingAttachment {
         path: path.into(),
@@ -8976,7 +8976,7 @@ fn merge_cached_refs_and_session_predicates_hold_custody() {
         mk("/f/b", None),
         mk("/f/c", Some(("sid-1", "ref-c"))),
     ];
-    abstractcode_tui::runner::merge_cached_refs(&h.store, &done);
+    abstractcode::runner::merge_cached_refs(&h.store, &done);
     let live = h.store.pending_attachments.get_untracked();
     assert_eq!(live.len(), 2, "merge never resurrects a removed chip");
     assert_eq!(
@@ -8999,7 +8999,7 @@ fn merge_cached_refs_and_session_predicates_hold_custody() {
     h.store
         .paste_undo
         .set(Some(("raw".into(), vec!["/f/a".into()])));
-    abstractcode_tui::runner::clear_sent_attachments(
+    abstractcode::runner::clear_sent_attachments(
         &h.store,
         &h.ctx.tx.clone(),
         &[live[0].clone()],
@@ -9059,11 +9059,11 @@ fn scrolled_up_renders_on_the_strip_and_esc_jump_never_arms_cancel() {
     h.store.run_id.set("run-1".into());
     h.store.fold.update(|f| {
         f.begin_run("run-1");
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "long task".into(),
         });
         for i in 0..40 {
-            f.push_item(abstractcode_tui::transcript::Item::Assistant {
+            f.push_item(abstractcode::transcript::Item::Assistant {
                 text: format!("progress line {i}"),
                 final_answer: false,
             });
@@ -9139,7 +9139,7 @@ fn idle_strip_names_the_last_outcome() {
         f.done_note = "done · 12s · 3 llm calls".into();
         f.finished = true;
     });
-    h.store.totals.set(abstractcode_tui::store::SessionTotals {
+    h.store.totals.set(abstractcode::store::SessionTotals {
         runs: 1,
         input_tokens: 1000,
         output_tokens: 50,
@@ -9285,7 +9285,7 @@ fn strip_names_cycle_intent_from_the_models_own_words() {
     h.store.run_id.set("r1".into());
     h.store.fold.update(|f| {
         f.begin_run("r1");
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "task".into(),
         });
         // Cycle 1 starts + its result lands (the gist source).
@@ -9320,7 +9320,7 @@ fn strip_names_cycle_intent_from_the_models_own_words() {
 /// and rehydration restores it from input_data.context.attachments.
 #[test]
 fn image_attachments_echo_as_previews_live_and_on_restore() {
-    use abstractcode_tui::store::PendingAttachment;
+    use abstractcode::store::PendingAttachment;
     let mut h = harness();
     h.turn();
     let sent = vec![PendingAttachment {
@@ -9335,11 +9335,11 @@ fn image_attachments_echo_as_previews_live_and_on_restore() {
                                "filename": "photo.png"}),
         )),
     }];
-    abstractcode_tui::runner::clear_sent_attachments(&h.store, &h.ctx.tx.clone(), &sent);
+    abstractcode::runner::clear_sent_attachments(&h.store, &h.ctx.tx.clone(), &sent);
     let has_image = h.store.fold.with_untracked(|f| {
         f.items.iter().any(|i| {
             matches!(i,
-            abstractcode_tui::transcript::Item::Image { artifact_id, label, .. }
+            abstractcode::transcript::Item::Image { artifact_id, label, .. }
                 if artifact_id == "img1" && label.contains("photo.png"))
         })
     });
@@ -9368,7 +9368,7 @@ fn arm_live_run(h: &mut Harness) {
     h.store.run_id.set("run-quit-test-0001".into());
     h.store.fold.update(|f| {
         f.begin_run("run-quit-test-0001");
-        f.push_item(abstractcode_tui::transcript::Item::User { text: "t".into() });
+        f.push_item(abstractcode::transcript::Item::User { text: "t".into() });
     });
 }
 
@@ -9407,7 +9407,7 @@ fn quit_with_live_run_opens_modal_enter_leaves_esc_stays() {
     assert!(!h.ctx.modal_open(), "modal closed");
     assert!(matches!(
         h.store.quit_state.get_untracked(),
-        abstractcode_tui::store::QuitState::None
+        abstractcode::store::QuitState::None
     ));
     // Re-quit + Enter: leave & quit, no verb commands sent.
     h.term.push_input(&[0x11]);
@@ -9457,7 +9457,7 @@ fn quit_pause_dedicated_send_bypasses_the_worker_and_fails_honestly() {
         h.turn();
         if matches!(
             h.store.quit_state.get_untracked(),
-            abstractcode_tui::store::QuitState::Failed {
+            abstractcode::store::QuitState::Failed {
                 definitive: true,
                 ..
             }
@@ -9493,14 +9493,14 @@ fn quit_sequencer_matching_ack_completes_the_quit() {
     h.turn();
     h.store
         .quit_state
-        .set(abstractcode_tui::store::QuitState::Delivering {
-            verb: abstractcode_tui::store::QuitVerb::Pause,
+        .set(abstractcode::store::QuitState::Delivering {
+            verb: abstractcode::store::QuitVerb::Pause,
             run_id: "run-quit-test-0001".into(),
             gen: 1,
         });
     h.turn();
-    h.store.verb_ack.set(Some(abstractcode_tui::store::VerbAck {
-        verb: abstractcode_tui::store::QuitVerb::Pause,
+    h.store.verb_ack.set(Some(abstractcode::store::VerbAck {
+        verb: abstractcode::store::QuitVerb::Pause,
         run_id: "run-quit-test-0001".into(),
         ok: true,
         definitive: true,
@@ -9511,7 +9511,7 @@ fn quit_sequencer_matching_ack_completes_the_quit() {
     assert!(h.app.quit_requested(), "ACK confirmed → quit");
     assert!(matches!(
         h.store.quit_state.get_untracked(),
-        abstractcode_tui::store::QuitState::Acked { .. }
+        abstractcode::store::QuitState::Acked { .. }
     ));
 }
 /// E8/E14 state-level (no threads — the dedicated send is exercised by
@@ -9530,15 +9530,15 @@ fn quit_cancel_failure_and_stale_acks() {
     h.turn();
     h.store
         .quit_state
-        .set(abstractcode_tui::store::QuitState::Delivering {
-            verb: abstractcode_tui::store::QuitVerb::Cancel,
+        .set(abstractcode::store::QuitState::Delivering {
+            verb: abstractcode::store::QuitVerb::Cancel,
             run_id: "run-quit-test-0001".into(),
             gen: 7,
         });
     h.turn();
     // Stale ack (another run): ignored — still Delivering.
-    h.store.verb_ack.set(Some(abstractcode_tui::store::VerbAck {
-        verb: abstractcode_tui::store::QuitVerb::Cancel,
+    h.store.verb_ack.set(Some(abstractcode::store::VerbAck {
+        verb: abstractcode::store::QuitVerb::Cancel,
         run_id: "some-other-run".into(),
         ok: true,
         definitive: true,
@@ -9548,14 +9548,14 @@ fn quit_cancel_failure_and_stale_acks() {
     assert!(
         matches!(
             h.store.quit_state.get_untracked(),
-            abstractcode_tui::store::QuitState::Delivering { .. }
+            abstractcode::store::QuitState::Delivering { .. }
         ),
         "mismatched ack ignored"
     );
     assert!(!h.app.quit_requested());
     // The real ack fails: Failed state, honest wording, app alive.
-    h.store.verb_ack.set(Some(abstractcode_tui::store::VerbAck {
-        verb: abstractcode_tui::store::QuitVerb::Cancel,
+    h.store.verb_ack.set(Some(abstractcode::store::VerbAck {
+        verb: abstractcode::store::QuitVerb::Cancel,
         run_id: "run-quit-test-0001".into(),
         ok: false,
         definitive: false,
@@ -9583,7 +9583,7 @@ fn quit_modal_auto_quits_on_conclusion_and_never_drains() {
     h.turn();
     arm_live_run(&mut h);
     h.store.queue.update(|q| {
-        q.push(abstractcode_tui::store::QueuedPrompt {
+        q.push(abstractcode::store::QueuedPrompt {
             id: 1,
             text: "next task".into(),
         })
@@ -9596,7 +9596,7 @@ fn quit_modal_auto_quits_on_conclusion_and_never_drains() {
     // The run concludes (the runner-post shape: outcome + phase).
     h.store
         .last_outcome
-        .set(abstractcode_tui::store::RunOutcome::Success);
+        .set(abstractcode::store::RunOutcome::Success);
     h.store.phase.set(Phase::Idle);
     h.turn();
     h.turn();
@@ -9668,8 +9668,8 @@ fn quit_late_ack_after_timeout_still_quits() {
     // the real thread.
     h.store
         .quit_state
-        .set(abstractcode_tui::store::QuitState::Failed {
-            verb: abstractcode_tui::store::QuitVerb::Pause,
+        .set(abstractcode::store::QuitState::Failed {
+            verb: abstractcode::store::QuitVerb::Pause,
             run_id: "run-quit-test-0001".into(),
             definitive: false,
             error: "no confirmation in 8s".into(),
@@ -9677,8 +9677,8 @@ fn quit_late_ack_after_timeout_still_quits() {
     h.turn();
     assert!(!h.app.quit_requested());
     // The late ack lands: delivered → quit.
-    h.store.verb_ack.set(Some(abstractcode_tui::store::VerbAck {
-        verb: abstractcode_tui::store::QuitVerb::Pause,
+    h.store.verb_ack.set(Some(abstractcode::store::VerbAck {
+        verb: abstractcode::store::QuitVerb::Pause,
         run_id: "run-quit-test-0001".into(),
         ok: true,
         definitive: true,
@@ -9689,7 +9689,7 @@ fn quit_late_ack_after_timeout_still_quits() {
     assert!(h.app.quit_requested(), "late delivery honors the intent");
     assert!(matches!(
         h.store.quit_state.get_untracked(),
-        abstractcode_tui::store::QuitState::Acked { .. }
+        abstractcode::store::QuitState::Acked { .. }
     ));
 }
 
@@ -9756,16 +9756,16 @@ fn quit_verb_retry_reuses_the_same_command_id_without_a_worker() {
     let mut h = harness();
     h.turn();
     let client =
-        abstractcode_tui::gateway::GatewayClient::new(&format!("http://127.0.0.1:{port}"), None);
+        abstractcode::gateway::GatewayClient::new(&format!("http://127.0.0.1:{port}"), None);
     let wake = abstracttui::reactive::wake_handle();
-    let command_id = abstractcode_tui::gateway::mint_command_id();
+    let command_id = abstractcode::gateway::mint_command_id();
     // Direct call: no worker thread, no Cmd channel — the dedicated
     // send lane's exact shape (blocks through both attempts).
-    abstractcode_tui::runner::send_verb_blocking(
+    abstractcode::runner::send_verb_blocking(
         &client,
         &wake,
         h.store,
-        abstractcode_tui::store::QuitVerb::Pause,
+        abstractcode::store::QuitVerb::Pause,
         "run-quit-retry-0001".into(),
         &command_id,
     );
@@ -9878,14 +9878,14 @@ fn scroll_to_top_autoloads_previous_history_bloc_with_progress() {
     // A session with older turns on the gateway: stub + cursor + count
     // (what probe_attach seeds after a bloc-limited boot restore).
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::Info {
-            text: abstractcode_tui::runner::history_stub_text(3),
+        f.push_item(abstractcode::transcript::Item::Info {
+            text: abstractcode::runner::history_stub_text(3),
         });
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "recent task".into(),
         });
         for i in 0..40 {
-            f.push_item(abstractcode_tui::transcript::Item::Assistant {
+            f.push_item(abstractcode::transcript::Item::Assistant {
                 text: format!("line {i}"),
                 final_answer: false,
             });
@@ -9924,9 +9924,9 @@ fn scroll_to_top_autoloads_previous_history_bloc_with_progress() {
     // turns, loading off. Still at the top -> the cascade re-arms and
     // fetches the NEXT bloc.
     h.store.fold.update(|f| {
-        abstractcode_tui::runner::prepend_history_items(
+        abstractcode::runner::prepend_history_items(
             f,
-            vec![abstractcode_tui::transcript::Item::User {
+            vec![abstractcode::transcript::Item::User {
                 text: "an older task".into(),
             }],
             2,
@@ -9973,11 +9973,11 @@ fn pageup_on_a_fitting_transcript_never_autoloads_history() {
     // A short restored session: stub + one complete turn — well under
     // the 30-row harness pane.
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::Info {
-            text: abstractcode_tui::runner::history_stub_text(3),
+        f.push_item(abstractcode::transcript::Item::Info {
+            text: abstractcode::runner::history_stub_text(3),
         });
-        f.push_item(abstractcode_tui::transcript::Item::User { text: "hi".into() });
-        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+        f.push_item(abstractcode::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode::transcript::Item::Assistant {
             text: "short answer".into(),
             final_answer: true,
         });
@@ -10012,7 +10012,7 @@ fn reasoning_stage_probes_selects_and_route_change_resets() {
     h.turn();
     h.store
         .providers
-        .set(vec![abstractcode_tui::store::ProviderInfo {
+        .set(vec![abstractcode::store::ProviderInfo {
             name: "endpoint:airelay".into(),
             models: vec!["gpt-5.6-sol".into(), "gpt-5.6-luna".into()],
         }]);
@@ -10047,7 +10047,7 @@ fn reasoning_stage_probes_selects_and_route_change_resets() {
     // pick it up in place.
     h.store
         .reasoning_probe
-        .set(Some(abstractcode_tui::store::ReasoningProbe {
+        .set(Some(abstractcode::store::ReasoningProbe {
             provider: "endpoint:airelay".into(),
             model: "gpt-5.6-sol".into(),
             supported: Some(true),
@@ -10155,7 +10155,7 @@ fn reasoning_command_fast_path_and_locked_caption() {
     h.turn();
     h.store
         .reasoning_probe
-        .set(Some(abstractcode_tui::store::ReasoningProbe {
+        .set(Some(abstractcode::store::ReasoningProbe {
             provider: "lmstudio".into(),
             model: "qwen3-4b".into(),
             supported: Some(false),
@@ -10187,14 +10187,14 @@ fn thinking_cards_fold_by_default_and_expand_with_details_on() {
     h.turn();
     h.store.fold.update(|f| {
         f.begin_run("root");
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "task".into(),
         });
-        f.push_item(abstractcode_tui::transcript::Item::Thinking {
+        f.push_item(abstractcode::transcript::Item::Thinking {
             iteration: 3,
             content: "I will edit the file next.".into(),
             reasoning: "SECRETPLAN alpha beta gamma".into(),
-            call: abstractcode_tui::transcript::CallCost::default(),
+            call: abstractcode::transcript::CallCost::default(),
         });
     });
     h.turn();
@@ -10244,13 +10244,13 @@ fn gating_modal_on_coder_select_and_status_surfaces_unattended() {
     let mut h = harness();
     h.turn();
     h.store.workflows.set(vec![
-        abstractcode_tui::store::Workflow {
+        abstractcode::store::Workflow {
             bundle_id: "multiagent-coding".into(),
             flow_id: "multiagent-coder".into(),
             name: "Multi-agent coder".into(),
             description: String::new(),
         },
-        abstractcode_tui::store::Workflow {
+        abstractcode::store::Workflow {
             bundle_id: "basic-agent".into(),
             flow_id: "basic".into(),
             name: "Basic agent".into(),
@@ -10276,7 +10276,7 @@ fn gating_modal_on_coder_select_and_status_surfaces_unattended() {
     h.turn();
     assert_eq!(h.store.gating_mode.get_untracked(), "auto");
     // /status names it.
-    let rows = abstractcode_tui::ui::transcript_view::status_card_rows(h.store, "gw", "");
+    let rows = abstractcode::ui::transcript_view::status_card_rows(h.store, "gw", "");
     assert!(
         rows.iter()
             .any(|(k, v)| *k == "gating" && v.contains("UNATTENDED")),
@@ -10324,8 +10324,8 @@ fn typing_off_the_composer_recovers_focus_and_keeps_the_first_character() {
     // A conversation (not the splash) is what mounts the scrollable
     // transcript the keyboard can wander into.
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User { text: "hi".into() });
-        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+        f.push_item(abstractcode::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode::transcript::Item::Assistant {
             text: "hello there".into(),
             final_answer: true,
         });
@@ -10363,8 +10363,8 @@ fn typing_after_a_click_in_the_transcript_recovers_focus() {
     h.turn();
     abstracttui::app::selection::selection().set_enabled(true);
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User { text: "hi".into() });
-        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+        f.push_item(abstractcode::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode::transcript::Item::Assistant {
             text: "a line worth clicking".into(),
             final_answer: true,
         });
@@ -10401,8 +10401,8 @@ fn a_slash_typed_off_the_composer_opens_the_command_dropdown() {
     let mut h = harness();
     h.turn();
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User { text: "hi".into() });
-        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+        f.push_item(abstractcode::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode::transcript::Item::Assistant {
             text: "hello there".into(),
             final_answer: true,
         });
@@ -10426,8 +10426,8 @@ fn pasted_text_off_the_composer_lands_in_the_draft_and_recovers_focus() {
     let mut h = harness();
     h.turn();
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User { text: "hi".into() });
-        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+        f.push_item(abstractcode::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode::transcript::Item::Assistant {
             text: "hello there".into(),
             final_answer: true,
         });
@@ -10459,8 +10459,8 @@ fn a_file_dropped_on_the_transcript_stages_a_chip_and_recovers_focus() {
     let mut h = harness();
     h.turn();
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User { text: "hi".into() });
-        f.push_item(abstractcode_tui::transcript::Item::Assistant {
+        f.push_item(abstractcode::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode::transcript::Item::Assistant {
             text: "hello there".into(),
             final_answer: true,
         });
@@ -10500,11 +10500,11 @@ fn type_to_focus_leaves_navigation_and_ctrl_chords_alone() {
     h.turn();
     h.store.fold.update(|f| {
         for i in 0..80 {
-            f.push_item(abstractcode_tui::transcript::Item::Info {
+            f.push_item(abstractcode::transcript::Item::Info {
                 text: format!("line {i}"),
             });
         }
-        f.push_item(abstractcode_tui::transcript::Item::User {
+        f.push_item(abstractcode::transcript::Item::User {
             text: "the tail card".into(),
         });
     });
@@ -10555,7 +10555,7 @@ fn the_activity_strip_shows_a_moving_wave_while_a_run_is_live() {
     h.store.run_id.set("root".into());
     h.store.fold.update(|f| f.begin_run("root"));
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode::transcript::Item::User { text: "hi".into() });
     });
 
     let wave_row = |screen: &str| -> Option<String> {
@@ -10602,7 +10602,7 @@ fn the_activity_strip_shows_a_moving_wave_while_a_run_is_live() {
 // ---------------------------------------------------------------------------
 
 fn gallery_fold(store: &Store) {
-    use abstractcode_tui::transcript::{CallCost, Item, ToolStatus};
+    use abstractcode::transcript::{CallCost, Item, ToolStatus};
     store.fold.update(|f| {
         f.begin_run("root");
         f.push_item(Item::User {
@@ -10758,7 +10758,7 @@ fn composer_grows_to_four_rows_and_keeps_the_caret_row_visible() {
     // the exact condition under which the crush appeared live.
     h.store.fold.update(|f| {
         for i in 0..60 {
-            f.push_item(abstractcode_tui::transcript::Item::User {
+            f.push_item(abstractcode::transcript::Item::User {
                 text: format!("history line {i}"),
             });
         }
@@ -10805,7 +10805,7 @@ fn cache_modal_reports_three_scopes_and_scrolls_to_its_tail() {
     let mut h = harness();
     h.turn();
     let store = h.store;
-    store.cache.set(Some(abstractcode_tui::store::CacheInfo {
+    store.cache.set(Some(abstractcode::store::CacheInfo {
         provider: "mlx".into(),
         model: "mlx-community/Qwen3.8-27B-4bit".into(),
         supported: true,
@@ -10979,7 +10979,7 @@ fn details_mode_truncates_nothing() {
     let args_full = lines("arg-line", 40, "TAIL-OF-ARGS");
     let tool_error = lines("err-line", 40, "TAIL-OF-TOOLERROR");
     h.store.fold.update(|f| {
-        use abstractcode_tui::transcript::Item;
+        use abstractcode::transcript::Item;
         f.push_item(Item::User {
             text: lines("u-line", 300, "TAIL-OF-USER"),
         });
@@ -10990,14 +10990,14 @@ fn details_mode_truncates_nothing() {
             iteration: 1,
             content: thinking.clone(),
             reasoning: String::new(),
-            call: abstractcode_tui::transcript::CallCost::default(),
+            call: abstractcode::transcript::CallCost::default(),
         });
         f.push_item(Item::Tool {
             key: "call:1".into(),
             name: "execute_command".into(),
             args_preview: "cargo test".into(),
             args_full: args_full.clone(),
-            status: abstractcode_tui::transcript::ToolStatus::Ok,
+            status: abstractcode::transcript::ToolStatus::Ok,
             result: result.clone(),
             error: String::new(),
         });
@@ -11007,7 +11007,7 @@ fn details_mode_truncates_nothing() {
             name: "broken_tool".into(),
             args_preview: String::new(),
             args_full: String::new(),
-            status: abstractcode_tui::transcript::ToolStatus::Failed,
+            status: abstractcode::transcript::ToolStatus::Failed,
             result: lines("fail-out", 20, "TAIL-OF-FAILED-OUTPUT"),
             error: tool_error.clone(),
         });
@@ -11028,7 +11028,7 @@ fn details_mode_truncates_nothing() {
         });
     });
     // An image whose fetch FAILED: its reason is a body like any other.
-    h.store.upsert_image(abstractcode_tui::store::ImageEntry {
+    h.store.upsert_image(abstractcode::store::ImageEntry {
         artifact_id: "img-1".into(),
         bitmap: None,
         error: lines("imgerr-line", 20, "TAIL-OF-IMAGEERROR"),
@@ -11081,7 +11081,7 @@ fn folded_view_stays_a_bounded_labelled_summary() {
     let mut h = harness_sized(Size::new(120, 60));
     h.turn();
     h.store.fold.update(|f| {
-        use abstractcode_tui::transcript::Item;
+        use abstractcode::transcript::Item;
         f.push_item(Item::User {
             text: (1..=300)
                 .map(|i| format!("u-line-{i}\n"))
@@ -11092,7 +11092,7 @@ fn folded_view_stays_a_bounded_labelled_summary() {
             name: "broken_tool".into(),
             args_preview: "cargo test".into(),
             args_full: "cargo test".into(),
-            status: abstractcode_tui::transcript::ToolStatus::Failed,
+            status: abstractcode::transcript::ToolStatus::Failed,
             result: String::new(),
             error: "line one\nline two\nline three\nline four\nline five".into(),
         });
@@ -11130,7 +11130,7 @@ fn an_undelivered_steer_keeps_the_words_and_restores_the_composer() {
     h.turn();
     let words = "no, i really want you to find a way to use AbstractTUI";
     h.store.fold.update(|f| {
-        f.push_item(abstractcode_tui::transcript::Item::Error {
+        f.push_item(abstractcode::transcript::Item::Error {
             text: format!("steer not delivered: boom\n\n— your steer —\n{words}"),
         });
     });
@@ -11218,8 +11218,8 @@ fn boot_gallery() {
 #[test]
 #[ignore = "render gallery: writes design-review screens, run explicitly"]
 fn animation_gallery() {
-    use abstractcode_tui::store::Phase;
-    use abstractcode_tui::transcript::{CallCost, Item, ToolStatus};
+    use abstractcode::store::Phase;
+    use abstractcode::transcript::{CallCost, Item, ToolStatus};
     let dir = std::env::var("GALLERY_DIR").unwrap_or_else(|_| "target/gallery".into());
     std::fs::create_dir_all(&dir).expect("gallery dir");
 
@@ -11325,7 +11325,7 @@ fn animation_replaces_the_pane_and_says_how_to_leave() {
 /// back must never reach "cancel the run".
 #[test]
 fn escape_leaves_the_animation_without_arming_cancel() {
-    use abstractcode_tui::store::Phase;
+    use abstractcode::store::Phase;
     let mut h = harness_sized(Size::new(120, 36));
     h.turn();
     h.store.phase.set(Phase::Running);
@@ -11362,7 +11362,7 @@ fn escape_leaves_the_animation_without_arming_cancel() {
 /// activity strip uses, and it is the animation's honesty contract.
 #[test]
 fn the_animation_states_the_truth_about_a_dead_gateway() {
-    use abstractcode_tui::store::{Conn, Phase};
+    use abstractcode::store::{Conn, Phase};
     let mut h = harness_sized(Size::new(120, 36));
     h.turn();
     h.store.phase.set(Phase::Running);
@@ -11404,7 +11404,7 @@ fn a_turn_that_stopped_short_holds_the_queue_instead_of_draining_it() {
     h.turn();
     assert_eq!(store.queue.with_untracked(|q| q.len()), 1, "queued");
 
-    simulate_terminal(store, abstractcode_tui::store::RunOutcome::StoppedShort);
+    simulate_terminal(store, abstractcode::store::RunOutcome::StoppedShort);
     h.turn();
     h.turn();
 
@@ -11462,7 +11462,7 @@ fn panel_row_text(screen: &str, needle: &str) -> String {
 /// real screen, not just in the pure row builder).
 #[test]
 fn resources_modal_renders_host_facts_and_unload_confirms_before_sending() {
-    use abstractcode_tui::store::{HostContracts, HostState};
+    use abstractcode::store::{HostContracts, HostState};
 
     let mut h = harness();
     h.leave_splash();
@@ -11475,7 +11475,7 @@ fn resources_modal_renders_host_facts_and_unload_confirms_before_sending() {
         session_caches: true,
         modality_labels: vec![("text-generation".into(), "LLM".into())],
     }));
-    let facts = abstractcode_tui::discovery::host_state_from_response(&serde_json::json!({
+    let facts = abstractcode::discovery::host_state_from_response(&serde_json::json!({
         "ok": true,
         "memory": {
             "ram": {"total_bytes": 137438953472u64, "used_bytes": 85238953472u64,
@@ -11747,7 +11747,7 @@ fn resources_modal_renders_host_facts_and_unload_confirms_before_sending() {
 /// resizing — just open it and look.
 #[test]
 fn resources_head_is_visible_at_the_default_size_and_never_scrolls_away() {
-    use abstractcode_tui::store::{HostContracts, HostState};
+    use abstractcode::store::{HostContracts, HostState};
 
     let mut h = harness();
     h.leave_splash();
@@ -11766,7 +11766,7 @@ fn resources_head_is_visible_at_the_default_size_and_never_scrolls_away() {
             })
         })
         .collect();
-    let facts = abstractcode_tui::discovery::host_state_from_response(&serde_json::json!({
+    let facts = abstractcode::discovery::host_state_from_response(&serde_json::json!({
         "memory": {
             "ram": {"total_bytes": 137438953472u64, "used_bytes": 33741111296u64,
                      "percent": 29.9},
@@ -11835,7 +11835,7 @@ fn resources_head_is_visible_at_the_default_size_and_never_scrolls_away() {
 /// highlight shows — never an out-of-range ghost.
 #[test]
 fn resources_tail_is_reachable_and_shrink_keeps_cursor_and_action_aligned() {
-    use abstractcode_tui::store::{HostContracts, HostState};
+    use abstractcode::store::{HostContracts, HostState};
 
     let mut h = harness();
     h.leave_splash();
@@ -11853,7 +11853,7 @@ fn resources_tail_is_reachable_and_shrink_keeps_cursor_and_action_aligned() {
             })
         })
         .collect();
-    let facts = abstractcode_tui::discovery::host_state_from_response(&serde_json::json!({
+    let facts = abstractcode::discovery::host_state_from_response(&serde_json::json!({
         "models": [
             {"provider": "lmstudio", "model": "qwen3-4b", "resident": true},
             {"provider": "ollama", "model": "phi4", "resident": true}
@@ -11885,7 +11885,7 @@ fn resources_tail_is_reachable_and_shrink_keeps_cursor_and_action_aligned() {
 
     // SHRINK under a deep cursor: one model remains; the clamped cursor
     // and the action target agree — u confirms the row the highlight is on.
-    let solo = abstractcode_tui::discovery::host_state_from_response(&serde_json::json!({
+    let solo = abstractcode::discovery::host_state_from_response(&serde_json::json!({
         "models": [{"provider": "solo", "model": "model-a", "resident": true}]
     }));
     h.store.host_state.set(HostState::Ready(solo));
@@ -11903,7 +11903,7 @@ fn resources_tail_is_reachable_and_shrink_keeps_cursor_and_action_aligned() {
 /// still-probing contracts get the probing state + a capabilities retry.
 #[test]
 fn resources_modal_is_honest_when_the_contract_is_absent_or_unprobed() {
-    use abstractcode_tui::store::HostContracts;
+    use abstractcode::store::HostContracts;
 
     // Known-absent: the gateway ANSWERED and declares no host_state.
     let mut h = harness();

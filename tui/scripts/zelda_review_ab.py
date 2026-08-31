@@ -56,7 +56,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-BIN = REPO / "target" / "release" / "abstractcode-tui"
+BIN = REPO / "target" / "release" / "abstractcode"
 OUT = REPO / "untracked" / "zelda-ab"
 
 # B1 (adversary, CONFIRMED): the workspace root must live OUTSIDE the framework
@@ -453,7 +453,7 @@ def one_run(arm: str, rep: int, framework_root: Path) -> Run:
            and not k.endswith(("_API_KEY", "_APIKEY"))}
 
     # B2: the old detector watched framework_root/untracked while products were
-    # written under abstractcode-tui/untracked — blind to every realistic stray.
+    # written under abstractcode/untracked — blind to every realistic stray.
     # Watch the repo's own tree (via git) and the workspace parent.
     before_repo = repo_dirty()
     before_ws = ws_snapshot_excluding(out_dir)

@@ -1,4 +1,4 @@
-//! Headless one-shot runs: `abstractcode-tui exec "<prompt>"`.
+//! Headless one-shot runs: `abstractcode exec "<prompt>"`.
 //!
 //! Prints transcript items as they fold, resolves waits from CLI policy
 //! (`--approve-all` approves tool batches; ask-user waits get an honest
@@ -358,7 +358,7 @@ pub fn run(args: &Args) -> i32 {
     let prompt = match args.prompt.as_deref() {
         Some(p) if !p.trim().is_empty() => p.trim().to_string(),
         _ => {
-            eprintln!("exec needs a prompt: abstractcode-tui exec \"<prompt>\"");
+            eprintln!("exec needs a prompt: abstractcode exec \"<prompt>\"");
             return 2;
         }
     };
@@ -379,7 +379,7 @@ pub fn run(args: &Args) -> i32 {
         Err(e) => {
             eprintln!("✗ catalog: {e}");
             if e.status == Some(401) || e.status == Some(403) {
-                eprintln!("  hint: token rejected — run `abstractcode-tui login` (or check ABSTRACTGATEWAY_AUTH_TOKEN)");
+                eprintln!("  hint: token rejected — run `abstractcode login` (or check ABSTRACTGATEWAY_AUTH_TOKEN)");
             }
             return 1;
         }
@@ -658,7 +658,7 @@ pub fn run(args: &Args) -> i32 {
         Err(e) => {
             eprintln!("✗ start: {e}");
             if e.status == Some(401) || e.status == Some(403) {
-                eprintln!("  hint: token rejected — run `abstractcode-tui login` (or check ABSTRACTGATEWAY_AUTH_TOKEN)");
+                eprintln!("  hint: token rejected — run `abstractcode login` (or check ABSTRACTGATEWAY_AUTH_TOKEN)");
             }
             return 1;
         }

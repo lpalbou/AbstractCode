@@ -17,7 +17,7 @@ Two halves:
 Every scenario must cancel the runs it created (`Gw.cancel_session_runs`)
 and print the run ids — live-gateway hygiene.
 
-Env: ACODE_TUI_BIN (default target/release/abstractcode-tui),
+Env: ACODE_TUI_BIN (default target/release/abstractcode),
      ACODE_GATEWAY_URL (default http://127.0.0.1:8080),
      ACODE_GATEWAY_TOKEN (required).
 """
@@ -44,7 +44,7 @@ COLS, ROWS = 120, 44
 
 
 def env_config():
-    bin_path = os.environ.get("ACODE_TUI_BIN", "target/release/abstractcode-tui")
+    bin_path = os.environ.get("ACODE_TUI_BIN", "target/release/abstractcode")
     gateway = os.environ.get("ACODE_GATEWAY_URL", "http://127.0.0.1:8080")
     token = os.environ.get("ACODE_GATEWAY_TOKEN", "")
     if not token:
@@ -96,7 +96,7 @@ class Tui:
         if pid == 0:
             env = dict(os.environ)
             env["TERM"] = "xterm-256color"
-            env["ABSTRACTCODE_TUI_PREFS_FILE"] = self.prefs_path
+            env["ABSTRACTCODE_PREFS_FILE"] = self.prefs_path
             os.execvpe(argv[0], argv, env)
             os._exit(127)
         self.pid, self.master = pid, master

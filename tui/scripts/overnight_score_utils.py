@@ -21,7 +21,7 @@ def resolve_monorepo_artifact(
 ) -> Path:
     """Map gateway workspace_root + tool-relative path to a local path.
 
-    When the gateway stores workspace_root as a basename (e.g. ``abstractcode-tui``)
+    When the gateway stores workspace_root as a basename (e.g. ``abstractcode``)
     and the tool writes ``untracked/...``, the file often lands under the monorepo
     root's ``untracked/`` tree — not under ``<monorepo>/<basename>/untracked/``.
     """
@@ -45,7 +45,7 @@ def resolve_capability_hello(
     row: dict,
     *,
     monorepo_root: Path,
-    workspace_root: str = "abstractcode-tui",
+    workspace_root: str = "abstractcode",
 ) -> Path | None:
     """Locate hello.txt for a capability report row (out_dir, artifact_path, monorepo)."""
     artifact = row.get("artifact_path")

@@ -1,6 +1,6 @@
 # Lane 1 — Performance · Reliability · Concurrency
 
-Findings for the roadmap, researched 2026-07-22 against `abstractcode-tui`
+Findings for the roadmap, researched 2026-07-22 against `abstractcode`
 v0.3.0 (post-release tree). Read-only pass: every finding cites the code it
 stands on; reference comparisons come from reading
 `codex-rs` (production Rust agent TUI, tokio), `opencode` (TS/Bun

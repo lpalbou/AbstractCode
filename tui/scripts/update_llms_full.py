@@ -23,9 +23,9 @@ INCLUDED = [
 ]
 
 HEADER = """\
-# abstractcode-tui — full documentation corpus
+# abstractcode — full documentation corpus
 
-This file aggregates the complete external documentation of abstractcode-tui
+This file aggregates the complete external documentation of abstractcode
 for AI assistants and tools. The canonical sources are the individual files
 named in each section header; regenerate with scripts/update_llms_full.py.
 

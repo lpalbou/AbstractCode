@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve abstractcode-tui. This is a small, focused
+Thanks for helping improve abstractcode. This is a small, focused
 codebase; the fastest way to a merged change is to keep the layering rules
 intact and ship the matching test.
 
@@ -17,7 +17,7 @@ The whole `cargo test` suite runs offline — no gateway, no network, no pty.
 Live verification (requires a running AbstractGateway + an LLM provider):
 
 ```sh
-./target/debug/abstractcode-tui doctor --gateway http://127.0.0.1:8080 --token <token>
+./target/debug/abstractcode doctor --gateway http://127.0.0.1:8080 --token <token>
 ACODE_GATEWAY_TOKEN=<token> python3 scripts/pty_live_smoke.py
 ```
 
@@ -56,4 +56,4 @@ ACODE_GATEWAY_TOKEN=<token> python3 scripts/pty_live_smoke.py
 
 Bump `Cargo.toml`, add a dated `CHANGELOG.md` entry, run the full gate
 (fmt, clippy, test, `cargo package`), then tag. The crate must always
-install cleanly via `cargo install abstractcode-tui`.
+install cleanly via `cargo install abstractcode`.

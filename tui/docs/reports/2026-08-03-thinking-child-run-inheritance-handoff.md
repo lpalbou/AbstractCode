@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-03 (all timestamps UTC — the relay logs are UTC; `ps` is local; mixing
 them cost this investigation an hour once already)
-**From:** abstractcode-tui seat
+**From:** abstractcode seat
 **For:** the gateway-seat agent investigating why bench requests reach the relay without
 `reasoning_effort`
 **Status of the wire:** every claim below is taken from the relay's own `inbound_request`

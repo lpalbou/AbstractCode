@@ -19,14 +19,14 @@
 //! ABSTRACTCODE_GATEWAY_TOKEN=... cargo test --test live_discovery_tiers -- --ignored --nocapture
 //! ```
 
-use abstractcode_tui::discovery::tools_from_discovery;
-use abstractcode_tui::gateway::GatewayClient;
+use abstractcode::discovery::tools_from_discovery;
+use abstractcode::gateway::GatewayClient;
 
 /// The production connection resolution (env > shared login store) —
 /// the same path the app boots with, so the probe sees what the app
 /// would see.
 fn live_client() -> GatewayClient {
-    let conn = abstractcode_tui::config::resolve_connection(None, None);
+    let conn = abstractcode::config::resolve_connection(None, None);
     GatewayClient::new(&conn.base_url, conn.token.as_deref())
 }
 
@@ -66,7 +66,7 @@ fn discovery_tier_approval_contract_is_consistent_either_way() {
             // The mapping is total (server_tier never panics); a served
             // read tool must not classify as All, a shell tool must not
             // classify below All at ask.
-            let mapped = abstractcode_tui::tool_policy::server_tier(&t.name, approval, t.risk_rank);
+            let mapped = abstractcode::tool_policy::server_tier(&t.name, approval, t.risk_rank);
             println!(
                 "  {} → approval={approval} rank={:?} tier={:?} → {mapped:?}",
                 t.name, t.risk_rank, t.tier
@@ -119,9 +119,9 @@ fn served_disabled_rows_parse_and_clamp_on_the_live_catalog() {
     // The clamp holds against the LIVE inventory: even at tier `all`,
     // no served-disabled name reaches auto_approve_tools; each lands in
     // require_approval_tools instead.
-    let classes: Vec<abstractcode_tui::tool_policy::ToolClass> = tools
+    let classes: Vec<abstractcode::tool_policy::ToolClass> = tools
         .iter()
-        .map(|t| abstractcode_tui::tool_policy::ToolClass {
+        .map(|t| abstractcode::tool_policy::ToolClass {
             name: t.name.clone(),
             approval: t.approval.clone(),
             tier: t.tier.clone(),
@@ -130,7 +130,7 @@ fn served_disabled_rows_parse_and_clamp_on_the_live_catalog() {
             risk_rank: t.risk_rank,
         })
         .collect();
-    let policy = abstractcode_tui::tool_policy::expand_run_policy(&classes, "all", &[]);
+    let policy = abstractcode::tool_policy::expand_run_policy(&classes, "all", &[]);
     for t in &disabled {
         assert!(
             !policy.auto_approve_tools.contains(&t.name),

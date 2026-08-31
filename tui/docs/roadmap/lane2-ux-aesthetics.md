@@ -1,6 +1,6 @@
 # Lane 2 — Aesthetics · Usability · Information Design (v0.3.0)
 
-Findings for the roadmap, researched 2026-07-22 against `abstractcode-tui`
+Findings for the roadmap, researched 2026-07-22 against `abstractcode`
 v0.3.0. Method: full read of `src/ui/*.rs` + `src/transcript.rs` +
 `src/commands.rs` + the engine's widget surface (`abstracttui` 0.2.x);
 read-only pty drive of the release binary against the live gateway at
@@ -97,7 +97,7 @@ against the references:
   empty state, same `▲ AbstractCode` twice on one screen).
   - **Change**: replace the centered wordmark block with a compact session
     card: `▲ AbstractCode v0.3.0 · basic-agent · lmstudio · ornith-1.0-35b`
-    / `dir ~/tmp/…/abstractcode-tui · workspace server-managed · session
+    / `dir ~/tmp/…/abstractcode · workspace server-managed · session
     acode-…` / one guidance line / one command hint line. Reuse the same
     card as a `/status` output later (codex `status/card.rs` pattern).
   - **Success**: at boot, model + directory + workspace mode readable
@@ -489,7 +489,7 @@ cancel-with-confirm). Frictions:
 
 ## Cross-cutting success criterion for the wave
 
-A user who has driven codex for a month sits down at abstractcode-tui,
+A user who has driven codex for a month sits down at abstractcode,
 runs one real task, and (a) never sees raw JSON in the default view,
 (b) reviews a file edit as a tinted diff before approving it, (c) points
 the agent at a file with `@`, (d) always knows how full the context is,
@@ -503,5 +503,5 @@ the findings above: boot/empty state, `/` dropdown, `/help`, `/theme`
 (+preview), `/tools`, `/workspace`, `/model` (2 stages), `/entities`,
 `/queue`, `/cache`, composer draft. Reproduce with a pyte-driven pty
 harness (the repo's `scripts/pty_features_check.py` conventions:
-`ABSTRACTCODE_TUI_PREFS_FILE` isolation; no prompts sent, so no runs
+`ABSTRACTCODE_PREFS_FILE` isolation; no prompts sent, so no runs
 started).

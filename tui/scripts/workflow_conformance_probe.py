@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Workflow conformance probe: can `abstractcode-tui exec` run EVERY workflow?
+"""Workflow conformance probe: can `abstractcode exec` run EVERY workflow?
 
 The operator's contract is "behind any request, we can ensure deterministic
 complex orchestrations" — so every workflow the gateway catalogs must be
@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-BIN = REPO / "target" / "release" / "abstractcode-tui"
+BIN = REPO / "target" / "release" / "abstractcode"
 OUT = REPO / "untracked" / "workflow-conformance"
 
 PROVIDER = os.environ.get("WFP_PROVIDER", "lmstudio")

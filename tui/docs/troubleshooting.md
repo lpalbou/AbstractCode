@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Symptom → cause → fix. `abstractcode-tui doctor` is the first move for
+Symptom → cause → fix. `abstractcode doctor` is the first move for
 anything connection-shaped: it prints which source provided the URL/token
 and which check failed.
 
@@ -35,7 +35,7 @@ gateway is gone.
 
 ## HTTP 401 on ping
 
-Token rejected. Re-run `abstractcode-tui login`. If the gateway runs with
+Token rejected. Re-run `abstractcode login`. If the gateway runs with
 user auth (`ABSTRACTGATEWAY_USER_AUTH=1`), the token must be a
 registry-issued `agw_…` token; a static dev token from a different
 configuration will be refused.
@@ -80,7 +80,7 @@ To inspect or extend the scope, use `/workspace`:
 - **allowed paths** — extra roots sent as `workspace_allowed_paths`;
   they apply in `workspace_or_allowed` mode.
 
-Mode + allowed paths persist in `~/.abstractcode-tui/prefs.json`
+Mode + allowed paths persist in `~/.abstractcode/prefs.json`
 (`workspace_mode`, `workspace_allowed`), which headless `exec` reads too
 — configure once, applies everywhere.
 

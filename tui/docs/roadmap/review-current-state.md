@@ -1,11 +1,11 @@
 # Current-state UX review: the sparse header, the empty frame, and what the maintainer actually saw
 
 Status: independent skeptical investigation, 2026-07-22 (evening).
-Method: read-only. Built `target/release/abstractcode-tui` (mtime 18:16:53,
+Method: read-only. Built `target/release/abstractcode` (mtime 18:16:53,
 self-reports v0.3.0 in `/help`; the maintainer's running process 58119 launched
 18:17:20 from the same file — we tested the binary he is looking at). Drove it
 in a pty (pyte VT screen, `TIOCSWINSZ`, `TERM=xterm-256color`, prefs isolated
-via `ABSTRACTCODE_TUI_PREFS_FILE`) against the live gateway at
+via `ABSTRACTCODE_PREFS_FILE`) against the live gateway at
 `http://127.0.0.1:8080`. No source edits, no gateway restarts, no runs started
 (boot + replay + reattach GETs, typing, `/help`, Esc only). His real terminal:
 Apple_Terminal, truecolor, **271×68** (`stty -f /dev/ttys041` → `68 271`), prefs

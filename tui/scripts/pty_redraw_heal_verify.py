@@ -67,7 +67,7 @@ except ImportError:
 
 TOKEN = os.environ.get("ACODE_GATEWAY_TOKEN", "")
 URL = os.environ.get("ACODE_GATEWAY_URL", "http://127.0.0.1:8080")
-BIN = os.environ.get("ACODE_TUI_BIN", "target/release/abstractcode-tui")
+BIN = os.environ.get("ACODE_TUI_BIN", "target/release/abstractcode")
 PROVIDER = os.environ.get("ACODE_PROVIDER", "lmstudio")
 MODEL = os.environ.get("ACODE_MODEL", "qwen/qwen3.6-35b-a3b")
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -102,7 +102,7 @@ class Session:
             env = dict(os.environ)
             env["TERM"] = "xterm-256color"
             env["COLORTERM"] = "truecolor"
-            env["ABSTRACTCODE_TUI_PREFS_FILE"] = prefs
+            env["ABSTRACTCODE_PREFS_FILE"] = prefs
             os.execvpe(cmd[0], cmd, env)
             os._exit(127)
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))

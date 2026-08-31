@@ -1966,7 +1966,7 @@ fn empty_state(
         }
         col = col
             .child(line(
-                "diagnose:   abstractcode-tui doctor    connect: abstractcode-tui login".into(),
+                "diagnose:   abstractcode doctor    connect: abstractcode login".into(),
                 muted,
             ))
             .child(line(

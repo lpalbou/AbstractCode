@@ -292,7 +292,7 @@ pub fn end_visit(store: Store, ctx: &UiCtx, name: Option<&str>, reason: &str) {
                     run_id: cs[ix].run_id.clone(),
                     epoch: cs[ix].turn_epoch,
                     reason: if reason.is_empty() {
-                        "closed from abstractcode-tui".to_string()
+                        "closed from abstractcode".to_string()
                     } else {
                         reason.to_string()
                     },

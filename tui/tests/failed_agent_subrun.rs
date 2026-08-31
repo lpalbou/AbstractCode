@@ -12,7 +12,7 @@
 
 use serde_json::Value;
 
-use abstractcode_tui::transcript::{Fold, FoldEffect, Item};
+use abstractcode::transcript::{Fold, FoldEffect, Item};
 
 fn fixture() -> Value {
     let raw = include_str!("fixtures/failed_agent_subrun_tree.json");

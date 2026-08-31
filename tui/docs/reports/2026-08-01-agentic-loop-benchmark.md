@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-01 · **Route (every run):** `gpt-5.4`, reasoning `medium`, `endpoint:airelay`
 (local subscription relay, `http://127.0.0.1:8317/v1`, no API keys) · **Client:**
-`abstractcode-tui 0.4.0` (`exec`, headless, `--ungated --permissions all`, uncapped wall time)
+`abstractcode 0.4.0` (`exec`, headless, `--ungated --permissions all`, uncapped wall time)
 · **Task:** the Zelda prompt (rich, ~10 stated requirements) plus a thin-prompt lane
 ("Create a small browser game… something fun with a canvas").
 
@@ -84,7 +84,7 @@ model — so this is a loop/verification gap, not a model ceiling.)
 - `review_mode` on react-agent: verifier demonstrably ran (2× llm calls, 3× tools),
   **no detectable product-quality effect at n=3** (pre-registered NOISE verdict).
   Verification pressure without *spec-shaped* checks does not move quality.
-- Cross-client: abstractcode-tui (no-review) median 0.922 vs abstractcode 0.752,
+- Cross-client: abstractcode (no-review) median 0.922 vs abstractcode 0.752,
   opencode 0.765, pi 0.921 — **all arms overlap; no client separates**. The original
   "abstractcode is a much better coder" premise was not supported; abstractcode is the
   most *consistent* (range 0.077), pi the most bimodal (two near-best + one 0.0 broken
@@ -257,7 +257,7 @@ apply or fail loudly (abstractcore); backlog 0232 sandboxing + fail-loud workspa
 - Backlog 0232 stands (silent workspace-root clamp → fail loudly; `execute_command`
   sandboxing; identity-based path containment).
 
-**abstractcode-tui (this client — shipped this campaign)**
+**abstractcode (this client — shipped this campaign)**
 - `--param` (workflow input pins), `--review/--review-rounds`, project-context injection,
   bundle-only workflow resolution + honest refusals, ADR-0027 timeout compliance,
   iteration-budget honesty (⚠ stopped ≠ ✓ done, exit 125). Remaining: B4 + three lesser
@@ -385,7 +385,7 @@ sub-0.5 run in both eras (2/5 pooled).
 
 ## 17. Default-workflow confirmation: coder (TUI) vs abstractcode 0.3.9 react
 
-Operator ask: confirm the new default (`coding-agent:coder` on abstractcode-tui) against
+Operator ask: confirm the new default (`coding-agent:coder` on abstractcode) against
 the ORIGINAL reference — old abstractcode with its local react loop — same Zelda prompt,
 same relay, n=3, scored/reviewed by the same instruments. (First attempt VOID: the relay's
 quota window closed mid-matrix and the harness mislabeled two instant "model not found"
@@ -429,7 +429,7 @@ auto-retried by the infra belt — the classify-and-retry fix earning its keep.)
 |---|---|---|---|
 | abstractcode 0.3.9 + **react** | 0.381 / 0.690 / 0.970 | 0.680 | 0.381 |
 | abstractcode 0.3.9 + **coder** | 0.694 / 0.925 / 0.970 | **0.863** | 0.694 |
-| abstractcode-tui + **coder** | 0.795 / 0.808 / 1.000 | **0.868** | 0.795 |
+| abstractcode + **coder** | 0.795 / 0.808 / 1.000 | **0.868** | 0.795 |
 
 **The workflow is the cause; the client is not.** Same client, swapping react→coder:
 +0.183 mean (0.680→0.863) and floor +0.313 (0.381→0.694). Same workflow, swapping

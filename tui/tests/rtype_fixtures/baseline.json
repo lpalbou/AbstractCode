@@ -5,9 +5,9 @@
  "attack_ceiling": 0.5,
  "rows": {
   "attack-a-attract-empty": {
-   "dir": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/attack-a-attract-empty",
+   "dir": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/attack-a-attract-empty",
    "G0_single_entry": true,
-   "entry": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/attack-a-attract-empty/index.html",
+   "entry": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/attack-a-attract-empty/index.html",
    "G0_refs_resolve": true,
    "G0_missing_refs": [],
    "G1_js_parses": true,
@@ -102,9 +102,9 @@
    "fixture": "attack-a-attract-empty"
   },
   "attack-a2-cosmetic": {
-   "dir": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/attack-a2-cosmetic",
+   "dir": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/attack-a2-cosmetic",
    "G0_single_entry": true,
-   "entry": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/attack-a2-cosmetic/index.html",
+   "entry": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/attack-a2-cosmetic/index.html",
    "G0_refs_resolve": true,
    "G0_missing_refs": [],
    "G1_js_parses": true,
@@ -199,9 +199,9 @@
    "fixture": "attack-a2-cosmetic"
   },
   "attack-b-comment-nouns": {
-   "dir": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/attack-b-comment-nouns",
+   "dir": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/attack-b-comment-nouns",
    "G0_single_entry": true,
-   "entry": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/attack-b-comment-nouns/index.html",
+   "entry": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/attack-b-comment-nouns/index.html",
    "G0_refs_resolve": true,
    "G0_missing_refs": [],
    "G1_js_parses": true,
@@ -296,9 +296,9 @@
    "fixture": "attack-b-comment-nouns"
   },
   "attack-c-split-stubs": {
-   "dir": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/attack-c-split-stubs",
+   "dir": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/attack-c-split-stubs",
    "G0_single_entry": true,
-   "entry": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/attack-c-split-stubs/index.html",
+   "entry": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/attack-c-split-stubs/index.html",
    "G0_refs_resolve": true,
    "G0_missing_refs": [],
    "G1_js_parses": true,
@@ -393,9 +393,9 @@
    "fixture": "attack-c-split-stubs"
   },
   "attack-d-combined": {
-   "dir": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/attack-d-combined",
+   "dir": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/attack-d-combined",
    "G0_single_entry": true,
-   "entry": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/attack-d-combined/index.html",
+   "entry": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/attack-d-combined/index.html",
    "G0_refs_resolve": true,
    "G0_missing_refs": [],
    "G1_js_parses": true,
@@ -490,9 +490,9 @@
    "fixture": "attack-d-combined"
   },
   "control-batched-fire": {
-   "dir": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/control-batched-fire",
+   "dir": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/control-batched-fire",
    "G0_single_entry": true,
-   "entry": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/control-batched-fire/index.html",
+   "entry": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/control-batched-fire/index.html",
    "G0_refs_resolve": true,
    "G0_missing_refs": [],
    "G1_js_parses": true,
@@ -597,7 +597,7 @@
   },
   "control-onefile": {
    "G0_single_entry": true,
-   "entry": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/control-onefile/index.html",
+   "entry": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/control-onefile/index.html",
    "G0_refs_resolve": true,
    "G0_missing_refs": [],
    "G1_js_parses": true,
@@ -636,9 +636,9 @@
    "fixture": "control-onefile"
   },
   "control-playable": {
-   "dir": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/control-playable",
+   "dir": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/control-playable",
    "G0_single_entry": true,
-   "entry": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/control-playable/index.html",
+   "entry": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/control-playable/index.html",
    "G0_refs_resolve": true,
    "G0_missing_refs": [],
    "G1_js_parses": true,
@@ -742,9 +742,9 @@
    "fixture": "control-playable"
   },
   "control-scaled-large": {
-   "dir": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/control-scaled-large",
+   "dir": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/control-scaled-large",
    "G0_single_entry": true,
-   "entry": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/control-scaled-large/index.html",
+   "entry": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/control-scaled-large/index.html",
    "G0_refs_resolve": true,
    "G0_missing_refs": [],
    "G1_js_parses": true,
@@ -848,9 +848,9 @@
    "fixture": "control-scaled-large"
   },
   "control-scaled-small": {
-   "dir": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/control-scaled-small",
+   "dir": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/control-scaled-small",
    "G0_single_entry": true,
-   "entry": "/Users/albou/tmp/abstractframework/abstractcode-tui/tests/rtype_fixtures/control-scaled-small/index.html",
+   "entry": "/Users/albou/tmp/abstractframework/abstractcode/tests/rtype_fixtures/control-scaled-small/index.html",
    "G0_refs_resolve": true,
    "G0_missing_refs": [],
    "G1_js_parses": true,

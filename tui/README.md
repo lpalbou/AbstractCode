@@ -1,4 +1,4 @@
-# abstractcode-tui
+# abstractcode
 
 AbstractCode on [AbstractTUI](https://github.com/lpalbou/AbstractTUI): a reactive
 terminal client for the [AbstractGateway](https://github.com/lpalbou/abstractgateway)
@@ -148,7 +148,7 @@ top of 0.4.0's conclusion + presence wave: declared context meter,
 ## Install
 
 ```sh
-cargo install abstractcode-tui
+cargo install abstractcode
 ```
 
 Rust 2021 (MSRV 1.87, inherited from AbstractTUI); macOS and Linux are the
@@ -162,9 +162,9 @@ You need a running AbstractGateway (the control plane that hosts the agent):
 
 ```sh
 abstractgateway serve                                  # or use an existing one
-abstractcode-tui login --gateway http://127.0.0.1:8080 --token <token>
-abstractcode-tui doctor                                # reachability · auth · catalog
-abstractcode-tui                                       # launch the TUI
+abstractcode login --gateway http://127.0.0.1:8080 --token <token>
+abstractcode doctor                                # reachability · auth · catalog
+abstractcode                                       # launch the TUI
 ```
 
 `login` verifies against the gateway before saving (flags/env only — it never
@@ -188,7 +188,7 @@ Inside the app:
 ## Headless one-shots
 
 ```sh
-abstractcode-tui exec "Summarize the workspace layout" \
+abstractcode exec "Summarize the workspace layout" \
   --provider lmstudio --model qwen/qwen3.6-35b-a3b --permissions all
 ```
 
@@ -261,7 +261,7 @@ smoke-ok
 ```
 
 The smoke path still launches the selected child (`abstractcode` for `code-1`
-or the release `abstractcode-tui` binary for `code-tui-1`). It exits 0 and
+or the release `abstractcode` binary for `code-tui-1`). It exits 0 and
 prints the requested answer only when every selected run exits successfully
 and its captured final answer contains that value; otherwise it exits nonzero
 without printing a success value. As in full benchmark mode, run logs and
@@ -279,7 +279,7 @@ Controls:
 - `ZELDA_BENCH_PROVIDER`, `ZELDA_BENCH_MODEL`, `ZELDA_BENCH_BASE_URL`,
   `ZELDA_BENCH_REASONING`, `ZELDA_BENCH_MAX_ITER`, and
   `ZELDA_BENCH_TIMEOUT_S` configure the child run.
-- TUI benchmark lanes require `target/release/abstractcode-tui`; build it with
+- TUI benchmark lanes require `target/release/abstractcode`; build it with
   `cargo build --release`. Gateway credentials come from
   `~/.abstractcode/gateway.json`, falling back to `ABSTRACTGATEWAY_URL` and
   `ABSTRACTGATEWAY_AUTH_TOKEN`.

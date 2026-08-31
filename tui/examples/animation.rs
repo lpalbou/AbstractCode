@@ -7,8 +7,8 @@
 //! The fabricated feed is DEMO DATA and lives here, in an example — the
 //! app never invents events.
 
-use abstractcode_tui::store::Phase;
-use abstractcode_tui::ui::animation::{
+use abstractcode::store::Phase;
+use abstractcode::ui::animation::{
     desk, drift, pulse, Ev, Family, Feed, Outcome, Snapshot, State,
 };
 use abstracttui::base::{Rect, Size};
@@ -93,7 +93,7 @@ fn demo_feed(span_ms: u64) -> Feed {
     let mut feed = Feed::new();
     let mut terms = Vec::new();
     for w in "make the mosaic dither quantize cleanly on 256 colour terminals".split_whitespace() {
-        abstractcode_tui::ui::animation::drift::absorb_term(&mut terms, w, 3.0, 0.0);
+        abstractcode::ui::animation::drift::absorb_term(&mut terms, w, 3.0, 0.0);
     }
     let files = [
         "mosaic.rs",
@@ -123,8 +123,8 @@ fn demo_feed(span_ms: u64) -> Feed {
             };
             let failing = (36..44).contains(&n);
             let label = files[(n % files.len() as u64) as usize].to_string();
-            abstractcode_tui::ui::animation::drift::absorb_term(&mut terms, &label, 1.0, 1.0);
-            abstractcode_tui::ui::animation::drift::absorb_term(
+            abstractcode::ui::animation::drift::absorb_term(&mut terms, &label, 1.0, 1.0);
+            abstractcode::ui::animation::drift::absorb_term(
                 &mut terms,
                 family.short(),
                 0.6,

@@ -969,7 +969,7 @@ impl BootSplash {
             let a = ease(EASE_FADE, window(ms, 300.0, 250.0));
             if a > 0.0 {
                 let ink = mix(bg, tk.text_faint, a);
-                let version = format!("abstractcode-tui {}", crate::cli::VERSION);
+                let version = format!("abstractcode {}", crate::cli::VERSION);
                 if size.w >= text::width(&version) + text::width(SKIP_HINT) + 4 {
                     self.surface.draw_text(1, y, &version, Style::new().fg(ink));
                 }

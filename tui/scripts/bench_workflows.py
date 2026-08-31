@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Workflow bench: abstractcode-tui only, one arm per agentic-loop design.
+"""Workflow bench: abstractcode only, one arm per agentic-loop design.
 
 The point is NOT a leaderboard: it is to see whether loop STRUCTURE (plain
 ReAct vs fresh-context Ralph cycles vs builder+verifier gates vs multi-agent
@@ -43,7 +43,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "untracked" / os.environ.get("WB_OUT", "workflow-bench")
-TUI_BIN = REPO / "target" / "release" / "abstractcode-tui"
+TUI_BIN = REPO / "target" / "release" / "abstractcode"
 RUNTIME_STORE = Path(os.environ.get(
     "WB_RUNTIME_STORE", "/Users/albou/tmp/abstractframework/runtime"))
 
@@ -369,7 +369,7 @@ def main() -> int:
     prov = {
         "generated": datetime.now(timezone.utc).isoformat(),
         "mode": "SMOKE" if a.smoke else "MATRIX",
-        "client": "abstractcode-tui",
+        "client": "abstractcode",
         "client_version": subprocess.run([str(TUI_BIN), "--version"],
                                          capture_output=True, text=True).stdout.strip(),
         "model": MODEL, "reasoning": REASONING, "provider": PROVIDER,

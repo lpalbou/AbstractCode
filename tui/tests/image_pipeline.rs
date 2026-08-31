@@ -126,7 +126,7 @@ fn progressive_jpeg_decodes_to_the_real_picture() {
 #[test]
 fn progressive_jpeg_reaches_the_transcript_as_painted_cells() {
     let decoded = decode_image(&fixture(PROGRESSIVE_JPEG_B64)).expect("progressive JPEG decodes");
-    let bounded = abstractcode_tui::runner::downscale_for_transcript(decoded);
+    let bounded = abstractcode::runner::downscale_for_transcript(decoded);
     // Already inside the F3 ceiling, so the pre-scale is a no-op here —
     // the point is that the transcript's own step accepts the bitmap.
     assert!(bounded.width() <= 1024 && bounded.height() <= 168);

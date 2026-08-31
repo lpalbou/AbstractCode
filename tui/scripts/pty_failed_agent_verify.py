@@ -34,7 +34,7 @@ COLS, ROWS = 120, 36
 
 
 def main() -> int:
-    bin_path = os.environ.get("ACODE_TUI_BIN", "target/release/abstractcode-tui")
+    bin_path = os.environ.get("ACODE_TUI_BIN", "target/release/abstractcode")
     gateway = os.environ.get("ACODE_GATEWAY_URL", "http://127.0.0.1:8080")
     token = os.environ.get("ACODE_GATEWAY_TOKEN", "")
     session = os.environ.get("ACODE_SESSION", "acode-ptysmoke-1784707419")
@@ -54,7 +54,7 @@ def main() -> int:
     if pid == 0:
         env = dict(os.environ)
         env["TERM"] = "xterm-256color"
-        env["ABSTRACTCODE_TUI_PREFS_FILE"] = prefs_path
+        env["ABSTRACTCODE_PREFS_FILE"] = prefs_path
         os.execvpe(cmd[0], cmd, env)
         os._exit(127)
 

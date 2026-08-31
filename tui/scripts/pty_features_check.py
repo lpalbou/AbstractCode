@@ -7,9 +7,9 @@ is a toggling selector, /skills lists the gateway shelf, /cache reports the
 prompt-cache posture, and /sessions lists remembered sessions.
 
 Env: ACODE_GATEWAY_TOKEN (required), ACODE_GATEWAY_URL (default local),
-ACODE_TUI_BIN (default target/release/abstractcode-tui).
+ACODE_TUI_BIN (default target/release/abstractcode).
 
-Prefs are ISOLATED to a temp file (ABSTRACTCODE_TUI_PREFS_FILE) — a live
+Prefs are ISOLATED to a temp file (ABSTRACTCODE_PREFS_FILE) — a live
 check must never touch the operator's real preferences.
 """
 
@@ -27,7 +27,7 @@ import time
 
 TOKEN = os.environ.get("ACODE_GATEWAY_TOKEN", "")
 URL = os.environ.get("ACODE_GATEWAY_URL", "http://127.0.0.1:8080")
-BIN = os.environ.get("ACODE_TUI_BIN", "target/release/abstractcode-tui")
+BIN = os.environ.get("ACODE_TUI_BIN", "target/release/abstractcode")
 
 if not TOKEN:
     print("SKIP: ACODE_GATEWAY_TOKEN not set")
@@ -61,7 +61,7 @@ def main() -> int:
     prefs.close()
 
     env = dict(os.environ)
-    env["ABSTRACTCODE_TUI_PREFS_FILE"] = prefs.name
+    env["ABSTRACTCODE_PREFS_FILE"] = prefs.name
     env["TERM"] = "xterm-256color"
 
     pid, fd = pty.fork()

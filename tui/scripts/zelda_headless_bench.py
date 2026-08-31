@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Headless Zelda benchmark: abstractcode vs abstractcode-tui, two iterations each.
+"""Headless Zelda benchmark: abstractcode vs abstractcode, two iterations each.
 
 Output layout (per operator request):
   untracked/<client>/<loop>-<iteration>/
@@ -42,7 +42,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 UNTRACKED = REPO_ROOT / "untracked"
 BENCH_ROOT = UNTRACKED / "zelda-bench"
-CODE_TUI_BIN = REPO_ROOT / "target" / "release" / "abstractcode-tui"
+CODE_TUI_BIN = REPO_ROOT / "target" / "release" / "abstractcode"
 
 ZELDA_PROMPT = """create a fully playable Zelda game in black & white, gameboy style (but scale to 600px). integrate game mechanics, maps, dungeons, treasures, monsters, boss, equipments and various weapons and effects and procedural VFX, SFX and music. must be playable with the arrows too. the game must be composed of a campaign with quests following the original Zelda stories spread across vast maps. Completing a quest must reveal part of the story and provide a new game mechanics with explanations. The transition between maps of different designs and aesthetics must be coherent, including in dungeons. There must be villages to replenish our equipments and talk with NPCs with entertaining stories related to the local map (each map has its own story and influence NPCs around it. There must be some magic and a sense of adventure and discovery. NPCs can have side quests to further explore the story of the map. please take extra care to the graphics, VFX, SFX and create a sound track suitable for this game and a gameboy. write the full game in local folder"""
 
