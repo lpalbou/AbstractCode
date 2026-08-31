@@ -11,33 +11,51 @@ AbstractCode is part of the **AbstractFramework** ecosystem:
 
 - Getting started: [`docs/getting-started.md`](docs/getting-started.md)
 - Architecture: [`docs/architecture.md`](docs/architecture.md)
-- CLI reference: [`docs/cli.md`](docs/cli.md)
+- API and CLI surface: [`docs/api.md`](docs/api.md)
 - Docs index: [`docs/README.md`](docs/README.md)
 
 ## Development setup
 
-Prereqs:
-- Python **3.10+**
-- (Optional) Node.js if you work on the web app (`web/`)
+This repository holds two clients, each with its own toolchain. You only need
+the one you are working on.
 
-Install in editable mode with dev tools:
+### Terminal client (`tui/`)
 
-```bash
-pip install -e ".[dev]"
-```
-
-Run tests:
+Requires Rust **1.87+** (the crate's declared minimum; CI builds against it).
 
 ```bash
-pytest -q
+cargo test --workspace
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Format and lint:
+All three run in CI and must pass. `cargo package --manifest-path tui/Cargo.toml --list`
+shows exactly what a release would publish.
+
+### Browser client (`web/`)
+
+Requires Node.js **24**.
 
 ```bash
-ruff check .
-black .
+cd web
+npm ci          # install from the lockfile, not the manifest
+npm test
+npm run build
 ```
+
+`npm ci` rather than `npm install`, so you reproduce CI's dependency tree.
+
+## Releases
+
+The two clients version independently, each under its own tag prefix:
+
+| Tag | Publishes |
+|---|---|
+| `v<version>` | the crate `abstractcode` to crates.io, plus binaries on the GitHub release |
+| `web-v<version>` | `@abstractframework/code` to npm |
+
+Each publish job asserts the tag matches its own manifest version, so bump
+`tui/Cargo.toml` or `web/package.json` before tagging.
 
 ## What to include in a PR
 
@@ -50,7 +68,7 @@ black .
 
 If you found a bug or want a feature:
 - Prefer a minimal reproducible example and include:
-  - OS + Python version
+  - OS, and the client and version you used
   - `abstractcode --help` output (or version)
   - what you expected vs what happened
 

@@ -1,149 +1,105 @@
 # Getting started
 
-AbstractCode is a **durable terminal TUI** for running agentic coding sessions on the AbstractFramework stack:
-- **AbstractRuntime** provides durable runs/ledger/waits/artifacts.
-- **AbstractAgent** provides the built-in agents (`react`, `memact`, `codeact`).
-- **AbstractCore** provides provider/model abstraction and tool definitions.
+AbstractCode needs a reachable [AbstractGateway](https://github.com/lpalbou/abstractgateway).
+The gateway runs the coding agent; the clients connect to it.
 
-Ecosystem links:
-- [AbstractFramework](https://github.com/lpalbou/AbstractFramework)
-- [AbstractCore](https://github.com/lpalbou/abstractcore)
-- [AbstractRuntime](https://github.com/lpalbou/abstractruntime)
-
-If you landed here directly, skim [`README.md`](../README.md) for an overview.
-
-## 1) Install
-
-Python **3.10+**:
+## 1. Run a gateway
 
 ```bash
-pip install abstractcode
+pip install abstractgateway
+abstractgateway serve            # defaults to http://127.0.0.1:8080
 ```
 
-Optional (run VisualFlow locally via `abstractcode flow ...`):
+The gateway ships working agent bundles out of the box, including
+`coding-agent:coder`, which the terminal client uses by default.
+
+## 2. Install a client
+
+### Terminal
 
 ```bash
-pip install "abstractcode[flow]"
+cargo install abstractcode
 ```
 
-Evidence:
-- Package deps and extras: `pyproject.toml`
-- CLI entrypoints: `abstractcode/__init__.py` and `abstractcode/__main__.py` → `abstractcode/cli.py`
-
-## 2) Start the interactive TUI
-
-Ollama (default provider):
+Requires Rust 1.87 or newer. Then:
 
 ```bash
-abstractcode --provider ollama --model qwen3:1.7b-q4_K_M
+abstractcode                     # launch against http://127.0.0.1:8080
+abstractcode --gateway https://gateway.example.com
 ```
 
-OpenAI-compatible server (example: LM Studio):
+### Browser
 
 ```bash
-abstractcode --provider openai --base-url http://127.0.0.1:1234/v1 --model qwen/qwen3-next-80b
+npx @abstractframework/code      # serves on http://127.0.0.1:3002
 ```
 
-In the app:
-- `/help` shows the authoritative command list (implemented in `abstractcode/react_shell.py::_show_help`)
-- type a task (or use `/task ...`)
+Set the Gateway URL in the interface, or start the server with
+`ABSTRACTCODE_GATEWAY_URL` already pointing at it.
 
-Evidence:
-- Arg parsing: `abstractcode/cli.py`
-- Interactive host: `abstractcode/react_shell.py`
-
-## 2b) Plan / Review modes (optional)
-
-AbstractCode supports two UX modes that affect how the agent responds:
-- **Plan mode**: the agent outputs a TODO plan before acting (`--plan` or `/plan on`)
-- **Review mode**: the agent self-checks before concluding (`--review` / `--no-review`, or `/review ...`)
-
-Evidence:
-- CLI flags: `abstractcode/cli.py`
-- TUI commands: `abstractcode/react_shell.py::_show_help`
-
-## 2c) Prompt caching (optional)
-
-By default, AbstractCode runs with `--prompt-cache auto`. In this mode it enables prompt caching when the runtime LLM client reports prompt-cache support through the AbstractCore capability contract.
-
-Controls:
-- CLI: `--prompt-cache auto|on|off` (or `ABSTRACTCODE_PROMPT_CACHE=auto|on|off`)
-- TUI: `/cache auto|on|off`
-
-Implementation notes (local runtime):
-- For providers with full in-process cache backends (currently `mlx`), the runtime builds a compartmentalized cache: `system | tools | history`. Appending to history updates only the history cache; changing system or tools rebuilds only the affected prefix.
-- For HuggingFace GGUF (llama.cpp), the same compartmentalized path is used when the current chat format has an exact cached renderer; otherwise caching falls back to keyed `LlamaRAMCache` reuse.
-
-If you’re iterating on prompts and want fully cold runs, start with `--prompt-cache off`.
-
-## 3) Approvals, tools, and files
-
-### Tool approvals (default-on)
-
-By default, tool calls pause at a durable boundary and require approval.
-
-- CLI: `--auto-approve` (unsafe; disables prompts)
-- TUI: `/auto-accept` (persists when state is enabled)
-
-Evidence:
-- Runtime is wired with `PassthroughToolExecutor(mode="approval_required")` in `abstractcode/react_shell.py`.
-- After approval, tools run via `MappingToolExecutor.from_tools(...)` in `abstractcode/react_shell.py`.
-
-### Attach files with `@path`
-
-Mention files in your prompt to attach them:
-
-```text
-Explain @abstractcode/cli.py and @docs/architecture.md
-```
-
-Evidence:
-- Mention parsing + workspace roots/mounts: `abstractcode/file_mentions.py`
-- Attachment ingestion to ArtifactStore: `abstractcode/react_shell.py::_ingest_attachments()`
-
-Workspace mounts (optional):
-- `ABSTRACTCODE_WORKSPACE_MOUNTS` (preferred)
-- `ABSTRACTGATEWAY_WORKSPACE_MOUNTS` (compat)
-
-Format: newline-separated `name=/abs/path` entries.
-
-## 4) Persistence (durable runs)
-
-Defaults:
-- state file: `~/.abstractcode/state.json`
-- durable stores: `~/.abstractcode/state.d/`
-- saved settings: `~/.abstractcode/state.config.json`
-
-Disable persistence:
+## 3. Check the connection
 
 ```bash
-abstractcode --no-state
+abstractcode doctor
 ```
 
-Evidence: file-backed vs in-memory stores are selected in `abstractcode/react_shell.py`.
+`doctor` reports whether the gateway is reachable, which credential source was
+used, and which workflows are available. Run it first whenever something is not
+behaving — it distinguishes "the gateway is down" from "your token is wrong"
+from "the workflow you asked for is not installed".
 
-## 5) Workflows and web UI (optional)
+## Credentials
 
-Workflows:
-- Local VisualFlow runs: `abstractcode flow ...` (requires `abstractcode[flow]`)
-- Workflow agent mode: `abstractcode --agent <flow_ref>`
-- Gateway control-plane: `abstractcode gateway ...`
-- Gateway bundle management: `abstractcode workflow ...`
+A remote gateway usually requires a token. Persist one so you do not repeat it:
 
-Details: [`docs/workflows.md`](workflows.md).
+```bash
+abstractcode login --gateway https://gateway.example.com --token <TOKEN>
+```
 
-Web UI:
-- The gateway-first web host is in `web/` (separate Node/Vite build; not part of the pip wheel).
+This verifies the credentials before writing them to
+`~/.abstractcode/gateway.json`. Both `--gateway` and `--token` can also come
+from the environment, and a token passed on the command line always wins over
+the stored one.
 
-Details: [`docs/web.md`](web.md) and [`docs/deployment-web.md`](deployment-web.md).
+The browser client keeps credentials differently: when you supply a gateway
+user and token, the server exchanges them for a gateway browser session and
+stores only app-scoped session cookies, so the raw token is never persisted in
+browser settings. See [`web.md`](web.md).
 
-## Next
+## Your first run
 
-- Docs index: [`docs/README.md`](README.md)
-- FAQ (common issues): [`docs/faq.md`](faq.md)
-- CLI/TUI reference (env vars, persistence details, MCP): [`docs/cli.md`](cli.md)
-- Architecture (diagrams): [`docs/architecture.md`](architecture.md)
-- API and integration points: [`docs/api.md`](api.md)
-- Workflow UI events contract: [`docs/ui_events.md`](ui_events.md)
-- Contributing: [`CONTRIBUTING.md`](../CONTRIBUTING.md)
-- Security policy: [`SECURITY.md`](../SECURITY.md)
+Type a task and press Enter. What you see:
+
+- **Reasoning cycles** as the agent works, with token counts and a per-cycle
+  output sparkline.
+- **Tool cards** that update in place: awaiting approval, then running, then a
+  result. Tools are approval-gated by default — nothing touches your files
+  until you say so.
+- **A final answer**, which by default a verifier re-reads before accepting, and
+  can send back for more work (`--no-review` turns this off).
+
+Useful while a run is in flight:
+
+| Action | How |
+|---|---|
+| Approve or reject a tool | the prompt in the transcript |
+| Steer without restarting | type guidance and send |
+| Pause or cancel | `/pause`, `/cancel` |
+| Reattach to the last session | `abstractcode --resume` |
+| List the commands | `/help` |
+
+## Choosing a workflow and model
+
+```bash
+abstractcode --workflow coding-agent:coder --provider lmstudio --model qwen3.6-35b
+```
+
+Both are optional: without them, the gateway's defaults apply and your last
+choice is remembered in `~/.abstractcode/prefs.json`.
+
+## Where to go next
+
+- [`architecture.md`](architecture.md) — how the pieces fit together
+- [`api.md`](api.md) — the gateway surface the clients speak
+- [`troubleshooting.md`](troubleshooting.md) — when something does not work
+- [`../tui/README.md`](../tui/README.md) — the terminal client in depth, including keys and themes

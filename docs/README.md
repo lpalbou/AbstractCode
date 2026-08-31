@@ -1,35 +1,44 @@
 # AbstractCode documentation
 
-Start here: [`docs/getting-started.md`](getting-started.md).
+Start at [`getting-started.md`](getting-started.md) if you want to run something
+now. Start at [`architecture.md`](architecture.md) if you want to understand the
+shape first.
 
-AbstractCode is part of the **AbstractFramework** ecosystem:
-- [AbstractFramework](https://github.com/lpalbou/AbstractFramework)
-- [AbstractCore](https://github.com/lpalbou/abstractcore) (providers + tools)
-- [AbstractRuntime](https://github.com/lpalbou/abstractruntime) (durable execution)
+## Project documentation
 
-## Entry points
+| Page | What it covers |
+|---|---|
+| [`getting-started.md`](getting-started.md) | Running a gateway, installing either client, credentials, your first run |
+| [`architecture.md`](architecture.md) | The two clients, the gateway, and the thin-client contract that binds them |
+| [`api.md`](api.md) | The gateway surface both clients speak, and the integration points |
+| [`workflows.md`](workflows.md) | Agent workflow bundles and how a run selects one |
+| [`ui_events.md`](ui_events.md) | The workflow-driven interface event contract |
+| [`faq.md`](faq.md) | Recurring questions and known limitations |
+| [`troubleshooting.md`](troubleshooting.md) | Symptom-oriented diagnosis and fixes |
 
-- First-time setup + quick usage: [`docs/getting-started.md`](getting-started.md)
-- Frequently asked questions: [`docs/faq.md`](faq.md)
-- Project overview + install + quickstart: [`README.md`](../README.md)
-- Agent-oriented docs: [`llms.txt`](../llms.txt) and [`llms-full.txt`](../llms-full.txt)
-- Architecture (with diagrams): [`docs/architecture.md`](architecture.md)
-- Prompt caching: [`docs/architecture.md`](architecture.md) and [`docs/faq.md`](faq.md)
+## The browser client
 
-- CLI/TUI reference (commands, persistence, env): [`docs/cli.md`](cli.md)
-- API and integration points: [`docs/api.md`](api.md)
-- Workflows (VisualFlow + bundles + gateway): [`docs/workflows.md`](workflows.md)
-- Workflow-driven UI events contract: [`docs/ui_events.md`](ui_events.md)
+| Page | What it covers |
+|---|---|
+| [`web.md`](web.md) | The browser client in depth, including optional voice features |
+| [`deployment-web.md`](deployment-web.md) | Hosting it, and the gateway-first deployment model |
+| [`deployment-iphone.md`](deployment-iphone.md) | Safari and progressive web app notes |
 
-## Web app
+## The terminal client
 
-- Web overview + local dev/build notes: [`docs/web.md`](web.md)
-- Deployment (gateway-first): [`docs/deployment-web.md`](deployment-web.md)
-- iPhone / PWA notes: [`docs/deployment-iphone.md`](deployment-iphone.md)
+The terminal client keeps its reference documentation beside its source:
 
-## Project
+| Page | What it covers |
+|---|---|
+| [`../tui/README.md`](../tui/README.md) | Features, interface tour, keys, themes |
+| [`../tui/docs/getting-started.md`](../tui/docs/getting-started.md) | Terminal-specific setup |
+| [`../tui/docs/api.md`](../tui/docs/api.md) | Command-line surface and library entry points |
+| [`../tui/docs/architecture.md`](../tui/docs/architecture.md) | How the client is built on AbstractTUI |
+| [`../tui/docs/troubleshooting.md`](../tui/docs/troubleshooting.md) | Terminal, rendering, and connection problems |
+| [`../tui/docs/faq.md`](../tui/docs/faq.md) | Terminal client questions |
 
-- Changelog: [`CHANGELOG.md`](../CHANGELOG.md)
-- Contributing: [`CONTRIBUTING.md`](../CONTRIBUTING.md)
-- Security: [`SECURITY.md`](../SECURITY.md)
-- Acknowledgments: [`ACKNOWLEDGMENTS.md`](../ACKNOWLEDGMENTS.md)
+## Machine-readable indexes
+
+[`../llms.txt`](../llms.txt) is a concise index of this corpus, and
+[`../llms-full.txt`](../llms-full.txt) is the expanded aggregate, both for
+language models and tooling.

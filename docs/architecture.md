@@ -1,207 +1,82 @@
-# AbstractCode architecture
+# Architecture
 
-> Last verified: 2026-02-09  
-> Scope: what is implemented in this repo (no roadmap claims).
+AbstractCode is two clients over one durable control plane. Neither client runs
+the coding agent; both observe and steer a run that lives on
+[AbstractGateway](https://github.com/lpalbou/abstractgateway).
 
-Start here: [`docs/getting-started.md`](getting-started.md).
-
-AbstractCode is a **host UI** for running durable agent/workflow executions built on:
-- **AbstractAgent** (agents)
-- **AbstractRuntime** (durable runtime: runs, ledger, waits, artifacts)
-- **AbstractCore** (provider/model abstraction + tool definitions)
-
-This repo contains:
-- Python CLI/TUI package: `abstractcode/`
-- Gateway-first web host UI: `web/` (separate build; not part of the pip wheel)
-
-Related:
-- CLI/TUI reference: [`docs/cli.md`](cli.md)
-- Workflows: [`docs/workflows.md`](workflows.md)
-- UI events contract: [`docs/ui_events.md`](ui_events.md)
-- Web overview: [`docs/web.md`](web.md)
-
-## Big picture (CLI/TUI)
+## Shape
 
 ```mermaid
-flowchart LR
-  U[User\n(terminal)] -->|input| UI[FullScreenUI\n(prompt_toolkit)]
-  UI <--> SH[ReactShell\n(command router + UX)]
+flowchart TB
+    subgraph clients["AbstractCode clients"]
+        tui["Terminal client<br/><code>tui/</code> — Rust<br/>crate <code>abstractcode</code>"]
+        web["Browser client<br/><code>web/</code> — TypeScript<br/>npm <code>@abstractframework/code</code>"]
+    end
 
-  SH -->|start/tick| RT[AbstractRuntime\n(durable execution)]
-  RT -->|LLM calls| LLM[AbstractCore LLM client\n(provider/model)]
+    gw["<b>AbstractGateway</b><br/>durable runs, sessions, run ledger"]
 
-  RT -->|tool calls (durable wait)| PTE[PassthroughToolExecutor\napproval_required]
-  SH -->|approve + execute| MTE[MappingToolExecutor\n(local tools or MCP)]
-  MTE -->|tool results| RT
+    subgraph server["Runs on the gateway host"]
+        rt["AbstractRuntime<br/>executes the run"]
+        core["AbstractCore<br/>providers and tools"]
+    end
 
-  RT --> RS[RunStore\n(JsonFileRunStore / InMemoryRunStore)]
-  RT --> LS[LedgerStore\n(JsonlLedgerStore / InMemoryLedgerStore)]
-  RT --> AS[ArtifactStore\n(FileArtifactStore / InMemoryArtifactStore)]
-  RT --> SS[SnapshotStore\n(JsonSnapshotStore / InMemorySnapshotStore)]
+    tui -- "HTTP: start, resume, cancel, steer" --> gw
+    web -- "HTTP: start, resume, cancel, steer" --> gw
+    gw -- "SSE: run ledger" --> tui
+    gw -- "SSE: run ledger" --> web
+    gw --> rt --> core
 ```
 
-Evidence (implementation):
-- CLI entrypoint + arg parsing: `abstractcode/cli.py`
-- Interactive host: `abstractcode/react_shell.py` (`ReactShell`)
-- UI: `abstractcode/fullscreen_ui.py` (`FullScreenUI`)
-- Runtime wiring: `abstractcode/react_shell.py` (creates stores + `create_local_runtime(...)`)
+Both clients speak the same surface, so a session is portable between them: a
+run gated on approval in the terminal can be approved in the browser, and a run
+started in the browser can be reattached from the terminal.
 
-## Web host (gateway-first)
+## The thin-client contract
 
-The web app is a **thin host** that talks only to an AbstractGateway under `/api/gateway/*`.
+Everything a client does goes through the gateway, and therefore the runtime.
+Four rules follow, and they are binding on both clients:
 
-```mermaid
-sequenceDiagram
-  participant B as Browser (web/)
-  participant G as AbstractGateway (/api/gateway/*)
-  participant R as AbstractRuntime (remote)
+1. **Server truth is the only truth about runs.** A client renders what the
+   ledger says. It never invents a status the gateway did not report; unknown
+   renders as unknown.
+2. **Decisions are communicated, never executed locally.** Approvals, answers,
+   cancels, pauses, and steering all travel as durable gateway commands, so they
+   are traceable in the ledger and answerable from any client.
+3. **Interface overlays on server truth must be honest and labelled.** Where a
+   client's rendering deliberately diverges from raw server state, the
+   divergence is named where you read it.
+4. **Client-held state stays a client concern** — rendering, input, credentials,
+   local preferences — plus intent you have not submitted yet, such as a
+   composer draft. The moment intent becomes work, it is a gateway run.
 
-  B->>G: Start run / list runs / discovery
-  B->>G: Stream ledger (SSE + cursor replay)
-  G-->>B: Ledger events
-  B->>G: Submit durable commands (resume waits, tool approvals)
-  G->>R: Execute durable commands
-```
-
-Evidence (implementation):
-- Gateway client + endpoints: `web/src/lib/gateway_client.ts`
-- UI rendering from ledger stream: `web/src/ui/app.tsx`
+The consequence you can rely on: start a task, disconnect, reconnect later, and
+find the run where it actually got to.
 
 ## Repository layout
 
 ```text
-abstractcode/                 # Python package (published to pip)
-  __init__.py                 # console entrypoint: abstractcode:main
-  __main__.py                 # module entrypoint: python -m abstractcode
-  cli.py                      # argparse CLI + subcommands (flow/workflow/gateway)
-  react_shell.py              # interactive shell + command routing
-  fullscreen_ui.py            # prompt_toolkit full-screen UI
-  input_handler.py            # prompt_toolkit input helpers
-  terminal_markdown.py        # markdown rendering for terminal output
-  theme.py                    # themes + env overrides
-  file_mentions.py            # @file parsing + workspace mount resolution
-  recall.py / remember.py     # memory UX helpers (host-side)
-  flow_cli.py                 # local VisualFlow runner (requires abstractflow extra)
-  workflow_agent.py           # run VisualFlow as an agent (abstractcode.agent.v1)
-  workflow_cli.py             # manage .flow bundles on a gateway
-  gateway_cli.py              # gateway HTTP client (runs, ledger follow, bundles, KG)
-
-web/                          # Web host UI (separate Node/Vite app)
-docs/                         # Documentation for this repo/package
-tests/                        # Test suite
+tui/     the terminal client — Rust crate `abstractcode`, a workspace member
+web/     the browser client — npm `@abstractframework/code`
+docs/    documentation for the project as a whole
 ```
 
-## Execution modes
+The Cargo workspace lives at the repository root with `tui` as its only member.
+That keeps `target/` at the root while scoping `cargo` packaging to the crate,
+so ordinary churn under `web/` cannot block a release.
 
-### 1) Interactive agents (default)
+The two clients version and release independently, each under its own tag
+prefix — `v<version>` for the terminal client, `web-v<version>` for the browser
+client. See [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
 
-Command: `abstractcode ...`
+## Boundaries
 
-Dispatch:
-- `abstractcode/cli.py` constructs a `ReactShell` and enters the TUI loop.
-- Built-in agent kinds are selected by `--agent` (`react|memact|codeact`).
-
-Evidence:
-- Agent selection + shell creation: `abstractcode/cli.py`
-- Agent wiring + toolset selection: `abstractcode/react_shell.py`
-
-### 2) One-shot (`--prompt`)
-
-Command: `abstractcode --prompt "..." ...`
-
-Behavior:
-- runs a single task, prints the final answer, exits
-- supports `@file` mentions (attachments are stored in the ArtifactStore)
-
-Evidence: `abstractcode/cli.py::_run_one_shot_prompt()`.
-
-### 3) Local VisualFlow runs (`abstractcode flow ...`)
-
-Commands: `abstractcode flow run|resume|pause|...`
-
-Behavior:
-- runs VisualFlow workflows locally with durable stores, separate from the agent state file
-
-Evidence:
-- CLI parsing: `abstractcode/cli.py::build_flow_parser()`
-- Flow driver: `abstractcode/flow_cli.py`
-
-### 4) Workflow agent (`abstractcode --agent <flow_ref>`)
-
-Runs a VisualFlow workflow as a first-class “agent” in the TUI, using the `abstractcode.agent.v1` contract.
-
-Evidence: `abstractcode/workflow_agent.py` (`WorkflowAgent`).
-
-### 5) Gateway control-plane (`abstractcode gateway ...`)
-
-Commands: `abstractcode gateway run|attach|kg`
-
-Behavior:
-- starts/attaches to remote runs via gateway HTTP endpoints
-- can query the persisted KG via the gateway (when enabled server-side)
-
-Evidence: `abstractcode/gateway_cli.py`.
-
-## Durability + tool approvals (core invariant)
-
-AbstractCode keeps runs durable by persisting only JSON-safe state:
-- tool **specs** and **requests** can be persisted
-- tool **callables** are never persisted; they stay in the host process
-
-Approval boundary (TUI):
-1) runtime emits a durable wait for tool calls (`approval_required`)
-2) host prompts the user (or auto-approves)
-3) host executes tools (local or via MCP) and resumes the run with results
-
-Evidence:
-- Passthrough executor: `abstractcode/react_shell.py` (`PassthroughToolExecutor(mode="approval_required")`)
-- Local executor: `abstractcode/react_shell.py` (`MappingToolExecutor.from_tools(...)`)
-
-## Prompt caching (best-effort)
-
-AbstractCode can enable prompt caching to reduce repeated *prefill* work (improves TTFT for long, stable prefixes).
-
-### Toggle surface
-
-- CLI: `--prompt-cache auto|on|off` (default: `auto`) / `ABSTRACTCODE_PROMPT_CACHE`
-- TUI: `/cache auto|on|off`
-
-In `auto`, AbstractCode enables caching only when the runtime AbstractCore LLM client reports prompt-cache support via `get_prompt_cache_capabilities(...)`.
-
-### How it works (local runtime)
-
-1) AbstractCode stores the policy in run vars: `run.vars["_runtime"]["prompt_cache"]` (bool or object).
-2) AbstractRuntime injects a `prompt_cache_key` into each LLM call (unless the caller explicitly set one).
-3) The local AbstractCore client uses that key to maintain caches:
-
-- Builds immutable prefix caches for `system` and `tools` via `provider.prompt_cache_prepare_modules(...)`.
-- Forks the final prefix cache into the per-session key via `provider.prompt_cache_fork(...)`.
-- Appends new history messages incrementally via `provider.prompt_cache_update(...)`.
-- Rebuilds the per-session history cache if the history diverges (edits/truncation), while reusing the prefix caches when possible.
-
-This yields a 3-compartment cache layout: `system | tools | history` — changing one compartment doesn’t require rebuilding the others.
-
-### Provider support
-
-- Backends that report `mode=local_control_plane`: full module/fork/update caching.
-- Today that includes MLX and GGUF models whose llama.cpp chat format can be rendered exactly for cached prefixes (currently `chatml-function-calling` and `llama-3`).
-- Backends that report `mode=keyed`: stable per-session cache keys, but no local module/fork/update control plane.
-- Remote APIs: `prompt_cache_key` is forwarded when applicable, and remote prompt-cache control-plane access depends on the configured `/acore/prompt_cache/*` surface.
-
-Evidence:
-- Policy + key wiring: `abstractcode/react_shell.py`
-- Injection: `abstractruntime/src/abstractruntime/integrations/abstractcore/effect_handlers.py`
-- Module caching logic: `abstractruntime/src/abstractruntime/integrations/abstractcore/llm_client.py`
-
-## Workflow-driven UX events
-
-Workflows can emit `emit_event` effects (ledger-backed) to request host UX updates:
-- status text: `abstract.status`
-- messages: `abstract.message`
-- tool blocks: `abstract.tool_execution`, `abstract.tool_result`
-
-Contract + payload shapes: [`docs/ui_events.md`](ui_events.md).
-
-Evidence:
-- Ledger subscription + normalization: `abstractcode/workflow_agent.py::_subscribe_ui_events()`
-- TUI rendering: `abstractcode/react_shell.py` (`_on_step(...)`)
+- **No client-side agent loop.** Neither client decides what the model does next;
+  the runtime does.
+- **No shared code between the clients.** They are separate implementations of
+  the same wire contract in different languages, deliberately: each is idiomatic
+  for its platform. The contract they share is the gateway's, documented in
+  [`api.md`](api.md).
+- **Shared browser components are consumed as published packages.** `web/`
+  depends on `@abstractframework/ui-kit`, `panel-chat`, `monitor-flow`, and
+  `monitor-gpu` from npm, never as relative paths into another checkout, so it
+  builds from its own directory alone.
