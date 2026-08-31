@@ -9,8 +9,20 @@ import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types
 import type { AttachmentRef } from "../lib/types";
 import { resolve_blocking_wait } from "../lib/wait_resolution";
 import { ChatMessageContent } from "@abstractframework/panel-chat";
-import { FontScaleSelect, HeaderDensitySelect, Icon, type IconName, ProviderModelSelect, type ProviderOption, ThemeSelect, applyTheme, applyTypography } from "@abstractframework/ui-kit";
+import {
+  AfAppearanceDialog,
+  type AppearanceSettings,
+  Icon,
+  type IconName,
+  ProviderModelSelect,
+  type ProviderOption,
+  useAppearanceSettings,
+} from "@abstractframework/ui-kit";
 import { AgentCyclesPanel, build_agent_trace, type LedgerRecordItem } from "@abstractframework/monitor-flow";
+// Family CSS rule (uic c2833, option (a)): hosts import component CSS
+// explicitly; idempotent beside monitor-flow's current self-import until
+// uic removes it.
+import "@abstractframework/monitor-flow/agent_cycles.css";
 import { registerMonitorGpuWidget } from "@abstractframework/monitor-gpu";
 import { MarkdownRenderer } from "./markdown_renderer";
 import { ToolPicker } from "./tool_picker";
@@ -595,13 +607,15 @@ export function App(): React.ReactElement {
     [settings.gateway_auth_mode, settings.gateway_url, settings.auth_token]
   );
 
-  useLayoutEffect(() => {
-    applyTheme(settings.theme);
-  }, [settings.theme]);
-
-  useLayoutEffect(() => {
-    applyTypography({ font_scale: settings.font_scale, header_density: settings.header_density });
-  }, [settings.font_scale, settings.header_density]);
+  // Appearance is kit-owned (tier-1 theme compliance): the hook owns
+  // persistence (af_appearance_abstractcode_v1), migrates the legacy composite
+  // settings blob once (it carried theme/font_scale/header_density), and
+  // applies theme+typography synchronously at first paint (no default-theme
+  // flash) and on every change.
+  const [appearance, set_appearance] = useAppearanceSettings("abstractcode", {
+    legacyKey: "abstractcode.settings.v1",
+    defaults: { header_density: "comfortable" },
+  });
 
   useEffect(() => {
     save_settings(settings);
@@ -725,6 +739,8 @@ export function App(): React.ReactElement {
                       gateway={gateway}
                       settings={settings}
                       on_change={set_settings}
+                      appearance={appearance}
+                      on_appearance_change={set_appearance}
                       on_done={() => set_route({ name: "console", session_id: session.session_id })}
                     />
                   ) : null}
@@ -1168,7 +1184,14 @@ function format_relative_time(date: Date): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_change: (s: Settings) => void; on_done: () => void }): React.ReactElement {
+function SettingsPage(props: {
+  gateway: GatewayClient;
+  settings: Settings;
+  on_change: (s: Settings) => void;
+  appearance: AppearanceSettings;
+  on_appearance_change: (next: AppearanceSettings) => void;
+  on_done: () => void;
+}): React.ReactElement {
   const s = props.settings;
   const settings_ref = useRef<Settings>(s);
   useEffect(() => {
@@ -1458,6 +1481,7 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
 
   // UI state: user can open "Custom allowlist" even if everything is currently selected.
   const [tools_editor_open, set_tools_editor_open] = useState<boolean>(false);
+  const [appearance_open, set_appearance_open] = useState<boolean>(false);
 
   // If the selection becomes a strict subset (e.g. loaded from storage), auto-open the editor.
   useEffect(() => {
@@ -1473,19 +1497,18 @@ function SettingsPage(props: { gateway: GatewayClient; settings: Settings; on_ch
           <div className="settings_card_header">
             <h2>Appearance</h2>
           </div>
-          <div className="muted">Shared AbstractUIC theme + typography (saved locally).</div>
+          <div className="muted">Shared AbstractUIC theme + typography (kit-owned, saved locally per app).</div>
           <div className="field" style={{ marginTop: 10 }}>
-            <label>Theme</label>
-            <ThemeSelect value={s.theme} onChange={(theme) => props.on_change({ ...s, theme })} />
+            <button type="button" className="secondary" onClick={() => set_appearance_open(true)}>
+              Appearance… ({props.appearance.theme} · {props.appearance.font_scale} · {props.appearance.header_density})
+            </button>
           </div>
-          <div className="field" style={{ marginTop: 10 }}>
-            <label>Font size</label>
-            <FontScaleSelect value={s.font_scale} onChange={(font_scale) => props.on_change({ ...s, font_scale })} />
-          </div>
-          <div className="field" style={{ marginTop: 10 }}>
-            <label>Header size</label>
-            <HeaderDensitySelect value={s.header_density} onChange={(header_density) => props.on_change({ ...s, header_density })} />
-          </div>
+          <AfAppearanceDialog
+            open={appearance_open}
+            onClose={() => set_appearance_open(false)}
+            value={props.appearance}
+            onChange={props.on_appearance_change}
+          />
         </div>
 
         <div className="panel settings_card settings_card_gateway">

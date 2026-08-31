@@ -1,178 +1,76 @@
 #!/usr/bin/env python3
+"""Regenerate llms-full.txt: one offline snapshot of the core documentation.
+
+Run from the repository root:
+
+    python scripts/generate_llms_full.py
+
+The manifest below is deliberately explicit rather than a glob. llms-full.txt is
+documentation context for a model, not an archive: the terminal client's backlog,
+design records and reports are useful to contributors but would bury the pages
+that answer "what is this and how do I use it". Add a page here when it becomes
+part of the core set.
+"""
+
 from __future__ import annotations
 
-import argparse
-from datetime import date
+import sys
 from pathlib import Path
-import re
 
+ROOT = Path(__file__).resolve().parent.parent
+OUTPUT = ROOT / "llms-full.txt"
 
-DEFAULT_SOURCES: list[str] = [
+DOCUMENTS = [
     "README.md",
-    "CHANGELOG.md",
-    "CHANGELOD.md",
-    "CONTRIBUTING.md",
-    "SECURITY.md",
-    "ACKNOWLEDGMENTS.md",
     "docs/getting-started.md",
-    "docs/README.md",
     "docs/architecture.md",
-    "docs/cli.md",
     "docs/api.md",
-    "docs/faq.md",
     "docs/workflows.md",
     "docs/ui_events.md",
+    "docs/faq.md",
+    "docs/troubleshooting.md",
+    "docs/README.md",
     "docs/web.md",
     "docs/deployment-web.md",
     "docs/deployment-iphone.md",
+    "tui/README.md",
+    "tui/docs/getting-started.md",
+    "tui/docs/api.md",
+    "tui/docs/architecture.md",
+    "tui/docs/troubleshooting.md",
+    "tui/docs/faq.md",
+    "web/README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "ACKNOWLEDGEMENTS.md",
 ]
 
+HEADER = """# AbstractCode — full documentation snapshot
 
-def _read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+This is the documentation only; it contains no source code. See llms.txt for
+the linked index, and the repository itself for the code and tests that are
+the source of truth.
 
-
-_MD_LINK_RE = re.compile(r"\]\(([^)]+)\)")
-
-
-def _normalize_markdown_links(*, text: str, file_path: Path, root: Path) -> str:
-    """Rewrite relative Markdown links to repo-root relative paths.
-
-    Why: In llms-full.txt, many docs are concatenated into a single file, so links
-    like (getting-started.md) in docs/README.md would otherwise break.
-
-    We do a best-effort rewrite outside of fenced code blocks only.
-    """
-
-    def _rewrite_target(raw_inside_parens: str) -> str:
-        raw = str(raw_inside_parens or "").strip()
-        if not raw:
-            return raw
-
-        # Keep autolink-like targets untouched (common in Markdown).
-        if raw.startswith("<") and raw.endswith(">"):
-            inner = raw[1:-1].strip()
-            if inner.startswith(("http://", "https://", "mailto:")):
-                return raw
-            raw = inner
-
-        # Split optional title (first token is the URL/path).
-        parts = raw.split(None, 1)
-        target = parts[0]
-        rest = (" " + parts[1]) if len(parts) > 1 else ""
-
-        if not target or target.startswith(("#", "http://", "https://", "mailto:")):
-            return raw_inside_parens
-        if target.startswith("/"):
-            return raw_inside_parens
-
-        # Preserve query and anchor.
-        anchor = ""
-        query = ""
-        base = target
-        if "#" in base:
-            base, frag = base.split("#", 1)
-            anchor = "#" + frag
-        if "?" in base:
-            base, q = base.split("?", 1)
-            query = "?" + q
-        if not base:
-            return raw_inside_parens
-
-        try:
-            resolved = (file_path.parent / base).resolve()
-        except Exception:
-            return raw_inside_parens
-
-        try:
-            rel = resolved.relative_to(root)
-        except Exception:
-            return raw_inside_parens
-
-        new_target = rel.as_posix() + query + anchor
-        return new_target + rest
-
-    out_lines: list[str] = []
-    in_fence = False
-    for ln in str(text or "").splitlines(keepends=True):
-        stripped = ln.lstrip()
-        if stripped.startswith("```") or stripped.startswith("~~~"):
-            in_fence = not in_fence
-            out_lines.append(ln)
-            continue
-        if in_fence:
-            out_lines.append(ln)
-            continue
-
-        def _repl(m: re.Match[str]) -> str:
-            inner = m.group(1)
-            return "](" + _rewrite_target(inner) + ")"
-
-        out_lines.append(_MD_LINK_RE.sub(_repl, ln))
-
-    return "".join(out_lines)
+"""
 
 
-def build_llms_full(*, root: Path, sources: list[str], generated_on: str) -> str:
-    lines: list[str] = []
-    lines.append("# AbstractCode (llms-full)")
-    lines.append("")
-    lines.append("> Full, unabridged content of the core documentation files for this repo.")
-    lines.append("> Contains docs and project policies; it does not inline source code (see `llms.txt`).")
-    lines.append("> Recommended: use `llms.txt` as the index when link-fetching is available; use `llms-full.txt` for offline/single-file context.")
-    lines.append("> Generated from the files listed below. Relative Markdown links are normalized to repo-root paths.")
-    lines.append("> If you update docs/policies, regenerate this file.")
-    lines.append(f"> Last generated: {generated_on}")
-    lines.append("")
-    lines.append("Files included (source):")
-    for rel in sources:
-        lines.append(f"- `{rel}`")
-    lines.append("")
-    lines.append("---")
-    lines.append("")
-
-    for rel in sources:
-        p = (root / rel).resolve()
-        # Keep the marker path stable and repo-relative.
-        lines.append(f"<!-- FILE: {rel} -->")
-        lines.append("")
-        content = _normalize_markdown_links(text=_read_text(p), file_path=p, root=root)
-        # Ensure each file ends with a newline to avoid accidental concatenation.
-        if content and not content.endswith("\n"):
-            content += "\n"
-        lines.append(content)
-        lines.append("---")
-        lines.append("")
-
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate llms-full.txt from core docs/policies.")
-    parser.add_argument("--root", default=".", help="Repo root (default: .)")
-    parser.add_argument("--output", default="llms-full.txt", help="Output path (default: llms-full.txt)")
-    parser.add_argument("--date", default=None, help="Override generation date (YYYY-MM-DD)")
-    parser.add_argument(
-        "--sources",
-        default=None,
-        help="Comma-separated list of repo-relative source paths (default: built-in set).",
-    )
-    args = parser.parse_args(argv)
-
-    root = Path(args.root).expanduser().resolve()
-    out = (root / str(args.output)).resolve()
-    generated_on = str(args.date).strip() if args.date else date.today().isoformat()
-    if args.sources:
-        sources = [s.strip() for s in str(args.sources).split(",") if s.strip()]
-    else:
-        sources = list(DEFAULT_SOURCES)
-
-    missing = [rel for rel in sources if not (root / rel).exists()]
+def main() -> int:
+    missing = [name for name in DOCUMENTS if not (ROOT / name).is_file()]
     if missing:
-        raise SystemExit(f"Missing source files: {', '.join(missing)}")
+        # Fail loudly: a silently skipped page is how these files go stale.
+        print("missing documents:", ", ".join(missing), file=sys.stderr)
+        return 1
 
-    text = build_llms_full(root=root, sources=sources, generated_on=generated_on)
-    out.write_text(text, encoding="utf-8")
+    parts = [HEADER]
+    for name in DOCUMENTS:
+        parts.append(f"\n\n{'=' * 78}\n# FILE: {name}\n{'=' * 78}\n\n")
+        parts.append((ROOT / name).read_text(encoding="utf-8").rstrip() + "\n")
+
+    OUTPUT.write_text("".join(parts), encoding="utf-8")
+    print(f"wrote {OUTPUT.relative_to(ROOT)} from {len(DOCUMENTS)} documents "
+          f"({OUTPUT.stat().st_size:,} bytes)")
     return 0
 
 

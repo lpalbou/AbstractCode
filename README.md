@@ -1,159 +1,93 @@
 # AbstractCode
 
-Durable terminal TUI for agentic coding on the AbstractFramework stack (**AbstractAgent + AbstractRuntime + AbstractCore**).
+An agentic coding assistant that runs **durably on a server**, with two clients
+you can use interchangeably: a terminal application and a browser application.
 
-Status: **pre-alpha** (APIs and UX may change).
+The coding agent itself runs on [AbstractGateway](https://github.com/lpalbou/abstractgateway).
+Both clients are thin: they start runs, stream the run ledger live, render
+reasoning cycles and tool calls as they happen, resolve tool-approval and
+ask-user prompts, and steer a run while it is in flight. Because the work lives
+on the gateway rather than in the client, you can start a task in the terminal,
+close your laptop, and pick the same session up in the browser.
 
-Next: [`docs/getting-started.md`](docs/getting-started.md).
+Status: **pre-alpha.** Interfaces and UX may change.
 
-## AbstractFramework ecosystem
+## The two clients
 
-AbstractCode is part of **AbstractFramework**:
-- [AbstractFramework](https://github.com/lpalbou/AbstractFramework)
-- [AbstractCore](https://github.com/lpalbou/abstractcore) (providers + tools)
-- [AbstractRuntime](https://github.com/lpalbou/abstractruntime) (durable runs)
+| | Terminal | Browser |
+|---|---|---|
+| Install | `cargo install abstractcode` | `npx @abstractframework/code` |
+| Source | [`tui/`](tui/) | [`web/`](web/) |
+| Built with | Rust, [AbstractTUI](https://github.com/lpalbou/AbstractTUI) | TypeScript, React, Vite |
+| Docs | [`tui/README.md`](tui/README.md) | [`docs/web.md`](docs/web.md) |
 
-## Features
+Both talk to the gateway over HTTP and SSE only, and both resolve the same
+durable commands, so a run gated on your approval in one client can be approved
+from the other.
 
-- Interactive TUI (`abstractcode`) with **durable runs** (resume/pause/cancel), snapshots, and logs
-- **Approval-gated tools** by default (with an allowlist you can configure)
-- Built-in agents: `react`, `memact`, `codeact` (from `abstractagent`)
-- Plan + Review modes (`--plan`, `--review`; `/plan`, `/review`)
-- VisualFlow workflows:
-  - run locally: `abstractcode flow ...` (optional extra)
-  - run as an agent: `abstractcode --agent <flow_ref>`
-- Remote tool execution via **MCP** (`/mcp`, `/executor`)
-- Optional gateway-first Web UI in `web/`
+## Quick start
 
-## How it fits together (diagram)
-
-```mermaid
-flowchart LR
-  U[User] --> AC[AbstractCode\n(TUI/CLI host)]
-  AC --> AA[AbstractAgent\n(agent logic)]
-  AC --> AR[AbstractRuntime\n(durable execution)]
-  AR --> CORE[AbstractCore\n(LLM providers + tools)]
-
-  AC -->|approve| TOOLS[Local tools]
-  AC <--> MCP[MCP servers\n(remote tools)]
-
-  WEB[web/\n(browser host)] <--> GW[AbstractGateway\n(/api/gateway/*)]
-  AC -. optional .-> GW
-```
-
-## Install
-
-Python: **3.10+**
+You need a reachable AbstractGateway. To run one locally:
 
 ```bash
-pip install abstractcode
+pip install abstractgateway
+abstractgateway serve            # binds 0.0.0.0:8080; reach it at http://127.0.0.1:8080
 ```
 
-Optional (run VisualFlow locally via `abstractcode flow ...`):
+Then start whichever client you prefer:
 
 ```bash
-pip install "abstractcode[flow]"
+# Terminal
+cargo install abstractcode
+abstractcode                     # or: abstractcode doctor, to check the connection
+
+# Browser
+npx @abstractframework/code      # binds 0.0.0.0:3002; open http://127.0.0.1:3002
 ```
 
-From source (development):
+`abstractcode doctor` diagnoses the gateway connection and prints which
+credential source it used. See [`docs/getting-started.md`](docs/getting-started.md)
+for credentials, remote gateways, and first-run configuration.
 
-```bash
-pip install -e ".[dev]"
-```
+## What you can do
 
-## Quickstart (TUI)
-
-Ollama (default provider):
-
-```bash
-abstractcode --provider ollama --model qwen3:1.7b-q4_K_M
-```
-
-OpenAI-compatible server (e.g. LM Studio):
-
-```bash
-abstractcode --provider openai --base-url http://127.0.0.1:1234/v1 --model qwen/qwen3-next-80b
-```
-
-Inside the app:
-- `/help` shows the authoritative command list
-- type a task (or use `/task ...`)
-- tool approvals: `/auto-accept` (or start with `--auto-approve`)
-- attach files with `@path/to/file` in your prompt
-
-## Prompt caching (best-effort)
-
-AbstractCode defaults to `--prompt-cache auto`, which enables prompt caching when the runtime LLM client reports prompt-cache support via the AbstractCore capability contract (reduces repeated *prefill* work and can improve time-to-first-token).
-
-Toggle:
-- CLI: `--prompt-cache auto|on|off` (or `ABSTRACTCODE_PROMPT_CACHE=auto|on|off`)
-- TUI: `/cache auto|on|off`
-
-Provider notes:
-- `mlx`: full in-process KV caching with a 3-compartment cache: `system | tools | history`.
-- `huggingface` + GGUF (llama.cpp): same 3-compartment cache when AbstractCore can render the model's llama.cpp chat format exactly for caching (currently `chatml-function-calling` and `llama-3`); otherwise it falls back to stable keyed `LlamaRAMCache` reuse.
-- Remote APIs: `prompt_cache_key` is forwarded where applicable (server-managed; semantics vary by provider).
-
-Details: [`docs/architecture.md`](docs/architecture.md) and [`docs/faq.md`](docs/faq.md).
-
-## Persistence (durable runs)
-
-Default paths:
-- state file: `~/.abstractcode/state.json`
-- durable stores: `~/.abstractcode/state.d/`
-- saved settings: `~/.abstractcode/state.config.json`
-
-Disable persistence:
-
-```bash
-abstractcode --no-state
-```
-
-## Workflows
-
-- Local runs: `abstractcode flow run <flow_id_or_path> ...` (requires `abstractcode[flow]`)
-- Workflow agent: `abstractcode --agent /path/to/workflow.json ...`
-- Remote control-plane: `abstractcode gateway --help`
-- Bundle management on a gateway: `abstractcode workflow --help`
-
-Details: [`docs/workflows.md`](docs/workflows.md).
-
-## Web UI
-
-The web host lives in `web/` and connects to an **AbstractGateway** at `/api/gateway/*`.
-
-Start here:
-- [`docs/web.md`](docs/web.md)
-- [`docs/deployment-web.md`](docs/deployment-web.md)
+- **Durable runs** — pause, cancel, resume, and reattach to a session that
+  keeps running while the client is closed.
+- **Approval-gated tools** — tools stop and wait for you by default; approve or
+  reject from either client.
+- **Steering** — inject guidance into a run without restarting it.
+- **Workflows** — run a named agent bundle, `coding-agent:coder` by default.
+- **Review mode** — before a tool-call-free answer is accepted as final, a
+  verifier re-reads the transcript and can force more work.
+- **Live activity** — reasoning cycles, tool cards that update in place, token
+  counts, and context metering, streamed from the run ledger.
 
 ## Documentation
 
-- Start here: [`docs/getting-started.md`](docs/getting-started.md)
-- FAQ: [`docs/faq.md`](docs/faq.md)
-- Docs index: [`docs/README.md`](docs/README.md)
-- Agent-oriented docs: [`llms.txt`](llms.txt) and [`llms-full.txt`](llms-full.txt)
-- [`docs/architecture.md`](docs/architecture.md)
-- [`docs/cli.md`](docs/cli.md)
-- [`docs/api.md`](docs/api.md)
-- [`docs/workflows.md`](docs/workflows.md)
-- [`docs/ui_events.md`](docs/ui_events.md)
+- [`docs/getting-started.md`](docs/getting-started.md) — install, connect, first run
+- [`docs/architecture.md`](docs/architecture.md) — how the clients and gateway fit together
+- [`docs/api.md`](docs/api.md) — the gateway surface both clients speak
+- [`docs/web.md`](docs/web.md) — the browser client in depth
+- [`docs/faq.md`](docs/faq.md) — recurring questions and known limits
+- [`docs/troubleshooting.md`](docs/troubleshooting.md) — symptoms and fixes
+- [`tui/docs/`](tui/docs/) — terminal client reference, keys, and design notes
 
-## Development
+## The AbstractFramework ecosystem
 
-```bash
-pip install -e ".[dev]"
-pytest -q
-ruff check .
-black .
-```
+AbstractCode is one part of **AbstractFramework**:
 
-## Project
+- [AbstractFramework](https://github.com/lpalbou/AbstractFramework) — the ecosystem hub
+- [AbstractGateway](https://github.com/lpalbou/abstractgateway) — the durable control plane AbstractCode talks to
+- [AbstractCore](https://github.com/lpalbou/abstractcore) — providers and tools
+- [AbstractRuntime](https://github.com/lpalbou/abstractruntime) — durable run execution
+- [AbstractTUI](https://github.com/lpalbou/AbstractTUI) — the terminal rendering engine
+- [AbstractUIC](https://github.com/lpalbou/abstractuic) — the shared browser UI components
 
-- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
-- Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- Security: [`SECURITY.md`](SECURITY.md)
-- Acknowledgments: [`ACKNOWLEDGMENTS.md`](ACKNOWLEDGMENTS.md)
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development setup and the test
+commands for each client. Security reports go through [`SECURITY.md`](SECURITY.md).
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE).

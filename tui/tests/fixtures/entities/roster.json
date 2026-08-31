@@ -1,0 +1,104 @@
+{
+ "entities": [
+  {
+   "format_version": 1,
+   "entity_id": "entity:castor@home-fd023c86",
+   "name": "castor",
+   "slug": "castor",
+   "home_id": "home-fd023c86",
+   "created_at": "2026-07-07T06:05:36.015471+00:00",
+   "spark_version": 1,
+   "spark_hash": "a9390be7803f98b6839f3eb275e4f1c49e06e6d828e00943c40f6a091973f1cc",
+   "public_key_id": null,
+   "key_registry": null,
+   "portability": "Copying this directory moves the entity. home_id names the birth home and is kept on copy; re-homing (new home_id + provenance record) is deferred to the keys/signature work.",
+   "handle": "castor@10.0.0.215",
+   "files": {
+    "spark": true,
+    "memory": true,
+    "book": true
+   },
+   "state": {
+    "state": "asleep",
+    "changed_at": "2026-07-10T07:25:17.957973+00:00",
+    "reason": "by the operator (roster)",
+    "written_by": "operator",
+    "liveness": "alive"
+   },
+   "drives": {
+    "questions": {
+     "open": 6,
+     "resolved": 0,
+     "ratio": 0.0
+    },
+    "problems": {
+     "open": 2,
+     "repaired": 0,
+     "ratio": 0.0
+    },
+    "interests": {
+     "open": 85,
+     "explored": 0,
+     "ratio": 0.0
+    },
+    "candidates": {
+     "pending": 0,
+     "by_proposed_kind": {}
+    },
+    "provenance": "answers/resolves convention for questions/problems; attributes.explores for interests (exploring moves the ratio, never closes the interest); candidates = standing review offers, outside every ratio; closure/hidden folds applied; never-100% is the design \u2014 the drive stays alive"
+   }
+  },
+  {
+   "format_version": 1,
+   "entity_id": "entity:doorcheck",
+   "name": "Doorcheck",
+   "slug": "doorcheck",
+   "home_id": "home-97a6975a",
+   "created_at": "2026-07-15T20:10:16.511990+00:00",
+   "spark_version": 1,
+   "spark_hash": "dde36ecb377d6b41ee065faf5a7d568d60786d275751fe7db5c7004e9a80828c",
+   "public_key_id": null,
+   "key_registry": null,
+   "portability": "Copying this directory moves the entity. home_id names the birth home and is kept on copy; re-homing (new home_id + provenance record) is deferred to the keys/signature work.",
+   "handle": "doorcheck@10.0.0.215",
+   "files": {
+    "spark": true,
+    "memory": true,
+    "book": true
+   },
+   "state": {
+    "state": "asleep",
+    "changed_at": "2026-07-18T11:13:18.866785+00:00",
+    "reason": "[by person:admin via POST /entities/Doorcheck/state]",
+    "written_by": "operator",
+    "liveness": "alive"
+   },
+   "drives": {
+    "questions": {
+     "open": 0,
+     "resolved": 0,
+     "ratio": null
+    },
+    "problems": {
+     "open": 0,
+     "repaired": 0,
+     "ratio": null
+    },
+    "interests": {
+     "open": 3,
+     "explored": 0,
+     "ratio": 0.0
+    },
+    "candidates": {
+     "pending": 0,
+     "by_proposed_kind": {}
+    },
+    "provenance": "answers/resolves convention for questions/problems; attributes.explores for interests (exploring moves the ratio, never closes the interest); candidates = standing review offers, outside every ratio; closure/hidden folds applied; never-100% is the design \u2014 the drive stays alive"
+   }
+  },
+  {
+   "slug": "lost-home",
+   "error": "home unreadable: manifest.json missing (moved or corrupted)"
+  }
+ ]
+}

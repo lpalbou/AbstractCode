@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>probe: powerup drop</title>
+<style>body{background:#111;margin:0}canvas{display:block;margin:20px auto;image-rendering:pixelated}</style>
+</head>
+<body>
+<canvas id="screen" width="480" height="360"></canvas>
+<script>
+// PROBE FIXTURE for S2_enemies_killable, S3_weapon_progression and
+// S10_impact_vfx: the corrected spec's core loop, working. Enemies die to
+// fire and burst into particles; every fifth kill drops a capsule that drifts
+// toward the ship (a magnet pickup, so the scorer's scripted sweep collects
+// it deterministically); each capsule adds a parallel gun, so fire output
+// GROWS over a played minute — the exact signature S3 measures. The suite
+// asserts the three checks are credited here, which pins them to a positive
+// as well as to the corpus.
+//
+// Single file, no modules, so the delivery gate passes and the probe isolates
+// the checks it exists to validate.
+(function () {
+  const canvas = document.getElementById('screen');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  let state = 'title';
+  const held = Object.create(null);
+  const ship = { x: 90, y: H / 2, w: 22, h: 12, speed: 240, guns: 1 };
+  const shots = [], enemies = [], bits = [], pods = [], stars = [];
+  let frame = 0, cooldown = 0, last = -1, kills = 0, score = 0;
+  for (let i = 0; i < 40; i++) {
+    stars.push({ x: (i * 97) % W, y: (i * 61) % H });
+  }
+  window.addEventListener('keydown', function (e) {
+    held[e.code] = true;
+    if (e.code === 'Enter' && state === 'title') state = 'play';
+    if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+  });
+  window.addEventListener('keyup', function (e) { held[e.code] = false; });
+
+  function fire() {
+    for (let g = 0; g < ship.guns; g++) {
+      shots.push({ x: ship.x + ship.w, y: ship.y - 1 + (g - (ship.guns - 1) / 2) * 10, vx: 430 });
+    }
+  }
+
+  function boom(x, y) {
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      bits.push({ x: x, y: y, dx: Math.cos(a) * 90, dy: Math.sin(a) * 90, life: 0.4 });
+    }
+  }
+
+  function update(dt) {
+    if (state !== 'play') return;
+    const dx = (held.ArrowRight ? 1 : 0) - (held.ArrowLeft ? 1 : 0);
+    const dy = (held.ArrowDown ? 1 : 0) - (held.ArrowUp ? 1 : 0);
+    ship.x = Math.max(60, Math.min(W - 160, ship.x + dx * ship.speed * dt));
+    ship.y = Math.max(16, Math.min(H - 16, ship.y + dy * ship.speed * dt));
+    cooldown -= 1;
+    if ((held.Space || held.KeyZ) && cooldown <= 0) { fire(); cooldown = 4; }
+    for (const s of shots) s.x += s.vx * dt;
+    for (let i = shots.length - 1; i >= 0; i--) if (shots[i].x > W) shots.splice(i, 1);
+    if (frame % 34 === 0) {
+      enemies.push({ x: W + 12, y: 20 + ((frame * 37) % (H - 40)), base: 20 + ((frame * 37) % (H - 40)), age: 0 });
+    }
+    for (const e of enemies) {
+      e.age += dt;
+      e.x -= 92 * dt;
+      e.y = e.base + Math.sin(e.age * 3) * 24;
+    }
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      const e = enemies[i];
+      let dead = e.x < -20;
+      for (let j = shots.length - 1; j >= 0 && !dead; j--) {
+        const s = shots[j];
+        if (s.x > e.x - 4 && s.x < e.x + 18 && s.y > e.y - 12 && s.y < e.y + 12) {
+          dead = true;
+          shots.splice(j, 1);
+          score += 100;
+          kills++;
+          boom(e.x, e.y);
+          if (kills % 5 === 0) pods.push({ x: e.x, y: e.y });
+        }
+      }
+      if (dead) enemies.splice(i, 1);
+    }
+    for (const b of bits) { b.x += b.dx * dt; b.y += b.dy * dt; b.life -= dt; }
+    for (let i = bits.length - 1; i >= 0; i--) if (bits[i].life <= 0) bits.splice(i, 1);
+    for (const p of pods) {
+      // Magnet drift toward the ship: collection is deterministic under the
+      // scorer's sweep rather than a matter of which row the drop chose.
+      p.x += (ship.x - p.x) * 1.6 * dt - 30 * dt;
+      p.y += (ship.y - p.y) * 1.6 * dt;
+    }
+    for (let i = pods.length - 1; i >= 0; i--) {
+      const p = pods[i];
+      if (Math.abs(p.x - ship.x) < 18 && Math.abs(p.y - ship.y) < 14) {
+        pods.splice(i, 1);
+        ship.guns = Math.min(4, ship.guns + 1);
+      } else if (p.x < -12) pods.splice(i, 1);
+    }
+    for (const st of stars) { st.x -= 40 * dt; if (st.x < 0) st.x += W; }
+    frame++;
+  }
+
+  function render() {
+    ctx.fillStyle = '#0b0f1a';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#3a4a6a';
+    for (const st of stars) ctx.fillRect(st.x | 0, st.y | 0, 2, 2);
+    if (state === 'title') {
+      ctx.fillStyle = '#dfe9ff';
+      ctx.font = '20px monospace';
+      ctx.fillText('DROP LOOP PROBE', 140, 150);
+      ctx.font = '12px monospace';
+      ctx.fillText('Press Enter', 200, 190);
+      return;
+    }
+    ctx.fillStyle = '#c86bff';
+    for (const e of enemies) ctx.fillRect(e.x | 0, (e.y - 8) | 0, 16, 16);
+    ctx.fillStyle = '#ff5f5f';
+    for (const s of shots) ctx.fillRect(s.x | 0, s.y | 0, 10, 3);
+    ctx.fillStyle = '#ffe28a';
+    for (const b of bits) ctx.fillRect(b.x | 0, b.y | 0, 3, 3);
+    ctx.fillStyle = '#63ff9c';
+    for (const p of pods) ctx.fillRect((p.x - 5) | 0, (p.y - 5) | 0, 10, 10);
+    ctx.fillStyle = '#8fd2ff';
+    ctx.fillRect(ship.x | 0, (ship.y - 6) | 0, ship.w, 12);
+    ctx.fillStyle = '#dfe9ff';
+    ctx.font = '12px monospace';
+    ctx.fillText('SCORE ' + score, 8, 14);
+    ctx.fillText('GUNS ' + ship.guns, W - 80, 14);
+  }
+
+  function loop(now) {
+    if (last < 0) last = now;
+    const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+    last = now;
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

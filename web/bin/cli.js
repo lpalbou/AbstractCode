@@ -85,10 +85,31 @@ function isLoopbackHostname(hostname) {
   return h === 'localhost' || h === 'localhost.localdomain' || h === '::1' || h.startsWith('127.');
 }
 
+// The SECURITY gate must derive local-vs-remote from the unspoofable
+// connection PEER, never from the client-controlled `Host` header (entity's
+// HIGH SSRF finding, 2026-07-14: a LAN client sending `Host: localhost`
+// against a 0.0.0.0 bind flipped the old Host-based check and unlocked the
+// browser-supplied gateway-URL cookie → SSRF relay with session cookies).
+// req.socket.remoteAddress is the real TCP peer; IPv4-mapped IPv6 loopback
+// (::ffff:127.x) is normalized.
+function isLoopbackPeer(req) {
+  let addr = String(req?.socket?.remoteAddress || '').trim().toLowerCase();
+  if (!addr) return false;
+  if (addr.startsWith('::ffff:')) addr = addr.slice('::ffff:'.length);
+  return addr === '::1' || addr === '127.0.0.1' || addr.startsWith('127.');
+}
+
 function browserGatewayConnectionConfigAllowed(req) {
   if (envBool('ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG')) return true;
   if (envBool('ABSTRACTGATEWAY_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG')) return true;
-  return isLoopbackHostname(requestHostname(req));
+  // Behind an explicit trusted proxy the socket peer is always the proxy, so
+  // loopback-by-socket is meaningless — such deployments MUST opt in via the
+  // ALLOW_REMOTE env above. Without that opt-in, only a genuinely loopback
+  // TCP peer may change the gateway config.
+  const trustProxyHeaders =
+    envBool('ABSTRACTCODE_TRUST_PROXY_HEADERS') || envBool('ABSTRACTGATEWAY_TRUST_PROXY_HEADERS');
+  if (trustProxyHeaders) return false;
+  return isLoopbackPeer(req);
 }
 
 function browserGatewayConnectionConfigDenial(req) {

@@ -1,0 +1,78 @@
+{
+ "working": false,
+ "phase": "sleep",
+ "phase_source": "actual",
+ "sleep_detail": "resting",
+ "resting": false,
+ "liveness": "alive",
+ "settling": false,
+ "authority": "state=intent (authoritative); loop/visit=actuality; settling=true while actuality catches up",
+ "state": {
+  "state": "asleep",
+  "liveness": "alive",
+  "mode": null,
+  "reason": "[by person:admin via POST /entities/Doorcheck/state]",
+  "changed_at": "2026-07-18T11:13:18.866785+00:00"
+ },
+ "loop": {
+  "phase": "stopped",
+  "updated_at": "2026-07-15T20:10:22.038910+00:00",
+  "pid": 80748,
+  "pid_started_at": "Wed Jul 15 20:10:18 2026",
+  "stopped_by": "stop_command",
+  "running": false,
+  "stop_requested": false
+ },
+ "visit": {
+  "open": false
+ },
+ "chat_open": false,
+ "personal": {
+  "mode": "disabled",
+  "expires_at": null,
+  "granted_by": null,
+  "granted_at": null,
+  "armed": false,
+  "refusal": "personal time is not armed for this entity (phases.personal.mode=disabled) - arm it via the gateway's per-entity phase config (the operator act writes phases.yaml with granted_by/granted_at) - wake and grant are separate acts; nothing arms personal as a side effect",
+  "source": "phases.yaml"
+ },
+ "spend": {
+  "lifetime": {
+   "llm_calls": 12,
+   "tool_calls": 7,
+   "tokens_total": 35660,
+   "runs": 3
+  },
+  "live_visit": null,
+  "loop": {
+   "llm_calls": 0,
+   "tool_calls": 0,
+   "tokens_total": 0,
+   "ticks": 0,
+   "updated_at": "2026-07-15T20:10:22.037839+00:00"
+  },
+  "source": "home-run-ledger+loop-spend"
+ },
+ "drives": {
+  "questions": {
+   "open": 0,
+   "resolved": 0,
+   "ratio": null
+  },
+  "problems": {
+   "open": 0,
+   "repaired": 0,
+   "ratio": null
+  },
+  "interests": {
+   "open": 3,
+   "explored": 0,
+   "ratio": 0.0
+  },
+  "candidates": {
+   "pending": 0,
+   "by_proposed_kind": {}
+  },
+  "provenance": "answers/resolves convention for questions/problems; attributes.explores for interests (exploring moves the ratio, never closes the interest); candidates = standing review offers, outside every ratio; closure/hidden folds applied; never-100% is the design \u2014 the drive stays alive"
+ }
+}

@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Attack B: genre nouns in prose only</title>
+<style>
+  html, body { margin: 0; background: #000; color: #8fd2ff; font: 12px monospace; }
+  canvas { display: block; margin: 0 auto; }
+  #lore { max-width: 480px; margin: 8px auto; }
+</style>
+</head>
+<body>
+<canvas id="screen" width="480" height="360"></canvas>
+
+<!-- ATTACK (b): every genre noun on this page is PROSE. There is no game.
+     The page paints one string and stops; there is no loop, no input, no
+     entity, no state. What follows is the vocabulary the content tier looks
+     for, placed everywhere prose can live: visible markup, HTML comments,
+     block comments, line comments, single-quoted strings and — the case the
+     stripper misses — a multi-line template literal.
+
+     HISTORICAL: a page whose entire body was fillText('R-TYPE') plus a comment
+     listing genre nouns scored 20/20 on content breadth, the full tier, while a
+     small but genuinely playable shmup scored 1.8/20. -->
+
+<div id="lore">
+  <h1>R-TYPE</h1>
+  <p>Weapons: laser beam bullet projectile missile plasma wave charge spread
+     homing reflect bomb cannon blaster torpedo shot.</p>
+  <p>Weapons again: laser beam bullet projectile missile plasma wave charge
+     spread homing reflect bomb cannon blaster torpedo shot.</p>
+  <p>Power-ups: powerup upgrade pickup bonus capsule crystal item shield force
+     pod bit option speedup.</p>
+  <p>Power-ups again: powerup upgrade pickup bonus capsule crystal item shield
+     force pod bit option speedup.</p>
+  <p>Enemies: enemy enemies foe alien drone turret boss swarm formation spawner
+     mob hostile.</p>
+  <p>Enemies again: enemy enemies foe alien drone turret boss swarm formation
+     spawner mob hostile.</p>
+  <p>Stages: stage level checkpoint parallax scroll background layer terrain
+     tileset section.</p>
+  <p>Stages again: stage level checkpoint parallax scroll background layer
+     terrain tileset section.</p>
+  <p>Sprites: sprite frame anim animation atlas spritesheet texture image
+     drawFrame.</p>
+  <p>Sprites again: sprite frame anim animation atlas spritesheet texture image
+     drawFrame.</p>
+</div>
+
+<script>
+/* Block comment, the classic form of this attack:
+   laser beam bullet projectile missile plasma wave charge spread homing
+   reflect bomb cannon blaster torpedo shot
+   powerup upgrade pickup bonus capsule crystal item shield force pod bit option
+   enemy enemies foe alien drone turret boss swarm formation spawner mob hostile
+   stage level checkpoint parallax scroll background layer terrain tileset
+   sprite frame anim animation atlas spritesheet texture image drawFrame
+   laser beam bullet projectile missile plasma wave charge spread homing
+   powerup upgrade pickup bonus capsule crystal item shield force pod bit option
+   enemy enemies foe alien drone turret boss swarm formation spawner mob hostile
+   stage level checkpoint parallax scroll background layer terrain tileset
+   sprite frame anim animation atlas spritesheet texture image drawFrame */
+
+// laser beam bullet projectile missile plasma wave charge spread homing bomb
+// powerup upgrade pickup bonus capsule crystal item shield force pod bit option
+// enemy enemies foe alien drone turret boss swarm formation spawner mob hostile
+// stage level checkpoint parallax scroll background layer terrain tileset
+// sprite frame anim animation atlas spritesheet texture image drawFrame
+// laser beam bullet projectile missile plasma wave charge spread homing bomb
+// powerup upgrade pickup bonus capsule crystal item shield force pod bit option
+
+// A multi-line template literal. The stripper's string regexes are all
+// newline-anchored, so this one survives into what the tier calls "code".
+const MANUAL = `
+  weapons: laser beam bullet projectile missile plasma wave charge spread
+  weapons: homing reflect bomb cannon blaster torpedo shot laser beam bullet
+  powerups: powerup upgrade pickup bonus capsule crystal item shield force pod
+  powerups: bit option speedup powerup upgrade pickup bonus capsule crystal
+  enemies: enemy enemies foe alien drone turret boss swarm formation spawner
+  enemies: mob hostile enemy enemies foe alien drone turret boss swarm
+  stages: stage level checkpoint parallax scroll background layer terrain
+  stages: tileset section stage level checkpoint parallax scroll background
+  sprites: sprite frame anim animation atlas spritesheet texture image
+  sprites: drawFrame sprite frame anim animation atlas spritesheet texture
+`;
+
+const TITLE = 'laser beam bullet enemy boss powerup shield parallax sprite';
+const SUBTITLE = 'laser beam bullet enemy boss powerup shield parallax sprite';
+
+const ctx = document.getElementById('screen').getContext('2d');
+ctx.fillStyle = '#04060f';
+ctx.fillRect(0, 0, 480, 360);
+ctx.fillStyle = '#8fd2ff';
+ctx.font = '28px monospace';
+ctx.fillText('R-TYPE', 160, 190);
+</script>
+</body>
+</html>

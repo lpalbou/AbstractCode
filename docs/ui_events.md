@@ -18,8 +18,6 @@ Canonical namespace: `abstract.*`
 
 Deprecated alias: `abstractcode.*` is accepted and normalized to `abstract.*`.
 
-Evidence: `abstractcode/workflow_agent.py::_normalize_ui_event_name()`.
-
 ## Supported events
 
 ### 1) `abstract.status`
@@ -35,10 +33,6 @@ Accepted payload shapes:
 - `-1`: sticky (do not auto-clear)
 - `> 0`: auto-clear after that many seconds (best-effort)
 
-Evidence:
-- Payload parsing: `abstractcode/workflow_agent.py::_extract_status()`
-- TUI rendering: `abstractcode/react_shell.py` (on-step handler for `"status"`)
-
 ### 2) `abstract.message`
 
 Purpose: show a notification/message block in the host.
@@ -48,10 +42,6 @@ Accepted payload shapes:
 - object:
   - required: `text`
   - optional: `level` (`info|success|warning|error`), `title`, `meta` (object)
-
-Evidence:
-- Payload parsing: `abstractcode/workflow_agent.py::_extract_message()`
-- TUI rendering: `abstractcode/react_shell.py` (on-step handler for `"message"`)
 
 ### 3) `abstract.tool_execution`
 
@@ -67,8 +57,6 @@ Supported tool call object shapes (best-effort normalization):
 - OpenAI-ish:
   - `{ "id": "...", "type": "function", "function": { "name": "read_file", "arguments": "{\"path\":\"README.md\"}" } }`
 
-Evidence: `abstractcode/workflow_agent.py::_extract_tool_exec()` and UI translation in `_subscribe_ui_events()`.
-
 ### 4) `abstract.tool_result`
 
 Purpose: render a “tool result” UX block.
@@ -82,11 +70,8 @@ Supported tool result object fields (best-effort):
 - `success` (boolean)
 - `output`/`result`/`content`/`text` (any; rendered as string)
 
-Evidence: `abstractcode/workflow_agent.py::_extract_tool_result()` and UI translation in `_subscribe_ui_events()`.
-
 ## Operational notes
 
 - Events are only surfaced after the corresponding ledger record is written as `status == completed`.
 - Hosts must treat these events as **UX-only** (they must not affect correctness).
 
-Evidence: ledger subscription filter in `abstractcode/workflow_agent.py::_subscribe_ui_events()`.

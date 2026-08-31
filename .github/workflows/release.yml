@@ -1,5 +1,15 @@
 name: Release
 
+# Two artifacts ship from this repository on independent versions, so each
+# owns a tag prefix:
+#
+#   v<version>      the terminal client — crates.io `abstractcode`, plus
+#                   prebuilt binaries attached to the GitHub release
+#   web-v<version>  the browser client — npm `@abstractframework/code`
+#
+# A single `v*` namespace cannot serve both: each publish job asserts the tag
+# matches its own manifest, and two manifests on one tag can never both agree.
+
 on:
   workflow_dispatch:
     inputs:
@@ -10,97 +20,85 @@ on:
         type: choice
         options:
           - all
+          - cli
           - web
-      version:
-        description: "Expected package version, with or without leading v"
-        required: false
-        type: string
   push:
     tags:
       - "v*"
+      - "web-v*"
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  test-python:
-    name: Test and build Python package
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target != 'web' }}
+  test-cli:
+    name: Test the terminal client
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.target != 'web') }}
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: abstractcode
     steps:
-      - name: Check out AbstractCode
-        uses: actions/checkout@v4
-        with:
-          path: abstractcode
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          python-version: "3.12"
+          components: rustfmt, clippy
 
-      - name: Validate Python tag version
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Validate tag version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PKG_VERSION="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          PKG_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' tui/Cargo.toml | head -1)"
           if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo "Tag version ($TAG_VERSION) does not match pyproject.toml version ($PKG_VERSION)." >&2
+            echo "Tag version ($TAG_VERSION) does not match tui/Cargo.toml version ($PKG_VERSION)." >&2
             exit 1
           fi
 
-      - name: Install package
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,flow]"
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
-        run: python -m pytest -q
+        run: cargo test --workspace --locked
 
-      - name: Build distribution
-        run: |
-          python -m pip install --upgrade build twine
-          python -m build
-          python -m twine check dist/*
-
-      - name: Upload Python distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-dist
-          path: abstractcode/dist/*
+      - name: Package
+        run: cargo package --manifest-path tui/Cargo.toml --locked
 
   test-web:
-    name: Test and build web package
+    name: Test and build the web client
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/web-v')) || (github.event_name == 'workflow_dispatch' && inputs.target != 'cli') }}
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: abstractcode/web
+        working-directory: web
     steps:
-      - name: Check out AbstractCode
-        uses: actions/checkout@v4
-        with:
-          path: abstractcode
-
-      - name: Check out AbstractUIC
-        uses: actions/checkout@v4
-        with:
-          repository: lpalbou/AbstractUIC
-          path: abstractuic
+      - uses: actions/checkout@v4
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "24"
-          registry-url: "https://registry.npmjs.org"
           cache: npm
-          cache-dependency-path: abstractcode/web/package-lock.json
+          cache-dependency-path: web/package-lock.json
+
+      - name: Validate tag version
+        if: startsWith(github.ref, 'refs/tags/web-v')
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#web-v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "Tag version ($TAG_VERSION) does not match web/package.json version ($PKG_VERSION)." >&2
+            exit 1
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -114,76 +112,161 @@ jobs:
       - name: Validate npm package contents
         run: npm pack --dry-run
 
-      - name: Validate npm tag version
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PKG_VERSION="$(node -p "require('./package.json').version")"
-          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo "Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)." >&2
-            exit 1
-          fi
-
-      - name: Validate npm dispatch version
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.version != '' }}
-        env:
-          RELEASE_INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          VERSION="${RELEASE_INPUT_VERSION#v}"
-          PKG_VERSION="$(node -p "require('./package.json').version")"
-          if [ "$VERSION" != "$PKG_VERSION" ]; then
-            echo "Input version ($VERSION) does not match package.json version ($PKG_VERSION)." >&2
-            exit 1
-          fi
-          if ! grep -Fq "## [$VERSION] - " ../CHANGELOG.md; then
-            echo "CHANGELOG.md has no entry for $VERSION." >&2
-            exit 1
-          fi
-
-  publish-pypi:
-    name: Publish Python package to PyPI
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target != 'web' }}
+  publish-crate:
+    name: Publish the terminal client to crates.io
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.target != 'web') }}
+    needs: [test-cli]
     runs-on: ubuntu-latest
-    needs: [test-python, test-web]
-    environment:
-      name: pypi
-      url: https://pypi.org/project/abstractcode/
+    environment: crates-io
     permissions:
       contents: read
+      # Trusted Publishing: crates.io mints a short-lived token from this
+      # workflow's OIDC identity, so no long-lived secret lives in the repo.
       id-token: write
     steps:
-      - name: Download Python distribution
-        uses: actions/download-artifact@v4
-        with:
-          name: python-dist
-          path: dist
+      - uses: actions/checkout@v4
 
-      - name: Publish package
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: dtolnay/rust-toolchain@stable
+
+      # A crates.io version is permanent, so publishing one that already exists
+      # is an error rather than a no-op. Checking first makes re-running a
+      # release, or tagging a version that was published by hand, succeed
+      # quietly instead of failing the whole run on a step that had nothing to
+      # do.
+      - name: Is this version already published?
+        id: check
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' tui/Cargo.toml | head -1)"
+          CODE="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H 'User-Agent: abstractcode-release' \
+            "https://crates.io/api/v1/crates/abstractcode/${VERSION}")"
+          if [ "$CODE" = "200" ]; then
+            echo "abstractcode ${VERSION} is already on crates.io — skipping publish"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Authenticate to crates.io
+        if: steps.check.outputs.published == 'false'
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
+      - name: Publish
+        if: steps.check.outputs.published == 'false'
+        run: cargo publish --manifest-path tui/Cargo.toml --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  binaries:
+    name: Build ${{ matrix.target }}
+    # Tag-only: a GitHub release needs a real tag to attach to.
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    needs: [test-cli]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross-linker
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} --manifest-path tui/Cargo.toml
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          tar -C "target/${{ matrix.target }}/release" -czf "abstractcode-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz" abstractcode
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "target/${{ matrix.target }}/release/abstractcode.exe" -DestinationPath "abstractcode-$env:GITHUB_REF_NAME-${{ matrix.target }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: abstractcode-${{ matrix.target }}
+          path: |
+            abstractcode-*.tar.gz
+            abstractcode-*.zip
+
+  github-release:
+    name: Attach binaries to the GitHub release
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    needs: [binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(dist/*)
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "no build artifacts to attach" >&2
+            exit 1
+          fi
+          # Create the release, or attach to the one that already exists. Only
+          # an "already exists" failure may fall through — an auth failure or a
+          # missing tag must surface as itself rather than as a confusing
+          # second error from the fallback.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes \
+              --verify-tag \
+              "${assets[@]}"
+          fi
 
   publish-npm:
-    name: Publish web package to npm
+    name: Publish the web client to npm
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/web-v')) || (github.event_name == 'workflow_dispatch' && inputs.target != 'cli') }}
+    needs: [test-web]
     runs-on: ubuntu-latest
-    needs: [test-python, test-web]
-    if: ${{ always() && !cancelled() && needs.test-web.result == 'success' && ((github.event_name == 'workflow_dispatch' && inputs.target == 'web') || needs.test-python.result == 'success') }}
     environment: npm
     permissions:
       contents: read
       id-token: write
     defaults:
       run:
-        working-directory: abstractcode/web
+        working-directory: web
     steps:
-      - name: Check out AbstractCode
-        uses: actions/checkout@v4
-        with:
-          path: abstractcode
-
-      - name: Check out AbstractUIC
-        uses: actions/checkout@v4
-        with:
-          repository: lpalbou/AbstractUIC
-          path: abstractuic
+      - uses: actions/checkout@v4
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -191,36 +274,13 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
           cache: npm
-          cache-dependency-path: abstractcode/web/package-lock.json
+          cache-dependency-path: web/package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Test
-        run: npm test
-
       - name: Build
         run: npm run build
 
-      - name: Validate npm package contents
-        run: npm pack --dry-run
-
-      - name: Validate tag version
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PKG_VERSION="$(node -p "require('./package.json').version")"
-          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo "Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)." >&2
-            exit 1
-          fi
-
-      - name: Publish package
-        run: |
-          PKG_NAME="$(node -p "require('./package.json').name")"
-          PKG_VERSION="$(node -p "require('./package.json').version")"
-          if npm view "${PKG_NAME}@${PKG_VERSION}" version >/dev/null 2>&1; then
-            echo "${PKG_NAME}@${PKG_VERSION} is already published; skipping."
-          else
-            npm publish --access public --provenance
-          fi
+      - name: Publish
+        run: npm publish --provenance --access public

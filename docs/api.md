@@ -1,112 +1,97 @@
 # API and integration points
 
-Start here: [`docs/getting-started.md`](getting-started.md).
+AbstractCode has no server of its own. Both clients integrate through
+[AbstractGateway](https://github.com/lpalbou/abstractgateway), over plain HTTP
+and Server-Sent Events, and that gateway surface is the contract to program
+against.
 
-AbstractCode is primarily a **CLI/TUI application**. This page documents the integration points that are most useful for external users:
-- the CLI surface (stable entrypoint for scripting)
-- minimal Python API (entrypoint function)
-- workflow interface contracts (`abstractcode.agent.v1`)
-- workflow-driven UI events (`abstract.*`)
-- gateway interaction surface (what this repo’s clients call)
+## Command-line surface
 
-Status: **pre-alpha** — interfaces may evolve, but changes should be reflected in the docs and [`CHANGELOG.md`](../CHANGELOG.md).
-
-## 1) CLI (primary interface)
-
-The CLI entrypoint is the published script:
+The terminal client is the scriptable entry point.
 
 ```bash
-abstractcode --help
+abstractcode                              # launch the interface
+abstractcode exec "<prompt>" [OPTIONS]    # headless one-shot run, prints events
+abstractcode login [OPTIONS]              # verify and persist gateway credentials
+abstractcode doctor [OPTIONS]             # diagnose the gateway connection
+abstractcode --caps                       # print the terminal capability report
 ```
 
-Note: workflow-related subcommands are dispatched by the first argument:
-- `abstractcode flow --help`
-- `abstractcode gateway --help`
-- `abstractcode workflow --help`
+`abstractcode --help` prints the full option list. The two that matter most for
+integration:
 
-Key modes:
-- interactive TUI: `abstractcode ...`
-- one-shot: `abstractcode --prompt "..." ...`
-- local VisualFlow runs: `abstractcode flow ...` (requires `abstractcode[flow]`)
-- gateway control-plane: `abstractcode gateway ...`
-- gateway bundle management: `abstractcode workflow ...`
+- `exec` runs a prompt to completion without an interface and streams events to
+  stdout, which is what bench harnesses and orchestrating agents consume. Its
+  exit code reflects the run's terminal status.
+- `doctor` is the supported way to assert an environment is wired correctly
+  before running anything else.
 
-Evidence: `abstractcode/cli.py`.
+Configuration resolves in a fixed order — explicit flag, then environment, then
+the login store at `~/.abstractcode/gateway.json`, then the default
+`http://127.0.0.1:8080`. `doctor` prints which source won.
 
-## 2) Python API (minimal)
+## Library surface
 
-The supported Python entrypoint is:
+The terminal client also builds as a Rust library:
 
-```python
-from abstractcode import main
-
-raise SystemExit(main(["--help"]))
+```toml
+[dependencies]
+abstractcode = "0.5"
 ```
 
-Evidence: `abstractcode/__init__.py` defines `main(argv=None)` and delegates to `abstractcode/cli.py`.
+```rust
+use abstractcode::gateway::GatewayClient;
+```
 
-You can also run the module:
+`GatewayClient` is the gateway transport — starting runs, streaming the ledger,
+and submitting durable commands. The interface modules above it are internal and
+change freely between releases; treat the crate's library surface as
+unstable while the project is pre-alpha.
+
+## Gateway surface
+
+Both clients use the same endpoints. This is the integration contract:
+
+| Purpose | Shape |
+|---|---|
+| Start a run | `POST` a run request with the workflow, prompt, and options |
+| Stream a run | `GET` the run's ledger stream as SSE (`event: step`, terminated by `event: done`) |
+| Resolve a wait | `POST` a durable command — approve, reject, or answer |
+| Steer a run | `POST` a guidance command against the live run |
+| Pause / cancel | `POST` the corresponding durable command |
+| Session history | `GET` the session's history bundle for replay |
+| Discovery | `GET` the available workflows, providers, models, and tools |
+
+Two properties follow from the gateway owning all of this, and both are relied
+on by the clients:
+
+- **Commands are durable and idempotent by id.** A command survives a client
+  disconnect, and re-submitting one does not double-apply it. This is why a
+  wait raised in one client can be resolved in another.
+- **The ledger is the record.** Rendering is a replay of it. A client that
+  reconnects mid-run recovers the full state by replaying the ledger rather
+  than by holding state across the gap.
+
+See the gateway's own documentation for exact paths, payload schemas, and
+authentication modes; it owns those definitions, and pinning them here would
+guarantee drift.
+
+## Workflow contract
+
+A run names a workflow bundle, `coding-agent:coder` by default. Agents exposed
+to AbstractCode implement the `abstractcode.agent.v1` interface, described in
+[`workflows.md`](workflows.md). Workflow-driven interface events — status lines,
+messages, and tool-execution cards — are described in [`ui_events.md`](ui_events.md).
+
+## Browser integration
+
+The browser client is published as `@abstractframework/code` and also runs as a
+served application:
 
 ```bash
-python -m abstractcode --help
+npx @abstractframework/code            # http://127.0.0.1:3002
+ABSTRACTCODE_GATEWAY_URL=... npx @abstractframework/code
 ```
 
-Evidence: `abstractcode/__main__.py`.
-
-## 2b) Prompt caching
-
-AbstractCode exposes prompt caching via the CLI/TUI (`--prompt-cache` and `/cache`). Internally it is configured through run vars and injected into LLM call params:
-
-- Run vars: `run.vars["_runtime"]["prompt_cache"]`
-  - `false`: disable injection
-  - `true`: enable injection (key is derived from session/run metadata)
-  - `{"enabled": true, "key": "mykey"}`: enable and force a specific `prompt_cache_key`
-
-- LLM params: `prompt_cache_key`
-  - If a caller explicitly sets `prompt_cache_key` in params, that value wins and runtime injection is skipped.
-  - Passing `prompt_cache_key=None`/empty disables caching for that call.
-
-Local-control-plane note: when the selected backend reports prompt-cache module support, the runtime maintains a 3-compartment cache (`system | tools | history`) using AbstractCore’s prompt-cache control plane (`prepare_modules` / `fork` / `update`). For GGUF this depends on the current model's llama.cpp chat format having an exact cached renderer; otherwise the backend remains keyed-only.
-
-## 3) Workflow agent contract: `abstractcode.agent.v1`
-
-AbstractCode can run a VisualFlow workflow as an agent:
-
-```bash
-abstractcode --agent /path/to/workflow.json --provider ollama --model qwen3:1.7b-q4_K_M
-```
-
-Contract summary (required):
-- `interfaces: ["abstractcode.agent.v1"]`
-- **On Flow Start** outputs: `provider`, `model`, `prompt`, `tools`
-- **On Flow End** inputs: `response`, `success`, `meta`
-
-Details: [`docs/workflows.md`](workflows.md).
-
-Evidence:
-- contract validation/scaffold: `abstractcode/workflow_agent.py` (`_apply_abstractcode_agent_v1_scaffold`, `_validate_abstractcode_agent_v1`)
-- run variable injection: `abstractcode/workflow_agent.py::WorkflowAgent.start()`
-
-## 4) Workflow-driven UI events (`abstract.*`)
-
-Workflows can emit durable UI hints via `emit_event` and have hosts render them:
-- `abstract.status`
-- `abstract.message`
-- `abstract.tool_execution`
-- `abstract.tool_result`
-
-Details: [`docs/ui_events.md`](ui_events.md).
-
-Evidence: ledger subscription + normalization in `abstractcode/workflow_agent.py::_subscribe_ui_events()`.
-
-## 5) Gateway interaction surface (used by this repo)
-
-This repo includes:
-- a Python gateway client used by `abstractcode gateway ...` and `abstractcode workflow ...`: `abstractcode/gateway_cli.py`
-- a browser gateway client used by the web app: `web/src/lib/gateway_client.ts`
-
-They both call gateway endpoints under `/api/gateway/*`, but with different focus:
-- Python client: runs, ledger polling, durable commands, bundles, KG (`/runs/*`, `/commands`, `/bundles/*`, `/kg/query`)
-- Browser client: discovery + files + streaming views (`/discovery/*`, `/files/*`, `/runs/*`, etc.)
-
-Note: AbstractGateway is a separate component; its full API surface is defined in its own project.
+See [`web.md`](web.md) for its configuration surface and
+[`deployment-web.md`](deployment-web.md) for hosting it.

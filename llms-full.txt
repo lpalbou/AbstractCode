@@ -1,198 +1,2582 @@
-# AbstractCode (llms-full)
+# AbstractCode — full documentation snapshot
 
-> Full, unabridged content of the core documentation files for this repo.
-> Contains docs and project policies; it does not inline source code (see `llms.txt`).
-> Recommended: use `llms.txt` as the index when link-fetching is available; use `llms-full.txt` for offline/single-file context.
-> Generated from the files listed below. Relative Markdown links are normalized to repo-root paths.
-> If you update docs/policies, regenerate this file.
-> Last generated: 2026-05-31
+This is the documentation only; it contains no source code. See llms.txt for
+the linked index, and the repository itself for the code and tests that are
+the source of truth.
 
-Files included (source):
-- `README.md`
-- `CHANGELOG.md`
-- `CHANGELOD.md`
-- `CONTRIBUTING.md`
-- `SECURITY.md`
-- `ACKNOWLEDGMENTS.md`
-- `docs/getting-started.md`
-- `docs/README.md`
-- `docs/architecture.md`
-- `docs/cli.md`
-- `docs/api.md`
-- `docs/faq.md`
-- `docs/workflows.md`
-- `docs/ui_events.md`
-- `docs/web.md`
-- `docs/deployment-web.md`
-- `docs/deployment-iphone.md`
 
----
 
-<!-- FILE: README.md -->
+==============================================================================
+# FILE: README.md
+==============================================================================
 
 # AbstractCode
 
-Durable terminal TUI for agentic coding on the AbstractFramework stack (**AbstractAgent + AbstractRuntime + AbstractCore**).
+An agentic coding assistant that runs **durably on a server**, with two clients
+you can use interchangeably: a terminal application and a browser application.
 
-Status: **pre-alpha** (APIs and UX may change).
+The coding agent itself runs on [AbstractGateway](https://github.com/lpalbou/abstractgateway).
+Both clients are thin: they start runs, stream the run ledger live, render
+reasoning cycles and tool calls as they happen, resolve tool-approval and
+ask-user prompts, and steer a run while it is in flight. Because the work lives
+on the gateway rather than in the client, you can start a task in the terminal,
+close your laptop, and pick the same session up in the browser.
 
-Next: [`docs/getting-started.md`](docs/getting-started.md).
+Status: **pre-alpha.** Interfaces and UX may change.
 
-## AbstractFramework ecosystem
+## The two clients
 
-AbstractCode is part of **AbstractFramework**:
-- [AbstractFramework](https://github.com/lpalbou/AbstractFramework)
-- [AbstractCore](https://github.com/lpalbou/abstractcore) (providers + tools)
-- [AbstractRuntime](https://github.com/lpalbou/abstractruntime) (durable runs)
+| | Terminal | Browser |
+|---|---|---|
+| Install | `cargo install abstractcode` | `npx @abstractframework/code` |
+| Source | [`tui/`](tui/) | [`web/`](web/) |
+| Built with | Rust, [AbstractTUI](https://github.com/lpalbou/AbstractTUI) | TypeScript, React, Vite |
+| Docs | [`tui/README.md`](tui/README.md) | [`docs/web.md`](docs/web.md) |
 
-## Features
+Both talk to the gateway over HTTP and SSE only, and both resolve the same
+durable commands, so a run gated on your approval in one client can be approved
+from the other.
 
-- Interactive TUI (`abstractcode`) with **durable runs** (resume/pause/cancel), snapshots, and logs
-- **Approval-gated tools** by default (with an allowlist you can configure)
-- Built-in agents: `react`, `memact`, `codeact` (from `abstractagent`)
-- Plan + Review modes (`--plan`, `--review`; `/plan`, `/review`)
-- VisualFlow workflows:
-  - run locally: `abstractcode flow ...` (optional extra)
-  - run as an agent: `abstractcode --agent <flow_ref>`
-- Remote tool execution via **MCP** (`/mcp`, `/executor`)
-- Optional gateway-first Web UI in `web/`
+## Quick start
 
-## How it fits together (diagram)
-
-```mermaid
-flowchart LR
-  U[User] --> AC[AbstractCode\n(TUI/CLI host)]
-  AC --> AA[AbstractAgent\n(agent logic)]
-  AC --> AR[AbstractRuntime\n(durable execution)]
-  AR --> CORE[AbstractCore\n(LLM providers + tools)]
-
-  AC -->|approve| TOOLS[Local tools]
-  AC <--> MCP[MCP servers\n(remote tools)]
-
-  WEB[web/\n(browser host)] <--> GW[AbstractGateway\n(/api/gateway/*)]
-  AC -. optional .-> GW
-```
-
-## Install
-
-Python: **3.10+**
+You need a reachable AbstractGateway. To run one locally:
 
 ```bash
-pip install abstractcode
+pip install abstractgateway
+abstractgateway serve            # binds 0.0.0.0:8080; reach it at http://127.0.0.1:8080
 ```
 
-Optional (run VisualFlow locally via `abstractcode flow ...`):
+Then start whichever client you prefer:
 
 ```bash
-pip install "abstractcode[flow]"
+# Terminal
+cargo install abstractcode
+abstractcode                     # or: abstractcode doctor, to check the connection
+
+# Browser
+npx @abstractframework/code      # binds 0.0.0.0:3002; open http://127.0.0.1:3002
 ```
 
-From source (development):
+`abstractcode doctor` diagnoses the gateway connection and prints which
+credential source it used. See [`docs/getting-started.md`](docs/getting-started.md)
+for credentials, remote gateways, and first-run configuration.
 
-```bash
-pip install -e ".[dev]"
-```
+## What you can do
 
-## Quickstart (TUI)
-
-Ollama (default provider):
-
-```bash
-abstractcode --provider ollama --model qwen3:1.7b-q4_K_M
-```
-
-OpenAI-compatible server (e.g. LM Studio):
-
-```bash
-abstractcode --provider openai --base-url http://127.0.0.1:1234/v1 --model qwen/qwen3-next-80b
-```
-
-Inside the app:
-- `/help` shows the authoritative command list
-- type a task (or use `/task ...`)
-- tool approvals: `/auto-accept` (or start with `--auto-approve`)
-- attach files with `@path/to/file` in your prompt
-
-## Prompt caching (best-effort)
-
-AbstractCode defaults to `--prompt-cache auto`, which enables prompt caching when the runtime LLM client reports prompt-cache support via the AbstractCore capability contract (reduces repeated *prefill* work and can improve time-to-first-token).
-
-Toggle:
-- CLI: `--prompt-cache auto|on|off` (or `ABSTRACTCODE_PROMPT_CACHE=auto|on|off`)
-- TUI: `/cache auto|on|off`
-
-Provider notes:
-- `mlx`: full in-process KV caching with a 3-compartment cache: `system | tools | history`.
-- `huggingface` + GGUF (llama.cpp): same 3-compartment cache when AbstractCore can render the model's llama.cpp chat format exactly for caching (currently `chatml-function-calling` and `llama-3`); otherwise it falls back to stable keyed `LlamaRAMCache` reuse.
-- Remote APIs: `prompt_cache_key` is forwarded where applicable (server-managed; semantics vary by provider).
-
-Details: [`docs/architecture.md`](docs/architecture.md) and [`docs/faq.md`](docs/faq.md).
-
-## Persistence (durable runs)
-
-Default paths:
-- state file: `~/.abstractcode/state.json`
-- durable stores: `~/.abstractcode/state.d/`
-- saved settings: `~/.abstractcode/state.config.json`
-
-Disable persistence:
-
-```bash
-abstractcode --no-state
-```
-
-## Workflows
-
-- Local runs: `abstractcode flow run <flow_id_or_path> ...` (requires `abstractcode[flow]`)
-- Workflow agent: `abstractcode --agent /path/to/workflow.json ...`
-- Remote control-plane: `abstractcode gateway --help`
-- Bundle management on a gateway: `abstractcode workflow --help`
-
-Details: [`docs/workflows.md`](docs/workflows.md).
-
-## Web UI
-
-The web host lives in `web/` and connects to an **AbstractGateway** at `/api/gateway/*`.
-
-Start here:
-- [`docs/web.md`](docs/web.md)
-- [`docs/deployment-web.md`](docs/deployment-web.md)
+- **Durable runs** — pause, cancel, resume, and reattach to a session that
+  keeps running while the client is closed.
+- **Approval-gated tools** — tools stop and wait for you by default; approve or
+  reject from either client.
+- **Steering** — inject guidance into a run without restarting it.
+- **Workflows** — run a named agent bundle, `coding-agent:coder` by default.
+- **Review mode** — before a tool-call-free answer is accepted as final, a
+  verifier re-reads the transcript and can force more work.
+- **Live activity** — reasoning cycles, tool cards that update in place, token
+  counts, and context metering, streamed from the run ledger.
 
 ## Documentation
 
-- Start here: [`docs/getting-started.md`](docs/getting-started.md)
-- FAQ: [`docs/faq.md`](docs/faq.md)
-- Docs index: [`docs/README.md`](docs/README.md)
-- Agent-oriented docs: [`llms.txt`](llms.txt) and [`llms-full.txt`](llms-full.txt)
-- [`docs/architecture.md`](docs/architecture.md)
-- [`docs/cli.md`](docs/cli.md)
-- [`docs/api.md`](docs/api.md)
-- [`docs/workflows.md`](docs/workflows.md)
-- [`docs/ui_events.md`](docs/ui_events.md)
+- [`docs/getting-started.md`](docs/getting-started.md) — install, connect, first run
+- [`docs/architecture.md`](docs/architecture.md) — how the clients and gateway fit together
+- [`docs/api.md`](docs/api.md) — the gateway surface both clients speak
+- [`docs/web.md`](docs/web.md) — the browser client in depth
+- [`docs/faq.md`](docs/faq.md) — recurring questions and known limits
+- [`docs/troubleshooting.md`](docs/troubleshooting.md) — symptoms and fixes
+- [`tui/docs/`](tui/docs/) — terminal client reference, keys, and design notes
 
-## Development
+## The AbstractFramework ecosystem
 
-```bash
-pip install -e ".[dev]"
-pytest -q
-ruff check .
-black .
-```
+AbstractCode is one part of **AbstractFramework**:
 
-## Project
+- [AbstractFramework](https://github.com/lpalbou/AbstractFramework) — the ecosystem hub
+- [AbstractGateway](https://github.com/lpalbou/abstractgateway) — the durable control plane AbstractCode talks to
+- [AbstractCore](https://github.com/lpalbou/abstractcore) — providers and tools
+- [AbstractRuntime](https://github.com/lpalbou/abstractruntime) — durable run execution
+- [AbstractTUI](https://github.com/lpalbou/AbstractTUI) — the terminal rendering engine
+- [AbstractUIC](https://github.com/lpalbou/abstractuic) — the shared browser UI components
 
-- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
-- Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- Security: [`SECURITY.md`](SECURITY.md)
-- Acknowledgments: [`ACKNOWLEDGMENTS.md`](ACKNOWLEDGMENTS.md)
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development setup and the test
+commands for each client. Security reports go through [`SECURITY.md`](SECURITY.md).
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE).
 
----
 
-<!-- FILE: CHANGELOG.md -->
+==============================================================================
+# FILE: docs/getting-started.md
+==============================================================================
+
+# Getting started
+
+AbstractCode needs a reachable [AbstractGateway](https://github.com/lpalbou/abstractgateway).
+The gateway runs the coding agent; the clients connect to it.
+
+## 1. Run a gateway
+
+```bash
+pip install abstractgateway
+abstractgateway serve            # binds 0.0.0.0:8080 by default
+```
+
+The gateway ships working agent bundles out of the box, including
+`coding-agent:coder`, which the terminal client uses by default.
+
+## 2. Install a client
+
+### Terminal
+
+```bash
+cargo install abstractcode
+```
+
+Requires Rust 1.87 or newer. Then:
+
+```bash
+abstractcode                     # launch against http://127.0.0.1:8080
+abstractcode --gateway https://gateway.example.com
+```
+
+### Browser
+
+```bash
+npx @abstractframework/code      # binds 0.0.0.0:3002; open http://127.0.0.1:3002
+```
+
+Set the Gateway URL in the interface, or start the server with
+`ABSTRACTCODE_GATEWAY_URL` already pointing at it.
+
+Both servers listen on every interface by default. Set `HOST=127.0.0.1` (web)
+or `abstractgateway serve --host 127.0.0.1` to keep them on loopback.
+
+## 3. Check the connection
+
+```bash
+abstractcode doctor
+```
+
+`doctor` reports whether the gateway is reachable, which credential source was
+used, and which workflows are available. Run it first whenever something is not
+behaving — it distinguishes "the gateway is down" from "your token is wrong"
+from "the workflow you asked for is not installed".
+
+## Credentials
+
+A remote gateway usually requires a token. Persist one so you do not repeat it:
+
+```bash
+abstractcode login --gateway https://gateway.example.com --token <TOKEN>
+```
+
+This verifies the credentials before writing them to
+`~/.abstractcode/gateway.json`. Both `--gateway` and `--token` can also come
+from the environment, and a token passed on the command line always wins over
+the stored one.
+
+The browser client keeps credentials differently: when you supply a gateway
+user and token, the server exchanges them for a gateway browser session and
+stores only app-scoped session cookies, so the raw token is never persisted in
+browser settings. See [`web.md`](web.md).
+
+## Your first run
+
+Type a task and press Enter. What you see:
+
+- **Reasoning cycles** as the agent works, with token counts and a per-cycle
+  output sparkline.
+- **Tool cards** that update in place: awaiting approval, then running, then a
+  result. Tools are approval-gated by default — nothing touches your files
+  until you say so.
+- **A final answer**, which by default a verifier re-reads before accepting, and
+  can send back for more work (`--no-review` turns this off).
+
+Useful while a run is in flight:
+
+| Action | How |
+|---|---|
+| Approve or reject a tool | the prompt in the transcript |
+| Steer without restarting | type guidance and send |
+| Pause or cancel | `/pause`, `/cancel` |
+| Reattach to the last session | `abstractcode --resume` |
+| List the commands | `/help` |
+
+## Choosing a workflow and model
+
+```bash
+abstractcode --workflow coding-agent:coder --provider lmstudio --model qwen3.6-35b
+```
+
+Both are optional: without them, the gateway's defaults apply and your last
+choice is remembered in `~/.abstractcode/prefs.json`.
+
+## Where to go next
+
+- [`architecture.md`](architecture.md) — how the pieces fit together
+- [`api.md`](api.md) — the gateway surface the clients speak
+- [`troubleshooting.md`](troubleshooting.md) — when something does not work
+- [`../tui/README.md`](../tui/README.md) — the terminal client in depth, including keys and themes
+
+
+==============================================================================
+# FILE: docs/architecture.md
+==============================================================================
+
+# Architecture
+
+AbstractCode is two clients over one durable control plane. Neither client runs
+the coding agent; both observe and steer a run that lives on
+[AbstractGateway](https://github.com/lpalbou/abstractgateway).
+
+## Shape
+
+```mermaid
+flowchart TB
+    subgraph clients["AbstractCode clients"]
+        tui["Terminal client<br/><code>tui/</code> — Rust<br/>crate <code>abstractcode</code>"]
+        web["Browser client<br/><code>web/</code> — TypeScript<br/>npm <code>@abstractframework/code</code>"]
+    end
+
+    gw["<b>AbstractGateway</b><br/>durable runs, sessions, run ledger"]
+
+    subgraph server["Runs on the gateway host"]
+        rt["AbstractRuntime<br/>executes the run"]
+        core["AbstractCore<br/>providers and tools"]
+    end
+
+    tui -- "HTTP: start, resume, cancel, steer" --> gw
+    web -- "HTTP: start, resume, cancel, steer" --> gw
+    gw -- "SSE: run ledger" --> tui
+    gw -- "SSE: run ledger" --> web
+    gw --> rt --> core
+```
+
+Both clients speak the same surface, so a session is portable between them: a
+run gated on approval in the terminal can be approved in the browser, and a run
+started in the browser can be reattached from the terminal.
+
+## The thin-client contract
+
+Everything a client does goes through the gateway, and therefore the runtime.
+Four rules follow, and they are binding on both clients:
+
+1. **Server truth is the only truth about runs.** A client renders what the
+   ledger says. It never invents a status the gateway did not report; unknown
+   renders as unknown.
+2. **Decisions are communicated, never executed locally.** Approvals, answers,
+   cancels, pauses, and steering all travel as durable gateway commands, so they
+   are traceable in the ledger and answerable from any client.
+3. **Interface overlays on server truth must be honest and labelled.** Where a
+   client's rendering deliberately diverges from raw server state, the
+   divergence is named where you read it.
+4. **Client-held state stays a client concern** — rendering, input, credentials,
+   local preferences — plus intent you have not submitted yet, such as a
+   composer draft. The moment intent becomes work, it is a gateway run.
+
+The consequence you can rely on: start a task, disconnect, reconnect later, and
+find the run where it actually got to.
+
+## Repository layout
+
+```text
+tui/     the terminal client — Rust crate `abstractcode`, a workspace member
+web/     the browser client — npm `@abstractframework/code`
+docs/    documentation for the project as a whole
+```
+
+The Cargo workspace lives at the repository root with `tui` as its only member.
+That keeps `target/` at the root while scoping `cargo` packaging to the crate,
+so ordinary churn under `web/` cannot block a release.
+
+The two clients version and release independently, each under its own tag
+prefix — `v<version>` for the terminal client, `web-v<version>` for the browser
+client. See [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
+
+## Boundaries
+
+- **No client-side agent loop.** Neither client decides what the model does next;
+  the runtime does.
+- **No shared code between the clients.** They are separate implementations of
+  the same wire contract in different languages, deliberately: each is idiomatic
+  for its platform. The contract they share is the gateway's, documented in
+  [`api.md`](api.md).
+- **Shared browser components are consumed as published packages.** `web/`
+  depends on `@abstractframework/ui-kit`, `panel-chat`, `monitor-flow`, and
+  `monitor-gpu` from npm, never as relative paths into another checkout, so it
+  builds from its own directory alone.
+
+
+==============================================================================
+# FILE: docs/api.md
+==============================================================================
+
+# API and integration points
+
+AbstractCode has no server of its own. Both clients integrate through
+[AbstractGateway](https://github.com/lpalbou/abstractgateway), over plain HTTP
+and Server-Sent Events, and that gateway surface is the contract to program
+against.
+
+## Command-line surface
+
+The terminal client is the scriptable entry point.
+
+```bash
+abstractcode                              # launch the interface
+abstractcode exec "<prompt>" [OPTIONS]    # headless one-shot run, prints events
+abstractcode login [OPTIONS]              # verify and persist gateway credentials
+abstractcode doctor [OPTIONS]             # diagnose the gateway connection
+abstractcode --caps                       # print the terminal capability report
+```
+
+`abstractcode --help` prints the full option list. The two that matter most for
+integration:
+
+- `exec` runs a prompt to completion without an interface and streams events to
+  stdout, which is what bench harnesses and orchestrating agents consume. Its
+  exit code reflects the run's terminal status.
+- `doctor` is the supported way to assert an environment is wired correctly
+  before running anything else.
+
+Configuration resolves in a fixed order — explicit flag, then environment, then
+the login store at `~/.abstractcode/gateway.json`, then the default
+`http://127.0.0.1:8080`. `doctor` prints which source won.
+
+## Library surface
+
+The terminal client also builds as a Rust library:
+
+```toml
+[dependencies]
+abstractcode = "0.5"
+```
+
+```rust
+use abstractcode::gateway::GatewayClient;
+```
+
+`GatewayClient` is the gateway transport — starting runs, streaming the ledger,
+and submitting durable commands. The interface modules above it are internal and
+change freely between releases; treat the crate's library surface as
+unstable while the project is pre-alpha.
+
+## Gateway surface
+
+Both clients use the same endpoints. This is the integration contract:
+
+| Purpose | Shape |
+|---|---|
+| Start a run | `POST` a run request with the workflow, prompt, and options |
+| Stream a run | `GET` the run's ledger stream as SSE (`event: step`, terminated by `event: done`) |
+| Resolve a wait | `POST` a durable command — approve, reject, or answer |
+| Steer a run | `POST` a guidance command against the live run |
+| Pause / cancel | `POST` the corresponding durable command |
+| Session history | `GET` the session's history bundle for replay |
+| Discovery | `GET` the available workflows, providers, models, and tools |
+
+Two properties follow from the gateway owning all of this, and both are relied
+on by the clients:
+
+- **Commands are durable and idempotent by id.** A command survives a client
+  disconnect, and re-submitting one does not double-apply it. This is why a
+  wait raised in one client can be resolved in another.
+- **The ledger is the record.** Rendering is a replay of it. A client that
+  reconnects mid-run recovers the full state by replaying the ledger rather
+  than by holding state across the gap.
+
+See the gateway's own documentation for exact paths, payload schemas, and
+authentication modes; it owns those definitions, and pinning them here would
+guarantee drift.
+
+## Workflow contract
+
+A run names a workflow bundle, `coding-agent:coder` by default. Agents exposed
+to AbstractCode implement the `abstractcode.agent.v1` interface, described in
+[`workflows.md`](workflows.md). Workflow-driven interface events — status lines,
+messages, and tool-execution cards — are described in [`ui_events.md`](ui_events.md).
+
+## Browser integration
+
+The browser client is published as `@abstractframework/code` and also runs as a
+served application:
+
+```bash
+npx @abstractframework/code            # http://127.0.0.1:3002
+ABSTRACTCODE_GATEWAY_URL=... npx @abstractframework/code
+```
+
+See [`web.md`](web.md) for its configuration surface and
+[`deployment-web.md`](deployment-web.md) for hosting it.
+
+
+==============================================================================
+# FILE: docs/workflows.md
+==============================================================================
+
+# Workflows
+
+A run executes a named **workflow bundle** on the gateway. The client picks
+which one; the gateway and [AbstractRuntime](https://github.com/lpalbou/abstractruntime)
+own everything about how it runs.
+
+Related:
+- API and CLI surface: [`docs/api.md`](api.md)
+- Interface events a workflow can drive: [`ui_events.md`](ui_events.md)
+
+## Selecting a workflow
+
+```bash
+abstractcode --workflow coding-agent:coder
+abstractcode --workflow <bundle_id>[@version][:<flow_id>]
+```
+
+`--agent` is accepted as an alias. Without either flag the client uses your
+saved choice, falling back to `coding-agent:coder` — the verified coding loop,
+which ships with the gateway.
+
+Inside a session, `/agent` changes the workflow, and your selection persists to
+`~/.abstractcode/prefs.json`.
+
+To see what a given gateway actually has installed:
+
+```bash
+abstractcode doctor
+```
+
+Installing and managing bundles is a gateway operation, not a client one — see
+the [AbstractGateway](https://github.com/lpalbou/abstractgateway) documentation.
+
+## The `abstractcode.agent.v1` interface
+
+A workflow usable as an AbstractCode agent declares the interface
+`abstractcode.agent.v1`. Its boundary pins are:
+
+| Node | Direction | Pins |
+|---|---|---|
+| On Flow Start | outputs | `provider`, `model`, `prompt` |
+| On Flow End | inputs | `response`, `success`, `meta` |
+
+**These pins are declarative, not enforced.** The gateway checks only that a
+bundle declares the interface string; nothing validates the pins, so a bundle
+that declares `abstractcode.agent.v1` without them is accepted and then fails
+at run time. Treat the table as the contract you are expected to honour rather
+than one the platform will hold you to.
+
+### What a run receives
+
+A run is given:
+
+| Variable | Sent |
+|---|---|
+| `vars.prompt` | always — the task text |
+| `vars.provider`, `vars.model` | only when explicitly overridden; otherwise the gateway's defaults apply and the keys are absent |
+| `vars.tools` | only when a tool allowlist is set for the session |
+| `vars.workspace_root` | when a workspace is in play |
+| `vars.context.messages` | conversation history |
+| `vars.context.attachments` | attachment references, when files were attached |
+| `vars._limits` | host limits such as maximum iterations and tokens |
+| `vars._runtime` | run directives — reasoning effort, review mode, tool policy, prompt caching |
+
+Absence is meaningful here: an omitted `provider` means "use server truth", not
+"use nothing". A workflow that reads these should treat a missing key as
+"unset" rather than substituting its own default.
+
+### What a run returns
+
+On completion the client reads from the run's output:
+
+| Output | Surfaced as |
+|---|---|
+| `response` | the assistant's answer text |
+| `success` | the run's success flag |
+| `meta` | metadata attached to the assistant message |
+| `scratchpad` | optional working notes, when the workflow emits them |
+
+Because these travel through the run ledger rather than a client-side call, any
+client attached to the session sees the same values.
+
+## Interface events
+
+A workflow can drive what the client shows — status lines, messages, and
+tool-execution cards — by emitting the events described in
+[`ui_events.md`](ui_events.md). These are advisory rendering hints layered over
+ledger truth, never a substitute for it.
+
+
+==============================================================================
+# FILE: docs/ui_events.md
+==============================================================================
+
+# Workflow-driven UI events (contract)
+
+AbstractCode can translate **durable** workflow `emit_event` effects into host UX updates.
+
+Start here: [`docs/getting-started.md`](getting-started.md).
+
+This is designed so:
+- the event is recorded in the **ledger** (durable, replayable),
+- different hosts (TUI, web) can render the same “UX hint” deterministically.
+
+Related:
+- Workflows overview: [`docs/workflows.md`](workflows.md)
+- Architecture: [`docs/architecture.md`](architecture.md)
+
+## Event namespace + backward compatibility
+
+Canonical namespace: `abstract.*`
+
+Deprecated alias: `abstractcode.*` is accepted and normalized to `abstract.*`.
+
+## Supported events
+
+### 1) `abstract.status`
+
+Purpose: update the host’s status/spinner text.
+
+Accepted payload shapes:
+- string: `"Indexing repo…"`
+- object: `{ "text": "Indexing repo…", "duration": 2 }`
+
+`duration` is seconds:
+- `null`/missing: host default
+- `-1`: sticky (do not auto-clear)
+- `> 0`: auto-clear after that many seconds (best-effort)
+
+### 2) `abstract.message`
+
+Purpose: show a notification/message block in the host.
+
+Accepted payload shapes:
+- string: `"Done."`
+- object:
+  - required: `text`
+  - optional: `level` (`info|success|warning|error`), `title`, `meta` (object)
+
+### 3) `abstract.tool_execution`
+
+Purpose: render a “tool call” UX block **without** requiring actual tool execution.
+
+Accepted payload shapes:
+- a single tool call object
+- a list of tool call objects
+
+Supported tool call object shapes (best-effort normalization):
+- Preferred normalized:
+  - `{ "name": "read_file", "arguments": { "path": "README.md" }, "call_id": "..." }`
+- OpenAI-ish:
+  - `{ "id": "...", "type": "function", "function": { "name": "read_file", "arguments": "{\"path\":\"README.md\"}" } }`
+
+### 4) `abstract.tool_result`
+
+Purpose: render a “tool result” UX block.
+
+Accepted payload shapes:
+- a single tool result object
+- a list of tool result objects
+
+Supported tool result object fields (best-effort):
+- `name`/`tool`/`tool_name` (string)
+- `success` (boolean)
+- `output`/`result`/`content`/`text` (any; rendered as string)
+
+## Operational notes
+
+- Events are only surfaced after the corresponding ledger record is written as `status == completed`.
+- Hosts must treat these events as **UX-only** (they must not affect correctness).
+
+
+==============================================================================
+# FILE: docs/faq.md
+==============================================================================
+
+# FAQ
+
+For the authoritative command list, run `/help` inside the terminal client, or
+`abstractcode --help` for the command-line surface.
+
+## What is AbstractCode?
+
+An agentic coding assistant with two clients — a terminal application and a
+browser application — over a coding agent that runs durably on
+[AbstractGateway](https://github.com/lpalbou/abstractgateway).
+
+## Do I need a gateway?
+
+Yes. Neither client runs the agent itself. The gateway can run on your own
+machine:
+
+```bash
+pip install abstractgateway
+abstractgateway serve
+```
+
+## Which client should I use?
+
+Whichever suits the moment — they are interchangeable, not alternatives. Both
+speak the same durable commands against the same sessions, so you can start a
+task in the terminal and resolve its approval prompt in the browser, or the
+reverse.
+
+## Can I close the client while a run is going?
+
+Yes. The run lives on the gateway. Reattach with `abstractcode --resume`, or
+open the session in the browser. This is the point of the architecture rather
+than a side effect of it.
+
+## Will it edit my files without asking?
+
+No. Tools are approval-gated by default: the run pauses and waits for you.
+`/gate` and `/permission` adjust the policy, and `--permissions` sets it for a
+headless `exec` run. Because the wait is durable, an approval you miss is still
+there when you come back.
+
+## What is review mode?
+
+Before a response with no tool calls is accepted as final, a verifier re-reads
+the transcript and can send the agent back for more work. It is on by default;
+`--no-review` disables it and `/review` toggles it mid-session.
+`--review-rounds` sets the budget, default 3.
+
+## How do I choose the model or provider?
+
+```bash
+abstractcode --provider lmstudio --model qwen3.6-35b
+```
+
+Or `/model` inside the session. Without either, the gateway's defaults apply.
+Your choice is remembered in `~/.abstractcode/prefs.json`.
+
+## What is a workflow?
+
+A named agent bundle the run executes, `coding-agent:coder` by default.
+`--workflow <bundle[:flow]>` selects another, and `abstractcode doctor` lists
+what the gateway has installed. See [`workflows.md`](workflows.md).
+
+## Where are my settings stored?
+
+- `~/.abstractcode/gateway.json` — gateway URL and token, written by
+  `abstractcode login`
+- `~/.abstractcode/prefs.json` — theme, model, workflow, last session
+
+`ABSTRACTCODE_PREFS_FILE` relocates the second. A build older than the rename
+wrote `~/.abstractcode-tui/prefs.json`; that file is read once and saved
+forward.
+
+## Can I run it without an interface?
+
+```bash
+abstractcode exec "add tests for the parser" --permissions all
+```
+
+`exec` streams events to stdout and exits with a code reflecting the run's
+terminal status, which is what bench harnesses and orchestrating agents use.
+
+## Why does the browser client refuse to change the Gateway URL?
+
+Only a request arriving from loopback may reconfigure it; otherwise the
+server-configured URL is authoritative. This is deliberate — deciding from the
+`Host` header instead would let a remote client claim to be local and turn the
+server into a relay for its own session cookies. See
+[`web.md`](web.md) for the environment variables that adjust this.
+
+## My terminal renders it badly. What now?
+
+Run `abstractcode --caps` to see what the client detected, and `Ctrl+L` or
+`/redraw` to recover a corrupted screen. [`troubleshooting.md`](troubleshooting.md)
+covers the common cases, including why `Shift+Enter` works only in some
+terminals.
+
+## What are the current limitations?
+
+- **Pre-alpha.** Interfaces and behavior may change between releases.
+- **A gateway is required.** There is no offline or standalone mode.
+- **The library surface is unstable.** The crate publishes its modules, but only
+  the command-line surface is treated as a contract for now.
+- **The two clients are not feature-identical.** They implement the same wire
+  contract independently, and each is ahead of the other in places.
+
+
+==============================================================================
+# FILE: docs/troubleshooting.md
+==============================================================================
+
+# Troubleshooting
+
+Run `abstractcode doctor` first. It separates the three failures that look
+alike from inside the interface: the gateway is unreachable, your credentials
+are wrong, or the workflow you asked for is not installed.
+
+## Connection
+
+**"Connection refused" or the client sits at connecting.**
+The gateway is not running or is not where the client is looking. Confirm it
+directly, then check which URL the client resolved:
+
+```bash
+curl -sS http://127.0.0.1:8080/api/health
+abstractcode doctor
+```
+
+Resolution order is `--gateway`, then the environment, then the login store at
+`~/.abstractcode/gateway.json`, then `http://127.0.0.1:8080`. `doctor` prints
+which one it used, which is usually the answer when a saved value is shadowing
+the one you expect.
+
+**401 or 403 from a remote gateway.**
+The token is missing, expired, or belongs to a different gateway. Re-verify and
+re-persist it:
+
+```bash
+abstractcode login --gateway https://gateway.example.com --token <TOKEN>
+```
+
+`login` checks the credentials before writing them, so a failure here is about
+the credentials rather than the file.
+
+**The browser client refuses to change the Gateway URL.**
+By design, when the request does not arrive from loopback. The interface can
+only reconfigure the gateway for a local connection; otherwise the
+server-configured URL wins. Set
+`ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` behind your own access
+control to permit it. Behind a reverse proxy, see [`web.md`](web.md) — every
+peer is the proxy there, so loopback proves nothing.
+
+## Runs
+
+**A run stops and nothing happens.**
+It is waiting for you. Approval-gated tools pause until you approve or reject,
+and an agent can also ask a question. Look for the pending card in the
+transcript. Because waits are durable, you can also answer from the other
+client.
+
+**A run seems stuck with no pending prompt.**
+Check the run on the gateway rather than trusting the client's view — server
+truth is authoritative. `/history` replays what the ledger actually recorded.
+
+**The client disconnected but the run mattered.**
+It kept running. Reattach:
+
+```bash
+abstractcode --resume
+```
+
+**The workflow is not found.**
+The bundle is not installed on that gateway. `doctor` lists what is available.
+The default is `coding-agent:coder`, which ships with the gateway.
+
+## Terminal
+
+**No colour, broken box drawing, or a garbled layout.**
+Ask the client what it detected:
+
+```bash
+abstractcode --caps
+```
+
+That reports the capabilities it resolved for your terminal. `Ctrl+L` or
+`/redraw` recovers a screen corrupted by another program writing over it.
+
+**`Shift+Enter` does not insert a newline.**
+It depends on the kitty keyboard protocol, which not every terminal supports.
+`Ctrl+J` always works, and the composer hint names the best available chord for
+your terminal.
+
+**Selection or copy does nothing.**
+Terminals differ in what they permit. The client falls back to the host
+clipboard where OSC 52 is not honoured; holding Shift or Option while dragging
+hands selection to the terminal itself instead.
+
+## Building and installing
+
+**`cargo install abstractcode` fails on an old toolchain.**
+The crate declares Rust 1.87 as its minimum. Run `rustup update`.
+
+**The browser client fails to build after a dependency change.**
+Reinstall from the lockfile rather than the manifest:
+
+```bash
+cd web && npm ci
+```
+
+If the failure mentions an `@abstractframework/*` package resolving outside
+`web/`, `npm test` will name it: `dependency_hygiene.test.ts` fails when a build
+config points at another checkout instead of the published package.
+
+## Preferences
+
+**Your theme or model choice did not persist.**
+Preferences live in `~/.abstractcode/prefs.json`. Set
+`ABSTRACTCODE_PREFS_FILE` to relocate it. If you used an earlier build that
+wrote `~/.abstractcode-tui/prefs.json`, that file is read once and saved
+forward to the current path.
+
+
+==============================================================================
+# FILE: docs/README.md
+==============================================================================
+
+# AbstractCode documentation
+
+Start at [`getting-started.md`](getting-started.md) if you want to run something
+now. Start at [`architecture.md`](architecture.md) if you want to understand the
+shape first.
+
+## Project documentation
+
+| Page | What it covers |
+|---|---|
+| [`getting-started.md`](getting-started.md) | Running a gateway, installing either client, credentials, your first run |
+| [`architecture.md`](architecture.md) | The two clients, the gateway, and the thin-client contract that binds them |
+| [`api.md`](api.md) | The gateway surface both clients speak, and the integration points |
+| [`workflows.md`](workflows.md) | Agent workflow bundles and how a run selects one |
+| [`ui_events.md`](ui_events.md) | The workflow-driven interface event contract |
+| [`faq.md`](faq.md) | Recurring questions and known limitations |
+| [`troubleshooting.md`](troubleshooting.md) | Symptom-oriented diagnosis and fixes |
+
+## The browser client
+
+| Page | What it covers |
+|---|---|
+| [`web.md`](web.md) | The browser client in depth, including optional voice features |
+| [`deployment-web.md`](deployment-web.md) | Hosting it, and the gateway-first deployment model |
+| [`deployment-iphone.md`](deployment-iphone.md) | Safari and progressive web app notes |
+
+## The terminal client
+
+The terminal client keeps its reference documentation beside its source:
+
+| Page | What it covers |
+|---|---|
+| [`../tui/README.md`](../tui/README.md) | Features, interface tour, keys, themes |
+| [`../tui/docs/getting-started.md`](../tui/docs/getting-started.md) | Terminal-specific setup |
+| [`../tui/docs/api.md`](../tui/docs/api.md) | Command-line surface and library entry points |
+| [`../tui/docs/architecture.md`](../tui/docs/architecture.md) | How the client is built on AbstractTUI |
+| [`../tui/docs/troubleshooting.md`](../tui/docs/troubleshooting.md) | Terminal, rendering, and connection problems |
+| [`../tui/docs/faq.md`](../tui/docs/faq.md) | Terminal client questions |
+
+## Machine-readable indexes
+
+[`../llms.txt`](../llms.txt) is a concise index of this corpus, and
+[`../llms-full.txt`](../llms-full.txt) is the expanded aggregate, both for
+language models and tooling.
+
+
+==============================================================================
+# FILE: docs/web.md
+==============================================================================
+
+# AbstractCode Web (gateway-first)
+
+The `web/` folder contains a **gateway-first** host UI:
+- talks only to **AbstractGateway** under `/api/gateway/*`
+- renders runs by replaying/streaming the **durable ledger**
+- resumes waits by submitting durable commands
+
+Start here: [`docs/getting-started.md`](getting-started.md).
+
+Related:
+- Deployment: [`docs/deployment-web.md`](deployment-web.md)
+- iPhone notes: [`docs/deployment-iphone.md`](deployment-iphone.md)
+- Architecture: [`docs/architecture.md`](architecture.md)
+
+## Shared components
+
+The interface is built from the shared AbstractUIC component packages —
+`@abstractframework/ui-kit`, `panel-chat`, `monitor-flow` and `monitor-gpu` —
+installed from npm like any other dependency and declared in
+`web/package.json`. Building requires nothing but this directory.
+
+## Voice (optional)
+
+AbstractCode Web supports **push-to-talk transcription** and **TTS playback** when the connected AbstractGateway exposes the endpoints the web client calls.
+
+Push-to-talk (record → upload → transcribe):
+- Upload: `POST /api/gateway/attachments/upload`
+- Transcribe: `POST /api/gateway/runs/{run_id}/audio/transcribe`
+
+Text-to-speech:
+- TTS: `POST /api/gateway/runs/{run_id}/voice/tts`
+
+
+## Local development
+
+```bash
+cd web
+npm ci
+npm run dev
+```
+
+Dev server:
+- runs on `http://127.0.0.1:3002/` (see `web/package.json`)
+- proxies `/api/*` to `http://localhost:8081` by default (see `web/vite.config.ts`)
+
+## Build
+
+```bash
+cd web
+npm run build
+```
+
+Output: `web/dist/` (static files).
+
+
+==============================================================================
+# FILE: docs/deployment-web.md
+==============================================================================
+
+# AbstractCode Web — Deployment (gateway-first)
+
+AbstractCode Web (`web/`) is a browser/PWA host that talks only to **AbstractGateway** (`/api/gateway/*`).
+
+Related:
+- Web app overview + local dev caveats: [`docs/web.md`](web.md)
+- Architecture: [`docs/architecture.md`](architecture.md)
+
+## 1) Run AbstractGateway
+
+Run a gateway that serves `/api/gateway/*` and (for browsers) allows your web app origin (CORS).
+
+Example (token + allowed origins):
+
+```bash
+export ABSTRACTGATEWAY_AUTH_TOKEN="dev-token"
+export ABSTRACTGATEWAY_ALLOWED_ORIGINS="http://localhost:*,http://127.0.0.1:*"
+
+abstractgateway serve --host 127.0.0.1 --port 8081
+```
+
+Notes:
+- Web UI uses gateway discovery endpoints for dropdowns: providers/models/tools.
+- Web UI uses the gateway file endpoint for `@file` mentions: `/api/gateway/files/search`.
+- Web UI uses gateway attachment endpoints for uploads: `/api/gateway/attachments/upload`.
+- (Optional) Voice features use: `/api/gateway/runs/{run_id}/audio/transcribe` and `/api/gateway/runs/{run_id}/voice/tts`.
+
+## 2) Run AbstractCode Web (dev)
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Open `http://127.0.0.1:3002/` and set:
+- `Gateway URL`: `http://127.0.0.1:8081`
+- `Gateway user` and that user's `Gateway token` when Gateway user auth is
+  enabled
+
+## 3) Build + host (static)
+
+```bash
+cd web
+npm run build
+```
+
+Deploy `web/dist/` behind the packaged web server or a reverse proxy that
+routes same-origin `/api/...` to Gateway.
+
+In hosted user-auth mode, AbstractCode Web exchanges the Gateway user token for
+an app-scoped browser session and strips bearer tokens from saved browser
+settings. Direct bearer-token mode is retained for local development when no
+Gateway user is configured. When the web UI is served from a non-local
+hostname, the server-configured Gateway URL is authoritative; browser-supplied
+Gateway URL changes are rejected unless
+`ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` is enabled behind your own
+access control. If a reverse proxy rewrites `Host`, set
+`ABSTRACTCODE_TRUST_PROXY_HEADERS=1` only when the proxy strips
+client-supplied forwarded headers.
+
+
+==============================================================================
+# FILE: docs/deployment-iphone.md
+==============================================================================
+
+# AbstractCode Web — iPhone Notes (Safari / PWA)
+
+AbstractCode Web is designed to run on iPhone as a **thin host UI** that connects to a **remote** AbstractGateway + AbstractRuntime deployment.
+
+Related:
+- Web app overview: [`docs/web.md`](web.md)
+- Web deployment: [`docs/deployment-web.md`](deployment-web.md)
+
+## Prerequisites
+
+- A reachable HTTPS endpoint for AbstractGateway (recommended: reverse proxy + TLS).
+- The AbstractCode Web static site hosted over HTTPS.
+- Gateway configured with:
+  - Gateway user auth for hosted access
+  - `ABSTRACTGATEWAY_ALLOWED_ORIGINS` including your web host origin (exact host recommended for prod).
+
+## Steps
+
+1) Open the AbstractCode Web URL in Safari.
+2) Go to `Settings`:
+   - set `Gateway URL` to your gateway URL (e.g. `https://gateway.example.com`)
+   - set `Gateway user` and that user's `Gateway token`
+3) (Optional) Add to Home Screen:
+   - Safari → Share → Add to Home Screen
+
+## Notes / constraints
+
+- iOS aggressively suspends background tabs; long-running workflows should be designed to be resumable (ledger replay).
+- File access is always remote (via gateway); the phone does not run local tools in v1.
+- The Gateway token is exchanged for an app-scoped browser session and is not
+  persisted in browser settings.
+- On non-local hosted UI hostnames, the server-configured Gateway URL is
+  authoritative. Browser-supplied Gateway URL changes are rejected unless
+  `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` is enabled behind your
+  own access control.
+
+
+==============================================================================
+# FILE: tui/README.md
+==============================================================================
+
+# abstractcode
+
+AbstractCode on [AbstractTUI](https://github.com/lpalbou/AbstractTUI): a reactive
+terminal client for the [AbstractGateway](https://github.com/lpalbou/abstractgateway)
+control plane. The coding agent runs **durably on the gateway**; this binary is the
+cockpit — it starts runs, streams their ledgers live, renders reasoning cycles,
+tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
+steers the agent mid-run, and keeps a durable session with server-side history.
+
+Status: **0.5.0** (the attachments + host-resources wave: file
+attachments with preview and drag & drop, the quit gate with durable
+pause/cancel delivery, `/conclude`, bloc history replay + `/history`,
+the reasoning dial, a launch animation, and `/resources` — the gateway
+host's memory, resident models and session caches, with model
+unload/lock and context-estimate actions and a footer `mem` meter — on
+top of 0.4.0's conclusion + presence wave: declared context meter,
+`/gpu`, `Ctrl+L`/`/redraw` screen recovery).
+
+## What it looks like
+
+```
+ ▲ AbstractCode  basic-agent · lmstudio · qwen3.6-35b · ⌂ snake · skills 2   acode-93db824cec83 ●
+ ❯ you
+   Create a snake game in rust, then run the tests.
+ ∴ cycle 1
+   I will scaffold the crate first…
+ » write_file · running   {"file_path":"src/main.rs", …}
+ ✓ cargo_build            exit 0 — 0 warnings
+ ✦ assistant
+   Done — the game builds clean and all 12 tests pass. …
+ ⠹ cycle 3 · model call 4s · 39 tok/s (last call) · 42s · 8.1k↑ 612↓ tk   ▂▃▅▂▇
+❯ ▐ describe a task — Enter sends · Ctrl+J newline · /help                    ▌
+ ctx 8.1k/262k tk (3%, declared) · 12k tk session · skills 2 · ? keys   nord · …
+```
+
+- **Live activity**: reasoning cycles, tool cards that update in place
+  (awaiting approval → running → ✓/✗), status lines, token counts, and a
+  per-cycle output sparkline — streamed over SSE from the run ledger into
+  the engine's keyed `Feed` widget (windowed paint, follow-tail pinning
+  that disengages while you read scrollback and re-pins at the bottom).
+- **A real composer**: multiline (grows 1..4 rows), `Ctrl+J` newline in
+  every terminal (`Alt+Enter` too; `Shift+Enter` wherever the kitty
+  keyboard protocol is live — kitty/Ghostty/foot from startup, iTerm2
+  ≥ 3.5, VS Code/Cursor and Warp via the mid-session probe — and the
+  composer hint names the best chord for YOUR terminal), multi-line
+  paste inserts whole, `↑`/`↓` recall sent messages, and a `/` command
+  completion dropdown at the caret (Tab/Enter accept — a fully-typed
+  command always submits on the first Enter).
+- **Select and copy in-app**: drag to select rendered text; releasing
+  copies via OSC 52 (Shift/Option-drag still reaches the terminal's
+  native selection).
+- **Approvals**: mutating tools pause the run durably; a focus-trapped modal
+  shows the exact calls + arguments; `a` approves, `d` denies, `A` approves
+  the batch AND sets permissions to `all` (sticky per session —
+  `/permissions read` restores prompting).
+- **Steering**: type while the agent works — Enter folds your guidance into
+  its next reasoning cycle (the gateway's durable steer sidecar). Guidance
+  sent before the run starts cycling is buffered and delivered on the
+  first cycle, never dropped.
+- **A prompt queue**: `/queue <text>` lines up the next task (FIFO); each
+  queued prompt runs as its own turn after the current run succeeds, with
+  the finished answer in its context. Failure or cancel pauses the queue;
+  it persists per session and always restores paused (`/queue` manages).
+- **Goal loops**: `/goal <text>` starts a self-verifying run that keeps
+  cycling until its own checks pass or the cycle budget runs out; `/goal`
+  shows status, `/goal stop` cancels durably. Requires a goal workflow
+  (`abstractcode.goal.v1`) published on the gateway — without one, `/goal`
+  says so and starts nothing.
+- **Summoned entities**: `@name` opens a durable visit with a gateway
+  entity (`/entities` lists the roster with identity cards); each
+  conversation gets its own transcript and header chip, and `Alt+E`
+  cycles focus between the agent and open visits. Entity turns are
+  non-interruptible and stream no mid-turn progress (a server-side
+  boundary, rendered honestly) — typing during a turn holds one draft and
+  auto-sends it when the turn parks. `/task` leaves work on an entity's
+  desk without a visit; `/end` closes the visit (its reflection runs
+  server-side).
+- **Permissions**: `/permissions read|write|all` sets the persisted
+  auto-approval level — proven read-only tools, then workspace file
+  writes, then everything. Per-tool pins (`p` in `/tools`) override the
+  level in both directions, and gateway-disabled tools never run. `all`
+  auto-approves arbitrary shell commands and network egress: a
+  deliberate, eyes-open choice, never the default. Sticky per session.
+- **Workspace scope**: `/workspace` shows where the agent's tools may
+  touch the filesystem (root, access mode, allowed paths) and extends it —
+  the fix for red "Path escapes workspace_root" refusals.
+- **Sessions and memory**: one durable session id per conversation, and a
+  `/sessions` picker over your recent ones (named by their first prompt).
+  The client carries the live conversation into each run; the gateway
+  replays prior turns server-side across restarts (`use_session_history`).
+- **Crash-proof by construction**: quit or crash, relaunch, and you are
+  back where you were — prior turns replay in full detail from their run
+  ledgers (cycles, tool cards, answers), a live run reattaches with its
+  prompt and full activity, pending approvals re-surface. `/pause` parks
+  the run durably on the gateway (it survives quitting); `/resume`
+  continues it.
+- **Capability control**: `/tools` switches gateway tools on/off per run
+  (checked set = the run's exact allowlist), `/skills` attaches gateway
+  skills, `/mcp` shows the gateway's MCP server registry.
+- **Honest telemetry**: the header names what "gateway defaults" actually
+  resolves to (and the model that served the last call) plus the working
+  directory, workspace mode, and capability counts; the footer is a
+  persistent instrument row (context meter, session tokens, `/gpu` and
+  host `mem` meters, skills/MCP counts — the key legend lives behind
+  `?`); the activity
+  strip shows live context size (`ctx`), cache hits, and the in-flight
+  model call with its last-call tok/s; `/cache` is the detail panel:
+  prompt-cache posture for the effective route (auto = on when available)
+  plus exact metrics for the latest call, this run, and the whole session —
+  hits, the derived new-vs-carried split, re-send amplification, peak
+  context, resets, and model time.
+- **Host resources**: `/resources` (alias `/host`) opens the gateway
+  host's live picture — RAM and device memory with meter bars, GPU
+  utilization where the host supports it, the gateway's own RSS, every
+  resident model (modality, tri-state residency — an unreported
+  residency reads `unknown`, size, context length with `*` marking a
+  calibrated value, 🔒 marking a residency lock), session prompt
+  caches, and totals — plus admin actions on the selected model:
+  unload (two-step confirm; force offered when a lock refuses),
+  lock/unlock, and a context estimate. Fetched at open and on `r`,
+  never polled; unknown numbers are omitted, never invented. The
+  footer gains a `mem NN%` segment from the same fetch. Requires a
+  gateway that declares the `host_state` contract — older gateways get
+  an honest "not supported".
+- **A context meter you declare**: `/context 262k` declares the model's
+  window (persisted; `--max-tokens` for one session) and the footer
+  reads `ctx 41k/262k tk (15%, declared)` — warn at 75%, error at 90%.
+  No declaration = the honest absolute; the label always names the
+  source (the client never ships a fabricated capability table). The
+  declaration also rides runs as `_limits.max_tokens`.
+- **Screen recovery**: `Ctrl+L` (or `/redraw`) force-repaints the whole
+  frame — the recovery from a terminal clear (Cmd+K) that a damage-
+  tracked renderer cannot otherwise see — and an externally cleared
+  screen also heals itself at the next focus round-trip (engine
+  redraw-on-focus-gained, on by default here).
+- **Detail on demand**: `Ctrl+D` (or `/details`) toggles between the full
+  live view (reasoning cycles, tool cards, results) and a clean answers-only
+  view — finished tool cards fold away; active, failed, and denied tools
+  plus errors always stay visible.
+- **Transcript export**: `/export` writes the conversation to a file —
+  readable archival markdown as shown, or SFT-ready JSONL (OpenAI chat
+  schema, one line per completed turn); `--details` adds reasoning + full
+  tool cards. Never overwrites.
+- **26 themes** with a live-preview picker (`/theme`, last choice saved),
+  markdown answers, inline images (generated artifacts render as unicode
+  mosaic), and a zero-cost idle footprint — all from AbstractTUI.
+
+## Install
+
+```sh
+cargo install abstractcode
+```
+
+Rust 2021 (MSRV 1.87, inherited from AbstractTUI); macOS and Linux are the
+live-verified platforms.
+Windows is unverified for this crate (AbstractTUI itself compiles there, but
+this client's TLS stack has not been built or run on Windows yet).
+
+## Quickstart
+
+You need a running AbstractGateway (the control plane that hosts the agent):
+
+```sh
+abstractgateway serve                                  # or use an existing one
+abstractcode login --gateway http://127.0.0.1:8080 --token <token>
+abstractcode doctor                                # reachability · auth · catalog
+abstractcode                                       # launch the TUI
+```
+
+`login` verifies against the gateway before saving (flags/env only — it never
+prompts). The store is `~/.abstractcode/gateway.json`.
+
+Inside the app:
+
+- type a task and press Enter — the agent workflow runs on the gateway
+- `/workflow` picks the agent (any catalog entrypoint implementing
+  `abstractcode.agent.v1`), `/model` picks provider + model, `/theme` restyles
+- type while a run is active to steer it; `Esc Esc` cancels; `/new` starts a
+  fresh session
+- tool approvals and agent questions open as modals; the run waits durably
+  (server-side) until you answer — even across client restarts
+- `@name` talks with a summoned entity when the gateway hosts them
+  (`/entities` lists the roster); `Alt+E` cycles conversation focus
+
+## Headless one-shots
+
+```sh
+abstractcode exec "Summarize the workspace layout" \
+  --provider lmstudio --model qwen/qwen3.6-35b-a3b --permissions all
+```
+
+Prints transcript events as they fold; exit codes: 0 completed answer,
+1 failure, 2 usage/config error, 124 timeout, 130 cancelled.
+`--permissions <read|write|all>` sets the tool level for the invocation
+(`--require-approval <names>` adds per-tool gates that deny headlessly);
+without a raised level, mutating tools are denied with an explanation the
+model sees.
+Ask-user waits get an honest "no interactive user" refusal so unattended
+runs never stall.
+
+## Options
+
+```
+--gateway <URL> --token <TOK>     connection (flag > env > login store)
+--session <ID>                    durable session id (default: fresh session)
+--resume                          reopen the last session (`--continue` alias)
+--workflow <bundle[:flow]>        agent workflow (default: saved or basic-agent)
+--provider <P> --model <M>        route override (default: gateway defaults)
+--workspace <PATH>                requested workspace root (see note)
+--theme <ID>                      start theme (ABSTRACTTUI_THEME works too)
+--animation <on|off>              launch animation (default: on) — SAVED, so
+                                  `--animation off` once disables it for good
+--caps                            print the terminal capability report
+```
+
+**Workspace note**: the gateway's server-managed workspace policy (the default
+posture) clamps client-provided paths — tools then execute in the gateway's
+workspace root or a managed per-session folder, and the app tells you so at
+startup. Set `ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1` on the gateway
+to honor client workspace roots (trusted/local setups).
+
+## How it relates to the browser client
+
+AbstractCode ships two clients over the same gateway: this terminal
+application and the browser application in [`web/`](../web/). Both are thin
+clients that render the same durable run ledger and submit the same durable
+commands, so a session is portable between them — a run gated on approval here
+can be approved there, and the reverse.
+
+## Documentation
+
+- [docs/getting-started.md](docs/getting-started.md) — install to first run
+- [docs/architecture.md](docs/architecture.md) — threading model, the ledger
+  fold, gateway contract
+- [docs/api.md](docs/api.md) — CLI options, slash commands, key bindings
+- [docs/faq.md](docs/faq.md) and [docs/troubleshooting.md](docs/troubleshooting.md)
+- Agent-oriented: [llms.txt](llms.txt)
+
+## Benchmark smoke mode
+
+`scripts/zelda_headless_bench.py` includes a smoke mode for checking the real
+selected benchmark client without running the full Zelda prompt. Set
+`ZELDA_BENCH_SMOKE` to an exact-answer prompt:
+
+```sh
+ZELDA_BENCH_SMOKE='Reply with exactly: smoke-ok' \
+ZELDA_BENCH_TIMEOUT_S=120 ZELDA_BENCH_MAX_ITER=3 \
+python3 scripts/zelda_headless_bench.py code-1
+```
+
+On success, stdout is exactly:
+
+```text
+smoke-ok
+```
+
+The smoke path still launches the selected child (`abstractcode` for `code-1`
+or the release `abstractcode` binary for `code-tui-1`). It exits 0 and
+prints the requested answer only when every selected run exits successfully
+and its captured final answer contains that value; otherwise it exits nonzero
+without printing a success value. As in full benchmark mode, run logs and
+reports are written under `untracked/zelda-bench/`.
+
+Controls:
+
+- Select lanes with `code-1`, `code-tui-1`, `code-2`, or `code-tui-2`; omit
+  lane arguments to run the four-step matrix.
+- `ZELDA_BENCH_CODE_LOOP` and `ZELDA_BENCH_CODE_AGENT` select the local
+  `abstractcode` loop and agent.
+- `ZELDA_BENCH_TUI_LOOP` selects a built-in TUI workflow mapping (`basic`,
+  `react`, `codeact`, `memact`, or `multi-coder`), while
+  `ZELDA_BENCH_TUI_WORKFLOW` overrides it with an explicit workflow reference.
+- `ZELDA_BENCH_PROVIDER`, `ZELDA_BENCH_MODEL`, `ZELDA_BENCH_BASE_URL`,
+  `ZELDA_BENCH_REASONING`, `ZELDA_BENCH_MAX_ITER`, and
+  `ZELDA_BENCH_TIMEOUT_S` configure the child run.
+- TUI benchmark lanes require `target/release/abstractcode`; build it with
+  `cargo build --release`. Gateway credentials come from
+  `~/.abstractcode/gateway.json`, falling back to `ABSTRACTGATEWAY_URL` and
+  `ABSTRACTGATEWAY_AUTH_TOKEN`.
+
+## Repository structure
+
+- `src/` — Rust CLI, gateway client, durable-run fold, policy, storage, export,
+  and TUI modules.
+- `tests/` — integration, replay, policy, and headless UI coverage.
+- `scripts/` — live checks and benchmark drivers, including
+  `zelda_headless_bench.py`.
+- `docs/` — getting started, command/key reference, architecture,
+  troubleshooting, design notes, and reports.
+- `untracked/` — generated benchmark artifacts and logs; not application
+  source.
+
+## Development
+
+```sh
+cargo test          # unit + headless UI (real pipeline, no pty) + replay
+cargo clippy --all-targets
+cargo build --release                              # required by TUI benchmark lanes
+ACODE_GATEWAY_TOKEN=… python3 scripts/pty_live_smoke.py   # live E2E
+```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
+
+
+==============================================================================
+# FILE: tui/docs/getting-started.md
+==============================================================================
+
+# Getting started
+
+From install to your first gateway-hosted agent run.
+
+## Prerequisites
+
+- A running [AbstractGateway](https://github.com/lpalbou/abstractgateway) —
+  the control plane that hosts the agent workflows, executes tools, and
+  stores durable runs. Locally: `abstractgateway serve` (defaults to
+  `http://127.0.0.1:8080`).
+- At least one LLM provider the gateway can reach (LM Studio, Ollama, or a
+  configured endpoint profile), and at least one catalog workflow
+  implementing the `abstractcode.agent.v1` interface — the stock
+  `basic-agent` bundle ships with the gateway.
+- Rust (2021 edition toolchain) if installing from source.
+
+## Install
+
+```sh
+cargo install abstractcode
+```
+
+## Connect once
+
+```sh
+abstractcode login --gateway http://127.0.0.1:8080 --token <your-token>
+```
+
+`login` takes the URL and token from flags or environment (it never prompts),
+verifies them against `GET /api/gateway/ping`, and only then saves them to
+`~/.abstractcode/gateway.json` (mode 0600 on unix).
+Environment variables (`ABSTRACTCODE_GATEWAY_URL`,
+`ABSTRACTCODE_GATEWAY_TOKEN`, or the `ABSTRACTGATEWAY_*` equivalents)
+override the store when set.
+
+Check the connection end to end:
+
+```sh
+abstractcode doctor
+# [1/3] reachability   ✓ server up (auth enforced)
+# [2/3] authentication ✓ ping ok
+# [3/3] catalog        ✓ 10 agent workflow(s): basic-agent:81795ea9, …
+# Result: HEALTHY
+```
+
+`doctor` prints WHICH source provided the URL and token (flag, env, or the
+login store) — the antidote to a stale export silently pointing you at the
+wrong gateway.
+
+## First run
+
+```sh
+abstractcode
+```
+
+Type a task and press Enter:
+
+> Create a file named hello.txt containing "hello", then reply DONE.
+
+You will see, live: the agent's reasoning cycles (dim `∴` blocks), tool
+cards updating in place (`»` running → `✓`/`✗`), and the final answer
+rendered as markdown. When the agent wants to run a mutating tool
+(`write_file` here), a **tool approval modal** opens with the exact call and
+arguments — press `a` to approve, `d` to deny. The run waits durably on the
+gateway until you answer.
+
+## The five things worth knowing on day one
+
+1. **Type while it works to steer.** Anything you submit during a run is
+   folded into the agent's next reasoning cycle as guidance. `Esc Esc`
+   cancels the run.
+2. **Sessions are durable and server-side.** Each conversation has a session
+   id (shown in the header); the gateway replays prior turns into new runs.
+   Launching starts a **fresh** session; continuity is explicit — `--resume`
+   (or `--continue`) reopens the last session, `--session <id>` opens a named
+   one, and `/sessions` switches in-app. `/new` starts a fresh session
+   mid-flight. When you reopen a session whose run is still active, the app
+   reattaches to it automatically.
+3. **Pick your agent and route.** `/workflow` lists every agent workflow on
+   the gateway; `/model` lists providers and models (leave it on "gateway
+   default" to use the server's routing). Both choices persist across
+   launches.
+4. **Where files land.** Under the gateway's default (server-managed)
+   workspace policy, tools execute in the gateway's workspace root or a
+   managed per-session folder — the app tells you this at startup. To make
+   the gateway honor client workspace paths (`--workspace`), set
+   `ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1` on the gateway
+   (trusted/local setups).
+5. **Themes.** `/theme` opens a live-preview picker over the 26 built-in
+   AbstractTUI themes; `Ctrl+T` cycles. Your pick persists.
+
+6. **Instruments.** Declare your model's context window once —
+   `/context 262k` — and the footer meter becomes `ctx used/window (%)`
+   (warns at 75%). `/gpu` toggles a gateway-host GPU meter, and
+   `/resources` (alias `/host`) opens the gateway host's memory +
+   resident-model panel — with model unload/lock and a context
+   estimate — and feeds a footer `mem NN%` segment (on gateways that
+   declare the `host_state` contract). If your
+   terminal ever gets externally cleared (Cmd+K), `Ctrl+L` (or
+   `/redraw`) repaints everything, and the screen also heals itself at
+   the next focus round-trip (click away and back).
+
+## Working with entities
+
+If your gateway hosts summoned entities, `@name` opens a durable **visit**
+(`/entities` lists the roster with identity cards; `Enter` there does the
+same as `@name`). The visit gets its own transcript and a header chip;
+`Alt+E` cycles focus between the agent and open visits, and everything you
+submit under entity focus is that visit's next turn.
+
+Two honesty rules to know up front: entity turns are **non-interruptible**
+and stream **no mid-turn progress** (both server-side boundaries — the app
+shows elapsed time, never a fake spinner of activity). Typing during a turn
+holds one draft and auto-sends it when the turn parks. `/end` closes the
+visit — the entity's reflection runs server-side, and a visit that woke a
+sleeping entity restores the sleep. To hand work over *without* a visit,
+`/task <name> <title>` leaves it on the entity's desk; pickup happens at the
+entity's own boundary.
+
+## Permissions
+
+Tired of approving every `read_file`? `/permissions <read|write|all>` sets
+the persisted auto-approval level: `read` auto-approves only proven
+read-only tools (the default; read-only `git` commands are proven and
+approved server-side by the runtime's refiner), `write` adds workspace
+file mutations, and
+`all` auto-approves everything — **including arbitrary shell commands and
+network egress**. Use `all` deliberately, on gateways you trust with the
+workspace they expose; it is sticky per session and seeds new sessions.
+Per-tool pins (`p` in `/tools`) override the level in both directions: pin
+`auto` to lift one tool above the level, pin `ask` to force a prompt below
+it — pins gate even at `all`, and gateway-disabled tools never run.
+
+## Headless one-shots
+
+For scripts and CI:
+
+```sh
+abstractcode exec "List the files in the workspace and summarize them" \
+  --permissions all --timeout 300
+```
+
+Events print as they fold; the final answer prints under an `answer` rule.
+Exit codes: 0 completed, 1 failed, 124 timeout, 130 cancelled. Without a
+raised `--permissions` level, mutating tools are denied with an explanation
+the agent sees (it will finish as best it can without them);
+`--require-approval <names>` gates specific tools even at `all`. Ask-user
+waits receive an honest "no interactive user is present" response.
+
+## Exporting transcripts
+
+`/export` writes the current agent conversation to a file, serving two
+goals in one command: **archival** — bare `/export` (or `/export md`)
+produces a readable markdown document mirroring the transcript as shown,
+auto-named in your working directory; and **training** — `/export jsonl`
+produces SFT-ready JSONL (OpenAI chat schema, one self-contained training
+example per completed turn; failed/unanswered turns are skipped and
+counted, so every line is a clean user→assistant pair for SFT or CPT
+pipelines). Add `--details` to include reasoning cycles and full tool
+cards, and an explicit path to choose the destination
+(`/export jsonl --details data/run1.jsonl`; tildes are not expanded, and
+the parent directory must already exist). Exports never overwrite an
+existing file. A transcript whose older items were dropped from view is
+disclosed honestly per format: the markdown header says so; JSONL stays
+schema-pure (no header line), so the on-screen notice carries the
+warning — the earliest turns are missing from every line's prefix. Full
+format spec in [api.md](api.md#transcript-export-export).
+
+## Attaching files
+
+Three ways to hand the agent a file:
+
+- **Drag & drop** — drop a file from Finder (or any file manager) onto
+  the terminal window: it attaches directly as a chip above the composer
+  (nothing lands in your draft). `Ctrl+O` undoes a drop — the chip goes
+  away and the pasted path text appears in the composer instead.
+- **`/attach <path>`** — accepts `~`, quotes, escaped spaces, `file://`
+  URLs, and relative paths. Bare `/attach` opens a file browser (type to
+  filter, `Enter` descends/picks, `Space` marks several); with chips
+  already staged it opens the pending manager instead.
+- **`exec --attach <path>`** — headless parity (repeatable; any upload
+  failure exits 1 before the run starts).
+
+The chips row is interactive: **click a file's name** to preview it,
+**click the `×`** to unstage it. Preview opens the file itself — a
+scrolling, line-numbered view for text documents, the picture for PNG
+and JPEG. **`/attach preview <path>`** works on any file, staged or not;
+inside the pending manager, `p` (or `Enter`) previews the chip under the
+cursor and `x` removes it.
+
+Chips upload at SEND time and ride the run as `context.attachments`.
+Text-like files inline straight into the model's context (up to 120 KB
+each, server-side); PDFs extract on demand; images need a
+vision-capable model route; other binaries the agent can list but
+usually not read — the attach notice tells you which. An upload failure
+blocks the send and keeps your chips (fix and resend; already-uploaded
+siblings are reused, never duplicated). Session uploads are permanent
+on the gateway: removing a chip before sending is the moment to change
+your mind. Details in [api.md](api.md#attachments-attach-drag--drop-exec---attach).
+
+## Where to next
+
+- [architecture.md](architecture.md) — how the client works (threading, the
+  ledger fold, the gateway contract)
+- [api.md](api.md) — every command, key binding, and CLI option
+- [faq.md](faq.md) · [troubleshooting.md](troubleshooting.md)
+
+
+==============================================================================
+# FILE: tui/docs/api.md
+==============================================================================
+
+# Reference: CLI, commands, keys
+
+## CLI
+
+```
+abstractcode [OPTIONS]                    launch the TUI
+abstractcode exec "<prompt>" [OPTIONS]    headless one-shot run
+abstractcode login [OPTIONS]              verify + persist credentials
+abstractcode doctor [OPTIONS]             diagnose the connection
+abstractcode --caps                       terminal capability report
+abstractcode --help | --version
+```
+
+### Options
+
+| Option | Meaning | Default |
+| --- | --- | --- |
+| `--gateway <URL>` | Gateway base URL | flag > env > login store > `http://127.0.0.1:8080` |
+| `--token <TOKEN>` | Bearer token | flag > env > login store |
+| `--session <ID>` | Durable session id | a fresh mint (`acode-<hex>`); `--resume`/`--continue` reopens the last one |
+| `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
+| `--reasoning <LEVEL>` | Reasoning effort: `none\|minimal\|low\|medium\|high\|xhigh\|auto` (also `--thinking`; validated at launch; works on `exec` too) | gateway default |
+| `--workflow <bundle[:flow]>` | Agent workflow | saved pick, else `basic-agent` |
+| `--provider <NAME>` | Provider override | gateway defaults |
+| `--model <NAME>` | Model override | gateway defaults |
+| `--workspace <PATH>` | Requested workspace root | current directory |
+| `--no-workspace` | Send no workspace root | — |
+| `--workspace-mode <M>` | Workspace access mode | server default |
+| `--theme <ID>` | Start theme | `ABSTRACTTUI_THEME`, else saved pick |
+| `--animation <on\|off>` | Launch animation; **persisted** to `prefs.json` (`animation`). Also skipped when stdout is not a tty, `NO_COLOR`/`TERM=dumb` is set, or `ABSTRACTTUI_NO_SPLASH` is set | on |
+| `--max-iterations <N>` | Ask the server for a specific iteration budget | none — **this client sets no budget**. Absent the flag the server's own default applies (the same one every client gets); the hard ceiling is the runtime's, enforced at run start |
+| `--replay-turns <N>` | Prior turns replayed in full detail at boot (0 disables) | 20 |
+| `--permissions <level>` | tool permissions for the invocation: `read` \| `write` \| `all` | prefs level |
+| `--require-approval <t>` | gate these tools regardless of level (comma list, repeatable); exec denies them | — |
+| `--no-prompt-cache` | exec: opt the run out of the runtime prompt cache (`_runtime.prompt_cache=false`) | server truth (on) |
+| `--timeout <SECS>` | exec: overall deadline | 900 |
+
+### Environment
+
+| Variable | Meaning |
+| --- | --- |
+| `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTFLOW_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` | Gateway URL (first set wins; beats the login store) |
+| `ABSTRACTCODE_GATEWAY_TOKEN` / `ABSTRACTGATEWAY_AUTH_TOKEN` / `ABSTRACTFLOW_GATEWAY_AUTH_TOKEN` | Bearer token |
+| `ABSTRACTCODE_GATEWAY_CONNECTION_FILE` | Login store path (default `~/.abstractcode/gateway.json`) |
+| `ABSTRACTCODE_PREFS_FILE` | Preferences path (default `~/.abstractcode/prefs.json`) |
+| `ABSTRACTTUI_THEME` | Start theme id |
+| `ABSTRACTTUI_NO_SPLASH` | Set to anything but `0` to skip the launch animation for one run (the persisted switch is `--animation off`) |
+
+### Exit codes (`exec`)
+
+`0` completed · `1` failed · `2` usage/config error · `124` timeout ·
+`130` cancelled.
+
+## Slash commands (composer)
+
+| Command | Effect |
+| --- | --- |
+| `/help` | Command + key reference modal |
+| `/new` | Fresh session (new durable id, cleared view) |
+| `/theme [id]` | Live-preview theme picker, or set directly |
+| `/workflow` | Pick the agent workflow from the gateway catalog |
+| `/model` | Pick provider + model from gateway discovery |
+| `/tools` | Enable/disable gateway tools (`Space` toggles; checked set = the run's exact allowlist; untouched = workflow defaults). In-modal: `p` cycles a per-tool approval pin, `t` cycles the tier — see the modal keys below |
+| `/permissions [read\|write\|all]` | THE tool-permission surface (bare = report): batches classifying at-or-below the level auto-approve. `read` = proven read-only tools only; `write` adds workspace file mutations; `all` auto-approves everything, **including arbitrary shell and network egress** — deliberate use only. Per-tool `ask` pins and gateway-disabled tools still gate. Sticky per session (`/tools tier` remains a spelling alias) |
+| `/workspace` | Inspect + edit the filesystem scope tools may touch: root (from `--workspace`/cwd), access mode, allowed paths. Mode + paths persist and ride every run |
+| `/skills` | Attach gateway skills to your runs (`Space` toggles; sent as `input_data.skills`) |
+| `/mcp` | The gateway's MCP server registry (read-only; their tools appear in `/tools` once declared) |
+| `/cache` | Prompt-cache + context metrics: route, latest call, run, session |
+| `/resources` | Gateway-host resources (`/host` is an alias): memory (RAM/device meter bars, GPU utilization when the host supports it, the gateway's process RSS, host name), resident models (modality label, tri-state residency — an unreported residency reads `unknown`, never "no" — size, `ctx N` with `*` = calibrated, 🔒 = residency lock, `default`), session prompt caches, totals. Admin actions on the selected model: `u` unload (two-step confirm; a 409 `model_locked` refusal offers `f` force), `k` lock/unlock, `e` context estimate, `r` refresh — keys under "Modal keys" below. Data is fetched at open, on `r`, and after a mutation — never polled; a failed refresh keeps the last snapshot marked STALE. Requires the gateway's declared `host_state` contract (`/discovery/capabilities`) — older gateways get an honest "not supported". Feeds the footer's `mem NN%` segment |
+| `/history [n\|all]` | Stream the PREVIOUS bloc of this session's turns from the gateway ledgers, prepended in full detail. Boot replays only the last bloc (`--replay-turns` sizes it, default 5); a stub line names how many earlier turns exist. **Scrolling to the top of the transcript auto-loads the previous bloc** — the stub becomes a live progress line and holding at the top cascades bloc-by-bloc until the session is fully loaded (Esc returns to the tail and stops the cascade). Failures name their cause — never a silent hole |
+| `/status` | The status card: workflow, route, workspace, session, connection, client phase + run id + last outcome, and a LIVE gateway run-status probe — the one place client view vs server truth is inspectable (wrapper roots legitimately stay `waiting` after your turn concluded) |
+| `/sessions` | Pick a recent session to continue (named by first prompt) |
+| `/session [id]` | Show or switch the session id (switching probes for a live run to reattach) |
+| `/details [full\|fold]` | Toggle transcript verbosity (`Ctrl+D`): `fold` (the default) renders each tool call as ONE line — glyph, name, status word (`ok`/`failed`/`running`/…), faint args hint — and thinking as a capped gist; `full` expands the whole card UNCUT (arguments in full on their own rows, the `│`-guttered result body entire, thinking content plus the labeled reasoning channel — nothing shortened). Thinking and every called tool stay visible in BOTH states — the toggle gates detail, never existence; errors always keep their `↳` bodies |
+| `/gating [auto\|wait]` | Approval gating for gating-capable workflows (the multi-agent coder): `auto` runs unattended (skips the workflow's human-approval pauses), `wait` re-gates (the default). Selecting the coder also opens a gated/unattended choice. Rides `input_data.gating_mode`; tool approval is a SEPARATE axis (`/permissions`) |
+| `/reasoning [level]` | Reasoning effort for the current route (`none\|minimal\|low\|medium\|high\|xhigh\|auto`; `default` clears). Bare `/reasoning` opens the dial — also stage 3 of `/model`: pick provider, then model, then effort. Non-reasoning models show a locked `none` (set-anyway override available while capability provenance is unserved); the choice is pair-coupled — changing provider or model resets it. Rides the run as `_runtime.thinking` (absent = gateway default) |
+| `/export [md\|jsonl] [--details] [path]` | Export the agent transcript to a file: `md` (default) = archival markdown; `jsonl` = SFT training lines. `--details` adds reasoning + full tool cards. Bare `/export` auto-names in the cwd; never overwrites — see "Transcript export" below |
+| `/attach [path\|preview\|clear]` | Stage a file for your NEXT message (chips above the composer; uploaded at send as `context.attachments`; **session uploads are permanent** server-side). Accepts `~`, quotes, escaped spaces, `file://`, relative paths. Bare `/attach` opens the file browser (nothing staged) or the pending manager (chips staged); `preview [n\|path]` opens the file itself (text or PNG/JPEG — staged or not); `clear` discards. Dropping a file onto the terminal attaches directly — `Ctrl+O` undoes (chips out, path text back). Agent-lane only (v1) — see "Attachments" below |
+| `/auto` | Removed (the session blanket had latent holes) — opens the `/permissions` report teaching the replacement |
+| `/pause` | Pause the run tree durably on the gateway (stops at the next step boundary; survives quitting the client) |
+| `/resume` | Resume a paused run tree |
+| `/cancel` | Cancel the active run |
+| `/conclude [note]` | Ask the agent to **wrap up now** and answer from what it already has — the missing verb between `/pause` (freeze) and `/cancel` (throw away). The loop stops reasoning at its next boundary and runs its tool-free conclusion, so the turn ends with a real answer plus what is left to do. A `note` is quoted to the model verbatim. Server-side verb (`POST /commands {type:"conclude"}`): the same request from AbstractObserver, the console or a chat bridge behaves identically, and the turn reports `stop_reason.code = "operator_conclude"` — not a failure, not a spent budget |
+| `/steer <text>` | Explicit steering (plain Enter during a run steers too; buffered until the run's first reasoning cycle when it has not started cycling yet). A send that hits a transport failure is retried once with the same command id — the gateway dedups on it, so the retry is exactly-once — and if it still fails your words are kept: they ride the error card and return to the composer when it is empty |
+| `/queue [text]` | Queue a prompt (FIFO): auto-runs after the current run **succeeds**; halts on failure/cancel (explicit resume). Persists per session and restores **paused** — a restore never auto-starts. Bare `/queue` opens the manager (keys under "Modal keys" below). Agent-lane only: under entity focus the visit's held-draft lane is the queue |
+| `/goal [text\|stop]` | Start a goal run on a goal workflow (`abstractcode.goal.v1`): loops until verified done or `max_cycles` (prefs `goal_max_cycles`, default 8). Bare `/goal` shows status; `/goal stop` cancels durably. Ships dark until a goal bundle is published on the gateway |
+| `/context [n\|off]` | Declare the model's context window in tokens (`262144`, `262k`, `1m`) — the footer meter becomes `ctx used/window tk (%, declared)`, warn ≥75% / error ≥90%, and the declaration rides runs as `_limits.max_tokens`. Bare `/context` reports; `off` clears. Persisted (`context_window`); `--max-tokens` declares for one session. Source-labeled "declared" — never a client capability table |
+| `/redraw` | Force a full-screen repaint (`Ctrl+L`) — recovery from an external terminal clear (Cmd+K), which damage-tracked rendering cannot detect |
+| `@name [text]` | Talk with a summoned entity: bare `@name` opens (or focuses) a durable visit; `@name <text>` opens and sends the first turn. An unknown name never becomes an agent prompt — the draft is preserved with a roster hint. A partial `@na` opens a completion dropdown (cached roster); accepting inserts the name and the NEXT Enter submits |
+| `/entities [name]` | Entity roster + identity cards (opens instantly on the cached roster, refreshes async — the live fetch can be slow behind the gateway's drives fold). `[name]` deep-links to that card |
+| `/brain <name>` | FLOW-BRAIN conversation with an entity: each message is one summon of the `entity-chat` VisualFlow through the entity door (poll to terminal; the structured `degraded`/`moment_error` contract renders as warn lines). Continuity rides the entity's own memory graph under one client-minted session id; the view is session-local, and `/end` closes it locally (no server visit exists). One conversation per entity: a live `@name` visit refuses with "/end first"; bare `/brain` reports the focused conversation's brain |
+| `/task <name> <title>` | Leave a task on the entity's desk — durable, no visit needed, works while the entity sleeps. Pickup happens at the entity's own boundary (day end, wake check, or visit close), never "immediately" |
+| `/end [name] [reason]` | Close the visit (the entity's reflection runs server-side; a visit that woke a sleeping entity restores the sleep). Refused mid-turn — entity turns are non-interruptible |
+| `/focus <name\|agent>` | Switch conversation focus (`Alt+E` cycles) |
+| `/quit` | Exit — with a live agent run, the quit gate opens first (see "Quitting with a live run") |
+
+Anything that is not a command is a task (when idle) or steering guidance
+(while a run is active). Under **entity focus**, submitted text is that
+visit's next turn — or the held draft while a turn runs (later text
+replaces the hold; it auto-sends when the turn parks).
+
+### Transcript export (`/export`)
+
+`/export [md|markdown|jsonl] [--details] [path]` — every token optional.
+Bare `/export` writes markdown, auto-named
+`abstractcode-export-<sid8>-<YYYYMMDD-HHMMSS>.md` in the current
+directory. The format word wins over the path's extension; a conflict
+(`/export md out.jsonl`) refuses. A known extension alone infers the
+format. `--details` is the export's own flag — the `Ctrl+D` view toggle
+never changes the output. v1 exports the **agent-lane** transcript
+(entity visits are separate conversations).
+
+- **Markdown** (archival): a header (session, workflow, timestamp, item
+  counts, and an explicit incompleteness note when the client view has
+  truncated older items), then the conversation with `## User` /
+  `## Assistant` markers. Default mirrors the clean view plus one-line
+  tool activity summaries; `--details` adds reasoning cycles (quoted) and
+  full tool cards (fenced args + result previews). Errored tools keep
+  their full card in both modes. Images are referenced by artifact id,
+  never bytes.
+- **JSONL** (SFT/CPT training): OpenAI chat schema, **one line per
+  completed turn**, each line carrying the cumulative message prefix up
+  to and including that turn's final answer — every line is a
+  self-contained training example; the last line is the whole session
+  (take just it for whole-session/CPT use). Unanswered turns
+  (failed/cancelled runs) are **skipped** — a dangling user prompt is
+  provider-hostile — and counted in the notice, never written to the
+  file. Default lines carry **only** `messages` (strict validators
+  accept them as-is); `--details` adds a `details` side field (that
+  turn's tools/cycles/steers as full strings — deliberately
+  not fabricated `tool_calls`: the client holds a humane rendering, not
+  wire-faithful call structures; full traces live in the gateway run
+  ledgers).
+
+Honesty bounds: bodies export as rendered — prompts/answers full text,
+tool args/results preview-bounded upstream by the client fold. Writes
+refuse existing files (never overwrite), never create parent
+directories, and `~` is not expanded. Paths with spaces are not
+supported (composer grammar); one path token max.
+
+### Attachments (`/attach`, drag & drop, `exec --attach`)
+
+Files stage as PENDING chips (validated at attach: exists, regular
+file, within the gateway's size cap when it declares one) and upload at
+SEND on the worker thread — removing a chip before sending is a true
+no-op. Refs ride the run as `context.attachments` (the agent lane's
+preferred media key); text-like files inline into the model's context
+server-side (120 KB/item), PDFs extract on `open_attachment`, images
+need a vision-capable route, other binaries are listable-not-readable
+(the attach notice says which).
+
+- **The chips row is interactive**: a staged file's NAME opens its
+  preview, and the `×` beside it unstages the file. Removing a chip
+  before the send is a true no-op (nothing has been uploaded yet).
+  Names are capped at 20 characters plus an ellipsis so one long
+  filename cannot own the row; the preview header and the manager spell
+  the full name out.
+- **Custody**: an upload or start failure blocks the send and KEEPS the
+  chips (error card names the server detail); refs minted before the
+  failure are cached, so the retry never duplicates artifacts. Chips
+  clear only when the run actually starts — a `📎` line then records
+  what rode the turn (and rehydrates on session restore). Send
+  snapshots the staged set: a chip removed while the upload is already
+  in flight still rides that run (you pressed send with it staged);
+  removal governs the NEXT send.
+- **Drag & drop**: dropping files onto the terminal arrives as a paste
+  of their paths; a verified drop (engine spelling classifier +
+  client existence check) attaches directly — nothing lands in the
+  composer — with `Ctrl+O` as the undo (chips out, the raw path text
+  back). Ambiguous pastes (prose, unescaped-space multi-drops on raw
+  terminals, nonexistent paths) insert as text, byte-identical.
+  Folders refuse (drop files, not folders).
+- **Image attachments** render a mosaic preview in the transcript when
+  they ride a run (and again on session restore) — you see exactly
+  what was attached. Reminder: the image reaches the MODEL only on a
+  vision-capable route.
+- **Preview** (click the chip, `/attach preview [n|path]`, or `p`/`Enter`
+  in the manager) opens the file's real bytes BEFORE it rides anything: a
+  scrolling, line-numbered document for text-like files, or the picture
+  itself for PNG/JPEG (same mosaic ladder as the transcript). Magic
+  bytes decide the kind, never the extension. It is a look, not an
+  attach — `/attach preview <path>` works on a file that is not staged
+  and stages nothing. Bounds are stated, never silent: text previews
+  the first 512 KB of a larger file and the header says so; invalid
+  UTF-8 is labeled; tabs expand to 4 columns; long lines WRAP (the
+  wrapped tail carries no line number, so the numbers stay a true index
+  into the file) and re-wrap when the terminal is resized. ANSI escape
+  sequences are removed so colored logs read, and the header says they
+  were; BOM'd UTF-16 is transcoded and labeled. Known limit: BOM-less
+  UTF-16 is indistinguishable from binary and refuses as such. The engine draws PNG and JPEG only — GIF/WebP/BMP/TIFF
+  and PDFs say so by name and remind you the attachment itself still
+  uploads and works. Reading and decoding run on their own thread, so a
+  large photo shows `reading…` rather than freezing the interface.
+- **Boundaries**: session uploads are PERMANENT server-side (the
+  session's attachment index has no delete surface). `/new` and session
+  switches discard pending chips with a notice. Chips never ride
+  steers, `/queue` drains, or `/goal` runs; entity lanes refuse (v1).
+- **Headless**: `exec --attach <path>` (repeatable) uploads before the
+  run starts and exits 1 on any failure — nothing spent.
+
+### Quitting with a live run
+
+The agent runs on the gateway — quitting this client never stops it.
+Every quit gesture (`Ctrl+Q`, `/quit`, double-`Ctrl+C`) funnels through
+one gate: idle quits instantly; a live agent run opens a modal with
+three verbs — **leave it running** (Enter — the default: nothing is
+sent, the run continues durably, relaunching this session reattaches),
+**pause, then quit** (`p` — durable gateway pause; `/resume` after
+relaunch continues it), **cancel it, then quit** (`c`). `Esc` stays.
+
+Honesty mechanics: pause/cancel quit only after the gateway ACCEPTS the
+durable command (up to 8s) — a failure shows an honest state offering
+quit-anyway/stay instead of pretending delivery. Repeat quit gestures
+always resolve to the safe verb (leave), so hammering `Ctrl+C`×3 /
+`Ctrl+Q`×2 exits at worst one press slower than before — and cancel is
+never reachable by repetition. A run concluding while the modal is open
+auto-quits (queued prompts are held back and restore paused next
+launch). Entity visits never gate — visits park on quit by design;
+reopening resumes them. Honest limit: closing the terminal window
+(SIGHUP/SIGKILL) shows no modal — the run continues and boot reattach
+recovers it.
+
+## Keys
+
+| Key | Context | Effect |
+| --- | --- | --- |
+| `Enter` | composer | Send task / send steering |
+| `Ctrl+J` | composer | Insert a newline — works in **every** terminal (it is the LF byte on the legacy wire); the composer grows to 4 rows |
+| `Alt+Enter` | composer | Insert a newline (Option+Enter on macOS with "Option as Meta/Esc+"); `Shift+Enter` also works wherever the kitty keyboard protocol is live (kitty/Ghostty/foot from startup; iTerm2 ≥ 3.5, VS Code/Cursor, Warp via the mid-session probe) |
+| `↑` / `↓` | composer at buffer edge | Recall sent messages (input history) |
+| `Tab` / `Enter` | `/` and `@` completion dropdowns | Accept the highlighted entry (Esc dismisses; a fully-typed command or `@name` submits directly on the first Enter) |
+| `Esc` | composer with text | Clear the composer |
+| `Esc` | scrolled up | Jump back to the live tail — that press is consumed (it never arms cancel) |
+| `Esc Esc` | while running, at the tail | Cancel the run (within 900ms). Under entity focus it explains instead: entity turns are non-interruptible |
+| `PgUp` / `PgDn` | anywhere | Scroll the transcript (PgDn to the tail re-sticks) |
+| mouse wheel | transcript | Scroll (unsticks from the tail) |
+| `Ctrl+D` | anywhere | Toggle detail view (thinking + tool results vs answers only) |
+| `Alt+E` | anywhere | Cycle conversation focus: agent → entity visit 1 → … → agent. Cycle order is the order conversations were opened — it never changes with how the header paints chips. Option+E on macOS with "Option as Meta/Esc+"; `/focus <name\|agent>` needs no modifier setting. (`Ctrl+E` is move-to-line-end in the composer) |
+| `Ctrl+T` | anywhere | Cycle theme |
+| `Ctrl+L` | anywhere | Force a full-screen repaint (`/redraw`) — recovers from a terminal clear |
+| `Ctrl+O` | while a drop's chips are still pending | Undo the newest file drop: chips out, the pasted path text back in the composer. Expires once the chips ride a run or are removed |
+| `?` + Enter | empty composer | Open the keys + commands reference (the footer's `? keys + commands`) |
+| `Ctrl+Q` | anywhere | Quit |
+| `Ctrl+C` | anywhere | Clear the current prompt (if any) and arm quit — a second Ctrl+C within 2s quits (with a live run, the quit gate opens; a third press = leave & quit) |
+| `↑↓` + `Enter`/`Space` | pickers | Move + choose — Space confirms too, single-select semantics (theme picker previews live) |
+| `Tab` | anywhere | Move focus (composer ↔ transcript ↔ modal fields) |
+| any character | transcript focused | Return focus to the composer and keep the character — typing is never dropped because focus wandered. `/` opens the command dropdown the same way |
+| paste / file drop | transcript focused | Same: pasted text lands in the draft, a dropped file becomes an attachment chip, and focus returns so you can type the prompt that goes with it |
+| `Ctrl+A` / `Ctrl+E` | composer | Move to line start / line end (`Home` / `End` also work) |
+| `Alt+B` / `Alt+F` | composer | Move one word left / right (`Ctrl+←` / `Ctrl+→` also work). Hold `Shift` on any form to extend the selection |
+| `Ctrl+W` / `Alt+D` | composer | Delete the word before / after the caret (`Alt+Backspace`, `Ctrl+Backspace`, `Alt+Delete`, `Ctrl+Delete` also work) |
+
+### Modal keys
+
+| Modal | Keys |
+| --- | --- |
+| approval | `a` approve · `A` approve all (sets permissions: `all`, sticky per session) · `d` deny · `f` toggle full JSON of the calls · `Esc` defer (the run keeps waiting; Enter on the empty composer reopens) |
+| ask (agent question) | `Enter` send the answer · `Esc` keeps the run waiting |
+| `/tools` | `Space` toggle · `a` all on · `n` all off · `p` cycle the per-tool pin (none → auto → ask → none; a pin beats the tier both ways) · `t` cycle the approval tier (read → write → all, persisted) · `Enter`/`Esc` close |
+| `/queue` | `↑↓` select · `x` remove · `u`/`d` move up/down · `c` clear all · `r` resume a paused queue · `e` pop the prompt into the composer for editing · `Enter`/`Esc` close |
+| chips row | click a staged file's name to preview it · click its `×` to unstage it |
+| `/attach` manager | `↑↓` select · `Enter`/`p` preview · `x` remove · `c` clear · `b` browse (file picker) · `Esc` close |
+| attachment preview | `↑↓` scroll · `PgUp`/`PgDn` page · `Home`/`End` ends · `Enter`/`Esc` close |
+| `/attach` picker | type to filter · `↑↓` move · `Enter` descend into a folder / attach the file (marked set when non-empty) · `Space` mark files for multi-attach · `Backspace`/`←` parent folder (filter empty) · `Esc` close |
+| `/resources` | `↑↓` move (model, cache and totals rows are all reachable; admin keys act on the selected MODEL row) · `u` unload → `y`/`Enter` confirms · `f` force-unload (confirm labeled FORCED) · `n`/`Esc` cancel an armed confirm · `k` lock/unlock residency · `e` context estimate (inline result) · `r` refresh (re-probes capabilities while the contract is unconfirmed) · `Enter`/`Esc` close |
+| `/entities` | `↑↓` browse (the identity card follows) · `Enter` talk (`@name`) · `t` leave a task (title prompt) · `e` end that entity's open visit · `Ctrl+D` show per-section provenance · `Esc` close |
+| `/workspace` | `↑↓` move · `Space` select an access mode / remove an allowed path · type a path + `Enter` adds it (switches to `workspace_or_allowed` when needed) · `Esc` close |
+
+## Transcript vocabulary
+
+The transcript reads as TURNS: a `══ you ══…` rule opens each one, a
+`══ assistant ══…` rule closes it with the answer (markdown), and the
+reasoning cycles between them are delimited by `── cycle N · 41s ·
+29k↑ 512↓ tk · 92% cached ──…` rules carrying that model call's
+duration, token cost, and — when the provider reports it — how much of
+the prompt was served from cache instead of recomputed. The model's own
+thinking leads every cycle; the cycle's tool calls stack directly
+beneath it, one line each.
+
+| Element | Item |
+| --- | --- |
+| `══ you ══…` | Your task (turn opener) |
+| `── cycle N · cost ──…` | One reasoning cycle: the thinking, then its tools |
+| `✓ name · ok  args…` | Tool call: glyph, name, status word, faint args hint |
+| `? · awaiting approval` / `» · running` | Tool paused / executing |
+| `✗ · failed` / `⊘ · denied` / `◌ · interrupted` | Failed / denied / run ended first |
+| `↳ …` | A tool error, attached under its row (error ink) |
+| `│ …` | Tool result output (full mode gutter) |
+| `══ assistant ══…` | The answer (markdown; `✦ assistant (update)` mid-run) |
+| `↪ steer` | Guidance you sent mid-run |
+| `▦` | Generated image (unicode mosaic) |
+| `·` | Informational notice |
+
+Three voices, three markings: bare indented prose is the model
+thinking, `│` is tool output, `↳` is an error. `/details` (or `Ctrl+D`)
+toggles verbosity — folded shows one-line tool calls with status tags
+and thinking gists; full shows args, result bodies, and the labeled
+reasoning channel. Thinking and every called tool stay visible in BOTH
+states.
+
+**`/details full` truncates nothing** (2026-08-20). *Every* body renders
+whole: your own prompts and steers, tool arguments, result bodies, tool
+errors, thinking and its reasoning channel, error and info notices,
+memory-probe digests, and an image's fetch error. No row cap, no
+`[#TRUNCATION …]`, no elision of any kind. The client keeps the full
+text the ledger reported — nothing is shortened on the way in either —
+so the full view has everything to show; use the scrollback (or
+`/export`, which writes the uncut arguments in its detailed mode) to
+read a long one. A failed tool shows its error AND its output: the
+error says that it failed, the body says why.
+
+The FOLDED view is a summary by definition: there, bodies are bounded
+and anything cut is labeled (`… (+N more lines)`, `… (+N words of
+reasoning · /details)`) — result bodies elide middle-out so their final
+lines (the `wc` total, the test verdict) survive, and a tool row stays
+one line. Asks TO you are never truncated in either mode, and neither
+is the approval modal's `f` JSON view — a question you cannot fully
+read is a question you cannot answer.
+
+Entity conversations reuse the same vocabulary. After each entity turn a
+`·` line counts what the probe reported (memories in context, diary
+entries, tools ran); the full memory digests sit behind the details toggle
+(`Ctrl+D`). Tool cards in entity transcripts come from the run's ledger
+(`tool_details`), never from reply prose.
+
+## What this client decides, and what it only shows
+
+AbstractCode's TUI is a **thin host**. The gateway is the single place run
+semantics live, because the same session is meant to be watched from
+AbstractObserver, a web client, or a chat bridge, and all of them must show the
+same answer to "did it finish, and what do I do about it?" A host that derives
+that answer locally has to be kept in sync with every other host by hand — and
+this one already got it wrong once, reading `outcome: "iteration_budget"` alone
+while the additive `conclusion_forced` sat beside it, telling operators to
+raise a budget that still had 38 of its 50 iterations unspent.
+
+So the loop's terminal node authors the verdict and this client renders it:
+
+| Field on `result.output` | Who writes it | What the host does |
+| --- | --- | --- |
+| `stop_reason.code` | agent loop | `final_answer`, `iteration_budget`, `stuck_repeat`, `stuck_oscillation` — carried, never interpreted for wording |
+| `stop_reason.finished` | agent loop | drives the ⚠/✓ glyph and the `exec` exit code |
+| `stop_reason.label` | agent loop | printed verbatim in the fixed chrome (`last run: …`) and as the headless one-liner |
+| `stop_reason.headline` + `.remedy` | agent loop | printed verbatim as the conclusion card |
+| `stop_reason.budget_exhausted` | agent loop | whether the iterations were actually SPENT — false for a stuck-loop stop; carried so no host re-derives the cause |
+| `notices[].{code,severity,text}` | agent loop | `text` printed verbatim; `severity` picks the ink (`error` renders as an error line, anything else as info); `code` is the stable key |
+
+**Legacy engines** (before this contract) send no `stop_reason`. The host then
+reports the bare fact — "the agent STOPPED, it did not finish" — and says
+explicitly that the engine reported no reason. It does not guess one: an
+exhausted budget and a stuck-loop stop both arrive as
+`outcome: "iteration_budget"`, and inventing the difference is the bug above.
+
+## Status surfaces
+
+- **Header**: wordmark · workflow · route · entity chips · cockpit facts ·
+  session id · connection orb (green ok / red down). With no override the
+  route names what "gateway defaults" resolves to — the gateway's
+  configured text route, replaced by the model that actually served once
+  a run reports it. The facts span carries the workspace directory's
+  basename, the workspace access mode, `skills N · mcp N` (when nonzero),
+  and the session token total at rest. One chip per entity conversation
+  (`◆castor parked`, `◆castor ✎42s` while a turn runs); chips render
+  whole or collapse into an honest `+N` tail at narrow widths — the
+  **focused** chip always renders (painted first when it would otherwise
+  hide), while `Alt+E` keeps cycling in open order regardless of paint
+  order; facts paint after chips and clip first.
+- **Activity strip** (while running): spinner · current activity · cycle ·
+  the in-flight model call (`model call 14s · 41 tok/s (last call)` —
+  elapsed from the started record, rate from the previous completed
+  call's usage receipt; ≥60s appends "provider may be slow") · elapsed ·
+  live token counts · `ctx` (input tokens of the latest model call — the
+  live context size) · `cache` (tokens served from the provider cache,
+  when reported) · tool count · per-cycle output sparkline. When idle:
+  session totals + last context size; a fresh session shows its session
+  line instead of a blank row.
+- **Status bar**: the persistent instrument row — `ctx used[/window] tk
+  ([%,] declared)` (the window comes from `/context`/`--max-tokens`;
+  warn ink ≥75%, error ≥90%; no declaration = the honest absolute) ·
+  session tokens (`N↑ N↓ tk session` when the provider reports the
+  split; the honest `N tk session` total when it doesn't) · `gpu N%`
+  (when the `/gpu` meter is on) · `mem N%` (host RAM from the last
+  `/resources` fetch — graded on the rounded percent, warn ≥75% / error
+  ≥90%; `mem N%*` marks a stale snapshot after a failed refresh; absent
+  when no percent is known) · `skills N` · `mcp N` ·
+  `? keys + commands`, plus theme + gateway host (+ error detail when
+  the connection drops). The key legend lives behind `?` (bare `?` +
+  Enter) and `/help`; the phase/focus teachings live in the composer
+  placeholder. When the row is too narrow for every instrument,
+  segments drop WHOLE from the right — never `…` fragments.
+- **Screen recovery**: `Ctrl+L` / `/redraw` force-repaints the whole
+  frame — recovery from an external terminal clear (Cmd+K), which a
+  damage-tracked renderer cannot detect on its own.
+
+## Caching and context
+
+The gateway enables prompt caching automatically per run when the provider
+supports it. Interactive sessions take the server default; there is nothing to
+configure. `/cache` is a scrollable panel (`↑↓`/`PgUp`/`PgDn`) reporting three
+scopes:
+
+- **route** — the requested route, the model that actually served the run,
+  whether that provider/model supports prompt caching (and in which mode), the
+  pair the capability probe asked about, and how many calls carried a
+  provider-reported hit count.
+- **latest model call** — context sent, its new-vs-carried split with
+  percentages, cache hits, output tokens, call time and output tok/s.
+- **this run** and **session (every run in this conversation)** — model and
+  tool calls, token totals, re-send amplification (input sent per output
+  token), cache hits against reported input, cumulative new-vs-carried,
+  peak context with a count of context resets, and model time with the
+  per-call average.
+
+Token counts are exact (`29,200`), not the chrome's rounded `29k`: the panel is
+the detail view opened when the rounded number was not enough.
+
+Two kinds of number live there and are never mixed silently. Cache hits are
+provider-reported; local providers (e.g. LM Studio) often cache without
+reporting hit counts, and the panel says "never reported by this provider"
+rather than inventing a zero that would read as a cold cache — once any call
+reports a count, a later zero is labeled as a real miss. The new-vs-carried
+split is DERIVED client-side from consecutive context sizes (the carried part
+is the prefix a cache can serve), and is labeled "derived" everywhere it
+appears. A context that shrank is counted as a reset, and credits nothing as
+carried — the cached prefix is gone.
+
+### `--no-prompt-cache`
+
+`exec --no-prompt-cache` opts a headless run out of the runtime prompt cache by
+sending `_runtime.prompt_cache = false` in the run's start vars. Absent, the run
+takes the gateway default (on). It exists so one gateway can serve both sides of
+an A/B measurement: the cached and uncached lanes then differ only by that key.
+
+```bash
+# uncached lane
+abstractcode exec "<prompt>" --session bench-off --workflow react-agent:react \
+  --provider mlx --model mlx-community/Qwen3-4B-Instruct-2507-4bit \
+  --no-project-context --no-review --permissions read --max-iterations 4 \
+  --no-prompt-cache
+
+# cached lane: the same command without --no-prompt-cache
+```
+
+**Scope.** The flag reaches the model calls of the run `exec` starts, and only
+those.
+
+- **It is `exec`-only.** The interactive client always takes the server default.
+- **It does not reach flow-graph bundles.** `coding-agent`, `basic-agent` and
+  `multiagent-coding` — including the default workflow — run their agent loop in
+  an Agent-node child run. The visual-flow compiler builds that child's
+  `_runtime` namespace from an explicit inheritance list: provider, model,
+  thinking, audio policy, transcription language, skills block and
+  `prompt_cache_binding` are carried across; **`prompt_cache` is not.** The child
+  therefore resolves the posture for itself and takes the gateway default,
+  whatever the parent was sent. Flow-graph bundles cannot be A/B'd from the
+  client today.
+- **Use `--workflow react-agent:react` for an A/B.** Its model calls run in the
+  run `exec` starts, so the posture governs them.
+
+**Verify the lane from the ledger, never from the flag.** On providers with an
+in-process cache, every model call that received a cache key carries
+`metadata.prompt_cache`. Absence of that metadata on *every* call is what proves
+an uncached lane; presence on any call in a lane you believe is off means the
+flag did not reach it. Check before trusting any comparison built on it.
+
+### What to expect when the cache is on
+
+Caching removes prompt prefill, not decoding, so the gain grows with prefix
+length and shrinks on short prompts with long answers, and it varies by model
+architecture.
+
+Measured through this client over three-turn sessions at ~5.6k-token contexts: a
+full-attention 4B served 96% of its prompt tokens from cache after the first
+turn, and two hybrid-attention models (4B and 27B) served about 47%, spending one
+turn rebuilding where the transcript first grows. Turns after the first were
+roughly twice as fast on those models, though the ratio moves by up to ×2 between
+repeat runs — treat it as an order of magnitude, not a figure. The first turn is
+slightly slower, because it builds the prefix cache the later turns reuse.
+
+GGUF models are the exception to watch: llama.cpp reuses the prefix on its own,
+and setting a cache key replaces that reuse rather than adding to it. The
+recorded comparison came out slower with the key, but it ran on CPU (Metal
+offload is disabled once PyTorch is in the process), so it is not a verdict for a
+GPU-offloaded GGUF host. Benchmark your own workload before enabling it there.
+
+See
+[AbstractCore's prompt-caching guide](https://github.com/lpalbou/AbstractCore/blob/main/docs/prompt-caching.md)
+for the per-model support matrix, the pending measurement list, and the
+measurement method.
+
+
+==============================================================================
+# FILE: tui/docs/architecture.md
+==============================================================================
+
+# Architecture
+
+abstractcode is a **thin client**: the agent executes on an
+AbstractGateway, and this process renders the run's durable ledger as it
+grows. Nothing intelligent happens client-side — that is the design. The
+run survives client crashes; two clients can watch the same run; the
+transcript's source of truth is the gateway's ledger, never client memory.
+
+## System view
+
+```mermaid
+flowchart LR
+  subgraph terminal [abstractcode process]
+    UI[UI thread<br/>AbstractTUI app<br/>signals + views]
+    W[gateway-runner thread<br/>owns all HTTP]
+    S1[ledger stream thread<br/>root run SSE]
+    S2[ledger stream threads<br/>subruns SSE]
+  end
+  subgraph gw [AbstractGateway]
+    API[/api/gateway/*/]
+    RUNS[(durable runs<br/>+ ledgers)]
+    AGENT[agent workflow<br/>LLM + tools]
+  end
+  UI -- "Cmd (mpsc)" --> W
+  W -- "WakeHandle::post closures" --> UI
+  S1 -- "record batches (post)" --> UI
+  S2 -- "record batches (post)" --> UI
+  W -- "runs/start · commands · discovery" --> API
+  S1 -- "GET ledger/stream (SSE)" --> API
+  S2 -- "GET ledger/stream (SSE)" --> API
+  API --- RUNS
+  RUNS --- AGENT
+```
+
+## Threading contract
+
+One rule, enforced everywhere: **the UI thread owns every reactive signal**.
+
+- UI → worker: an mpsc channel of `Cmd` values (`Start`, `Resume`, `Steer`,
+  `Cancel`, `Follow`, `FetchImage`, …). Handlers never block on HTTP.
+- Worker → UI: `abstracttui::reactive::WakeHandle::post` closures. The
+  closure captures `Send` data (the record batch, `Copy` signal handles) and
+  runs on the UI thread, where it writes signals.
+- Each followed run gets its own stream thread with a stop flag. Starting a
+  new run flips every previous flag; posted closures additionally re-check
+  that their records belong to the fold's current run tree
+  (`Fold::is_following`), so a stale stream can never contaminate a new run.
+
+## The ledger fold
+
+A gateway run emits an append-only ledger of step records:
+`{run_id, node_id, status, effect{type, payload}, result, error}`. The fold
+(`src/transcript.rs`) turns that stream into UI state:
+
+```mermaid
+flowchart TD
+  R[ledger record] --> C{effect type / status}
+  C -- "llm_call started @reason" --> CY[cycle counter + activity]
+  C -- "llm_call completed @reason" --> TH[Thinking item + usage fold]
+  C -- "tool_calls started" --> TC[Tool cards: running]
+  C -- "tool_calls completed" --> TD2[cards -> ok / failed<br/>result previews]
+  C -- "waiting: approval / ask" --> PW[pending wait -> modal]
+  C -- "waiting: subworkflow" --> F[FollowRun effect -> new stream]
+  C -- "emit abstract.status" --> AC[activity strip]
+  C -- "emit abstract.message / answer_user" --> AM[assistant update]
+  C -- "result.output on root or agent subrun" --> FA[final answer -> turn done]
+  C -- "failed" --> ER[error item]
+```
+
+Properties that carry the correctness weight:
+
+- **Replay-safe**: reconnects and reattach replay records from a cursor (or
+  from zero). Wait keys and tool call ids are seen-once sets, so answered
+  approvals never re-prompt and tool cards never duplicate.
+- **Wait resolution follows the references**: the canonical wait location is
+  `result.wait`; tool approval is `details.mode == "approval_required"` (or
+  embedded `tool_calls`, or a `tool_approval:` wait key); a later record from
+  the waiting run clears a stale prompt (ledger order is the argument).
+- **The answer can come from a subrun.** Wrapper bundles keep helper
+  subflows (status watchers) running after the agent answered, so the fold
+  accepts a flow output from the run currently emitting reasoning cycles —
+  the agent loop — as the turn's answer, and the UI releases the composer
+  immediately while the root finalizes server-side.
+
+## Streaming: SSE first, polling fallback
+
+`GET /runs/{id}/ledger/stream` delivers `event: step` frames
+(`data: {cursor, record}`) with keep-alive comments and a final
+`event: done`. Each stream thread:
+
+1. streams from its cursor, posting one batch per network read (arrival
+   cadence — approvals must surface the moment they land);
+2. on idle timeout or clean close without `done`, checks run status and
+   reconnects from the cursor;
+3. on transport errors, falls back to polling `GET /runs/{id}/ledger`
+   pages with capped backoff until the stream works again;
+4. on `done` (root only), reads the final status and reports the terminal
+   state.
+
+The `exec` subcommand uses the polling path exclusively, so both transports
+stay exercised.
+
+## Sessions and steering
+
+- **Sessions**: the client mints a durable session id and passes
+  `use_session_history: true` in run input; the gateway seeds prior turns
+  server-side (the durable-sessions contract) — that covers restarts. LIVE
+  turns additionally ride `context.messages` built from the fold's completed
+  user/answer pairs (client messages win by contract): wrapper bundles can
+  leave prior ROOT runs non-completed for a while (helper poller subflows),
+  which starves a completed-roots-only seed — carrying the visible
+  conversation makes follow-ups immune to that. `/new` rotates the id.
+- **Steering**: submitting text while a run is active sends an
+  `inject_guidance` command to the run currently cycling (the fold tracks
+  which subrun that is); the runtime folds it into the next reasoning
+  iteration through its durable steer sidecar.
+- **Approvals**: `resume` commands target the waiting run id + wait key with
+  `{"approved": true|false}` (or `{"response": …}` for ask-user waits). The
+  UI clears the prompt optimistically and restores it if the resume is
+  refused.
+
+## Module map
+
+| Module | Role |
+| --- | --- |
+| `src/config.rs` | Connection + preference resolution, and the login store. |
+| `src/gateway/` | Blocking HTTP client (ureq), SSE parser, stream loop. |
+| `src/protocol.rs` | Pure extraction over ledger records (waits, tools, usage, output). |
+| `src/transcript.rs` | The fold: records → items, stats, pending waits; dedup sets; bounds. |
+| `src/runner.rs` | Worker thread: commands, per-run stream threads, terminal detection. |
+| `src/store.rs` | The signal store (UI-thread owned). |
+| `src/ui/` | AbstractTUI views: chrome, transcript pane, modals. |
+| `src/cli.rs`, `src/exec.rs` | CLI parsing, `login`/`doctor`, headless one-shots. |
+
+## Testing model
+
+- **Unit**: protocol extraction and the fold, including a fixture of REAL
+  captured ledger records (tool approval round-trip included).
+- **Replay**: `tests/run_tree_replay.rs` re-drives a captured four-run tree
+  (root + two helper subflows + the agent subrun) through the fold the way
+  the runner interleaves it.
+- **Headless UI**: `tests/headless_ui.rs` drives the real interface through
+  AbstractTUI's capture harness — real input dispatch, real damage, screen
+  assertions — no pty.
+- **Live**: `scripts/pty_live_smoke.py` forks the binary under a real
+  controlling pty against a live gateway: boot → prompt → approval modal →
+  `a` → answer → clean Ctrl+C exit, with filesystem proof of the tool write.
+
+## Honest limits
+
+- Attachments (`@file`) are not implemented in this client yet.
+- Right after a drag-selection, a leading `c` or a bare Enter is consumed
+  by the engine's selection layer as a copy key (the region stays visible
+  after the release-copy); any other keystroke clears it. Engine-side fix
+  filed (abstracttui backlog 0290).
+- The `/` completion dropdown can land on the status-bar row when it has
+  only 1–2 candidates and the composer sits at the bottom of a short
+  terminal (engine placement policy; filed as abstracttui backlog 0294).
+  It is transient and clears as you type.
+- Markdown tables render as plain text lines (an AbstractTUI MarkdownView
+  limit today).
+- Images render as unicode mosaic through the transcript (pixel-protocol
+  placement for kitty/iTerm2 is an engine capability not yet wired here).
+- Windows is unverified for this crate end-to-end.
+
+
+==============================================================================
+# FILE: tui/docs/troubleshooting.md
+==============================================================================
+
+# Troubleshooting
+
+Symptom → cause → fix. `abstractcode doctor` is the first move for
+anything connection-shaped: it prints which source provided the URL/token
+and which check failed.
+
+## The screen went (mostly) blank and stays blank
+
+Something outside the app cleared the terminal — Terminal.app's Cmd+K, a
+stray `clear`/`printf '\033c'` from another process, an emulator glitch.
+The engine repaints only cells it believes changed, so it cannot know the
+terminal lost everything. **Press `Ctrl+L`** (or type `/redraw`) — one
+full repaint (protocol images re-place too), works even while a modal
+is open. Focusing another window and coming back also heals the whole
+screen automatically (the engine's redraw-on-focus-gained, on by
+default in this app) — that half needs the terminal to report focus
+events (DEC 1004; under tmux set `focus-events on`), so `Ctrl+L`
+remains the works-everywhere recovery.
+
+## "gateway unreachable" / red orb in the header
+
+The URL points at nothing listening. Is the gateway up
+(`abstractgateway serve`)? Is the port right? `doctor` shows the resolved
+URL and its source — a stale `ABSTRACTGATEWAY_URL` export overrides the
+login store by design.
+
+Wording is evidence-based: "gateway unreachable" means connect-level
+failure (refused/DNS — nobody at the address); "gateway timed out" means
+the gateway accepted the connection but didn't answer in time (busy —
+e.g. in-process inference load — or wedged); "gateway request failed"
+means the transfer broke mid-way. The red orb flips on connect-level
+evidence immediately, or on a *run* of consecutive timeouts (2 idle
+probes / 3 stream-lane failures) — a single slow call never claims the
+gateway is gone.
+
+## HTTP 401 on ping
+
+Token rejected. Re-run `abstractcode login`. If the gateway runs with
+user auth (`ABSTRACTGATEWAY_USER_AUTH=1`), the token must be a
+registry-issued `agw_…` token; a static dev token from a different
+configuration will be refused.
+
+## "no agent workflows available"
+
+The catalog has no entrypoint implementing `abstractcode.agent.v1`. Install
+the stock `basic-agent` bundle on the gateway (it ships with it), then
+`/workflow` to pick it up — the catalog reloads on the next launch or picker
+open.
+
+## The run starts, then an error names an LLM provider failure
+
+The gateway could not reach the model (e.g. LM Studio "Model unloaded").
+Load a model in your provider, or pick a loaded one with `/model`. The run
+retries with backoff server-side; `Esc Esc` cancels it if you would rather
+switch models and start over.
+
+## The agent wrote files, but not where I expected
+
+Server-managed workspace policy (the startup notice says so): the gateway
+clamps client paths and tools execute in its managed workspace. See the
+workspace note in [getting-started.md](getting-started.md#the-five-things-worth-knowing-on-day-one).
+
+## Red "Path escapes workspace_root: '…'" errors in the transcript
+
+These are RUNTIME workspace-policy refusals, not client bugs: every file
+tool call is resolved against the run's workspace scope, and a path that
+lands outside it is refused with exactly that message (a sibling message,
+"Path is outside workspace roots", appears in allowlist mode). The agent
+usually recovers by retrying inside the workspace; repeated refusals mean
+the task genuinely needs a directory the run was not granted.
+
+To inspect or extend the scope, use `/workspace`:
+
+- **root** — where relative paths anchor (`--workspace <PATH>` at launch;
+  defaults to the directory you launched from).
+- **access mode** — `workspace_only` (root only), `workspace_or_allowed`
+  (root + your allowed paths), `all_except_ignored` (any absolute path —
+  the gateway only honors it when it trusts client scope). Default:
+  server-managed (nothing sent; the gateway decides).
+- **allowed paths** — extra roots sent as `workspace_allowed_paths`;
+  they apply in `workspace_or_allowed` mode.
+
+Mode + allowed paths persist in `~/.abstractcode/prefs.json`
+(`workspace_mode`, `workspace_allowed`), which headless `exec` reads too
+— configure once, applies everywhere.
+
+Honesty note: the GATEWAY enforces the policy server-side. Unless the
+operator enabled client scope overrides
+(`ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1`, or local tool mode),
+client-sent paths are clamped to operator-controlled roots — adding a
+path in `/workspace` widens what the CLIENT asks for, and the server may
+still refuse it.
+
+## Approval modals keep appearing for harmless tools
+
+Tool batches prompt when they classify ABOVE your accepted permissions
+level. `/permissions <read|write|all>` sets it (sticky per session):
+
+- `read` (default) — read-only tools (read/list/search/skim/analyze)
+  auto-approve; proven read-only `git` commands are approved SERVER-side
+  (the runtime's `git_read_only@v1` refiner) and never prompt at all.
+- `write` — adds workspace file writes (`write_file`/`edit_file`).
+- `all` — everything auto-approves, including arbitrary shell and
+  network; nothing is ever asked (per-tool `ask` pins and
+  gateway-disabled tools still gate).
+
+Per-tool pins live in prefs.json under `tool_approval.overrides`
+(`{"fetch_url": "auto", "read_file": "ask"}`). The approval modal's
+second line shows both sides ("permissions: write — this batch needs:
+all"), so a prompt always names why it exists. The old `/auto` session
+blanket is removed — its spellings open the `/permissions` report.
+
+## An approval modal answered elsewhere is stuck on screen
+
+It clears the moment the ledger shows the run progressed (another client may
+have approved). If the connection dropped mid-wait, the polling fallback
+picks it up within seconds; the status bar shows the connection error
+meanwhile.
+
+## What I type does not appear in the prompt box
+
+Just keep typing: any character returns focus to the composer and is kept,
+and so is a paste or a file drop. Focus can sit on the transcript after you
+click in the scrollback or press Tab, and the transcript answers only
+navigation keys — so if a keystroke seems to vanish, type the next one and
+both land. `Tab` still moves focus explicitly, and `/focus <name|agent>`
+switches conversations from any state.
+
+## Copy did not reach the clipboard
+
+Copy uses OSC 52 where the terminal advertises it, and falls back to the
+host clipboard tool (`pbcopy`, `wl-copy`, `xclip`, `clip.exe`) everywhere
+else, so a drag-copy works in macOS Terminal.app, the VS Code and Cursor
+terminals, and Warp. If OSC 52 is the only route your setup allows, tmux
+needs `set -g set-clipboard on` and some terminals cap the payload size.
+Shift-drag (Option-drag on macOS Terminal and iTerm2) bypasses the app and
+uses the terminal's native selection.
+
+A selection made while a run streams copies exactly the cells you
+highlighted: the transcript holds still for the length of the drag and
+returns to the live tail when the region clears.
+
+## Garbled cells / misaligned borders
+
+Your terminal likely renders ambiguous-width characters wide. Use a
+terminal/font configured for narrow ambiguous width (the norm), and check
+`--caps` for what was detected.
+
+## `exec` hangs then exits 124
+
+The run outlived `--timeout`. The run itself stays durable on the gateway —
+the timeout message names the run id; reattach in the TUI with the same
+session or inspect it through the gateway's own surfaces.
+
+## Live smoke for a full-stack check
+
+```sh
+ACODE_GATEWAY_TOKEN=<token> python3 scripts/pty_live_smoke.py
+```
+
+Boots the real binary under a pty against your gateway, drives a prompt →
+approval → answer round trip, and verifies a clean exit.
+
+
+==============================================================================
+# FILE: tui/docs/faq.md
+==============================================================================
+
+# FAQ
+
+**How is this different from the browser client?**
+Only the surface. Both are thin clients: the agent executes on the gateway and
+each renders the same durable run ledger. They submit the same durable
+commands, so a session is portable — start a task here, resolve its approval
+prompt in the browser, or the reverse.
+
+**Do I lose my run if the terminal dies?**
+No. Runs are durable gateway objects. Relaunch with the same session and you
+come back to the state you left: prior turns replay IN FULL DETAIL from
+their run ledgers (prompts, reasoning cycles, tool cards, answers — through
+the same fold as live streaming, so the details toggle applies), a live run
+reattaches with its original prompt and full activity, and pending
+approvals re-surface. Replay depth defaults to the last 20 turns
+(`--replay-turns N` raises it, `0` disables) because each turn costs one
+history-bundle fetch carrying its complete run-tree ledgers.
+
+**Can I pause a run?**
+Yes — `/pause` pauses the whole run tree durably on the gateway (it stops
+consuming tokens at the next step boundary and SURVIVES quitting the
+client). `/resume` continues it. The activity strip shows the paused state,
+including after a restart.
+
+**Where does the agent write files?**
+On the gateway host, under its workspace policy. The default posture is
+server-managed: client-supplied paths are clamped to the gateway's workspace
+root or a managed per-session folder, and the app says so at startup. For
+trusted local setups, start the gateway with
+`ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1` and pass `--workspace`.
+
+**How does conversation memory work?**
+Two layers. Live, the client carries the visible conversation (completed
+user/answer turns, capped like the server's own defaults) into each new run —
+so follow-ups always see prior turns, even while earlier runs are still
+finalizing on the gateway. Across restarts, the gateway's server-side session
+history (`use_session_history`) seeds prior completed turns into the model.
+The visual transcript is per-launch; the model's memory is not.
+
+**What do the token numbers mean?**
+Input/output tokens summed from the run's completed LLM calls (the ledger's
+usage records). `ctx` is the input tokens of the LATEST call — the live
+context size the model actually received. `cache` counts prompt tokens the
+provider served from its cache (shown only when the provider reports hits).
+The sparkline shows output tokens per reasoning cycle. Idle, the strip shows
+session totals across runs.
+
+**Is prompt caching on?**
+The gateway enables prompt caching automatically for every run when the
+provider supports it — nothing to configure client-side. `/cache` shows the
+posture for the effective route (supported + mode) and then the numbers, at
+three scopes: the latest model call, this run, and the whole session. Per
+scope: cache hits against reported input, the derived new-vs-carried split
+(how much of what you send is a reusable prefix), re-send amplification, peak
+context and context resets, and model time. The panel scrolls (`↑↓`/`PgUp`/
+`PgDn`). Local providers (LM Studio) often cache without reporting hit counts;
+the panel says "never reported by this provider" instead of inventing a zero —
+and the derived split still tells you what a cache could save.
+
+**Can I turn prompt caching off to compare?**
+`exec --no-prompt-cache` opts a headless run out, which is enough to A/B one
+gateway against itself. It is `exec`-only, and it reaches the model calls of the
+run it starts — so pair it with `--workflow react-agent:react`. Flow-graph
+bundles (`coding-agent`, `basic-agent`, `multiagent-coding`, and the default
+workflow) run their agent loop in a child run that does not inherit the posture,
+so they cannot be A/B'd from the client. Confirm the lane you actually got from
+the run ledger, not from the flag. See
+[Caching and context](api.md#caching-and-context) for the full scope and what to
+expect from the cache.
+
+**Which model serves "gateway defaults"?**
+The gateway's configured text route (its Multimodal console page). The
+header names it as soon as the catalog loads, and switches to the model
+that ACTUALLY served once a run reports one — bundle pins or server config
+can influence resolution, so the served model is the final truth.
+
+**How do I limit which tools the agent gets?**
+`/tools`, `Space` to toggle. Untouched, the workflow's own tool defaults
+apply. Once you customize, the checked set is exactly the allowlist sent
+with each run. `/skills` attaches gateway skills the same way; `/mcp` shows
+MCP servers declared on the gateway (their tools join the inventory).
+
+**Why did my turn finish while the run still shows as waiting on the
+gateway?**
+Agent bundles can keep helper subflows (status watchers) polling after the
+agent produced its answer. The answer is the turn's finish line — the client
+releases the composer the moment it lands and lets the root run finalize
+server-side.
+
+**Can I run several tasks in parallel?**
+One active run per app instance. Launch a second instance with a different
+`--session` for a parallel conversation — both stream independently from the
+same gateway.
+
+**Does steering interrupt the model?**
+No. Guidance lands in the runtime's durable steer sidecar and folds into the
+agent's next reasoning cycle; the in-flight LLM call is never cut.
+
+**Which terminals work?**
+Anything VT100-descended. AbstractTUI detects capabilities and degrades in
+the open (truecolor → 256 → 16; images → unicode mosaic). Check what your
+terminal offers with `abstractcode --caps`.
+
+**Where are my settings?**
+Connection: `~/.abstractcode/gateway.json`.
+Preferences (theme, workflow, route, session, tool/skill selections, recent
+sessions): `~/.abstractcode/prefs.json`.
+
+**Why did my queued prompt not start?**
+The queue only advances after the current run **succeeds** — a failure or a
+cancel pauses it (running the follow-up anyway would build on a turn that
+never finished). It also always restores **paused** after a relaunch or a
+session switch: a restore never auto-starts work. Open `/queue` and press
+`r` to resume; the strip shows `N queued (paused — /queue resumes)`
+whenever prompts are waiting on you.
+
+**How do I stop the constant approval prompts?**
+Set the permissions level: `/permissions write` auto-approves proven
+read-only tools plus workspace file writes (the runtime clamps those to the
+run's workspace); `/permissions all` auto-approves everything. Be clear-eyed
+about `all`: it auto-approves **arbitrary shell commands and network
+egress**, and it is sticky per session (and seeds new ones) — use it on
+gateways whose workspace and tools you trust, not as a reflex. Finer
+control: in `/tools`, `p` pins one tool `auto` (always approves, even above
+the level) or `ask` (always prompts, even below it — pins gate even at
+`all`). The approval modal's `A` sets `all` for the session.
+
+**Why deny by default in `exec`?**
+Unattended runs should not mutate a machine because nobody was there to say
+no. `--permissions all` is the explicit opt-in; denials carry an explanation the
+model sees, so it finishes as best it can without the tool.
+
+
+==============================================================================
+# FILE: web/README.md
+==============================================================================
+
+# AbstractCode Web (Gateway-First)
+
+The browser client for [AbstractCode](../README.md), published to npm as
+`@abstractframework/code`. Like the terminal client, it is a **gateway-first**
+host UI:
+- talks only to **AbstractGateway** (`/api/gateway/*`)
+- renders by replaying/streaming the ledger
+- resumes waits by submitting durable commands
+
+Run it without installing anything:
+
+```bash
+npx @abstractframework/code      # serves on http://127.0.0.1:3002
+```
+
+Shared UI components come from the published `@abstractframework/*` packages
+(see `package.json`), so this app builds from its own directory with no other
+checkout present.
+
+Docs:
+- Web overview: [`../docs/web.md`](../docs/web.md)
+- Deployment: [`../docs/deployment-web.md`](../docs/deployment-web.md)
+  - Voice features (optional): push-to-talk transcription + TTS (see `../docs/web.md`)
+
+## Local dev
+```bash
+cd web
+npm ci
+npm run dev
+```
+
+In the UI:
+- set `Gateway URL` (blank = same origin / dev proxy; e.g. `http://127.0.0.1:8081`)
+- in hosted user-auth mode, set `Gateway user` and that user's `Gateway token`
+
+When a Gateway user is provided, the web server exchanges the token for a
+Gateway browser session and stores only app-scoped session cookies. The raw
+token is not persisted in browser settings. Direct bearer-token mode is kept for
+local development only.
+
+Whether a browser may change the Gateway URL is decided by the **connection
+peer**, not by any request header: only a request arriving from loopback may
+reconfigure it, and the server-configured Gateway URL is authoritative for
+everyone else. Set `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` to allow
+it from anywhere, behind your own access control. Behind a reverse proxy every
+peer is the proxy, so loopback carries no meaning there — set
+`ABSTRACTCODE_TRUST_PROXY_HEADERS=1` to refuse browser-supplied changes
+regardless of peer, and add the env var above if you still want to permit them.
+
+
+==============================================================================
+# FILE: CHANGELOG.md
+==============================================================================
 
 # Changelog
 
@@ -202,6 +2586,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Added
+
+- Terminal client written in Rust, published to crates.io as `abstractcode` and
+  installed with `cargo install abstractcode`. It lives in `tui/` and renders
+  with [AbstractTUI](https://github.com/lpalbou/AbstractTUI): live reasoning
+  cycles, tool cards that update in place, durable pause/cancel/resume,
+  mid-run steering, file attachments, session history replay, and 26 themes.
+- Prebuilt binaries for macOS (Apple silicon and Intel), Linux (x86-64 and
+  ARM64), and Windows, attached to each release.
+
+### Changed
+
+- **AbstractCode is now a Rust terminal client plus a browser client.** The two
+  ship independently: `v<version>` releases the terminal client, and
+  `web-v<version>` releases `@abstractframework/code` to npm.
+- The browser client consumes the shared AbstractUIC components as published
+  npm packages rather than through path aliases into a sibling checkout, so
+  `web/` builds from its own directory with no other repository present.
+- Preferences moved to `~/.abstractcode/prefs.json`, beside the existing login
+  store. `ABSTRACTCODE_PREFS_FILE` overrides the location.
+
+### Removed
+
+- **The Python implementation of AbstractCode.** The terminal client replaces
+  it. Version 0.3.8 remains installable from PyPI and tag `v0.3.8` marks its
+  source; the implementation stays in this repository's history.
+- `abstractcode flow`, `abstractcode gateway`, and `abstractcode workflow`
+  subcommands. Workflow selection is now `--workflow <bundle[:flow]>`, and
+  installing bundles is a gateway-side operation.
+
+### Fixed
+
+- The browser client's gateway-configuration guard decides local from the
+  connection peer instead of the `Host` header, which a remote client could
+  set to claim it was local.
+- The shared component stylesheet is imported explicitly, restoring styling for
+  the agent-cycles panel.
+
+### Migration
+
+- `pip install abstractcode` → `cargo install abstractcode`.
+- Preferences from a pre-rename build are read once from
+  `~/.abstractcode-tui/prefs.json` and saved forward automatically.
+- Credentials in `~/.abstractcode/gateway.json` are unchanged.
+
+## [0.3.9] - 2026-06-03
+
+### Changed
+- Raised AbstractFramework dependency floors to Core `>=2.13.32`, Runtime `>=0.4.27`, Agent `>=0.3.11`, and Flow `>=0.3.18`.
+- Aligned the web package release version with the Python package.
 
 ## [0.3.8] - 2026-05-31
 
@@ -499,20 +2934,10 @@ Commands: /help | /status | /tools | /history | /clear
 
 [0.2.0]: https://github.com/lpalbou/abstractcode/releases/tag/v0.2.0
 
----
 
-<!-- FILE: CHANGELOD.md -->
-
-# Changelog
-
-This repository’s changelog is maintained in [`CHANGELOG.md`](CHANGELOG.md).
-
-This file exists only as a convenience for common typos and external references.
-
-
----
-
-<!-- FILE: CONTRIBUTING.md -->
+==============================================================================
+# FILE: CONTRIBUTING.md
+==============================================================================
 
 # Contributing to AbstractCode
 
@@ -527,33 +2952,55 @@ AbstractCode is part of the **AbstractFramework** ecosystem:
 
 - Getting started: [`docs/getting-started.md`](docs/getting-started.md)
 - Architecture: [`docs/architecture.md`](docs/architecture.md)
-- CLI reference: [`docs/cli.md`](docs/cli.md)
+- API and CLI surface: [`docs/api.md`](docs/api.md)
 - Docs index: [`docs/README.md`](docs/README.md)
 
 ## Development setup
 
-Prereqs:
-- Python **3.10+**
-- (Optional) Node.js if you work on the web app (`web/`)
+This repository holds two clients, each with its own toolchain. You only need
+the one you are working on.
 
-Install in editable mode with dev tools:
+### Terminal client (`tui/`)
 
-```bash
-pip install -e ".[dev]"
-```
-
-Run tests:
+Requires Rust **1.87+** (the crate's declared minimum; CI builds against it).
 
 ```bash
-pytest -q
+cargo test --workspace
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Format and lint:
+All three run in CI and must pass. `cargo package --manifest-path tui/Cargo.toml --list`
+shows exactly what a release would publish.
+
+`cargo package` refuses to build from a dirty tree. If it names a file you did
+not edit, it is a build artifact that should not be tracked — untrack it and
+add it to `.gitignore` rather than committing it.
+
+### Browser client (`web/`)
+
+Requires Node.js **24**.
 
 ```bash
-ruff check .
-black .
+cd web
+npm ci          # install from the lockfile, not the manifest
+npm test
+npm run build
 ```
+
+`npm ci` rather than `npm install`, so you reproduce CI's dependency tree.
+
+## Releases
+
+The two clients version independently, each under its own tag prefix:
+
+| Tag | Publishes |
+|---|---|
+| `v<version>` | the crate `abstractcode` to crates.io, plus binaries on the GitHub release |
+| `web-v<version>` | `@abstractframework/code` to npm |
+
+Each publish job asserts the tag matches its own manifest version, so bump
+`tui/Cargo.toml` or `web/package.json` before tagging.
 
 ## What to include in a PR
 
@@ -566,7 +3013,7 @@ black .
 
 If you found a bug or want a feature:
 - Prefer a minimal reproducible example and include:
-  - OS + Python version
+  - OS, and the client and version you used
   - `abstractcode --help` output (or version)
   - what you expected vs what happened
 
@@ -574,15 +3021,16 @@ Security issues: please follow [`SECURITY.md`](SECURITY.md).
 
 ## Web app contributions
 
-The web app lives in `web/`. Local development currently depends on shared UI packages via Vite path aliases.
+The web app lives in `web/`. Its shared UI components install from npm as ordinary dependencies, so it builds from that directory alone.
 
 See:
 - [`docs/web.md`](docs/web.md)
 - [`docs/deployment-web.md`](docs/deployment-web.md)
 
----
 
-<!-- FILE: SECURITY.md -->
+==============================================================================
+# FILE: SECURITY.md
+==============================================================================
 
 # Security policy
 
@@ -608,9 +3056,46 @@ Include as much of the following as you can:
 
 We’ll acknowledge receipt and work with you on a coordinated timeline for a fix and release. If you need a specific credit line in release notes, mention it in your report.
 
----
 
-<!-- FILE: ACKNOWLEDGMENTS.md -->
+==============================================================================
+# FILE: CODE_OF_CONDUCT.md
+==============================================================================
+
+# Code of Conduct
+
+## Our standard
+
+Everyone participating in this project — maintainers, contributors,
+reporters — is expected to act professionally and treat others with respect.
+
+Expected behavior:
+
+- Be respectful and constructive in issues, reviews, and discussions.
+- Focus critique on code and ideas, never on people.
+- Assume good faith; disagree with evidence and specifics.
+- Respect maintainers' time: clear reports, minimal reproductions.
+
+Unacceptable behavior:
+
+- Harassment, insults, or discriminatory language of any kind.
+- Trolling, deliberate disruption, or sustained off-topic argument.
+- Publishing others' private information without permission.
+
+## Enforcement
+
+Violations can be reported privately to contact@abstractframework.ai.
+Reports are reviewed confidentially; consequences range from a warning to a
+permanent ban from project spaces, at the maintainers' discretion.
+
+## Attribution
+
+This policy is adapted in spirit from the
+[Contributor Covenant](https://www.contributor-covenant.org/), v2.1.
+
+
+==============================================================================
+# FILE: ACKNOWLEDGEMENTS.md
+==============================================================================
 
 # Acknowledgments
 
@@ -618,28 +3103,30 @@ AbstractCode is built on (and inspired by) a lot of open-source work — thank y
 
 ## Where dependencies are declared
 
-- Python: `pyproject.toml`
-- Web UI: `web/package.json` (and the fully resolved tree in `web/package-lock.json`)
-- Web UI local packages: `web/vite.config.ts` aliases (`../../abstractuic/*`)
+- Terminal client: `tui/Cargo.toml` (resolved tree in `Cargo.lock`)
+- Browser client: `web/package.json` (resolved tree in `web/package-lock.json`)
 
-## Runtime dependencies (Python)
+## Terminal client dependencies (Rust)
 
-Declared in `pyproject.toml`:
+Declared in `tui/Cargo.toml`:
 
-- `abstractagent` — built-in agents (`react`, `memact`, `codeact`)
-- `abstractruntime` — durable runs, stores, snapshots, and workflow execution
-- `abstractcore[tools,media]` — provider/model abstraction + tools + rich media handling
-- `prompt_toolkit` — interactive terminal UI (TUI)
-- `ddgs` — DuckDuckGo-backed search backend used by the default `web_search` tool
+- [`abstracttui`](https://github.com/lpalbou/AbstractTUI) — the terminal rendering engine: layout, widgets, input, themes, and screen capture
+- `ureq` — small blocking HTTP client, used for gateway calls and SSE streaming
+- `serde_json` — JSON parsing for gateway payloads
 
-## Optional extras (Python)
+## Server-side lineage
 
-- `abstractflow` — VisualFlow execution (`pip install "abstractcode[flow]"`, declared in `pyproject.toml`)
-- `abstractmemory` — optional memory/knowledge graph integration (imported in `abstractcode/react_shell.py`, not installed by default)
+AbstractCode is a client. The agent it drives runs on
+[AbstractGateway](https://github.com/lpalbou/abstractgateway), which builds on
+[AbstractRuntime](https://github.com/lpalbou/abstractruntime) for durable runs
+and [AbstractCore](https://github.com/lpalbou/abstractcore) for providers and
+tools. Those projects carry their own acknowledgments.
 
-## Web UI dependencies (TypeScript/React)
+## Browser client dependencies (TypeScript/React)
 
 Declared in `web/package.json`:
+
+- [`@abstractframework/ui-kit`, `panel-chat`, `monitor-flow`, `monitor-gpu`](https://github.com/lpalbou/abstractuic) — the shared AbstractUIC component packages
 
 - `react`, `react-dom` — UI framework
 - `vite`, `typescript` — build toolchain
@@ -648,20 +3135,10 @@ Declared in `web/package.json`:
 - `marked` — Markdown rendering
 - `dompurify` — HTML sanitization for rendered Markdown
 
-Local UI packages (via `web/vite.config.ts` aliases):
-
-- `@abstractuic/ui-kit` — shared theme/tokens and UI primitives
-- `@abstractuic/panel-chat` — chat message rendering
-- `@abstractuic/monitor-flow` — run/trace viewer (Context inspector)
-- `@abstractutils/monitor-gpu` — optional GPU widget integration
-
 ## Development & packaging
 
-Declared in `pyproject.toml` (dev/build):
-
-- `pytest`, `pytest-cov` — tests/coverage
-- `ruff`, `black` — linting/formatting
-- `setuptools`, `wheel` — packaging
+- Terminal client: `cargo` with `rustfmt` and `clippy`
+- Browser client: `vite` and `typescript` for the build, `vitest` for tests
 
 ## Abstract* ecosystem
 
@@ -671,1308 +3148,6 @@ AbstractCode is part of the Abstract* stack and relies on:
 - [AbstractCore](https://github.com/lpalbou/abstractcore)
 - [AbstractRuntime](https://github.com/lpalbou/abstractruntime)
 - **AbstractAgent**
-- (optional) **AbstractFlow** for local VisualFlow runs (`abstractcode[flow]`)
-- **AbstractUIC** components in the Web UI (via `../../abstractuic/*`)
+- [AbstractUIC](https://github.com/lpalbou/abstractuic) components in the browser client
 
 Thank you to all contributors and the broader open-source community.
-
----
-
-<!-- FILE: docs/getting-started.md -->
-
-# Getting started
-
-AbstractCode is a **durable terminal TUI** for running agentic coding sessions on the AbstractFramework stack:
-- **AbstractRuntime** provides durable runs/ledger/waits/artifacts.
-- **AbstractAgent** provides the built-in agents (`react`, `memact`, `codeact`).
-- **AbstractCore** provides provider/model abstraction and tool definitions.
-
-Ecosystem links:
-- [AbstractFramework](https://github.com/lpalbou/AbstractFramework)
-- [AbstractCore](https://github.com/lpalbou/abstractcore)
-- [AbstractRuntime](https://github.com/lpalbou/abstractruntime)
-
-If you landed here directly, skim [`README.md`](README.md) for an overview.
-
-## 1) Install
-
-Python **3.10+**:
-
-```bash
-pip install abstractcode
-```
-
-Optional (run VisualFlow locally via `abstractcode flow ...`):
-
-```bash
-pip install "abstractcode[flow]"
-```
-
-Evidence:
-- Package deps and extras: `pyproject.toml`
-- CLI entrypoints: `abstractcode/__init__.py` and `abstractcode/__main__.py` → `abstractcode/cli.py`
-
-## 2) Start the interactive TUI
-
-Ollama (default provider):
-
-```bash
-abstractcode --provider ollama --model qwen3:1.7b-q4_K_M
-```
-
-OpenAI-compatible server (example: LM Studio):
-
-```bash
-abstractcode --provider openai --base-url http://127.0.0.1:1234/v1 --model qwen/qwen3-next-80b
-```
-
-In the app:
-- `/help` shows the authoritative command list (implemented in `abstractcode/react_shell.py::_show_help`)
-- type a task (or use `/task ...`)
-
-Evidence:
-- Arg parsing: `abstractcode/cli.py`
-- Interactive host: `abstractcode/react_shell.py`
-
-## 2b) Plan / Review modes (optional)
-
-AbstractCode supports two UX modes that affect how the agent responds:
-- **Plan mode**: the agent outputs a TODO plan before acting (`--plan` or `/plan on`)
-- **Review mode**: the agent self-checks before concluding (`--review` / `--no-review`, or `/review ...`)
-
-Evidence:
-- CLI flags: `abstractcode/cli.py`
-- TUI commands: `abstractcode/react_shell.py::_show_help`
-
-## 2c) Prompt caching (optional)
-
-By default, AbstractCode runs with `--prompt-cache auto`. In this mode it enables prompt caching when the runtime LLM client reports prompt-cache support through the AbstractCore capability contract.
-
-Controls:
-- CLI: `--prompt-cache auto|on|off` (or `ABSTRACTCODE_PROMPT_CACHE=auto|on|off`)
-- TUI: `/cache auto|on|off`
-
-Implementation notes (local runtime):
-- For providers with full in-process cache backends (currently `mlx`), the runtime builds a compartmentalized cache: `system | tools | history`. Appending to history updates only the history cache; changing system or tools rebuilds only the affected prefix.
-- For HuggingFace GGUF (llama.cpp), the same compartmentalized path is used when the current chat format has an exact cached renderer; otherwise caching falls back to keyed `LlamaRAMCache` reuse.
-
-If you’re iterating on prompts and want fully cold runs, start with `--prompt-cache off`.
-
-## 3) Approvals, tools, and files
-
-### Tool approvals (default-on)
-
-By default, tool calls pause at a durable boundary and require approval.
-
-- CLI: `--auto-approve` (unsafe; disables prompts)
-- TUI: `/auto-accept` (persists when state is enabled)
-
-Evidence:
-- Runtime is wired with `PassthroughToolExecutor(mode="approval_required")` in `abstractcode/react_shell.py`.
-- After approval, tools run via `MappingToolExecutor.from_tools(...)` in `abstractcode/react_shell.py`.
-
-### Attach files with `@path`
-
-Mention files in your prompt to attach them:
-
-```text
-Explain @abstractcode/cli.py and @docs/architecture.md
-```
-
-Evidence:
-- Mention parsing + workspace roots/mounts: `abstractcode/file_mentions.py`
-- Attachment ingestion to ArtifactStore: `abstractcode/react_shell.py::_ingest_attachments()`
-
-Workspace mounts (optional):
-- `ABSTRACTCODE_WORKSPACE_MOUNTS` (preferred)
-- `ABSTRACTGATEWAY_WORKSPACE_MOUNTS` (compat)
-
-Format: newline-separated `name=/abs/path` entries.
-
-## 4) Persistence (durable runs)
-
-Defaults:
-- state file: `~/.abstractcode/state.json`
-- durable stores: `~/.abstractcode/state.d/`
-- saved settings: `~/.abstractcode/state.config.json`
-
-Disable persistence:
-
-```bash
-abstractcode --no-state
-```
-
-Evidence: file-backed vs in-memory stores are selected in `abstractcode/react_shell.py`.
-
-## 5) Workflows and web UI (optional)
-
-Workflows:
-- Local VisualFlow runs: `abstractcode flow ...` (requires `abstractcode[flow]`)
-- Workflow agent mode: `abstractcode --agent <flow_ref>`
-- Gateway control-plane: `abstractcode gateway ...`
-- Gateway bundle management: `abstractcode workflow ...`
-
-Details: [`docs/workflows.md`](docs/workflows.md).
-
-Web UI:
-- The gateway-first web host is in `web/` (separate Node/Vite build; not part of the pip wheel).
-
-Details: [`docs/web.md`](docs/web.md) and [`docs/deployment-web.md`](docs/deployment-web.md).
-
-## Next
-
-- Docs index: [`docs/README.md`](docs/README.md)
-- FAQ (common issues): [`docs/faq.md`](docs/faq.md)
-- CLI/TUI reference (env vars, persistence details, MCP): [`docs/cli.md`](docs/cli.md)
-- Architecture (diagrams): [`docs/architecture.md`](docs/architecture.md)
-- API and integration points: [`docs/api.md`](docs/api.md)
-- Workflow UI events contract: [`docs/ui_events.md`](docs/ui_events.md)
-- Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- Security policy: [`SECURITY.md`](SECURITY.md)
-
----
-
-<!-- FILE: docs/README.md -->
-
-# AbstractCode documentation
-
-Start here: [`docs/getting-started.md`](docs/getting-started.md).
-
-AbstractCode is part of the **AbstractFramework** ecosystem:
-- [AbstractFramework](https://github.com/lpalbou/AbstractFramework)
-- [AbstractCore](https://github.com/lpalbou/abstractcore) (providers + tools)
-- [AbstractRuntime](https://github.com/lpalbou/abstractruntime) (durable execution)
-
-## Entry points
-
-- First-time setup + quick usage: [`docs/getting-started.md`](docs/getting-started.md)
-- Frequently asked questions: [`docs/faq.md`](docs/faq.md)
-- Project overview + install + quickstart: [`README.md`](README.md)
-- Agent-oriented docs: [`llms.txt`](llms.txt) and [`llms-full.txt`](llms-full.txt)
-- Architecture (with diagrams): [`docs/architecture.md`](docs/architecture.md)
-- Prompt caching: [`docs/architecture.md`](docs/architecture.md) and [`docs/faq.md`](docs/faq.md)
-
-- CLI/TUI reference (commands, persistence, env): [`docs/cli.md`](docs/cli.md)
-- API and integration points: [`docs/api.md`](docs/api.md)
-- Workflows (VisualFlow + bundles + gateway): [`docs/workflows.md`](docs/workflows.md)
-- Workflow-driven UI events contract: [`docs/ui_events.md`](docs/ui_events.md)
-
-## Web app
-
-- Web overview + local dev/build notes: [`docs/web.md`](docs/web.md)
-- Deployment (gateway-first): [`docs/deployment-web.md`](docs/deployment-web.md)
-- iPhone / PWA notes: [`docs/deployment-iphone.md`](docs/deployment-iphone.md)
-
-## Project
-
-- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
-- Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- Security: [`SECURITY.md`](SECURITY.md)
-- Acknowledgments: [`ACKNOWLEDGMENTS.md`](ACKNOWLEDGMENTS.md)
-
----
-
-<!-- FILE: docs/architecture.md -->
-
-# AbstractCode architecture
-
-> Last verified: 2026-02-09  
-> Scope: what is implemented in this repo (no roadmap claims).
-
-Start here: [`docs/getting-started.md`](docs/getting-started.md).
-
-AbstractCode is a **host UI** for running durable agent/workflow executions built on:
-- **AbstractAgent** (agents)
-- **AbstractRuntime** (durable runtime: runs, ledger, waits, artifacts)
-- **AbstractCore** (provider/model abstraction + tool definitions)
-
-This repo contains:
-- Python CLI/TUI package: `abstractcode/`
-- Gateway-first web host UI: `web/` (separate build; not part of the pip wheel)
-
-Related:
-- CLI/TUI reference: [`docs/cli.md`](docs/cli.md)
-- Workflows: [`docs/workflows.md`](docs/workflows.md)
-- UI events contract: [`docs/ui_events.md`](docs/ui_events.md)
-- Web overview: [`docs/web.md`](docs/web.md)
-
-## Big picture (CLI/TUI)
-
-```mermaid
-flowchart LR
-  U[User\n(terminal)] -->|input| UI[FullScreenUI\n(prompt_toolkit)]
-  UI <--> SH[ReactShell\n(command router + UX)]
-
-  SH -->|start/tick| RT[AbstractRuntime\n(durable execution)]
-  RT -->|LLM calls| LLM[AbstractCore LLM client\n(provider/model)]
-
-  RT -->|tool calls (durable wait)| PTE[PassthroughToolExecutor\napproval_required]
-  SH -->|approve + execute| MTE[MappingToolExecutor\n(local tools or MCP)]
-  MTE -->|tool results| RT
-
-  RT --> RS[RunStore\n(JsonFileRunStore / InMemoryRunStore)]
-  RT --> LS[LedgerStore\n(JsonlLedgerStore / InMemoryLedgerStore)]
-  RT --> AS[ArtifactStore\n(FileArtifactStore / InMemoryArtifactStore)]
-  RT --> SS[SnapshotStore\n(JsonSnapshotStore / InMemorySnapshotStore)]
-```
-
-Evidence (implementation):
-- CLI entrypoint + arg parsing: `abstractcode/cli.py`
-- Interactive host: `abstractcode/react_shell.py` (`ReactShell`)
-- UI: `abstractcode/fullscreen_ui.py` (`FullScreenUI`)
-- Runtime wiring: `abstractcode/react_shell.py` (creates stores + `create_local_runtime(...)`)
-
-## Web host (gateway-first)
-
-The web app is a **thin host** that talks only to an AbstractGateway under `/api/gateway/*`.
-
-```mermaid
-sequenceDiagram
-  participant B as Browser (web/)
-  participant G as AbstractGateway (/api/gateway/*)
-  participant R as AbstractRuntime (remote)
-
-  B->>G: Start run / list runs / discovery
-  B->>G: Stream ledger (SSE + cursor replay)
-  G-->>B: Ledger events
-  B->>G: Submit durable commands (resume waits, tool approvals)
-  G->>R: Execute durable commands
-```
-
-Evidence (implementation):
-- Gateway client + endpoints: `web/src/lib/gateway_client.ts`
-- UI rendering from ledger stream: `web/src/ui/app.tsx`
-
-## Repository layout
-
-```text
-abstractcode/                 # Python package (published to pip)
-  __init__.py                 # console entrypoint: abstractcode:main
-  __main__.py                 # module entrypoint: python -m abstractcode
-  cli.py                      # argparse CLI + subcommands (flow/workflow/gateway)
-  react_shell.py              # interactive shell + command routing
-  fullscreen_ui.py            # prompt_toolkit full-screen UI
-  input_handler.py            # prompt_toolkit input helpers
-  terminal_markdown.py        # markdown rendering for terminal output
-  theme.py                    # themes + env overrides
-  file_mentions.py            # @file parsing + workspace mount resolution
-  recall.py / remember.py     # memory UX helpers (host-side)
-  flow_cli.py                 # local VisualFlow runner (requires abstractflow extra)
-  workflow_agent.py           # run VisualFlow as an agent (abstractcode.agent.v1)
-  workflow_cli.py             # manage .flow bundles on a gateway
-  gateway_cli.py              # gateway HTTP client (runs, ledger follow, bundles, KG)
-
-web/                          # Web host UI (separate Node/Vite app)
-docs/                         # Documentation for this repo/package
-tests/                        # Test suite
-```
-
-## Execution modes
-
-### 1) Interactive agents (default)
-
-Command: `abstractcode ...`
-
-Dispatch:
-- `abstractcode/cli.py` constructs a `ReactShell` and enters the TUI loop.
-- Built-in agent kinds are selected by `--agent` (`react|memact|codeact`).
-
-Evidence:
-- Agent selection + shell creation: `abstractcode/cli.py`
-- Agent wiring + toolset selection: `abstractcode/react_shell.py`
-
-### 2) One-shot (`--prompt`)
-
-Command: `abstractcode --prompt "..." ...`
-
-Behavior:
-- runs a single task, prints the final answer, exits
-- supports `@file` mentions (attachments are stored in the ArtifactStore)
-
-Evidence: `abstractcode/cli.py::_run_one_shot_prompt()`.
-
-### 3) Local VisualFlow runs (`abstractcode flow ...`)
-
-Commands: `abstractcode flow run|resume|pause|...`
-
-Behavior:
-- runs VisualFlow workflows locally with durable stores, separate from the agent state file
-
-Evidence:
-- CLI parsing: `abstractcode/cli.py::build_flow_parser()`
-- Flow driver: `abstractcode/flow_cli.py`
-
-### 4) Workflow agent (`abstractcode --agent <flow_ref>`)
-
-Runs a VisualFlow workflow as a first-class “agent” in the TUI, using the `abstractcode.agent.v1` contract.
-
-Evidence: `abstractcode/workflow_agent.py` (`WorkflowAgent`).
-
-### 5) Gateway control-plane (`abstractcode gateway ...`)
-
-Commands: `abstractcode gateway run|attach|kg`
-
-Behavior:
-- starts/attaches to remote runs via gateway HTTP endpoints
-- can query the persisted KG via the gateway (when enabled server-side)
-
-Evidence: `abstractcode/gateway_cli.py`.
-
-## Durability + tool approvals (core invariant)
-
-AbstractCode keeps runs durable by persisting only JSON-safe state:
-- tool **specs** and **requests** can be persisted
-- tool **callables** are never persisted; they stay in the host process
-
-Approval boundary (TUI):
-1) runtime emits a durable wait for tool calls (`approval_required`)
-2) host prompts the user (or auto-approves)
-3) host executes tools (local or via MCP) and resumes the run with results
-
-Evidence:
-- Passthrough executor: `abstractcode/react_shell.py` (`PassthroughToolExecutor(mode="approval_required")`)
-- Local executor: `abstractcode/react_shell.py` (`MappingToolExecutor.from_tools(...)`)
-
-## Prompt caching (best-effort)
-
-AbstractCode can enable prompt caching to reduce repeated *prefill* work (improves TTFT for long, stable prefixes).
-
-### Toggle surface
-
-- CLI: `--prompt-cache auto|on|off` (default: `auto`) / `ABSTRACTCODE_PROMPT_CACHE`
-- TUI: `/cache auto|on|off`
-
-In `auto`, AbstractCode enables caching only when the runtime AbstractCore LLM client reports prompt-cache support via `get_prompt_cache_capabilities(...)`.
-
-### How it works (local runtime)
-
-1) AbstractCode stores the policy in run vars: `run.vars["_runtime"]["prompt_cache"]` (bool or object).
-2) AbstractRuntime injects a `prompt_cache_key` into each LLM call (unless the caller explicitly set one).
-3) The local AbstractCore client uses that key to maintain caches:
-
-- Builds immutable prefix caches for `system` and `tools` via `provider.prompt_cache_prepare_modules(...)`.
-- Forks the final prefix cache into the per-session key via `provider.prompt_cache_fork(...)`.
-- Appends new history messages incrementally via `provider.prompt_cache_update(...)`.
-- Rebuilds the per-session history cache if the history diverges (edits/truncation), while reusing the prefix caches when possible.
-
-This yields a 3-compartment cache layout: `system | tools | history` — changing one compartment doesn’t require rebuilding the others.
-
-### Provider support
-
-- Backends that report `mode=local_control_plane`: full module/fork/update caching.
-- Today that includes MLX and GGUF models whose llama.cpp chat format can be rendered exactly for cached prefixes (currently `chatml-function-calling` and `llama-3`).
-- Backends that report `mode=keyed`: stable per-session cache keys, but no local module/fork/update control plane.
-- Remote APIs: `prompt_cache_key` is forwarded when applicable, and remote prompt-cache control-plane access depends on the configured `/acore/prompt_cache/*` surface.
-
-Evidence:
-- Policy + key wiring: `abstractcode/react_shell.py`
-- Injection: `abstractruntime/src/abstractruntime/integrations/abstractcore/effect_handlers.py`
-- Module caching logic: `abstractruntime/src/abstractruntime/integrations/abstractcore/llm_client.py`
-
-## Workflow-driven UX events
-
-Workflows can emit `emit_event` effects (ledger-backed) to request host UX updates:
-- status text: `abstract.status`
-- messages: `abstract.message`
-- tool blocks: `abstract.tool_execution`, `abstract.tool_result`
-
-Contract + payload shapes: [`docs/ui_events.md`](docs/ui_events.md).
-
-Evidence:
-- Ledger subscription + normalization: `abstractcode/workflow_agent.py::_subscribe_ui_events()`
-- TUI rendering: `abstractcode/react_shell.py` (`_on_step(...)`)
-
----
-
-<!-- FILE: docs/cli.md -->
-
-# CLI / TUI reference
-
-This document covers **how to run AbstractCode** (CLI/TUI) and how its **durability + approvals** work.
-
-Start here: [`docs/getting-started.md`](docs/getting-started.md).
-
-See also: [`docs/faq.md`](docs/faq.md).
-
-Related:
-- Architecture: [`docs/architecture.md`](docs/architecture.md)
-- Workflows: [`docs/workflows.md`](docs/workflows.md)
-- Web app: [`docs/web.md`](docs/web.md)
-
-## Install
-
-See the top-level [`README.md`](README.md#install).
-
-## Run the TUI (interactive)
-
-Minimum:
-
-```bash
-abstractcode --provider ollama --model qwen3:1.7b-q4_K_M
-```
-
-Notes:
-- Full CLI flags live in `abstractcode/cli.py` (see `abstractcode --help`).
-- Inside the app, run `/help` for the authoritative command list (implemented in `abstractcode/react_shell.py::_show_help`).
-
-## One-shot mode (`--prompt`)
-
-Run a single task and exit (useful for scripting / quick checks):
-
-```bash
-abstractcode --provider ollama --model qwen3:1.7b-q4_K_M --prompt "Summarize @README.md"
-```
-
-Evidence:
-- One-shot driver: `abstractcode/cli.py::_run_one_shot_prompt()`
-- `@file` mention parsing: `abstractcode/file_mentions.py`
-
-## Key commands (TUI)
-
-Use `/help` for the full, authoritative list. Common commands:
-- `/status` (current run status)
-- `/logs runtime` and `/logs provider` (durable tracing and provider wire logs)
-- `/tools`, `/mcp`, `/executor` (tool allowlist + MCP servers + where tools execute)
-- `/cache auto|on|off` (session-scoped prompt caching; default `auto` enables when supported)
-- `/plan [on|off]` and `/review ...` (response shaping modes)
-- `/snapshot save|load|list` (snapshots)
-- `/flow ...` (run local workflows inside the REPL; requires `abstractcode[flow]`)
-- `/gpu [status|on|off]` (optional gateway GPU meter)
-- `/whitelist ...` and `/blacklist ...` (session workspace mounts / blocks)
-- `/files` and `/files-keep [on|off]` (manage pending `@file` attachments)
-
-## Tool approvals (default-on)
-
-By default, tool calls are **paused at a durable boundary** and require approval:
-- CLI flag: `--auto-approve` (unsafe; disables prompts)
-- TUI command: `/auto-accept` (persists when state is enabled)
-
-Evidence:
-- Runtime tool executor is created as `PassthroughToolExecutor(mode="approval_required")` in `abstractcode/react_shell.py`.
-- Local execution after approval uses `MappingToolExecutor.from_tools(...)` in `abstractcode/react_shell.py`.
-
-## Plan / Review modes
-
-Two optional modes influence how the agent responds:
-- Plan mode: `--plan` (CLI) or `/plan on` (TUI)
-- Review mode: `--review` / `--no-review` (CLI) or `/review ...` (TUI)
-
-Evidence: `abstractcode/cli.py` and `/help` in `abstractcode/react_shell.py::_show_help`.
-
-## Persistence (durable runs)
-
-Default state file:
-- `~/.abstractcode/state.json` (override with `--state-file` or `ABSTRACTCODE_STATE_FILE`)
-
-When state is enabled, AbstractCode writes:
-- durable stores directory: `~/.abstractcode/state.d/` (derived from `state.json` → `state.d/`)
-- persisted settings: `~/.abstractcode/state.config.json`
-
-Disable persistence:
-
-```bash
-abstractcode --no-state
-```
-
-Evidence:
-- Store dir + stores selection: `abstractcode/react_shell.py` (file-backed `JsonFileRunStore` + `JsonlLedgerStore` vs in-memory).
-- Config file load/save: `abstractcode/react_shell.py::_load_config()` / `_save_config()`.
-
-## Attachments (`@file`) and workspace roots
-
-You can attach local/project files by mentioning them in a prompt:
-
-```text
-Explain @abstractcode/cli.py and @docs/architecture.md
-```
-
-Workspace resolution:
-- Default workspace root is the current working directory.
-- Optional named mounts via:
-  - `ABSTRACTCODE_WORKSPACE_MOUNTS` (preferred)
-  - `ABSTRACTGATEWAY_WORKSPACE_MOUNTS` (compat)
-  (newline-separated `name=/abs/path`).
-
-Session-only mounts/blocks:
-- `/whitelist <dir...>` or `/whitelist name=/abs/dir ...`
-- `/blacklist <path...>` and `/blacklist reset`
-
-Size limit:
-- Default max attachment size is **25 MB**.
-- Override via `ABSTRACTCODE_MAX_ATTACHMENT_BYTES` (or `ABSTRACTGATEWAY_MAX_ATTACHMENT_BYTES`).
-
-Evidence: `abstractcode/file_mentions.py` + `abstractcode/react_shell.py::_ingest_attachments()`.
-
-## MCP (remote tool execution)
-
-AbstractCode can discover tools from (and execute tools on) remote MCP servers.
-
-Commands (see `/help` for full syntax):
-- `/mcp add ...`, `/mcp sync`, `/mcp list`, `/mcp remove`
-- `/executor use <server_id>` to make tools run remotely by default
-
-Tool naming:
-- After sync, MCP tools are exposed as `mcp::<server_id>::<tool_name>` (see `/help` and `abstractcode/react_shell.py`).
-
-## Gateway integration (GPU meter)
-
-The TUI can poll AbstractGateway for GPU utilization and display a small meter in the footer:
-- command: `/gpu [status|on|off]`
-- endpoint: `GET /api/gateway/host/metrics/gpu`
-
-Enable:
-- in-session: `/gpu on`
-- env: `ABSTRACTCODE_GPU_MONITOR=1` (or `auto` to enable when a gateway URL/token is configured)
-
-Evidence: `abstractcode/react_shell.py::_gpu_monitor_enabled_from_env()` and `abstractcode/react_shell.py::_fetch_gateway_gpu_utilization_pct()`.
-
-## Environment variables (CLI + TUI)
-
-Common:
-- `ABSTRACTCODE_AGENT` (default agent selector; same as `--agent`)
-- `ABSTRACTCODE_BASE_URL` (provider base URL; same as `--base-url`)
-- `ABSTRACTCODE_PROMPT_CACHE` (`auto|on|off`; same as `--prompt-cache`)
-- `ABSTRACTCODE_STATE_FILE` (default state file)
-- `ABSTRACTCODE_MAX_ITERATIONS`, `ABSTRACTCODE_MAX_TOKENS` (CLI defaults)
-
-Workspace/attachments:
-- `ABSTRACTCODE_WORKSPACE_MOUNTS`
-- `ABSTRACTCODE_MAX_ATTACHMENT_BYTES`
-
-Gateway (for `/gpu` and `abstractcode gateway|workflow` commands):
-- `ABSTRACTCODE_GATEWAY_URL`, `ABSTRACTCODE_GATEWAY_TOKEN`
-- `ABSTRACTCODE_GPU_MONITOR` (`0|1|auto`)
-
-Themes:
-- `ABSTRACTCODE_THEME`
-- `ABSTRACTCODE_THEME_PRIMARY`, `ABSTRACTCODE_THEME_SECONDARY`, `ABSTRACTCODE_THEME_SURFACE`, `ABSTRACTCODE_THEME_MUTED`
-
-Evidence: `abstractcode/cli.py`, `abstractcode/react_shell.py`, `abstractcode/file_mentions.py`, `abstractcode/theme.py`.
-
----
-
-<!-- FILE: docs/api.md -->
-
-# API and integration points
-
-Start here: [`docs/getting-started.md`](docs/getting-started.md).
-
-AbstractCode is primarily a **CLI/TUI application**. This page documents the integration points that are most useful for external users:
-- the CLI surface (stable entrypoint for scripting)
-- minimal Python API (entrypoint function)
-- workflow interface contracts (`abstractcode.agent.v1`)
-- workflow-driven UI events (`abstract.*`)
-- gateway interaction surface (what this repo’s clients call)
-
-Status: **pre-alpha** — interfaces may evolve, but changes should be reflected in the docs and [`CHANGELOG.md`](CHANGELOG.md).
-
-## 1) CLI (primary interface)
-
-The CLI entrypoint is the published script:
-
-```bash
-abstractcode --help
-```
-
-Note: workflow-related subcommands are dispatched by the first argument:
-- `abstractcode flow --help`
-- `abstractcode gateway --help`
-- `abstractcode workflow --help`
-
-Key modes:
-- interactive TUI: `abstractcode ...`
-- one-shot: `abstractcode --prompt "..." ...`
-- local VisualFlow runs: `abstractcode flow ...` (requires `abstractcode[flow]`)
-- gateway control-plane: `abstractcode gateway ...`
-- gateway bundle management: `abstractcode workflow ...`
-
-Evidence: `abstractcode/cli.py`.
-
-## 2) Python API (minimal)
-
-The supported Python entrypoint is:
-
-```python
-from abstractcode import main
-
-raise SystemExit(main(["--help"]))
-```
-
-Evidence: `abstractcode/__init__.py` defines `main(argv=None)` and delegates to `abstractcode/cli.py`.
-
-You can also run the module:
-
-```bash
-python -m abstractcode --help
-```
-
-Evidence: `abstractcode/__main__.py`.
-
-## 2b) Prompt caching
-
-AbstractCode exposes prompt caching via the CLI/TUI (`--prompt-cache` and `/cache`). Internally it is configured through run vars and injected into LLM call params:
-
-- Run vars: `run.vars["_runtime"]["prompt_cache"]`
-  - `false`: disable injection
-  - `true`: enable injection (key is derived from session/run metadata)
-  - `{"enabled": true, "key": "mykey"}`: enable and force a specific `prompt_cache_key`
-
-- LLM params: `prompt_cache_key`
-  - If a caller explicitly sets `prompt_cache_key` in params, that value wins and runtime injection is skipped.
-  - Passing `prompt_cache_key=None`/empty disables caching for that call.
-
-Local-control-plane note: when the selected backend reports prompt-cache module support, the runtime maintains a 3-compartment cache (`system | tools | history`) using AbstractCore’s prompt-cache control plane (`prepare_modules` / `fork` / `update`). For GGUF this depends on the current model's llama.cpp chat format having an exact cached renderer; otherwise the backend remains keyed-only.
-
-## 3) Workflow agent contract: `abstractcode.agent.v1`
-
-AbstractCode can run a VisualFlow workflow as an agent:
-
-```bash
-abstractcode --agent /path/to/workflow.json --provider ollama --model qwen3:1.7b-q4_K_M
-```
-
-Contract summary (required):
-- `interfaces: ["abstractcode.agent.v1"]`
-- **On Flow Start** outputs: `provider`, `model`, `prompt`, `tools`
-- **On Flow End** inputs: `response`, `success`, `meta`
-
-Details: [`docs/workflows.md`](docs/workflows.md).
-
-Evidence:
-- contract validation/scaffold: `abstractcode/workflow_agent.py` (`_apply_abstractcode_agent_v1_scaffold`, `_validate_abstractcode_agent_v1`)
-- run variable injection: `abstractcode/workflow_agent.py::WorkflowAgent.start()`
-
-## 4) Workflow-driven UI events (`abstract.*`)
-
-Workflows can emit durable UI hints via `emit_event` and have hosts render them:
-- `abstract.status`
-- `abstract.message`
-- `abstract.tool_execution`
-- `abstract.tool_result`
-
-Details: [`docs/ui_events.md`](docs/ui_events.md).
-
-Evidence: ledger subscription + normalization in `abstractcode/workflow_agent.py::_subscribe_ui_events()`.
-
-## 5) Gateway interaction surface (used by this repo)
-
-This repo includes:
-- a Python gateway client used by `abstractcode gateway ...` and `abstractcode workflow ...`: `abstractcode/gateway_cli.py`
-- a browser gateway client used by the web app: `web/src/lib/gateway_client.ts`
-
-They both call gateway endpoints under `/api/gateway/*`, but with different focus:
-- Python client: runs, ledger polling, durable commands, bundles, KG (`/runs/*`, `/commands`, `/bundles/*`, `/kg/query`)
-- Browser client: discovery + files + streaming views (`/discovery/*`, `/files/*`, `/runs/*`, etc.)
-
-Note: AbstractGateway is a separate component; its full API surface is defined in its own project.
-
----
-
-<!-- FILE: docs/faq.md -->
-
-# FAQ
-
-Start here: [`docs/getting-started.md`](docs/getting-started.md).
-
-This page answers common questions from first-time users. For the authoritative CLI/TUI command list, run `/help` inside the app (implemented in `abstractcode/react_shell.py::_show_help`).
-
-## What is AbstractCode?
-
-AbstractCode is a **durable terminal TUI** for running agentic coding sessions on the AbstractFramework stack:
-- **AbstractRuntime**: durable execution (runs, ledger, waits, artifacts)
-- **AbstractAgent**: built-in agents (`react`, `memact`, `codeact`)
-- **AbstractCore**: provider/model abstraction + tool definitions
-
-Evidence: runtime wiring and agent selection in `abstractcode/react_shell.py` and `abstractcode/cli.py`.
-
-## Is AbstractCode the runtime or the gateway?
-
-No. AbstractCode is a **host UI**:
-- The TUI runs a local runtime (`create_local_runtime(...)`) by default.
-- The web app (`web/`) is a thin client that talks to **AbstractGateway** under `/api/gateway/*`.
-
-Evidence:
-- Local runtime creation: `abstractcode/react_shell.py`
-- Gateway HTTP client: `abstractcode/gateway_cli.py`
-- Web gateway client: `web/src/lib/gateway_client.ts`
-
-## How do I install it?
-
-```bash
-pip install abstractcode
-```
-
-Optional (to run VisualFlow locally via `abstractcode flow ...`):
-
-```bash
-pip install "abstractcode[flow]"
-```
-
-Evidence: extras in `pyproject.toml` and flow implementation in `abstractcode/flow_cli.py`.
-
-## How do I choose provider/model (Ollama, OpenAI-compatible, …)?
-
-Use `--provider` and `--model` (and `--base-url` when needed):
-
-```bash
-abstractcode --provider ollama --model qwen3:1.7b-q4_K_M
-abstractcode --provider openai --base-url http://127.0.0.1:1234/v1 --model qwen/qwen3-next-80b
-```
-
-Evidence: CLI args in `abstractcode/cli.py`.
-
-## Where does it store state? Can I disable persistence?
-
-By default AbstractCode persists to:
-- state file: `~/.abstractcode/state.json`
-- durable stores: `~/.abstractcode/state.d/`
-- saved settings: `~/.abstractcode/state.config.json`
-
-Disable persistence:
-
-```bash
-abstractcode --no-state
-```
-
-Evidence: store selection + config persistence in `abstractcode/react_shell.py`.
-
-## Why does it keep asking to approve tool calls?
-
-Tool execution is **approval-gated by default**. This is a durability + safety boundary:
-- runtime emits a durable wait for tool calls
-- the host prompts you
-- tools run locally (or via MCP) and results are fed back into the run
-
-Skip prompts (unsafe):
-- CLI: `--auto-approve`
-- TUI: `/auto-accept`
-
-Evidence:
-- Runtime tool executor: `PassthroughToolExecutor(mode=\"approval_required\")` in `abstractcode/react_shell.py`
-- Tool execution: `MappingToolExecutor.from_tools(...)` in `abstractcode/react_shell.py`
-
-## What are Plan and Review modes?
-
-- **Plan mode**: the agent produces a short TODO list before acting (`--plan` or `/plan on`).
-- **Review mode**: the agent runs a self-check pass before concluding (`--review` / `--no-review`, or `/review ...`).
-
-Evidence:
-- CLI flags: `abstractcode/cli.py`
-- TUI commands: `/help` in `abstractcode/react_shell.py::_show_help`
-
-## Is prompt caching enabled by default? How do I toggle it?
-
-Yes — the default is `--prompt-cache auto`, which enables caching when the runtime LLM client reports prompt-cache support.
-
-Toggle:
-- CLI: `--prompt-cache auto|on|off` (or `ABSTRACTCODE_PROMPT_CACHE=...`)
-- TUI: `/cache auto|on|off`
-
-Which providers benefit most:
-- `mlx`: full in-process KV caching with compartmentalized caches (`system | tools | history`)
-- `huggingface` + GGUF (llama.cpp): compartmentalized caching when the model's llama.cpp chat format has an exact cached renderer, otherwise keyed `LlamaRAMCache` reuse
-- Remote APIs: `prompt_cache_key` is forwarded when supported (server-managed)
-
-Notes:
-- HuggingFace *transformers* models do not currently support prompt caching (GGUF-only).
-- If you want fully cold runs while iterating on prompts, use `--prompt-cache off`.
-
-## How do I restrict which tools the agent may use?
-
-Use `/tools` to manage the allowlist:
-- `/tools only <name...>`
-- `/tools enable <name...>`
-- `/tools disable <name...>`
-- `/tools reset`
-
-Evidence: implementation in `abstractcode/react_shell.py::_handle_tools()`.
-
-## How do I attach files to a prompt?
-
-Mention files as `@path` in your prompt:
-
-```text
-Explain @abstractcode/cli.py and @docs/architecture.md
-```
-
-Notes:
-- Workspace-relative paths are resolved against a workspace root (see below).
-- Absolute paths are also accepted (best-effort), but `@…` tokens stop at whitespace.
-
-Evidence:
-- Mention parsing: `abstractcode/file_mentions.py::extract_at_file_mentions()`
-- Attachment resolution: `abstractcode/react_shell.py::_resolve_attachment_file()`
-
-### What is the workspace root? Can I mount other directories?
-
-Workspace root:
-- Always the current working directory at launch.
-
-Optional mounts:
-- `ABSTRACTCODE_WORKSPACE_MOUNTS` (preferred) or `ABSTRACTGATEWAY_WORKSPACE_MOUNTS` (compat)
-  - newline-separated `name=/abs/path`
-
-Session-only mounts:
-- `/whitelist <dir...>` or `/whitelist name=/abs/dir ...`
-- `/blacklist <path...>` and `/blacklist reset`
-
-Evidence: `abstractcode/file_mentions.py::default_workspace_root()` and `abstractcode/file_mentions.py::default_workspace_mounts()`.
-
-## What’s the difference between `/logs runtime` and `/logs provider`?
-
-- `/logs runtime`: durable step trace for LLM/tool calls (runtime perspective)
-- `/logs provider`: provider wire request/response (what was sent/received)
-
-Evidence: commands are exposed in `abstractcode/react_shell.py::_show_help` and implemented in `abstractcode/react_shell.py`.
-
-## How do workflows work here?
-
-There are several workflow-related modes:
-
-- Local VisualFlow runs: `abstractcode flow ...` (requires `abstractcode[flow]`)
-- Workflow as an agent: `abstractcode --agent <flow_ref>` (implements `abstractcode.agent.v1`)
-- Gateway control-plane: `abstractcode gateway ...`
-- Gateway bundle management: `abstractcode workflow ...`
-
-Details: [`docs/workflows.md`](docs/workflows.md).
-
-Evidence:
-- Local flows: `abstractcode/flow_cli.py`
-- Workflow agent: `abstractcode/workflow_agent.py`
-- Gateway + bundles: `abstractcode/gateway_cli.py` and `abstractcode/workflow_cli.py`
-
-## Why doesn’t the web app build when I clone only this repo?
-
-The web app currently imports shared UI components via Vite path aliases pointing at a sibling `abstractuic/` repo.
-
-Options:
-- deploy the prebuilt static output from `web/dist/` (if it matches your needs), or
-- clone/build with the sibling UI repo present.
-
-Evidence:
-- Vite aliases: `web/vite.config.ts`
-- Imports: `web/src/ui/app.tsx` and `web/src/main.tsx`
-
-## How do I enable the GPU meter in the footer?
-
-The TUI can poll AbstractGateway:
-- endpoint: `GET /api/gateway/host/metrics/gpu`
-- command: `/gpu [status|on|off]`
-
-Enable:
-- in-session: `/gpu on`
-- env: `ABSTRACTCODE_GPU_MONITOR=1` (or `auto`)
-
-Evidence: `abstractcode/react_shell.py::_handle_gpu()` and `abstractcode/react_shell.py::_fetch_gateway_gpu_utilization_pct()`.
-
-## I’m on MemAct: why do I have `/memory` but not on ReAct/CodeAct?
-
-`/memory` is MemAct-specific (it shows MemAct “Active Memory”).
-
-Evidence: command list in `abstractcode/react_shell.py::_show_help` and agent wiring in `abstractcode/react_shell.py`.
-
----
-
-<!-- FILE: docs/workflows.md -->
-
-# Workflows (VisualFlow / bundles / gateway)
-
-Start here: [`docs/getting-started.md`](docs/getting-started.md).
-
-AbstractCode supports these workflow-related modes:
-
-1) **Run VisualFlow locally**: `abstractcode flow ...` (requires `abstractflow`; install `abstractcode[flow]`)
-2) **Run a workflow *as an agent***: `abstractcode --agent <flow_ref>` (compiles via `abstractruntime.visualflow_compiler`)
-3) **Run/observe via AbstractGateway**: `abstractcode gateway ...`
-4) **Manage gateway workflow bundles**: `abstractcode workflow ...` (upload/list/remove `.flow` bundles)
-5) **Gateway-first web host UI**: `web/` (runs against `/api/gateway/*`)
-
-Related:
-- CLI: [`docs/cli.md`](docs/cli.md)
-- UI events contract: [`docs/ui_events.md`](docs/ui_events.md)
-- Web deployment: [`docs/deployment-web.md`](docs/deployment-web.md)
-
-## 1) Local workflows (`abstractcode flow ...`)
-
-Install:
-
-```bash
-pip install "abstractcode[flow]"
-```
-
-Run a flow by id (from a flows dir) or by path to a VisualFlow `.json`:
-
-```bash
-abstractcode flow run <flow_id_or_path> --flows-dir /path/to/flows --param query="who are you?"
-```
-
-Other useful commands:
-- `abstractcode flow runs` (list recent runs)
-- `abstractcode flow attach <run_id>` (set the current flow ref)
-- `abstractcode flow emit ...` (advanced: resume a wait_key / emit an event)
-
-Durability:
-- flow run reference file: `~/.abstractcode/flow_state.json` (override with `--flow-state-file` or `ABSTRACTCODE_FLOW_STATE_FILE`)
-- durable stores directory: `~/.abstractcode/flow_state.d/`
-
-Evidence:
-- Defaults: `abstractcode/flow_cli.py::default_flow_state_file()` and `abstractcode/flow_cli.py::_flow_store_dir()`.
-
-## 2) Workflow agent mode (`--agent <flow_ref>`)
-
-Run a workflow as an interactive “agent” inside the TUI:
-
-```bash
-abstractcode --agent /path/to/workflow.json --provider ollama --model qwen3:1.7b-q4_K_M
-```
-
-Supported `flow_ref` forms (resolved in `abstractcode/workflow_agent.py::resolve_visual_flow()`):
-- VisualFlow id (from `--flows-dir`/`ABSTRACTFLOW_FLOWS_DIR`)
-- VisualFlow `name`
-- path to `.json`
-- path/ref to a bundled `.flow` (zip) file
-- bundle ref `bundle_id[@version]` and optional `bundle_id[@version]:flow_id`
-
-### `abstractcode.agent.v1` contract (implemented)
-
-AbstractCode validates (and best-effort scaffolds) the interface:
-- Flow must declare `interfaces: ["abstractcode.agent.v1"]`
-- Required pins:
-  - **On Flow Start** outputs: `provider`, `model`, `prompt`, `tools`
-  - **On Flow End** inputs: `response`, `success`, `meta`
-
-Evidence: `_apply_abstractcode_agent_v1_scaffold()` + `_validate_abstractcode_agent_v1()` in `abstractcode/workflow_agent.py`.
-
-### Variables provided to the workflow
-
-At run start, AbstractCode passes (at least):
-- `vars.prompt`: the user task text
-- `vars.provider`, `vars.model`: from the runtime config (`--provider/--model`)
-- `vars.tools`: the session allowlist (empty list if not set)
-- `vars.context.messages`: the conversation history (host-managed)
-- `vars.context.attachments`: (optional) attachment refs from `@file` mentions
-- `vars._limits`: max_iterations/max_tokens/etc (host limits)
-
-Evidence: `abstractcode/workflow_agent.py::WorkflowAgent.start()`.
-
-### Outputs surfaced back to the host
-
-When the workflow completes, AbstractCode:
-- extracts `response` text (best-effort) from `RunState.output`
-- attaches `meta` to the assistant message metadata as `workflow_meta`
-- attaches optional `scratchpad` as `workflow_scratchpad`
-- attaches `success` as `workflow_success`
-
-Evidence: `abstractcode/workflow_agent.py::WorkflowAgent.step()`.
-
-## 3) AbstractGateway mode (`abstractcode gateway ...`)
-
-The `gateway` subcommand is a thin HTTP control-plane client:
-
-```bash
-abstractcode gateway run <flow_id> --input-json '{"prompt":"hello"}'
-abstractcode gateway attach <run_id>
-abstractcode gateway kg --scope session
-```
-
-Evidence: argument parsing in `abstractcode/cli.py` and HTTP client in `abstractcode/gateway_cli.py`.
-
-## Workflow bundles on a gateway (`abstractcode workflow ...`)
-
-This subcommand manages **WorkflowBundle** `.flow` files on a running AbstractGateway.
-
-Examples:
-
-```bash
-# Upload a bundle
-abstractcode workflow install /path/to/bundle.flow --overwrite
-
-# List entrypoints (optionally filter to workflows that implement the agent interface)
-abstractcode workflow list --interface abstractcode.agent.v1
-
-# Inspect and remove
-abstractcode workflow info my-bundle@1.2.3
-abstractcode workflow remove my-bundle@1.2.3
-
-# (Optional) Deprecate / undeprecate bundles on the gateway (hide + block launch)
-abstractcode workflow deprecate my-bundle --reason "superseded"
-abstractcode workflow undeprecate my-bundle
-```
-
-Gateway config:
-- flags: `--gateway-url`, `--gateway-token`
-- env: `ABSTRACTCODE_GATEWAY_URL`, `ABSTRACTCODE_GATEWAY_TOKEN`
-
-Evidence: CLI parser in `abstractcode/cli.py::build_workflow_parser()` and implementation in `abstractcode/workflow_cli.py`.
-
-## Workflow-driven UI events
-
-Workflows can emit reserved events that update AbstractCode’s UX (status/messages/tool blocks).
-
-Contract: [`docs/ui_events.md`](docs/ui_events.md).
-
----
-
-<!-- FILE: docs/ui_events.md -->
-
-# Workflow-driven UI events (contract)
-
-AbstractCode can translate **durable** workflow `emit_event` effects into host UX updates.
-
-Start here: [`docs/getting-started.md`](docs/getting-started.md).
-
-This is designed so:
-- the event is recorded in the **ledger** (durable, replayable),
-- different hosts (TUI, web) can render the same “UX hint” deterministically.
-
-Related:
-- Workflows overview: [`docs/workflows.md`](docs/workflows.md)
-- Architecture: [`docs/architecture.md`](docs/architecture.md)
-
-## Event namespace + backward compatibility
-
-Canonical namespace: `abstract.*`
-
-Deprecated alias: `abstractcode.*` is accepted and normalized to `abstract.*`.
-
-Evidence: `abstractcode/workflow_agent.py::_normalize_ui_event_name()`.
-
-## Supported events
-
-### 1) `abstract.status`
-
-Purpose: update the host’s status/spinner text.
-
-Accepted payload shapes:
-- string: `"Indexing repo…"`
-- object: `{ "text": "Indexing repo…", "duration": 2 }`
-
-`duration` is seconds:
-- `null`/missing: host default
-- `-1`: sticky (do not auto-clear)
-- `> 0`: auto-clear after that many seconds (best-effort)
-
-Evidence:
-- Payload parsing: `abstractcode/workflow_agent.py::_extract_status()`
-- TUI rendering: `abstractcode/react_shell.py` (on-step handler for `"status"`)
-
-### 2) `abstract.message`
-
-Purpose: show a notification/message block in the host.
-
-Accepted payload shapes:
-- string: `"Done."`
-- object:
-  - required: `text`
-  - optional: `level` (`info|success|warning|error`), `title`, `meta` (object)
-
-Evidence:
-- Payload parsing: `abstractcode/workflow_agent.py::_extract_message()`
-- TUI rendering: `abstractcode/react_shell.py` (on-step handler for `"message"`)
-
-### 3) `abstract.tool_execution`
-
-Purpose: render a “tool call” UX block **without** requiring actual tool execution.
-
-Accepted payload shapes:
-- a single tool call object
-- a list of tool call objects
-
-Supported tool call object shapes (best-effort normalization):
-- Preferred normalized:
-  - `{ "name": "read_file", "arguments": { "path": "README.md" }, "call_id": "..." }`
-- OpenAI-ish:
-  - `{ "id": "...", "type": "function", "function": { "name": "read_file", "arguments": "{\"path\":\"README.md\"}" } }`
-
-Evidence: `abstractcode/workflow_agent.py::_extract_tool_exec()` and UI translation in `_subscribe_ui_events()`.
-
-### 4) `abstract.tool_result`
-
-Purpose: render a “tool result” UX block.
-
-Accepted payload shapes:
-- a single tool result object
-- a list of tool result objects
-
-Supported tool result object fields (best-effort):
-- `name`/`tool`/`tool_name` (string)
-- `success` (boolean)
-- `output`/`result`/`content`/`text` (any; rendered as string)
-
-Evidence: `abstractcode/workflow_agent.py::_extract_tool_result()` and UI translation in `_subscribe_ui_events()`.
-
-## Operational notes
-
-- Events are only surfaced after the corresponding ledger record is written as `status == completed`.
-- Hosts must treat these events as **UX-only** (they must not affect correctness).
-
-Evidence: ledger subscription filter in `abstractcode/workflow_agent.py::_subscribe_ui_events()`.
-
----
-
-<!-- FILE: docs/web.md -->
-
-# AbstractCode Web (gateway-first)
-
-The `web/` folder contains a **gateway-first** host UI:
-- talks only to **AbstractGateway** under `/api/gateway/*`
-- renders runs by replaying/streaming the **durable ledger**
-- resumes waits by submitting durable commands
-
-Start here: [`docs/getting-started.md`](docs/getting-started.md).
-
-Related:
-- Deployment: [`docs/deployment-web.md`](docs/deployment-web.md)
-- iPhone notes: [`docs/deployment-iphone.md`](docs/deployment-iphone.md)
-- Architecture: [`docs/architecture.md`](docs/architecture.md)
-
-## Status (important for external users)
-
-Good to know: the web app currently consumes shared UI components via Vite path aliases to a sibling `abstractuic/` repo:
-- configured in `web/vite.config.ts`
-- imports used in `web/src/ui/app.tsx` and `web/src/main.tsx`
-
-This repo includes a prebuilt `web/dist/` for convenience. If you need to modify/rebuild the web app, see the next section.
-
-## Voice (optional)
-
-AbstractCode Web supports **push-to-talk transcription** and **TTS playback** when the connected AbstractGateway exposes the endpoints the web client calls.
-
-Push-to-talk (record → upload → transcribe):
-- Upload: `POST /api/gateway/attachments/upload`
-- Transcribe: `POST /api/gateway/runs/{run_id}/audio/transcribe`
-
-Text-to-speech:
-- TTS: `POST /api/gateway/runs/{run_id}/voice/tts`
-
-Evidence:
-- Client methods: `web/src/lib/gateway_client.ts` (`attachments_upload`, `audio_transcribe`, `voice_tts`)
-- UI wiring: `web/src/ui/app.tsx` (`transcribe_voice_blob`, `toggle_tts`)
-
-## Local development (requires the sibling UI repo)
-
-```bash
-cd web
-npm install
-npm run dev
-```
-
-Dev server:
-- runs on `http://127.0.0.1:3002/` (see `web/package.json`)
-- proxies `/api/*` to `http://localhost:8081` by default (see `web/vite.config.ts`)
-
-## Build
-
-```bash
-cd web
-npm run build
-```
-
-Output: `web/dist/` (static files).
-
----
-
-<!-- FILE: docs/deployment-web.md -->
-
-# AbstractCode Web — Deployment (gateway-first)
-
-AbstractCode Web (`web/`) is a browser/PWA host that talks only to **AbstractGateway** (`/api/gateway/*`).
-
-Related:
-- Web app overview + local dev caveats: [`docs/web.md`](docs/web.md)
-- Architecture: [`docs/architecture.md`](docs/architecture.md)
-
-## 1) Run AbstractGateway
-
-Run a gateway that serves `/api/gateway/*` and (for browsers) allows your web app origin (CORS).
-
-Example (token + allowed origins):
-
-```bash
-export ABSTRACTGATEWAY_AUTH_TOKEN="dev-token"
-export ABSTRACTGATEWAY_ALLOWED_ORIGINS="http://localhost:*,http://127.0.0.1:*"
-
-abstractgateway serve --host 127.0.0.1 --port 8081
-```
-
-Notes:
-- Web UI uses gateway discovery endpoints for dropdowns: providers/models/tools.
-- Web UI uses gateway file endpoints for `@file` mentions: `/api/gateway/files/search` and `/api/gateway/files/read`.
-- Web UI uses gateway attachment endpoints for uploads: `/api/gateway/attachments/upload`.
-- (Optional) Voice features use: `/api/gateway/runs/{run_id}/audio/transcribe` and `/api/gateway/runs/{run_id}/voice/tts`.
-
-## 2) Run AbstractCode Web (dev)
-
-```bash
-cd web
-npm install
-npm run dev
-```
-
-Open `http://127.0.0.1:3002/` and set:
-- `Gateway URL`: `http://127.0.0.1:8081`
-- `Gateway user` and that user's `Gateway token` when Gateway user auth is
-  enabled
-
-## 3) Build + host (static)
-
-```bash
-cd web
-npm run build
-```
-
-Deploy `web/dist/` behind the packaged web server or a reverse proxy that
-routes same-origin `/api/...` to Gateway.
-
-In hosted user-auth mode, AbstractCode Web exchanges the Gateway user token for
-an app-scoped browser session and strips bearer tokens from saved browser
-settings. Direct bearer-token mode is retained for local development when no
-Gateway user is configured. When the web UI is served from a non-local
-hostname, the server-configured Gateway URL is authoritative; browser-supplied
-Gateway URL changes are rejected unless
-`ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` is enabled behind your own
-access control. If a reverse proxy rewrites `Host`, set
-`ABSTRACTCODE_TRUST_PROXY_HEADERS=1` only when the proxy strips
-client-supplied forwarded headers.
-
----
-
-<!-- FILE: docs/deployment-iphone.md -->
-
-# AbstractCode Web — iPhone Notes (Safari / PWA)
-
-AbstractCode Web is designed to run on iPhone as a **thin host UI** that connects to a **remote** AbstractGateway + AbstractRuntime deployment.
-
-Related:
-- Web app overview: [`docs/web.md`](docs/web.md)
-- Web deployment: [`docs/deployment-web.md`](docs/deployment-web.md)
-
-## Prerequisites
-
-- A reachable HTTPS endpoint for AbstractGateway (recommended: reverse proxy + TLS).
-- The AbstractCode Web static site hosted over HTTPS.
-- Gateway configured with:
-  - Gateway user auth for hosted access
-  - `ABSTRACTGATEWAY_ALLOWED_ORIGINS` including your web host origin (exact host recommended for prod).
-
-## Steps
-
-1) Open the AbstractCode Web URL in Safari.
-2) Go to `Settings`:
-   - set `Gateway URL` to your gateway URL (e.g. `https://gateway.example.com`)
-   - set `Gateway user` and that user's `Gateway token`
-3) (Optional) Add to Home Screen:
-   - Safari → Share → Add to Home Screen
-
-## Notes / constraints
-
-- iOS aggressively suspends background tabs; long-running workflows should be designed to be resumable (ledger replay).
-- File access is always remote (via gateway); the phone does not run local tools in v1.
-- The Gateway token is exchanged for an app-scoped browser session and is not
-  persisted in browser settings.
-- On non-local hosted UI hostnames, the server-configured Gateway URL is
-  authoritative. Browser-supplied Gateway URL changes are rejected unless
-  `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` is enabled behind your
-  own access control.
-
----

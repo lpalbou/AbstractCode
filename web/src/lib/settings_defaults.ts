@@ -51,10 +51,22 @@ export function compute_settings_on_gateway_connect(args: {
   }
 
   // Tools: default to all available tools on first connect (user can later restrict).
+  //
+  // The gateway's /discovery/tools now returns the FULL catalog including
+  // env-gated toolsets (email/telegram/whatsapp/agora/persistent-shell) as
+  // `enabled:false` rows with real specs (gateway ship c4562/c4573). Those
+  // rows are DISCOVERABLE so users can see what exists, but seeding them into
+  // the run allowlist would offer a tool the operator never enabled — and the
+  // gateway deliberately clamps disabled rows to approval `ask`, never auto.
+  // Seed and prune only ENABLED tools; a row is enabled unless it explicitly
+  // carries enabled === false (older gateways omit the field → treated as
+  // enabled, byte-identical to prior behavior).
+  const is_enabled = (t: any): boolean => (t as any)?.enabled !== false;
   if (!next.tools_initialized) {
     const tools = Array.isArray(args.discovered_tools) ? args.discovered_tools : [];
     const names: string[] = [];
     for (const t of tools) {
+      if (!is_enabled(t)) continue;
       const n = String((t as any)?.name || "").trim();
       if (n) names.push(n);
     }
@@ -63,9 +75,11 @@ export function compute_settings_on_gateway_connect(args: {
     next.tools_initialized = true;
     changed = true;
   } else if (Array.isArray(next.tools) && next.tools.length && Array.isArray(args.discovered_tools)) {
-    // Best-effort: drop tools that no longer exist on the gateway.
+    // Best-effort: drop tools that no longer exist OR are now disabled on the
+    // gateway (a toolset the operator turned off must leave the allowlist).
     const allowed = new Set<string>();
     for (const t of args.discovered_tools) {
+      if (!is_enabled(t)) continue;
       const n = String((t as any)?.name || "").trim();
       if (n) allowed.add(n);
     }

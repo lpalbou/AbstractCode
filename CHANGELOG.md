@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Terminal client written in Rust, published to crates.io as `abstractcode` and
+  installed with `cargo install abstractcode`. It lives in `tui/` and renders
+  with [AbstractTUI](https://github.com/lpalbou/AbstractTUI): live reasoning
+  cycles, tool cards that update in place, durable pause/cancel/resume,
+  mid-run steering, file attachments, session history replay, and 26 themes.
+- Prebuilt binaries for macOS (Apple silicon and Intel), Linux (x86-64 and
+  ARM64), and Windows, attached to each release.
+
+### Changed
+
+- **AbstractCode is now a Rust terminal client plus a browser client.** The two
+  ship independently: `v<version>` releases the terminal client, and
+  `web-v<version>` releases `@abstractframework/code` to npm.
+- The browser client consumes the shared AbstractUIC components as published
+  npm packages rather than through path aliases into a sibling checkout, so
+  `web/` builds from its own directory with no other repository present.
+- Preferences moved to `~/.abstractcode/prefs.json`, beside the existing login
+  store. `ABSTRACTCODE_PREFS_FILE` overrides the location.
+- The browser client moves to 0.4.0, the first version released under the
+  `web-v<version>` tag.
+
+### Removed
+
+- **The Python implementation of AbstractCode.** The terminal client replaces
+  it. Version 0.3.8 remains installable from PyPI and tag `v0.3.8` marks its
+  source; the implementation stays in this repository's history.
+- `abstractcode flow`, `abstractcode gateway`, and `abstractcode workflow`
+  subcommands. Workflow selection is now `--workflow <bundle[:flow]>`, and
+  installing bundles is a gateway-side operation.
+
+### Fixed
+
+- The browser client's gateway-configuration guard decides local from the
+  connection peer instead of the `Host` header, which a remote client could
+  set to claim it was local.
+- The shared component stylesheet is imported explicitly, restoring styling for
+  the agent-cycles panel.
+
+### Migration
+
+- `pip install abstractcode` → `cargo install abstractcode`.
+- Preferences from a pre-rename build are read once from
+  `~/.abstractcode-tui/prefs.json` and saved forward automatically.
+- Credentials in `~/.abstractcode/gateway.json` are unchanged.
+
 ## [0.3.9] - 2026-06-03
 
 ### Changed

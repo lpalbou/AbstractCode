@@ -1,200 +1,105 @@
 # FAQ
 
-Start here: [`docs/getting-started.md`](getting-started.md).
-
-This page answers common questions from first-time users. For the authoritative CLI/TUI command list, run `/help` inside the app (implemented in `abstractcode/react_shell.py::_show_help`).
+For the authoritative command list, run `/help` inside the terminal client, or
+`abstractcode --help` for the command-line surface.
 
 ## What is AbstractCode?
 
-AbstractCode is a **durable terminal TUI** for running agentic coding sessions on the AbstractFramework stack:
-- **AbstractRuntime**: durable execution (runs, ledger, waits, artifacts)
-- **AbstractAgent**: built-in agents (`react`, `memact`, `codeact`)
-- **AbstractCore**: provider/model abstraction + tool definitions
+An agentic coding assistant with two clients — a terminal application and a
+browser application — over a coding agent that runs durably on
+[AbstractGateway](https://github.com/lpalbou/abstractgateway).
 
-Evidence: runtime wiring and agent selection in `abstractcode/react_shell.py` and `abstractcode/cli.py`.
+## Do I need a gateway?
 
-## Is AbstractCode the runtime or the gateway?
-
-No. AbstractCode is a **host UI**:
-- The TUI runs a local runtime (`create_local_runtime(...)`) by default.
-- The web app (`web/`) is a thin client that talks to **AbstractGateway** under `/api/gateway/*`.
-
-Evidence:
-- Local runtime creation: `abstractcode/react_shell.py`
-- Gateway HTTP client: `abstractcode/gateway_cli.py`
-- Web gateway client: `web/src/lib/gateway_client.ts`
-
-## How do I install it?
+Yes. Neither client runs the agent itself. The gateway can run on your own
+machine:
 
 ```bash
-pip install abstractcode
+pip install abstractgateway
+abstractgateway serve
 ```
 
-Optional (to run VisualFlow locally via `abstractcode flow ...`):
+## Which client should I use?
+
+Whichever suits the moment — they are interchangeable, not alternatives. Both
+speak the same durable commands against the same sessions, so you can start a
+task in the terminal and resolve its approval prompt in the browser, or the
+reverse.
+
+## Can I close the client while a run is going?
+
+Yes. The run lives on the gateway. Reattach with `abstractcode --resume`, or
+open the session in the browser. This is the point of the architecture rather
+than a side effect of it.
+
+## Will it edit my files without asking?
+
+No. Tools are approval-gated by default: the run pauses and waits for you.
+`/gate` and `/permission` adjust the policy, and `--permissions` sets it for a
+headless `exec` run. Because the wait is durable, an approval you miss is still
+there when you come back.
+
+## What is review mode?
+
+Before a response with no tool calls is accepted as final, a verifier re-reads
+the transcript and can send the agent back for more work. It is on by default;
+`--no-review` disables it and `/review` toggles it mid-session.
+`--review-rounds` sets the budget, default 3.
+
+## How do I choose the model or provider?
 
 ```bash
-pip install "abstractcode[flow]"
+abstractcode --provider lmstudio --model qwen3.6-35b
 ```
 
-Evidence: extras in `pyproject.toml` and flow implementation in `abstractcode/flow_cli.py`.
+Or `/model` inside the session. Without either, the gateway's defaults apply.
+Your choice is remembered in `~/.abstractcode/prefs.json`.
 
-## How do I choose provider/model (Ollama, OpenAI-compatible, …)?
+## What is a workflow?
 
-Use `--provider` and `--model` (and `--base-url` when needed):
+A named agent bundle the run executes, `coding-agent:coder` by default.
+`--workflow <bundle[:flow]>` selects another, and `abstractcode doctor` lists
+what the gateway has installed. See [`workflows.md`](workflows.md).
+
+## Where are my settings stored?
+
+- `~/.abstractcode/gateway.json` — gateway URL and token, written by
+  `abstractcode login`
+- `~/.abstractcode/prefs.json` — theme, model, workflow, last session
+
+`ABSTRACTCODE_PREFS_FILE` relocates the second. A build older than the rename
+wrote `~/.abstractcode-tui/prefs.json`; that file is read once and saved
+forward.
+
+## Can I run it without an interface?
 
 ```bash
-abstractcode --provider ollama --model qwen3:1.7b-q4_K_M
-abstractcode --provider openai --base-url http://127.0.0.1:1234/v1 --model qwen/qwen3-next-80b
+abstractcode exec "add tests for the parser" --permissions all
 ```
 
-Evidence: CLI args in `abstractcode/cli.py`.
+`exec` streams events to stdout and exits with a code reflecting the run's
+terminal status, which is what bench harnesses and orchestrating agents use.
 
-## Where does it store state? Can I disable persistence?
+## Why does the browser client refuse to change the Gateway URL?
 
-By default AbstractCode persists to:
-- state file: `~/.abstractcode/state.json`
-- durable stores: `~/.abstractcode/state.d/`
-- saved settings: `~/.abstractcode/state.config.json`
+Only a request arriving from loopback may reconfigure it; otherwise the
+server-configured URL is authoritative. This is deliberate — deciding from the
+`Host` header instead would let a remote client claim to be local and turn the
+server into a relay for its own session cookies. See
+[`web.md`](web.md) for the environment variables that adjust this.
 
-Disable persistence:
+## My terminal renders it badly. What now?
 
-```bash
-abstractcode --no-state
-```
+Run `abstractcode --caps` to see what the client detected, and `Ctrl+L` or
+`/redraw` to recover a corrupted screen. [`troubleshooting.md`](troubleshooting.md)
+covers the common cases, including why `Shift+Enter` works only in some
+terminals.
 
-Evidence: store selection + config persistence in `abstractcode/react_shell.py`.
+## What are the current limitations?
 
-## Why does it keep asking to approve tool calls?
-
-Tool execution is **approval-gated by default**. This is a durability + safety boundary:
-- runtime emits a durable wait for tool calls
-- the host prompts you
-- tools run locally (or via MCP) and results are fed back into the run
-
-Skip prompts (unsafe):
-- CLI: `--auto-approve`
-- TUI: `/auto-accept`
-
-Evidence:
-- Runtime tool executor: `PassthroughToolExecutor(mode=\"approval_required\")` in `abstractcode/react_shell.py`
-- Tool execution: `MappingToolExecutor.from_tools(...)` in `abstractcode/react_shell.py`
-
-## What are Plan and Review modes?
-
-- **Plan mode**: the agent produces a short TODO list before acting (`--plan` or `/plan on`).
-- **Review mode**: the agent runs a self-check pass before concluding (`--review` / `--no-review`, or `/review ...`).
-
-Evidence:
-- CLI flags: `abstractcode/cli.py`
-- TUI commands: `/help` in `abstractcode/react_shell.py::_show_help`
-
-## Is prompt caching enabled by default? How do I toggle it?
-
-Yes — the default is `--prompt-cache auto`, which enables caching when the runtime LLM client reports prompt-cache support.
-
-Toggle:
-- CLI: `--prompt-cache auto|on|off` (or `ABSTRACTCODE_PROMPT_CACHE=...`)
-- TUI: `/cache auto|on|off`
-
-Which providers benefit most:
-- `mlx`: full in-process KV caching with compartmentalized caches (`system | tools | history`)
-- `huggingface` + GGUF (llama.cpp): compartmentalized caching when the model's llama.cpp chat format has an exact cached renderer, otherwise keyed `LlamaRAMCache` reuse
-- Remote APIs: `prompt_cache_key` is forwarded when supported (server-managed)
-
-Notes:
-- HuggingFace *transformers* models do not currently support prompt caching (GGUF-only).
-- If you want fully cold runs while iterating on prompts, use `--prompt-cache off`.
-
-## How do I restrict which tools the agent may use?
-
-Use `/tools` to manage the allowlist:
-- `/tools only <name...>`
-- `/tools enable <name...>`
-- `/tools disable <name...>`
-- `/tools reset`
-
-Evidence: implementation in `abstractcode/react_shell.py::_handle_tools()`.
-
-## How do I attach files to a prompt?
-
-Mention files as `@path` in your prompt:
-
-```text
-Explain @abstractcode/cli.py and @docs/architecture.md
-```
-
-Notes:
-- Workspace-relative paths are resolved against a workspace root (see below).
-- Absolute paths are also accepted (best-effort), but `@…` tokens stop at whitespace.
-
-Evidence:
-- Mention parsing: `abstractcode/file_mentions.py::extract_at_file_mentions()`
-- Attachment resolution: `abstractcode/react_shell.py::_resolve_attachment_file()`
-
-### What is the workspace root? Can I mount other directories?
-
-Workspace root:
-- Always the current working directory at launch.
-
-Optional mounts:
-- `ABSTRACTCODE_WORKSPACE_MOUNTS` (preferred) or `ABSTRACTGATEWAY_WORKSPACE_MOUNTS` (compat)
-  - newline-separated `name=/abs/path`
-
-Session-only mounts:
-- `/whitelist <dir...>` or `/whitelist name=/abs/dir ...`
-- `/blacklist <path...>` and `/blacklist reset`
-
-Evidence: `abstractcode/file_mentions.py::default_workspace_root()` and `abstractcode/file_mentions.py::default_workspace_mounts()`.
-
-## What’s the difference between `/logs runtime` and `/logs provider`?
-
-- `/logs runtime`: durable step trace for LLM/tool calls (runtime perspective)
-- `/logs provider`: provider wire request/response (what was sent/received)
-
-Evidence: commands are exposed in `abstractcode/react_shell.py::_show_help` and implemented in `abstractcode/react_shell.py`.
-
-## How do workflows work here?
-
-There are several workflow-related modes:
-
-- Local VisualFlow runs: `abstractcode flow ...` (requires `abstractcode[flow]`)
-- Workflow as an agent: `abstractcode --agent <flow_ref>` (implements `abstractcode.agent.v1`)
-- Gateway control-plane: `abstractcode gateway ...`
-- Gateway bundle management: `abstractcode workflow ...`
-
-Details: [`docs/workflows.md`](workflows.md).
-
-Evidence:
-- Local flows: `abstractcode/flow_cli.py`
-- Workflow agent: `abstractcode/workflow_agent.py`
-- Gateway + bundles: `abstractcode/gateway_cli.py` and `abstractcode/workflow_cli.py`
-
-## Why doesn’t the web app build when I clone only this repo?
-
-The web app currently imports shared UI components via Vite path aliases pointing at a sibling `abstractuic/` repo.
-
-Options:
-- deploy the prebuilt static output from `web/dist/` (if it matches your needs), or
-- clone/build with the sibling UI repo present.
-
-Evidence:
-- Vite aliases: `web/vite.config.ts`
-- Imports: `web/src/ui/app.tsx` and `web/src/main.tsx`
-
-## How do I enable the GPU meter in the footer?
-
-The TUI can poll AbstractGateway:
-- endpoint: `GET /api/gateway/host/metrics/gpu`
-- command: `/gpu [status|on|off]`
-
-Enable:
-- in-session: `/gpu on`
-- env: `ABSTRACTCODE_GPU_MONITOR=1` (or `auto`)
-
-Evidence: `abstractcode/react_shell.py::_handle_gpu()` and `abstractcode/react_shell.py::_fetch_gateway_gpu_utilization_pct()`.
-
-## I’m on MemAct: why do I have `/memory` but not on ReAct/CodeAct?
-
-`/memory` is MemAct-specific (it shows MemAct “Active Memory”).
-
-Evidence: command list in `abstractcode/react_shell.py::_show_help` and agent wiring in `abstractcode/react_shell.py`.
+- **Pre-alpha.** Interfaces and behavior may change between releases.
+- **A gateway is required.** There is no offline or standalone mode.
+- **The library surface is unstable.** The crate publishes its modules, but only
+  the command-line surface is treated as a contract for now.
+- **The two clients are not feature-identical.** They implement the same wire
+  contract independently, and each is ahead of the other in places.

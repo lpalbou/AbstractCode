@@ -1,0 +1,2797 @@
+[
+ {
+  "run_id": "5d786409-b5f3-4657-8f4d-346874de5ba1",
+  "step_id": "34b77f93-5bca-4b63-926f-c50db62dc742",
+  "node_id": "reason",
+  "status": "started",
+  "effect": {
+   "type": "llm_call",
+   "payload": {
+    "prompt": "",
+    "messages": [
+     {
+      "role": "user",
+      "content": "<runtime_metadata>{\"display\":\"[2026-07-21 15:06:25]\",\"local_datetime\":\"2026-07-21T15:06:25+02:00\"}</runtime_metadata>\nCreate a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE.\n\n[loop] iteration 1 of 50."
+     }
+    ],
+    "tools": [
+     {
+      "name": "edit_file",
+      "description": "Surgically edit a text file via small find/replace (literal/regex) or a single-file unified diff patch.",
+      "parameters": {
+       "file_path": {
+        "type": "string"
+       },
+       "pattern": {
+        "type": "string"
+       },
+       "replacement": {
+        "type": "string",
+        "default": null
+       },
+       "use_regex": {
+        "type": "boolean",
+        "default": false
+       },
+       "max_replacements": {
+        "type": "integer",
+        "default": null
+       },
+       "start_line": {
+        "type": "integer",
+        "default": null
+       },
+       "end_line": {
+        "type": "integer",
+        "default": null
+       },
+       "preview_only": {
+        "type": "boolean",
+        "default": false
+       }
+      },
+      "when_to_use": "Use for small, precise edits. Prefer search_files \u2192 read_file \u2192 edit_file with a small unique pattern; for whole-file rewrites, use write_file().",
+      "examples": [
+       {
+        "description": "Surgical one-line replacement (safe default: exactly one unique match)",
+        "arguments": {
+         "file_path": "config.py",
+         "pattern": "debug = False",
+         "replacement": "debug = True"
+        }
+       },
+       {
+        "description": "Update function definition using regex",
+        "arguments": {
+         "file_path": "script.py",
+         "pattern": "def old_function\\\\([^)]*\\\\):",
+         "replacement": "def new_function(param1, param2):",
+         "use_regex": true
+        }
+       },
+       {
+        "description": "Replace ALL occurrences (explicit opt-in), previewing first",
+        "arguments": {
+         "file_path": "test.py",
+         "pattern": "OldClass",
+         "replacement": "NewClass",
+         "preview_only": true,
+         "max_replacements": -1
+        }
+       }
+      ],
+      "tags": [
+       "mutating"
+      ]
+     },
+     {
+      "name": "analyze_code",
+      "description": "Return a compact outline + diagnostics for a code file (Python/JavaScript/HTML/R) to guide precise edits.",
+      "parameters": {
+       "file_path": {
+        "type": "string"
+       },
+       "language": {
+        "type": "string",
+        "default": null
+       }
+      },
+      "when_to_use": "Use before editing to locate the right block quickly; then read_file(start_line/end_line) around that block instead of re-reading the whole file.",
+      "examples": [
+       {
+        "description": "Outline a Python file",
+        "arguments": {
+         "file_path": "src/app.py"
+        }
+       },
+       {
+        "description": "Outline a JavaScript file",
+        "arguments": {
+         "file_path": "web/app.js"
+        }
+       },
+       {
+        "description": "Outline an HTML file",
+        "arguments": {
+         "file_path": "templates/index.html"
+        }
+       }
+      ]
+     },
+     {
+      "name": "execute_command",
+      "description": "Execute shell commands safely with security controls and platform detection",
+      "parameters": {
+       "command": {
+        "type": "string"
+       },
+       "working_directory": {
+        "type": "string",
+        "default": null
+       },
+       "timeout": {
+        "type": "integer",
+        "default": 300
+       },
+       "capture_output": {
+        "type": "boolean",
+        "default": true
+       },
+       "require_confirmation": {
+        "type": "boolean",
+        "default": false
+       },
+       "allow_dangerous": {
+        "type": "boolean",
+        "default": false
+       }
+      },
+      "when_to_use": "When you need to run system commands, shell scripts, or interact with command-line tools",
+      "examples": [
+       {
+        "description": "List current directory contents",
+        "arguments": {
+         "command": "ls -la"
+        }
+       },
+       {
+        "description": "Search for a pattern in files (grep)",
+        "arguments": {
+         "command": "grep -R \"ActiveContextPolicy\" -n abstractruntime/src/abstractruntime | head"
+        }
+       },
+       {
+        "description": "Safe mode with confirmation",
+        "arguments": {
+         "command": "rm temp_file.txt",
+         "require_confirmation": true
+        }
+       }
+      ],
+      "tags": [
+       "mutating"
+      ]
+     },
+     {
+      "name": "fetch_url",
+      "description": "Fetch a URL and parse common content types (HTML/JSON/text); supports previews and basic metadata.",
+      "parameters": {
+       "url": {
+        "type": "string"
+       },
+       "method": {
+        "type": "string",
+        "default": "GET"
+       },
+       "headers": {
+        "type": "object",
+        "default": null
+       },
+       "data": {
+        "type": "string",
+        "default": null
+       },
+       "timeout": {
+        "type": "integer",
+        "default": 45
+       },
+       "include_binary_preview": {
+        "type": "boolean",
+        "default": false
+       },
+       "keep_links": {
+        "type": "boolean",
+        "default": true
+       },
+       "user_agent": {
+        "type": "string",
+        "default": "AbstractCore-FetchTool/1.0 (+https://github.com/lpalbou/abstractcore)"
+       },
+       "include_full_content": {
+        "type": "boolean",
+        "default": true
+       }
+      },
+      "when_to_use": "Use to retrieve and analyze a URL after you know it is worth opening. Prefer skim_url first for a faster, smaller preview. For shorter outputs, set include_full_content=False or keep_links=False.",
+      "examples": [
+       {
+        "description": "Fetch and parse HTML webpage",
+        "arguments": {
+         "url": "https://example.com/article.html"
+        }
+       },
+       {
+        "description": "Fetch JSON API response",
+        "arguments": {
+         "url": "https://api.github.com/repos/python/cpython",
+         "headers": {
+          "Accept": "application/json"
+         }
+        }
+       },
+       {
+        "description": "Fetch binary content with metadata",
+        "arguments": {
+         "url": "https://example.com/document.pdf",
+         "include_binary_preview": true
+        }
+       }
+      ],
+      "tags": [
+       "write",
+       "remote_write"
+      ]
+     },
+     {
+      "name": "list_files",
+      "description": "List files/directories by name/path using glob patterns (case-insensitive). Does NOT search file contents; head_limit defaults to 10 results.",
+      "parameters": {
+       "directory_path": {
+        "type": "string",
+        "default": "."
+       },
+       "pattern": {
+        "type": "string",
+        "default": "*"
+       },
+       "recursive": {
+        "type": "boolean",
+        "default": false
+       },
+       "include_hidden": {
+        "type": "boolean",
+        "default": false
+       },
+       "head_limit": {
+        "type": "integer",
+        "default": 10
+       }
+      },
+      "when_to_use": "Use to find files by filename/path; prefer narrow patterns like '*.py|*.md' (avoid '*') and raise head_limit if needed. For file contents, use search_files().",
+      "examples": [
+       {
+        "description": "List Python + Markdown files in current directory",
+        "arguments": {
+         "directory_path": ".",
+         "pattern": "*.py|*.md"
+        }
+       },
+       {
+        "description": "Find all Python files recursively",
+        "arguments": {
+         "directory_path": ".",
+         "pattern": "*.py",
+         "recursive": true
+        }
+       },
+       {
+        "description": "Find docs/config files recursively",
+        "arguments": {
+         "directory_path": ".",
+         "pattern": "*.md|*.yml|*.yaml|*.json",
+         "recursive": true
+        }
+       }
+      ]
+     },
+     {
+      "name": "read_file",
+      "description": "Read a text file (line-numbered). Oversized reads return a labeled PARTIAL chunk plus the exact continuation call (start_char).",
+      "parameters": {
+       "file_path": {
+        "type": "string"
+       },
+       "start_line": {
+        "type": "integer",
+        "default": 1
+       },
+       "end_line": {
+        "type": "integer",
+        "default": null
+       },
+       "start_char": {
+        "type": "integer",
+        "default": null
+       }
+      },
+      "when_to_use": "Use to inspect exact file contents. For code, prefer analyze_code first. Prefer bounded reads; if line numbers are unknown, use search_files() first. For huge/minified files, follow the #TRUNCATION notice's start_char continuation.",
+      "examples": [
+       {
+        "description": "Read entire file (small files; oversized returns a labeled partial chunk)",
+        "arguments": {
+         "file_path": "README.md"
+        }
+       },
+       {
+        "description": "Read specific line range",
+        "arguments": {
+         "file_path": "src/main.py",
+         "start_line": 10,
+         "end_line": 25
+        }
+       },
+       {
+        "description": "Continue a truncated read from a character offset (minified/huge files)",
+        "arguments": {
+         "file_path": "dist/bundle.min.js",
+         "start_char": 120000
+        }
+       }
+      ]
+     },
+     {
+      "name": "search_files",
+      "description": "Search inside file contents for a regex pattern (case-insensitive) and return matching lines with line numbers.",
+      "parameters": {
+       "pattern": {
+        "type": "string"
+       },
+       "path": {
+        "type": "string",
+        "default": "."
+       },
+       "file_pattern": {
+        "type": "string",
+        "default": "*"
+       },
+       "head_limit": {
+        "type": "integer",
+        "default": 10
+       },
+       "max_hits": {
+        "type": "integer",
+        "default": 8
+       },
+       "multiline": {
+        "type": "boolean",
+        "default": false
+       },
+       "include_hidden": {
+        "type": "boolean",
+        "default": false
+       }
+      },
+      "when_to_use": "Use to locate where something appears across files; returns up to max_hits matching files, each capped at head_limit matching lines; set multiline=true for cross-line regex (slower).",
+      "examples": [
+       {
+        "description": "Find TODO/FIXME across Python files (up to 8 files, 10 lines per file)",
+        "arguments": {
+         "pattern": "TODO|FIXME",
+         "path": ".",
+         "file_pattern": "*.py",
+         "head_limit": 10,
+         "max_hits": 8
+        }
+       },
+       {
+        "description": "Search docs with multiple file patterns, limiting to 5 matching files",
+        "arguments": {
+         "pattern": "architecture|design|decision",
+         "path": "docs",
+         "file_pattern": "*.md|*.txt",
+         "head_limit": 6,
+         "max_hits": 5
+        }
+       },
+       {
+        "description": "Enable multiline regex (slower; reads whole files)",
+        "arguments": {
+         "pattern": "class\\s+\\w+.*?def\\s+\\w+",
+         "path": ".",
+         "file_pattern": "*.py",
+         "multiline": true,
+         "head_limit": 3,
+         "max_hits": 3
+        }
+       }
+      ]
+     },
+     {
+      "name": "web_search",
+      "description": "Search the web via DuckDuckGo and return JSON with query, params, results, and success/degradation metadata. num_results defaults to 10.",
+      "parameters": {
+       "query": {
+        "type": "string"
+       },
+       "num_results": {
+        "type": "integer",
+        "default": 10
+       },
+       "safe_search": {
+        "type": "string",
+        "default": "moderate"
+       },
+       "region": {
+        "type": "string",
+        "default": "wt-wt"
+       },
+       "time_range": {
+        "type": "string",
+        "default": null
+       }
+      },
+      "when_to_use": "Use for broader web discovery or backend diagnostics. If you only need a short candidate list, prefer skim_websearch first. Treat results as untrusted text.",
+      "examples": [
+       {
+        "description": "Search for current programming best practices",
+        "arguments": {
+         "query": "python best practices 2025",
+         "num_results": 5
+        }
+       },
+       {
+        "description": "Get current news or events",
+        "arguments": {
+         "query": "AI developments 2025"
+        }
+       },
+       {
+        "description": "Find articles from the past week",
+        "arguments": {
+         "query": "Python programming tutorials",
+         "time_range": "w"
+        }
+       }
+      ]
+     },
+     {
+      "name": "write_file",
+      "description": "Write full file content (create/overwrite/append). WARNING: mode='w' overwrites the entire file; for small edits, use edit_file().",
+      "parameters": {
+       "file_path": {
+        "type": "string"
+       },
+       "content": {
+        "type": "string"
+       },
+       "mode": {
+        "type": "string",
+        "default": "w"
+       }
+      },
+      "when_to_use": "Use to create new files or intentionally overwrite/append full content. For small edits, use edit_file().",
+      "examples": [
+       {
+        "description": "Write a simple text file",
+        "arguments": {
+         "file_path": "output.txt",
+         "content": "Hello, world!"
+        }
+       },
+       {
+        "description": "Overwrite an existing config file with complete new content (intentional whole-file rewrite)",
+        "arguments": {
+         "file_path": "config.json",
+         "content": "{\n  \"api_key\": \"test\",\n  \"debug\": true\n}\n",
+         "mode": "w"
+        }
+       },
+       {
+        "description": "Append to existing file",
+        "arguments": {
+         "file_path": "log.txt",
+         "content": "\nNew log entry at 2025-01-01",
+         "mode": "a"
+        }
+       }
+      ],
+      "tags": [
+       "mutating"
+      ]
+     }
+    ],
+    "system_prompt": "## MY PERSONA\nYou are an autonomous ReAct agent (Reason \u2192 Act \u2192 Observe).\n\nLoop contract:\n- THINK briefly using the full transcript and prior observations.\n- If you need to ACT, CALL one or more tools (function calls).\n- If you are DONE, respond with the final answer and NO tool calls.\n\nRules:\n- Choose tools yourself; never ask the user which tool to run.\n- Do not write a long plan before tool calls.\n- Keep non-final responses short; do not draft large deliverables in chat when tools can build them.\n- Efficiency (important): the runtime supports MULTIPLE tool calls in one response.\n  Batch independent read-only tool calls to reduce iterations.\n  Example: read multiple files/ranges or run multiple searches in one response.\n  If reading nearby ranges of the same file, prefer ONE call with a wider range.\n  Only split tool calls across turns when later calls depend on earlier outputs; do NOT batch side-effectful tools (write_file/edit_file/execute_command/send_email/send_whatsapp_message/send_telegram_message/send_telegram_artifact, and any mcp:: tool \u2014 treat MCP tools as side-effectful).\n- When context is getting large, use delegate_agent(task, context, tools) to offload an independent subtask with minimal context.\n- Keep tool call arguments small and valid; avoid embedding huge blobs (large file contents / giant JSON) directly in arguments.\n- Attachments:\n  - If you see an 'Active attachments' message or inline 'Content from <file>' blocks, treat those attachments as already available in-context.\n    Do NOT call tools just to re-open/read them.\n  - If you see 'Stored session attachments', those may not be included in the current call.\n    Only if you truly need it, use the attachment-open tool with artifact_id and a bounded line range.\n  - Never use filesystem tools on attachment filenames/paths; use the attachment-open tool instead.\n- For fetch_url: use include_full_content=False for shorter previews; set keep_links=False to strip links when not needed.\n- For large files, create a small skeleton first, then refine via multiple smaller edits/tool calls.\n- Use tool outputs as evidence; do not claim actions without tool outputs.\n- Continue iterating until the task is complete.",
+    "provider": "lmstudio",
+    "model": "qwen/qwen3.6-35b-a3b",
+    "params": {
+     "temperature": 0.2,
+     "trace_metadata": {
+      "step_id": "34b77f93-5bca-4b63-926f-c50db62dc742",
+      "effect_idempotency_key": "a958441db623002af49bbc186ce4fbaf",
+      "attempt": 1
+     }
+    }
+   },
+   "result_key": "_temp.llm_response"
+  },
+  "result": null,
+  "error": null,
+  "started_at": "2026-07-21T13:06:25.116298+00:00",
+  "ended_at": null,
+  "actor_id": "gateway",
+  "session_id": "acode-b31d146348b9",
+  "attempt": 1,
+  "idempotency_key": "a958441db623002af49bbc186ce4fbaf",
+  "prev_hash": null,
+  "record_hash": null,
+  "signature": null
+ },
+ {
+  "run_id": "5d786409-b5f3-4657-8f4d-346874de5ba1",
+  "step_id": "34b77f93-5bca-4b63-926f-c50db62dc742",
+  "node_id": "reason",
+  "status": "completed",
+  "effect": {
+   "type": "llm_call",
+   "payload": {
+    "prompt": "",
+    "messages": [
+     {
+      "role": "user",
+      "content": "<runtime_metadata>{\"display\":\"[2026-07-21 15:06:25]\",\"local_datetime\":\"2026-07-21T15:06:25+02:00\"}</runtime_metadata>\nCreate a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE.\n\n[loop] iteration 1 of 50."
+     }
+    ],
+    "tools": {
+     "$slim": {
+      "v": 1,
+      "kind": "started_payload_field",
+      "step_id": "34b77f93-5bca-4b63-926f-c50db62dc742",
+      "sha256": "73551061c3227ccefc5398988525dcf47c69aaf3a49a41b6e210a26c9b564926",
+      "bytes": 9265,
+      "field": "tools"
+     }
+    },
+    "system_prompt": "## MY PERSONA\nYou are an autonomous ReAct agent (Reason \u2192 Act \u2192 Observe).\n\nLoop contract:\n- THINK briefly using the full transcript and prior observations.\n- If you need to ACT, CALL one or more tools (function calls).\n- If you are DONE, respond with the final answer and NO tool calls.\n\nRules:\n- Choose tools yourself; never ask the user which tool to run.\n- Do not write a long plan before tool calls.\n- Keep non-final responses short; do not draft large deliverables in chat when tools can build them.\n- Efficiency (important): the runtime supports MULTIPLE tool calls in one response.\n  Batch independent read-only tool calls to reduce iterations.\n  Example: read multiple files/ranges or run multiple searches in one response.\n  If reading nearby ranges of the same file, prefer ONE call with a wider range.\n  Only split tool calls across turns when later calls depend on earlier outputs; do NOT batch side-effectful tools (write_file/edit_file/execute_command/send_email/send_whatsapp_message/send_telegram_message/send_telegram_artifact, and any mcp:: tool \u2014 treat MCP tools as side-effectful).\n- When context is getting large, use delegate_agent(task, context, tools) to offload an independent subtask with minimal context.\n- Keep tool call arguments small and valid; avoid embedding huge blobs (large file contents / giant JSON) directly in arguments.\n- Attachments:\n  - If you see an 'Active attachments' message or inline 'Content from <file>' blocks, treat those attachments as already available in-context.\n    Do NOT call tools just to re-open/read them.\n  - If you see 'Stored session attachments', those may not be included in the current call.\n    Only if you truly need it, use the attachment-open tool with artifact_id and a bounded line range.\n  - Never use filesystem tools on attachment filenames/paths; use the attachment-open tool instead.\n- For fetch_url: use include_full_content=False for shorter previews; set keep_links=False to strip links when not needed.\n- For large files, create a small skeleton first, then refine via multiple smaller edits/tool calls.\n- Use tool outputs as evidence; do not claim actions without tool outputs.\n- Continue iterating until the task is complete.",
+    "provider": "lmstudio",
+    "model": "qwen/qwen3.6-35b-a3b",
+    "params": {
+     "temperature": 0.2,
+     "trace_metadata": {
+      "step_id": "34b77f93-5bca-4b63-926f-c50db62dc742",
+      "effect_idempotency_key": "a958441db623002af49bbc186ce4fbaf",
+      "attempt": 1,
+      "run_id": "5d786409-b5f3-4657-8f4d-346874de5ba1",
+      "workflow_id": "visual_react_agent_basic-agent_0_0_2_81795ea9_node-2",
+      "node_id": "reason",
+      "actor_id": "gateway",
+      "session_id": "acode-b31d146348b9",
+      "parent_run_id": "4b08a706-ae4e-46ed-bfbb-611b374ddfc4"
+     }
+    }
+   },
+   "result_key": "_temp.llm_response"
+  },
+  "result": {
+   "content": "",
+   "reasoning": null,
+   "data": null,
+   "raw_response": {
+    "id": "chatcmpl-j8ans5z2p6yiuhqrkwe6",
+    "object": "chat.completion",
+    "created": 1784639185,
+    "model": "qwen/qwen3.6-35b-a3b",
+    "choices": [
+     {
+      "index": 0,
+      "message": {
+       "role": "assistant",
+       "content": "",
+       "tool_calls": [
+        {
+         "type": "function",
+         "id": "775257785",
+         "function": {
+          "name": "write_file",
+          "arguments": "{\"file_path\":\"hello.txt\",\"content\":\"hello from abstractcode-tui\",\"mode\":\"w\"}"
+         }
+        }
+       ]
+      },
+      "logprobs": null,
+      "finish_reason": "tool_calls"
+     }
+    ],
+    "usage": {
+     "prompt_tokens": 1987,
+     "completion_tokens": 57,
+     "total_tokens": 2044
+    },
+    "stats": {},
+    "system_fingerprint": "qwen/qwen3.6-35b-a3b"
+   },
+   "tool_calls": [
+    {
+     "name": "write_file",
+     "arguments": {
+      "file_path": "hello.txt",
+      "content": "hello from abstractcode-tui",
+      "mode": "w"
+     },
+     "call_id": "775257785"
+    }
+   ],
+   "usage": {
+    "input_tokens": 1987,
+    "output_tokens": 57,
+    "total_tokens": 2044,
+    "prompt_tokens": 1987,
+    "completion_tokens": 57
+   },
+   "model": "qwen/qwen3.6-35b-a3b",
+   "finish_reason": "tool_calls",
+   "metadata": {
+    "_provider_request": {
+     "url": "http://localhost:1234/v1/chat/completions",
+     "payload": {
+      "model": "qwen/qwen3.6-35b-a3b",
+      "messages": [
+       {
+        "role": "system",
+        "content": "## MY PERSONA\nYou are an autonomous ReAct agent (Reason \u2192 Act \u2192 Observe).\n\nLoop contract:\n- THINK briefly using the full transcript and prior observations.\n- If you need to ACT, CALL one or more tools (function calls).\n- If you are DONE, respond with the final answer and NO tool calls.\n\nRules:\n- Choose tools yourself; never ask the user which tool to run.\n- Do not write a long plan before tool calls.\n- Keep non-final responses short; do not draft large deliverables in chat when tools can build them.\n- Efficiency (important): the runtime supports MULTIPLE tool calls in one response.\n  Batch independent read-only tool calls to reduce iterations.\n  Example: read multiple files/ranges or run multiple searches in one response.\n  If reading nearby ranges of the same file, prefer ONE call with a wider range.\n  Only split tool calls across turns when later calls depend on earlier outputs; do NOT batch side-effectful tools (write_file/edit_file/execute_command/send_email/send_whatsapp_message/send_telegram_message/send_telegram_artifact, and any mcp:: tool \u2014 treat MCP tools as side-effectful).\n- When context is getting large, use delegate_agent(task, context, tools) to offload an independent subtask with minimal context.\n- Keep tool call arguments small and valid; avoid embedding huge blobs (large file contents / giant JSON) directly in arguments.\n- Attachments:\n  - If you see an 'Active attachments' message or inline 'Content from <file>' blocks, treat those attachments as already available in-context.\n    Do NOT call tools just to re-open/read them.\n  - If you see 'Stored session attachments', those may not be included in the current call.\n    Only if you truly need it, use the attachment-open tool with artifact_id and a bounded line range.\n  - Never use filesystem tools on attachment filenames/paths; use the attachment-open tool instead.\n- For fetch_url: use include_full_content=False for shorter previews; set keep_links=False to strip links when not needed.\n- For large files, create a small skeleton first, then refine via multiple smaller edits/tool calls.\n- Use tool outputs as evidence; do not claim actions without tool outputs.\n- Continue iterating until the task is complete.\n\nRUNTIME GROUNDING: the latest user message may begin with a machine-generated <runtime_metadata>{...}</runtime_metadata> envelope carrying the current local date/time (and optionally timezone, country, or OS user) for grounding. It is not written by the user and it is not a language or locale preference. Always respond in the language of the user's request itself unless the user explicitly asks otherwise."
+       },
+       {
+        "role": "user",
+        "content": "Create a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE.\n\n[loop] iteration 1 of 50."
+       },
+       {
+        "role": "user",
+        "content": "<system_instruction>\nStored session attachments (most recent first; not necessarily active in this call). Do not mention this list:\n</system_instruction>"
+       },
+       {
+        "role": "user",
+        "content": "<runtime_metadata>{\"display\":\"[2026-07-21 15:06:25]\",\"local_datetime\":\"2026-07-21T15:06:25+02:00\"}</runtime_metadata>"
+       }
+      ],
+      "stream": false,
+      "temperature": 0.2,
+      "top_p": 0.95,
+      "max_tokens": 81920,
+      "top_k": 20,
+      "prompt_cache_key": "session:9d346a4c4ccf9a8d032dd6e5",
+      "tools": [
+       {
+        "type": "function",
+        "function": {
+         "name": "edit_file",
+         "description": "Surgically edit a text file via small find/replace (literal/regex) or a single-file unified diff patch.",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "file_path": {
+            "type": "string"
+           },
+           "pattern": {
+            "type": "string"
+           },
+           "replacement": {
+            "type": "string"
+           },
+           "use_regex": {
+            "type": "boolean"
+           },
+           "max_replacements": {
+            "type": "integer"
+           },
+           "start_line": {
+            "type": "integer"
+           },
+           "end_line": {
+            "type": "integer"
+           },
+           "preview_only": {
+            "type": "boolean"
+           }
+          },
+          "required": [
+           "file_path",
+           "pattern"
+          ]
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "analyze_code",
+         "description": "Return a compact outline + diagnostics for a code file (Python/JavaScript/HTML/R) to guide precise edits.",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "file_path": {
+            "type": "string"
+           },
+           "language": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "file_path"
+          ]
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "execute_command",
+         "description": "Execute shell commands safely with security controls and platform detection",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "command": {
+            "type": "string"
+           },
+           "working_directory": {
+            "type": "string"
+           },
+           "timeout": {
+            "type": "integer"
+           },
+           "capture_output": {
+            "type": "boolean"
+           },
+           "require_confirmation": {
+            "type": "boolean"
+           },
+           "allow_dangerous": {
+            "type": "boolean"
+           }
+          },
+          "required": [
+           "command"
+          ]
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "fetch_url",
+         "description": "Fetch a URL and parse common content types (HTML/JSON/text); supports previews and basic metadata.",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "url": {
+            "type": "string"
+           },
+           "method": {
+            "type": "string"
+           },
+           "headers": {
+            "type": "object"
+           },
+           "data": {
+            "type": "string"
+           },
+           "timeout": {
+            "type": "integer"
+           },
+           "include_binary_preview": {
+            "type": "boolean"
+           },
+           "keep_links": {
+            "type": "boolean"
+           },
+           "user_agent": {
+            "type": "string"
+           },
+           "include_full_content": {
+            "type": "boolean"
+           }
+          },
+          "required": [
+           "url"
+          ]
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "list_files",
+         "description": "List files/directories by name/path using glob patterns (case-insensitive). Does NOT search file contents; head_limit defaults to 10 results.",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "directory_path": {
+            "type": "string"
+           },
+           "pattern": {
+            "type": "string"
+           },
+           "recursive": {
+            "type": "boolean"
+           },
+           "include_hidden": {
+            "type": "boolean"
+           },
+           "head_limit": {
+            "type": "integer"
+           }
+          },
+          "required": []
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "read_file",
+         "description": "Read a text file (line-numbered). Oversized reads return a labeled PARTIAL chunk plus the exact continuation call (start_char).",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "file_path": {
+            "type": "string"
+           },
+           "start_line": {
+            "type": "integer"
+           },
+           "end_line": {
+            "type": "integer"
+           },
+           "start_char": {
+            "type": "integer"
+           }
+          },
+          "required": [
+           "file_path"
+          ]
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "search_files",
+         "description": "Search inside file contents for a regex pattern (case-insensitive) and return matching lines with line numbers.",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "pattern": {
+            "type": "string"
+           },
+           "path": {
+            "type": "string"
+           },
+           "file_pattern": {
+            "type": "string"
+           },
+           "head_limit": {
+            "type": "integer"
+           },
+           "max_hits": {
+            "type": "integer"
+           },
+           "multiline": {
+            "type": "boolean"
+           },
+           "include_hidden": {
+            "type": "boolean"
+           }
+          },
+          "required": [
+           "pattern"
+          ]
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "web_search",
+         "description": "Search the web via DuckDuckGo and return JSON with query, params, results, and success/degradation metadata. num_results defaults to 10.",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "query": {
+            "type": "string"
+           },
+           "num_results": {
+            "type": "integer"
+           },
+           "safe_search": {
+            "type": "string"
+           },
+           "region": {
+            "type": "string"
+           },
+           "time_range": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "query"
+          ]
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "write_file",
+         "description": "Write full file content (create/overwrite/append). WARNING: mode='w' overwrites the entire file; for small edits, use edit_file().",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "file_path": {
+            "type": "string"
+           },
+           "content": {
+            "type": "string"
+           },
+           "mode": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "file_path",
+           "content"
+          ]
+         }
+        }
+       }
+      ],
+      "tool_choice": "auto"
+     }
+    },
+    "trace_id": "b77ee19f-337a-405f-b49e-abbdbf8b9fb9",
+    "_resolved_generate_route": {
+     "request": {
+      "text": "",
+      "has_messages": true,
+      "message_count": 3,
+      "media_count": 0,
+      "media_types": []
+     },
+     "outputs": [
+      {
+       "modality": "text",
+       "task": "text_generation",
+       "provider": "lmstudio",
+       "model": "ornith-1.0-35b"
+      }
+     ],
+     "text_route": {
+      "route_key": "input.text",
+      "provider": "lmstudio",
+      "model": "ornith-1.0-35b",
+      "options": {
+       "configured": true
+      },
+      "source": "abstractcore.gateway_runtime",
+      "field_sources": {
+       "provider": "abstractcore.gateway_runtime",
+       "model": "abstractcore.gateway_runtime",
+       "options": "abstractcore.gateway_runtime",
+       "route": "abstractcore.gateway_runtime"
+      }
+     },
+     "input_routes": [],
+     "output_routes": [
+      {
+       "route_key": "output.text",
+       "provider": "lmstudio",
+       "model": "ornith-1.0-35b",
+       "options": {
+        "derived_from": "input.text",
+        "read_only": true,
+        "configured": true
+       },
+       "source": "abstractcore.gateway_runtime",
+       "field_sources": {
+        "provider": "abstractcore.gateway_runtime",
+        "model": "abstractcore.gateway_runtime",
+        "options": "abstractcore.gateway_runtime",
+        "route": "abstractcore.gateway_runtime"
+       }
+      }
+     ],
+     "reasoning": null,
+     "reasoning_source": null
+    },
+    "runtime_grounding": {
+     "local_datetime": "2026-07-21T15:06:25+02:00",
+     "country": "FR",
+     "display": "[2026-07-21 15:06:25 FR]",
+     "source": "abstractruntime",
+     "prompt_injected": true,
+     "timezone": "Europe/Paris",
+     "user": "gateway"
+    },
+    "_runtime_observability": {
+     "llm_generate_kwargs": {
+      "prompt": "",
+      "messages": [
+       {
+        "role": "user",
+        "content": "<runtime_metadata>{\"display\":\"[2026-07-21 15:06:25]\",\"local_datetime\":\"2026-07-21T15:06:25+02:00\"}</runtime_metadata>\nCreate a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE.\n\n[loop] iteration 1 of 50."
+       },
+       {
+        "role": "system",
+        "content": "Stored session attachments (most recent first; not necessarily active in this call). Do not mention this list:",
+        "metadata": {
+         "kind": "attachment_index"
+        }
+       }
+      ],
+      "system_prompt": "## MY PERSONA\nYou are an autonomous ReAct agent (Reason \u2192 Act \u2192 Observe).\n\nLoop contract:\n- THINK briefly using the full transcript and prior observations.\n- If you need to ACT, CALL one or more tools (function calls).\n- If you are DONE, respond with the final answer and NO tool calls.\n\nRules:\n- Choose tools yourself; never ask the user which tool to run.\n- Do not write a long plan before tool calls.\n- Keep non-final responses short; do not draft large deliverables in chat when tools can build them.\n- Efficiency (important): the runtime supports MULTIPLE tool calls in one response.\n  Batch independent read-only tool calls to reduce iterations.\n  Example: read multiple files/ranges or run multiple searches in one response.\n  If reading nearby ranges of the same file, prefer ONE call with a wider range.\n  Only split tool calls across turns when later calls depend on earlier outputs; do NOT batch side-effectful tools (write_file/edit_file/execute_command/send_email/send_whatsapp_message/send_telegram_message/send_telegram_artifact, and any mcp:: tool \u2014 treat MCP tools as side-effectful).\n- When context is getting large, use delegate_agent(task, context, tools) to offload an independent subtask with minimal context.\n- Keep tool call arguments small and valid; avoid embedding huge blobs (large file contents / giant JSON) directly in arguments.\n- Attachments:\n  - If you see an 'Active attachments' message or inline 'Content from <file>' blocks, treat those attachments as already available in-context.\n    Do NOT call tools just to re-open/read them.\n  - If you see 'Stored session attachments', those may not be included in the current call.\n    Only if you truly need it, use the attachment-open tool with artifact_id and a bounded line range.\n  - Never use filesystem tools on attachment filenames/paths; use the attachment-open tool instead.\n- For fetch_url: use include_full_content=False for shorter previews; set keep_links=False to strip links when not needed.\n- For large files, create a small skeleton first, then refine via multiple smaller edits/tool calls.\n- Use tool outputs as evidence; do not claim actions without tool outputs.\n- Continue iterating until the task is complete.",
+      "media": null,
+      "tools": {
+       "$slim": {
+        "v": 1,
+        "kind": "started_payload_field",
+        "step_id": "34b77f93-5bca-4b63-926f-c50db62dc742",
+        "sha256": "73551061c3227ccefc5398988525dcf47c69aaf3a49a41b6e210a26c9b564926",
+        "bytes": 9265,
+        "field": "tools"
+       }
+      },
+      "params": {
+       "temperature": 0.2,
+       "trace_metadata": {
+        "step_id": "34b77f93-5bca-4b63-926f-c50db62dc742",
+        "effect_idempotency_key": "a958441db623002af49bbc186ce4fbaf",
+        "attempt": 1,
+        "run_id": "5d786409-b5f3-4657-8f4d-346874de5ba1",
+        "workflow_id": "visual_react_agent_basic-agent_0_0_2_81795ea9_node-2",
+        "node_id": "reason",
+        "actor_id": "gateway",
+        "session_id": "acode-b31d146348b9",
+        "parent_run_id": "4b08a706-ae4e-46ed-bfbb-611b374ddfc4"
+       },
+       "_provider": "lmstudio",
+       "_model": "qwen/qwen3.6-35b-a3b",
+       "prompt_cache_key": "session:9d346a4c4ccf9a8d032dd6e5"
+      },
+      "structured_output_fallback": false
+     }
+    },
+    "_runtime_resolved_action": {
+     "kind": "generate",
+     "action_id": "generate_text",
+     "family": "text",
+     "modality": "text",
+     "task": "text_generation",
+     "normalized_request": {
+      "text": "",
+      "has_messages": true,
+      "message_count": 3,
+      "media_count": 0,
+      "media_types": []
+     },
+     "normalized_output": [
+      {
+       "modality": "text",
+       "task": "text_generation",
+       "provider": "lmstudio",
+       "model": "ornith-1.0-35b"
+      }
+     ],
+     "effective_route": {
+      "text_route": {
+       "route_key": "input.text",
+       "provider": "lmstudio",
+       "model": "ornith-1.0-35b",
+       "options": {
+        "configured": true
+       },
+       "source": "abstractcore.gateway_runtime",
+       "field_sources": {
+        "provider": "abstractcore.gateway_runtime",
+        "model": "abstractcore.gateway_runtime",
+        "options": "abstractcore.gateway_runtime",
+        "route": "abstractcore.gateway_runtime"
+       }
+      },
+      "input_routes": [],
+      "output_routes": [
+       {
+        "route_key": "output.text",
+        "provider": "lmstudio",
+        "model": "ornith-1.0-35b",
+        "options": {
+         "derived_from": "input.text",
+         "read_only": true,
+         "configured": true
+        },
+        "source": "abstractcore.gateway_runtime",
+        "field_sources": {
+         "provider": "abstractcore.gateway_runtime",
+         "model": "abstractcore.gateway_runtime",
+         "options": "abstractcore.gateway_runtime",
+         "route": "abstractcore.gateway_runtime"
+        }
+       }
+      ],
+      "reasoning": null,
+      "reasoning_source": null
+     },
+     "requested_override": {
+      "text_route": {
+       "provider": "abstractcore.gateway_runtime",
+       "model": "abstractcore.gateway_runtime",
+       "options": "abstractcore.gateway_runtime",
+       "route": "abstractcore.gateway_runtime"
+      },
+      "output_routes": [
+       {
+        "provider": "abstractcore.gateway_runtime",
+        "model": "abstractcore.gateway_runtime",
+        "options": "abstractcore.gateway_runtime",
+        "route": "abstractcore.gateway_runtime"
+       }
+      ],
+      "reasoning_source": null
+     },
+     "override_disposition": "resolved",
+     "policy_class": "runtime_call"
+    }
+   },
+   "trace_id": "b77ee19f-337a-405f-b49e-abbdbf8b9fb9",
+   "gen_time": 70601.9
+  },
+  "error": null,
+  "started_at": "2026-07-21T13:06:25.116298+00:00",
+  "ended_at": "2026-07-21T13:07:35.779150+00:00",
+  "actor_id": "gateway",
+  "session_id": "acode-b31d146348b9",
+  "attempt": 1,
+  "idempotency_key": "a958441db623002af49bbc186ce4fbaf",
+  "prev_hash": null,
+  "record_hash": null,
+  "signature": null
+ },
+ {
+  "run_id": "5d786409-b5f3-4657-8f4d-346874de5ba1",
+  "step_id": "f525c42b-611e-4884-88eb-4d5945d390f0",
+  "node_id": "act",
+  "status": "started",
+  "effect": {
+   "type": "tool_calls",
+   "payload": {
+    "tool_calls": [
+     {
+      "name": "write_file",
+      "arguments": {
+       "file_path": "hello.txt",
+       "content": "hello from abstractcode-tui",
+       "mode": "w"
+      },
+      "call_id": "775257785",
+      "runtime_call_id": "rtcall_84017f579ccb7532f607caea97ebb8f5_1"
+     }
+    ],
+    "allowed_tools": [
+     "analyze_code",
+     "edit_file",
+     "execute_command",
+     "fetch_url",
+     "list_files",
+     "read_file",
+     "search_files",
+     "web_search",
+     "write_file"
+    ],
+    "act_seq": 1
+   },
+   "result_key": "_temp.tool_results"
+  },
+  "result": null,
+  "error": null,
+  "started_at": "2026-07-21T13:07:35.881348+00:00",
+  "ended_at": null,
+  "actor_id": "gateway",
+  "session_id": "acode-b31d146348b9",
+  "attempt": 1,
+  "idempotency_key": "84017f579ccb7532f607caea97ebb8f5",
+  "prev_hash": null,
+  "record_hash": null,
+  "signature": null
+ },
+ {
+  "run_id": "5d786409-b5f3-4657-8f4d-346874de5ba1",
+  "step_id": "f525c42b-611e-4884-88eb-4d5945d390f0",
+  "node_id": "act",
+  "status": "waiting",
+  "effect": {
+   "type": "tool_calls",
+   "payload": {
+    "tool_calls": [
+     {
+      "name": "write_file",
+      "arguments": {
+       "file_path": "hello.txt",
+       "content": "hello from abstractcode-tui",
+       "mode": "w"
+      },
+      "call_id": "775257785",
+      "runtime_call_id": "rtcall_84017f579ccb7532f607caea97ebb8f5_1"
+     }
+    ],
+    "allowed_tools": [
+     "analyze_code",
+     "edit_file",
+     "execute_command",
+     "fetch_url",
+     "list_files",
+     "read_file",
+     "search_files",
+     "web_search",
+     "write_file"
+    ],
+    "act_seq": 1
+   },
+   "result_key": "_temp.tool_results"
+  },
+  "result": {
+   "wait": {
+    "reason": "user",
+    "wait_key": "tool_approval:9dca9b34b05e4fa38e5d16285a9aa1cc",
+    "until": null,
+    "resume_to_node": "observe",
+    "result_key": "_temp.tool_results",
+    "prompt": null,
+    "choices": null,
+    "allow_free_text": true,
+    "details": {
+     "mode": "approval_required",
+     "tool_calls": [
+      {
+       "name": "write_file",
+       "arguments": {
+        "file_path": "/srv/gateway/runtime/workspaces/540313ab1c0542d49b79ad04f53e7a28/hello.txt",
+        "content": "hello from abstractcode-tui",
+        "mode": "w"
+       },
+       "call_id": "775257785",
+       "runtime_call_id": "rtcall_84017f579ccb7532f607caea97ebb8f5_1"
+      }
+     ],
+     "executor": {
+      "kind": "tool_approval",
+      "policy": {
+       "auto_approve_tools": [
+        "agora_ack_inbox",
+        "agora_check_inbox",
+        "agora_post_message",
+        "agora_read_channel",
+        "agora_read_message",
+        "agora_send_dm",
+        "agora_whoami",
+        "analyze_code",
+        "channel_fs_list",
+        "channel_fs_read",
+        "channel_store_get",
+        "fetch_url",
+        "list_files",
+        "read_file",
+        "search_files",
+        "send_telegram_artifact",
+        "send_telegram_message",
+        "skim_files",
+        "skim_folders",
+        "skim_url",
+        "skim_websearch",
+        "web_search"
+       ],
+       "require_approval_tools": [
+        "channel_fs_write",
+        "channel_store_set",
+        "edit_file",
+        "execute_command",
+        "send_email",
+        "send_whatsapp_message",
+        "shell_close",
+        "shell_exec",
+        "shell_write_stdin",
+        "write_file"
+       ]
+      }
+     }
+    }
+   }
+  },
+  "error": null,
+  "started_at": "2026-07-21T13:07:35.881348+00:00",
+  "ended_at": "2026-07-21T13:07:35.908219+00:00",
+  "actor_id": "gateway",
+  "session_id": "acode-b31d146348b9",
+  "attempt": 1,
+  "idempotency_key": "84017f579ccb7532f607caea97ebb8f5",
+  "prev_hash": null,
+  "record_hash": null,
+  "signature": null
+ },
+ {
+  "run_id": "5d786409-b5f3-4657-8f4d-346874de5ba1",
+  "step_id": "83b6f9aa-476d-49fc-a4ee-8b506deaa574",
+  "node_id": "act",
+  "status": "completed",
+  "effect": {
+   "type": "tool_calls",
+   "payload": {
+    "tool_calls": [
+     {
+      "name": "write_file",
+      "arguments": {
+       "file_path": "hello.txt",
+       "content": "hello from abstractcode-tui",
+       "mode": "w"
+      },
+      "call_id": "775257785",
+      "runtime_call_id": "rtcall_84017f579ccb7532f607caea97ebb8f5_1"
+     }
+    ],
+    "allowed_tools": [
+     "analyze_code",
+     "edit_file",
+     "execute_command",
+     "fetch_url",
+     "list_files",
+     "read_file",
+     "search_files",
+     "web_search",
+     "write_file"
+    ],
+    "act_seq": 1
+   },
+   "result_key": "_temp.tool_results"
+  },
+  "result": {
+   "mode": "executed",
+   "results": [
+    {
+     "call_id": "775257785",
+     "runtime_call_id": "rtcall_84017f579ccb7532f607caea97ebb8f5_1",
+     "name": "write_file",
+     "success": true,
+     "output": "\u2705 Successfully written to '/srv/gateway/runtime/workspaces/540313ab1c0542d49b79ad04f53e7a28/hello.txt' (27 bytes, 1 lines)",
+     "error": null
+    }
+   ]
+  },
+  "error": null,
+  "started_at": "2026-07-21T13:07:36.932962+00:00",
+  "ended_at": "2026-07-21T13:07:36.932982+00:00",
+  "actor_id": "gateway",
+  "session_id": "acode-b31d146348b9",
+  "attempt": 1,
+  "idempotency_key": "84017f579ccb7532f607caea97ebb8f5",
+  "prev_hash": null,
+  "record_hash": null,
+  "signature": null
+ },
+ {
+  "run_id": "5d786409-b5f3-4657-8f4d-346874de5ba1",
+  "step_id": "7d3dc7db-e0e6-41c7-ba4c-333f3f82ef86",
+  "node_id": "act",
+  "status": "completed",
+  "effect": {
+   "type": "resume",
+   "payload": {
+    "wait_reason": "user",
+    "wait_key": "tool_approval:9dca9b34b05e4fa38e5d16285a9aa1cc",
+    "resume_to_node": "observe",
+    "result_key": "_temp.tool_results",
+    "payload": {
+     "mode": "executed",
+     "results": [
+      {
+       "call_id": "775257785",
+       "runtime_call_id": "rtcall_84017f579ccb7532f607caea97ebb8f5_1",
+       "name": "write_file",
+       "success": true,
+       "output": "\u2705 Successfully written to '/srv/gateway/runtime/workspaces/540313ab1c0542d49b79ad04f53e7a28/hello.txt' (27 bytes, 1 lines)",
+       "error": null
+      }
+     ]
+    }
+   },
+   "result_key": null
+  },
+  "result": {
+   "resumed": true
+  },
+  "error": null,
+  "started_at": "2026-07-21T13:07:36.941920+00:00",
+  "ended_at": "2026-07-21T13:07:36.941937+00:00",
+  "actor_id": "gateway",
+  "session_id": "acode-b31d146348b9",
+  "attempt": 1,
+  "idempotency_key": null,
+  "prev_hash": null,
+  "record_hash": null,
+  "signature": null
+ },
+ {
+  "run_id": "5d786409-b5f3-4657-8f4d-346874de5ba1",
+  "step_id": "e09da96c-3277-4a4e-8847-0cfc56fa28a7",
+  "node_id": "reason",
+  "status": "started",
+  "effect": {
+   "type": "llm_call",
+   "payload": {
+    "prompt": "",
+    "messages": [
+     {
+      "role": "user",
+      "content": "Create a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE."
+     },
+     {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+       {
+        "type": "function",
+        "id": "775257785",
+        "function": {
+         "name": "write_file",
+         "arguments": "{\"file_path\": \"hello.txt\", \"content\": \"hello from abstractcode-tui\", \"mode\": \"w\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "content": "[write_file]: \u2705 Successfully written to '/srv/gateway/runtime/workspaces/540313ab1c0542d49b79ad04f53e7a28/hello.txt' (27 bytes, 1 lines)",
+      "tool_call_id": "775257785"
+     },
+     {
+      "role": "user",
+      "content": "<runtime_metadata>{\"display\":\"[2026-07-21 15:07:37]\",\"local_datetime\":\"2026-07-21T15:07:37+02:00\"}</runtime_metadata>\n[loop] iteration 2 of 50.",
+      "volatile": true
+     }
+    ],
+    "tools": [
+     {
+      "name": "edit_file",
+      "description": "Surgically edit a text file via small find/replace (literal/regex) or a single-file unified diff patch.",
+      "parameters": {
+       "file_path": {
+        "type": "string"
+       },
+       "pattern": {
+        "type": "string"
+       },
+       "replacement": {
+        "type": "string",
+        "default": null
+       },
+       "use_regex": {
+        "type": "boolean",
+        "default": false
+       },
+       "max_replacements": {
+        "type": "integer",
+        "default": null
+       },
+       "start_line": {
+        "type": "integer",
+        "default": null
+       },
+       "end_line": {
+        "type": "integer",
+        "default": null
+       },
+       "preview_only": {
+        "type": "boolean",
+        "default": false
+       }
+      },
+      "when_to_use": "Use for small, precise edits. Prefer search_files \u2192 read_file \u2192 edit_file with a small unique pattern; for whole-file rewrites, use write_file().",
+      "examples": [
+       {
+        "description": "Surgical one-line replacement (safe default: exactly one unique match)",
+        "arguments": {
+         "file_path": "config.py",
+         "pattern": "debug = False",
+         "replacement": "debug = True"
+        }
+       },
+       {
+        "description": "Update function definition using regex",
+        "arguments": {
+         "file_path": "script.py",
+         "pattern": "def old_function\\\\([^)]*\\\\):",
+         "replacement": "def new_function(param1, param2):",
+         "use_regex": true
+        }
+       },
+       {
+        "description": "Replace ALL occurrences (explicit opt-in), previewing first",
+        "arguments": {
+         "file_path": "test.py",
+         "pattern": "OldClass",
+         "replacement": "NewClass",
+         "preview_only": true,
+         "max_replacements": -1
+        }
+       }
+      ],
+      "tags": [
+       "mutating"
+      ]
+     },
+     {
+      "name": "analyze_code",
+      "description": "Return a compact outline + diagnostics for a code file (Python/JavaScript/HTML/R) to guide precise edits.",
+      "parameters": {
+       "file_path": {
+        "type": "string"
+       },
+       "language": {
+        "type": "string",
+        "default": null
+       }
+      },
+      "when_to_use": "Use before editing to locate the right block quickly; then read_file(start_line/end_line) around that block instead of re-reading the whole file.",
+      "examples": [
+       {
+        "description": "Outline a Python file",
+        "arguments": {
+         "file_path": "src/app.py"
+        }
+       },
+       {
+        "description": "Outline a JavaScript file",
+        "arguments": {
+         "file_path": "web/app.js"
+        }
+       },
+       {
+        "description": "Outline an HTML file",
+        "arguments": {
+         "file_path": "templates/index.html"
+        }
+       }
+      ]
+     },
+     {
+      "name": "execute_command",
+      "description": "Execute shell commands safely with security controls and platform detection",
+      "parameters": {
+       "command": {
+        "type": "string"
+       },
+       "working_directory": {
+        "type": "string",
+        "default": null
+       },
+       "timeout": {
+        "type": "integer",
+        "default": 300
+       },
+       "capture_output": {
+        "type": "boolean",
+        "default": true
+       },
+       "require_confirmation": {
+        "type": "boolean",
+        "default": false
+       },
+       "allow_dangerous": {
+        "type": "boolean",
+        "default": false
+       }
+      },
+      "when_to_use": "When you need to run system commands, shell scripts, or interact with command-line tools",
+      "examples": [
+       {
+        "description": "List current directory contents",
+        "arguments": {
+         "command": "ls -la"
+        }
+       },
+       {
+        "description": "Search for a pattern in files (grep)",
+        "arguments": {
+         "command": "grep -R \"ActiveContextPolicy\" -n abstractruntime/src/abstractruntime | head"
+        }
+       },
+       {
+        "description": "Safe mode with confirmation",
+        "arguments": {
+         "command": "rm temp_file.txt",
+         "require_confirmation": true
+        }
+       }
+      ],
+      "tags": [
+       "mutating"
+      ]
+     },
+     {
+      "name": "fetch_url",
+      "description": "Fetch a URL and parse common content types (HTML/JSON/text); supports previews and basic metadata.",
+      "parameters": {
+       "url": {
+        "type": "string"
+       },
+       "method": {
+        "type": "string",
+        "default": "GET"
+       },
+       "headers": {
+        "type": "object",
+        "default": null
+       },
+       "data": {
+        "type": "string",
+        "default": null
+       },
+       "timeout": {
+        "type": "integer",
+        "default": 45
+       },
+       "include_binary_preview": {
+        "type": "boolean",
+        "default": false
+       },
+       "keep_links": {
+        "type": "boolean",
+        "default": true
+       },
+       "user_agent": {
+        "type": "string",
+        "default": "AbstractCore-FetchTool/1.0 (+https://github.com/lpalbou/abstractcore)"
+       },
+       "include_full_content": {
+        "type": "boolean",
+        "default": true
+       }
+      },
+      "when_to_use": "Use to retrieve and analyze a URL after you know it is worth opening. Prefer skim_url first for a faster, smaller preview. For shorter outputs, set include_full_content=False or keep_links=False.",
+      "examples": [
+       {
+        "description": "Fetch and parse HTML webpage",
+        "arguments": {
+         "url": "https://example.com/article.html"
+        }
+       },
+       {
+        "description": "Fetch JSON API response",
+        "arguments": {
+         "url": "https://api.github.com/repos/python/cpython",
+         "headers": {
+          "Accept": "application/json"
+         }
+        }
+       },
+       {
+        "description": "Fetch binary content with metadata",
+        "arguments": {
+         "url": "https://example.com/document.pdf",
+         "include_binary_preview": true
+        }
+       }
+      ],
+      "tags": [
+       "write",
+       "remote_write"
+      ]
+     },
+     {
+      "name": "list_files",
+      "description": "List files/directories by name/path using glob patterns (case-insensitive). Does NOT search file contents; head_limit defaults to 10 results.",
+      "parameters": {
+       "directory_path": {
+        "type": "string",
+        "default": "."
+       },
+       "pattern": {
+        "type": "string",
+        "default": "*"
+       },
+       "recursive": {
+        "type": "boolean",
+        "default": false
+       },
+       "include_hidden": {
+        "type": "boolean",
+        "default": false
+       },
+       "head_limit": {
+        "type": "integer",
+        "default": 10
+       }
+      },
+      "when_to_use": "Use to find files by filename/path; prefer narrow patterns like '*.py|*.md' (avoid '*') and raise head_limit if needed. For file contents, use search_files().",
+      "examples": [
+       {
+        "description": "List Python + Markdown files in current directory",
+        "arguments": {
+         "directory_path": ".",
+         "pattern": "*.py|*.md"
+        }
+       },
+       {
+        "description": "Find all Python files recursively",
+        "arguments": {
+         "directory_path": ".",
+         "pattern": "*.py",
+         "recursive": true
+        }
+       },
+       {
+        "description": "Find docs/config files recursively",
+        "arguments": {
+         "directory_path": ".",
+         "pattern": "*.md|*.yml|*.yaml|*.json",
+         "recursive": true
+        }
+       }
+      ]
+     },
+     {
+      "name": "read_file",
+      "description": "Read a text file (line-numbered). Oversized reads return a labeled PARTIAL chunk plus the exact continuation call (start_char).",
+      "parameters": {
+       "file_path": {
+        "type": "string"
+       },
+       "start_line": {
+        "type": "integer",
+        "default": 1
+       },
+       "end_line": {
+        "type": "integer",
+        "default": null
+       },
+       "start_char": {
+        "type": "integer",
+        "default": null
+       }
+      },
+      "when_to_use": "Use to inspect exact file contents. For code, prefer analyze_code first. Prefer bounded reads; if line numbers are unknown, use search_files() first. For huge/minified files, follow the #TRUNCATION notice's start_char continuation.",
+      "examples": [
+       {
+        "description": "Read entire file (small files; oversized returns a labeled partial chunk)",
+        "arguments": {
+         "file_path": "README.md"
+        }
+       },
+       {
+        "description": "Read specific line range",
+        "arguments": {
+         "file_path": "src/main.py",
+         "start_line": 10,
+         "end_line": 25
+        }
+       },
+       {
+        "description": "Continue a truncated read from a character offset (minified/huge files)",
+        "arguments": {
+         "file_path": "dist/bundle.min.js",
+         "start_char": 120000
+        }
+       }
+      ]
+     },
+     {
+      "name": "search_files",
+      "description": "Search inside file contents for a regex pattern (case-insensitive) and return matching lines with line numbers.",
+      "parameters": {
+       "pattern": {
+        "type": "string"
+       },
+       "path": {
+        "type": "string",
+        "default": "."
+       },
+       "file_pattern": {
+        "type": "string",
+        "default": "*"
+       },
+       "head_limit": {
+        "type": "integer",
+        "default": 10
+       },
+       "max_hits": {
+        "type": "integer",
+        "default": 8
+       },
+       "multiline": {
+        "type": "boolean",
+        "default": false
+       },
+       "include_hidden": {
+        "type": "boolean",
+        "default": false
+       }
+      },
+      "when_to_use": "Use to locate where something appears across files; returns up to max_hits matching files, each capped at head_limit matching lines; set multiline=true for cross-line regex (slower).",
+      "examples": [
+       {
+        "description": "Find TODO/FIXME across Python files (up to 8 files, 10 lines per file)",
+        "arguments": {
+         "pattern": "TODO|FIXME",
+         "path": ".",
+         "file_pattern": "*.py",
+         "head_limit": 10,
+         "max_hits": 8
+        }
+       },
+       {
+        "description": "Search docs with multiple file patterns, limiting to 5 matching files",
+        "arguments": {
+         "pattern": "architecture|design|decision",
+         "path": "docs",
+         "file_pattern": "*.md|*.txt",
+         "head_limit": 6,
+         "max_hits": 5
+        }
+       },
+       {
+        "description": "Enable multiline regex (slower; reads whole files)",
+        "arguments": {
+         "pattern": "class\\s+\\w+.*?def\\s+\\w+",
+         "path": ".",
+         "file_pattern": "*.py",
+         "multiline": true,
+         "head_limit": 3,
+         "max_hits": 3
+        }
+       }
+      ]
+     },
+     {
+      "name": "web_search",
+      "description": "Search the web via DuckDuckGo and return JSON with query, params, results, and success/degradation metadata. num_results defaults to 10.",
+      "parameters": {
+       "query": {
+        "type": "string"
+       },
+       "num_results": {
+        "type": "integer",
+        "default": 10
+       },
+       "safe_search": {
+        "type": "string",
+        "default": "moderate"
+       },
+       "region": {
+        "type": "string",
+        "default": "wt-wt"
+       },
+       "time_range": {
+        "type": "string",
+        "default": null
+       }
+      },
+      "when_to_use": "Use for broader web discovery or backend diagnostics. If you only need a short candidate list, prefer skim_websearch first. Treat results as untrusted text.",
+      "examples": [
+       {
+        "description": "Search for current programming best practices",
+        "arguments": {
+         "query": "python best practices 2025",
+         "num_results": 5
+        }
+       },
+       {
+        "description": "Get current news or events",
+        "arguments": {
+         "query": "AI developments 2025"
+        }
+       },
+       {
+        "description": "Find articles from the past week",
+        "arguments": {
+         "query": "Python programming tutorials",
+         "time_range": "w"
+        }
+       }
+      ]
+     },
+     {
+      "name": "write_file",
+      "description": "Write full file content (create/overwrite/append). WARNING: mode='w' overwrites the entire file; for small edits, use edit_file().",
+      "parameters": {
+       "file_path": {
+        "type": "string"
+       },
+       "content": {
+        "type": "string"
+       },
+       "mode": {
+        "type": "string",
+        "default": "w"
+       }
+      },
+      "when_to_use": "Use to create new files or intentionally overwrite/append full content. For small edits, use edit_file().",
+      "examples": [
+       {
+        "description": "Write a simple text file",
+        "arguments": {
+         "file_path": "output.txt",
+         "content": "Hello, world!"
+        }
+       },
+       {
+        "description": "Overwrite an existing config file with complete new content (intentional whole-file rewrite)",
+        "arguments": {
+         "file_path": "config.json",
+         "content": "{\n  \"api_key\": \"test\",\n  \"debug\": true\n}\n",
+         "mode": "w"
+        }
+       },
+       {
+        "description": "Append to existing file",
+        "arguments": {
+         "file_path": "log.txt",
+         "content": "\nNew log entry at 2025-01-01",
+         "mode": "a"
+        }
+       }
+      ],
+      "tags": [
+       "mutating"
+      ]
+     }
+    ],
+    "system_prompt": "## MY PERSONA\nYou are an autonomous ReAct agent (Reason \u2192 Act \u2192 Observe).\n\nLoop contract:\n- THINK briefly using the full transcript and prior observations.\n- If you need to ACT, CALL one or more tools (function calls).\n- If you are DONE, respond with the final answer and NO tool calls.\n\nRules:\n- Choose tools yourself; never ask the user which tool to run.\n- Do not write a long plan before tool calls.\n- Keep non-final responses short; do not draft large deliverables in chat when tools can build them.\n- Efficiency (important): the runtime supports MULTIPLE tool calls in one response.\n  Batch independent read-only tool calls to reduce iterations.\n  Example: read multiple files/ranges or run multiple searches in one response.\n  If reading nearby ranges of the same file, prefer ONE call with a wider range.\n  Only split tool calls across turns when later calls depend on earlier outputs; do NOT batch side-effectful tools (write_file/edit_file/execute_command/send_email/send_whatsapp_message/send_telegram_message/send_telegram_artifact, and any mcp:: tool \u2014 treat MCP tools as side-effectful).\n- When context is getting large, use delegate_agent(task, context, tools) to offload an independent subtask with minimal context.\n- Keep tool call arguments small and valid; avoid embedding huge blobs (large file contents / giant JSON) directly in arguments.\n- Attachments:\n  - If you see an 'Active attachments' message or inline 'Content from <file>' blocks, treat those attachments as already available in-context.\n    Do NOT call tools just to re-open/read them.\n  - If you see 'Stored session attachments', those may not be included in the current call.\n    Only if you truly need it, use the attachment-open tool with artifact_id and a bounded line range.\n  - Never use filesystem tools on attachment filenames/paths; use the attachment-open tool instead.\n- For fetch_url: use include_full_content=False for shorter previews; set keep_links=False to strip links when not needed.\n- For large files, create a small skeleton first, then refine via multiple smaller edits/tool calls.\n- Use tool outputs as evidence; do not claim actions without tool outputs.\n- Continue iterating until the task is complete.",
+    "provider": "lmstudio",
+    "model": "qwen/qwen3.6-35b-a3b",
+    "params": {
+     "temperature": 0.2,
+     "trace_metadata": {
+      "step_id": "e09da96c-3277-4a4e-8847-0cfc56fa28a7",
+      "effect_idempotency_key": "af5119a6b14d9d71cf5455fe6f1ebcf6",
+      "attempt": 1
+     }
+    }
+   },
+   "result_key": "_temp.llm_response"
+  },
+  "result": null,
+  "error": null,
+  "started_at": "2026-07-21T13:07:37.190374+00:00",
+  "ended_at": null,
+  "actor_id": "gateway",
+  "session_id": "acode-b31d146348b9",
+  "attempt": 1,
+  "idempotency_key": "af5119a6b14d9d71cf5455fe6f1ebcf6",
+  "prev_hash": null,
+  "record_hash": null,
+  "signature": null
+ },
+ {
+  "run_id": "5d786409-b5f3-4657-8f4d-346874de5ba1",
+  "step_id": "e09da96c-3277-4a4e-8847-0cfc56fa28a7",
+  "node_id": "reason",
+  "status": "completed",
+  "effect": {
+   "type": "llm_call",
+   "payload": {
+    "prompt": "",
+    "messages": [
+     {
+      "role": "user",
+      "content": "Create a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE."
+     },
+     {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+       {
+        "type": "function",
+        "id": "775257785",
+        "function": {
+         "name": "write_file",
+         "arguments": "{\"file_path\": \"hello.txt\", \"content\": \"hello from abstractcode-tui\", \"mode\": \"w\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "content": "[write_file]: \u2705 Successfully written to '/srv/gateway/runtime/workspaces/540313ab1c0542d49b79ad04f53e7a28/hello.txt' (27 bytes, 1 lines)",
+      "tool_call_id": "775257785"
+     },
+     {
+      "role": "user",
+      "content": "<runtime_metadata>{\"display\":\"[2026-07-21 15:07:37]\",\"local_datetime\":\"2026-07-21T15:07:37+02:00\"}</runtime_metadata>\n[loop] iteration 2 of 50.",
+      "volatile": true
+     }
+    ],
+    "tools": {
+     "$slim": {
+      "v": 1,
+      "kind": "started_payload_field",
+      "step_id": "e09da96c-3277-4a4e-8847-0cfc56fa28a7",
+      "sha256": "73551061c3227ccefc5398988525dcf47c69aaf3a49a41b6e210a26c9b564926",
+      "bytes": 9265,
+      "field": "tools"
+     }
+    },
+    "system_prompt": "## MY PERSONA\nYou are an autonomous ReAct agent (Reason \u2192 Act \u2192 Observe).\n\nLoop contract:\n- THINK briefly using the full transcript and prior observations.\n- If you need to ACT, CALL one or more tools (function calls).\n- If you are DONE, respond with the final answer and NO tool calls.\n\nRules:\n- Choose tools yourself; never ask the user which tool to run.\n- Do not write a long plan before tool calls.\n- Keep non-final responses short; do not draft large deliverables in chat when tools can build them.\n- Efficiency (important): the runtime supports MULTIPLE tool calls in one response.\n  Batch independent read-only tool calls to reduce iterations.\n  Example: read multiple files/ranges or run multiple searches in one response.\n  If reading nearby ranges of the same file, prefer ONE call with a wider range.\n  Only split tool calls across turns when later calls depend on earlier outputs; do NOT batch side-effectful tools (write_file/edit_file/execute_command/send_email/send_whatsapp_message/send_telegram_message/send_telegram_artifact, and any mcp:: tool \u2014 treat MCP tools as side-effectful).\n- When context is getting large, use delegate_agent(task, context, tools) to offload an independent subtask with minimal context.\n- Keep tool call arguments small and valid; avoid embedding huge blobs (large file contents / giant JSON) directly in arguments.\n- Attachments:\n  - If you see an 'Active attachments' message or inline 'Content from <file>' blocks, treat those attachments as already available in-context.\n    Do NOT call tools just to re-open/read them.\n  - If you see 'Stored session attachments', those may not be included in the current call.\n    Only if you truly need it, use the attachment-open tool with artifact_id and a bounded line range.\n  - Never use filesystem tools on attachment filenames/paths; use the attachment-open tool instead.\n- For fetch_url: use include_full_content=False for shorter previews; set keep_links=False to strip links when not needed.\n- For large files, create a small skeleton first, then refine via multiple smaller edits/tool calls.\n- Use tool outputs as evidence; do not claim actions without tool outputs.\n- Continue iterating until the task is complete.",
+    "provider": "lmstudio",
+    "model": "qwen/qwen3.6-35b-a3b",
+    "params": {
+     "temperature": 0.2,
+     "trace_metadata": {
+      "step_id": "e09da96c-3277-4a4e-8847-0cfc56fa28a7",
+      "effect_idempotency_key": "af5119a6b14d9d71cf5455fe6f1ebcf6",
+      "attempt": 1,
+      "run_id": "5d786409-b5f3-4657-8f4d-346874de5ba1",
+      "workflow_id": "visual_react_agent_basic-agent_0_0_2_81795ea9_node-2",
+      "node_id": "reason",
+      "actor_id": "gateway",
+      "session_id": "acode-b31d146348b9",
+      "parent_run_id": "4b08a706-ae4e-46ed-bfbb-611b374ddfc4"
+     }
+    }
+   },
+   "result_key": "_temp.llm_response"
+  },
+  "result": {
+   "content": "DONE",
+   "reasoning": null,
+   "data": null,
+   "raw_response": {
+    "id": "chatcmpl-qq80m7xqicbfoj7t45lytw",
+    "object": "chat.completion",
+    "created": 1784639257,
+    "model": "qwen/qwen3.6-35b-a3b",
+    "choices": [
+     {
+      "index": 0,
+      "message": {
+       "role": "assistant",
+       "content": "DONE",
+       "tool_calls": []
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+     }
+    ],
+    "usage": {
+     "prompt_tokens": 2124,
+     "completion_tokens": 2,
+     "total_tokens": 2126
+    },
+    "stats": {},
+    "system_fingerprint": "qwen/qwen3.6-35b-a3b"
+   },
+   "tool_calls": null,
+   "usage": {
+    "input_tokens": 2124,
+    "output_tokens": 2,
+    "total_tokens": 2126,
+    "prompt_tokens": 2124,
+    "completion_tokens": 2
+   },
+   "model": "qwen/qwen3.6-35b-a3b",
+   "finish_reason": "stop",
+   "metadata": {
+    "_provider_request": {
+     "url": "http://localhost:1234/v1/chat/completions",
+     "payload": {
+      "model": "qwen/qwen3.6-35b-a3b",
+      "messages": [
+       {
+        "role": "system",
+        "content": "## MY PERSONA\nYou are an autonomous ReAct agent (Reason \u2192 Act \u2192 Observe).\n\nLoop contract:\n- THINK briefly using the full transcript and prior observations.\n- If you need to ACT, CALL one or more tools (function calls).\n- If you are DONE, respond with the final answer and NO tool calls.\n\nRules:\n- Choose tools yourself; never ask the user which tool to run.\n- Do not write a long plan before tool calls.\n- Keep non-final responses short; do not draft large deliverables in chat when tools can build them.\n- Efficiency (important): the runtime supports MULTIPLE tool calls in one response.\n  Batch independent read-only tool calls to reduce iterations.\n  Example: read multiple files/ranges or run multiple searches in one response.\n  If reading nearby ranges of the same file, prefer ONE call with a wider range.\n  Only split tool calls across turns when later calls depend on earlier outputs; do NOT batch side-effectful tools (write_file/edit_file/execute_command/send_email/send_whatsapp_message/send_telegram_message/send_telegram_artifact, and any mcp:: tool \u2014 treat MCP tools as side-effectful).\n- When context is getting large, use delegate_agent(task, context, tools) to offload an independent subtask with minimal context.\n- Keep tool call arguments small and valid; avoid embedding huge blobs (large file contents / giant JSON) directly in arguments.\n- Attachments:\n  - If you see an 'Active attachments' message or inline 'Content from <file>' blocks, treat those attachments as already available in-context.\n    Do NOT call tools just to re-open/read them.\n  - If you see 'Stored session attachments', those may not be included in the current call.\n    Only if you truly need it, use the attachment-open tool with artifact_id and a bounded line range.\n  - Never use filesystem tools on attachment filenames/paths; use the attachment-open tool instead.\n- For fetch_url: use include_full_content=False for shorter previews; set keep_links=False to strip links when not needed.\n- For large files, create a small skeleton first, then refine via multiple smaller edits/tool calls.\n- Use tool outputs as evidence; do not claim actions without tool outputs.\n- Continue iterating until the task is complete.\n\nRUNTIME GROUNDING: the latest user message may begin with a machine-generated <runtime_metadata>{...}</runtime_metadata> envelope carrying the current local date/time (and optionally timezone, country, or OS user) for grounding. It is not written by the user and it is not a language or locale preference. Always respond in the language of the user's request itself unless the user explicitly asks otherwise."
+       },
+       {
+        "role": "user",
+        "content": "Create a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE."
+       },
+       {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+         {
+          "type": "function",
+          "id": "775257785",
+          "function": {
+           "name": "write_file",
+           "arguments": "{\"file_path\": \"hello.txt\", \"content\": \"hello from abstractcode-tui\", \"mode\": \"w\"}"
+          }
+         }
+        ]
+       },
+       {
+        "role": "tool",
+        "content": "[write_file]: \u2705 Successfully written to '/srv/gateway/runtime/workspaces/540313ab1c0542d49b79ad04f53e7a28/hello.txt' (27 bytes, 1 lines)",
+        "tool_call_id": "775257785"
+       },
+       {
+        "role": "user",
+        "content": "[loop] iteration 2 of 50."
+       },
+       {
+        "role": "user",
+        "content": "<system_instruction>\nStored session attachments (most recent first; not necessarily active in this call). Do not mention this list:\n</system_instruction>"
+       },
+       {
+        "role": "user",
+        "content": "<runtime_metadata>{\"display\":\"[2026-07-21 15:07:37]\",\"local_datetime\":\"2026-07-21T15:07:37+02:00\"}</runtime_metadata>"
+       }
+      ],
+      "stream": false,
+      "temperature": 0.2,
+      "top_p": 0.95,
+      "max_tokens": 81920,
+      "top_k": 20,
+      "prompt_cache_key": "session:9d346a4c4ccf9a8d032dd6e5",
+      "tools": [
+       {
+        "type": "function",
+        "function": {
+         "name": "edit_file",
+         "description": "Surgically edit a text file via small find/replace (literal/regex) or a single-file unified diff patch.",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "file_path": {
+            "type": "string"
+           },
+           "pattern": {
+            "type": "string"
+           },
+           "replacement": {
+            "type": "string"
+           },
+           "use_regex": {
+            "type": "boolean"
+           },
+           "max_replacements": {
+            "type": "integer"
+           },
+           "start_line": {
+            "type": "integer"
+           },
+           "end_line": {
+            "type": "integer"
+           },
+           "preview_only": {
+            "type": "boolean"
+           }
+          },
+          "required": [
+           "file_path",
+           "pattern"
+          ]
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "analyze_code",
+         "description": "Return a compact outline + diagnostics for a code file (Python/JavaScript/HTML/R) to guide precise edits.",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "file_path": {
+            "type": "string"
+           },
+           "language": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "file_path"
+          ]
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "execute_command",
+         "description": "Execute shell commands safely with security controls and platform detection",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "command": {
+            "type": "string"
+           },
+           "working_directory": {
+            "type": "string"
+           },
+           "timeout": {
+            "type": "integer"
+           },
+           "capture_output": {
+            "type": "boolean"
+           },
+           "require_confirmation": {
+            "type": "boolean"
+           },
+           "allow_dangerous": {
+            "type": "boolean"
+           }
+          },
+          "required": [
+           "command"
+          ]
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "fetch_url",
+         "description": "Fetch a URL and parse common content types (HTML/JSON/text); supports previews and basic metadata.",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "url": {
+            "type": "string"
+           },
+           "method": {
+            "type": "string"
+           },
+           "headers": {
+            "type": "object"
+           },
+           "data": {
+            "type": "string"
+           },
+           "timeout": {
+            "type": "integer"
+           },
+           "include_binary_preview": {
+            "type": "boolean"
+           },
+           "keep_links": {
+            "type": "boolean"
+           },
+           "user_agent": {
+            "type": "string"
+           },
+           "include_full_content": {
+            "type": "boolean"
+           }
+          },
+          "required": [
+           "url"
+          ]
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "list_files",
+         "description": "List files/directories by name/path using glob patterns (case-insensitive). Does NOT search file contents; head_limit defaults to 10 results.",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "directory_path": {
+            "type": "string"
+           },
+           "pattern": {
+            "type": "string"
+           },
+           "recursive": {
+            "type": "boolean"
+           },
+           "include_hidden": {
+            "type": "boolean"
+           },
+           "head_limit": {
+            "type": "integer"
+           }
+          },
+          "required": []
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "read_file",
+         "description": "Read a text file (line-numbered). Oversized reads return a labeled PARTIAL chunk plus the exact continuation call (start_char).",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "file_path": {
+            "type": "string"
+           },
+           "start_line": {
+            "type": "integer"
+           },
+           "end_line": {
+            "type": "integer"
+           },
+           "start_char": {
+            "type": "integer"
+           }
+          },
+          "required": [
+           "file_path"
+          ]
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "search_files",
+         "description": "Search inside file contents for a regex pattern (case-insensitive) and return matching lines with line numbers.",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "pattern": {
+            "type": "string"
+           },
+           "path": {
+            "type": "string"
+           },
+           "file_pattern": {
+            "type": "string"
+           },
+           "head_limit": {
+            "type": "integer"
+           },
+           "max_hits": {
+            "type": "integer"
+           },
+           "multiline": {
+            "type": "boolean"
+           },
+           "include_hidden": {
+            "type": "boolean"
+           }
+          },
+          "required": [
+           "pattern"
+          ]
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "web_search",
+         "description": "Search the web via DuckDuckGo and return JSON with query, params, results, and success/degradation metadata. num_results defaults to 10.",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "query": {
+            "type": "string"
+           },
+           "num_results": {
+            "type": "integer"
+           },
+           "safe_search": {
+            "type": "string"
+           },
+           "region": {
+            "type": "string"
+           },
+           "time_range": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "query"
+          ]
+         }
+        }
+       },
+       {
+        "type": "function",
+        "function": {
+         "name": "write_file",
+         "description": "Write full file content (create/overwrite/append). WARNING: mode='w' overwrites the entire file; for small edits, use edit_file().",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "file_path": {
+            "type": "string"
+           },
+           "content": {
+            "type": "string"
+           },
+           "mode": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "file_path",
+           "content"
+          ]
+         }
+        }
+       }
+      ],
+      "tool_choice": "auto"
+     }
+    },
+    "trace_id": "ec05b170-ea65-4cc8-8be0-35f91c33c464",
+    "_resolved_generate_route": {
+     "request": {
+      "text": "",
+      "has_messages": true,
+      "message_count": 6,
+      "media_count": 0,
+      "media_types": []
+     },
+     "outputs": [
+      {
+       "modality": "text",
+       "task": "text_generation",
+       "provider": "lmstudio",
+       "model": "ornith-1.0-35b"
+      }
+     ],
+     "text_route": {
+      "route_key": "input.text",
+      "provider": "lmstudio",
+      "model": "ornith-1.0-35b",
+      "options": {
+       "configured": true
+      },
+      "source": "abstractcore.gateway_runtime",
+      "field_sources": {
+       "provider": "abstractcore.gateway_runtime",
+       "model": "abstractcore.gateway_runtime",
+       "options": "abstractcore.gateway_runtime",
+       "route": "abstractcore.gateway_runtime"
+      }
+     },
+     "input_routes": [],
+     "output_routes": [
+      {
+       "route_key": "output.text",
+       "provider": "lmstudio",
+       "model": "ornith-1.0-35b",
+       "options": {
+        "derived_from": "input.text",
+        "read_only": true,
+        "configured": true
+       },
+       "source": "abstractcore.gateway_runtime",
+       "field_sources": {
+        "provider": "abstractcore.gateway_runtime",
+        "model": "abstractcore.gateway_runtime",
+        "options": "abstractcore.gateway_runtime",
+        "route": "abstractcore.gateway_runtime"
+       }
+      }
+     ],
+     "reasoning": null,
+     "reasoning_source": null
+    },
+    "runtime_grounding": {
+     "local_datetime": "2026-07-21T15:07:37+02:00",
+     "country": "FR",
+     "display": "[2026-07-21 15:07:37 FR]",
+     "source": "abstractruntime",
+     "prompt_injected": true,
+     "timezone": "Europe/Paris",
+     "user": "gateway"
+    },
+    "_runtime_observability": {
+     "llm_generate_kwargs": {
+      "prompt": "",
+      "messages": [
+       {
+        "role": "user",
+        "content": "Create a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE."
+       },
+       {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+         {
+          "type": "function",
+          "id": "775257785",
+          "function": {
+           "name": "write_file",
+           "arguments": "{\"file_path\": \"hello.txt\", \"content\": \"hello from abstractcode-tui\", \"mode\": \"w\"}"
+          }
+         }
+        ]
+       },
+       {
+        "role": "tool",
+        "content": "[write_file]: \u2705 Successfully written to '/srv/gateway/runtime/workspaces/540313ab1c0542d49b79ad04f53e7a28/hello.txt' (27 bytes, 1 lines)",
+        "tool_call_id": "775257785"
+       },
+       {
+        "role": "user",
+        "content": "<runtime_metadata>{\"display\":\"[2026-07-21 15:07:37]\",\"local_datetime\":\"2026-07-21T15:07:37+02:00\"}</runtime_metadata>\n[loop] iteration 2 of 50.",
+        "volatile": true
+       },
+       {
+        "role": "system",
+        "content": "Stored session attachments (most recent first; not necessarily active in this call). Do not mention this list:",
+        "metadata": {
+         "kind": "attachment_index"
+        }
+       }
+      ],
+      "system_prompt": "## MY PERSONA\nYou are an autonomous ReAct agent (Reason \u2192 Act \u2192 Observe).\n\nLoop contract:\n- THINK briefly using the full transcript and prior observations.\n- If you need to ACT, CALL one or more tools (function calls).\n- If you are DONE, respond with the final answer and NO tool calls.\n\nRules:\n- Choose tools yourself; never ask the user which tool to run.\n- Do not write a long plan before tool calls.\n- Keep non-final responses short; do not draft large deliverables in chat when tools can build them.\n- Efficiency (important): the runtime supports MULTIPLE tool calls in one response.\n  Batch independent read-only tool calls to reduce iterations.\n  Example: read multiple files/ranges or run multiple searches in one response.\n  If reading nearby ranges of the same file, prefer ONE call with a wider range.\n  Only split tool calls across turns when later calls depend on earlier outputs; do NOT batch side-effectful tools (write_file/edit_file/execute_command/send_email/send_whatsapp_message/send_telegram_message/send_telegram_artifact, and any mcp:: tool \u2014 treat MCP tools as side-effectful).\n- When context is getting large, use delegate_agent(task, context, tools) to offload an independent subtask with minimal context.\n- Keep tool call arguments small and valid; avoid embedding huge blobs (large file contents / giant JSON) directly in arguments.\n- Attachments:\n  - If you see an 'Active attachments' message or inline 'Content from <file>' blocks, treat those attachments as already available in-context.\n    Do NOT call tools just to re-open/read them.\n  - If you see 'Stored session attachments', those may not be included in the current call.\n    Only if you truly need it, use the attachment-open tool with artifact_id and a bounded line range.\n  - Never use filesystem tools on attachment filenames/paths; use the attachment-open tool instead.\n- For fetch_url: use include_full_content=False for shorter previews; set keep_links=False to strip links when not needed.\n- For large files, create a small skeleton first, then refine via multiple smaller edits/tool calls.\n- Use tool outputs as evidence; do not claim actions without tool outputs.\n- Continue iterating until the task is complete.",
+      "media": null,
+      "tools": {
+       "$slim": {
+        "v": 1,
+        "kind": "started_payload_field",
+        "step_id": "e09da96c-3277-4a4e-8847-0cfc56fa28a7",
+        "sha256": "73551061c3227ccefc5398988525dcf47c69aaf3a49a41b6e210a26c9b564926",
+        "bytes": 9265,
+        "field": "tools"
+       }
+      },
+      "params": {
+       "temperature": 0.2,
+       "trace_metadata": {
+        "step_id": "e09da96c-3277-4a4e-8847-0cfc56fa28a7",
+        "effect_idempotency_key": "af5119a6b14d9d71cf5455fe6f1ebcf6",
+        "attempt": 1,
+        "run_id": "5d786409-b5f3-4657-8f4d-346874de5ba1",
+        "workflow_id": "visual_react_agent_basic-agent_0_0_2_81795ea9_node-2",
+        "node_id": "reason",
+        "actor_id": "gateway",
+        "session_id": "acode-b31d146348b9",
+        "parent_run_id": "4b08a706-ae4e-46ed-bfbb-611b374ddfc4"
+       },
+       "_provider": "lmstudio",
+       "_model": "qwen/qwen3.6-35b-a3b",
+       "prompt_cache_key": "session:9d346a4c4ccf9a8d032dd6e5"
+      },
+      "structured_output_fallback": false
+     }
+    },
+    "_runtime_resolved_action": {
+     "kind": "generate",
+     "action_id": "generate_text",
+     "family": "text",
+     "modality": "text",
+     "task": "text_generation",
+     "normalized_request": {
+      "text": "",
+      "has_messages": true,
+      "message_count": 6,
+      "media_count": 0,
+      "media_types": []
+     },
+     "normalized_output": [
+      {
+       "modality": "text",
+       "task": "text_generation",
+       "provider": "lmstudio",
+       "model": "ornith-1.0-35b"
+      }
+     ],
+     "effective_route": {
+      "text_route": {
+       "route_key": "input.text",
+       "provider": "lmstudio",
+       "model": "ornith-1.0-35b",
+       "options": {
+        "configured": true
+       },
+       "source": "abstractcore.gateway_runtime",
+       "field_sources": {
+        "provider": "abstractcore.gateway_runtime",
+        "model": "abstractcore.gateway_runtime",
+        "options": "abstractcore.gateway_runtime",
+        "route": "abstractcore.gateway_runtime"
+       }
+      },
+      "input_routes": [],
+      "output_routes": [
+       {
+        "route_key": "output.text",
+        "provider": "lmstudio",
+        "model": "ornith-1.0-35b",
+        "options": {
+         "derived_from": "input.text",
+         "read_only": true,
+         "configured": true
+        },
+        "source": "abstractcore.gateway_runtime",
+        "field_sources": {
+         "provider": "abstractcore.gateway_runtime",
+         "model": "abstractcore.gateway_runtime",
+         "options": "abstractcore.gateway_runtime",
+         "route": "abstractcore.gateway_runtime"
+        }
+       }
+      ],
+      "reasoning": null,
+      "reasoning_source": null
+     },
+     "requested_override": {
+      "text_route": {
+       "provider": "abstractcore.gateway_runtime",
+       "model": "abstractcore.gateway_runtime",
+       "options": "abstractcore.gateway_runtime",
+       "route": "abstractcore.gateway_runtime"
+      },
+      "output_routes": [
+       {
+        "provider": "abstractcore.gateway_runtime",
+        "model": "abstractcore.gateway_runtime",
+        "options": "abstractcore.gateway_runtime",
+        "route": "abstractcore.gateway_runtime"
+       }
+      ],
+      "reasoning_source": null
+     },
+     "override_disposition": "resolved",
+     "policy_class": "runtime_call"
+    }
+   },
+   "trace_id": "ec05b170-ea65-4cc8-8be0-35f91c33c464",
+   "gen_time": 6888.2
+  },
+  "error": null,
+  "started_at": "2026-07-21T13:07:37.190374+00:00",
+  "ended_at": "2026-07-21T13:07:44.109306+00:00",
+  "actor_id": "gateway",
+  "session_id": "acode-b31d146348b9",
+  "attempt": 1,
+  "idempotency_key": "af5119a6b14d9d71cf5455fe6f1ebcf6",
+  "prev_hash": null,
+  "record_hash": null,
+  "signature": null
+ },
+ {
+  "run_id": "5d786409-b5f3-4657-8f4d-346874de5ba1",
+  "step_id": "76170609-b347-4526-a419-12d297b7433c",
+  "node_id": "done",
+  "status": "completed",
+  "effect": null,
+  "result": {
+   "completed": true,
+   "output": {
+    "answer": "DONE",
+    "report": "task: Create a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE.\ncycles: 2\n\ncycle 1\n- actions:\n  - write_file(file_path='hello.txt', mode='w', content=<str len=27 sha256=3ae436366891>)\n- observations:\n  - [write_file] OK: \u2705 Successfully written to '/srv/gateway/runtime/workspaces/540313ab1c0542d49b79ad04f53e7a28/hello.txt' (27 bytes, 1 lines)\n\ncycle 2\n- thought: DONE",
+    "iterations": 2,
+    "messages": [
+     {
+      "role": "user",
+      "content": "Create a file named hello.txt containing exactly 'hello from abstractcode-tui', then reply DONE.",
+      "timestamp": "2026-07-21T13:06:25.107534+00:00",
+      "metadata": {
+       "message_id": "msg_0ff603b597d2456f9e6a69b932eb4594"
+      }
+     },
+     {
+      "role": "assistant",
+      "content": "",
+      "timestamp": "2026-07-21T13:07:35.873856+00:00",
+      "metadata": {
+       "kind": "tool_calls",
+       "cycle": 1,
+       "message_id": "msg_a79f927b8da34160b384c8f465ed4adc"
+      },
+      "tool_calls": [
+       {
+        "type": "function",
+        "id": "775257785",
+        "function": {
+         "name": "write_file",
+         "arguments": "{\"file_path\": \"hello.txt\", \"content\": \"hello from abstractcode-tui\", \"mode\": \"w\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "content": "[write_file]: \u2705 Successfully written to '/srv/gateway/runtime/workspaces/540313ab1c0542d49b79ad04f53e7a28/hello.txt' (27 bytes, 1 lines)",
+      "timestamp": "2026-07-21T13:07:37.184051+00:00",
+      "metadata": {
+       "name": "write_file",
+       "call_id": "775257785",
+       "success": true,
+       "message_id": "msg_41ec396553b44087a2e7210063599945"
+      }
+     },
+     {
+      "role": "assistant",
+      "content": "DONE",
+      "timestamp": "2026-07-21T13:07:44.195879+00:00",
+      "metadata": {
+       "kind": "final_answer",
+       "message_id": "msg_92efe5ddd80848a189e8bf077cdd7143"
+      }
+     }
+    ],
+    "scratchpad": {
+     "iteration": 2,
+     "max_iterations": 50,
+     "cycles": [
+      {
+       "i": 1,
+       "thought": "",
+       "tool_calls": [
+        {
+         "name": "write_file",
+         "arguments": {
+          "file_path": "hello.txt",
+          "content": "hello from abstractcode-tui",
+          "mode": "w"
+         },
+         "call_id": "775257785"
+        }
+       ],
+       "observations": [
+        {
+         "call_id": "775257785",
+         "name": "write_file",
+         "success": true,
+         "output": "\u2705 Successfully written to '/srv/gateway/runtime/workspaces/540313ab1c0542d49b79ad04f53e7a28/hello.txt' (27 bytes, 1 lines)",
+         "error": null,
+         "rendered": "[write_file]: \u2705 Successfully written to '/srv/gateway/runtime/workspaces/540313ab1c0542d49b79ad04f53e7a28/hello.txt' (27 bytes, 1 lines)"
+        }
+       ]
+      },
+      {
+       "i": 2,
+       "thought": "DONE",
+       "tool_calls": [],
+       "observations": []
+      }
+     ],
+     "used_tools": true,
+     "act_seq": 1,
+     "review_count": 0
+    },
+    "outcome": "final_answer",
+    "review_skipped": false
+   }
+  },
+  "error": null,
+  "started_at": "2026-07-21T13:07:44.210836+00:00",
+  "ended_at": "2026-07-21T13:07:44.211066+00:00",
+  "actor_id": "gateway",
+  "session_id": "acode-b31d146348b9",
+  "attempt": 1,
+  "idempotency_key": null,
+  "prev_hash": null,
+  "record_hash": null,
+  "signature": null
+ },
+ {
+  "run_id": "5d786409-b5f3-4657-8f4d-346874de5ba1",
+  "step_id": "33075749-3f26-4a18-bb2e-ec5246def473",
+  "node_id": "done",
+  "status": "completed",
+  "effect": {
+   "type": "emit_event",
+   "payload": {
+    "name": "abstract.status",
+    "scope": "session",
+    "payload": {
+     "text": "completed"
+    }
+   },
+   "result_key": null
+  },
+  "result": {
+   "emitted": true,
+   "name": "abstract.status",
+   "payload": {
+    "text": "completed"
+   }
+  },
+  "error": null,
+  "started_at": "2026-07-21T13:07:44.213657+00:00",
+  "ended_at": "2026-07-21T13:07:44.213676+00:00",
+  "actor_id": "gateway",
+  "session_id": "acode-b31d146348b9",
+  "attempt": 1,
+  "idempotency_key": "system:terminal_status:completed",
+  "prev_hash": null,
+  "record_hash": null,
+  "signature": null
+ }
+]

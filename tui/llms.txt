@@ -1,0 +1,92 @@
+# abstractcode
+
+> abstractcode is a reactive terminal client for the AbstractGateway
+> control plane, built on the AbstractTUI rendering engine. The coding agent
+> runs durably on the gateway; this binary starts runs, streams their
+> ledgers live (SSE with a polling fallback), renders reasoning cycles,
+> tool cards that update in place, markdown answers and generated images,
+> resolves tool-approval and ask-user waits through focus-trapped modals
+> (with a persisted read/write/all auto-approval tier plus per-tool pins),
+> steers the agent mid-run, queues follow-up prompts, attaches files to
+> prompts (`/attach`, a file browser, or drag & drop onto the terminal —
+> uploaded at send as `context.attachments`), and keeps a durable
+> session whose history the gateway replays server-side. It also talks
+> with gateway-hosted summoned entities: `@name` opens a durable visit
+> with its own transcript and header chip (turns are non-interruptible,
+> rendered honestly). One crate, three dependencies (abstracttui, ureq,
+> serde_json). MIT licensed.
+
+## Core docs
+
+- [README](README.md): The pitch, a rendered-screen sketch, install,
+  quickstart, the workspace-policy note, and how this client relates to the
+  browser client.
+- [Getting started](docs/getting-started.md): Install to first run —
+  `login`, `doctor`, the first approval, steering, sessions, workflows,
+  workspaces, themes, working with entities, approval tiers, and headless
+  one-shots.
+- [Architecture](docs/architecture.md): The thin-client design — threading
+  contract (UI thread owns signals; a worker owns HTTP; WakeHandle posts),
+  the ledger fold, SSE/polling transports, wait resolution, module map,
+  testing model, honest limits.
+- [Reference](docs/api.md): Every CLI option and env var, slash commands
+  (including `@name`, `/entities`, `/task`, `/end`, `/queue`, `/goal`,
+  `/permissions`, `/workspace`, `/attach`, `/export`, `/context`, `/gpu`,
+  `/resources`, `/redraw`), key bindings (incl. `Ctrl+L` repaint, `Ctrl+J` newline,
+  `Ctrl+O` drop-undo, `Alt+E` conversation focus, the composer's editor
+  chords, `?` reference), the type-to-focus rule (typing, pasting or
+  dropping a file returns focus to the composer and keeps the input),
+  per-modal keys, transcript glyph
+  vocabulary, attachments custody rules, exec exit codes, and prompt-cache
+  posture (`exec --no-prompt-cache`, its scope, and how to verify the lane).
+- [FAQ](docs/faq.md): Durability, workspace policy, token stats, steering
+  semantics, queue pause semantics, approval tiers, parallel sessions,
+  prompt-cache A/B.
+- [Troubleshooting](docs/troubleshooting.md): Symptom → cause → fix for
+  connection, auth, catalog, provider, workspace, and rendering issues.
+- [Orchestration cards](docs/orchestration-cards.md): One card per coding
+  workflow accepted by `--workflow` — anatomy, how each decides it is done,
+  what it remembers, measured profile, and when to choose it.
+- [Documentation index](docs/README.md): One-line map of every page.
+
+## Project
+
+- [Changelog](CHANGELOG.md): Release history (0.1.0 was the first release —
+  and the first application built on AbstractTUI; 0.2.0 is the engine-0.2.0
+  adoption wave: Feed transcript, multiline composer + completion, in-app
+  selection/copy, engine follow-tail and intervals; 0.3.0 is the
+  control-and-collaboration wave: prompt queue, /goal client half,
+  @entity conversations, tiered tool approvals, /workspace scope; 0.4.0
+  is the conclusion + presence wave: offloaded/failed-answer conclusion
+  fixes, header facts + instrument footer, /context declared window,
+  /gpu meter, Ctrl+L//redraw screen recovery — engine-owned full redraw
+  + redraw-on-focus-gained since abstracttui 0.2.6; 0.5.0 is the
+  attachments + host-resources wave: /attach with preview and drag &
+  drop, the quit gate, /conclude, bloc history replay + /history, the
+  reasoning dial, a launch animation, and /resources — gateway-host
+  memory, resident models + session caches with unload/lock/estimate
+  actions and a footer mem meter).
+- [Contributing](CONTRIBUTING.md): Build/test gates, the layering rules
+  (signal ownership, pure protocol layer, replay-safe fold), which test to
+  write for which change.
+- [Security policy](SECURITY.md): Private reporting; credentials at rest
+  (0600 login store) and in transit; untrusted-render-input scope.
+- [Acknowledgements](ACKNOWLEDGEMENTS.md): The three dependencies and the
+  sibling projects (AbstractGateway, the Python abstractcode).
+- [License](LICENSE): MIT.
+
+## Code entry points
+
+- [src/lib.rs](src/lib.rs): Crate root with the layer map and `run_cli`.
+- [src/protocol.rs](src/protocol.rs): Pure extraction over gateway ledger
+  records — the protocol contract in one file.
+- [src/transcript.rs](src/transcript.rs): The fold from records to
+  transcript items, stats, and pending waits.
+- [src/runner.rs](src/runner.rs): The worker thread owning every HTTP call
+  and per-run stream thread.
+- [src/ui/](src/ui/mod.rs): AbstractTUI views — chrome, transcript pane,
+  modals.
+- [tests/headless_ui.rs](tests/headless_ui.rs): The real interface driven
+  through AbstractTUI's capture harness (the pattern for UI tests).
+- [scripts/pty_live_smoke.py](scripts/pty_live_smoke.py): Live end-to-end
+  proof against a running gateway.
