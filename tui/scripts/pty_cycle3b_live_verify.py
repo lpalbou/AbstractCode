@@ -250,8 +250,8 @@ def file_proof(name, since_ts):
     patterns = [
         os.path.join(WORKSPACE, name),
         os.path.join(WORKSPACE, "**", name),
-        "/Users/albou/tmp/abstractframework/runtime/workspaces/*/" + name,
-        "/Users/albou/tmp/abstractframework/runtime/**/workspaces/*/" + name,
+        "/workspace/runtime/workspaces/*/" + name,
+        "/workspace/runtime/**/workspaces/*/" + name,
     ]
     for pat in patterns:
         for path in glob.glob(pat, recursive=True):

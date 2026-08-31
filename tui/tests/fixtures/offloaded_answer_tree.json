@@ -343,7 +343,7 @@
       {
        "name": "list_files",
        "arguments": {
-        "directory_path": "/Users/albou/Desktop",
+        "directory_path": "/home/user/Desktop",
         "pattern": "game.js",
         "recursive": true,
         "include_hidden": false,
@@ -354,7 +354,7 @@
       {
        "name": "list_files",
        "arguments": {
-        "directory_path": "/Users/albou/Desktop",
+        "directory_path": "/home/user/Desktop",
         "pattern": "index.html",
         "recursive": true,
         "include_hidden": false,
@@ -365,7 +365,7 @@
       {
        "name": "list_files",
        "arguments": {
-        "directory_path": "/Users/albou/Desktop",
+        "directory_path": "/home/user/Desktop",
         "pattern": "bug-no-ship.png",
         "recursive": false,
         "include_hidden": false,
@@ -410,7 +410,7 @@
        {
         "name": "list_files",
         "arguments": {
-         "directory_path": "/Users/albou/Desktop",
+         "directory_path": "/home/user/Desktop",
          "pattern": "game.js",
          "recursive": true,
          "include_hidden": false,
@@ -422,7 +422,7 @@
        {
         "name": "list_files",
         "arguments": {
-         "directory_path": "/Users/albou/Desktop",
+         "directory_path": "/home/user/Desktop",
          "pattern": "index.html",
          "recursive": true,
          "include_hidden": false,
@@ -434,7 +434,7 @@
        {
         "name": "list_files",
         "arguments": {
-         "directory_path": "/Users/albou/Desktop",
+         "directory_path": "/home/user/Desktop",
          "pattern": "bug-no-ship.png",
          "recursive": false,
          "include_hidden": false,
@@ -477,7 +477,7 @@
        {
         "name": "list_files",
         "arguments": {
-         "directory_path": "/Users/albou/Desktop",
+         "directory_path": "/home/user/Desktop",
          "pattern": "game.js",
          "recursive": true,
          "include_hidden": false,
@@ -489,7 +489,7 @@
        {
         "name": "list_files",
         "arguments": {
-         "directory_path": "/Users/albou/Desktop",
+         "directory_path": "/home/user/Desktop",
          "pattern": "index.html",
          "recursive": true,
          "include_hidden": false,
@@ -501,7 +501,7 @@
        {
         "name": "list_files",
         "arguments": {
-         "directory_path": "/Users/albou/Desktop",
+         "directory_path": "/home/user/Desktop",
          "pattern": "bug-no-ship.png",
          "recursive": false,
          "include_hidden": false,
@@ -529,7 +529,7 @@
        "name": "list_files",
        "success": false,
        "output": null,
-       "error": "Path escapes workspace_root: '/Users/albou/Desktop' \u2014 if you meant a file inside the workspace, retry with a path relative to '/Users/albou/tmp/abstractframewor\u2026[fixture-trim]"
+       "error": "Path escapes workspace_root: '/home/user/Desktop' \u2014 if you meant a file inside the workspace, retry with a path relative to '/home/user/tmp/abstractframewor\u2026[fixture-trim]"
       },
       {
        "call_id": "call_faS2knDi0fzpsuk9Vwsg6Hrj",
@@ -537,7 +537,7 @@
        "name": "list_files",
        "success": false,
        "output": null,
-       "error": "Path escapes workspace_root: '/Users/albou/Desktop' \u2014 if you meant a file inside the workspace, retry with a path relative to '/Users/albou/tmp/abstractframewor\u2026[fixture-trim]"
+       "error": "Path escapes workspace_root: '/home/user/Desktop' \u2014 if you meant a file inside the workspace, retry with a path relative to '/home/user/tmp/abstractframewor\u2026[fixture-trim]"
       },
       {
        "call_id": "call_cTYXJYLllSzflszbasjDsniy",
@@ -545,7 +545,7 @@
        "name": "list_files",
        "success": false,
        "output": null,
-       "error": "Path escapes workspace_root: '/Users/albou/Desktop' \u2014 if you meant a file inside the workspace, retry with a path relative to '/Users/albou/tmp/abstractframewor\u2026[fixture-trim]"
+       "error": "Path escapes workspace_root: '/home/user/Desktop' \u2014 if you meant a file inside the workspace, retry with a path relative to '/home/user/tmp/abstractframewor\u2026[fixture-trim]"
       }
      ]
     },

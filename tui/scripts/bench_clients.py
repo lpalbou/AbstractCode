@@ -57,7 +57,7 @@ REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "untracked" / os.environ.get("CB_OUT", "client-bench")
 TUI_BIN = REPO / "target" / "release" / "abstractcode"
 RUNTIME_STORE = Path(os.environ.get(
-    "CB_RUNTIME_STORE", "/Users/albou/tmp/abstractframework/runtime"))
+    "CB_RUNTIME_STORE", "/workspace/runtime"))
 # Arms that execute through the gateway and therefore leave a durable
 # run_<id>.json whose `_runtime` block is the ONLY trustworthy route evidence.
 GATEWAY_ARMS = {"tui-basic", "tui-coder", "tui-multi",
@@ -704,7 +704,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _abort)
 
     ws_root = Path(os.environ.get("BENCH_WS_BASE",
-        "/Users/albou/tmp/abstractframework/.bench-ws")) / (
+        "/workspace/.bench-ws")) / (
         # IN-SCOPE by necessity: the gateway now REFUSES an out-of-scope
         # workspace_root with a 400 instead of silently clamping it
         # (backlog 0232 §1, the fail-loud fix). /private/tmp is outside the

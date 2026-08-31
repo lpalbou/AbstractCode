@@ -65,10 +65,10 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Lint
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: Package
         run: cargo package --manifest-path tui/Cargo.toml
@@ -170,7 +170,7 @@ jobs:
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }} --manifest-path tui/Cargo.toml
+        run: cargo build --release --locked --target ${{ matrix.target }} --manifest-path tui/Cargo.toml
 
       - name: Package (unix)
         if: runner.os != 'Windows'

@@ -45,7 +45,7 @@ REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "untracked" / os.environ.get("WB_OUT", "workflow-bench")
 TUI_BIN = REPO / "target" / "release" / "abstractcode"
 RUNTIME_STORE = Path(os.environ.get(
-    "WB_RUNTIME_STORE", "/Users/albou/tmp/abstractframework/runtime"))
+    "WB_RUNTIME_STORE", "/workspace/runtime"))
 
 MODEL = "gpt-5.4"
 REASONING = "medium"
@@ -406,7 +406,7 @@ def main() -> int:
     # the fail-loud fix). /private/tmp is outside the operator roots, so builds
     # live in a dedicated game-free dir inside the allowed tree.
     ws_root = Path(os.environ.get(
-        "BENCH_WS_BASE", "/Users/albou/tmp/abstractframework/.bench-ws")) / (
+        "BENCH_WS_BASE", "/workspace/.bench-ws")) / (
         f"wb-{OUT.name}-{os.getpid()}-"
         f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}")
     ws_root.mkdir(parents=True, exist_ok=True)

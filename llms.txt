@@ -58,7 +58,7 @@ Ground rules for reading this repository:
 - [Changelog](CHANGELOG.md): user-visible changes and migration notes
 - [Contributing](CONTRIBUTING.md): toolchains, tests, and the release tag scheme
 - [Security](SECURITY.md): how to report a vulnerability
-- [Acknowledgments](ACKNOWLEDGMENTS.md): dependencies and upstream lineage
+- [Acknowledgements](ACKNOWLEDGEMENTS.md): dependencies and upstream lineage
 - [License](LICENSE): MIT
 
 ## Optional

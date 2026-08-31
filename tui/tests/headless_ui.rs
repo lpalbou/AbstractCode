@@ -10614,7 +10614,7 @@ fn gallery_fold(store: &Store) {
             args_preview: "…/todel2/js/game.js  start_line=720  end_line=1187".into(),
             args_full: String::new(),
             status: ToolStatus::Ok,
-            result: "File: /Users/albou/tmp/abstractframework/todel2/js/game.js (468 lines)\n720:     ctx.fillStyle = p.color;\n721:     ctx.beginPath();\n722:     ctx.arc(p.x, p.y, p.size + pulse, 0, Math.PI * 2);\n723:     ctx.fill();\n… (+18 more lines)".into(),
+            result: "File: /workspace/todel2/js/game.js (468 lines)\n720:     ctx.fillStyle = p.color;\n721:     ctx.beginPath();\n722:     ctx.arc(p.x, p.y, p.size + pulse, 0, Math.PI * 2);\n723:     ctx.fill();\n… (+18 more lines)".into(),
             error: String::new(),
         });
         f.push_item(Item::Tool {

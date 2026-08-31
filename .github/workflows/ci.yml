@@ -30,10 +30,10 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Lint
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: Validate crate contents
         run: cargo package --manifest-path tui/Cargo.toml --list
@@ -54,7 +54,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build
-        run: cargo build --workspace
+        run: cargo build --workspace --locked
 
   web:
     name: Test and build the web client

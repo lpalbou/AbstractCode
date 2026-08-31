@@ -7,7 +7,7 @@ them cost this investigation an hour once already)
 `reasoning_effort`
 **Status of the wire:** every claim below is taken from the relay's own `inbound_request`
 log (`~/.airelays/logs/YYYY/MM/DD-HH.log`, verbatim client bytes) and from the runtime
-store (`/Users/albou/tmp/abstractframework/runtime/run_<id>.json`), never from client
+store (`/workspace/runtime/run_<id>.json`), never from client
 intent.
 
 ---
@@ -119,7 +119,7 @@ whether `thinking` was present at the call site.
 
 ## 4. Defect #2 — child runs lose `thinking` (YOUR TARGET), with a built-in differential
 
-Runtime store, the three probe runs (`/Users/albou/tmp/abstractframework/runtime/`):
+Runtime store, the three probe runs (`/workspace/runtime/`):
 
 ```
 tui-basic   root 43f20ff7  session acode-f159becff269  thinking=medium

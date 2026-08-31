@@ -3062,7 +3062,7 @@ We’ll acknowledge receipt and work with you on a coordinated timeline for a fi
 
 
 ==============================================================================
-# FILE: ACKNOWLEDGMENTS.md
+# FILE: ACKNOWLEDGEMENTS.md
 ==============================================================================
 
 # Acknowledgments

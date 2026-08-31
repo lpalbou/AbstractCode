@@ -5524,7 +5524,9 @@ mod tests {
     fn tool_args_preview_leads_with_the_identifying_value() {
         let args = serde_json::json!({
             "end_line": "1187",
-            "file_path": "/Users/albou/tmp/abstractframework/todel2/js/game.js",
+            // Long enough that the preview must tail-compact it, which is what
+            // this test is about.
+            "file_path": "/home/user/projects/example-app/assets/js/game.js",
             "start_line": "720",
         });
         let p = tool_args_preview(Some(&args), 200);

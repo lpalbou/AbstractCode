@@ -150,7 +150,7 @@ def main() -> int:
         # happened, in the gateway-managed workspace.
         import glob
         proof = None
-        for path in glob.glob("/Users/albou/tmp/abstractframework/runtime/workspaces/*/pty-proof.txt"):
+        for path in glob.glob("/workspace/runtime/workspaces/*/pty-proof.txt"):
             # Strictly THIS run's write: older smoke leftovers must not alias.
             if os.path.getmtime(path) > start_ts:
                 proof = path

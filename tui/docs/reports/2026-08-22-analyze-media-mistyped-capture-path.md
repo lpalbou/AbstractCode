@@ -3,7 +3,7 @@
 **Run** `decdf2b8-a178-4dd0-969b-b631da414a62` (twin `acaa7e50-…`), session
 `acode-f8866395de21`, 2026-08-22 02:44–02:49 UTC.
 **Route** `endpoint:m4-max` / `qwen/qwen3.5-35b-a3b`, profile `basic-agent`,
-workspace `/Users/albou/tt-35-35b`, access mode `workspace_or_allowed`.
+workspace `/home/user/tt-35-35b`, access mode `workspace_or_allowed`.
 **Method** run-store forensics + two adversarial audits + a live A/B on the
 same endpoint and model.
 
@@ -19,7 +19,7 @@ a 100-character absolute temp path containing a random 8-character directory
 token, and tells it in plain text to retype that path into `analyze_media`.
 The model dropped one character. The workspace wall then answered a
 mistyped-temp-path with its containment refusal — *"retry with a path relative
-to `/Users/albou/tt-35-35b`"* — advice that can never reach a file in
+to `/home/user/tt-35-35b`"* — advice that can never reach a file in
 `/var/folders/…/T/`. The run ended with the model reporting visual facts it
 had not verified.
 
@@ -33,7 +33,7 @@ misleading. The second one is fixed.
 
 | cycle | call | outcome |
 |---|---|---|
-| 7 | `browser_probe target=file:///Users/albou/tt-35-35b/webos.html` | PASS, screenshot written |
+| 7 | `browser_probe target=file:///home/user/tt-35-35b/webos.html` | PASS, screenshot written |
 | 8 | `analyze_media file_path=…/abstractcore_browser_probe_**hqlzfin**/probe_aa6f562ccf9d.png` | **refused by the wall** |
 | 9 | — | final answer, no retry |
 
@@ -91,7 +91,7 @@ probe verified none of that, and the failure was never mentioned.
 
 ### The recovery advice pointed away from the file, twice
 
-The wall said *"retry with a path relative to `/Users/albou/tt-35-35b`"*. Then
+The wall said *"retry with a path relative to `/home/user/tt-35-35b`"*. Then
 the tool-failure diagnosis (`messages[17]`) added:
 
 > `why: file_path='…hqlzfin/probe_aa6f562ccf9d.png', question='…' appears
@@ -201,7 +201,7 @@ vision route) in-process, so the running gateway was never touched.
 
 ```
 WALL REFUSED : Path is outside workspace roots: '…/abstractcore_browser_probe_hqlzfin/probe_aa6f562ccf9d.png'
-               — if you meant a file inside the workspace, retry with a path relative to '/Users/albou/tt-35-35b' …
+               — if you meant a file inside the workspace, retry with a path relative to '/home/user/tt-35-35b' …
 ```
 
 *Fixed* — resolves and the real model reads the real screenshot:

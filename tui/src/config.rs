@@ -1,11 +1,9 @@
 //! Connection + preference resolution.
 //!
-//! Connection precedence (one resolution point, mirrored from the Python
-//! `abstractcode` CLI so both clients share one mental model AND one login
-//! store): explicit flag > env > login store > default. Env beats the store
-//! deliberately (unix convention); `abstractcode-tui doctor` prints WHICH
-//! source won, which is the antidote to silently-swapped principals from a
-//! stale export.
+//! Connection precedence, resolved in one place: explicit flag > env > login
+//! store > default. Env beats the store deliberately (unix convention);
+//! `abstractcode doctor` prints WHICH source won, which is the antidote to
+//! silently-swapped principals from a stale export.
 
 use std::fs;
 use std::path::PathBuf;
@@ -70,6 +68,18 @@ pub fn prefs_path() -> PathBuf {
 /// The pre-rename preferences location, read only when [`prefs_path`] has no
 /// file yet. Returns `None` once the current path exists.
 pub fn legacy_prefs_path() -> Option<PathBuf> {
+    // An explicit override means "use exactly this file". Falling back to the
+    // legacy location under an override would defeat the isolation the
+    // override exists to provide: the conformance harnesses point it at a
+    // fresh path precisely so a run starts from defaults, and reading the
+    // operator's old file there would silently hand those runs a saved
+    // `tool_approval.accepted_tier` — auto-approving tools in a run the
+    // harness believes is clean.
+    if trimmed_env("ABSTRACTCODE_PREFS_FILE").is_some()
+        || trimmed_env("ABSTRACTCODE_TUI_PREFS_FILE").is_some()
+    {
+        return None;
+    }
     if prefs_path().exists() {
         return None;
     }

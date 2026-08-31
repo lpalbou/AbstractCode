@@ -106,7 +106,7 @@ all. The five relay arms ran at reasoning off.
 `abstractcode exec --workflow basic-agent --provider endpoint:airelay --model gpt-5.4
 --reasoning medium` (the exact `tui-basic` invocation shape), run `8ea55553-…`:
 
-- Gateway run store `/Users/albou/tmp/abstractframework/runtime/run_8ea55553-….json`
+- Gateway run store `/workspace/runtime/run_8ea55553-….json`
   records `vars._runtime.thinking = "medium"`.
 - Relay `inbound_request` for that run: top-level keys
   `['model','prompt_cache_key','stream','temperature','tool_choice','top_p']` —
@@ -181,7 +181,7 @@ not audited here.
 ## 3. Root cause — one function, one line
 
 **Owning package: `abstractcore`** (version 2.13.38, editable install at
-`/Users/albou/tmp/abstractframework/abstractcore`).
+`/workspace/abstractcore`).
 
 Both abstractcode paths and all three tui paths converge on the same drop site.
 

@@ -43,7 +43,7 @@ DOCUMENTS = [
     "CHANGELOG.md",
     "CONTRIBUTING.md",
     "SECURITY.md",
-    "ACKNOWLEDGMENTS.md",
+    "ACKNOWLEDGEMENTS.md",
 ]
 
 HEADER = """# AbstractCode — full documentation snapshot

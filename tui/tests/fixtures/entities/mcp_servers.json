@@ -3,6 +3,6 @@
  "source": null,
  "probed": false,
  "warnings": [
-  "no MCP server registry declared (create /Users/albou/tmp/abstractframework/runtime/config/mcp_servers.json with {\"version\": 1, \"servers\": [{\"name\": ..., \"url\": ..., \"description\": ..., \"auth_required\": ...}]})"
+  "no MCP server registry declared (create /workspace/runtime/config/mcp_servers.json with {\"version\": 1, \"servers\": [{\"name\": ..., \"url\": ..., \"description\": ..., \"auth_required\": ...}]})"
  ]
 }
