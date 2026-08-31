@@ -6,8 +6,8 @@
 //! durable session (server-side history replay).
 //!
 //! Layer map:
-//! - [`config`]: connection + preference resolution (login store shared with
-//!   the Python `abstractcode` CLI).
+//! - [`config`]: connection and preference resolution — the login store and
+//!   `prefs.json`.
 //! - [`gateway`]: blocking HTTP client + SSE ledger streaming.
 //! - [`protocol`]: pure extraction over ledger records (waits, tools, usage,
 //!   flow output).

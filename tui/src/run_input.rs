@@ -43,9 +43,8 @@ pub struct StartOpts {
     pub max_iterations_explicit: bool,
     pub system: String,
     /// Project instructions (`AGENTS.md`) to APPEND to the agent's system
-    /// prompt — rides `_runtime.system_prompt_extra`, the exact wire key the
-    /// Python `abstractcode` client already uses (react_shell.py:12998).
-    /// Empty = absent = server truth, byte-parity for every existing caller.
+    /// prompt — rides `_runtime.system_prompt_extra`. Empty = absent = server
+    /// truth, byte-parity for every existing caller.
     ///
     /// Reach, corrected: this lands for NATIVE-LOOP bundles, whose root run
     /// vars are the loop's vars. Flow-graph Agent children do NOT inherit it —
@@ -64,9 +63,7 @@ pub struct StartOpts {
     /// (`abstractagent/adapters/react_runtime.py:2244-2246` reads the key and
     /// falls back to `False`).
     ///
-    /// THE premature-completion fix. The Python `abstractcode` client
-    /// constructs its ReAct agent with `review_mode=True,
-    /// review_max_rounds=3` by DEFAULT (`react_shell.py:251-252`), so before
+    /// THE premature-completion fix: before
     /// accepting any tool-call-free response as final, a strict verifier LLM
     /// call re-reads the transcript and can force more tool calls
     /// ("only count actions supported by the tool outputs"). This client sent
@@ -217,7 +214,7 @@ pub fn build_input_data(prompt: &str, opts: &StartOpts) -> Value {
     // memact has NO review nodes: `MemActAgent` deprecation-warns on these
     // kwargs (`abstractagent/agents/memact.py:88-96`) and the Python client
     // deliberately withholds them for that agent kind
-    // (`react_shell.py:775-779`). Sending them would be noise the server has
+    // for that agent kind. Sending them would be noise the server has
     // to warn about, so the posture is simply not stated.
     if let Some(review) = opts.review_mode.filter(|_| opts.review_capable) {
         runtime.insert("review_mode".into(), json!(review));

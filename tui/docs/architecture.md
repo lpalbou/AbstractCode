@@ -123,7 +123,7 @@ stay exercised.
 
 | Module | Role |
 | --- | --- |
-| `src/config.rs` | Connection + preference resolution; login store shared with the Python CLI. |
+| `src/config.rs` | Connection + preference resolution, and the login store. |
 | `src/gateway/` | Blocking HTTP client (ureq), SSE parser, stream loop. |
 | `src/protocol.rs` | Pure extraction over ledger records (waits, tools, usage, output). |
 | `src/transcript.rs` | The fold: records → items, stats, pending waits; dedup sets; bounds. |

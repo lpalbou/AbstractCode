@@ -168,10 +168,7 @@ abstractcode                                       # launch the TUI
 ```
 
 `login` verifies against the gateway before saving (flags/env only — it never
-prompts); the store is shared with the Python CLI.
-
-The login store is **shared with the Python `abstractcode` CLI**
-(`~/.abstractcode/gateway.json`) — log in once with either client.
+prompts). The store is `~/.abstractcode/gateway.json`.
 
 Inside the app:
 
@@ -222,16 +219,13 @@ workspace root or a managed per-session folder, and the app tells you so at
 startup. Set `ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1` on the gateway
 to honor client workspace roots (trusted/local setups).
 
-## How it relates to `abstractcode` (Python)
+## How it relates to the browser client
 
-The Python [`abstractcode`](https://github.com/lpalbou/abstractcode) runs the
-agent loop **in-process** (AbstractAgent + AbstractRuntime + AbstractCore) with
-the gateway as its control plane. This port is a **thin client**: the agent
-executes on the gateway and the TUI renders its durable run ledger. Same
-workflows, same approvals, same steering — different execution home. Use the
-Python CLI when you want local execution and local tools; use this when the
-gateway is the execution home (shared runs, one durable transcript, attach
-from anywhere).
+AbstractCode ships two clients over the same gateway: this terminal
+application and the browser application in [`web/`](../web/). Both are thin
+clients that render the same durable run ledger and submit the same durable
+commands, so a session is portable between them — a run gated on approval here
+can be approved there, and the reverse.
 
 ## Documentation
 

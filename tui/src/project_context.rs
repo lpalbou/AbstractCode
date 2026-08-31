@@ -1,19 +1,15 @@
 //! Project instructions (`AGENTS.md`) for gateway agent runs — CLIENT-SIDE
 //! discovery, server-side application.
 //!
-//! Parity with the Python `abstractcode` client, which composes
-//! `_runtime.system_prompt_extra` from `[project context][skills block]`
-//! (`abstractcode/react_shell.py:12972-13000`) so the agent reads the
-//! project's own conventions before it writes a line. This client sent NO
-//! system prompt and NO project context at all (`StartOpts.system` was
-//! hardcoded empty at both call sites), so the server-side agent coded blind
-//! about the repo it was pointed at — a first-order quality gap, not a
-//! cosmetic one.
+//! The client composes `_runtime.system_prompt_extra` from
+//! `[project context][skills block]` so the agent reads the project's own
+//! conventions before it writes a line. Without it the server-side agent codes
+//! blind about the repository it was pointed at.
 //!
-//! Wire key: `_runtime.system_prompt_extra`. Deliberately the SAME key
-//! abstractcode already uses end-to-end, so no gateway or bundle change is
-//! needed for a NATIVE-LOOP bundle (react/codeact/memact), whose root run
-//! vars are the loop's own vars.
+//! Wire key: `_runtime.system_prompt_extra` — a key the gateway already
+//! carries end to end, so no gateway or bundle change is needed for a
+//! NATIVE-LOOP bundle (react/codeact/memact), whose root run vars are the
+//! loop's own vars.
 //!
 //! It does NOT reach flow-graph Agent children: the runtime compiler rebuilds
 //! each child `_runtime` and inherits a fixed set carrying `thinking` but not

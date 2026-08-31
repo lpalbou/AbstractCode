@@ -7,7 +7,7 @@ The gateway runs the coding agent; the clients connect to it.
 
 ```bash
 pip install abstractgateway
-abstractgateway serve            # defaults to http://127.0.0.1:8080
+abstractgateway serve            # binds 0.0.0.0:8080 by default
 ```
 
 The gateway ships working agent bundles out of the box, including
@@ -31,11 +31,14 @@ abstractcode --gateway https://gateway.example.com
 ### Browser
 
 ```bash
-npx @abstractframework/code      # serves on http://127.0.0.1:3002
+npx @abstractframework/code      # binds 0.0.0.0:3002; open http://127.0.0.1:3002
 ```
 
 Set the Gateway URL in the interface, or start the server with
 `ABSTRACTCODE_GATEWAY_URL` already pointing at it.
+
+Both servers listen on every interface by default. Set `HOST=127.0.0.1` (web)
+or `abstractgateway serve --host 127.0.0.1` to keep them on loopback.
 
 ## 3. Check the connection
 

@@ -179,10 +179,7 @@ abstractcode                                       # launch the TUI
 ```
 
 `login` verifies against the gateway before saving (flags/env only — it never
-prompts); the store is shared with the Python CLI.
-
-The login store is **shared with the Python `abstractcode` CLI**
-(`~/.abstractcode/gateway.json`) — log in once with either client.
+prompts). The store is `~/.abstractcode/gateway.json`.
 
 Inside the app:
 
@@ -233,16 +230,13 @@ workspace root or a managed per-session folder, and the app tells you so at
 startup. Set `ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1` on the gateway
 to honor client workspace roots (trusted/local setups).
 
-## How it relates to `abstractcode` (Python)
+## How it relates to the browser client
 
-The Python [`abstractcode`](https://github.com/lpalbou/abstractcode) runs the
-agent loop **in-process** (AbstractAgent + AbstractRuntime + AbstractCore) with
-the gateway as its control plane. This port is a **thin client**: the agent
-executes on the gateway and the TUI renders its durable run ledger. Same
-workflows, same approvals, same steering — different execution home. Use the
-Python CLI when you want local execution and local tools; use this when the
-gateway is the execution home (shared runs, one durable transcript, attach
-from anywhere).
+AbstractCode ships two clients over the same gateway: this terminal
+application and the browser application in [`web/`](../web/). Both are thin
+clients that render the same durable run ledger and submit the same durable
+commands, so a session is portable between them — a run gated on approval here
+can be approved there, and the reverse.
 
 ## Documentation
 
@@ -354,8 +348,8 @@ abstractcode login --gateway http://127.0.0.1:8080 --token <your-token>
 
 `login` takes the URL and token from flags or environment (it never prompts),
 verifies them against `GET /api/gateway/ping`, and only then saves them to
-`~/.abstractcode/gateway.json` (mode 0600 on unix). That store is shared with
-the Python `abstractcode` CLI — logging in with either client covers both. Environment variables (`ABSTRACTCODE_GATEWAY_URL`,
+`~/.abstractcode/gateway.json` (mode 0600 on unix).
+Environment variables (`ABSTRACTCODE_GATEWAY_URL`,
 `ABSTRACTCODE_GATEWAY_TOKEN`, or the `ABSTRACTGATEWAY_*` equivalents)
 override the store when set.
 
@@ -660,7 +654,7 @@ stay exercised.
 
 | Module | Role |
 | --- | --- |
-| `src/config.rs` | Connection + preference resolution; login store shared with the Python CLI. |
+| `src/config.rs` | Connection + preference resolution, and the login store. |
 | `src/gateway/` | Blocking HTTP client (ureq), SSE parser, stream loop. |
 | `src/protocol.rs` | Pure extraction over ledger records (waits, tools, usage, output). |
 | `src/transcript.rs` | The fold: records → items, stats, pending waits; dedup sets; bounds. |
@@ -1200,14 +1194,11 @@ FILE: docs/faq.md
 
 # FAQ
 
-**How is this different from the Python `abstractcode`?**
-The Python CLI runs the agent loop in-process (AbstractAgent + AbstractRuntime
-+ AbstractCore) and uses the gateway as its control plane. This client is a
-pure thin client: the agent executes ON the gateway, and the TUI renders the
-durable run ledger. Same workflows, same approvals, same steering — different
-execution home. If you want local tools and local execution, use the Python
-CLI; if the gateway is your execution home (shared runs, durable transcript,
-attach from anywhere), use this.
+**How is this different from the browser client?**
+Only the surface. Both are thin clients: the agent executes on the gateway and
+each renders the same durable run ledger. They submit the same durable
+commands, so a session is portable — start a task here, resolve its approval
+prompt in the browser, or the reverse.
 
 **Do I lose my run if the terminal dies?**
 No. Runs are durable gateway objects. Relaunch with the same session and you
@@ -1305,7 +1296,7 @@ the open (truecolor → 256 → 16; images → unicode mosaic). Check what your
 terminal offers with `abstractcode --caps`.
 
 **Where are my settings?**
-Connection: `~/.abstractcode/gateway.json` (shared with the Python CLI).
+Connection: `~/.abstractcode/gateway.json`.
 Preferences (theme, workflow, route, session, tool/skill selections, recent
 sessions): `~/.abstractcode/prefs.json`.
 
@@ -1728,8 +1719,8 @@ remediation plan; coordinated disclosure is appreciated.
 abstractcode is a network client for an AbstractGateway you control.
 Security-relevant surfaces:
 
-- **Credentials at rest**: the login store (`~/.abstractcode/gateway.json`,
-  shared with the Python CLI) holds the gateway bearer token and is written
+- **Credentials at rest**: the login store (`~/.abstractcode/gateway.json`)
+  holds the gateway bearer token and is written
   with mode 0600 on unix. Preferences (`~/.abstractcode/prefs.json`)
   hold no secrets.
 - **Credentials in transit**: the token rides the `Authorization: Bearer`
@@ -1777,7 +1768,7 @@ projects.
 - [AbstractGateway](https://github.com/lpalbou/abstractgateway) — the control
   plane this client speaks to: durable runs, workflow catalog, tool
   execution, session history.
-- [abstractcode](https://github.com/lpalbou/abstractcode) (Python) — the
+- [abstractcode](https://github.com/lpalbou/abstractcode) — the
   original AbstractCode TUI whose gateway thin-client contracts (web client
   and CLI) define the protocol this port follows.
 
@@ -1798,6 +1789,428 @@ All notable changes to this project are documented here. The format follows
 [SemVer](https://semver.org/).
 
 ## [Unreleased]
+
+### Added (tool-card disclosure + gateway-backed `/sessions`, 2026-08-29)
+
+- **A folded tool card now NAMES the output it is hiding, and expands in
+  place.** The collapsed row used to render glyph, name, status word,
+  args hint and error — and the tool's result not at all, so a call that
+  printed 214 lines looked exactly like one that printed nothing. Every
+  other lane in this transcript already named what it held back (the
+  thinking card's `… (+441 words of reasoning · /details)`, every capped
+  body's `… (+K more lines)`), so this was the one place the house rule
+  was not applied to itself. The row now carries a right-aligned
+  `▸ N lines`; clicking it expands THAT card inline under the `│`
+  output gutter and flips it to `▾ N lines`. The number the marker
+  promises is the number expanding delivers — pinned against each other
+  by test, because a marker that disagrees with its own body is a lie.
+  A running call gets no marker (its output does not exist yet) and a
+  call that printed nothing gets none either.
+  - Per-card state is keyed by `tool_key(run_id,node_id,index,call_id)`
+    — the code's single authority for card identity — never by the
+    feed's positional `i{index}` keys, which a truncation drain shifts
+    onto a different call.
+  - `/details` still outranks it: under full detail every body is shown
+    and no marker renders. Expansion is a reading gesture, not a
+    preference, so it is session-scoped and never persisted.
+  - The click consumes ONLY the marker's cells. Screen text-selection
+    is enabled app-wide and the engine's own `Feed::on_item_press`
+    stops propagation for any press landing on an item, so wiring that
+    would have killed drag-to-select across the entire transcript.
+- **`/sessions` asks the GATEWAY which sessions exist.** The picker
+  rendered `prefs.recent_sessions` — a local file — so pointing this
+  client at a remote gateway showed an empty list over a gateway full of
+  live work. It now fetches `GET /runs?root_only=true` once at open (and
+  on `r`), folds the answer into one row per session, and renders a
+  board: id, time, live state, run count, and the prompt.
+  - **Existence comes from the gateway; labels come from prefs.** A
+    session the gateway lists and this client has never heard of is
+    offered, with no label rather than a blank that would read as an
+    empty conversation. A session prefs remembers that the gateway did
+    not list is kept and MARKED, never given an invented state.
+  - A session is as live as its liveliest run — waiting on you, then
+    running — because that is the order in which it wants a human;
+    live sessions sort to the top.
+  - The hint line states provenance and the fetch's own state: asking,
+    the count and whether the listing was complete, or the refusal
+    verbatim. Absence is never drawn as an empty gateway. Fetched at
+    the gesture, never polled.
+- `Picker` gained a live hint (a static one beside an async fetch would
+  freeze on "asking the gateway…") and bindable extra keys, so the `r`
+  its title promises is actually bound.
+
+### Fixed (`/sessions` board, against a live 119-session gateway, 2026-08-29)
+
+Three defects the operator caught on a real gateway, all of them the
+board claiming things it had no standing to claim.
+
+- **The board lied while it was still asking.** Local rows rendered a
+  state column before the gateway had been contacted, so every one of
+  them read `not on the gateway` about a server no request had reached
+  yet. The board now shows a WAITING surface — a braille spinner and
+  "asking the gateway which sessions exist…" — until the listing lands,
+  and claims nothing until it does. The ticker is armed only while the
+  fetch is in flight and dies with the modal, so idle still costs
+  nothing.
+- **Sessions that WERE on the gateway were reported missing.** The
+  listing pages ROOT RUNS, not sessions, and the client clamped it to
+  500 — so on a store with 119 sessions most of them fell outside the
+  page and every one rendered `not on the gateway`. The clamp's ceiling
+  is gone (the route documents "No server ceiling"), the board asks for
+  5000, and absence is now three-way: only a listing the gateway marked
+  COMPLETE may say `not on the gateway`; a truncated one says `outside
+  this listing`; a fetch that never answered says `state unknown`.
+  Defaulting to the strongest claim was the whole bug.
+- **`1+ runs` became `N turns`, and prompts come from the gateway.** A
+  root run IS a turn, so the count is now labelled as such — exact when
+  the listing is complete, a floor (`N+`) when it is not. And the
+  prompt is no longer whatever this client happened to remember:
+  `/sessions` fetches each session's opening words from the gateway
+  (`input_data` on its newest root run), bounded to the newest 40
+  sessions and posted in batches so the board fills in progressively.
+  A row with no prompt renders a quiet `—` instead of a loud
+  "(no prompt remembered)", which said "this client failed" about
+  sessions that were perfectly fine — prefs only ever remembered the 15
+  sessions this client itself started.
+
+### Changed (a failed restore is a transient condition, 2026-08-31)
+
+- **A restore that fails no longer writes a permanent transcript card.**
+  Losing the gateway for a moment pushed an `Item::Error` reading
+  "session history could not be restored … — /sessions and re-select to
+  retry", which was wrong three ways: a permanent entry for a transient
+  fault, it outlived the reconnection that fixed it, and it asked the
+  operator to do by hand what this client already does automatically.
+  It is now an ephemeral condition (`store.restore_failed`) shown as a
+  strip line while it holds and gone the moment it resolves.
+- **The reconnect retries the restore.** The Down→Ok edge re-issued the
+  catalog and tool loads but never the rehydration — the one thing a
+  reconnection actually fixes. It does now, so the notice resolves
+  itself.
+- **The message carries no URL.** It rendered `GwError`'s Display,
+  which includes the full request URL (`http://…/api/gateway/runs?…`);
+  it now uses the `compact_reason()` form built for text that is shown.
+  The URL-free choice lives inside `apply_restore_failure`, which takes
+  the error rather than a string — handed a string, a caller could pass
+  Display and nothing would catch it (measured: that sabotage survived
+  a green suite).
+
+### Fixed (adversarial review of the `/sessions` board)
+
+- **Enter on the waiting board switched sessions and CANCELLED the live
+  run.** The waiting surface renders a two-row placeholder while
+  `on_choose` read the merged session list — two different index
+  spaces — and the engine clamps the activation index into the
+  *rendered* rows. So Enter, Space, or a double-click on a screen
+  showing nothing but a spinner resolved to a real session, switched to
+  it, and `switch_session` cancelled the in-flight run on the way out.
+  Reachable on first open and again after every `r`. Activation is now
+  refused until the gateway answers.
+- **The fetch ran inline on the single command loop.** `Steer`,
+  `Cancel`, `Pause` and approval `Resume` are handled on that same
+  loop, so one `/sessions` open (a listing plus up to 40 prompt
+  fetches, each with a 60 s read timeout) could queue every control
+  gesture behind it while the transcript kept streaming from its own
+  threads — the UI looking alive with its controls dead. Moved to its
+  own thread, the pattern the GPU and entity lanes already use, and `r`
+  is a no-op while a pass is in flight instead of queueing another.
+- **Prompts were fetched for a different 40 rows than the board shows.**
+  The fetch used the fold's order; the board sorts live-sessions-first.
+  A session waiting on a human since last month sat at row 0 unlabeled
+  while forty finished sessions below it were labeled. Both now use one
+  shared ordering, and the hint NAMES the bound (`prompts: top 40, 79
+  unfetched`) — without it, one `—` meant "still arriving", "outside
+  the bound" and "genuinely none" at once.
+- **The label was the session's NEWEST prompt, not its opening one** —
+  so a session begun "port the tests to rstest" whose last turn was
+  "yes" rendered as `yes`, and three doc sites said "opening"/"first".
+  It now reads the session's first turn.
+- **A missing `has_more` defaulted to the strongest claim.** Absent, it
+  read as a complete listing, which licenses "not on the gateway". It
+  now defaults to truncated.
+- The waiting animation's frame signal was created on the app scope,
+  leaking one arena node per `/sessions` open; it lives on the modal
+  scope now.
+- **Five sabotages that left the suite green now fail**: reverting the
+  run limit to the 500 that caused the operator's bug, dropping the
+  prompt fetch, zeroing its bound, marking exact turn counts as floors,
+  and dropping the unfetched-count from the hint. Each was verified by
+  reintroducing the defect. One of my own new pins also passed for the
+  wrong reason — its fixture put the current session at row 0, where
+  `switch_session` early-returns — and was rewritten until it bit.
+
+### Fixed (adversarial review of the 2026-08-29 work)
+
+- **The marker's click target existed where no marker was drawn.** The
+  draw drops a marker it cannot fit; the hit-test had no such term, so
+  on a pane around 34 columns a left click on the args hint silently
+  expanded the body AND swallowed the press that would have started a
+  text selection — a control with no glyph on screen. Both sides now
+  read one `tool_row_layout`.
+- **The marker promised rows expanding never delivered.** It counted
+  `result.lines()` while the body counted WRAPPED rows: `"\n\n\n"`
+  promised 3 and delivered 0 (wrapping pops trailing blanks), and one
+  300-column line promised 1 and delivered 5. Both sides read one
+  `tool_body_rows` now, so parity is structural rather than asserted,
+  and a single-line result reads `1 line` instead of `1 lines`.
+- **Expanding re-wrapped the whole result on every repaint.** The clip
+  cull skipped the prints, not the wrap; a 30k-line expanded card under
+  a streaming run measured ~51 ms/frame. The wrap is memoised per width.
+- **A status the gateway did not report rendered as "done".** An empty
+  status from a malformed index row — or any status added server-side
+  since this build — told the operator a live session had finished. It
+  is now `SessionState::Unknown`, renders as `—`, and ranks last so it
+  never drags a live session down.
+- **`SessionState::Paused` was unreachable and has been removed.** `GET
+  /runs` hardcodes `"paused": false` on its index-row fast path
+  (`routes/gateway.py:8007` — the only `paused` in the whole listing
+  response), so the branch could never fire; `unwrap_or(false)` made it
+  silent. Reading real pause state needs the gateway to report it.
+- **The board sorted by the wrong field.** It ordered by `created_at`
+  while the gateway pages by `updated_at DESC`, so a session created in
+  August but touched a minute ago sorted below one created today and
+  long dead.
+- **The truncation notice could not fit on screen.** The hint sentence
+  was ~85 columns against an ~87-column budget, so ` · older sessions
+  exist beyond this page` ellipsized away at every terminal width —
+  silent truncation of the truncation notice. Both hints are short now,
+  the failure hint leads with the fact so the gateway's own reason
+  survives, and `has_more` is reported as *older runs*, which is what
+  the gateway actually said.
+- **`N run(s)` was a page-bounded floor rendered as a total**, and the
+  `when` column rendered a gateway timestamp and a locally-remembered
+  one identically. Counts read `N+ runs`, remembered times wear `~`, and
+  the hint says `counts page-only`.
+- Removed a dead `Picker::quiet()` helper (never called, two new clippy
+  warnings) and an unreachable match arm in the row renderer.
+- **Six tests that could not fail were rewritten or added.** Deleting
+  the body term from the height callback, counting source lines in the
+  marker, replacing the liveliness fold with "last run wins", mangling
+  the `/runs` query, and removing the `r` binding all left the full
+  suite green. Each now has a pin verified by reintroducing the defect
+  and watching it go red — including the height test, which had been
+  restating the arithmetic it meant to check.
+
+### Changed (`/resources` operator refinements, 2026-08-28)
+
+- **`/resources` byte sizes are binary math with BINARY labels** (`B` / `KiB` /
+  `MiB` / `GiB` / `TiB`, one decimal). `human_bytes` always divided by 1024;
+  calling the result `GB` made this client disagree with the AbstractGateway
+  web console, which really did divide by 1e9 — one 89,986,353,824-byte GGUF
+  read `83.8 GB` here and `89.99 GB` there, and a 128 GiB machine's RAM read
+  `128.0 GB` here and `137.44 GB` there. Memory is binary wherever it is
+  configured or reported (`sysctl iogpu.wired_limit_mb=110000` is 107.4 GiB),
+  so the math stays and the units are corrected; the web console,
+  the gateway console-TUI, abstractflow and
+  `@abstractframework/monitor-memory` moved to the same spelling in the same
+  wave, pinned by a shared six-value assertion set. The ATTACHMENT surface
+  (`paths::human_size`, used by `exec.rs`/`runner.rs`/the preview header) is
+  untouched and keeps its own `KB`/`MB` spelling, so `/resources` no longer
+  borrows it for sub-GiB sizes.
+
+- **The device meter told the truth about the wrong pool.** On Metal,
+  `memory.device.allocated_bytes` is PROCESS-LOCAL: the live host serves
+  `allocated_bytes: 0` while a 93 GB GGUF is resident under LM Studio.
+  The line now prefers `host_in_use_bytes / wired_limit_bytes` and is
+  labelled **`Accelerator heap · <backend> (all processes)`**, falling
+  back to the allocated/total pair labelled **(this process only)** — a
+  "0 B allocated" beside a full machine can no longer be drawn
+  (`HostFacts::accelerator_figure`). It is NOT the machine's memory use
+  and NOT a denominator for "how full is this host": the counter is blind
+  to memory-mapped GGUF weights, and a dim sub-line says so verbatim —
+  *memory-mapped GGUF weights are not counted here*. The footer's `mem`
+  segment is unchanged: it reports host RAM percent, which was never wrong.
+- **Every resident line offers the lock verb**, sweep/externally-loaded
+  rows included: `POST /models/lock` now ADOPTS them, so `lockable` is
+  parsed TRI-STATE (`Option<bool>`) — a null is an unknown the gateway
+  answers, not the refusal this client used to invent by folding it to
+  `false`. `locked` outranks residency (a locked-but-evicted row keeps
+  Unlock); a row the host says it is NOT holding gets no lock and no
+  unload, naming the reason. Each row prints the verb `k` will perform,
+  read from the same `store::lock_action` the key handler uses.
+- **Per-model footprint.** One coalesce for every surface: `size_bytes` →
+  `size_vram_bytes` → `est_weights_bytes`, the third MARKED `~3.1 GB`
+  against a reported `3.1 GB` (documented in the panel's hint row). Rows
+  carrying only `est_weights_bytes` — every externally-loaded model —
+  used to print no size at all. `cache_bytes` rides beside it as its own
+  figure, never folded into the size.
+- **A memory breakdown under the meters**, in three KINDS of line keyed
+  and ordered identically on every surface: ITEMS the framework measured
+  (`model:<runtime_id>` per resident model, `model_caches`,
+  `session_caches`, `process_rss`), each naming what it measures and
+  which field supplied it; then, under a rule, REFERENCES that are
+  separate counters and NOT summable with them (`sum_model_weights`,
+  `ram`, `accelerator`); then a NOTE when `Σ model weights` exceeds the
+  accelerator heap, which is the normal memory-mapped-GGUF case. A line
+  is emitted when its value is KNOWN and omitted when unknown; a known
+  `0` IS emitted.
+- **The `unattributed` remainder is DELETED.** It subtracted
+  RAM-dimensioned quantities (weights, caches, RSS) from an accelerator
+  counter that cannot see memory-mapped weights: live it computed −79 GB,
+  clamped to `0 B`, and blamed "overlap" for a category error. No second
+  remainder replaces it — attribution against RAM would need per-process
+  accounting the framework does not have.
+- **Adopt wording keys on `source == "provider_server"`** — the one
+  marker the wire stamps on a host-sweep row. `lockable: true` rides on
+  those rows too, so it can never be the selector; the tolerated
+  `sweep`/`external` aliases (which the wire never emits) are gone.
+- **Model rows WRAP instead of truncating**, and the panel scrolls the
+  cursor INTO VIEW instead of centring it: a row now carries its
+  footprint, cache and verb, and centring on the first model target
+  scrolled the meters — the thing the panel is opened for — off the top.
+  The memory section no longer repeats the host name (it is in the title)
+  or the RSS (the breakdown itemizes it one line below).
+- **The meters are a PINNED head, and the body opens at its own top.**
+  The window follows the CURSOR, so rows above the first cursor target
+  can never be scrolled back to — `↑` stops at the first target. That was
+  invisible while the preamble was shorter than the window; with the
+  accelerator meter, its note and the itemized breakdown above the first
+  model row, the preamble outgrew the window and stranded the meters
+  behind an `↑ N more` no key could move. The meters block is now held
+  out of the scroll (`draw_rows_pinned`) so it renders at every cursor
+  position, and the body anchors at its own top while the cursor is on
+  the first target so the itemization is not stranded one level down. The
+  trade: the first target's own highlight can sit below the fold at rest.
+  That is safe because every action key NAMES the row it will act on
+  ("unload lmstudio/qwen3-4b?"), so the target is stated, never guessed.
+
+Fixtures for all of the above are pinned from a LIVE `/host/state`
+capture (allocated 0, 98.5 GB of accelerator heap in use across all
+processes, a `source: provider_server` / `lockable: true` sweep row with
+only an estimate), not written to match the parser. The breakdown's keys,
+order and byte values are pinned against the shared cross-surface payload
+(89.99 GB of itemized weights beside a 1.04 GB accelerator heap — the
+GGUF case the old remainder got wrong).
+
+### Fixed (adversarial review of the 2026-08-28 work)
+
+- **A stale probe's progress no longer lands on the session you just
+  picked.** `probe_attach`'s restoring/progress posts were unguarded
+  while the fold-swap post beside them was session-guarded. Picking a
+  second session inside the first restore window — the exact window
+  this feature exists for — rendered probe A's counters on session B's
+  loading screen (*"restored 4 of 9 prior turn(s)"* for a restore that
+  had not begun), then let A's clear drop `restoring` while B's fold
+  was still Info-only, handing the pane back to the splash's *"describe
+  a task below"* over a session with history in flight. Every post in
+  the probe now carries the same guard the fold swap always had.
+- **Right-clicking a streaming, scrolled transcript no longer opens the
+  wrong item's menu.** The handler sat outside the `Scroll` and added
+  `offset_y` to the row — but `Scroll` bottom-anchors its content while
+  the tail is pinned and syncs that signal only a turn later ("the pin
+  IS the position"), so during a live run the offset lagged one append
+  and the menu resolved an earlier item, then copied it under a notice
+  that sounded correct. The handler moved INSIDE the Scroll and now
+  uses the engine's own formula (`pos.y - rect.y`, no offset), immune
+  to the lag by construction.
+- **The loading screen no longer paints over an entity conversation.**
+  Its pane branch ran before any focus check, so opening an entity lane
+  during a restore (Alt+E, `/focus`, `@name` — none consult
+  `restoring`) showed *"restoring session <agent-session>…"* above that
+  entity's own composer placeholder. Gated to the agent lane.
+- **A copy notice can no longer claim a write that did not happen.**
+  The engine's `copy_to_clipboard` refuses all-whitespace text, but the
+  menu gated on `is_empty()` — so a `"\n"` stdout (`mkdir -p out`,
+  `touch x`) offered an enabled "Copy result", dropped the write, and
+  announced *"copied result (1 chars)"*. Every offer and payload now
+  gates on `trim().is_empty()`, and each row's enablement mirrors its
+  payload's gate, so an enabled row can never resolve to nothing.
+- **A right-click with nothing to offer says so.** An all-disabled menu
+  makes `ContextMenu::open` return `None`; the press was consumed and
+  nothing appeared, which reads as a flaky menu since the same card
+  works once its result lands. Inert cards and a refused open both
+  notify now.
+- **Link URIs are charset-gated at the source.** `register_link`
+  interns a URI verbatim and the presenter writes its bytes between
+  `ESC]8;;` and `ESC\`, so a control character inside a token escapes
+  the sequence (measured: an embedded `ESC]0;…BEL` sets the window
+  title). Both call sites happened to launder text through
+  `text::wrap`/`truncate_ellipsis` first, but that is the engine's
+  incidental behavior, not this module's contract — tokens carrying a
+  control character are now refused outright.
+- **Off-screen rows are culled before drawing.** A custom block gets its
+  FULL rect and the canvas clips, so an uncapped `/details` result body
+  drew thousands of invisible rows — and `linkify` stats every relative
+  path token it is handed. Measured at 10.35 ms per repaint on a
+  3000-line path-dense body, against one repaint per streamed ledger
+  record. Cost now tracks the viewport, not the body.
+- **Three tests that could not fail were rewritten.** The path-guard
+  test probed relative paths, which `file_uri` refuses anyway for want
+  of a root, so it passed with the guards deleted (it uses absolute
+  paths now); the scan-band test asserted a wrap that holds for *every*
+  integer step, pinning nothing about the constant it named (it now
+  pins that the band advances and crosses the bar); and the right-click
+  test used a fold that fit the pane, so the offset term was never
+  exercised — which is how the defect above survived the suite (it
+  scrolls now). Each fix was verified by reintroducing the defect and
+  watching the test go red.
+
+### Added (clickable paths/URLs + right-click menus, 2026-08-28)
+
+- **File paths and URLs in tool cards are OSC-8 hyperlinks**
+  (`ui::linkify`). The folded row's args hint and the details card's
+  argument/result bodies attach `file://` and `http(s)://` targets to
+  their path/URL tokens — same cells, same inks, zero added visual
+  noise; the affordance is the terminal's own (Cmd/Ctrl-click,
+  hover-underline where supported; terminals without OSC 8 ignore the
+  bytes). Honesty rules: a URL links as itself, an absolute path links
+  verbatim, a RELATIVE path links only when it exists under the
+  workspace root (a gateway-side path must not become a local link to
+  nothing), and `path.rs:12:5` line anchors stay in the text but leave
+  the URI. Prose bodies (user text, thinking, notices) deliberately
+  stay plain.
+- **Right-click on a transcript item opens its action menu**
+  (`ui::item_menu`, the engine's `ContextMenu`): copy a message/answer/
+  thinking/notice, quote a message or answer into the composer
+  (replaces the draft — the seed's documented contract), and on tool
+  cards copy arguments, result, error (only when one exists), or the
+  first path in the args (shown as the row's hint). Disabled rows say
+  "nothing here" (empty result); a press on the gap between items opens
+  nothing. Copies go out as OSC 52 with a notice naming what left;
+  arrows/Enter/Escape work inside the open menu. Agent lane only for
+  now; `/sessions` rows need a Picker-level hook (follow-up).
+
+### Changed (engine 0.6.0, 2026-08-28)
+
+- **AbstractTUI 0.3.6 → 0.6.0** (crossing the 0.4.0 and 0.5.0 majors).
+  One source break reached this crate: `gfx::ImageFormat` gained `Gif`
+  and went `#[non_exhaustive]` — `/attach preview` now DRAWS GIFs (an
+  animated GIF previews as its first frame) instead of refusing them by
+  name, unknown future formats route to the decoder with a generic
+  label, and `named_binary` dropped its now-unreachable GIF row (its
+  wording names the real decoder family: PNG, JPEG and GIF). Inherited
+  without wiring: scrollbar drags no longer start text selections in
+  select mode, `Feed` reports its true height on the first frame (the
+  Scroll remount/offset clamp class), grounds stay distinct on
+  256-color terminals, wrap/grid layout honors margins, and hover tips
+  gained keyboard reachability for any future adoption. Tests moved
+  with the truth: GIF left the "formats the engine cannot draw" pins
+  and gained a drawable-family pin (decode + verbatim decoder errors).
+
+### Added (session-loading screen, 2026-08-28)
+
+- **An animated loading screen for session restores** (`ui::loading`).
+  Picking a session in `/sessions` (and a boot `--resume`) used to render
+  the idle splash — "describe a task below" over a session whose history
+  was mid-flight, with one faint strip line as the only truth — for the
+  whole restore window (up to ~21 HTTP bundle fetches). The transcript
+  pane is now the waiting surface while `restoring` is armed: the brand
+  lockup with its sheen, the engine's braille `Spinner`, and a progress
+  bar that SWEEPS (soft sheen band — honest motion, no fake percentage)
+  while the run list is in flight, then turns determinate on the
+  worker's own counters — the engine's `Progress` widget filling per
+  fetched turn bundle, captioned `restored N of M prior turn(s) in full
+  detail`. The screen arms on the UI thread at the pick gesture (never
+  waiting for the worker to reach the probe), hands off directly to the
+  restored transcript, and shares the splash ticker's one interval (the
+  zero-wakeup idle rule keeps a single predicate). The strip line stays
+  and now repeats the counter (`turn N of M`) so the fact survives pane
+  heights where the captions clip. New store signal
+  `restore_progress: Option<(fetched, total)>`, posted by
+  `probe_attach` before the first bundle fetch and after every one
+  (failed fetches advance it too — their errors are carded); cleared on
+  every probe exit path, on session reset, and by the worker-death
+  recovery.
 
 ## [0.5.0] - 2026-08-27
 

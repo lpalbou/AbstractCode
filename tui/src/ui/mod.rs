@@ -1716,7 +1716,7 @@ pub fn cycle_permissions(store: Store, ctx: &UiCtx) {
 /// `_limits.max_tokens`. Source honesty: the label everywhere says
 /// "declared" — this is the operator's statement, never a client-shipped
 /// capability table (the Python predecessor's own first resolution rung
-/// is exactly this, react_shell.py:1352-1381).
+/// is exactly this).
 /// `/iterations [N|off]` — the iteration budget this client REQUESTS.
 ///
 /// The bare form answers the question the failure card raises and cannot

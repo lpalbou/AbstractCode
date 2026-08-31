@@ -28,8 +28,8 @@ abstractcode login --gateway http://127.0.0.1:8080 --token <your-token>
 
 `login` takes the URL and token from flags or environment (it never prompts),
 verifies them against `GET /api/gateway/ping`, and only then saves them to
-`~/.abstractcode/gateway.json` (mode 0600 on unix). That store is shared with
-the Python `abstractcode` CLI — logging in with either client covers both. Environment variables (`ABSTRACTCODE_GATEWAY_URL`,
+`~/.abstractcode/gateway.json` (mode 0600 on unix).
+Environment variables (`ABSTRACTCODE_GATEWAY_URL`,
 `ABSTRACTCODE_GATEWAY_TOKEN`, or the `ABSTRACTGATEWAY_*` equivalents)
 override the store when set.
 

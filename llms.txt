@@ -8,8 +8,7 @@
 
 This file follows the `llms.txt` manifest format (curated links). Use `llms.txt`
 when you can fetch the linked files, and `llms-full.txt` when you need one
-offline snapshot of the documentation. Regenerate the latter with
-`python scripts/generate_llms_full.py`. Format reference: https://llmstxt.org/
+offline snapshot of the documentation. Format reference: https://llmstxt.org/
 
 Ground rules for reading this repository:
 
@@ -45,6 +44,7 @@ Ground rules for reading this repository:
 - [Terminal API](tui/docs/api.md): command-line surface and library entry points
 - [Terminal architecture](tui/docs/architecture.md): how the client is built on AbstractTUI
 - [Terminal troubleshooting](tui/docs/troubleshooting.md): terminal, rendering, and connection problems
+- [Terminal FAQ](tui/docs/faq.md): durability, workspaces, tokens, steering semantics
 
 ## Browser client
 
@@ -58,10 +58,7 @@ Ground rules for reading this repository:
 - [Changelog](CHANGELOG.md): user-visible changes and migration notes
 - [Contributing](CONTRIBUTING.md): toolchains, tests, and the release tag scheme
 - [Security](SECURITY.md): how to report a vulnerability
+- [Code of conduct](CODE_OF_CONDUCT.md): contributor behavior expectations
 - [Acknowledgements](ACKNOWLEDGEMENTS.md): dependencies and upstream lineage
 - [License](LICENSE): MIT
 
-## Optional
-
-- [Terminal design notes](tui/docs/design/): design records for the terminal client
-- [Terminal roadmap](tui/docs/roadmap/): planned work

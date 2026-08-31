@@ -33,8 +33,6 @@ Accepted payload shapes:
 - `-1`: sticky (do not auto-clear)
 - `> 0`: auto-clear after that many seconds (best-effort)
 
-Evidence:
-
 ### 2) `abstract.message`
 
 Purpose: show a notification/message block in the host.
@@ -44,8 +42,6 @@ Accepted payload shapes:
 - object:
   - required: `text`
   - optional: `level` (`info|success|warning|error`), `title`, `meta` (object)
-
-Evidence:
 
 ### 3) `abstract.tool_execution`
 

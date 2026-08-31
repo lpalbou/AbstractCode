@@ -1,13 +1,10 @@
 # FAQ
 
-**How is this different from the Python `abstractcode`?**
-The Python CLI runs the agent loop in-process (AbstractAgent + AbstractRuntime
-+ AbstractCore) and uses the gateway as its control plane. This client is a
-pure thin client: the agent executes ON the gateway, and the TUI renders the
-durable run ledger. Same workflows, same approvals, same steering — different
-execution home. If you want local tools and local execution, use the Python
-CLI; if the gateway is your execution home (shared runs, durable transcript,
-attach from anywhere), use this.
+**How is this different from the browser client?**
+Only the surface. Both are thin clients: the agent executes on the gateway and
+each renders the same durable run ledger. They submit the same durable
+commands, so a session is portable — start a task here, resolve its approval
+prompt in the browser, or the reverse.
 
 **Do I lose my run if the terminal dies?**
 No. Runs are durable gateway objects. Relaunch with the same session and you
@@ -105,7 +102,7 @@ the open (truecolor → 256 → 16; images → unicode mosaic). Check what your
 terminal offers with `abstractcode --caps`.
 
 **Where are my settings?**
-Connection: `~/.abstractcode/gateway.json` (shared with the Python CLI).
+Connection: `~/.abstractcode/gateway.json`.
 Preferences (theme, workflow, route, session, tool/skill selections, recent
 sessions): `~/.abstractcode/prefs.json`.
 

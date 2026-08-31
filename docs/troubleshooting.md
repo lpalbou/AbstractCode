@@ -89,10 +89,6 @@ hands selection to the terminal itself instead.
 **`cargo install abstractcode` fails on an old toolchain.**
 The crate declares Rust 1.87 as its minimum. Run `rustup update`.
 
-**`cargo package` refuses: uncommitted changes.**
-Cargo will not package a dirty tree. Commit or stash first. If it names a file
-you never edited, it is likely a build artifact that should not be tracked.
-
 **The browser client fails to build after a dependency change.**
 Reinstall from the lockfile rather than the manifest:
 

@@ -12,13 +12,12 @@ Related:
 - iPhone notes: [`docs/deployment-iphone.md`](deployment-iphone.md)
 - Architecture: [`docs/architecture.md`](architecture.md)
 
-## Status (important for external users)
+## Shared components
 
-Good to know: the web app currently consumes shared UI components via Vite path aliases to a sibling `abstractuic/` repo:
-- configured in `web/vite.config.ts`
-- imports used in `web/src/ui/app.tsx` and `web/src/main.tsx`
-
-This repo includes a prebuilt `web/dist/` for convenience. If you need to modify/rebuild the web app, see the next section.
+The interface is built from the shared AbstractUIC component packages —
+`@abstractframework/ui-kit`, `panel-chat`, `monitor-flow` and `monitor-gpu` —
+installed from npm like any other dependency and declared in
+`web/package.json`. Building requires nothing but this directory.
 
 ## Voice (optional)
 
@@ -31,15 +30,12 @@ Push-to-talk (record → upload → transcribe):
 Text-to-speech:
 - TTS: `POST /api/gateway/runs/{run_id}/voice/tts`
 
-Evidence:
-- Client methods: `web/src/lib/gateway_client.ts` (`attachments_upload`, `audio_transcribe`, `voice_tts`)
-- UI wiring: `web/src/ui/app.tsx` (`transcribe_voice_blob`, `toggle_tts`)
 
-## Local development (requires the sibling UI repo)
+## Local development
 
 ```bash
 cd web
-npm install
+npm ci
 npm run dev
 ```
 

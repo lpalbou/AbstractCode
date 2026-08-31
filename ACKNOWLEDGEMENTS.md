@@ -36,12 +36,6 @@ Declared in `web/package.json`:
 - `marked` — Markdown rendering
 - `dompurify` — HTML sanitization for rendered Markdown
 
-Local UI packages (via `web/vite.config.ts` aliases):
-
-- `@abstractuic/ui-kit` — shared theme/tokens and UI primitives
-- `@abstractuic/panel-chat` — chat message rendering
-- `@abstractuic/monitor-flow` — run/trace viewer (Context inspector)
-
 ## Development & packaging
 
 - Terminal client: `cargo` with `rustfmt` and `clippy`
@@ -55,7 +49,6 @@ AbstractCode is part of the Abstract* stack and relies on:
 - [AbstractCore](https://github.com/lpalbou/abstractcore)
 - [AbstractRuntime](https://github.com/lpalbou/abstractruntime)
 - **AbstractAgent**
-- (optional) **AbstractFlow** for local VisualFlow runs (`abstractcode[flow]`)
-- **AbstractUIC** components in the Web UI (via `../../abstractuic/*`)
+- [AbstractUIC](https://github.com/lpalbou/abstractuic) components in the browser client
 
 Thank you to all contributors and the broader open-source community.

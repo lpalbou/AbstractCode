@@ -34,27 +34,37 @@ the [AbstractGateway](https://github.com/lpalbou/abstractgateway) documentation.
 ## The `abstractcode.agent.v1` interface
 
 A workflow usable as an AbstractCode agent declares the interface
-`abstractcode.agent.v1`. The gateway knows it as its basic-agent interface and
-the runtime's VisualFlow compiler enforces it, so the pins below are the
-contract a bundle must satisfy:
+`abstractcode.agent.v1`. Its boundary pins are:
 
 | Node | Direction | Pins |
 |---|---|---|
-| On Flow Start | outputs | `provider`, `model`, `prompt`, `tools` |
+| On Flow Start | outputs | `provider`, `model`, `prompt` |
 | On Flow End | inputs | `response`, `success`, `meta` |
+
+**These pins are declarative, not enforced.** The gateway checks only that a
+bundle declares the interface string; nothing validates the pins, so a bundle
+that declares `abstractcode.agent.v1` without them is accepted and then fails
+at run time. Treat the table as the contract you are expected to honour rather
+than one the platform will hold you to.
 
 ### What a run receives
 
-At start, a run is given at least:
+A run is given:
 
-| Variable | Meaning |
+| Variable | Sent |
 |---|---|
-| `vars.prompt` | the task text |
-| `vars.provider`, `vars.model` | resolved provider and model for the run |
-| `vars.tools` | the session tool allowlist, empty when unset |
+| `vars.prompt` | always — the task text |
+| `vars.provider`, `vars.model` | only when explicitly overridden; otherwise the gateway's defaults apply and the keys are absent |
+| `vars.tools` | only when a tool allowlist is set for the session |
+| `vars.workspace_root` | when a workspace is in play |
 | `vars.context.messages` | conversation history |
 | `vars.context.attachments` | attachment references, when files were attached |
 | `vars._limits` | host limits such as maximum iterations and tokens |
+| `vars._runtime` | run directives — reasoning effort, review mode, tool policy, prompt caching |
+
+Absence is meaningful here: an omitted `provider` means "use server truth", not
+"use nothing". A workflow that reads these should treat a missing key as
+"unset" rather than substituting its own default.
 
 ### What a run returns
 

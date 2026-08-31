@@ -20,7 +20,7 @@
 
 - [README](README.md): The pitch, a rendered-screen sketch, install,
   quickstart, the workspace-policy note, and how this client relates to the
-  Python `abstractcode` CLI.
+  browser client.
 - [Getting started](docs/getting-started.md): Install to first run —
   `login`, `doctor`, the first approval, steering, sessions, workflows,
   workspaces, themes, working with entities, approval tiers, and headless

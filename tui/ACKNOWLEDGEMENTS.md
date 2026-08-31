@@ -16,7 +16,7 @@ projects.
 - [AbstractGateway](https://github.com/lpalbou/abstractgateway) — the control
   plane this client speaks to: durable runs, workflow catalog, tool
   execution, session history.
-- [abstractcode](https://github.com/lpalbou/abstractcode) (Python) — the
+- [abstractcode](https://github.com/lpalbou/abstractcode) — the
   original AbstractCode TUI whose gateway thin-client contracts (web client
   and CLI) define the protocol this port follows.
 

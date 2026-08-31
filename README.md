@@ -31,7 +31,7 @@ You need a reachable AbstractGateway. To run one locally:
 
 ```bash
 pip install abstractgateway
-abstractgateway serve            # defaults to http://127.0.0.1:8080
+abstractgateway serve            # binds 0.0.0.0:8080; reach it at http://127.0.0.1:8080
 ```
 
 Then start whichever client you prefer:
@@ -42,7 +42,7 @@ cargo install abstractcode
 abstractcode                     # or: abstractcode doctor, to check the connection
 
 # Browser
-npx @abstractframework/code      # serves on http://127.0.0.1:3002
+npx @abstractframework/code      # binds 0.0.0.0:3002; open http://127.0.0.1:3002
 ```
 
 `abstractcode doctor` diagnoses the gateway connection and prints which

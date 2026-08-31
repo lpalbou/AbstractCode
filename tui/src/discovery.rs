@@ -248,7 +248,7 @@ pub fn resolve_bundle_only(workflows: &[Workflow], bundle_id: &str) -> Option<Wo
 ///
 /// memact does not: `MemActAgent` deprecation-warns on `review_mode` /
 /// `review_max_rounds` (`abstractagent/agents/memact.py:88-96`) and the Python
-/// client withholds them for that agent kind (`react_shell.py:775-779`).
+/// client withholds them for that agent kind.
 /// Match that rather than making the server warn about a posture it ignores.
 pub fn workflow_is_review_capable(bundle_id: &str) -> bool {
     !bundle_id.starts_with("memact")

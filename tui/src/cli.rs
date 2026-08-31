@@ -4,8 +4,7 @@ use crate::config;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Verifier rounds when review is on — 3, the value the Python
-/// `abstractcode` client has always used (`react_shell.py:252`).
+/// Verifier rounds when review is on.
 pub const DEFAULT_REVIEW_ROUNDS: u32 = 3;
 
 /// `#[WARNING:TIMEOUT]` — `exec`'s wall-clock safeguard, 7200s (2h).
@@ -24,21 +23,14 @@ pub const DEFAULT_EXEC_TIMEOUT_SECS: u64 = 7200;
 
 /// Verifier-before-conclude is ON unless the operator says otherwise.
 ///
-/// Aimed at the premature-completion gap, with a precise parity claim —
-/// the loose version of it does not survive reading the Python source.
-///
-/// abstractcode has TWO agent paths. Its NATIVE loops (`--agent react`,
-/// `--agent codeact`) are constructed with `review_mode=True,
-/// review_max_rounds=3` (`react_shell.py:251-252`, `agents/react.py:189-194`).
-/// Its `WorkflowAgent` path — the one that runs gateway BUNDLES, i.e. the
-/// closest analogue to this whole client — passes no review kwargs at all
-/// (`workflow_agent.py:1192-1200`). So this is parity with abstractcode's
-/// native-loop default, EXTENDED to the bundles this client runs; it is not a
-/// behaviour abstractcode exhibits when it runs the same bundle.
+/// Aimed at premature completion: before a tool-call-free response is
+/// accepted as final, a strict verifier re-reads the transcript and can force
+/// more tool calls. On by default because a confidently wrong "done" costs
+/// the user more than the extra call costs.
 ///
 /// Costs one extra verifier LLM call per candidate final answer. Reach is
 /// limited: see `run_input::StartOpts::review_mode`. Not sent for memact,
-/// which has no review nodes (matching `react_shell.py:775-779`).
+/// which has no review nodes.
 pub const DEFAULT_REVIEW_MODE: bool = true;
 
 #[derive(Debug, Clone, Default)]
@@ -60,12 +52,12 @@ pub struct Args {
     pub no_workspace: bool,
     /// `--no-project-context` — do NOT inject the workspace's `AGENTS.md`
     /// into the agent's system prompt. Injection is the default (parity with
-    /// the Python `abstractcode` client); this opts a scripted run out when
+    /// on by default); this opts a scripted run out when
     /// it needs a byte-exact prompt independent of the repo's files.
     pub no_project_context: bool,
     /// `--review` / `--no-review` — verifier-before-conclude posture
     /// (`_runtime.review_mode`). `None` = the client default (ON, matching
-    /// the Python `abstractcode` client); `Some(false)` pins it off.
+    /// on by default); `Some(false)` pins it off.
     pub review: Option<bool>,
     /// `--review-rounds <N>` — verifier round budget (default 3, as
     /// abstractcode uses). 0 leaves the loop's own default.
@@ -223,7 +215,7 @@ ENVIRONMENT:
   ABSTRACTTUI_THEME                      start theme
 
 `login` takes credentials from flags/env (it never prompts) and persists them
-to the store shared with the Python CLI: ~/.abstractcode/gateway.json.
+to the login store: ~/.abstractcode/gateway.json.
 "#
     )
 }
@@ -231,7 +223,7 @@ to the store shared with the Python CLI: ~/.abstractcode/gateway.json.
 pub fn parse(argv: &[String]) -> Result<Args, String> {
     let mut args = Args {
         max_iterations: 0,
-        // Parity with abstractcode's ReAct default (`react_shell.py:252`).
+        // The verifier round budget; see DEFAULT_REVIEW_ROUNDS.
         review_rounds: DEFAULT_REVIEW_ROUNDS,
         replay_turns: crate::runner::REHYDRATE_DEFAULT_TURNS,
         // #[WARNING:TIMEOUT] exec wall-clock safeguard. ADR-0027 §2 forbids

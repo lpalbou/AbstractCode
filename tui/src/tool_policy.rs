@@ -39,7 +39,7 @@
 //!   an accepted tier of `all` (the explicit eyes-open posture).
 //! - `fetch_url` classifies as `all` (network egress with model-controlled
 //!   method/body — `remote_write_capable` in core's inventory). NOTE: the
-//!   Python CLI auto-runs it under an operator ruling about core's
+//!   it auto-runs under an operator ruling about core's
 //!   in-tool base64 URL screen; here the tool executes on the GATEWAY,
 //!   so this client keeps the conservative tier until the gateway serves
 //!   its own classification (the #FALLBACK above).

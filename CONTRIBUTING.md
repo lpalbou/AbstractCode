@@ -32,6 +32,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 All three run in CI and must pass. `cargo package --manifest-path tui/Cargo.toml --list`
 shows exactly what a release would publish.
 
+`cargo package` refuses to build from a dirty tree. If it names a file you did
+not edit, it is a build artifact that should not be tracked — untrack it and
+add it to `.gitignore` rather than committing it.
+
 ### Browser client (`web/`)
 
 Requires Node.js **24**.
@@ -76,7 +80,7 @@ Security issues: please follow [`SECURITY.md`](SECURITY.md).
 
 ## Web app contributions
 
-The web app lives in `web/`. Local development currently depends on shared UI packages via Vite path aliases.
+The web app lives in `web/`. Its shared UI components install from npm as ordinary dependencies, so it builds from that directory alone.
 
 See:
 - [`docs/web.md`](docs/web.md)
