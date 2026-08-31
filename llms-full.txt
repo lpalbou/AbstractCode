@@ -2592,7 +2592,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The browser client's bundled HTML sanitizer is updated to DOMPurify 3.4.14,
   which carries fixes for mutation-XSS via re-contextualization and for an
   `IN_PLACE` hook leaving a detached subtree executable. The dependency is no
-  longer pinned to an exact version, so it can take future patches.
+  longer pinned to an exact version, so it can take future patches, and an
+  override collapses the copy nested inside `monaco-editor` onto the same
+  patched version.
+- Build-toolchain dependencies are updated; `npm audit` reports no advisories
+  at any severity. These never shipped to users — the published package
+  contains only a bundle and a server on Node builtins — but they run on
+  contributor machines and in CI.
 
 ### Changed
 
