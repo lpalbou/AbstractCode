@@ -8,9 +8,11 @@ export type Settings = {
   gateway_remember: boolean;
   gateway_was_connected: boolean;
 
-  theme: string;
-  font_scale: string;
-  header_density: string;
+  // Appearance (theme/font_scale/header_density) is NOT part of this object:
+  // it is owned by the kit's useAppearanceSettings("abstractcode") under
+  // af_appearance_abstractcode_v1 (tier-1 theme compliance). This composite
+  // key is the hook's legacyKey — old stored blobs carry the three fields and
+  // migrate forward exactly once.
 
   client_id: string;
 
@@ -131,10 +133,6 @@ function _default_settings(): Settings {
     gateway_remember: true,
     gateway_was_connected: false,
 
-    theme: "dark",
-    font_scale: "md",
-    header_density: "comfortable",
-
     client_id: "abstractcode_web",
 
     provider: "",
@@ -174,9 +172,6 @@ export function load_settings(): Settings {
   out.gateway_auth_mode = (out as any).gateway_auth_mode === "direct" ? "direct" : "session";
   out.gateway_remember = (out as any).gateway_remember === false ? false : true;
   out.gateway_was_connected = Boolean((out as any).gateway_was_connected);
-  out.theme = String(out.theme || base.theme);
-  out.font_scale = String(out.font_scale || base.font_scale);
-  out.header_density = String(out.header_density || base.header_density);
   out.client_id = String(out.client_id || base.client_id);
   out.provider = String(out.provider || "");
   out.model = String(out.model || "");

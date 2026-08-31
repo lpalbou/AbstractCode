@@ -53,12 +53,6 @@ jobs:
         with:
           path: abstractcode
 
-      - name: Check out AbstractUIC
-        uses: actions/checkout@v4
-        with:
-          repository: lpalbou/AbstractUIC
-          path: abstractuic
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
