@@ -23,9 +23,7 @@ use abstracttui::testing::CaptureTerm;
 
 use abstractcode::config::Prefs;
 use abstractcode::runner::Cmd;
-use abstractcode::store::{
-    Conn, GpuMeter, GpuSample, McpServer, SessionTotals, Store, Workflow,
-};
+use abstractcode::store::{Conn, GpuMeter, GpuSample, McpServer, SessionTotals, Store, Workflow};
 use abstractcode::ui::{self, UiCtx};
 
 struct SizedHarness {

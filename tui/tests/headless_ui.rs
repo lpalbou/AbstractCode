@@ -4345,10 +4345,7 @@ fn workspace_path_entry_normalizes_and_refuses_relative() {
 /// posts on the UI thread, in the SAME order (outcome BEFORE phase: each
 /// signal write flushes effects synchronously, and the drain effect keys
 /// on "phase Idle" — the ordering contract documented in runner.rs).
-fn simulate_terminal(
-    store: abstractcode::store::Store,
-    outcome: abstractcode::store::RunOutcome,
-) {
+fn simulate_terminal(store: abstractcode::store::Store, outcome: abstractcode::store::RunOutcome) {
     store.last_outcome.set(outcome);
     store.run_started.set(None);
     store.phase.set(Phase::Idle);
@@ -4796,9 +4793,7 @@ fn queue_client_refusal_without_workflow_keeps_the_item() {
     let mut h = harness();
     h.turn();
     let store = h.store;
-    store
-        .workflow
-        .set(abstractcode::store::Workflow::default());
+    store.workflow.set(abstractcode::store::Workflow::default());
     store.queue.update(|q| {
         q.push(abstractcode::store::QueuedPrompt {
             id: 1,
@@ -6721,11 +6716,9 @@ fn gpu_toggle_round_trip_and_footer_render() {
     let screen = h.turn();
     assert!(screen.contains("gpu 42%"), "footer meter:\n{screen}");
     // Unsupported is honest: the segment leaves the bar entirely.
-    h.store
-        .gpu
-        .set(abstractcode::store::GpuMeter::Unsupported(
-            "host reports no GPU metrics".into(),
-        ));
+    h.store.gpu.set(abstractcode::store::GpuMeter::Unsupported(
+        "host reports no GPU metrics".into(),
+    ));
     let screen = h.turn();
     assert!(!screen.contains("gpu 42%"), "no stale meter:\n{screen}");
     // Toggle off from a non-Off state: Off + GpuDisable.
@@ -8999,11 +8992,7 @@ fn merge_cached_refs_and_session_predicates_hold_custody() {
     h.store
         .paste_undo
         .set(Some(("raw".into(), vec!["/f/a".into()])));
-    abstractcode::runner::clear_sent_attachments(
-        &h.store,
-        &h.ctx.tx.clone(),
-        &[live[0].clone()],
-    );
+    abstractcode::runner::clear_sent_attachments(&h.store, &h.ctx.tx.clone(), &[live[0].clone()]);
     let after = h.store.pending_attachments.get_untracked();
     assert_eq!(after.len(), 1);
     assert_eq!(after[0].path, "/f/b", "only the sent chip left");

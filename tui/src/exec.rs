@@ -1063,6 +1063,104 @@ fn print_new(fold: &Fold, printed: &mut usize, tool_state: &mut HashMap<usize, T
     }
 }
 
+/// One-line tool-result tail for the headless stream.
+///
+/// ADR-0026: display bound, but NEVER a silent one. This stream is captured by
+/// the bench harnesses and piped into orchestrating agents, so a cut that
+/// leaves no trace reads downstream as "the tool returned exactly this". The
+/// marker names what was dropped; the full result stays in the gateway ledger.
+fn preview_suffix(preview: &str) -> String {
+    let first = preview.lines().next().unwrap_or("").trim();
+    if first.is_empty() {
+        return String::new();
+    }
+    let total = preview.chars().count();
+    let more_lines = preview.lines().count() > 1;
+    let capped: String = first.chars().take(100).collect();
+    if capped.chars().count() < first.chars().count() || more_lines {
+        //[WARNING:TRUNCATION] headless one-line tool preview; full result in the ledger
+        format!(" — {capped}… [#TRUNCATION: first line, 100 chars of {total}; full result in the run ledger]")
+    } else {
+        format!(" — {capped}")
+    }
+}
+
+fn print_item(item: &Item) {
+    match item {
+        Item::User { text } => println!("❯ {text}"),
+        Item::Steer { text } => println!("↪ steer: {text}"),
+        Item::Thinking {
+            iteration,
+            content,
+            reasoning,
+            ..
+        } => {
+            let body = if content.trim().is_empty() {
+                reasoning
+            } else {
+                content
+            };
+            let first: String = body.lines().take(3).collect::<Vec<_>>().join(" | ");
+            let capped: String = first.chars().take(240).collect();
+            // ADR-0026: the cycle line is progress chrome, but a SILENT cut in a
+            // piped stream reads as the model's whole thought. Say so when it cuts.
+            if capped.chars().count() < first.chars().count() || body.lines().count() > 3 {
+                //[WARNING:TRUNCATION] headless cycle preview; full reasoning in the ledger
+                println!(
+                    "∴ cycle {iteration}: {capped}… [#TRUNCATION: first 3 lines, 240 chars of {}; full text in the run ledger]",
+                    body.chars().count()
+                );
+            } else {
+                println!("∴ cycle {iteration}: {capped}");
+            }
+        }
+        Item::Tool {
+            name,
+            args_preview,
+            status,
+            ..
+        } => {
+            let glyph = match status {
+                ToolStatus::AwaitingApproval => "?",
+                ToolStatus::Running => "»",
+                ToolStatus::Ok => "✓",
+                ToolStatus::Failed => "✗",
+                ToolStatus::Denied => "⊘",
+                ToolStatus::Interrupted => "◌",
+            };
+            println!("{glyph} {name} {args_preview}");
+        }
+        Item::Assistant { text, final_answer } => {
+            if *final_answer {
+                println!("\n━━━ answer ━━━\n{text}\n");
+            } else {
+                println!("✦ {text}");
+            }
+        }
+        Item::Image {
+            artifact_id, label, ..
+        } => println!("▦ image: {label} ({artifact_id})"),
+        Item::Info { text } => println!("· {text}"),
+        Item::Error { text } => println!("✗ {text}"),
+        // Entity-lane probe cards (worker-2 lane): headless prints the
+        // title + first body line, nothing interactive.
+        Item::Probe { title, body } => {
+            let first = body.lines().next().unwrap_or("").trim();
+            if first.is_empty() {
+                println!("◈ {title}");
+            } else if body.lines().count() > 1 {
+                //[WARNING:TRUNCATION] headless probe card shows the first body line only
+                println!(
+                    "◈ {title} — {first} [#TRUNCATION: first of {} lines; full probe body in the run ledger]",
+                    body.lines().count()
+                );
+            } else {
+                println!("◈ {title} — {first}");
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{resolve_headless_ask, stopped_head, ASK_REFUSAL};
@@ -1165,103 +1263,5 @@ mod tests {
             log.contains("refusal"),
             "ordinary asks must still refuse headlessly: {log}"
         );
-    }
-}
-
-/// One-line tool-result tail for the headless stream.
-///
-/// ADR-0026: display bound, but NEVER a silent one. This stream is captured by
-/// the bench harnesses and piped into orchestrating agents, so a cut that
-/// leaves no trace reads downstream as "the tool returned exactly this". The
-/// marker names what was dropped; the full result stays in the gateway ledger.
-fn preview_suffix(preview: &str) -> String {
-    let first = preview.lines().next().unwrap_or("").trim();
-    if first.is_empty() {
-        return String::new();
-    }
-    let total = preview.chars().count();
-    let more_lines = preview.lines().count() > 1;
-    let capped: String = first.chars().take(100).collect();
-    if capped.chars().count() < first.chars().count() || more_lines {
-        //[WARNING:TRUNCATION] headless one-line tool preview; full result in the ledger
-        format!(" — {capped}… [#TRUNCATION: first line, 100 chars of {total}; full result in the run ledger]")
-    } else {
-        format!(" — {capped}")
-    }
-}
-
-fn print_item(item: &Item) {
-    match item {
-        Item::User { text } => println!("❯ {text}"),
-        Item::Steer { text } => println!("↪ steer: {text}"),
-        Item::Thinking {
-            iteration,
-            content,
-            reasoning,
-            ..
-        } => {
-            let body = if content.trim().is_empty() {
-                reasoning
-            } else {
-                content
-            };
-            let first: String = body.lines().take(3).collect::<Vec<_>>().join(" | ");
-            let capped: String = first.chars().take(240).collect();
-            // ADR-0026: the cycle line is progress chrome, but a SILENT cut in a
-            // piped stream reads as the model's whole thought. Say so when it cuts.
-            if capped.chars().count() < first.chars().count() || body.lines().count() > 3 {
-                //[WARNING:TRUNCATION] headless cycle preview; full reasoning in the ledger
-                println!(
-                    "∴ cycle {iteration}: {capped}… [#TRUNCATION: first 3 lines, 240 chars of {}; full text in the run ledger]",
-                    body.chars().count()
-                );
-            } else {
-                println!("∴ cycle {iteration}: {capped}");
-            }
-        }
-        Item::Tool {
-            name,
-            args_preview,
-            status,
-            ..
-        } => {
-            let glyph = match status {
-                ToolStatus::AwaitingApproval => "?",
-                ToolStatus::Running => "»",
-                ToolStatus::Ok => "✓",
-                ToolStatus::Failed => "✗",
-                ToolStatus::Denied => "⊘",
-                ToolStatus::Interrupted => "◌",
-            };
-            println!("{glyph} {name} {args_preview}");
-        }
-        Item::Assistant { text, final_answer } => {
-            if *final_answer {
-                println!("\n━━━ answer ━━━\n{text}\n");
-            } else {
-                println!("✦ {text}");
-            }
-        }
-        Item::Image {
-            artifact_id, label, ..
-        } => println!("▦ image: {label} ({artifact_id})"),
-        Item::Info { text } => println!("· {text}"),
-        Item::Error { text } => println!("✗ {text}"),
-        // Entity-lane probe cards (worker-2 lane): headless prints the
-        // title + first body line, nothing interactive.
-        Item::Probe { title, body } => {
-            let first = body.lines().next().unwrap_or("").trim();
-            if first.is_empty() {
-                println!("◈ {title}");
-            } else if body.lines().count() > 1 {
-                //[WARNING:TRUNCATION] headless probe card shows the first body line only
-                println!(
-                    "◈ {title} — {first} [#TRUNCATION: first of {} lines; full probe body in the run ledger]",
-                    body.lines().count()
-                );
-            } else {
-                println!("◈ {title} — {first}");
-            }
-        }
     }
 }

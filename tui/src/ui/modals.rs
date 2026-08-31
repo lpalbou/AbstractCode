@@ -5042,10 +5042,12 @@ mod tests {
     /// "not on the gateway" — and truncated every surviving count.
     #[test]
     fn the_board_asks_for_enough_runs_to_cover_a_real_store() {
-        assert!(
-            super::SESSION_LIST_LIMIT >= 5000,
-            "the listing must cover a real store; 500 was the live bug"
-        );
+        const {
+            assert!(
+                super::SESSION_LIST_LIMIT >= 5000,
+                "the listing must cover a real store; 500 was the live bug"
+            )
+        };
         // And it reaches the query unclamped — no ceiling on the way.
         let p = crate::gateway::GatewayClient::session_listing_path(super::SESSION_LIST_LIMIT);
         assert!(

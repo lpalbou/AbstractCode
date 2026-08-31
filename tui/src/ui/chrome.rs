@@ -1406,14 +1406,7 @@ mod tests {
     fn header_facts_fill_rule() {
         // Full house at rest.
         assert_eq!(
-            header_facts(
-                "abstractcode",
-                "workspace_or_allowed",
-                2,
-                1,
-                true,
-                128_000
-            ),
+            header_facts("abstractcode", "workspace_or_allowed", 2, 1, true, 128_000),
             vec![
                 "⌂ abstractcode".to_string(),
                 "workspace_or_allowed".to_string(),

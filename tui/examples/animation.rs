@@ -8,9 +8,7 @@
 //! app never invents events.
 
 use abstractcode::store::Phase;
-use abstractcode::ui::animation::{
-    desk, drift, pulse, Ev, Family, Feed, Outcome, Snapshot, State,
-};
+use abstractcode::ui::animation::{desk, drift, pulse, Ev, Family, Feed, Outcome, Snapshot, State};
 use abstracttui::base::{Rect, Size};
 use abstracttui::render::{Cell, Screenshot, Surface};
 use abstracttui::theme;
@@ -124,12 +122,7 @@ fn demo_feed(span_ms: u64) -> Feed {
             let failing = (36..44).contains(&n);
             let label = files[(n % files.len() as u64) as usize].to_string();
             abstractcode::ui::animation::drift::absorb_term(&mut terms, &label, 1.0, 1.0);
-            abstractcode::ui::animation::drift::absorb_term(
-                &mut terms,
-                family.short(),
-                0.6,
-                1.0,
-            );
+            abstractcode::ui::animation::drift::absorb_term(&mut terms, family.short(), 0.6, 1.0);
             evs.push(Ev {
                 at_ms: at + 400 * (k + 1),
                 family,
