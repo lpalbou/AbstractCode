@@ -2587,6 +2587,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- The browser client's bundled HTML sanitizer is updated to DOMPurify 3.4.14,
+  which carries fixes for mutation-XSS via re-contextualization and for an
+  `IN_PLACE` hook leaving a detached subtree executable. The dependency is no
+  longer pinned to an exact version, so it can take future patches.
+
+### Changed
+
+- The published browser package declares no runtime dependencies. It ships a
+  self-contained bundle and a server that uses only Node builtins, so
+  installing it no longer downloads React, Monaco and the rest of the build
+  toolchain.
+- Release binaries ship a `SHA256SUMS` file and build provenance, verifiable
+  with `gh attestation verify`.
+
 ### Added
 
 - Terminal client written in Rust, published to crates.io as `abstractcode` and
@@ -2607,6 +2623,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `web/` builds from its own directory with no other repository present.
 - Preferences moved to `~/.abstractcode/prefs.json`, beside the existing login
   store. `ABSTRACTCODE_PREFS_FILE` overrides the location.
+- The browser client moves to 0.4.0, the first version released under the
+  `web-v<version>` tag.
 
 ### Removed
 

@@ -81,14 +81,33 @@ function package_of(specifier: string): string {
 describe("web builds from its own directory", () => {
   it("declares every shared kit package it imports", () => {
     const manifest = JSON.parse(read("package.json"));
-    const declared = new Set(Object.keys(manifest.dependencies || {}));
+    // Either map satisfies this. What matters is that the package is DECLARED,
+    // so it installs from the registry rather than resolving through a path
+    // alias into another checkout. Which map it sits in is a separate question,
+    // answered by what the published tarball needs: this package ships only
+    // `bin/` and a self-contained `dist/` bundle, so everything here is a build
+    // input and belongs in devDependencies.
+    const declared = new Set([
+      ...Object.keys(manifest.dependencies || {}),
+      ...Object.keys(manifest.devDependencies || {}),
+    ]);
 
     const imported = [...imported_kit_specifiers()].map(package_of);
     expect(imported.length).toBeGreaterThan(0); // guard against a silent no-op
 
     for (const pkg of new Set(imported)) {
-      expect(declared, `${pkg} is imported but not in package.json dependencies`).toContain(pkg);
+      expect(declared, `${pkg} is imported but declared in neither dependency map`).toContain(pkg);
     }
+  });
+
+  it("ships no runtime dependencies", () => {
+    // The published package is `bin/cli.js` (node builtins only) plus a bundled
+    // `dist/`. A runtime dependency here would make every `npx` invocation
+    // download something the program never loads — and would put anything
+    // vulnerable in it on every user's install rather than only in this repo's
+    // build.
+    const manifest = JSON.parse(read("package.json"));
+    expect(Object.keys(manifest.dependencies || {})).toEqual([]);
   });
 
   it("resolves every imported kit specifier from node_modules", async () => {

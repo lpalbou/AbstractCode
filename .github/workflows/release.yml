@@ -220,11 +220,31 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Build provenance: signs a statement that these exact bytes came from
+      # this workflow at this commit, verifiable with `gh attestation verify`.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+
+      # Someone downloading a binary from a release page has no way to tell it
+      # apart from one substituted in transit. A checksum file they can compare
+      # against, and an attestation they can verify against this repository,
+      # are the two cheap answers.
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum abstractcode-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Attest the binaries
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/abstractcode-*"
 
       - name: Upload to the release
         env:
