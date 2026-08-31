@@ -2,3 +2,15 @@ node_modules/
 dist/
 .npm_cache/
 .DS_Store
+
+# Local build/tool scratch. These were tracked once; a tracked file that a
+# dev-server rewrites on every run makes the working tree permanently dirty,
+# which (among other things) makes `cargo package` refuse to build a release
+# from this repo.
+.vite/
+.tmp_playwright/
+
+# Vite reads .env* at build time; never commit one.
+.env
+.env.*
+!.env.example
