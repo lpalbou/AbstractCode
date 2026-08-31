@@ -128,12 +128,34 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # A crates.io version is permanent, so publishing one that already exists
+      # is an error rather than a no-op. Checking first makes re-running a
+      # release, or tagging a version that was published by hand, succeed
+      # quietly instead of failing the whole run on a step that had nothing to
+      # do.
+      - name: Is this version already published?
+        id: check
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' tui/Cargo.toml | head -1)"
+          CODE="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H 'User-Agent: abstractcode-release' \
+            "https://crates.io/api/v1/crates/abstractcode/${VERSION}")"
+          if [ "$CODE" = "200" ]; then
+            echo "abstractcode ${VERSION} is already on crates.io — skipping publish"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Authenticate to crates.io
+        if: steps.check.outputs.published == 'false'
         uses: rust-lang/crates-io-auth-action@v1
         id: auth
 
       - name: Publish
-        run: cargo publish --manifest-path tui/Cargo.toml
+        if: steps.check.outputs.published == 'false'
+        run: cargo publish --manifest-path tui/Cargo.toml --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 

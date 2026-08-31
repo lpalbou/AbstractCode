@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `web/` builds from its own directory with no other repository present.
 - Preferences moved to `~/.abstractcode/prefs.json`, beside the existing login
   store. `ABSTRACTCODE_PREFS_FILE` overrides the location.
+- The browser client moves to 0.4.0, the first version released under the
+  `web-v<version>` tag.
 
 ### Removed
 
