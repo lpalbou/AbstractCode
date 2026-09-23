@@ -20,6 +20,7 @@ abstractcode --help | --version
 | `--session <ID>` | Durable session id | a fresh mint (`acode-<hex>`); `--resume`/`--continue` reopens the last one |
 | `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
 | `--reasoning <LEVEL>` | Reasoning effort: `none\|minimal\|low\|medium\|high\|xhigh\|auto` (also `--thinking`; validated at launch; works on `exec` too) | gateway default |
+| `--mtp <DEPTH\|off\|inherit>` | Native-MTP request override; an explicit depth must be honored by the execution host. Works on `exec` too | saved TUI choice, otherwise inherit; `exec` inherits unless the flag is supplied |
 | `--workflow <bundle[:flow]>` | Agent workflow | saved pick, else `basic-agent` |
 | `--provider <NAME>` | Provider override | gateway defaults |
 | `--model <NAME>` | Model override | gateway defaults |
@@ -60,6 +61,7 @@ abstractcode --help | --version
 | `/theme [id]` | Live-preview theme picker, or set directly |
 | `/workflow` | Pick the agent workflow from the gateway catalog |
 | `/model` | Pick provider + model from gateway discovery |
+| `/mtp [depth\|off\|inherit]` | Native-MTP request policy (`/speculation` alias). Bare command opens a provider/model capability-driven picker; explicit values persist locally and ride `_runtime.speculation`. Inherit omits the override; Off sends `false`; a depth sends `native_mtp` with `require_acceleration=true` |
 | `/tools` | Enable/disable gateway tools (`Space` toggles; checked set = the run's exact allowlist; untouched = workflow defaults). In-modal: `p` cycles a per-tool approval pin, `t` cycles the tier — see the modal keys below |
 | `/permissions [read\|write\|all]` | THE tool-permission surface (bare = report): batches classifying at-or-below the level auto-approve. `read` = proven read-only tools only; `write` adds workspace file mutations; `all` auto-approves everything, **including arbitrary shell and network egress** — deliberate use only. Per-tool `ask` pins and gateway-disabled tools still gate. Sticky per session (`/tools tier` remains a spelling alias) |
 | `/workspace` | Inspect + edit the filesystem scope tools may touch: root (from `--workspace`/cwd), access mode, allowed paths. Mode + paths persist and ride every run |
@@ -98,6 +100,13 @@ Anything that is not a command is a task (when idle) or steering guidance
 (while a run is active). Under **entity focus**, submitted text is that
 visit's next turn — or the held draft while a turn runs (later text
 replaces the hold; it auto-sends when the turn parks).
+
+MTP is separate from reasoning. The picker only offers depths the execution host advertises;
+unknown capabilities and head-not-ready/reload reasons remain visible. A saved unavailable
+depth is retained, not silently replaced. Typed depths are explicit requests, not a claim
+that the current backend can execute them: the host validates them and refuses unsupported
+strict requests. Neither discovery nor `/mtp` downloads a head or loads a model. Inherited
+defaults remain host-owned (fresh Core configurations use depth 2 for compatible models).
 
 ### Transcript export (`/export`)
 

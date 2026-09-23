@@ -233,6 +233,10 @@ pub enum Cmd {
         provider: String,
         model: String,
     },
+    ProbeModelExecution {
+        provider: String,
+        model: String,
+    },
     /// Pause the active run tree durably (gateway `pause` command).
     Pause {
         run_id: String,
@@ -804,6 +808,14 @@ impl Runner {
             Cmd::ProbeRunStatus { run_id } => self.probe_run_status(run_id),
             Cmd::ProbeModelReasoning { provider, model } => {
                 self.probe_model_reasoning(provider, model)
+            }
+            Cmd::ProbeModelExecution { provider, model } => {
+                let payload = self
+                    .client
+                    .model_capabilities(&provider, &model)
+                    .unwrap_or_else(|error| serde_json::json!({"error": error.to_string()}));
+                let store = self.store;
+                self.post(move || store.execution_probe.set(Some((provider, model, payload))));
             }
             Cmd::Pause { run_id } => self.pause(run_id),
             Cmd::Conclude { run_id, note } => self.conclude(run_id, note),

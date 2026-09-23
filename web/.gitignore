@@ -9,6 +9,9 @@ dist/
 # from this repo.
 .vite/
 .tmp_playwright/
+e2e/test-results/
+e2e/playwright-report/
+e2e/artifacts/
 
 # Vite reads .env* at build time; never commit one.
 .env

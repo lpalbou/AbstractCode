@@ -13,9 +13,10 @@ Run it without installing anything:
 npx @abstractframework/code      # serves on http://127.0.0.1:3002
 ```
 
-Shared UI components come from the published `@abstractframework/*` packages
-(see `package.json`), so this app builds from its own directory with no other
-checkout present.
+The interface uses AbstractUIC themes, authentication, settings, and reusable
+workflow chat. It builds without a sibling checkout: the shared
+`@abstractframework/*` components install from npm like any other dependency,
+at the ranges declared in `package.json`.
 
 Docs:
 - Web overview: [`../docs/web.md`](../docs/web.md)
@@ -30,13 +31,19 @@ npm run dev
 ```
 
 In the UI:
-- set `Gateway URL` (blank = same origin / dev proxy; e.g. `http://127.0.0.1:8081`)
-- in hosted user-auth mode, set `Gateway user` and that user's `Gateway token`
+- set `Gateway URL` (e.g. `http://127.0.0.1:8080`), or configure it on the
+  server with `ABSTRACTCODE_GATEWAY_URL`
+- set `Gateway user` and that user's `Gateway token`
 
 When a Gateway user is provided, the web server exchanges the token for a
 Gateway browser session and stores only app-scoped session cookies. The raw
-token is not persisted in browser settings. Direct bearer-token mode is kept for
-local development only.
+token is not persisted in browser settings. Vite development and the packaged
+server use the same session proxy; the browser keeps API requests same-origin.
+
+Choose an agent or registered workflow in the toolbar. Agent tasks use the
+composer; structured workflows use **Inputs**. Questions, tool approvals, and
+event waits appear in the conversation. Runs and history remain on the gateway
+when you close the browser. Unsent drafts and queued turns do not survive reload.
 
 Whether a browser may change the Gateway URL is decided by the **connection
 peer**, not by any request header: only a request arriving from loopback may

@@ -35,6 +35,7 @@ pub mod project_context;
 pub mod protocol;
 pub mod run_input;
 pub mod runner;
+pub mod speculation;
 pub mod store;
 pub mod tool_policy;
 pub mod transcript;
@@ -285,6 +286,12 @@ fn run_tui(args: &cli::Args) -> i32 {
         store.provider.set(provider.clone());
         store.model.set(model.clone());
         store.reasoning.set(reasoning.clone());
+        store.speculation.set(
+            args.mtp
+                .as_deref()
+                .and_then(|v| speculation::parse(v).ok())
+                .unwrap_or_else(|| prefs.speculation.clone()),
+        );
         // Verifier-before-conclude: `--review`/`--no-review` seeds the
         // session; `/review` retunes it. The default is ON (see
         // `cli::DEFAULT_REVIEW_MODE`).

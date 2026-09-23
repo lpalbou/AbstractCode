@@ -769,14 +769,10 @@ impl GatewayClient {
     /// over core's registry. Reads `thinking_support` + `reasoning_levels`
     /// (+ `capability_source` when core ships the provenance ask).
     pub fn model_capabilities(&self, provider: &str, model: &str) -> GwResult<Value> {
-        let name = if provider.is_empty() {
-            model.to_string()
-        } else {
-            format!("{provider}/{model}")
-        };
         self.get_json(&format!(
-            "/discovery/models/capabilities?model_name={}",
-            url_encode(&name)
+            "/discovery/models/capabilities?model_name={}&provider={}",
+            url_encode(model),
+            url_encode(provider)
         ))
     }
 

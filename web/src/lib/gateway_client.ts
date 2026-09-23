@@ -193,7 +193,7 @@ export class GatewayClient {
     return { items, next_after };
   }
 
-  async stream_ledger(run_id: string, opts: { after: number; on_step: (ev: LedgerStreamEvent) => void; signal?: AbortSignal }): Promise<void> {
+  async stream_ledger(run_id: string, opts: { after: number; on_step: (ev: LedgerStreamEvent) => void; signal?: AbortSignal; on_open?: () => void }): Promise<void> {
     const rid = String(run_id || "").trim();
     if (!rid) throw new Error("stream_ledger: run_id is required");
     const after = Number(opts?.after || 0);
@@ -206,6 +206,9 @@ export class GatewayClient {
     });
     if (!r.ok) return await _throw_http(r, "stream_ledger failed");
     if (!r.body) throw new Error("stream_ledger: response body is missing");
+    // Connection state is earned by a successful, readable SSE response; do
+    // not call this for an auth/error response or before its body is present.
+    opts.on_open?.();
 
     const reader = r.body.getReader();
     const decoder = new TextDecoder("utf-8");
@@ -275,10 +278,12 @@ export class GatewayClient {
     return await r.json();
   }
 
-  async discovery_model_capabilities(model_name: string): Promise<any> {
+  async discovery_model_capabilities(model_name: string, provider = ""): Promise<any> {
     const name = String(model_name || "").trim();
     if (!name) throw new Error("discovery_model_capabilities: model_name is required");
-    const url = _join(this._cfg.base_url, `/api/gateway/discovery/models/capabilities?model_name=${encodeURIComponent(name)}`);
+    const query = new URLSearchParams({ model_name: name });
+    if (provider.trim()) query.set("provider", provider.trim());
+    const url = _join(this._cfg.base_url, `/api/gateway/discovery/models/capabilities?${query}`);
     const r = await fetch(url, { headers: { ..._auth_headers(this._cfg.auth_token) } });
     if (!r.ok) return await _throw_http(r, "discovery_model_capabilities failed");
     return await r.json();

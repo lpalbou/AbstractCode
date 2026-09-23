@@ -27,6 +27,7 @@ pub struct StartOpts {
     /// "reasoning" is the UI word; `thinking` is the wire spelling —
     /// one vocabulary, no third name (contract v1, plan v13).
     pub reasoning: String,
+    pub speculation: Option<Value>,
     pub workspace_root: Option<String>,
     pub workspace_mode: Option<String>,
     /// Extra allowlisted root directories (`workspace_allowed_paths`) —
@@ -195,6 +196,9 @@ pub fn build_input_data(prompt: &str, opts: &StartOpts) -> Value {
     // `thinking` input pin to read it, and basic-agent has none.
     if !opts.reasoning.trim().is_empty() {
         runtime.insert("thinking".into(), json!(opts.reasoning.trim()));
+    }
+    if let Some(value) = &opts.speculation {
+        runtime.insert("speculation".into(), value.clone());
     }
     // Project instructions (AGENTS.md): APPENDED to whatever system prompt
     // the workflow bakes in, never replacing it — `system_prompt_extra` is
@@ -410,6 +414,7 @@ mod tests {
             model: "qwen3-4b".into(),
             gating_mode: "auto".into(),
             reasoning: "high".into(),
+            speculation: Some(json!(false)),
             workspace_root: Some("/tmp/proj".into()),
             workspace_mode: Some("all_except_ignored".into()),
             max_iterations: 20,
@@ -591,6 +596,7 @@ mod tests {
             max_iterations: 20,
             max_iterations_explicit: true,
             system: "be brief".into(),
+            speculation: Some(json!(false)),
             system_prompt_extra: "Project instructions: run cargo fmt.".into(),
             review_mode: Some(true),
             review_capable: true,
@@ -674,10 +680,11 @@ mod tests {
         assert_eq!(runtime["review_max_rounds"], json!(3));
         // Prompt-cache posture rides the SAME map (`--no-prompt-cache`).
         assert_eq!(runtime["prompt_cache"], json!(false));
+        assert_eq!(runtime["speculation"], json!(false));
         assert_eq!(
             runtime.len(),
-            8,
-            "exactly provider + model + thinking + system_prompt_extra + review_mode + review_max_rounds + tool_policy + prompt_cache — a new _runtime writer must extend this test"
+            9,
+            "exactly provider + model + thinking + speculation + system_prompt_extra + review_mode + review_max_rounds + tool_policy + prompt_cache — a new _runtime writer must extend this test"
         );
         // The declared window rides its own namespace, never _runtime —
         // beside the iteration budget, which must reach the resolver here or

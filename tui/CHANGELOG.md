@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-23
+
+### Added
+
+- **Native-MTP request controls.** `/mtp` (alias `/speculation`) opens a
+  capability-driven depth picker; `/mtp <depth>`, `/mtp off` and
+  `/mtp inherit` set it directly, and `--mtp` does the same for a launch or a
+  headless `exec`. Explicit Off and advertised depths persist locally.
+  Inherit omits the setting from the run request, Off is sent as `false`, and
+  an explicit depth requires native execution. Readiness and unavailable saved
+  choices are shown without loading or downloading a model.
+
+## [0.5.0] - 2026-08-31
+
 ### Added (tool-card disclosure + gateway-backed `/sessions`, 2026-08-29)
 
 - **A folded tool card now NAMES the output it is hiding, and expands in
@@ -427,8 +441,6 @@ GGUF case the old remainder got wrong).
   (failed fetches advance it too — their errors are carded); cleared on
   every probe exit path, on session reset, and by the worker-death
   recovery.
-
-## [0.5.0] - 2026-08-27
 
 ### Added (`/resources` — gateway-host memory, models + caches, 2026-08-27)
 

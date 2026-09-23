@@ -1240,6 +1240,70 @@ fn apply_reasoning(store: Store, ctx: &UiCtx, level: &str) {
 /// from the registry's default-false row for unknown local models —
 /// the worse failure); probe failed/unknown → same override shape,
 /// labeled "capability unknown".
+pub fn apply_speculation(store: Store, ctx: &UiCtx, value: Option<serde_json::Value>) {
+    store.speculation.set(value.clone());
+    let saved = value.clone();
+    crate::ui::persist_prefs(ctx, move |prefs| prefs.speculation = saved.clone());
+    store.notify(format!(
+        "MTP requested: {}",
+        crate::speculation::label(value.as_ref())
+    ));
+}
+
+fn mtp_route(store: Store) -> (String, String) {
+    let provider = store.provider.get();
+    let model = store.model.get();
+    if provider.is_empty() && model.is_empty() {
+        store.default_route.get()
+    } else {
+        (provider, model)
+    }
+}
+
+fn mtp_rows(store: Store) -> Vec<crate::speculation::Row> {
+    let probe = store.execution_probe.get();
+    let (provider, model) = mtp_route(store);
+    let payload = probe
+        .as_ref()
+        .filter(|(p, m, _)| *p == provider && *m == model)
+        .map(|(_, _, v)| v);
+    crate::speculation::rows(payload, store.speculation.get().as_ref())
+}
+
+pub fn open_mtp_stage(cx: Scope, store: Store, ctx: &UiCtx) {
+    store.execution_probe.set(None);
+    let (provider, model) = mtp_route(store);
+    if !model.is_empty() {
+        ctx.send(crate::runner::Cmd::ProbeModelExecution { provider, model });
+    }
+    let choose_ctx = ctx.clone();
+    open_picker(
+        cx,
+        ctx,
+        Picker {
+            title: "MTP depth — requested for the next run".into(),
+            labels: mtp_rows(store).into_iter().map(|r| r.label).collect(),
+            live: Some(Rc::new(move || {
+                mtp_rows(store).into_iter().map(|r| r.label).collect()
+            })),
+            start: 0,
+            size: modal_size(76, 14),
+            hint: None,
+            live_hint: None,
+            keys: Vec::new(),
+            on_mount: None,
+            on_selection: None,
+            on_choose: Box::new(move |ix| {
+                if let Some(row) = mtp_rows(store).get(ix).filter(|r| r.selectable) {
+                    apply_speculation(store, &choose_ctx, row.value.clone());
+                    choose_ctx.close_modal();
+                }
+            }),
+            on_cancel: None,
+        },
+    );
+}
+
 pub fn open_reasoning_stage(cx: Scope, store: Store, ctx: &UiCtx) {
     let provider = store.provider.get_untracked();
     let model = store.model.get_untracked();

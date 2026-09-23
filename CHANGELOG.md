@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [terminal 0.5.1 / web 0.4.2] - 2026-09-23
+
+Terminal client `abstractcode` 0.5.1 (tag `v0.5.1`) and browser client
+`@abstractframework/code` 0.4.2 (tag `web-v0.4.2`).
+
+### Added
+
+- **Native-MTP request controls.** Browser Settings and the terminal's `/mtp`
+  command (alias `/speculation`) and `--mtp` flag choose inherit, explicit Off,
+  or a requested speculative-decoding depth. The pickers are driven by the
+  gateway's advertised capabilities, show readiness and unavailable saved
+  choices, and never load or download a model. Preferences and run requests
+  keep an explicit Off distinct from inherit.
+- **Web: drag-and-drop and paste files into the chat composer.** Files dropped
+  on the conversation or pasted into the message field (screenshots included)
+  attach like picked files. Each file appears as a chip in the composer:
+  "Waiting" / "Uploading" (three uploads at a time), then name and size. A file
+  over the gateway's `maxAttachmentBytes` is refused on its chip before any
+  upload, with both sizes named; a gateway failure shows the gateway's reason
+  with Retry. Chips are keyboard-focusable with labelled Remove buttons, and a
+  live region announces the attachment count. The composer stays usable while
+  files upload; starting a turn while a chip is still uploading, refused or
+  failed is refused with the reason, and uploads survive a run starting or
+  finishing mid-upload.
+- **Web: the Activity tab names each step.** Started / waiting / completed
+  records of one step collapse into a single row whose status advances, and
+  `abstract.progress` / `abstract.status` records fold into the row of the step
+  that emitted them instead of becoming rows of their own. Rows read like
+  `llm · mlx · <model>` with tokens in/out, cache state, duration and tool-call
+  count; `tools · web_search ×3` with an argument preview; `subflow · agent
+  loop` with its task; `wait · delay 3 s`; `ask · your input`; and
+  `run finished`. Expanding a row still shows the raw JSON of every record it
+  collapsed.
+- **Web: the run strip shows the model's phase.** When the provider reports it
+  (AbstractCore `abstract.progress` records with `kind: "llm"`), the run strip
+  reads `Prefill · 2,100 / 5,642 tokens (37%)` while the prompt is processed
+  (or `Prefill · 5,642 tokens` without a measured position) and
+  `Generating · 120 tokens · 157 tok/s` once tokens stream. Without phase
+  records the strip renders exactly as before.
+- **Web: message stat chips open a detail panel.** The tokens / tools / time
+  chips under an assistant message open a structured panel on hover or focus:
+  prompt-cache reuse per call, context growth, time-to-first-token and
+  generation rates, speculative-decoding acceptance, tool time with the slowest
+  batch and failure classes, and per-call tables for multi-call turns. Values
+  the stack did not report read "not reported".
+- Web: reusable AbstractUIC workflow chat for agent and registered Flow
+  workflows (questions, event waits, status messages, structured final
+  results), gateway skill selection, local next-turn queues with cancellation
+  safety, optional gateway-backed dictation and read-aloud, and responsive
+  layouts.
+- Web: `npm run test:e2e` runs a Playwright end-to-end suite against a
+  disposable local gateway fixture (`web/e2e/gateway_fixture.py`); browsers are
+  installed separately with `npx playwright install`. `npm test` stays a
+  browser-free unit suite.
+
+### Changed
+
+- Web: the browser opens a modular AbstractUIC-themed workspace with shared
+  gateway sign-in, durable conversation history, workflow inputs,
+  file/artifact inspection, and explicit approval controls. Generic Flow
+  inputs are kept separate from agent-only settings.
+- Web: Stop shows the ledger-derived stop state where the Stop button was:
+  "Stopping…" → "Stopped", or the gateway's own report such as
+  "Stop forced at 10 s: inference killed".
+- Web: the shared components install from npm as
+  `@abstractframework/panel-chat` `^0.1.16` and `@abstractframework/ui-kit`
+  `^0.1.10`; building `web/` needs only the npm registry.
+- Web: `npm run dev` uses the same gateway session proxy as the packaged
+  server (`bin/server.js`), so development and production share one sign-in
+  and CSRF flow. The development-only `/api` proxy to port 8081 is removed;
+  set `ABSTRACTCODE_GATEWAY_URL` instead.
+
+### Fixed
+
+- Web: with a standing permission ("Permissions: all", or per-tool Allow) a
+  covered tool batch no longer flashes "Approval needed" while it runs; the
+  browser answers the gateway's parked approval automatically and shows the
+  batch as running tools. Batches outside the permission still show the
+  approval card, and after Revoke the next batch asks again.
+
+### Security
+
+- Web: browser login and gateway mutations validate request origin and Fetch
+  Metadata before forwarding. Login requires JSON, and browser destination
+  changes require a loopback peer and hostname unless explicitly enabled with
+  `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1`.
+
+## [terminal 0.5.0 / web 0.4.0, 0.4.1] - 2026-08-31
+
 ### Security
 
 - The browser client's bundled HTML sanitizer is updated to DOMPurify 3.4.14,

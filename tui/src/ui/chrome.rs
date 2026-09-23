@@ -53,10 +53,18 @@ pub fn route_label(store: Store) -> String {
     // joins the route label — absence is omission (no override = the
     // server default, unlabeled), the P2-E join rule.
     let reasoning = store.reasoning.get();
-    if reasoning.is_empty() {
+    let base = if reasoning.is_empty() {
         base
     } else {
         format!("{base} · {reasoning}")
+    };
+    if let Some(value) = store.speculation.get() {
+        format!(
+            "{base} · MTP requested {}",
+            crate::speculation::label(Some(&value))
+        )
+    } else {
+        base
     }
 }
 

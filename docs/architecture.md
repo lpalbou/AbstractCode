@@ -76,7 +76,34 @@ client. See [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
   the same wire contract in different languages, deliberately: each is idiomatic
   for its platform. The contract they share is the gateway's, documented in
   [`api.md`](api.md).
-- **Shared browser components are consumed as published packages.** `web/`
-  depends on `@abstractframework/ui-kit`, `panel-chat`, `monitor-flow`, and
-  `monitor-gpu` from npm, never as relative paths into another checkout, so it
-  builds from its own directory alone.
+- **Shared browser components are package dependencies.** `web/` consumes
+  AbstractUIC packages from the npm registry, without sibling-checkout aliases,
+  so the checkout builds independently.
+
+## Browser ownership
+
+```mermaid
+flowchart LR
+    shell["AbstractCode workspace shell"] --> chat["AbstractUIC WorkflowChat"]
+    shell --> kit["AbstractUIC themes / auth / settings"]
+    shell --> adapter["App transport + catalog adapters"]
+    chat --> state["Transport-injected WorkflowSessionController"]
+    state --> adapter
+    adapter --> proxy["Same-origin session proxy"]
+    proxy --> gateway["Gateway auth / registry / policy / commands"]
+    gateway --> runtime["Runtime + Flow nodes + tools"]
+```
+
+`panel-chat` owns reusable presentation and replay/stream state, including
+questions, approvals, event waits, and structured results. It does not store
+credentials, select workspace scope, or invoke tools. Code supplies the HTTP
+adapter, workflow catalog, session navigation, schema inputs, and inspector.
+The app server owns session exchange and CSRF/origin checks.
+
+Run lifecycle comes from gateway run snapshots; a completed ledger step does
+not imply a completed workflow. Ledger records own replayable messages and
+activity. UI-only status events never replace authoritative run status.
+Account and session changes abort or isolate pending requests and local queues.
+
+The legacy `web/src/ui/` implementation is retained as unmounted source; the
+entrypoint mounts only `web/src/workspace/app.tsx`.

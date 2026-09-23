@@ -73,6 +73,10 @@ browser settings. See [`web.md`](web.md).
 
 Type a task and press Enter. What you see:
 
+The terminal client includes the specialized views below. In the browser, use
+the transcript for questions and answers and **Activity** for tool arguments
+and step results; see the [web guide](web.md) for its workflow.
+
 - **Reasoning cycles** as the agent works, with token counts and a per-cycle
   output sparkline.
 - **Tool cards** that update in place: awaiting approval, then running, then a

@@ -287,6 +287,7 @@ pub struct Prefs {
     /// "selecting a model enables picking the effort"; a stale effort
     /// riding onto a different model is the fabricated-selection class).
     pub reasoning: Option<String>,
+    pub speculation: Option<Value>,
     pub reasoning_provider: Option<String>,
     pub reasoning_model: Option<String>,
     pub session_id: Option<String>,
@@ -578,6 +579,7 @@ impl Prefs {
             provider: s("provider"),
             model: s("model"),
             reasoning: s("reasoning"),
+            speculation: v.get("speculation").and_then(crate::speculation::normalize),
             reasoning_provider: s("reasoning_provider"),
             reasoning_model: s("reasoning_model"),
             session_id: s("session_id"),
@@ -635,6 +637,7 @@ impl Prefs {
             "provider": self.provider,
             "model": self.model,
             "reasoning": self.reasoning,
+            "speculation": self.speculation,
             "reasoning_provider": self.reasoning_provider,
             "reasoning_model": self.reasoning_model,
             "session_id": self.session_id,
@@ -1081,6 +1084,7 @@ mod tests {
             provider: Some("lmstudio".into()),
             model: Some("qwen3-4b".into()),
             reasoning: Some("high".into()),
+            speculation: Some(json!(false)),
             reasoning_provider: Some("lmstudio".into()),
             reasoning_model: Some("qwen3-4b".into()),
             session_id: Some("acode-full".into()),

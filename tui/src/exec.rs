@@ -578,6 +578,11 @@ pub fn run(args: &Args) -> i32 {
         // scripted, and a sticky TUI preference silently changing a
         // script's reasoning posture is the ambient-config class.
         reasoning: args.reasoning.clone().unwrap_or_default(),
+        speculation: args
+            .mtp
+            .as_deref()
+            .and_then(|v| crate::speculation::parse(v).ok())
+            .flatten(),
         // --ungated -> gating_mode=auto (guarded above); absent = the
         // workflow's default (gated).
         gating_mode: if args.ungated {

@@ -4,8 +4,8 @@ An agentic coding assistant that runs **durably on a server**, with two clients
 you can use interchangeably: a terminal application and a browser application.
 
 The coding agent itself runs on [AbstractGateway](https://github.com/lpalbou/abstractgateway).
-Both clients are thin: they start runs, stream the run ledger live, render
-reasoning cycles and tool calls as they happen, resolve tool-approval and
+Both clients are thin: they start runs, stream the run ledger live, show
+workflow and tool activity as it happens, resolve tool-approval and
 ask-user prompts, and steer a run while it is in flight. Because the work lives
 on the gateway rather than in the client, you can start a task in the terminal,
 close your laptop, and pick the same session up in the browser.

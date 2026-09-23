@@ -16,8 +16,8 @@ An agentic coding assistant that runs **durably on a server**, with two clients
 you can use interchangeably: a terminal application and a browser application.
 
 The coding agent itself runs on [AbstractGateway](https://github.com/lpalbou/abstractgateway).
-Both clients are thin: they start runs, stream the run ledger live, render
-reasoning cycles and tool calls as they happen, resolve tool-approval and
+Both clients are thin: they start runs, stream the run ledger live, show
+workflow and tool activity as it happens, resolve tool-approval and
 ask-user prompts, and steer a run while it is in flight. Because the work lives
 on the gateway rather than in the client, you can start a task in the terminal,
 close your laptop, and pick the same session up in the browser.
@@ -184,6 +184,10 @@ browser settings. See [`web.md`](web.md).
 
 Type a task and press Enter. What you see:
 
+The terminal client includes the specialized views below. In the browser, use
+the transcript for questions and answers and **Activity** for tool arguments
+and step results; see the [web guide](web.md) for its workflow.
+
 - **Reasoning cycles** as the agent works, with token counts and a per-cycle
   output sparkline.
 - **Tool cards** that update in place: awaiting approval, then running, then a
@@ -301,10 +305,37 @@ client. See [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
   the same wire contract in different languages, deliberately: each is idiomatic
   for its platform. The contract they share is the gateway's, documented in
   [`api.md`](api.md).
-- **Shared browser components are consumed as published packages.** `web/`
-  depends on `@abstractframework/ui-kit`, `panel-chat`, `monitor-flow`, and
-  `monitor-gpu` from npm, never as relative paths into another checkout, so it
-  builds from its own directory alone.
+- **Shared browser components are package dependencies.** `web/` consumes
+  AbstractUIC packages from the npm registry, without sibling-checkout aliases,
+  so the checkout builds independently.
+
+## Browser ownership
+
+```mermaid
+flowchart LR
+    shell["AbstractCode workspace shell"] --> chat["AbstractUIC WorkflowChat"]
+    shell --> kit["AbstractUIC themes / auth / settings"]
+    shell --> adapter["App transport + catalog adapters"]
+    chat --> state["Transport-injected WorkflowSessionController"]
+    state --> adapter
+    adapter --> proxy["Same-origin session proxy"]
+    proxy --> gateway["Gateway auth / registry / policy / commands"]
+    gateway --> runtime["Runtime + Flow nodes + tools"]
+```
+
+`panel-chat` owns reusable presentation and replay/stream state, including
+questions, approvals, event waits, and structured results. It does not store
+credentials, select workspace scope, or invoke tools. Code supplies the HTTP
+adapter, workflow catalog, session navigation, schema inputs, and inspector.
+The app server owns session exchange and CSRF/origin checks.
+
+Run lifecycle comes from gateway run snapshots; a completed ledger step does
+not imply a completed workflow. Ledger records own replayable messages and
+activity. UI-only status events never replace authoritative run status.
+Account and session changes abort or isolate pending requests and local queues.
+
+The legacy `web/src/ui/` implementation is retained as unmounted source; the
+entrypoint mounts only `web/src/workspace/app.tsx`.
 
 
 ==============================================================================
@@ -446,6 +477,15 @@ abstractcode doctor
 
 Installing and managing bundles is a gateway operation, not a client one — see
 the [AbstractGateway](https://github.com/lpalbou/abstractgateway) documentation.
+
+### In the browser
+
+Use Workflow to choose an authorized private entrypoint or shared catalog
+workflow. The browser is not restricted to `abstractcode.agent.v1`: ordinary
+AbstractFlow workflows run from their registered schema using **Inputs** and
+**Run workflow**. Generic workflows receive the configured input object;
+agent-only model/tool/runtime settings are not injected. Questions, messages,
+event waits, and structured results use the shared workflow chat. See [web](web.md).
 
 ## The `abstractcode.agent.v1` interface
 
@@ -838,7 +878,7 @@ shape first.
 
 | Page | What it covers |
 |---|---|
-| [`web.md`](web.md) | The browser client in depth, including optional voice features |
+| [`web.md`](web.md) | Workflow chat, inputs, approvals, workspaces, reusable components, and optional voice |
 | [`deployment-web.md`](deployment-web.md) | Hosting it, and the gateway-first deployment model |
 | [`deployment-iphone.md`](deployment-iphone.md) | Safari and progressive web app notes |
 
@@ -866,125 +906,134 @@ language models and tooling.
 # FILE: docs/web.md
 ==============================================================================
 
-# AbstractCode Web (gateway-first)
+# AbstractCode Web
 
-The `web/` folder contains a **gateway-first** host UI:
-- talks only to **AbstractGateway** under `/api/gateway/*`
-- renders runs by replaying/streaming the **durable ledger**
-- resumes waits by submitting durable commands
+AbstractCode Web is a gateway-authenticated workspace for coding agents and registered workflows. The browser observes durable runs; it does not execute models, workflow nodes, or tools locally.
 
-Start here: [`docs/getting-started.md`](getting-started.md).
+Start with [getting started](getting-started.md). For hosting and authentication, see [web deployment](deployment-web.md).
 
-Related:
-- Deployment: [`docs/deployment-web.md`](deployment-web.md)
-- iPhone notes: [`docs/deployment-iphone.md`](deployment-iphone.md)
-- Architecture: [`docs/architecture.md`](architecture.md)
+## Working in the interface
 
-## Shared components
+- **Conversations** restores gateway sessions and history. Search by conversation text or session ID; load more to browse older runs.
+- **Workflow** selects a private bundle entrypoint or an authorized shared catalog workflow. Agent interfaces and schema-driven workflows are both supported.
+- **Inputs** presents the registered input schema. Use JSON input mode for nested or custom input objects. The gateway validates submitted values.
+- **Settings** contains model, reasoning, MTP depth, tool policy, workspace requests, and gateway skills for agent workflows. Unset options preserve workflow defaults.
+- **Files** browses the gateway's authorized shared files, not a local disk or the run's private working directory. Attach a shared file or upload from your device. Agents accept attachment references; generic workflows must declare an `attachments` array input.
+- **Activity** shows durable workflow steps and tool arguments/results.
+- **Artifacts** downloads files stored with the selected run.
 
-The interface is built from the shared AbstractUIC component packages —
-`@abstractframework/ui-kit`, `panel-chat`, `monitor-flow` and `monitor-gpu` —
-installed from npm like any other dependency and declared in
-`web/package.json`. Building requires nothing but this directory.
+Use the appearance control in the header to choose an AbstractUIC theme. On narrow screens, conversation navigation and the inspector open on demand.
 
-## Voice (optional)
+MTP depth is independent of reasoning. Leave it on **Inherit** to follow workflow and
+execution-host defaults, choose **Off** to send an explicit `false`, or request an advertised
+depth. Choices come from provider/model execution discovery; missing support is unknown,
+and saved unavailable choices stay visible. An explicit depth sets `require_acceleration`
+so the host must honor it or report an error. The browser saves this preference locally and
+sends it as `_runtime.speculation`; it does not load models, download heads, or change the
+shared Core default. Fresh Core configurations use depth 2 only for compatible models.
 
-AbstractCode Web supports **push-to-talk transcription** and **TTS playback** when the connected AbstractGateway exposes the endpoints the web client calls.
+## Running and supervising work
 
-Push-to-talk (record → upload → transcribe):
-- Upload: `POST /api/gateway/attachments/upload`
-- Transcribe: `POST /api/gateway/runs/{run_id}/audio/transcribe`
+For an agent, type a task and press Enter; Shift+Enter inserts a newline. For a structured workflow, configure its required inputs and select **Run workflow**. Text, structured JSON results, and workflow messages appear in the transcript.
 
-Text-to-speech:
-- TTS: `POST /api/gateway/runs/{run_id}/voice/tts`
+Answer questions in their dedicated cards. Tool approvals show requested arguments and offer **Allow once** and **Deny**. The browser never accepts an approval automatically; gateway and workflow policy determine which operations need a decision.
 
+An event-driven workflow stays attached while waiting for its trigger. Its wait card can also submit an explicit JSON event through the gateway's durable command path. Messages and status updates emitted by workflow nodes are replayable. See the [UI event contract](ui_events.md).
 
-## Local development
+Use **Pause**, **Resume**, **Conclude**, or **Stop** to supervise an active run. Commands are requests, not optimistic lifecycle changes: the display follows confirmed gateway state. Guidance is consumed at supported workflow boundaries. **Queue next turn** keeps a local queue for this conversation; a failure or cancellation pauses it for explicit review. Switching conversations or signing out clears it. Unsent drafts and queued turns do not survive reload.
+
+## Workspaces and authorization
+
+The gateway owns workspace roots, mount visibility, access modes, tool availability, and approval enforcement. Workspace controls are editable only when it permits client scope requests. Continuing an agent conversation restores its gateway-returned workspace instead of silently creating a different one.
+
+Shared workflow restoration uses the gateway's verified public selection: registry scope, bundle ID, version, and flow ID. If that exact workflow is unavailable, restore it on the gateway or start a new conversation.
+
+Credentials are exchanged through the app server for HttpOnly session cookies. Gateway requests stay same-origin and mutations include the app's CSRF token. Appearance and non-secret settings may be saved locally; transcripts and run state are loaded from the gateway.
+
+## Optional voice
+
+When the gateway advertises configured speech capabilities, a conversation with a run offers hold-to-dictate and read-aloud controls. Hold the microphone button (or Space/Enter while focused), then release to transcribe into the draft. Review the text before sending. Read-aloud supports pause, resume, and stop.
+
+Recording and playback happen in the browser; transcription and synthesis use the gateway's durable media endpoints. Microphone access requires permission and a secure context (HTTPS or localhost). No speech model runs in the browser.
+
+## Development and build
 
 ```bash
 cd web
 npm ci
-npm run dev
+ABSTRACTCODE_GATEWAY_URL=http://127.0.0.1:8080 npm run dev
 ```
 
-Dev server:
-- runs on `http://127.0.0.1:3002/` (see `web/package.json`)
-- proxies `/api/*` to `http://localhost:8081` by default (see `web/vite.config.ts`)
-
-## Build
+Open `http://127.0.0.1:3002`. Vite and the packaged server provide the same connection and authenticated proxy routes.
 
 ```bash
-cd web
 npm run build
+HOST=127.0.0.1 npm start
 ```
 
-Output: `web/dist/` (static files).
+The build writes `web/dist/`. Serve it with the packaged server, not as a bare static site: connection/session middleware is part of the application.
+
+## Shared chat integration
+
+The app shell lives in `web/src/workspace/`. The reusable conversation view, wait controls, replay/stream controller, and React hook live in AbstractUIC's `@abstractframework/panel-chat` package. The controller accepts a transport; it does not own URLs, authentication, workspace policy, or browser storage. Other applications can reuse the chat inside a tab or observer without adopting Code's shell. See [architecture](architecture.md).
+
+The terminal and browser share the gateway contract, not identical interfaces. Terminal slash commands, specialized memory/operator panels, and headless workflows remain terminal-specific. Voice depends on the gateway and browser. There is no offline execution mode.
+
+## Current parity limits
+
+The redesigned web client is not a complete port of every Rust control. It does not yet expose review/verifier rounds, gating or prompt-cache settings, dedicated goal/entity-memory views, or GPU/resource/cache administration. Registered workflows can still implement those behaviors, but their generic input and activity surfaces are not substitutes for the specialized terminal controls.
+
+Project instructions are not automatically read from the browser's local filesystem. Agent workflows can receive additional instructions manually; any automatic workspace discovery must happen through authorized gateway execution. Transcript export is Markdown, not the terminal's detailed/SFT JSONL export. Attachments support upload, removal, and download, but not the terminal's local-path browser or rich preview. Tool permissions offer explicit per-tool choices rather than tier shortcuts. The prompt queue is not durable across reloads.
 
 
 ==============================================================================
 # FILE: docs/deployment-web.md
 ==============================================================================
 
-# AbstractCode Web — Deployment (gateway-first)
+# AbstractCode Web deployment
 
-AbstractCode Web (`web/`) is a browser/PWA host that talks only to **AbstractGateway** (`/api/gateway/*`).
+The browser uses a same-origin application server, which authenticates to AbstractGateway and proxies its API. There are no models or tools in the web server. See [web features](web.md) and [architecture](architecture.md).
 
-Related:
-- Web app overview + local dev caveats: [`docs/web.md`](web.md)
-- Architecture: [`docs/architecture.md`](architecture.md)
+## Run the gateway and web server
 
-## 1) Run AbstractGateway
-
-Run a gateway that serves `/api/gateway/*` and (for browsers) allows your web app origin (CORS).
-
-Example (token + allowed origins):
+Configure gateway user authentication and provision a user/token through your gateway's administration process. Then:
 
 ```bash
-export ABSTRACTGATEWAY_AUTH_TOKEN="dev-token"
-export ABSTRACTGATEWAY_ALLOWED_ORIGINS="http://localhost:*,http://127.0.0.1:*"
-
-abstractgateway serve --host 127.0.0.1 --port 8081
+abstractgateway serve --host 127.0.0.1 --port 8080
 ```
 
-Notes:
-- Web UI uses gateway discovery endpoints for dropdowns: providers/models/tools.
-- Web UI uses the gateway file endpoint for `@file` mentions: `/api/gateway/files/search`.
-- Web UI uses gateway attachment endpoints for uploads: `/api/gateway/attachments/upload`.
-- (Optional) Voice features use: `/api/gateway/runs/{run_id}/audio/transcribe` and `/api/gateway/runs/{run_id}/voice/tts`.
+In another terminal:
 
-## 2) Run AbstractCode Web (dev)
+```bash
+ABSTRACTCODE_GATEWAY_URL=http://127.0.0.1:8080 HOST=127.0.0.1 npx @abstractframework/code
+```
+
+Open `http://127.0.0.1:3002` and sign in with the gateway user and token. The server exchanges these for an app-scoped browser session. The raw token is not saved in local storage. API writes require the session's CSRF token.
+
+For a source checkout:
 
 ```bash
 cd web
-npm install
-npm run dev
-```
-
-Open `http://127.0.0.1:3002/` and set:
-- `Gateway URL`: `http://127.0.0.1:8081`
-- `Gateway user` and that user's `Gateway token` when Gateway user auth is
-  enabled
-
-## 3) Build + host (static)
-
-```bash
-cd web
+npm ci
 npm run build
+ABSTRACTCODE_GATEWAY_URL=http://127.0.0.1:8080 HOST=127.0.0.1 npm start
 ```
 
-Deploy `web/dist/` behind the packaged web server or a reverse proxy that
-routes same-origin `/api/...` to Gateway.
+`PORT` changes the web listener port. The CLI binds every interface by default; use `HOST=127.0.0.1` for local-only access. Development uses `npm run dev` with the same gateway setting and session flow.
 
-In hosted user-auth mode, AbstractCode Web exchanges the Gateway user token for
-an app-scoped browser session and strips bearer tokens from saved browser
-settings. Direct bearer-token mode is retained for local development when no
-Gateway user is configured. When the web UI is served from a non-local
-hostname, the server-configured Gateway URL is authoritative; browser-supplied
-Gateway URL changes are rejected unless
-`ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` is enabled behind your own
-access control. If a reverse proxy rewrites `Host`, set
-`ABSTRACTCODE_TRUST_PROXY_HEADERS=1` only when the proxy strips
-client-supplied forwarded headers.
+## Reverse proxies and HTTPS
+
+Put the packaged server behind your HTTPS reverse proxy. Forward the whole application, including `/api/connection/gateway` and `/api/gateway/*`; a static file host or direct gateway API proxy alone does not implement the session exchange. Allow long-lived streaming responses and disable buffering for ledger SSE.
+
+Set `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` only when the proxy strips untrusted forwarded headers and sets `X-Forwarded-Host` and `X-Forwarded-Proto` itself. These determine browser-origin validation and secure-cookie behavior. Pin `ABSTRACTCODE_GATEWAY_URL` on the server. Browser-to-gateway CORS access is not needed.
+
+Browser-supplied destination changes are limited to loopback peers using a loopback hostname, unless `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` explicitly enables remote configuration. With trusted proxy headers enabled, the server destination remains authoritative unless that opt-in is set. Do not enable remote reconfiguration on a publicly accessible app without your own access controls. Cross-origin mutation attempts are rejected before gateway egress.
+
+## Gateway capabilities and storage
+
+Discovery determines workflows, tools, skills, providers, workspace policy, and optional speech features. The gateway retains runs, history, files, and artifacts. The browser stores appearance and non-secret preferences. An offline PWA shell can display the application, but executing or restoring work requires a reachable authenticated gateway.
+
+Speech recording requires HTTPS or localhost and microphone permission. See [iPhone notes](deployment-iphone.md) for platform-specific constraints.
 
 
 ==============================================================================
@@ -1041,7 +1090,8 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.5.0** (the attachments + host-resources wave: file
+Status: **0.5.1** (adds native-MTP request controls — `/mtp` and
+`--mtp` — to 0.5.0, the attachments + host-resources wave: file
 attachments with preview and drag & drop, the quit gate with durable
 pause/cancel delivery, `/conclude`, bloc history replay + `/history`,
 the reasoning dial, a launch animation, and `/resources` — the gateway
@@ -1576,6 +1626,7 @@ abstractcode --help | --version
 | `--session <ID>` | Durable session id | a fresh mint (`acode-<hex>`); `--resume`/`--continue` reopens the last one |
 | `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
 | `--reasoning <LEVEL>` | Reasoning effort: `none\|minimal\|low\|medium\|high\|xhigh\|auto` (also `--thinking`; validated at launch; works on `exec` too) | gateway default |
+| `--mtp <DEPTH\|off\|inherit>` | Native-MTP request override; an explicit depth must be honored by the execution host. Works on `exec` too | saved TUI choice, otherwise inherit; `exec` inherits unless the flag is supplied |
 | `--workflow <bundle[:flow]>` | Agent workflow | saved pick, else `basic-agent` |
 | `--provider <NAME>` | Provider override | gateway defaults |
 | `--model <NAME>` | Model override | gateway defaults |
@@ -1616,6 +1667,7 @@ abstractcode --help | --version
 | `/theme [id]` | Live-preview theme picker, or set directly |
 | `/workflow` | Pick the agent workflow from the gateway catalog |
 | `/model` | Pick provider + model from gateway discovery |
+| `/mtp [depth\|off\|inherit]` | Native-MTP request policy (`/speculation` alias). Bare command opens a provider/model capability-driven picker; explicit values persist locally and ride `_runtime.speculation`. Inherit omits the override; Off sends `false`; a depth sends `native_mtp` with `require_acceleration=true` |
 | `/tools` | Enable/disable gateway tools (`Space` toggles; checked set = the run's exact allowlist; untouched = workflow defaults). In-modal: `p` cycles a per-tool approval pin, `t` cycles the tier — see the modal keys below |
 | `/permissions [read\|write\|all]` | THE tool-permission surface (bare = report): batches classifying at-or-below the level auto-approve. `read` = proven read-only tools only; `write` adds workspace file mutations; `all` auto-approves everything, **including arbitrary shell and network egress** — deliberate use only. Per-tool `ask` pins and gateway-disabled tools still gate. Sticky per session (`/tools tier` remains a spelling alias) |
 | `/workspace` | Inspect + edit the filesystem scope tools may touch: root (from `--workspace`/cwd), access mode, allowed paths. Mode + paths persist and ride every run |
@@ -1654,6 +1706,13 @@ Anything that is not a command is a task (when idle) or steering guidance
 (while a run is active). Under **entity focus**, submitted text is that
 visit's next turn — or the held draft while a turn runs (later text
 replaces the hold; it auto-sends when the turn parks).
+
+MTP is separate from reasoning. The picker only offers depths the execution host advertises;
+unknown capabilities and head-not-ready/reload reasons remain visible. A saved unavailable
+depth is retained, not silently replaced. Typed depths are explicit requests, not a claim
+that the current backend can execute them: the host validates them and refuses unsupported
+strict requests. Neither discovery nor `/mtp` downloads a head or loads a model. Inherited
+defaults remain host-owned (fresh Core configurations use depth 2 for compatible models).
 
 ### Transcript export (`/export`)
 
@@ -2539,9 +2598,10 @@ Run it without installing anything:
 npx @abstractframework/code      # serves on http://127.0.0.1:3002
 ```
 
-Shared UI components come from the published `@abstractframework/*` packages
-(see `package.json`), so this app builds from its own directory with no other
-checkout present.
+The interface uses AbstractUIC themes, authentication, settings, and reusable
+workflow chat. It builds without a sibling checkout: the shared
+`@abstractframework/*` components install from npm like any other dependency,
+at the ranges declared in `package.json`.
 
 Docs:
 - Web overview: [`../docs/web.md`](../docs/web.md)
@@ -2556,13 +2616,19 @@ npm run dev
 ```
 
 In the UI:
-- set `Gateway URL` (blank = same origin / dev proxy; e.g. `http://127.0.0.1:8081`)
-- in hosted user-auth mode, set `Gateway user` and that user's `Gateway token`
+- set `Gateway URL` (e.g. `http://127.0.0.1:8080`), or configure it on the
+  server with `ABSTRACTCODE_GATEWAY_URL`
+- set `Gateway user` and that user's `Gateway token`
 
 When a Gateway user is provided, the web server exchanges the token for a
 Gateway browser session and stores only app-scoped session cookies. The raw
-token is not persisted in browser settings. Direct bearer-token mode is kept for
-local development only.
+token is not persisted in browser settings. Vite development and the packaged
+server use the same session proxy; the browser keeps API requests same-origin.
+
+Choose an agent or registered workflow in the toolbar. Agent tasks use the
+composer; structured workflows use **Inputs**. Questions, tool approvals, and
+event waits appear in the conversation. Runs and history remain on the gateway
+when you close the browser. Unsent drafts and queued turns do not survive reload.
 
 Whether a browser may change the Gateway URL is decided by the **connection
 peer**, not by any request header: only a request arriving from loopback may
@@ -2586,6 +2652,95 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [terminal 0.5.1 / web 0.4.2] - 2026-09-23
+
+Terminal client `abstractcode` 0.5.1 (tag `v0.5.1`) and browser client
+`@abstractframework/code` 0.4.2 (tag `web-v0.4.2`).
+
+### Added
+
+- **Native-MTP request controls.** Browser Settings and the terminal's `/mtp`
+  command (alias `/speculation`) and `--mtp` flag choose inherit, explicit Off,
+  or a requested speculative-decoding depth. The pickers are driven by the
+  gateway's advertised capabilities, show readiness and unavailable saved
+  choices, and never load or download a model. Preferences and run requests
+  keep an explicit Off distinct from inherit.
+- **Web: drag-and-drop and paste files into the chat composer.** Files dropped
+  on the conversation or pasted into the message field (screenshots included)
+  attach like picked files. Each file appears as a chip in the composer:
+  "Waiting" / "Uploading" (three uploads at a time), then name and size. A file
+  over the gateway's `maxAttachmentBytes` is refused on its chip before any
+  upload, with both sizes named; a gateway failure shows the gateway's reason
+  with Retry. Chips are keyboard-focusable with labelled Remove buttons, and a
+  live region announces the attachment count. The composer stays usable while
+  files upload; starting a turn while a chip is still uploading, refused or
+  failed is refused with the reason, and uploads survive a run starting or
+  finishing mid-upload.
+- **Web: the Activity tab names each step.** Started / waiting / completed
+  records of one step collapse into a single row whose status advances, and
+  `abstract.progress` / `abstract.status` records fold into the row of the step
+  that emitted them instead of becoming rows of their own. Rows read like
+  `llm · mlx · <model>` with tokens in/out, cache state, duration and tool-call
+  count; `tools · web_search ×3` with an argument preview; `subflow · agent
+  loop` with its task; `wait · delay 3 s`; `ask · your input`; and
+  `run finished`. Expanding a row still shows the raw JSON of every record it
+  collapsed.
+- **Web: the run strip shows the model's phase.** When the provider reports it
+  (AbstractCore `abstract.progress` records with `kind: "llm"`), the run strip
+  reads `Prefill · 2,100 / 5,642 tokens (37%)` while the prompt is processed
+  (or `Prefill · 5,642 tokens` without a measured position) and
+  `Generating · 120 tokens · 157 tok/s` once tokens stream. Without phase
+  records the strip renders exactly as before.
+- **Web: message stat chips open a detail panel.** The tokens / tools / time
+  chips under an assistant message open a structured panel on hover or focus:
+  prompt-cache reuse per call, context growth, time-to-first-token and
+  generation rates, speculative-decoding acceptance, tool time with the slowest
+  batch and failure classes, and per-call tables for multi-call turns. Values
+  the stack did not report read "not reported".
+- Web: reusable AbstractUIC workflow chat for agent and registered Flow
+  workflows (questions, event waits, status messages, structured final
+  results), gateway skill selection, local next-turn queues with cancellation
+  safety, optional gateway-backed dictation and read-aloud, and responsive
+  layouts.
+- Web: `npm run test:e2e` runs a Playwright end-to-end suite against a
+  disposable local gateway fixture (`web/e2e/gateway_fixture.py`); browsers are
+  installed separately with `npx playwright install`. `npm test` stays a
+  browser-free unit suite.
+
+### Changed
+
+- Web: the browser opens a modular AbstractUIC-themed workspace with shared
+  gateway sign-in, durable conversation history, workflow inputs,
+  file/artifact inspection, and explicit approval controls. Generic Flow
+  inputs are kept separate from agent-only settings.
+- Web: Stop shows the ledger-derived stop state where the Stop button was:
+  "Stopping…" → "Stopped", or the gateway's own report such as
+  "Stop forced at 10 s: inference killed".
+- Web: the shared components install from npm as
+  `@abstractframework/panel-chat` `^0.1.16` and `@abstractframework/ui-kit`
+  `^0.1.10`; building `web/` needs only the npm registry.
+- Web: `npm run dev` uses the same gateway session proxy as the packaged
+  server (`bin/server.js`), so development and production share one sign-in
+  and CSRF flow. The development-only `/api` proxy to port 8081 is removed;
+  set `ABSTRACTCODE_GATEWAY_URL` instead.
+
+### Fixed
+
+- Web: with a standing permission ("Permissions: all", or per-tool Allow) a
+  covered tool batch no longer flashes "Approval needed" while it runs; the
+  browser answers the gateway's parked approval automatically and shows the
+  batch as running tools. Batches outside the permission still show the
+  approval card, and after Revoke the next batch asks again.
+
+### Security
+
+- Web: browser login and gateway mutations validate request origin and Fetch
+  Metadata before forwarding. Login requires JSON, and browser destination
+  changes require a loopback peer and hostname unless explicitly enabled with
+  `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1`.
+
+## [terminal 0.5.0 / web 0.4.0, 0.4.1] - 2026-08-31
 
 ### Security
 

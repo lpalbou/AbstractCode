@@ -34,6 +34,7 @@ pub enum Command {
     /// (stage 3 of the model picker, opened directly); with an argument,
     /// applies the level without the modal.
     Reasoning(Option<String>),
+    Mtp(Option<String>),
     /// `/gating [auto|wait]` — gating mode for gating-capable workflows
     /// (the multi-agent coder): auto runs unattended (skips human
     /// approval pauses), wait restores gated. Bare shows/toggles.
@@ -173,6 +174,7 @@ pub fn parse(text: &str) -> Option<Command> {
         "/reasoning" | "/thinking" => {
             Command::Reasoning(if rest.is_empty() { None } else { Some(rest) })
         }
+        "/mtp" | "/speculation" => Command::Mtp(if rest.is_empty() { None } else { Some(rest) }),
         "/gating" | "/gate" => Command::Gating(if rest.is_empty() { None } else { Some(rest) }),
         "/review" | "/verify" => Command::Review(if rest.is_empty() { None } else { Some(rest) }),
         "/status" => Command::Status,
@@ -241,6 +243,10 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
     ("review", "verifier before the agent may conclude"),
     ("model", "pick provider + model + reasoning"),
     ("reasoning", "reasoning effort for the current route"),
+    (
+        "mtp",
+        "MTP depth: inherit | off | positive depth; bare opens model-aware selector",
+    ),
     (
         "gating",
         "coder approval gating: auto (unattended) | wait (gated)",
@@ -381,6 +387,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "/sessions [id]",
         "pick a recent session, or switch straight to an id",
     ),
+    ("/mtp [depth|off|inherit]", "MTP depth for next runs; bare opens the picker"),
     (
         "/details [full|fold]",
         "transcript verbosity (Ctrl+D): `full` = tool args + results + expanded thinking; `fold` = one-line tool calls with status tags + thinking gists (default)",

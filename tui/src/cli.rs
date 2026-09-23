@@ -77,6 +77,7 @@ pub struct Args {
     /// effort override for the session route (first-citizen directive).
     /// Validated at parse; empty = gateway default.
     pub reasoning: Option<String>,
+    pub mtp: Option<String>,
     /// `--ungated` — run a gating-capable workflow (the multi-agent
     /// coder) unattended, skipping its human-approval pauses
     /// (`gating_mode=auto`). REFUSED unless `--permissions` is also set
@@ -139,6 +140,7 @@ OPTIONS:
   --session <ID>          durable session id (default: a fresh session)
   --resume                reopen the last session (also: --continue)
   --reasoning <LEVEL>     reasoning effort: none|minimal|low|medium|high|xhigh|auto
+  --mtp <DEPTH|off|inherit>  MTP override; requires native support on the selected host
   --ungated               run a gating-capable workflow unattended (skips its
                           human approval pauses); requires --permissions
   --workflow <B[:F]>      agent workflow bundle[:flow] (default: saved, else
@@ -263,6 +265,11 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
                     ));
                 }
                 args.reasoning = Some(v);
+            }
+            "--mtp" => {
+                let value = take(a)?;
+                crate::speculation::parse(&value)?;
+                args.mtp = Some(value);
             }
             "--workflow" | "--agent" => args.workflow = Some(take(a)?),
             "--provider" => args.provider = Some(take(a)?),

@@ -49,7 +49,7 @@ Ground rules for reading this repository:
 ## Browser client
 
 - [Browser client README](web/README.md): running it, configuration, credential handling
-- [Web overview](docs/web.md): the browser client in depth
+- [Web overview](docs/web.md): reusable workflow chat, schema inputs, approvals, workspace policy, and optional voice
 - [Web deployment](docs/deployment-web.md): hosting it, gateway-first
 - [iPhone notes](docs/deployment-iphone.md): Safari and progressive web app behavior
 
@@ -61,4 +61,3 @@ Ground rules for reading this repository:
 - [Code of conduct](CODE_OF_CONDUCT.md): contributor behavior expectations
 - [Acknowledgements](ACKNOWLEDGEMENTS.md): dependencies and upstream lineage
 - [License](LICENSE): MIT
-

@@ -1,60 +1,44 @@
-# AbstractCode Web — Deployment (gateway-first)
+# AbstractCode Web deployment
 
-AbstractCode Web (`web/`) is a browser/PWA host that talks only to **AbstractGateway** (`/api/gateway/*`).
+The browser uses a same-origin application server, which authenticates to AbstractGateway and proxies its API. There are no models or tools in the web server. See [web features](web.md) and [architecture](architecture.md).
 
-Related:
-- Web app overview + local dev caveats: [`docs/web.md`](web.md)
-- Architecture: [`docs/architecture.md`](architecture.md)
+## Run the gateway and web server
 
-## 1) Run AbstractGateway
-
-Run a gateway that serves `/api/gateway/*` and (for browsers) allows your web app origin (CORS).
-
-Example (token + allowed origins):
+Configure gateway user authentication and provision a user/token through your gateway's administration process. Then:
 
 ```bash
-export ABSTRACTGATEWAY_AUTH_TOKEN="dev-token"
-export ABSTRACTGATEWAY_ALLOWED_ORIGINS="http://localhost:*,http://127.0.0.1:*"
-
-abstractgateway serve --host 127.0.0.1 --port 8081
+abstractgateway serve --host 127.0.0.1 --port 8080
 ```
 
-Notes:
-- Web UI uses gateway discovery endpoints for dropdowns: providers/models/tools.
-- Web UI uses the gateway file endpoint for `@file` mentions: `/api/gateway/files/search`.
-- Web UI uses gateway attachment endpoints for uploads: `/api/gateway/attachments/upload`.
-- (Optional) Voice features use: `/api/gateway/runs/{run_id}/audio/transcribe` and `/api/gateway/runs/{run_id}/voice/tts`.
+In another terminal:
 
-## 2) Run AbstractCode Web (dev)
+```bash
+ABSTRACTCODE_GATEWAY_URL=http://127.0.0.1:8080 HOST=127.0.0.1 npx @abstractframework/code
+```
+
+Open `http://127.0.0.1:3002` and sign in with the gateway user and token. The server exchanges these for an app-scoped browser session. The raw token is not saved in local storage. API writes require the session's CSRF token.
+
+For a source checkout:
 
 ```bash
 cd web
-npm install
-npm run dev
-```
-
-Open `http://127.0.0.1:3002/` and set:
-- `Gateway URL`: `http://127.0.0.1:8081`
-- `Gateway user` and that user's `Gateway token` when Gateway user auth is
-  enabled
-
-## 3) Build + host (static)
-
-```bash
-cd web
+npm ci
 npm run build
+ABSTRACTCODE_GATEWAY_URL=http://127.0.0.1:8080 HOST=127.0.0.1 npm start
 ```
 
-Deploy `web/dist/` behind the packaged web server or a reverse proxy that
-routes same-origin `/api/...` to Gateway.
+`PORT` changes the web listener port. The CLI binds every interface by default; use `HOST=127.0.0.1` for local-only access. Development uses `npm run dev` with the same gateway setting and session flow.
 
-In hosted user-auth mode, AbstractCode Web exchanges the Gateway user token for
-an app-scoped browser session and strips bearer tokens from saved browser
-settings. Direct bearer-token mode is retained for local development when no
-Gateway user is configured. When the web UI is served from a non-local
-hostname, the server-configured Gateway URL is authoritative; browser-supplied
-Gateway URL changes are rejected unless
-`ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` is enabled behind your own
-access control. If a reverse proxy rewrites `Host`, set
-`ABSTRACTCODE_TRUST_PROXY_HEADERS=1` only when the proxy strips
-client-supplied forwarded headers.
+## Reverse proxies and HTTPS
+
+Put the packaged server behind your HTTPS reverse proxy. Forward the whole application, including `/api/connection/gateway` and `/api/gateway/*`; a static file host or direct gateway API proxy alone does not implement the session exchange. Allow long-lived streaming responses and disable buffering for ledger SSE.
+
+Set `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` only when the proxy strips untrusted forwarded headers and sets `X-Forwarded-Host` and `X-Forwarded-Proto` itself. These determine browser-origin validation and secure-cookie behavior. Pin `ABSTRACTCODE_GATEWAY_URL` on the server. Browser-to-gateway CORS access is not needed.
+
+Browser-supplied destination changes are limited to loopback peers using a loopback hostname, unless `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` explicitly enables remote configuration. With trusted proxy headers enabled, the server destination remains authoritative unless that opt-in is set. Do not enable remote reconfiguration on a publicly accessible app without your own access controls. Cross-origin mutation attempts are rejected before gateway egress.
+
+## Gateway capabilities and storage
+
+Discovery determines workflows, tools, skills, providers, workspace policy, and optional speech features. The gateway retains runs, history, files, and artifacts. The browser stores appearance and non-secret preferences. An offline PWA shell can display the application, but executing or restoring work requires a reachable authenticated gateway.
+
+Speech recording requires HTTPS or localhost and microphone permission. See [iPhone notes](deployment-iphone.md) for platform-specific constraints.

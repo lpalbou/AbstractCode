@@ -105,24 +105,18 @@ afterEach(() => {
   child = undefined;
 });
 
-// The guard decides local-vs-remote from the unspoofable TCP peer
-// (req.socket.remoteAddress), never from the client-controlled Host header.
-// The old Host-based check was an SSRF hole: a LAN client sending
-// `Host: localhost` at a 0.0.0.0 bind flipped it and unlocked the
-// browser-supplied gateway URL, turning this server into a relay that
-// forwarded its session cookies wherever the attacker named.
+// Local configuration requires both a loopback peer and a loopback Host.
+// The peer blocks LAN spoofing; the Host check also closes DNS rebinding where
+// a hostile origin resolves its own hostname to the user's loopback server.
 describe("hosted Gateway URL guard", () => {
-  it("ignores a spoofed remote Host header when the peer is genuinely loopback", async () => {
+  it("refuses a remote Host header even when the peer is loopback", async () => {
     const port = await free_port();
     await start_server(port);
 
     const response = await post_gateway_url_change(port);
 
-    // Not 403: the Host header no longer decides. A real loopback peer is
-    // local no matter what it claims to be, so the request passes the config
-    // gate and is stopped later by the ordinary auth requirement.
-    expect(response.status).not.toBe(403);
-    expect(String(response.body.detail || "")).not.toContain(DENIAL);
+    expect(response.status).toBe(403);
+    expect(String(response.body.detail || "")).toContain(DENIAL);
   });
 
   it("refuses config changes behind a trusted proxy, where the peer proves nothing", async () => {

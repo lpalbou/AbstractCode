@@ -7,7 +7,8 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.5.0** (the attachments + host-resources wave: file
+Status: **0.5.1** (adds native-MTP request controls — `/mtp` and
+`--mtp` — to 0.5.0, the attachments + host-resources wave: file
 attachments with preview and drag & drop, the quit gate with durable
 pause/cancel delivery, `/conclude`, bloc history replay + `/history`,
 the reasoning dial, a launch animation, and `/resources` — the gateway

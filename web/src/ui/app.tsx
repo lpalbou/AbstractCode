@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 
 import { GatewayClient, GatewayHttpError } from "../lib/gateway_client";
 import { random_id } from "../lib/ids";
+import { extract_llm_phase_event, format_llm_phase } from "../lib/llm_phase";
 import { extract_wait_from_record } from "../lib/runtime_extractors";
 import { choose_follow_run, infer_subworkflow_follow_kind, type FollowRunKind } from "../lib/subworkflow_follow";
 import { LedgerStreamEvent, StepRecord, ToolCall, WaitState } from "../lib/types";
@@ -3017,6 +3018,16 @@ function ConsolePage(props: {
     if (emit && is_abstract_status(emit.name)) {
       const { text, duration_s } = parse_status_payload(emit.payload);
       set_status(text, duration_s);
+    }
+    // Live model phase (prefill vs generation) from the followed agent
+    // subworkflow's ledger. It outranks the flow's own "Thinking..." because it
+    // is measured, not declared. A terminal phase event formats to "" and is
+    // deliberately NOT written: clearing here would hide the whole working line
+    // between two iterations of a ReAct loop.
+    const llm_phase = extract_llm_phase_event(rec);
+    if (llm_phase) {
+      const phase_text = format_llm_phase(llm_phase);
+      if (phase_text) set_status(phase_text, 0);
     }
     if (emit && is_abstract_message(emit.name)) {
       const parsed = parse_message_payload(emit.payload);

@@ -20,7 +20,7 @@ shape first.
 
 | Page | What it covers |
 |---|---|
-| [`web.md`](web.md) | The browser client in depth, including optional voice features |
+| [`web.md`](web.md) | Workflow chat, inputs, approvals, workspaces, reusable components, and optional voice |
 | [`deployment-web.md`](deployment-web.md) | Hosting it, and the gateway-first deployment model |
 | [`deployment-iphone.md`](deployment-iphone.md) | Safari and progressive web app notes |
 

@@ -31,6 +31,15 @@ abstractcode doctor
 Installing and managing bundles is a gateway operation, not a client one — see
 the [AbstractGateway](https://github.com/lpalbou/abstractgateway) documentation.
 
+### In the browser
+
+Use Workflow to choose an authorized private entrypoint or shared catalog
+workflow. The browser is not restricted to `abstractcode.agent.v1`: ordinary
+AbstractFlow workflows run from their registered schema using **Inputs** and
+**Run workflow**. Generic workflows receive the configured input object;
+agent-only model/tool/runtime settings are not injected. Questions, messages,
+event waits, and structured results use the shared workflow chat. See [web](web.md).
+
 ## The `abstractcode.agent.v1` interface
 
 A workflow usable as an AbstractCode agent declares the interface

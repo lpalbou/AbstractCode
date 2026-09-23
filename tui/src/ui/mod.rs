@@ -842,6 +842,7 @@ pub(crate) fn agent_start_opts(
         model: store.model.get_untracked(),
         gating_mode: store.gating_mode.get_untracked(),
         reasoning: store.reasoning.get_untracked(),
+        speculation: store.speculation.get_untracked(),
         // The operator-declared window rides as `_limits.max_tokens`
         // (CTX-0); 0 = undeclared = the key stays absent.
         context_window: store.context_window.get_untracked(),
@@ -1184,6 +1185,13 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
                 other => store.notify(format!("/review takes on | off | rounds N (got {other:?})")),
             }
         }
+        Command::Mtp(arg) => match arg.as_deref().map(str::trim) {
+            None | Some("") => modals::open_mtp_stage(cx, store, ctx),
+            Some(value) => match crate::speculation::parse(value) {
+                Ok(value) => modals::apply_speculation(store, ctx, value),
+                Err(error) => store.notify(error),
+            },
+        },
         Command::Reasoning(arg) => match arg.as_deref().map(str::trim) {
             // Bare /reasoning: the dial for the current route (stage 3
             // opened directly; the probe fires for the current model).

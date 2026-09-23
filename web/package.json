@@ -1,6 +1,6 @@
 {
   "name": "@abstractframework/code",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Browser-based coding assistant for AbstractFramework - connects to AbstractGateway for durable agent sessions",
   "type": "module",
   "author": "Laurent-Philippe Albou",
@@ -35,15 +35,16 @@
     "preview": "vite preview",
     "start": "node ./bin/cli.js",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "prepublishOnly": "npm run build"
   },
-  "dependencies": {},
   "devDependencies": {
     "@abstractframework/monitor-flow": "^0.1.9",
     "@abstractframework/monitor-gpu": "^0.1.9",
-    "@abstractframework/panel-chat": "^0.1.9",
-    "@abstractframework/ui-kit": "^0.1.9",
+    "@abstractframework/panel-chat": "^0.1.16",
+    "@abstractframework/ui-kit": "^0.1.10",
     "@monaco-editor/react": "^4.6.0",
+    "@playwright/test": "^1.63.0",
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "@vitejs/plugin-react": "^4.7.0",

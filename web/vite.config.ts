@@ -1,10 +1,31 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 import { resolve } from "path";
+import { loadEnv, type Plugin } from "vite";
+// The published runtime is intentionally Node-builtins-only. Its middleware
+// is shared here so development cannot bypass the app-cookie session exchange.
+import { createGatewayMiddleware } from "./bin/server.js";
 
-export default defineConfig({
+function codeGatewayPlugin(env: Record<string, string>): Plugin {
+  return {
+    name: "abstractcode-gateway-session-proxy",
+    configureServer(server) {
+      server.middlewares.use(createGatewayMiddleware({ env }));
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => ({
   base: "./",
-  plugins: [react()],
+  plugins: [
+    react(),
+    codeGatewayPlugin({
+      ...loadEnv(mode, __dirname, ""),
+      ...((
+        globalThis as unknown as { process?: { env?: Record<string, string> } }
+      ).process?.env || {}),
+    }),
+  ],
   // The @abstractframework/* kit packages resolve from node_modules like any
   // other dependency — see package.json. They were once aliased to a sibling
   // `../../abstractuic` checkout, which silently coupled this build to the
@@ -14,19 +35,9 @@ export default defineConfig({
   // Consuming the published packages is what makes this app relocatable.
   server: {
     host: "0.0.0.0",
-    allowedHosts: true,
     strictPort: false,
-    cors: true,
     fs: {
       allow: [resolve(__dirname)],
-    },
-    proxy: {
-      "/api": {
-        target: "http://localhost:8081",
-        changeOrigin: true,
-        ws: true,
-        secure: false,
-      },
     },
   },
   test: {
@@ -41,4 +52,4 @@ export default defineConfig({
       deps: { inline: [/@abstractframework\//] },
     },
   },
-});
+}));

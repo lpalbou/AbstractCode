@@ -848,6 +848,8 @@ pub struct Store {
     /// rule — an effort may only apply under the model it was chosen
     /// for).
     pub reasoning: Signal<String>,
+    pub speculation: Signal<Option<serde_json::Value>>,
+    pub execution_probe: Signal<Option<(String, String, serde_json::Value)>>,
     /// Per-model reasoning capability probe result for the picker's
     /// third stage: (provider, model, probe). None while in flight.
     pub reasoning_probe: Signal<Option<ReasoningProbe>>,
@@ -1119,6 +1121,8 @@ impl Store {
             // same one every other client gets.
             max_iterations: cx.signal(0u32),
             reasoning: cx.signal(String::new()),
+            speculation: cx.signal(None),
+            execution_probe: cx.signal(None),
             reasoning_probe: cx.signal(None),
             providers: cx.signal(Vec::new()),
             tools: cx.signal(Vec::new()),

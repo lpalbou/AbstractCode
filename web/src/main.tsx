@@ -3,8 +3,9 @@ import ReactDOM from "react-dom/client";
 
 import "@abstractframework/ui-kit/theme.css";
 
-import { App } from "./ui/app";
-import "./ui/styles.css";
+import "@abstractframework/panel-chat/panel_chat.css";
+import { CodeWorkspace, WorkspaceErrorBoundary } from "./workspace/app";
+import "./workspace/workspace.css";
 
 function applyViewportHeightVar(): void {
   try {
@@ -56,6 +57,6 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <WorkspaceErrorBoundary><CodeWorkspace /></WorkspaceErrorBoundary>
   </React.StrictMode>
 );
