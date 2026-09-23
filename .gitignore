@@ -65,5 +65,6 @@ Thumbs.db
 # Local scratch
 # ---------------------------------------------------------------------------
 untracked/
+.venv/
 test-results/
 *.log
