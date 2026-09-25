@@ -14,7 +14,6 @@ import {
   useAppearanceSettings,
   useGatewayConnection,
   VoiceSettings,
-  normalizeSpeculationValue,
   type VoicePreferences,
 } from "@abstractframework/ui-kit";
 import {
@@ -47,6 +46,17 @@ import {
   type SettingsTab,
 } from "./settings_panel";
 import { WorkspaceInspector, type InspectorTab } from "./workspace_panels";
+import { readPreferences, writePreferences } from "./preferences";
+import {
+  GATEWAY_DEFAULT,
+  gatewayDefaultDefinition,
+  gatewayDefaultOptionLabel,
+  reconcileSelection,
+  resolvedWorkflowNote,
+  startRunBody,
+  visibleWorkflowChoices,
+  type ResolvedWorkflowNote,
+} from "./workflow_selection";
 import {
   schemaDefaults,
   validateWorkflowInputs,
@@ -91,21 +101,6 @@ function writeRoute(sessionId: string, runId = "") {
   const params = new URLSearchParams({ session: sessionId });
   if (runId) params.set("run", runId);
   window.history.replaceState(null, "", `#${params}`);
-}
-function readPreferences(identity: string): RunPreferences {
-  try {
-    const raw = JSON.parse(
-      localStorage.getItem(`abstractcode.workspace.v2:${identity}`) || "{}",
-    );
-    return {
-      ...DEFAULT_PREFERENCES,
-      ...raw,
-      speculation: normalizeSpeculationValue(raw.speculation),
-      tools: { ...DEFAULT_PREFERENCES.tools, ...raw.tools },
-    };
-  } catch {
-    return DEFAULT_PREFERENCES;
-  }
 }
 
 export function CodeWorkspace() {
@@ -154,9 +149,26 @@ export function CodeWorkspace() {
   };
   const [preferences, setPreferences] =
     useState<RunPreferences>(DEFAULT_PREFERENCES);
-  const [selection, setSelection] = useState("");
+  const preferencesRef = useRef(preferences);
+  preferencesRef.current = preferences;
+  // "@default" (the gateway default agent workflow) or a catalog workflow id.
+  const [selection, setSelection] = useState(DEFAULT_PREFERENCES.workflow);
+  const visibleChoices = useMemo(
+    () => visibleWorkflowChoices(catalog.choices, preferences.showAllWorkflows),
+    [catalog.choices, preferences.showAllWorkflows],
+  );
+  const defaultWorkflow = useMemo(
+    () => gatewayDefaultDefinition(catalog.gatewayDefault, catalog.workflows),
+    [catalog.gatewayDefault, catalog.workflows],
+  );
   const workflow =
-    catalog.workflows.find((item) => item.id === selection) || null;
+    selection === GATEWAY_DEFAULT
+      ? defaultWorkflow
+      : catalog.workflows.find((item) => item.id === selection) || null;
+  // What the gateway said it started, for the run this page started.
+  const [resolvedNote, setResolvedNote] = useState<
+    (ResolvedWorkflowNote & { runId: string }) | null
+  >(null);
   const isAgent = isChatAgent(workflow);
   const [session, setSession] = useState(route);
   const [draft, setDraft] = useState("");
@@ -326,7 +338,9 @@ export function CodeWorkspace() {
     }
     principalRef.current = identity;
     skipPreferenceWrite.current = true;
-    setPreferences(readPreferences(identity));
+    const saved = readPreferences(identity);
+    setPreferences(saved);
+    setSelection(saved.workflow);
   }, [identity]);
   useEffect(() => {
     if (!identity) return;
@@ -334,28 +348,20 @@ export function CodeWorkspace() {
       skipPreferenceWrite.current = false;
       return;
     }
-    try {
-      localStorage.setItem(
-        `abstractcode.workspace.v2:${identity}`,
-        JSON.stringify(preferences),
-      );
-    } catch {
-      /* In-memory settings remain usable. */
-    }
+    writePreferences(identity, preferences);
   }, [preferences, identity]);
   useEffect(() => {
-    if (!catalog.choices.length) {
-      setSelection("");
-      return;
-    }
-    if (!(session.runId && catalog.workflows.some(item => item.id === selection)) && !catalog.choices.some((item) => item.id === selection))
-      setSelection(
-        (
-          catalog.choices.find((item) => item.isDefault) ||
-          catalog.choices[0]
-        ).id,
-      );
-  }, [catalog.workflows, catalog.choices, selection, session.runId]);
+    // Until the catalog has loaded, a saved workflow id cannot be checked.
+    if (catalog.loading || !catalog.workflows.length) return;
+    const next = reconcileSelection({
+      selection,
+      preferred: preferences.workflow,
+      visible: visibleChoices,
+      workflows: catalog.workflows,
+      runId: session.runId,
+    });
+    if (next !== selection) setSelection(next);
+  }, [catalog.loading, catalog.workflows, visibleChoices, selection, preferences.workflow, session.runId]);
   useEffect(() => {
     let alive = true;
     setInputs({});
@@ -446,6 +452,7 @@ export function CodeWorkspace() {
   const newConversation = useCallback(() => {
     const next = { sessionId: newId(), runId: "" };
     setSession(next);
+    setSelection(preferencesRef.current.workflow);
     writeRoute(next.sessionId);
     setDraft("");
     setQueue([]);
@@ -478,6 +485,10 @@ export function CodeWorkspace() {
     if (sendLock.current) throw new Error("A turn is already being submitted.");
     if (!connection.connected)
       throw new Error("Connect to your gateway first.");
+    if (selection === GATEWAY_DEFAULT && catalog.gatewayDefault.status === "unavailable")
+      throw new Error(
+        `Gateway default: ${catalog.gatewayDefault.reason}. Choose a workflow from the list.`,
+      );
     if (!workflow) throw new Error("Choose a workflow first.");
     if (!catalog.policy)
       throw new Error(
@@ -579,14 +590,12 @@ export function CodeWorkspace() {
         setInputsOpen(true);
         throw new Error(problems.join(" "));
       }
-      const body = {
-        bundle_id: workflow.bundleId,
-        bundle_version: workflow.bundleVersion,
-        registry_scope: workflow.registryScope,
-        flow_id: workflow.flowId,
-        session_id: startedSession,
-        input_data: input,
-      };
+      const body = startRunBody({
+        selection,
+        workflow,
+        sessionId: startedSession,
+        input,
+      });
       const result = await gatewayRequest("/api/gateway/runs/start", {
         method: "POST",
         body: JSON.stringify(body),
@@ -602,6 +611,10 @@ export function CodeWorkspace() {
         throw staleSendAbort();
       attachedRun = String(result.run_id);
       startedRunInput.current = { runId: attachedRun, input };
+      setResolvedNote({
+        runId: attachedRun,
+        ...resolvedWorkflowNote(result.resolved_workflow),
+      });
       setOptimistic([
         ...messages,
         ...(text.trim()
@@ -1033,23 +1046,47 @@ export function CodeWorkspace() {
               aria-label="Workflow"
               value={selection}
               disabled={locked || catalog.loading || !connection.connected}
-              onChange={(e) => setSelection(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setSelection(next);
+                setPreferences((previous) => ({ ...previous, workflow: next }));
+              }}
             >
-              {!catalog.choices.length ? (
-                <option value="">
-                  {catalog.loading ? "Loading workflows…" : "Choose a workflow"}
-                </option>
-              ) : null}
-              {workflow && session.runId && !catalog.choices.some(item => item.id === workflow.id) ? <option value={workflow.id}>{workflow.name} · conversation version {workflow.bundleVersion}</option> : null}
-              {catalog.choices.map((item) => (
+              <option value={GATEWAY_DEFAULT}>
+                {gatewayDefaultOptionLabel(catalog.gatewayDefault)}
+              </option>
+              {workflow && selection !== GATEWAY_DEFAULT && !visibleChoices.some(item => item.id === workflow.id) ? <option value={workflow.id}>{workflow.name}{session.runId ? ` · conversation version ${workflow.bundleVersion || ""}` : ""}</option> : null}
+              {visibleChoices.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {workflowChoiceLabel(item, catalog.choices)}
+                  {workflowChoiceLabel(item, visibleChoices)}
                 </option>
               ))}
             </select>
             <span className="code-workflow-kind">
               {isAgent ? "AGENT" : "WORKFLOW"}
             </span>
+            <label className="code-workflow-all" title="List workflows that are not coding agents too">
+              <input
+                type="checkbox"
+                checked={preferences.showAllWorkflows}
+                disabled={locked || !connection.connected}
+                onChange={(e) =>
+                  setPreferences((previous) => ({
+                    ...previous,
+                    showAllWorkflows: e.target.checked,
+                  }))
+                }
+              />
+              <span>Show all workflows</span>
+            </label>
+            {resolvedNote && resolvedNote.runId === session.runId ? (
+              <span
+                className={`code-workflow-resolved${resolvedNote.missing ? " is-missing" : ""}`}
+                role="status"
+              >
+                {resolvedNote.text}
+              </span>
+            ) : null}
           </div>
           <span className="code-toolbar-divider" />
           <button

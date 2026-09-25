@@ -28,6 +28,11 @@ export type RunPreferences = {
   toolsCustomized: boolean;
   permissions: PermissionLevel;
   skills: string[];
+  /** Workflow for new conversations: "@default" (the gateway's default agent
+   * workflow, resolved by the server at run start) or a catalog workflow id. */
+  workflow: string;
+  /** List non-agent workflows in the selector too. */
+  showAllWorkflows: boolean;
 };
 export const DEFAULT_PREFERENCES: RunPreferences = {
   provider: "",
@@ -43,6 +48,8 @@ export const DEFAULT_PREFERENCES: RunPreferences = {
   toolsCustomized: false,
   permissions: "default",
   skills: [],
+  workflow: "@default",
+  showAllWorkflows: false,
 };
 export type SettingsTab = "model" | "workspace" | "tools" | "skills";
 

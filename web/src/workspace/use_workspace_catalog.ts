@@ -16,6 +16,10 @@ import {
   reconcileVisualFlowSchema,
 } from "./input_schema";
 import { defaultTextRoute } from "./model_discovery";
+import {
+  gatewayDefaultFromEnvelope,
+  type GatewayDefaultState,
+} from "./workflow_selection";
 
 type CatalogState = {
   workflows: WorkflowDefinition[];
@@ -28,8 +32,11 @@ type CatalogState = {
   errors: string[];
   hasMore: boolean;
   defaultModel?: { provider: string; model: string };
+  /** `default_agent_workflows["abstractcode.agent.v1"]` of the `/bundles` envelope. */
+  gatewayDefault: GatewayDefaultState;
 };
 const empty: CatalogState = {
+  gatewayDefault: { status: "loading" },
   workflows: [],
   choices: [],
   policy: null,
@@ -105,6 +112,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       sessions: normalizeSessionSummaries(value(3), inputCache.current.values),
       capabilities: capabilityContracts(value(4)),
       defaultModel: defaultTextRoute(value(6)),
+      gatewayDefault: gatewayDefaultFromEnvelope(value(0)),
       loading: false,
       errors,
       hasMore: Boolean(value(3)?.has_more),

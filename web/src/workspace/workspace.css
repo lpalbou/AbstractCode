@@ -350,7 +350,7 @@ button {
   border: 0;
   font-size: var(--font-size-md);
   font-weight: 550;
-  max-width: 220px;
+  max-width: 320px;
   padding: 5px 4px;
   cursor: pointer;
 }
@@ -365,6 +365,26 @@ select option {
   padding: 2px 5px;
   border-radius: 4px;
   color: var(--text-secondary);
+}
+.code-workflow-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-xxs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.code-workflow-resolved {
+  font-size: var(--font-size-xxs);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.code-workflow-resolved.is-missing {
+  color: var(--error);
 }
 .code-toolbar-divider {
   height: 17px;
