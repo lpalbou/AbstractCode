@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildWorkflowInput } from './catalog';
 import { GatewayClient } from '../lib/gateway_client';
-import { DEFAULT_PREFERENCES } from './settings_panel';
+import { DEFAULT_PREFERENCES, SettingsPanel } from './settings_panel';
+import { parsePreferences } from './preferences';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 describe('MTP application transport', () => {
   it('inherits unless explicitly set, preserving Off', () => {
@@ -21,5 +24,20 @@ describe('MTP application transport', () => {
       expect(fetch.mock.calls[0][0]).toContain('provider=endpoint%3Alocal');
       expect(fetch.mock.calls[0][1].method).toBeUndefined();
     } finally { vi.unstubAllGlobals(); }
+  });
+  it('shows the MTP control in Settings > Model & behavior', () => {
+    const html = renderToStaticMarkup(React.createElement(SettingsPanel, {
+      open: true, onClose: () => {}, tab: 'model', onTab: () => {},
+      value: DEFAULT_PREFERENCES, onChange: () => {}, policy: null, tools: [], disabled: false,
+    }));
+    expect(html).toContain('aria-label="MTP depth"');
+  });
+  it('persists the MTP choice across reloads and sends it on the next run (Off stays Off)', () => {
+    for (const choice of [false, {mode:'native_mtp' as const,num_draft_tokens:4,require_acceleration:true as const}]) {
+      const restored = parsePreferences(JSON.stringify({...DEFAULT_PREFERENCES, speculation: choice}));
+      expect(restored.speculation).toEqual(choice);
+      expect((buildWorkflowInput({speculation: restored.speculation})._runtime as any).speculation).toEqual(choice);
+    }
+    expect(parsePreferences(JSON.stringify({})).speculation).toBeUndefined();
   });
 });
