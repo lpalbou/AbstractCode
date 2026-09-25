@@ -824,8 +824,8 @@ export function CodeWorkspace() {
     if (!stale() && (attached || failed))
       setUploadNotice(uploadAnnouncement(attached, failed));
   }
-  function attachUploads(files: File[]) {
-    if (!files.length) return;
+  function attachUploads(files: File[]): PendingUpload[] {
+    if (!files.length) return [];
     const items = queueUploads(
       files,
       catalog.policy?.maxAttachmentBytes,
@@ -836,6 +836,7 @@ export function CodeWorkspace() {
     if (refused)
       setUploadNotice(uploadAnnouncement(0, refused));
     void uploadBatch(items.filter((item) => item.status === "queued"));
+    return items;
   }
   function retryUpload(id: string) {
     const item = uploads.find((entry) => entry.id === id);
@@ -1346,7 +1347,7 @@ export function CodeWorkspace() {
               disabled={!connection.connected}
               interaction={interaction}
               onAttach={() => fileInput.current?.click()}
-              onFiles={attachUploads}
+              onFiles={(files) => { attachUploads(files); }}
               attachments={
                 attachments.length || uploads.length ? (
                   <ComposerAttachments

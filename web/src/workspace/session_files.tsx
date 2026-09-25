@@ -3,6 +3,7 @@ import { Icon } from "@abstractframework/ui-kit";
 import { JsonViewer, Markdown } from "@abstractframework/panel-chat";
 import { formatError, gatewayRequest } from "./transport";
 import { copy_text } from "../lib/clipboard";
+import { uploadRefusal, type PendingUpload } from "./attachment_uploads";
 
 /** `GET /runs/{run_id}/workspace` (CONTRACTS §W). */
 export type RunWorkspace = {
@@ -30,8 +31,9 @@ export type WorkspaceListing = {
 
 export type PreviewKind = "markdown" | "json" | "image" | "html" | "text" | "binary";
 
-/** Bytes fetched for a text preview; larger files show their first part. */
-export const PREVIEW_TEXT_LIMIT = 512 * 1024;
+/** Bytes read for a text preview; larger files show their first part. */
+export const PREVIEW_TEXT_LIMIT = 1024 * 1024;
+export const PREVIEW_LIMIT_LABEL = "1 MiB";
 
 const runPath = (runId: string) =>
   `/api/gateway/runs/${encodeURIComponent(runId)}/workspace`;
@@ -79,7 +81,7 @@ export function previewKind(name: string, contentType = ""): PreviewKind {
 export function formatBytes(value: number | undefined): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "";
   if (value < 1024) return `${value} B`;
-  const units = ["KB", "MB", "GB", "TB"];
+  const units = ["KiB", "MiB", "GiB", "TiB"];
   let size = value / 1024;
   let unit = 0;
   while (size >= 1024 && unit < units.length - 1) {
@@ -197,11 +199,157 @@ export function WorkspaceFileList({
   );
 }
 
+/** Validate a `/workspace/files` answer. A malformed or older response is
+ * an error, never an empty folder. */
+export function parseListing(data: unknown, directory: string): WorkspaceListing {
+  const body = data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : null;
+  const fail = (why: string): never => {
+    throw new Error(`Unexpected /workspace/files response from the gateway: ${why}.`);
+  };
+  if (!body) fail("not an object");
+  if (!Array.isArray(body!.entries)) fail("no `entries` list");
+  if (typeof body!.truncated !== "boolean") fail("no `truncated` flag");
+  const entries = (body!.entries as unknown[]).map((raw, index) => {
+    const row = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    if (typeof row.name !== "string" || typeof row.path !== "string" || (row.type !== "file" && row.type !== "dir"))
+      fail(`entry ${index + 1} lacks a name, path or file/dir type`);
+    return row as unknown as WorkspaceEntry;
+  });
+  return {
+    path: typeof body!.path === "string" ? (body!.path as string) : directory,
+    entries,
+    truncated: body!.truncated as boolean,
+  };
+}
+
+/** Why a workspace file cannot be attached, decided BEFORE downloading it
+ * (the gateway's `maxAttachmentBytes`, the only size rule), or null. */
+export function attachPrecheck(entry: WorkspaceEntry, maxBytes: number | undefined): string | null {
+  if (typeof entry.size_bytes !== "number") return null;
+  return uploadRefusal({ name: entry.name, size: entry.size_bytes }, maxBytes);
+}
+
+/** What the Files panel says after handing a file to the upload queue: a
+ * refusal carries its reason; success is never claimed before the upload. */
+export function attachOutcomeNotice(name: string, chip: PendingUpload | undefined): string {
+  if (!chip) return `${name} was not queued for upload.`;
+  if (chip.status === "refused")
+    return `Not attached: ${chip.message || "refused by the gateway's attachment policy"}`;
+  return `${name} is uploading; its chip in the message box shows when it is attached.`;
+}
+
+export type BoundedText = { text: string; received: number; total?: number; partial: boolean };
+
+/** The size a content response reports: the total of `Content-Range`
+ * (a 206), else `Content-Length` of a full 200 answer. */
+export function responseTotal(response: Response): number | undefined {
+  const range = response.headers.get("content-range");
+  const total = range ? Number(range.split("/")[1]) : NaN;
+  if (Number.isFinite(total)) return total;
+  const length = Number(response.headers.get("content-length"));
+  return response.status === 200 && Number.isFinite(length) && response.headers.has("content-length")
+    ? length
+    : undefined;
+}
+
+/** Read at most `limit` bytes of a response body as text, then stop reading
+ * (never the whole of a large file). */
+export async function readBoundedText(
+  response: Response,
+  limit: number,
+  knownSize?: number,
+): Promise<BoundedText> {
+  const decoder = new TextDecoder();
+  let text = "";
+  let received = 0;
+  const reader = response.body?.getReader();
+  if (reader) {
+    while (received < limit) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = value.subarray(0, limit - received);
+      received += chunk.length;
+      text += decoder.decode(chunk, { stream: true });
+    }
+    await reader.cancel().catch(() => {});
+  }
+  const total = responseTotal(response) ?? knownSize;
+  const partial = total !== undefined ? total > received : received >= limit;
+  return { text, received, total, partial };
+}
+
+export function partialPreviewNote(total: number | undefined): string {
+  return `Showing the first ${PREVIEW_LIMIT_LABEL} of ${total !== undefined ? formatBytes(total) : "a file of unknown size"}; download for the rest.`;
+}
+
+/** Markdown previews never load images from elsewhere: an image renders only
+ * when its URL is this conversation's workspace content route (a relative
+ * path is resolved against the Markdown file's folder); any other image
+ * becomes a plain link. Fenced code is left untouched. */
+export function safeMarkdownImages(text: string, runId: string, markdownPath: string): string {
+  const contentPrefix = `/api/gateway/runs/${encodeURIComponent(runId)}/workspace/content?`;
+  const folder = markdownPath.split("/").slice(0, -1);
+  const resolveRelative = (src: string): string | null => {
+    if (/^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith("/") || src.startsWith("#")) return null;
+    const parts = [...folder];
+    for (const part of src.split(/[?#]/, 1)[0].split("/")) {
+      if (!part || part === ".") continue;
+      if (part === "..") {
+        if (!parts.length) return null;
+        parts.pop();
+      } else parts.push(decodeURIComponentSafe(part));
+    }
+    return parts.length ? workspaceContentUrl(runId, parts.join("/")) : null;
+  };
+  const rewriteLine = (line: string): string => {
+    let out = "";
+    let i = 0;
+    while (i < line.length) {
+      if (line[i] === "!" && line[i + 1] === "[") {
+        const labelEnd = line.indexOf("]", i + 2);
+        if (labelEnd !== -1 && line[labelEnd + 1] === "(") {
+          const hrefEnd = line.indexOf(")", labelEnd + 2);
+          if (hrefEnd !== -1) {
+            const alt = line.slice(i + 2, labelEnd);
+            const src = line.slice(labelEnd + 2, hrefEnd).trim();
+            const local = src.startsWith(contentPrefix) ? src : resolveRelative(src);
+            out += local ? `![${alt}](${local})` : `[image: ${alt || src}](${src})`;
+            i = hrefEnd + 1;
+            continue;
+          }
+        }
+      }
+      out += line[i];
+      i += 1;
+    }
+    return out;
+  };
+  let fenced = false;
+  return text
+    .split("\n")
+    .map((line) => {
+      if (/^\s*(```|~~~)/.test(line)) {
+        fenced = !fenced;
+        return line;
+      }
+      return fenced ? line : rewriteLine(line);
+    })
+    .join("\n");
+}
+
+function decodeURIComponentSafe(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 type PreviewState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; kind: PreviewKind; text?: string; partial: boolean };
+  | { status: "ready"; kind: PreviewKind; text?: string; partial: boolean; total?: number };
 
 export function FilePreview({
   entry,
@@ -234,9 +382,7 @@ export function FilePreview({
       ) : state.status === "ready" ? (
         <>
           {state.partial ? (
-            <p className="code-field-help">
-              Showing the first {formatBytes(PREVIEW_TEXT_LIMIT)} of {formatBytes(entry.size_bytes)}. Download for the whole file.
-            </p>
+            <p className="code-field-help" role="status">{partialPreviewNote(state.total)}</p>
           ) : null}
           {state.kind === "image" ? (
             <img className="code-file-preview-image" src={url} alt={entry.name} />
@@ -275,12 +421,16 @@ export function SessionFiles({
   runId,
   enabled,
   refreshKey,
+  maxAttachmentBytes,
   onAttachFiles,
 }: {
   runId: string;
   enabled: boolean;
   refreshKey?: string;
-  onAttachFiles: (files: File[]) => void;
+  /** The gateway's attachment size limit, checked before any download. */
+  maxAttachmentBytes?: number;
+  /** Queue files for upload; returns their chips (refused ones included). */
+  onAttachFiles: (files: File[]) => PendingUpload[];
 }): React.ReactElement {
   const [info, setInfo] = useState<RunWorkspace | null>(null);
   const [infoError, setInfoError] = useState("");
@@ -322,13 +472,7 @@ export function SessionFiles({
     void gatewayRequest<WorkspaceListing>(workspaceFilesUrl(runId, directory), {
       signal: abort.signal,
     })
-      .then((data) =>
-        setListing({
-          path: String(data?.path ?? directory),
-          entries: Array.isArray(data?.entries) ? data.entries : [],
-          truncated: data?.truncated === true,
-        }),
-      )
+      .then((data) => setListing(parseListing(data, directory)))
       .catch((e) => {
         if (!abort.signal.aborted) setListError(formatError(e));
       })
@@ -350,11 +494,12 @@ export function SessionFiles({
     }
     const abort = new AbortController();
     setPreview({ status: "loading" });
-    const partial = (selected.size_bytes ?? 0) > PREVIEW_TEXT_LIMIT;
+    // Always bounded: the content route supports Range, and the body is read
+    // only up to the limit even when a server ignores Range.
     void fetch(workspaceContentUrl(runId, selected.path), {
       credentials: "same-origin",
       signal: abort.signal,
-      headers: partial ? { Range: `bytes=0-${PREVIEW_TEXT_LIMIT - 1}` } : {},
+      headers: { Range: `bytes=0-${PREVIEW_TEXT_LIMIT - 1}` },
     })
       .then(async (response) => {
         if (!response.ok)
@@ -363,21 +508,24 @@ export function SessionFiles({
           );
         const kind = previewKind(selected.name, response.headers.get("content-type") || "");
         if (kind === "binary" || kind === "image") {
+          await response.body?.cancel().catch(() => {});
           setPreview({ status: "ready", kind, partial: false });
           return;
         }
+        const read = await readBoundedText(response, PREVIEW_TEXT_LIMIT, selected.size_bytes);
         setPreview({
           status: "ready",
           kind,
-          text: await response.text(),
-          partial: partial && response.status === 206,
+          text: kind === "markdown" ? safeMarkdownImages(read.text, runId, selected.path) : read.text,
+          partial: read.partial,
+          total: read.total,
         });
       })
       .catch((e) => {
         if (!abort.signal.aborted) setPreview({ status: "error", message: formatError(e) });
       });
     return () => abort.abort();
-  }, [runId, selected]);
+  }, [runId, selected, refreshKey]);
 
   if (!runId)
     return (
@@ -390,17 +538,32 @@ export function SessionFiles({
 
   const attachSelected = async () => {
     if (!selected) return;
-    setAttaching(true);
     setNotice("");
+    // The size rule is applied before anything is downloaded.
+    const refusal = attachPrecheck(selected, maxAttachmentBytes);
+    if (refusal) {
+      setNotice(`Not attached: ${refusal}`);
+      return;
+    }
+    setAttaching(true);
     try {
+      const abort = new AbortController();
       const response = await fetch(workspaceContentUrl(runId, selected.path), {
         credentials: "same-origin",
+        signal: abort.signal,
       });
       if (!response.ok)
         throw new Error(`Could not read ${selected.name} (${response.status}): ${await response.text()}`);
+      // No listed size: the response's own length is checked before reading.
+      const late = attachPrecheck({ ...selected, size_bytes: responseTotal(response) }, maxAttachmentBytes);
+      if (late) {
+        abort.abort();
+        setNotice(`Not attached: ${late}`);
+        return;
+      }
       const blob = await response.blob();
-      onAttachFiles([new File([blob], selected.name, { type: blob.type })]);
-      setNotice(`${selected.name} added to the message.`);
+      const [chip] = onAttachFiles([new File([blob], selected.name, { type: blob.type })]);
+      setNotice(attachOutcomeNotice(selected.name, chip));
     } catch (e) {
       setNotice(formatError(e));
     } finally {

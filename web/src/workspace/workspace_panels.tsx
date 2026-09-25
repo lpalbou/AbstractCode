@@ -5,6 +5,7 @@ import { downloadArtifact, formatError, gatewayRequest } from "./transport";
 import type { WorkspacePolicy } from "./catalog";
 import { navigateTabs } from "./tabs";
 import { SessionFiles } from "./session_files";
+import type { PendingUpload } from "./attachment_uploads";
 import {
   activity_rows,
   type ActivityKind,
@@ -46,8 +47,8 @@ export function WorkspaceInspector({
   refreshKey?: string;
   /** Attach a file from the operator's shared workspace (admin). */
   onAttach: (path: string) => Promise<void>;
-  /** Attach files read from this conversation's workspace. */
-  onAttachFiles: (files: File[]) => void;
+  /** Queue files read from this conversation's workspace for upload. */
+  onAttachFiles: (files: File[]) => PendingUpload[];
   onClose: () => void;
 }) {
   const [filesMode, setFilesMode] = useState<"session" | "shared">("session");
@@ -131,6 +132,7 @@ export function WorkspaceInspector({
                 runId={runId}
                 enabled={enabled}
                 refreshKey={refreshKey}
+                maxAttachmentBytes={policy?.maxAttachmentBytes}
                 onAttachFiles={onAttachFiles}
               />
             )}
