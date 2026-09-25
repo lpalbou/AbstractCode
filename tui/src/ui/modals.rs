@@ -2132,6 +2132,364 @@ pub fn open_tools(cx: Scope, store: Store, ctx: &UiCtx) {
     });
 }
 
+/// `/files` — the current run's workspace ON THE GATEWAY HOST (§W): the
+/// absolute root (and which host it is on), the folder's entries, and a
+/// preview for any file. Nothing here reads this machine's disk.
+pub fn open_files(cx: Scope, store: Store, ctx: &UiCtx) {
+    let run_id = store.run_id.get_untracked();
+    if run_id.trim().is_empty() {
+        // Loud, not an empty modal: a session with no run has no
+        // workspace the gateway can show yet.
+        store.notify(
+            "/files shows a run's workspace — this session has no run yet; send a task first",
+        );
+        return;
+    }
+    // Same run: keep the folder the user was in; new run: start at the root.
+    let (dir, with_info) = store.files.with_untracked(|f| {
+        if f.run_id == run_id {
+            let need_info = !matches!(f.info, crate::store::Fetch::Ready(_));
+            (f.dir.clone(), need_info)
+        } else {
+            (String::new(), true)
+        }
+    });
+    store.files.update(|f| {
+        if f.run_id != run_id {
+            *f = crate::store::FilesView {
+                run_id: run_id.clone(),
+                ..Default::default()
+            };
+        }
+        if with_info {
+            f.info = crate::store::Fetch::Loading;
+        }
+        f.dir = dir.clone();
+        f.listing = crate::store::Fetch::Loading;
+    });
+    ctx.send(Cmd::LoadWorkspaceFiles {
+        run_id,
+        dir,
+        with_info,
+    });
+    let base_url = ctx.client.connection().0;
+    let ctx2 = ctx.clone();
+    let size = modal_size(110, 30);
+    ctx.open_modal(cx, size, move |mcx| {
+        let t = abstracttui::app::current_theme().tokens;
+        let cursor = mcx.signal(0usize);
+        // The selectable rows: ".." (below the root) then the entries.
+        let items = move || -> Vec<Option<crate::workspace_files::WorkspaceEntry>> {
+            store.files.with_untracked(|f| {
+                let mut v = Vec::new();
+                if !f.dir.is_empty() {
+                    v.push(None);
+                }
+                if let crate::store::Fetch::Ready(l) = &f.listing {
+                    v.extend(l.entries.iter().cloned().map(Some));
+                }
+                v
+            })
+        };
+        let navigate = {
+            let ctx = ctx2.clone();
+            move |dir: String| {
+                let run_id = store.files.with_untracked(|f| f.run_id.clone());
+                store.files.update(|f| {
+                    f.dir = dir.clone();
+                    f.listing = crate::store::Fetch::Loading;
+                });
+                cursor.set(0);
+                ctx.send(Cmd::LoadWorkspaceFiles {
+                    run_id,
+                    dir,
+                    with_info: false,
+                });
+            }
+        };
+        let root_of = move || {
+            store.files.with_untracked(|f| match &f.info {
+                crate::store::Fetch::Ready(i) => Some(i.clone()),
+                _ => None,
+            })
+        };
+        let activate = {
+            let ctx = ctx2.clone();
+            let navigate = navigate.clone();
+            move || {
+                let list = items();
+                let Some(item) = list.get(cursor.get_untracked()).cloned() else {
+                    return;
+                };
+                match item {
+                    None => {
+                        let up = store
+                            .files
+                            .with_untracked(|f| crate::workspace_files::parent_dir(&f.dir));
+                        navigate(up);
+                    }
+                    Some(e) if e.is_dir => navigate(e.path.clone()),
+                    Some(e) => {
+                        let run_id = store.files.with_untracked(|f| f.run_id.clone());
+                        let shown = root_of()
+                            .map(|i| crate::workspace_files::absolute_path(&i.workspace_root, &e.path))
+                            .unwrap_or_else(|| e.path.clone());
+                        crate::ui::preview::open_remote(
+                            cx,
+                            store,
+                            &ctx,
+                            run_id,
+                            e.path.clone(),
+                            shown,
+                            e.size_bytes,
+                        );
+                    }
+                }
+            }
+        };
+        let selected_abs = move || -> Option<String> {
+            let info = root_of()?;
+            let list = items();
+            let rel = match list.get(cursor.get_untracked()) {
+                Some(Some(e)) => e.path.clone(),
+                _ => store.files.with_untracked(|f| f.dir.clone()),
+            };
+            Some(crate::workspace_files::absolute_path(&info.workspace_root, &rel))
+        };
+        let copy = move || match selected_abs() {
+            Some(path) => {
+                abstracttui::app::selection::copy_to_clipboard(&path);
+                store.notify(format!("copied {path}"));
+            }
+            None => store.notify("the workspace location is not known yet"),
+        };
+        let open_folder = {
+            let base_url = base_url.clone();
+            move || {
+                let Some(info) = root_of() else {
+                    store.notify("the workspace location is not known yet");
+                    return;
+                };
+                if let Some(why) = crate::workspace_files::open_refusal(&info, &base_url) {
+                    store.notify(why);
+                    return;
+                }
+                let dir = store.files.with_untracked(|f| f.dir.clone());
+                let path = crate::workspace_files::absolute_path(&info.workspace_root, &dir);
+                let Some(program) = crate::workspace_files::opener_program() else {
+                    store.notify(format!("no folder opener on this platform — {path}"));
+                    return;
+                };
+                match std::process::Command::new(program)
+                    .arg(&path)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                {
+                    Ok(_) => store.notify(format!("opened {path}")),
+                    Err(e) => store.notify(format!("could not open {path}: {e}")),
+                }
+            }
+        };
+        let move_cursor = move |delta: i64| {
+            let n = items().len();
+            if n == 0 {
+                return;
+            }
+            cursor.update(|c| {
+                *c = (*c as i64 + delta).clamp(0, n as i64 - 1) as usize;
+            });
+        };
+        let go_up = {
+            let navigate = navigate.clone();
+            move || {
+                let dir = store.files.with_untracked(|f| f.dir.clone());
+                if !dir.is_empty() {
+                    navigate(crate::workspace_files::parent_dir(&dir));
+                }
+            }
+        };
+        let refresh = {
+            let ctx = ctx2.clone();
+            move || {
+                let (run_id, dir) = store.files.with_untracked(|f| (f.run_id.clone(), f.dir.clone()));
+                store.files.update(|f| {
+                    f.info = crate::store::Fetch::Loading;
+                    f.listing = crate::store::Fetch::Loading;
+                });
+                ctx.send(Cmd::LoadWorkspaceFiles {
+                    run_id,
+                    dir,
+                    with_info: true,
+                });
+            }
+        };
+        let hint_base_url = base_url.clone();
+        Element::new()
+            .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
+            .focusable()
+            .autofocus()
+            .shortcut(KeyChord::plain(Key::Escape), {
+                let ctx = ctx2.clone();
+                move |_| ctx.close_modal()
+            })
+            .shortcut(KeyChord::plain(Key::Up), move |_| move_cursor(-1))
+            .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
+            .shortcut(KeyChord::plain(Key::Enter), {
+                let activate = activate.clone();
+                move |_| activate()
+            })
+            .shortcut(KeyChord::plain(Key::Right), move |_| activate())
+            .shortcut(KeyChord::plain(Key::Left), {
+                let go_up = go_up.clone();
+                move |_| go_up()
+            })
+            .shortcut(KeyChord::plain(Key::Backspace), move |_| go_up())
+            .shortcut(KeyChord::plain(Key::Char('c')), move |_| copy())
+            .shortcut(KeyChord::plain(Key::Char('o')), move |_| open_folder())
+            .shortcut(KeyChord::plain(Key::Char('r')), move |_| refresh())
+            .child(title_row(&t, "session files — the run's workspace on the gateway".into()))
+            .child(dyn_view(LayoutStyle::column().shrink(0.0), move || {
+                let t2 = abstracttui::app::current_theme().tokens;
+                let lines = store
+                    .files
+                    .with(|f| files_header_lines(&f.info, &f.dir, &f.listing));
+                let mut col = Element::new().style(LayoutStyle::column());
+                for line in lines {
+                    col = col.child(hint_row(&t2, line));
+                }
+                col.build()
+            }))
+            .child(dyn_view(
+                LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)),
+                move || {
+                    let cur = cursor.get();
+                    let rows_src = store.files.with(|f| {
+                        let mut rows = Vec::new();
+                        let mut selectable = Vec::new();
+                        if !f.dir.is_empty() {
+                            selectable.push(rows.len());
+                            rows.push(RowSpec {
+                                text: "..  (parent folder)".into(),
+                                header: false,
+                                checked: None,
+                                dim: false,
+                            });
+                        }
+                        match &f.listing {
+                            crate::store::Fetch::Ready(l) => {
+                                for e in &l.entries {
+                                    selectable.push(rows.len());
+                                    rows.push(RowSpec {
+                                        text: files_entry_row(e),
+                                        header: false,
+                                        checked: None,
+                                        dim: false,
+                                    });
+                                }
+                                if l.entries.is_empty() {
+                                    rows.push(RowSpec {
+                                        text: "(empty folder)".into(),
+                                        header: false,
+                                        checked: None,
+                                        dim: true,
+                                    });
+                                }
+                            }
+                            crate::store::Fetch::Failed(err) => rows.push(RowSpec {
+                                text: format!("listing failed: {err}"),
+                                header: false,
+                                checked: None,
+                                dim: false,
+                            }),
+                            _ => rows.push(RowSpec {
+                                text: "asking the gateway…".into(),
+                                header: false,
+                                checked: None,
+                                dim: true,
+                            }),
+                        }
+                        (rows, selectable)
+                    });
+                    let (rows, selectable) = rows_src;
+                    let cur = cur.min(selectable.len().saturating_sub(1));
+                    draw_rows(rows, cur, selectable)
+                },
+            ))
+            .child(dyn_view(LayoutStyle::line(1).shrink(0.0), move || {
+                let t2 = abstracttui::app::current_theme().tokens;
+                let can_open = store.files.with(|f| match &f.info {
+                    crate::store::Fetch::Ready(i) => {
+                        crate::workspace_files::can_open_locally(i, &hint_base_url)
+                    }
+                    _ => false,
+                });
+                let open = if can_open { " · o opens the folder" } else { "" };
+                hint_row(
+                    &t2,
+                    format!(
+                        "↑↓ move · Enter opens a folder / previews a file · ← or Backspace goes up · c copies the path{open} · r refreshes · Esc closes"
+                    ),
+                )
+            }))
+            .build()
+    });
+}
+
+/// `/files` header lines: the ABSOLUTE root and the machine it is on, the
+/// folder shown, and the gateway's own cut. Pure; test-pinned.
+pub fn files_header_lines(
+    info: &crate::store::Fetch<crate::workspace_files::WorkspaceInfo>,
+    dir: &str,
+    listing: &crate::store::Fetch<crate::workspace_files::WorkspaceListing>,
+) -> Vec<String> {
+    use crate::store::Fetch;
+    let mut out = Vec::new();
+    match info {
+        Fetch::Ready(i) => {
+            let place = if i.caller_is_this_machine {
+                " (this machine)".to_string()
+            } else if i.hostname.is_empty() {
+                " on the gateway host".to_string()
+            } else {
+                format!(" on gateway host {}", i.hostname)
+            };
+            out.push(format!("workspace: {}{place}", i.workspace_root));
+            if !i.exists {
+                out.push("this folder does not exist yet on the gateway host".to_string());
+            }
+            let here = crate::workspace_files::absolute_path(&i.workspace_root, dir);
+            if !dir.is_empty() {
+                out.push(format!("folder: {here}"));
+            }
+        }
+        Fetch::Failed(e) => out.push(format!("workspace: the gateway refused — {e}")),
+        _ => out.push("workspace: asking the gateway…".to_string()),
+    }
+    if let Fetch::Ready(l) = listing {
+        let n = l.entries.len();
+        let mut line = format!("{n} entr{}", if n == 1 { "y" } else { "ies" });
+        if l.truncated {
+            line.push_str(" — the gateway cut this list (its limit); not every entry is shown");
+        }
+        out.push(line);
+    }
+    out
+}
+
+/// One `/files` row: folders end in `/`, files carry their size.
+pub fn files_entry_row(e: &crate::workspace_files::WorkspaceEntry) -> String {
+    if e.is_dir {
+        format!("▸ {}/", e.name)
+    } else {
+        match e.size_bytes {
+            Some(n) => format!("  {}  ·  {}", e.name, crate::paths::human_size(n)),
+            None => format!("  {}", e.name),
+        }
+    }
+}
+
 /// The `/skills` modal's body for an EMPTY list (§X): the shelf, its source
 /// and the gateway's warnings, verbatim. Pure; test-pinned.
 pub fn empty_shelf_lines(shelf: &crate::store::SkillShelf) -> Vec<String> {
@@ -6417,5 +6775,50 @@ mod tests {
         assert_eq!(super::human_bytes(3_109_915_433), "2.9 GiB");
         // session caches
         assert_eq!(super::human_bytes(4_352_519_172), "4.1 GiB");
+    }
+}
+
+#[cfg(test)]
+mod files_tests {
+    use super::{files_entry_row, files_header_lines};
+    use crate::store::Fetch;
+    use crate::workspace_files::{WorkspaceEntry, WorkspaceInfo, WorkspaceListing};
+
+    #[test]
+    fn header_names_the_absolute_root_and_the_machine() {
+        let info = WorkspaceInfo {
+            workspace_root: "/w/session-1".into(),
+            hostname: "studio".into(),
+            exists: true,
+            caller_is_this_machine: true,
+            ..Default::default()
+        };
+        let lines = files_header_lines(&Fetch::Ready(info.clone()), "src", &Fetch::Loading);
+        assert_eq!(lines[0], "workspace: /w/session-1 (this machine)");
+        assert_eq!(lines[1], "folder: /w/session-1/src");
+        let remote = WorkspaceInfo {
+            caller_is_this_machine: false,
+            exists: false,
+            ..info
+        };
+        let listing = WorkspaceListing {
+            truncated: true,
+            entries: vec![WorkspaceEntry::default()],
+            ..Default::default()
+        };
+        let lines = files_header_lines(&Fetch::Ready(remote), "", &Fetch::Ready(listing));
+        assert_eq!(lines[0], "workspace: /w/session-1 on gateway host studio");
+        assert!(lines[1].contains("does not exist yet"));
+        assert!(lines[2].starts_with("1 entry — the gateway cut this list"));
+        let failed = files_header_lines(&Fetch::Failed("HTTP 404".into()), "", &Fetch::Loading);
+        assert!(failed[0].contains("HTTP 404"));
+        assert_eq!(
+            files_entry_row(&WorkspaceEntry {
+                name: "d".into(),
+                is_dir: true,
+                ..Default::default()
+            }),
+            "▸ d/"
+        );
     }
 }

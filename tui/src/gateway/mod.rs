@@ -648,6 +648,56 @@ impl GatewayClient {
         Ok((bytes, content_type))
     }
 
+    // -- run workspace (§W) ----------------------------------------------------
+
+    /// `GET /runs/{rid}/workspace` — where this run's workspace lives on the
+    /// GATEWAY host, and whether the caller is on that machine.
+    pub fn run_workspace(&self, run_id: &str) -> GwResult<Value> {
+        self.get_json(&format!("/runs/{}/workspace", url_encode(run_id)))
+    }
+
+    /// `GET /runs/{rid}/workspace/files?path=<dir>` — one folder's entries
+    /// (not recursive). The gateway reports its own cut as `truncated`.
+    pub fn run_workspace_files(&self, run_id: &str, dir: &str) -> GwResult<Value> {
+        self.get_json(&format!(
+            "/runs/{}/workspace/files?path={}&recursive=false",
+            url_encode(run_id),
+            url_encode(dir)
+        ))
+    }
+
+    /// `GET /runs/{rid}/workspace/content?path=<file>` — at most `limit`
+    /// bytes of one file, plus its `Content-Type`. When the listing says the
+    /// file is bigger (`size`), a `Range` asks for just the prefix; a server
+    /// that ignores it is still read no further than `limit`. The caller
+    /// passes the file's full size to `preview::load_bytes`, which LABELS
+    /// the cut — this read never shortens a file silently.
+    pub fn run_workspace_content(
+        &self,
+        run_id: &str,
+        path: &str,
+        size: Option<u64>,
+        limit: u64,
+    ) -> GwResult<(Vec<u8>, String)> {
+        let route = format!(
+            "/runs/{}/workspace/content?path={}",
+            url_encode(run_id),
+            url_encode(path)
+        );
+        let mut req = self.with_auth(self.agent.get(&self.url(&route)));
+        if size.is_some_and(|n| n > limit) && limit > 0 {
+            req = req.set("Range", &format!("bytes=0-{}", limit - 1));
+        }
+        let resp = req.call().map_err(|e| err_from_ureq(&route, e))?;
+        let content_type = resp.content_type().to_string();
+        let mut bytes = Vec::new();
+        resp.into_reader()
+            .take(limit)
+            .read_to_end(&mut bytes)
+            .map_err(|e| GwError::from_io_read(format!("workspace file read failed: {e}"), &e))?;
+        Ok((bytes, content_type))
+    }
+
     // -- commands ---------------------------------------------------------------
 
     pub fn submit_command(&self, run_id: &str, typ: &str, payload: Value) -> GwResult<Value> {
@@ -1229,6 +1279,70 @@ pub fn url_encode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One-shot HTTP server: answers `body` with `content_type` and hands
+    /// back the raw request it received.
+    fn one_shot_server(
+        body: Vec<u8>,
+        content_type: &'static str,
+    ) -> (String, std::sync::mpsc::Receiver<String>) {
+        use std::io::{BufRead, BufReader, Write};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let url = format!("http://{}", l.local_addr().unwrap());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut sock, _) = l.accept().expect("accept");
+            let mut reader = BufReader::new(sock.try_clone().unwrap());
+            let mut req = String::new();
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+                req.push_str(&line);
+            }
+            let _ = tx.send(req);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = sock.write_all(head.as_bytes());
+            let _ = sock.write_all(&body);
+        });
+        (url, rx)
+    }
+
+    /// §W content read: a file bigger than the preview limit is asked for
+    /// with a `Range`, and even a server that ignores it is read no further
+    /// than the limit (the caller labels the cut).
+    #[test]
+    fn workspace_content_reads_a_bounded_prefix() {
+        let (url, rx) = one_shot_server(vec![b'x'; 5000], "text/plain; charset=utf-8");
+        let c = GatewayClient::new(&url, None);
+        let (bytes, ct) = c
+            .run_workspace_content("r 1", "logs/big.log", Some(5000), 1000)
+            .expect("read");
+        assert_eq!(bytes.len(), 1000, "never past the limit");
+        assert!(ct.starts_with("text/plain"));
+        let req = rx.recv().unwrap();
+        assert!(
+            req.starts_with("GET /api/gateway/runs/r%201/workspace/content?path=logs%2Fbig.log "),
+            "{req}"
+        );
+        assert!(
+            req.to_ascii_lowercase().contains("range: bytes=0-999"),
+            "{req}"
+        );
+
+        // Small file: no Range, whole body.
+        let (url, rx) = one_shot_server(b"hello".to_vec(), "text/markdown");
+        let c = GatewayClient::new(&url, None);
+        let (bytes, _) = c
+            .run_workspace_content("r", "a.md", Some(5), 1000)
+            .expect("read");
+        assert_eq!(bytes, b"hello");
+        assert!(!rx.recv().unwrap().to_ascii_lowercase().contains("range:"));
+    }
 
     /// §D wire shape: the `@default` sentinel sends `interface` and NO
     /// bundle; a named workflow sends its bundle and no interface.

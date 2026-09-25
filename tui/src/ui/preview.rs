@@ -152,6 +152,45 @@ fn open_state(cx: Scope, store: Store, ctx: &UiCtx, path: String, name: String, 
     open_modal(cx, store, ctx, seq);
 }
 
+/// Preview one file of a run's workspace ON THE GATEWAY (`/files`). `path`
+/// is relative to the workspace root; `shown` is the absolute path the
+/// header names. Same modal, same staleness guard as local previews.
+pub(crate) fn open_remote(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    run_id: String,
+    path: String,
+    shown: String,
+    size: Option<u64>,
+) {
+    let seq = store.preview_seq.get_untracked().wrapping_add(1);
+    store.preview_seq.set(seq);
+    let name = path.rsplit('/').next().unwrap_or(&path).to_string();
+    store.preview.set(Some(PreviewState::loading(
+        seq,
+        shown,
+        name.clone(),
+        size.unwrap_or(0),
+    )));
+    if !ctx.send(Cmd::LoadWorkspacePreview {
+        seq,
+        run_id,
+        path,
+        name,
+        size,
+    }) {
+        crate::runner::apply_preview(
+            &store,
+            seq,
+            PreviewBody::Unavailable {
+                reason: "the client's worker thread is not running — restart to preview".into(),
+            },
+        );
+    }
+    open_modal(cx, store, ctx, seq);
+}
+
 /// Closing is just closing: the modal scope's cleanup drops the body
 /// (see `open_modal`), so EVERY close path — Esc, another modal
 /// replacing this one, quit — frees it, not only the one that goes

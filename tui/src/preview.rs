@@ -184,6 +184,113 @@ pub fn load(path: &str) -> PreviewBody {
     PreviewBody::Text(text_preview(head, total))
 }
 
+/// `load`'s twin for bytes that did NOT come from the local disk — a file
+/// in a run's workspace ON THE GATEWAY HOST (`/files`), fetched by the
+/// worker. `bytes` may be a PREFIX of the file: `total` is the file's full
+/// size (from the listing), and every cut is labelled exactly like a local
+/// preview's — a text body says "showing the first N of M", an image whose
+/// bytes did not all arrive says it is past the decode ceiling. Nothing is
+/// silently shortened.
+///
+/// `content_type` is the gateway's `Content-Type`; the bytes' own magic
+/// still decides (a `.png` holding JPEG previews as the JPEG it is), the
+/// header only names a format the engine cannot draw. `name` is for the
+/// messages.
+pub fn load_bytes(bytes: &[u8], content_type: &str, name: &str, total: u64) -> PreviewBody {
+    let total = total.max(bytes.len() as u64);
+    if total == 0 {
+        return PreviewBody::Unavailable {
+            reason: "empty file (0 bytes)".into(),
+        };
+    }
+    if abstracttui::gfx::sniff_format(bytes).is_some() {
+        if (bytes.len() as u64) < total {
+            return PreviewBody::Unavailable {
+                reason: format!(
+                    "{} image — too large to decode for preview (ceiling {})",
+                    crate::paths::human_size(total),
+                    crate::paths::human_size(IMAGE_DECODE_MAX_BYTES)
+                ),
+            };
+        }
+        return decode_image_bytes(bytes);
+    }
+    let ct = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if ct.starts_with("image/") {
+        return PreviewBody::Unavailable {
+            reason: format!("{name} is {ct} — the preview draws PNG, JPEG and GIF"),
+        };
+    }
+    let head: Vec<u8> = bytes
+        .iter()
+        .take(TEXT_PREVIEW_MAX_BYTES as usize)
+        .copied()
+        .collect();
+    if let Some(big_endian) = utf16_bom(&head) {
+        return PreviewBody::Text(utf16_preview(head, total, big_endian));
+    }
+    if let Some(reason) = named_binary(&head) {
+        return PreviewBody::Unavailable { reason };
+    }
+    if looks_binary(&head) {
+        return PreviewBody::Unavailable {
+            reason: "binary file — no text or image preview".into(),
+        };
+    }
+    PreviewBody::Text(text_preview(head, total))
+}
+
+/// Decode in-memory image bytes (the whole file) into a bounded bitmap.
+fn decode_image_bytes(bytes: &[u8]) -> PreviewBody {
+    let format = match abstracttui::gfx::sniff_format(bytes) {
+        Some(abstracttui::gfx::ImageFormat::Png) => "PNG",
+        Some(abstracttui::gfx::ImageFormat::Jpeg) => "JPEG",
+        Some(abstracttui::gfx::ImageFormat::Gif) => "GIF",
+        Some(_) => "image",
+        None => {
+            return PreviewBody::Unavailable {
+                reason: "not an image the preview can draw".into(),
+            }
+        }
+    };
+    match abstracttui::gfx::decode_image(bytes) {
+        Ok(bitmap) => {
+            let source_px = (bitmap.width(), bitmap.height());
+            PreviewBody::Image(ImagePreview {
+                bitmap: Arc::new(downscale_for_preview(bitmap)),
+                source_px,
+                format,
+            })
+        }
+        Err(e) => PreviewBody::Unavailable {
+            reason: format!("{format} decode failed: {e}"),
+        },
+    }
+}
+
+/// How much of a REMOTE file the worker fetches for a preview, decided
+/// from the listing's size and name BEFORE any byte moves:
+/// the whole file when it fits the text cap; the whole file when it looks
+/// like a picture within the decode ceiling; otherwise the first
+/// [`TEXT_PREVIEW_MAX_BYTES`] (labelled as a cut by `load_bytes`).
+pub fn remote_fetch_limit(name: &str, size: Option<u64>) -> u64 {
+    let lower = name.to_ascii_lowercase();
+    let pictureish = [".png", ".jpg", ".jpeg", ".gif"]
+        .iter()
+        .any(|ext| lower.ends_with(ext));
+    match size {
+        Some(n) if n <= TEXT_PREVIEW_MAX_BYTES => TEXT_PREVIEW_MAX_BYTES,
+        Some(n) if pictureish && n <= IMAGE_DECODE_MAX_BYTES => IMAGE_DECODE_MAX_BYTES,
+        None if pictureish => IMAGE_DECODE_MAX_BYTES,
+        _ => TEXT_PREVIEW_MAX_BYTES,
+    }
+}
+
 /// Decode an image file into a bounded bitmap. The MAGIC decided we are
 /// here (`sniff_format`), so the extension is irrelevant — a `.png` that
 /// holds JPEG bytes previews as the JPEG it is.
@@ -739,5 +846,56 @@ mod tests {
         }
         let p = tmp("colored.log", &bytes);
         assert!(matches!(load(&p), PreviewBody::Text(_)));
+    }
+
+    /// `/files` previews: remote bytes go through the same honesty rules.
+    #[test]
+    fn load_bytes_labels_every_cut() {
+        // Whole text file.
+        match load_bytes(b"# Title\nbody\n", "text/markdown", "README.md", 13) {
+            PreviewBody::Text(t) => {
+                assert_eq!(t.lines, vec!["# Title".to_string(), "body".to_string()]);
+                assert!(!t.truncated);
+            }
+            _ => panic!("markdown previews as text"),
+        }
+        // A PREFIX of a larger file: labelled as cut, never silent.
+        match load_bytes(b"{\"a\": 1,", "application/json", "big.json", 10_000_000) {
+            PreviewBody::Text(t) => {
+                assert!(t.truncated);
+                assert_eq!(t.total_bytes, 10_000_000);
+            }
+            _ => panic!("json prefix previews as cut text"),
+        }
+        // An image whose bytes did not all arrive names the ceiling.
+        let png = [
+            0x89u8, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13,
+        ];
+        let why = reason_of(&load_bytes(&png, "image/png", "huge.png", 500_000_000));
+        assert!(why.contains("too large to decode"), "{why}");
+        // A format the engine cannot draw is NAMED.
+        let why = reason_of(&load_bytes(b"RIFF....WEBP", "image/webp", "x.webp", 12));
+        assert!(why.contains("image/webp"), "{why}");
+        assert!(reason_of(&load_bytes(b"", "text/plain", "e.txt", 0)).contains("empty"));
+    }
+
+    #[test]
+    fn remote_fetch_limit_follows_size_and_kind() {
+        assert_eq!(
+            remote_fetch_limit("a.txt", Some(10)),
+            TEXT_PREVIEW_MAX_BYTES
+        );
+        assert_eq!(
+            remote_fetch_limit("shot.PNG", Some(5_000_000)),
+            IMAGE_DECODE_MAX_BYTES
+        );
+        assert_eq!(
+            remote_fetch_limit("log.txt", Some(5_000_000)),
+            TEXT_PREVIEW_MAX_BYTES
+        );
+        assert_eq!(
+            remote_fetch_limit("huge.png", Some(IMAGE_DECODE_MAX_BYTES + 1)),
+            TEXT_PREVIEW_MAX_BYTES
+        );
     }
 }

@@ -41,6 +41,7 @@ pub mod store;
 pub mod tool_policy;
 pub mod transcript;
 pub mod ui;
+pub mod workspace_files;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -174,15 +175,18 @@ fn run_tui(args: &cli::Args) -> i32 {
         None => prefs.workflow_preference(),
     };
 
-    let workspace_root = if args.no_workspace {
-        None
-    } else {
-        args.workspace.clone().or_else(|| {
-            std::env::current_dir()
-                .ok()
-                .map(|p| p.display().to_string())
-        })
-    };
+    // A remote gateway does not get this machine's cwd implicitly — see
+    // `workspace_files::launch_workspace_root` for the decision; the notice
+    // lands in the transcript at boot.
+    let cwd = std::env::current_dir()
+        .ok()
+        .map(|p| p.display().to_string());
+    let (workspace_root, workspace_note) = workspace_files::launch_workspace_root(
+        args.no_workspace,
+        args.workspace.as_deref(),
+        cwd.as_deref(),
+        &conn.base_url,
+    );
     let workspace_mode = args
         .workspace_mode
         .clone()
@@ -374,6 +378,11 @@ fn run_tui(args: &cli::Args) -> i32 {
                 text: format!("session {session_id} · durable memory lives on the gateway"),
             })
         });
+        if let Some(note) = workspace_note.clone() {
+            store
+                .fold
+                .update(|f| f.push_item(Item::Info { text: note }));
+        }
 
         let ctx = ui::UiCtx {
             tx,

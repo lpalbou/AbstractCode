@@ -12155,3 +12155,191 @@ fn about_modal_shows_identity_links_and_gateway_versions() {
     assert!(screen.contains("abstractgateway"), "{screen}");
     assert!(screen.contains("0.4.4"), "{screen}");
 }
+
+/// §W: /files shows the run's workspace ON THE GATEWAY HOST — absolute
+/// root + hostname, folders navigable, Enter previews through the gateway,
+/// and "open folder" is refused (with the reason) when the caller is not
+/// on the gateway's machine.
+#[test]
+fn files_modal_browses_the_gateway_workspace() {
+    use abstractcode::store::{Fetch, FilesView};
+    use abstractcode::workspace_files::{WorkspaceEntry, WorkspaceInfo, WorkspaceListing};
+    let mut h = harness_sized(Size::new(130, 34));
+    h.turn();
+    // No run yet: a loud refusal, no modal.
+    h.store.run_id.set(String::new());
+    h.type_text("/files");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(h
+        .store
+        .notices
+        .get_untracked()
+        .iter()
+        .any(|n| n.contains("no run yet")));
+
+    h.store.run_id.set("run-1".into());
+    while h.rx.try_recv().is_ok() {}
+    h.type_text("/workspace files");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::LoadWorkspaceFiles { .. })) {
+        Some(Cmd::LoadWorkspaceFiles {
+            run_id,
+            dir,
+            with_info,
+        }) => {
+            assert_eq!(run_id, "run-1");
+            assert_eq!(dir, "");
+            assert!(with_info);
+        }
+        other => panic!(
+            "expected LoadWorkspaceFiles, got {:?}",
+            other.map(|_| "cmd")
+        ),
+    }
+    h.store.files.set(FilesView {
+        run_id: "run-1".into(),
+        info: Fetch::Ready(WorkspaceInfo {
+            workspace_root: "/srv/gw/workspaces/session-abc".into(),
+            kind: "session".into(),
+            exists: true,
+            hostname: "studio".into(),
+            caller_is_this_machine: false,
+            open_supported: false,
+            ..Default::default()
+        }),
+        dir: String::new(),
+        listing: Fetch::Ready(WorkspaceListing {
+            path: String::new(),
+            truncated: true,
+            entries: vec![
+                WorkspaceEntry {
+                    name: "src".into(),
+                    path: "src".into(),
+                    is_dir: true,
+                    size_bytes: None,
+                },
+                WorkspaceEntry {
+                    name: "README.md".into(),
+                    path: "README.md".into(),
+                    is_dir: false,
+                    size_bytes: Some(2048),
+                },
+            ],
+        }),
+    });
+    h.turn();
+    let screen = h.turn();
+    for needle in [
+        "workspace: /srv/gw/workspaces/session-abc on gateway host studio",
+        "the gateway cut this list",
+        "▸ src/",
+        "README.md  ·  2.0 KB",
+    ] {
+        assert!(screen.contains(needle), "missing {needle:?}:\n{screen}");
+    }
+    assert!(!screen.contains("o opens the folder"), "{screen}");
+    // `o` on a remote workspace: refused, with the reason.
+    h.type_text("o");
+    h.turn();
+    assert!(
+        h.store
+            .notices
+            .get_untracked()
+            .iter()
+            .any(|n| n.contains("not this machine")),
+        "{:?}",
+        h.store.notices.get_untracked()
+    );
+    // Enter on the folder navigates.
+    while h.rx.try_recv().is_ok() {}
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::LoadWorkspaceFiles { .. })) {
+        Some(Cmd::LoadWorkspaceFiles { dir, with_info, .. }) => {
+            assert_eq!(dir, "src");
+            assert!(!with_info);
+        }
+        other => panic!("expected a folder load, got {:?}", other.map(|_| "cmd")),
+    }
+    // Back at the root listing, Enter on the file previews it remotely.
+    // (The folder load above is in flight — its listing is Loading; the
+    // test answers it with the root listing again.)
+    h.store.files.update(|f| {
+        f.dir = String::new();
+        f.listing = Fetch::Ready(WorkspaceListing {
+            path: String::new(),
+            truncated: false,
+            entries: vec![
+                WorkspaceEntry {
+                    name: "src".into(),
+                    path: "src".into(),
+                    is_dir: true,
+                    size_bytes: None,
+                },
+                WorkspaceEntry {
+                    name: "README.md".into(),
+                    path: "README.md".into(),
+                    is_dir: false,
+                    size_bytes: Some(2048),
+                },
+            ],
+        });
+    });
+    h.turn();
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    while h.rx.try_recv().is_ok() {}
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::LoadWorkspacePreview { .. })) {
+        Some(Cmd::LoadWorkspacePreview {
+            run_id, path, size, ..
+        }) => {
+            assert_eq!(run_id, "run-1");
+            assert_eq!(path, "README.md");
+            assert_eq!(size, Some(2048));
+        }
+        other => panic!("expected a remote preview, got {:?}", other.map(|_| "cmd")),
+    }
+    let shown = h
+        .store
+        .preview
+        .with_untracked(|p| p.as_ref().map(|s| s.path.clone()));
+    assert_eq!(
+        shown.as_deref(),
+        Some("/srv/gw/workspaces/session-abc/README.md"),
+        "the preview names the absolute path on the gateway host"
+    );
+}
+
+/// A gateway WITHOUT the §W routes: the HTTP error is on screen, never an
+/// empty folder.
+#[test]
+fn files_modal_surfaces_a_missing_route() {
+    use abstractcode::store::{Fetch, FilesView};
+    let mut h = harness_sized(Size::new(130, 30));
+    h.turn();
+    h.store.run_id.set("run-1".into());
+    h.type_text("/files");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.store.files.set(FilesView {
+        run_id: "run-1".into(),
+        info: Fetch::Failed("HTTP 404 on /runs/run-1/workspace: Not Found".into()),
+        dir: String::new(),
+        listing: Fetch::Failed("HTTP 404 on /runs/run-1/workspace/files: Not Found".into()),
+    });
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("the gateway refused — HTTP 404"),
+        "{screen}"
+    );
+    assert!(screen.contains("listing failed: HTTP 404"), "{screen}");
+    assert!(!screen.contains("(empty folder)"), "{screen}");
+}

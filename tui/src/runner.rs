@@ -294,6 +294,23 @@ pub enum Cmd {
         seq: u64,
         path: String,
     },
+    /// `/files` (§W): fetch the run's workspace facts (once per run) and
+    /// the listing of `dir` into `store.files`.
+    LoadWorkspaceFiles {
+        run_id: String,
+        dir: String,
+        with_info: bool,
+    },
+    /// `/files` Enter on a file: fetch (at most the preview's cap of) its
+    /// bytes from the gateway and decode on a worker thread into
+    /// `store.preview` — same modal and staleness guard as `LoadPreview`.
+    LoadWorkspacePreview {
+        seq: u64,
+        run_id: String,
+        path: String,
+        name: String,
+        size: Option<u64>,
+    },
     /// The answer landed: stop following helper subruns (wrapper bundles can
     /// keep status-watcher subflows polling long after the agent finished).
     StopFollows,
@@ -846,6 +863,18 @@ impl Runner {
                 artifact_id,
             } => self.fetch_answer(run_id, artifact_id),
             Cmd::LoadPreview { seq, path } => self.load_preview(seq, path),
+            Cmd::LoadWorkspaceFiles {
+                run_id,
+                dir,
+                with_info,
+            } => self.load_workspace_files(run_id, dir, with_info),
+            Cmd::LoadWorkspacePreview {
+                seq,
+                run_id,
+                path,
+                name,
+                size,
+            } => self.load_workspace_preview(seq, run_id, path, name, size),
             Cmd::LoadCapabilities => self.load_capabilities(),
             Cmd::LoadHostState => self.load_host_state(),
             Cmd::UnloadModel {
@@ -2418,6 +2447,105 @@ impl Runner {
     /// is the pure half). Off this loop by construction: the decode is
     /// CPU work measured in hundreds of milliseconds for a phone photo,
     /// and the command loop also carries Start/Probe.
+    /// `/files` (§W). Posts are guarded by `(run_id, dir)`: a quick folder
+    /// change must not let the slower answer overwrite the newer view.
+    /// Failures land VERBATIM (`GwError` Display — status + route), so a
+    /// gateway without these routes says 404 on screen, not "empty".
+    fn load_workspace_files(&self, run_id: String, dir: String, with_info: bool) {
+        let store = self.store;
+        let client = self.client.clone();
+        let wake = self.wake.clone();
+        let spawned = std::thread::Builder::new()
+            .name("workspace-files".into())
+            .spawn(move || {
+                use crate::store::Fetch;
+                if with_info {
+                    let info = match client.run_workspace(&run_id) {
+                        Ok(v) => Fetch::Ready(crate::workspace_files::workspace_info_from(&v)),
+                        Err(e) => Fetch::Failed(e.to_string()),
+                    };
+                    let rid = run_id.clone();
+                    wake.post(move || {
+                        store.files.update(|f| {
+                            if f.run_id == rid {
+                                f.info = info;
+                            }
+                        })
+                    });
+                }
+                let listing = match client.run_workspace_files(&run_id, &dir) {
+                    Ok(v) => Fetch::Ready(crate::workspace_files::workspace_listing_from(&v)),
+                    Err(e) => Fetch::Failed(e.to_string()),
+                };
+                wake.post(move || {
+                    store.files.update(|f| {
+                        if f.run_id == run_id && f.dir == dir {
+                            f.listing = listing;
+                        }
+                    })
+                });
+            });
+        if spawned.is_err() {
+            self.post(move || {
+                store.files.update(|f| {
+                    f.listing = crate::store::Fetch::Failed(
+                        "the client could not start the workspace loader".into(),
+                    )
+                })
+            });
+        }
+    }
+
+    /// `/files` preview: bytes from the gateway, decoded by
+    /// `preview::load_bytes`. The fetch size is decided up front
+    /// (`preview::remote_fetch_limit`) and every cut is LABELLED by the
+    /// body — a remote preview is never silently shortened.
+    fn load_workspace_preview(
+        &self,
+        seq: u64,
+        run_id: String,
+        path: String,
+        name: String,
+        size: Option<u64>,
+    ) {
+        let store = self.store;
+        let client = self.client.clone();
+        let wake = self.wake.clone();
+        let spawned = std::thread::Builder::new()
+            .name("workspace-preview".into())
+            .spawn(move || {
+                let limit = crate::preview::remote_fetch_limit(&name, size);
+                let body = match client.run_workspace_content(&run_id, &path, size, limit) {
+                    Ok((bytes, ct)) => {
+                        // Unknown size + a full read = the file may be
+                        // longer than what arrived: say at least one more
+                        // byte exists so the body labels the cut.
+                        let total = size.unwrap_or(if bytes.len() as u64 >= limit {
+                            limit + 1
+                        } else {
+                            bytes.len() as u64
+                        });
+                        crate::preview::load_bytes(&bytes, &ct, &name, total)
+                    }
+                    Err(e) => crate::preview::PreviewBody::Unavailable {
+                        reason: format!("could not fetch this file from the gateway: {e}"),
+                    },
+                };
+                wake.post(move || apply_preview(&store, seq, body));
+            });
+        if spawned.is_err() {
+            self.post(move || {
+                apply_preview(
+                    &store,
+                    seq,
+                    crate::preview::PreviewBody::Unavailable {
+                        reason: "the client could not start the preview loader".into(),
+                    },
+                )
+            });
+        }
+    }
+
     fn load_preview(&self, seq: u64, path: String) {
         let store = self.store;
         let wake = self.wake.clone();

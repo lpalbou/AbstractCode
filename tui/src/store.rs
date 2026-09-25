@@ -362,6 +362,28 @@ impl From<&ToolInfo> for crate::tool_policy::ToolClass {
     }
 }
 
+/// One gateway fetch's state, as the modal renders it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Fetch<T> {
+    #[default]
+    Idle,
+    Loading,
+    Ready(T),
+    /// The HTTP error, verbatim (a missing route is a 404 the user sees).
+    Failed(String),
+}
+
+/// `/files` — the run workspace browser's state (§W).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FilesView {
+    /// The run whose workspace is shown.
+    pub run_id: String,
+    pub info: Fetch<crate::workspace_files::WorkspaceInfo>,
+    /// The folder shown, relative to the root ("" = the root).
+    pub dir: String,
+    pub listing: Fetch<crate::workspace_files::WorkspaceListing>,
+}
+
 /// The `/skills` envelope beside the list (§X): where the shelf lives, how
 /// it was chosen, and the gateway's own explanation when the list is empty.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -929,6 +951,8 @@ pub struct Store {
     /// The `/skills` envelope (shelf, source, warnings); `None` until a
     /// load answered — so "loading…" and "empty" are never confused.
     pub skills_shelf: Signal<Option<SkillShelf>>,
+    /// `/files` browser state (§W).
+    pub files: Signal<FilesView>,
     /// Skill names attached to every run (persisted; `input_data.skills`).
     pub selected_skills: Signal<Vec<String>>,
     /// Gateway MCP server registry (`/mcp`), plus its honest empty-state note.
@@ -1197,6 +1221,7 @@ impl Store {
             skills_catalog: cx.signal(Vec::new()),
             skills_error: cx.signal(String::new()),
             skills_shelf: cx.signal(None),
+            files: cx.signal(FilesView::default()),
             selected_skills: cx.signal(Vec::new()),
             mcp_servers: cx.signal(Vec::new()),
             mcp_note: cx.signal(String::new()),

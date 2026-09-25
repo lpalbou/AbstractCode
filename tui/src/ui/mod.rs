@@ -1266,6 +1266,7 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
         }
         Command::Permissions(arg) => set_permissions(store, ctx, arg),
         Command::Workspace => modals::open_workspace(cx, store, ctx),
+        Command::Files => modals::open_files(cx, store, ctx),
         Command::Steer(text) => {
             if text.is_empty() {
                 store.notify("usage: /steer <guidance>");

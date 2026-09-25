@@ -570,15 +570,20 @@ pub fn run(args: &Args) -> i32 {
             }
         }
     }
-    let workspace_root = if args.no_workspace {
-        None
-    } else {
-        args.workspace.clone().or_else(|| {
-            std::env::current_dir()
-                .ok()
-                .map(|p| p.display().to_string())
-        })
-    };
+    // A remote gateway does not get this machine's cwd implicitly (see
+    // `workspace_files::launch_workspace_root`); say so on stderr.
+    let cwd = std::env::current_dir()
+        .ok()
+        .map(|p| p.display().to_string());
+    let (workspace_root, workspace_note) = crate::workspace_files::launch_workspace_root(
+        args.no_workspace,
+        args.workspace.as_deref(),
+        cwd.as_deref(),
+        &conn.base_url,
+    );
+    if let Some(note) = workspace_note {
+        eprintln!("note: {note}");
+    }
     // Project instructions (AGENTS.md) for the run's workspace — parity with
     // the Python client, which has always injected them. Scoped to the
     // workspace: `--no-workspace` runs have no project to read conventions

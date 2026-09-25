@@ -3,6 +3,9 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Help,
+    /// `/files` (also `/workspace files`) — the current run's workspace
+    /// on the gateway host: browse folders, preview files (§W).
+    Files,
     /// `/about` — app + version, AbstractFramework identity, links, and the
     /// gateway's package versions when known.
     About,
@@ -163,7 +166,9 @@ pub fn parse(text: &str) -> Option<Command> {
         "/permissions" | "/permission" | "/perms" => {
             Command::Permissions(if rest.is_empty() { None } else { Some(rest) })
         }
+        "/workspace" | "/ws" if rest.eq_ignore_ascii_case("files") => Command::Files,
         "/workspace" | "/ws" => Command::Workspace,
+        "/files" | "/file" => Command::Files,
         "/skills" | "/skill" => Command::Skills,
         "/mcp" => Command::Mcp,
         "/cache" | "/caching" => Command::Cache,
@@ -265,6 +270,10 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
         "tool permissions: read|write|all (sticky per session)",
     ),
     ("workspace", "workspace root, access mode, allowed paths"),
+    (
+        "files",
+        "browse + preview the run's workspace files on the gateway",
+    ),
     ("skills", "attach gateway skills"),
     ("mcp", "MCP server registry"),
     ("cache", "prompt-cache + context metrics"),
@@ -486,6 +495,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "/focus <name|agent>",
         "switch conversation focus (Alt+E cycles)",
     ),
+    (
+        "/files",
+        "the run's workspace on the gateway host: browse, preview (Enter), copy path (c)",
+    ),
     ("/about", "version, author, licence, links, gateway versions"),
     ("/quit", "leave (Ctrl+Q too; Ctrl+C clears the prompt — twice in a row quits)"),
 ];
@@ -536,7 +549,7 @@ pub const HELP_EXTRA: &[(&str, &str)] = &[
     ),
     (
         "workspace",
-        "gateway-managed by default: server policy clamps client paths; /workspace shows and extends the scope (mode + allowed paths persist in prefs.json)",
+        "gateway-managed by default: server policy clamps client paths; /workspace shows and extends the scope (mode + allowed paths persist in prefs.json); /files browses the run's workspace on the gateway host. A remote gateway is not sent this machine's folder unless you pass --workspace",
     ),
 ];
 
@@ -560,6 +573,16 @@ mod tests {
             "MTP (multi-token prediction): Inherit — /mtp changes it"
         );
         assert!(crate::ui::modals::mtp_hint(Some(&serde_json::json!(false))).contains("Off"));
+    }
+
+    #[test]
+    fn files_parses_with_its_alias_and_is_listed() {
+        assert_eq!(parse("/files"), Some(Command::Files));
+        assert_eq!(parse("/workspace files"), Some(Command::Files));
+        assert_eq!(parse("/ws files"), Some(Command::Files));
+        assert_eq!(parse("/workspace"), Some(Command::Workspace));
+        assert!(HELP_LINES.iter().any(|(k, _)| *k == "/files"));
+        assert!(completion_matches("fil").iter().any(|(k, _)| *k == "files"));
     }
 
     #[test]
