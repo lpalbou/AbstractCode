@@ -1,11 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition } from "./catalog";
-import { markDefaultSession, parsePreferences, readDefaultSessions } from "./preferences";
+import { parsePreferences } from "./preferences";
 import { DEFAULT_PREFERENCES } from "./settings_panel";
 import {
   GATEWAY_DEFAULT,
   NO_DEFAULT_REPORTED,
   conversationSelection,
+  runSelectionSource,
+  selectionSourceNote,
   gatewayDefaultDefinition,
   gatewayDefaultFromEnvelope,
   gatewayDefaultOptionLabel,
@@ -189,29 +191,32 @@ describe("gateway default per conversation (CONTRACTS A-4)", () => {
     });
   });
 
-  it("keeps sending @default in a conversation started with it, and the exact workflow otherwise", () => {
-    const defaults = new Set(["s-default"]);
-    expect(conversationSelection({ sessionId: "s-default", defaultSessions: defaults, restored: agent })).toBe(GATEWAY_DEFAULT);
-    expect(conversationSelection({ sessionId: "s-default", defaultSessions: defaults, restored: undefined })).toBe(GATEWAY_DEFAULT);
-    expect(conversationSelection({ sessionId: "s-other", defaultSessions: defaults, restored: report })).toBe(report.id);
-    expect(conversationSelection({ sessionId: "s-other", defaultSessions: defaults, restored: undefined })).toBeUndefined();
+  const runInputs = (selection?: Record<string, unknown>) => ({
+    run_id: "r1",
+    input_data: { prompt: "hi", ...(selection ? { workflow_selection: selection } : {}) },
   });
 
-  it("remembers which conversations run on the gateway default, per account", () => {
-    const store = new Map<string, string>();
-    vi.stubGlobal("localStorage", {
-      getItem: (key: string) => store.get(key) ?? null,
-      setItem: (key: string, value: string) => void store.set(key, value),
-    });
-    try {
-      expect(markDefaultSession("alice", "s1", true).has("s1")).toBe(true);
-      expect(readDefaultSessions("alice").has("s1")).toBe(true);
-      expect(readDefaultSessions("bob").has("s1")).toBe(false);
-      // Choosing an explicit workflow in that conversation clears it.
-      expect(markDefaultSession("alice", "s1", false).has("s1")).toBe(false);
-      expect(readDefaultSessions("alice").size).toBe(0);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+  it("keeps @default when the gateway says the last run came from its default, on any browser", () => {
+    // A second browser has no local state at all: the run itself decides.
+    const fromDefault = runInputs({ source: "gateway_default", interface: "abstractcode.agent.v1", workflow_id: agent.workflowId });
+    expect(runSelectionSource(fromDefault)).toBe("gateway_default");
+    expect(conversationSelection({ restoredInputs: fromDefault, restored: agent })).toBe(GATEWAY_DEFAULT);
+    expect(conversationSelection({ restoredInputs: fromDefault, restored: undefined })).toBe(GATEWAY_DEFAULT);
+    expect(selectionSourceNote(fromDefault)).toBe("");
+  });
+
+  it("keeps the exact workflow when the run was a client choice", () => {
+    const fromClient = runInputs({ source: "client", workflow_id: report.workflowId });
+    expect(conversationSelection({ restoredInputs: fromClient, restored: report })).toBe(report.id);
+    expect(conversationSelection({ restoredInputs: fromClient, restored: undefined })).toBeUndefined();
+    expect(selectionSourceNote(fromClient)).toBe("");
+  });
+
+  it("says so, visibly, when an older gateway does not record how the workflow was chosen", () => {
+    const old = runInputs();
+    expect(runSelectionSource(old)).toBeUndefined();
+    expect(conversationSelection({ restoredInputs: old, restored: agent })).toBe(agent.id);
+    expect(selectionSourceNote(old)).toContain("does not record whether this conversation used the gateway default");
+    expect(selectionSourceNote(null)).toBe("");
   });
 });

@@ -158,17 +158,32 @@ export function reconcileSelection(options: {
   return GATEWAY_DEFAULT;
 }
 
-/** Which workflow the next turn of a conversation sends. A conversation this
- * browser started with the gateway default keeps sending "@default", so a
- * change made on the gateway applies to its next turn (CONTRACTS A-4); any
- * other restored conversation keeps the exact workflow its run used. */
+/** How the gateway says a run's workflow was chosen: the server-written
+ * `input_data.workflow_selection.source` of `GET /runs/{id}/input_data`
+ * ("gateway_default" | "client"), or undefined when the gateway does not
+ * record it (older gateways). */
+export function runSelectionSource(restoredInputs: unknown): string | undefined {
+  const selection = record(record(record(restoredInputs)?.input_data)?.workflow_selection);
+  return text(selection?.source);
+}
+
+/** Which workflow the next turn of a restored conversation sends. A last run
+ * the gateway started from its default keeps "@default" (the gateway
+ * re-resolves it at every start, CONTRACTS A-4) on every device; any other
+ * run keeps its exact workflow. */
 export function conversationSelection(options: {
-  sessionId: string;
-  defaultSessions: ReadonlySet<string>;
+  restoredInputs: unknown;
   restored?: WorkflowDefinition | null;
 }): string | undefined {
-  if (options.defaultSessions.has(options.sessionId)) return GATEWAY_DEFAULT;
+  if (runSelectionSource(options.restoredInputs) === "gateway_default") return GATEWAY_DEFAULT;
   return options.restored?.id;
+}
+
+/** Visible note when the gateway does not say how the run's workflow was
+ * chosen: the conversation then continues with the exact workflow. */
+export function selectionSourceNote(restoredInputs: unknown): string {
+  if (!record(restoredInputs) || runSelectionSource(restoredInputs)) return "";
+  return "This gateway does not record whether this conversation used the gateway default workflow; its next turn uses the workflow its last run used.";
 }
 
 /** `POST /runs/start` body. The gateway default is sent as the sentinel and
