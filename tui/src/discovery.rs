@@ -353,15 +353,27 @@ pub fn choose_workflow(
 /// (`default_agent_workflows[interface] = {available: false, reason}`), or
 /// the fact that it reports nothing at all (a gateway that predates §D).
 pub fn served_default_unavailable_reason(v: &Value, interface_id: &str) -> String {
-    let Some(map) = v.get("default_agent_workflows") else {
+    if v.get("default_agent_workflows").is_none() {
         return "this gateway does not report a default agent workflow".to_string();
-    };
-    let reason = map
-        .get(interface_id)
-        .and_then(|r| r.get("reason"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
+    }
+    // The gateway lists an unresolvable default in
+    // `default_agent_workflows_unavailable[interface] = {source, value,
+    // reason}`; an `{available: false, reason}` row in the main map is read
+    // the same way.
+    let reason = [
+        "default_agent_workflows_unavailable",
+        "default_agent_workflows",
+    ]
+    .iter()
+    .find_map(|k| {
+        v.get(*k)
+            .and_then(|m| m.get(interface_id))
+            .and_then(|r| r.get("reason"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+    })
+    .unwrap_or("");
     if reason.is_empty() {
         "no default is set on the gateway".to_string()
     } else {
@@ -1203,6 +1215,16 @@ mod tests {
         assert!(
             served_default_unavailable_reason(&legacy, AGENT_INTERFACE_V1)
                 .contains("does not report")
+        );
+        // The live gateway shape (abstractgateway agent_defaults.discovery_envelope).
+        let live = json!({"items": [], "default_agent_workflows": {},
+            "default_agent_workflows_unavailable": {AGENT_INTERFACE_V1: {
+                "source": "default", "value": null,
+                "reason": "the basic-agent bundle is not on this gateway"}}});
+        assert_eq!(served_default_workflow(&live, AGENT_INTERFACE_V1), None);
+        assert_eq!(
+            served_default_unavailable_reason(&live, AGENT_INTERFACE_V1),
+            "the basic-agent bundle is not on this gateway"
         );
     }
 

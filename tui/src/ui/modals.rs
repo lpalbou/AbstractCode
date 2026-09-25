@@ -2429,7 +2429,7 @@ pub fn open_files(cx: Scope, store: Store, ctx: &UiCtx) {
                 hint_row(
                     &t2,
                     format!(
-                        "↑↓ move · Enter opens a folder / previews a file · ← or Backspace goes up · c copies the path{open} · r refreshes · Esc closes"
+                        "↑↓ · Enter opens / previews · ← up · c copies the path{open} · r refresh · Esc closes"
                     ),
                 )
             }))
