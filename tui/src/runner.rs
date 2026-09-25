@@ -1067,9 +1067,13 @@ impl Runner {
                     }
                     _ => None,
                 };
-                let no_workflow = chosen
-                    .is_none()
-                    .then(|| crate::discovery::no_default_workflow_message(workflows.len()));
+                let default_reason = crate::discovery::served_default_unavailable_reason(
+                    &v,
+                    crate::discovery::AGENT_INTERFACE_V1,
+                );
+                let no_workflow = chosen.is_none().then(|| {
+                    crate::discovery::no_default_workflow_message(workflows.len(), &default_reason)
+                });
                 // A workflow requested on the COMMAND LINE that resolved to
                 // something else must say so. `choose_workflow` degrades to
                 // basic-agent by design for the PREFS lane (a stale saved
@@ -1119,6 +1123,7 @@ impl Runner {
                         }
                     }
                     store.gateway_default_workflow.set(gateway_default);
+                    store.gateway_default_reason.set(default_reason);
                     store.gateway_default_loaded.set(true);
                     if let Some(msg) = stale_pref {
                         store.notify(msg.clone());
@@ -1272,8 +1277,10 @@ impl Runner {
         match self.client.skills() {
             Ok(v) => {
                 let skills = skills_from_response(&v);
+                let shelf = crate::discovery::skill_shelf_from_response(&v);
                 self.post(move || {
                     store.skills_catalog.set(skills);
+                    store.skills_shelf.set(Some(shelf));
                     store.skills_error.set(String::new());
                 });
             }

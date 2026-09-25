@@ -362,6 +362,19 @@ impl From<&ToolInfo> for crate::tool_policy::ToolClass {
     }
 }
 
+/// The `/skills` envelope beside the list (§X): where the shelf lives, how
+/// it was chosen, and the gateway's own explanation when the list is empty.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SkillShelf {
+    /// Shelf path on the GATEWAY host ("" = the gateway did not say).
+    pub shelf: String,
+    /// `saved` | `env` | `seeded` ("" = not reported).
+    pub shelf_source: String,
+    pub bundled_version: String,
+    /// The gateway's warnings, verbatim.
+    pub warnings: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SkillInfo {
     pub name: String,
@@ -848,6 +861,10 @@ pub struct Store {
     /// §D), already marked `gateway_default`. `None` = not loaded yet OR the
     /// gateway reports none — `gateway_default_loaded` tells them apart.
     pub gateway_default_workflow: Signal<Option<Workflow>>,
+    /// Why the gateway serves no default (its `reason`, verbatim, or the
+    /// fact that it reports none). Meaningful only while the default is
+    /// `None` after a load.
+    pub gateway_default_reason: Signal<String>,
     /// `true` once a catalog load answered (with or without a default).
     pub gateway_default_loaded: Signal<bool>,
     pub provider: Signal<String>,
@@ -904,6 +921,9 @@ pub struct Store {
     /// Gateway skill shelf (`/skills`).
     pub skills_catalog: Signal<Vec<SkillInfo>>,
     pub skills_error: Signal<String>,
+    /// The `/skills` envelope (shelf, source, warnings); `None` until a
+    /// load answered — so "loading…" and "empty" are never confused.
+    pub skills_shelf: Signal<Option<SkillShelf>>,
     /// Skill names attached to every run (persisted; `input_data.skills`).
     pub selected_skills: Signal<Vec<String>>,
     /// Gateway MCP server registry (`/mcp`), plus its honest empty-state note.
@@ -1150,6 +1170,7 @@ impl Store {
             workflow: cx.signal(Workflow::default()),
             workflows: cx.signal(Vec::new()),
             gateway_default_workflow: cx.signal(None),
+            gateway_default_reason: cx.signal(String::new()),
             gateway_default_loaded: cx.signal(false),
             provider: cx.signal(String::new()),
             model: cx.signal(String::new()),
@@ -1170,6 +1191,7 @@ impl Store {
             camera_seed_pending: cx.signal(false),
             skills_catalog: cx.signal(Vec::new()),
             skills_error: cx.signal(String::new()),
+            skills_shelf: cx.signal(None),
             selected_skills: cx.signal(Vec::new()),
             mcp_servers: cx.signal(Vec::new()),
             mcp_note: cx.signal(String::new()),

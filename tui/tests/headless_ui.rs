@@ -12064,7 +12064,7 @@ fn no_gateway_default_and_no_pick_refuses_loudly() {
     h.turn();
     let screen = h.turn();
     assert!(
-        screen.contains("Gateway default — none set on this gateway"),
+        screen.contains("Gateway default — none available on this gateway"),
         "{screen}"
     );
     // Row 0 is the (empty) default: Enter must not close or select.
@@ -12076,4 +12076,37 @@ fn no_gateway_default_and_no_pick_refuses_loudly() {
         "picker stays open:\n{screen}"
     );
     assert!(h.store.workflow.get_untracked().flow_id.is_empty());
+}
+
+/// §X: an EMPTY shelf shows the gateway's own reason — shelf path, the
+/// source word verbatim, every warning — never a bare "no skills".
+#[test]
+fn empty_skills_shelf_shows_the_gateways_warnings() {
+    let mut h = harness_sized(Size::new(140, 30));
+    h.turn();
+    h.store.skills_catalog.set(Vec::new());
+    h.store
+        .skills_shelf
+        .set(Some(abstractcode::store::SkillShelf {
+            shelf: "/data/skills/registry".into(),
+            shelf_source: "seeded".into(),
+            bundled_version: "0.3.0".into(),
+            warnings: vec!["#FALLBACK no curated shelf found (empty dir)".into()],
+        }));
+    h.type_text("/skills");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let screen = h.turn();
+    assert!(screen.contains("the shelf is empty"), "{screen}");
+    assert!(
+        screen.contains("shelf on the gateway host: /data/skills/registry"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("source: seeded · bundled set 0.3.0"),
+        "{screen}"
+    );
+    assert!(screen.contains("no curated shelf found"), "{screen}");
+    assert!(!screen.contains("loading…"), "loaded ≠ loading:\n{screen}");
 }

@@ -18,7 +18,7 @@ use serde_json::Value;
 
 use crate::store::{
     HostContracts, HostFacts, McpServer, ProviderInfo, ResidencyRow, SessionCacheRow, SkillInfo,
-    ToolInfo, Workflow,
+    SkillShelf, ToolInfo, Workflow,
 };
 
 pub const AGENT_INTERFACE_V1: &str = "abstractcode.agent.v1";
@@ -272,6 +272,9 @@ pub const GATEWAY_DEFAULT_SENTINEL: &str = "@default";
 /// to pick; it never substitutes one.
 pub fn served_default_workflow(v: &Value, interface_id: &str) -> Option<Workflow> {
     let row = v.get("default_agent_workflows")?.get(interface_id)?;
+    if row.get("available").and_then(Value::as_bool) == Some(false) {
+        return None;
+    }
     let s = |k: &str| -> String {
         row.get(k)
             .and_then(Value::as_str)
@@ -346,17 +349,42 @@ pub fn choose_workflow(
     gateway_default.cloned()
 }
 
+/// The gateway's own reason when it reports its default as unavailable
+/// (`default_agent_workflows[interface] = {available: false, reason}`), or
+/// the fact that it reports nothing at all (a gateway that predates §D).
+pub fn served_default_unavailable_reason(v: &Value, interface_id: &str) -> String {
+    let Some(map) = v.get("default_agent_workflows") else {
+        return "this gateway does not report a default agent workflow".to_string();
+    };
+    let reason = map
+        .get(interface_id)
+        .and_then(|r| r.get("reason"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if reason.is_empty() {
+        "no default is set on the gateway".to_string()
+    } else {
+        reason.to_string()
+    }
+}
+
 /// The words for "the gateway reports no default and you picked none" —
 /// one sentence shared by the TUI transcript and headless `exec`.
-pub fn no_default_workflow_message(available: usize) -> String {
+pub fn no_default_workflow_message(available: usize, reason: &str) -> String {
+    let why = if reason.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", reason.trim())
+    };
     if available == 0 {
         format!(
-            "this gateway has no agent workflows ({AGENT_INTERFACE_V1}) and reports no default — \
+            "this gateway has no agent workflows ({AGENT_INTERFACE_V1}) and reports no default{why} — \
              install one on the gateway (e.g. the basic-agent bundle)"
         )
     } else {
         format!(
-            "this gateway reports no default agent workflow ({AGENT_INTERFACE_V1}) and none is \
+            "this gateway reports no default agent workflow ({AGENT_INTERFACE_V1}){why} and none is \
              selected — pick one with /workflow ({available} available)"
         )
     }
@@ -522,6 +550,43 @@ pub fn skills_from_response(v: &Value) -> Vec<SkillInfo> {
     }
     out.sort_by_key(|s| s.name.clone());
     out
+}
+
+/// The `/skills` envelope around the list (§X): `shelf`, `shelf_source`,
+/// `bundled_version` and `warnings` — kept so an EMPTY list can show the
+/// gateway's own reason instead of a bare "no skills". Warnings are strings;
+/// an object row contributes its `message`/`detail`.
+pub fn skill_shelf_from_response(v: &Value) -> SkillShelf {
+    let s = |k: &str| {
+        v.get(k)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    let warnings = v
+        .get("warnings")
+        .and_then(Value::as_array)
+        .map(|ws| {
+            ws.iter()
+                .filter_map(|w| match w {
+                    Value::String(t) => Some(t.trim().to_string()),
+                    other => other
+                        .get("message")
+                        .or_else(|| other.get("detail"))
+                        .and_then(Value::as_str)
+                        .map(|t| t.trim().to_string()),
+                })
+                .filter(|t| !t.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    SkillShelf {
+        shelf: s("shelf"),
+        shelf_source: s("shelf_source"),
+        bundled_version: s("bundled_version"),
+        warnings,
+    }
 }
 
 /// MCP registry -> (servers, note). The note carries the gateway's own
@@ -1105,8 +1170,24 @@ mod tests {
             let v = json!({"items": [], "default_agent_workflows": {AGENT_INTERFACE_V1: row}});
             assert_eq!(served_default_workflow(&v, AGENT_INTERFACE_V1), None);
         }
-        assert!(no_default_workflow_message(2).contains("/workflow"));
-        assert!(no_default_workflow_message(0).contains("install"));
+        assert!(no_default_workflow_message(2, "").contains("/workflow"));
+        assert!(no_default_workflow_message(0, "").contains("install"));
+        // The gateway's reason rides verbatim.
+        let off = json!({"items": [], "default_agent_workflows": {
+            AGENT_INTERFACE_V1: {"available": false, "reason": "basic-agent is not installed",
+                                 "bundle_id": "basic-agent", "flow_id": "main"}}});
+        assert_eq!(
+            served_default_workflow(&off, AGENT_INTERFACE_V1),
+            None,
+            "available:false"
+        );
+        let why = served_default_unavailable_reason(&off, AGENT_INTERFACE_V1);
+        assert_eq!(why, "basic-agent is not installed");
+        assert!(no_default_workflow_message(1, &why).contains("(basic-agent is not installed)"));
+        assert!(
+            served_default_unavailable_reason(&legacy, AGENT_INTERFACE_V1)
+                .contains("does not report")
+        );
     }
 
     /// A BUNDLE-ONLY reference resolves inside its own bundle — it must never
@@ -1339,6 +1420,30 @@ mod tests {
         assert_eq!(skills[0].trust, "adopted");
         assert!(!skills[0].blocked);
         assert!(skills[1].blocked);
+    }
+
+    /// §X: the envelope survives parsing — an empty shelf explains itself.
+    #[test]
+    fn skills_envelope_keeps_shelf_source_and_warnings() {
+        let v = json!({
+            "skills": [],
+            "shelf": "/data/skills/registry",
+            "shelf_source": "seeded",
+            "bundled_version": "0.3.0",
+            "warnings": ["#FALLBACK no curated shelf found (x)", "", {"message": "trust registry failed"}]
+        });
+        let shelf = skill_shelf_from_response(&v);
+        assert_eq!(shelf.shelf, "/data/skills/registry");
+        assert_eq!(shelf.shelf_source, "seeded");
+        assert_eq!(shelf.bundled_version, "0.3.0");
+        assert_eq!(
+            shelf.warnings,
+            vec![
+                "#FALLBACK no curated shelf found (x)".to_string(),
+                "trust registry failed".to_string()
+            ]
+        );
+        assert_eq!(skill_shelf_from_response(&json!({})), SkillShelf::default());
     }
 
     #[test]

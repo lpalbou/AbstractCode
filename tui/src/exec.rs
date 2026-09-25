@@ -417,10 +417,15 @@ pub fn run(args: &Args) -> i32 {
     let workflow = match chosen {
         Some(w) => w,
         None => {
-            let msg = crate::discovery::no_default_workflow_message(workflows.len()).replace(
-                "pick one with /workflow",
-                "name one with --workflow <bundle[:flow]>",
+            let reason = crate::discovery::served_default_unavailable_reason(
+                &bundles,
+                crate::discovery::AGENT_INTERFACE_V1,
             );
+            let msg = crate::discovery::no_default_workflow_message(workflows.len(), &reason)
+                .replace(
+                    "pick one with /workflow",
+                    "name one with --workflow <bundle[:flow]>",
+                );
             eprintln!("✗ {msg}");
             for w in workflows.iter().take(12) {
                 eprintln!("    {}:{}", w.bundle_id, w.flow_id);

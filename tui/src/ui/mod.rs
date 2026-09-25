@@ -764,7 +764,8 @@ fn start_run_inner(
         // Loud and in the transcript: the gateway reports no default and the
         // user picked none — the client never picks one on its own.
         let n = store.workflows.with_untracked(|w| w.len());
-        let msg = crate::discovery::no_default_workflow_message(n);
+        let reason = store.gateway_default_reason.get_untracked();
+        let msg = crate::discovery::no_default_workflow_message(n, &reason);
         store.notify("no agent workflow selected — /workflow");
         store
             .fold

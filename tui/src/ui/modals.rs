@@ -916,6 +916,7 @@ fn workflow_desc_line(desc: &str, budget: i32) -> String {
 fn gateway_default_row(
     default: Option<&crate::store::Workflow>,
     loaded: bool,
+    reason: &str,
     current: &crate::store::Workflow,
 ) -> String {
     let marker = if current.gateway_default {
@@ -931,7 +932,14 @@ fn gateway_default_row(
             d.flow_id
         ),
         None if loaded => {
-            format!("{marker}Gateway default — none set on this gateway (pick a workflow below)")
+            let why = if reason.trim().is_empty() {
+                String::new()
+            } else {
+                format!(": {}", reason.trim())
+            };
+            format!(
+                "{marker}Gateway default — none available on this gateway{why} (pick a workflow below)"
+            )
         }
         None => format!("{marker}Gateway default — loading…"),
     }
@@ -952,7 +960,17 @@ fn workflow_picker_rows(store: Store, tracked: bool) -> Vec<String> {
                 store.gateway_default_loaded.get_untracked(),
             )
         };
-        let mut rows = vec![gateway_default_row(default.as_ref(), loaded, &current)];
+        let reason = if tracked {
+            store.gateway_default_reason.get()
+        } else {
+            store.gateway_default_reason.get_untracked()
+        };
+        let mut rows = vec![gateway_default_row(
+            default.as_ref(),
+            loaded,
+            &reason,
+            &current,
+        )];
         let explicit = crate::store::Workflow {
             gateway_default: false,
             ..current.clone()
@@ -2102,6 +2120,66 @@ pub fn open_tools(cx: Scope, store: Store, ctx: &UiCtx) {
     });
 }
 
+/// The `/skills` modal's body for an EMPTY list (§X): the shelf, its source
+/// and the gateway's warnings, verbatim. Pure; test-pinned.
+pub fn empty_shelf_lines(shelf: &crate::store::SkillShelf) -> Vec<String> {
+    let mut out = vec!["no skills on this gateway's shelf".to_string()];
+    if !shelf.shelf.is_empty() {
+        out.push(format!("shelf on the gateway host: {}", shelf.shelf));
+    }
+    // The gateway's source word verbatim (flag/stored/env/default/seeded/
+    // checkout — contract amendment 3), never a paraphrase.
+    let mut facts: Vec<String> = Vec::new();
+    if !shelf.shelf_source.is_empty() {
+        facts.push(format!("source: {}", shelf.shelf_source));
+    }
+    if !shelf.bundled_version.is_empty() {
+        facts.push(format!("bundled set {}", shelf.bundled_version));
+    }
+    if !facts.is_empty() {
+        out.push(facts.join(" · "));
+    }
+    if shelf.warnings.is_empty() {
+        out.push("the gateway gave no reason".to_string());
+    } else {
+        // Wrapped, never truncated: a warning IS the explanation.
+        for w in &shelf.warnings {
+            out.extend(wrap_words(&format!("⚠ {w}"), 74));
+        }
+    }
+    out
+}
+
+/// Greedy word wrap to `width` chars (a word longer than the width gets its
+/// own line and is split).
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let mut word = word.to_string();
+        while word.chars().count() > width {
+            if !line.is_empty() {
+                lines.push(std::mem::take(&mut line));
+            }
+            let head: String = word.chars().take(width).collect();
+            word = word.chars().skip(width).collect();
+            lines.push(head);
+        }
+        let need = if line.is_empty() { 0 } else { 1 } + word.chars().count();
+        if line.chars().count() + need > width && !line.is_empty() {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(&word);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
 /// `/skills` — attach gateway skills to every run (`input_data.skills`).
 pub fn open_skills(cx: Scope, store: Store, ctx: &UiCtx) {
     let ctx2 = ctx.clone();
@@ -2164,10 +2242,13 @@ pub fn open_skills(cx: Scope, store: Store, ctx: &UiCtx) {
                 let n = store.skills_catalog.with(|c| c.len());
                 let err = store.skills_error.get();
                 let on = store.selected_skills.with(|s| s.len());
+                let loaded = store.skills_shelf.with(Option::is_some);
                 let title = if !err.is_empty() {
                     format!("gateway skills — discovery failed: {err}")
-                } else if n == 0 {
+                } else if n == 0 && !loaded {
                     "gateway skills — loading…".to_string()
+                } else if n == 0 {
+                    "gateway skills — the shelf is empty".to_string()
                 } else {
                     format!("gateway skills — {n} on the shelf · {on} attached to your runs")
                 };
@@ -2197,12 +2278,21 @@ pub fn open_skills(cx: Scope, store: Store, ctx: &UiCtx) {
                         });
                     }
                     if rows.is_empty() {
-                        rows.push(RowSpec {
-                            text: "no skills on this gateway".into(),
-                            header: false,
-                            checked: None,
-                            dim: true,
-                        });
+                        // §X: the gateway's own reason, never a bare "no
+                        // skills" — where the shelf is, how it was chosen,
+                        // and every warning verbatim.
+                        let lines = match store.skills_shelf.get() {
+                            Some(shelf) => empty_shelf_lines(&shelf),
+                            None => vec!["waiting for the gateway's skill shelf…".to_string()],
+                        };
+                        for text in lines {
+                            rows.push(RowSpec {
+                                text,
+                                header: false,
+                                checked: None,
+                                dim: true,
+                            });
+                        }
                     }
                     // Clamp the anchor if the shelf shrank mid-modal.
                     let cur = cur.min(selectable.len().saturating_sub(1));
