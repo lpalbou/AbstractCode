@@ -76,16 +76,26 @@ gateway until you answer.
    one, and `/sessions` switches in-app. `/new` starts a fresh session
    mid-flight. When you reopen a session whose run is still active, the app
    reattaches to it automatically.
-3. **Pick your agent and route.** `/workflow` lists every agent workflow on
-   the gateway; `/model` lists providers and models (leave it on "gateway
-   default" to use the server's routing). Both choices persist across
-   launches.
+3. **Pick your agent and route.** `/workflow` starts with **Gateway default →
+   name @version** — the workflow the gateway's operator chose, and what a
+   new install uses. Keep it and a change on the gateway applies to your next
+   turn; pick a named workflow below it to pin that one. The transcript says
+   which workflow each turn ran ("running Basic agent @0.0.3 (gateway
+   default)"). If the gateway has no default and you have not picked one, the
+   app says so and asks you to pick. `/model` lists providers and models
+   (leave it on "gateway default" to use the server's routing); its footer
+   shows the multi-token prediction (MTP) setting, which `/mtp` changes. Both
+   choices persist across launches.
 4. **Where files land.** Under the gateway's default (server-managed)
    workspace policy, tools execute in the gateway's workspace root or a
    managed per-session folder — the app tells you this at startup. To make
    the gateway honor client workspace paths (`--workspace`), set
    `ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1` on the gateway
-   (trusted/local setups).
+   (trusted/local setups). `/files` shows the run's workspace — the full path,
+   the machine it is on, and a preview of any file. When the gateway runs on
+   another machine, the app does not send your local folder (it would name a
+   path on the gateway host); the agent works in a gateway-side session
+   folder, and `--workspace <path>` names a folder on the gateway host.
 5. **Themes.** `/theme` opens a live-preview picker over the 26 built-in
    AbstractTUI themes; `Ctrl+T` cycles. Your pick persists.
 

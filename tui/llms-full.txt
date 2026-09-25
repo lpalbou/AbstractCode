@@ -96,6 +96,10 @@ top of 0.4.0's conclusion + presence wave: declared context meter,
 - **Workspace scope**: `/workspace` shows where the agent's tools may
   touch the filesystem (root, access mode, allowed paths) and extends it —
   the fix for red "Path escapes workspace_root" refusals.
+- **Session files**: `/files` browses the run's workspace on the gateway
+  host — its full path and which machine it is on, folders with sizes, and a
+  preview of any text, Markdown, JSON or image file (`Enter`). `c` copies a
+  path; `o` opens the folder when the gateway is on this machine.
 - **Sessions and memory**: one durable session id per conversation, and a
   `/sessions` picker over your recent ones (named by their first prompt).
   The client carries the live conversation into each run; the gateway
@@ -108,7 +112,11 @@ top of 0.4.0's conclusion + presence wave: declared context meter,
   continues it.
 - **Capability control**: `/tools` switches gateway tools on/off per run
   (checked set = the run's exact allowlist), `/skills` attaches gateway
-  skills, `/mcp` shows the gateway's MCP server registry.
+  skills (an empty shelf shows the gateway's own explanation), `/mcp` shows
+  the gateway's MCP server registry.
+- **About**: `/about` shows the version, the AbstractFramework links
+  (website, source, documentation, issues, feedback), author and licence,
+  and the gateway's package versions.
 - **Honest telemetry**: the header names what "gateway defaults" actually
   resolves to (and the model that served the last call) plus the working
   directory, workspace mode, and capability counts; the footer is a
@@ -185,8 +193,11 @@ prompts). The store is `~/.abstractcode/gateway.json`.
 Inside the app:
 
 - type a task and press Enter — the agent workflow runs on the gateway
-- `/workflow` picks the agent (any catalog entrypoint implementing
-  `abstractcode.agent.v1`), `/model` picks provider + model, `/theme` restyles
+- `/workflow` picks the agent: the first row, **Gateway default**, runs the
+  workflow your gateway's operator set (a change there applies to your next
+  turn); below it, every catalog entrypoint implementing
+  `abstractcode.agent.v1`. `/model` picks provider + model (and shows the
+  multi-token prediction setting — `/mtp` changes it), `/theme` restyles
 - type while a run is active to steer it; `Esc Esc` cancels; `/new` starts a
   fresh session
 - tool approvals and agent questions open as modals; the run waits durably
@@ -216,7 +227,8 @@ runs never stall.
 --gateway <URL> --token <TOK>     connection (flag > env > login store)
 --session <ID>                    durable session id (default: fresh session)
 --resume                          reopen the last session (`--continue` alias)
---workflow <bundle[:flow]>        agent workflow (default: saved or basic-agent)
+--workflow <bundle[:flow]|default>  agent workflow (default: your /workflow
+                                  choice, else the gateway's default)
 --provider <P> --model <M>        route override (default: gateway defaults)
 --workspace <PATH>                requested workspace root (see note)
 --theme <ID>                      start theme (ABSTRACTTUI_THEME works too)
@@ -397,16 +409,26 @@ gateway until you answer.
    one, and `/sessions` switches in-app. `/new` starts a fresh session
    mid-flight. When you reopen a session whose run is still active, the app
    reattaches to it automatically.
-3. **Pick your agent and route.** `/workflow` lists every agent workflow on
-   the gateway; `/model` lists providers and models (leave it on "gateway
-   default" to use the server's routing). Both choices persist across
-   launches.
+3. **Pick your agent and route.** `/workflow` starts with **Gateway default →
+   name @version** — the workflow the gateway's operator chose, and what a
+   new install uses. Keep it and a change on the gateway applies to your next
+   turn; pick a named workflow below it to pin that one. The transcript says
+   which workflow each turn ran ("running Basic agent @0.0.3 (gateway
+   default)"). If the gateway has no default and you have not picked one, the
+   app says so and asks you to pick. `/model` lists providers and models
+   (leave it on "gateway default" to use the server's routing); its footer
+   shows the multi-token prediction (MTP) setting, which `/mtp` changes. Both
+   choices persist across launches.
 4. **Where files land.** Under the gateway's default (server-managed)
    workspace policy, tools execute in the gateway's workspace root or a
    managed per-session folder — the app tells you this at startup. To make
    the gateway honor client workspace paths (`--workspace`), set
    `ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1` on the gateway
-   (trusted/local setups).
+   (trusted/local setups). `/files` shows the run's workspace — the full path,
+   the machine it is on, and a preview of any file. When the gateway runs on
+   another machine, the app does not send your local folder (it would name a
+   path on the gateway host); the agent works in a gateway-side session
+   folder, and `--workspace <path>` names a folder on the gateway host.
 5. **Themes.** `/theme` opens a live-preview picker over the 26 built-in
    AbstractTUI themes; `Ctrl+T` cycles. Your pick persists.
 
@@ -722,10 +744,10 @@ abstractcode --help | --version
 | `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
 | `--reasoning <LEVEL>` | Reasoning effort: `none\|minimal\|low\|medium\|high\|xhigh\|auto` (also `--thinking`; validated at launch; works on `exec` too) | gateway default |
 | `--mtp <DEPTH\|off\|inherit>` | Native-MTP request override; an explicit depth must be honored by the execution host. Works on `exec` too | saved TUI choice, otherwise inherit; `exec` inherits unless the flag is supplied |
-| `--workflow <bundle[:flow]>` | Agent workflow | saved pick, else `basic-agent` |
+| `--workflow <bundle[:flow]\|default>` | Agent workflow; `default` = the gateway's default (the gateway resolves it at every run start) | your `/workflow` choice, else the gateway default; with neither, the app asks you to pick (`exec` exits 2 and lists the workflows) |
 | `--provider <NAME>` | Provider override | gateway defaults |
 | `--model <NAME>` | Model override | gateway defaults |
-| `--workspace <PATH>` | Requested workspace root | current directory |
+| `--workspace <PATH>` | Requested workspace root | current directory when the gateway is on this machine (loopback URL); none for a remote gateway (the agent works in a gateway-side session folder) |
 | `--no-workspace` | Send no workspace root | — |
 | `--workspace-mode <M>` | Workspace access mode | server default |
 | `--theme <ID>` | Start theme | `ABSTRACTTUI_THEME`, else saved pick |
@@ -760,13 +782,15 @@ abstractcode --help | --version
 | `/help` | Command + key reference modal |
 | `/new` | Fresh session (new durable id, cleared view) |
 | `/theme [id]` | Live-preview theme picker, or set directly |
-| `/workflow` | Pick the agent workflow from the gateway catalog |
+| `/workflow` | Pick the agent workflow. First row: **Gateway default → name @version** — saved as "the gateway default", so the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran |
+| `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` opens the folder with your file manager only when the gateway is on this machine and allows it; `r` refreshes |
+| `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
 | `/model` | Pick provider + model from gateway discovery |
 | `/mtp [depth\|off\|inherit]` | Native-MTP request policy (`/speculation` alias). Bare command opens a provider/model capability-driven picker; explicit values persist locally and ride `_runtime.speculation`. Inherit omits the override; Off sends `false`; a depth sends `native_mtp` with `require_acceleration=true` |
 | `/tools` | Enable/disable gateway tools (`Space` toggles; checked set = the run's exact allowlist; untouched = workflow defaults). In-modal: `p` cycles a per-tool approval pin, `t` cycles the tier — see the modal keys below |
 | `/permissions [read\|write\|all]` | THE tool-permission surface (bare = report): batches classifying at-or-below the level auto-approve. `read` = proven read-only tools only; `write` adds workspace file mutations; `all` auto-approves everything, **including arbitrary shell and network egress** — deliberate use only. Per-tool `ask` pins and gateway-disabled tools still gate. Sticky per session (`/tools tier` remains a spelling alias) |
 | `/workspace` | Inspect + edit the filesystem scope tools may touch: root (from `--workspace`/cwd), access mode, allowed paths. Mode + paths persist and ride every run |
-| `/skills` | Attach gateway skills to your runs (`Space` toggles; sent as `input_data.skills`) |
+| `/skills` | Attach gateway skills to your runs (`Space` toggles; sent as `input_data.skills`). An empty shelf shows where the shelf is on the gateway host, how it was chosen, and the gateway's warnings |
 | `/mcp` | The gateway's MCP server registry (read-only; their tools appear in `/tools` once declared) |
 | `/cache` | Prompt-cache + context metrics: route, latest call, run, session |
 | `/resources` | Gateway-host resources (`/host` is an alias): memory (RAM/device meter bars, GPU utilization when the host supports it, the gateway's process RSS, host name), resident models (modality label, tri-state residency — an unreported residency reads `unknown`, never "no" — size, `ctx N` with `*` = calibrated, 🔒 = residency lock, `default`), session prompt caches, totals. Admin actions on the selected model: `u` unload (two-step confirm; a 409 `model_locked` refusal offers `f` force), `k` lock/unlock, `e` context estimate, `r` refresh — keys under "Modal keys" below. Data is fetched at open, on `r`, and after a mutation — never polled; a failed refresh keeps the last snapshot marked STALE. Requires the gateway's declared `host_state` contract (`/discovery/capabilities`) — older gateways get an honest "not supported". Feeds the footer's `mem NN%` segment |
@@ -1387,6 +1411,19 @@ the stock `basic-agent` bundle on the gateway (it ships with it), then
 `/workflow` to pick it up — the catalog reloads on the next launch or picker
 open.
 
+## "this gateway reports no default agent workflow"
+
+You have not picked a workflow and the gateway has no default for
+`abstractcode.agent.v1` (the reason is quoted in brackets). Pick one with
+`/workflow` (or `--workflow bundle:flow`), or ask the gateway's operator to set
+the default in the gateway console. The app never picks one on its own: which
+agent runs is the gateway's setting or your choice.
+
+## `/files` says "the gateway refused — HTTP 404"
+
+The gateway predates workspace browsing. Update AbstractGateway; nothing is
+wrong with the run.
+
 ## The run starts, then an error names an LLM provider failure
 
 The gateway could not reach the model (e.g. LM Studio "Model unloaded").
@@ -1799,6 +1836,42 @@ All notable changes to this project are documented here. The format follows
 [SemVer](https://semver.org/).
 
 ## [Unreleased]
+
+### Changed
+
+- **The default agent workflow is now the gateway's setting.** `/workflow`
+  starts with **Gateway default → name @version**; choosing it (or never
+  choosing anything, as on a new install) lets the gateway decide which
+  workflow each new turn runs, so a change there applies to your next turn.
+  The app no longer falls back to `coding-agent:coder` or `basic-agent` on its
+  own: out of the box the gateway runs its shipped `basic-agent`, and operators
+  who want the coder set it as the gateway default in the gateway console. When
+  the gateway has no default and you have picked none, the app says so and
+  asks you to pick. Each turn names what ran ("running Basic agent @0.0.3
+  (gateway default)"). `--workflow default` does the same from the command
+  line and in `exec`.
+- **A remote gateway is not sent your local folder.** When the gateway URL is
+  not on this machine, the app no longer sends its current directory as the
+  workspace (it would name a path on the gateway host); the agent works in a
+  gateway-side session folder and a notice says so. `--workspace <path>` still
+  names a folder explicitly.
+
+### Added
+
+- **`/files`** (also `/workspace files`): the run's workspace on the gateway
+  host — its full path and the machine it is on, folders you can open, file
+  sizes, and a preview of text, Markdown, JSON and images. Large files show
+  their first 512 KiB, labelled. `c` copies a path; `o` opens the folder when
+  the gateway is on this machine and allows it.
+- **`/about`** (also `/version`): version, "Part of AbstractFramework",
+  author and licence, links to the website, source, documentation, issues and
+  feedback, the contact address, and the gateway's package versions.
+- **`/skills` explains an empty shelf**: where the shelf is on the gateway
+  host, how it was chosen, and the gateway's warnings, instead of a bare
+  "no skills".
+- **Multi-token prediction is easier to find**: `/help`, the `/` completion
+  and `--help` describe `/mtp` and `--mtp`, and the `/model` picker shows the
+  current MTP setting.
 
 ## [0.5.1] - 2026-09-23
 

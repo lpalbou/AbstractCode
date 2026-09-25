@@ -6,6 +6,42 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The default agent workflow is now the gateway's setting.** `/workflow`
+  starts with **Gateway default → name @version**; choosing it (or never
+  choosing anything, as on a new install) lets the gateway decide which
+  workflow each new turn runs, so a change there applies to your next turn.
+  The app no longer falls back to `coding-agent:coder` or `basic-agent` on its
+  own: out of the box the gateway runs its shipped `basic-agent`, and operators
+  who want the coder set it as the gateway default in the gateway console. When
+  the gateway has no default and you have picked none, the app says so and
+  asks you to pick. Each turn names what ran ("running Basic agent @0.0.3
+  (gateway default)"). `--workflow default` does the same from the command
+  line and in `exec`.
+- **A remote gateway is not sent your local folder.** When the gateway URL is
+  not on this machine, the app no longer sends its current directory as the
+  workspace (it would name a path on the gateway host); the agent works in a
+  gateway-side session folder and a notice says so. `--workspace <path>` still
+  names a folder explicitly.
+
+### Added
+
+- **`/files`** (also `/workspace files`): the run's workspace on the gateway
+  host — its full path and the machine it is on, folders you can open, file
+  sizes, and a preview of text, Markdown, JSON and images. Large files show
+  their first 512 KiB, labelled. `c` copies a path; `o` opens the folder when
+  the gateway is on this machine and allows it.
+- **`/about`** (also `/version`): version, "Part of AbstractFramework",
+  author and licence, links to the website, source, documentation, issues and
+  feedback, the contact address, and the gateway's package versions.
+- **`/skills` explains an empty shelf**: where the shelf is on the gateway
+  host, how it was chosen, and the gateway's warnings, instead of a bare
+  "no skills".
+- **Multi-token prediction is easier to find**: `/help`, the `/` completion
+  and `--help` describe `/mtp` and `--mtp`, and the `/model` picker shows the
+  current MTP setting.
+
 ## [0.5.1] - 2026-09-23
 
 ### Added

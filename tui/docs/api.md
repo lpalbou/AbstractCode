@@ -21,10 +21,10 @@ abstractcode --help | --version
 | `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
 | `--reasoning <LEVEL>` | Reasoning effort: `none\|minimal\|low\|medium\|high\|xhigh\|auto` (also `--thinking`; validated at launch; works on `exec` too) | gateway default |
 | `--mtp <DEPTH\|off\|inherit>` | Native-MTP request override; an explicit depth must be honored by the execution host. Works on `exec` too | saved TUI choice, otherwise inherit; `exec` inherits unless the flag is supplied |
-| `--workflow <bundle[:flow]>` | Agent workflow | saved pick, else `basic-agent` |
+| `--workflow <bundle[:flow]\|default>` | Agent workflow; `default` = the gateway's default (the gateway resolves it at every run start) | your `/workflow` choice, else the gateway default; with neither, the app asks you to pick (`exec` exits 2 and lists the workflows) |
 | `--provider <NAME>` | Provider override | gateway defaults |
 | `--model <NAME>` | Model override | gateway defaults |
-| `--workspace <PATH>` | Requested workspace root | current directory |
+| `--workspace <PATH>` | Requested workspace root | current directory when the gateway is on this machine (loopback URL); none for a remote gateway (the agent works in a gateway-side session folder) |
 | `--no-workspace` | Send no workspace root | — |
 | `--workspace-mode <M>` | Workspace access mode | server default |
 | `--theme <ID>` | Start theme | `ABSTRACTTUI_THEME`, else saved pick |
@@ -59,13 +59,15 @@ abstractcode --help | --version
 | `/help` | Command + key reference modal |
 | `/new` | Fresh session (new durable id, cleared view) |
 | `/theme [id]` | Live-preview theme picker, or set directly |
-| `/workflow` | Pick the agent workflow from the gateway catalog |
+| `/workflow` | Pick the agent workflow. First row: **Gateway default → name @version** — saved as "the gateway default", so the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran |
+| `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` opens the folder with your file manager only when the gateway is on this machine and allows it; `r` refreshes |
+| `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
 | `/model` | Pick provider + model from gateway discovery |
 | `/mtp [depth\|off\|inherit]` | Native-MTP request policy (`/speculation` alias). Bare command opens a provider/model capability-driven picker; explicit values persist locally and ride `_runtime.speculation`. Inherit omits the override; Off sends `false`; a depth sends `native_mtp` with `require_acceleration=true` |
 | `/tools` | Enable/disable gateway tools (`Space` toggles; checked set = the run's exact allowlist; untouched = workflow defaults). In-modal: `p` cycles a per-tool approval pin, `t` cycles the tier — see the modal keys below |
 | `/permissions [read\|write\|all]` | THE tool-permission surface (bare = report): batches classifying at-or-below the level auto-approve. `read` = proven read-only tools only; `write` adds workspace file mutations; `all` auto-approves everything, **including arbitrary shell and network egress** — deliberate use only. Per-tool `ask` pins and gateway-disabled tools still gate. Sticky per session (`/tools tier` remains a spelling alias) |
 | `/workspace` | Inspect + edit the filesystem scope tools may touch: root (from `--workspace`/cwd), access mode, allowed paths. Mode + paths persist and ride every run |
-| `/skills` | Attach gateway skills to your runs (`Space` toggles; sent as `input_data.skills`) |
+| `/skills` | Attach gateway skills to your runs (`Space` toggles; sent as `input_data.skills`). An empty shelf shows where the shelf is on the gateway host, how it was chosen, and the gateway's warnings |
 | `/mcp` | The gateway's MCP server registry (read-only; their tools appear in `/tools` once declared) |
 | `/cache` | Prompt-cache + context metrics: route, latest call, run, session |
 | `/resources` | Gateway-host resources (`/host` is an alias): memory (RAM/device meter bars, GPU utilization when the host supports it, the gateway's process RSS, host name), resident models (modality label, tri-state residency — an unreported residency reads `unknown`, never "no" — size, `ctx N` with `*` = calibrated, 🔒 = residency lock, `default`), session prompt caches, totals. Admin actions on the selected model: `u` unload (two-step confirm; a 409 `model_locked` refusal offers `f` force), `k` lock/unlock, `e` context estimate, `r` refresh — keys under "Modal keys" below. Data is fetched at open, on `r`, and after a mutation — never polled; a failed refresh keeps the last snapshot marked STALE. Requires the gateway's declared `host_state` contract (`/discovery/capabilities`) — older gateways get an honest "not supported". Feeds the footer's `mem NN%` segment |

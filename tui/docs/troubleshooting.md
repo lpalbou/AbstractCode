@@ -47,6 +47,19 @@ the stock `basic-agent` bundle on the gateway (it ships with it), then
 `/workflow` to pick it up — the catalog reloads on the next launch or picker
 open.
 
+## "this gateway reports no default agent workflow"
+
+You have not picked a workflow and the gateway has no default for
+`abstractcode.agent.v1` (the reason is quoted in brackets). Pick one with
+`/workflow` (or `--workflow bundle:flow`), or ask the gateway's operator to set
+the default in the gateway console. The app never picks one on its own: which
+agent runs is the gateway's setting or your choice.
+
+## `/files` says "the gateway refused — HTTP 404"
+
+The gateway predates workspace browsing. Update AbstractGateway; nothing is
+wrong with the run.
+
 ## The run starts, then an error names an LLM provider failure
 
 The gateway could not reach the model (e.g. LM Studio "Model unloaded").

@@ -85,6 +85,10 @@ top of 0.4.0's conclusion + presence wave: declared context meter,
 - **Workspace scope**: `/workspace` shows where the agent's tools may
   touch the filesystem (root, access mode, allowed paths) and extends it —
   the fix for red "Path escapes workspace_root" refusals.
+- **Session files**: `/files` browses the run's workspace on the gateway
+  host — its full path and which machine it is on, folders with sizes, and a
+  preview of any text, Markdown, JSON or image file (`Enter`). `c` copies a
+  path; `o` opens the folder when the gateway is on this machine.
 - **Sessions and memory**: one durable session id per conversation, and a
   `/sessions` picker over your recent ones (named by their first prompt).
   The client carries the live conversation into each run; the gateway
@@ -97,7 +101,11 @@ top of 0.4.0's conclusion + presence wave: declared context meter,
   continues it.
 - **Capability control**: `/tools` switches gateway tools on/off per run
   (checked set = the run's exact allowlist), `/skills` attaches gateway
-  skills, `/mcp` shows the gateway's MCP server registry.
+  skills (an empty shelf shows the gateway's own explanation), `/mcp` shows
+  the gateway's MCP server registry.
+- **About**: `/about` shows the version, the AbstractFramework links
+  (website, source, documentation, issues, feedback), author and licence,
+  and the gateway's package versions.
 - **Honest telemetry**: the header names what "gateway defaults" actually
   resolves to (and the model that served the last call) plus the working
   directory, workspace mode, and capability counts; the footer is a
@@ -174,8 +182,11 @@ prompts). The store is `~/.abstractcode/gateway.json`.
 Inside the app:
 
 - type a task and press Enter — the agent workflow runs on the gateway
-- `/workflow` picks the agent (any catalog entrypoint implementing
-  `abstractcode.agent.v1`), `/model` picks provider + model, `/theme` restyles
+- `/workflow` picks the agent: the first row, **Gateway default**, runs the
+  workflow your gateway's operator set (a change there applies to your next
+  turn); below it, every catalog entrypoint implementing
+  `abstractcode.agent.v1`. `/model` picks provider + model (and shows the
+  multi-token prediction setting — `/mtp` changes it), `/theme` restyles
 - type while a run is active to steer it; `Esc Esc` cancels; `/new` starts a
   fresh session
 - tool approvals and agent questions open as modals; the run waits durably
@@ -205,7 +216,8 @@ runs never stall.
 --gateway <URL> --token <TOK>     connection (flag > env > login store)
 --session <ID>                    durable session id (default: fresh session)
 --resume                          reopen the last session (`--continue` alias)
---workflow <bundle[:flow]>        agent workflow (default: saved or basic-agent)
+--workflow <bundle[:flow]|default>  agent workflow (default: your /workflow
+                                  choice, else the gateway's default)
 --provider <P> --model <M>        route override (default: gateway defaults)
 --workspace <PATH>                requested workspace root (see note)
 --theme <ID>                      start theme (ABSTRACTTUI_THEME works too)
