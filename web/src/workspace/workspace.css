@@ -925,6 +925,85 @@ select option {
 .code-file-list button:hover .code-file-action {
   opacity: 1;
 }
+.code-file-list button.is-selected {
+  background: var(--ui-surface-2);
+}
+.code-file-meta {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xxs);
+  white-space: nowrap;
+}
+.code-files-mode {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.code-files-mode button {
+  flex: 1;
+  border: 1px solid var(--ui-border-1);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  padding: 5px 6px;
+  font-size: var(--font-size-xxs);
+}
+.code-files-mode button[aria-pressed="true"] {
+  background: var(--ui-surface-2);
+  color: var(--text-primary);
+}
+.code-session-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.code-session-workspace-path {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.code-session-workspace-path code {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-xxs);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.code-session-workspace .code-subtle-button {
+  align-self: flex-start;
+}
+.code-file-preview {
+  border-top: 1px solid var(--ui-border-1);
+  margin-top: 10px;
+  padding-top: 10px;
+  min-width: 0;
+}
+.code-file-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.code-file-preview-head strong {
+  flex: 1 1 100%;
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+.code-file-preview-text {
+  max-height: 420px;
+  overflow: auto;
+  font-size: var(--font-size-xxs);
+  white-space: pre;
+  background: var(--ui-surface-2);
+  padding: 8px;
+  border-radius: 6px;
+}
+.code-file-preview-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
 .code-pane-empty {
   display: flex;
   flex-direction: column;

@@ -96,6 +96,28 @@ function isLoopbackPeer(req) {
   );
 }
 
+function peerAddress(req) {
+  let address = String(req.socket?.remoteAddress || "").trim().toLowerCase();
+  if (address.startsWith("::ffff:")) address = address.slice("::ffff:".length);
+  return address;
+}
+
+/** X-Forwarded-For for the gateway: the browser's socket address, appended to
+ * an existing chain only when this server trusts its reverse proxy. */
+export function forwardedForChain(req, config) {
+  const trusted =
+    envBool(config.env, "ABSTRACTCODE_TRUST_PROXY_HEADERS") ||
+    envBool(config.env, "ABSTRACTGATEWAY_TRUST_PROXY_HEADERS");
+  const prior = trusted
+    ? String(req.headers["x-forwarded-for"] || "")
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+    : [];
+  const peer = peerAddress(req);
+  return [...prior, ...(peer ? [peer] : [])].join(", ");
+}
+
 function connectionConfigAllowed(req, config) {
   if (envBool(config.env, "ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG"))
     return true;
@@ -563,7 +585,14 @@ function proxyGatewayRequest(req, res, config) {
   const headers = { ...req.headers, host: backend.url.host };
   delete headers.cookie;
   delete headers.authorization;
+  // The gateway decides whether the BROWSER sits on its machine (workspace
+  // "Open folder", same-machine defaults). Seen from the gateway, this proxy
+  // is the peer, so the browser's address travels as X-Forwarded-For. A
+  // chain from the browser side is kept (appended to) only behind a trusted
+  // reverse proxy; otherwise it is client-supplied and replaced.
+  const forwardedFor = forwardedForChain(req, config);
   delete headers["x-forwarded-for"];
+  if (forwardedFor) headers["x-forwarded-for"] = forwardedFor;
   delete headers["x-forwarded-host"];
   delete headers["x-forwarded-proto"];
   delete headers["x-abstractcode-csrf"];

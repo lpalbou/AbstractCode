@@ -1443,6 +1443,9 @@ export function CodeWorkspace() {
               runId={session.runId}
               records={snapshot.records}
               enabled={connection.connected}
+              isAdmin={connection.status?.gateway?.principal?.admin === true}
+              refreshKey={snapshot.status}
+              onAttachFiles={attachUploads}
               onClose={() => setInspectorOpen(false)}
               onAttach={async (path) => {
                 const sid = session.sessionId;

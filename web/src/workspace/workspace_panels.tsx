@@ -4,6 +4,7 @@ import { JsonViewer, type WorkflowRecord } from "@abstractframework/panel-chat";
 import { downloadArtifact, formatError, gatewayRequest } from "./transport";
 import type { WorkspacePolicy } from "./catalog";
 import { navigateTabs } from "./tabs";
+import { SessionFiles } from "./session_files";
 import {
   activity_rows,
   type ActivityKind,
@@ -27,7 +28,10 @@ export function WorkspaceInspector({
   runId,
   records,
   enabled,
+  isAdmin,
+  refreshKey,
   onAttach,
+  onAttachFiles,
   onClose,
 }: {
   tab: InspectorTab;
@@ -36,9 +40,17 @@ export function WorkspaceInspector({
   runId: string;
   records: WorkflowRecord[];
   enabled: boolean;
+  /** The operator's shared workspace browser is admin-only on the gateway. */
+  isAdmin: boolean;
+  /** Changes when the run's state changes, so the file list follows the work. */
+  refreshKey?: string;
+  /** Attach a file from the operator's shared workspace (admin). */
   onAttach: (path: string) => Promise<void>;
+  /** Attach files read from this conversation's workspace. */
+  onAttachFiles: (files: File[]) => void;
   onClose: () => void;
 }) {
+  const [filesMode, setFilesMode] = useState<"session" | "shared">("session");
   // Rows, not records: the three records of one step are one row, and the
   // `abstract.progress` / `abstract.status` records are progress UI rather than
   // activity. The badge counts what the operator can actually read — a turn
@@ -90,12 +102,39 @@ export function WorkspaceInspector({
         aria-labelledby={`inspector-tab-${tab}`}
       >
         {tab === "files" ? (
-          <FileBrowser
-            policy={policy}
-            enabled={enabled}
-            runId={runId}
-            onAttach={onAttach}
-          />
+          <>
+            {isAdmin ? (
+              <div className="code-files-mode" role="group" aria-label="Files source">
+                <button
+                  aria-pressed={filesMode === "session"}
+                  onClick={() => setFilesMode("session")}
+                >
+                  This conversation
+                </button>
+                <button
+                  aria-pressed={filesMode === "shared"}
+                  onClick={() => setFilesMode("shared")}
+                >
+                  Shared workspace (admin)
+                </button>
+              </div>
+            ) : null}
+            {isAdmin && filesMode === "shared" ? (
+              <SharedWorkspaceBrowser
+                policy={policy}
+                enabled={enabled}
+                runId={runId}
+                onAttach={onAttach}
+              />
+            ) : (
+              <SessionFiles
+                runId={runId}
+                enabled={enabled}
+                refreshKey={refreshKey}
+                onAttachFiles={onAttachFiles}
+              />
+            )}
+          </>
         ) : tab === "activity" ? (
           <Activity rows={rows} />
         ) : (
@@ -110,7 +149,9 @@ export function WorkspaceInspector({
   );
 }
 
-function FileBrowser({
+/** The gateway operator's shared workspace root (`/files/list|search`,
+ * admin-only). Clicking a file attaches it to the next message. */
+function SharedWorkspaceBrowser({
   policy,
   enabled,
   runId,
@@ -172,7 +213,7 @@ function FileBrowser({
       <div className="code-pane-intro">
         <Icon name="terminal" size={17} />
         <div>
-          <strong>Gateway files</strong>
+          <strong>Shared workspace (admin)</strong>
           <span>{directory || "Authorized shared workspace"}</span>
         </div>
         <button

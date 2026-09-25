@@ -193,6 +193,46 @@ describe("shared Code Gateway middleware", () => {
     expect((await request(codePort, "GET", "/%2e%2e/secret")).status).toBe(400);
   });
 
+  it("forwards the browser's address as X-Forwarded-For, replacing a client-supplied chain", async () => {
+    const received: IncomingHttpHeaders[] = [];
+    const gatewayPort = await listen(http.createServer((req, res) => {
+      req.resume();
+      if (req.url === "/api/gateway/session/login") {
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Set-Cookie": ["abstractgateway_session=gs; Path=/; HttpOnly", "abstractgateway_csrf=gc; Path=/"],
+        });
+        res.end(JSON.stringify({ session: {} }));
+        return;
+      }
+      received.push(req.headers);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end("{}");
+    }));
+    const login = async (codePort: number) => cookieHeader((await request(codePort, "POST", "/api/connection/gateway", {
+      body: { gateway_user_id: "alice", gateway_token: "secret" },
+    })).headers["set-cookie"]);
+
+    const direct = await listen(createCodeServer({ defaultGatewayUrl: `http://127.0.0.1:${gatewayPort}` }));
+    const cookies = await login(direct);
+    await request(direct, "GET", "/api/gateway/runs/r1/workspace", {
+      headers: { Cookie: cookies, "X-Forwarded-For": "203.0.113.9" },
+    });
+    // Not behind a trusted proxy: the spoofable header is replaced by the peer.
+    expect(received[0]["x-forwarded-for"]).toBe("127.0.0.1");
+
+    const proxied = await listen(createCodeServer({
+      defaultGatewayUrl: `http://127.0.0.1:${gatewayPort}`,
+      env: { ABSTRACTCODE_TRUST_PROXY_HEADERS: "1" },
+    }));
+    const proxiedCookies = await login(proxied);
+    await request(proxied, "GET", "/api/gateway/runs/r1/workspace", {
+      headers: { Cookie: proxiedCookies, "X-Forwarded-For": "198.51.100.7" },
+    });
+    // Behind a trusted reverse proxy the chain is kept and this hop appended.
+    expect(received[1]["x-forwarded-for"]).toBe("198.51.100.7, 127.0.0.1");
+  });
+
   it("falls through for non-owned paths when mounted in Vite", async () => {
     const middleware = createGatewayMiddleware({ defaultGatewayUrl: "http://127.0.0.1:65534" });
     const port = await listen(http.createServer((req, res) => {
