@@ -1210,6 +1210,15 @@ fn workflow_row(w: &crate::store::Workflow, current: &crate::store::Workflow) ->
     )
 }
 
+/// The model picker's MTP line: the current multi-token prediction setting
+/// and the command that changes it. Pure; test-pinned.
+pub fn mtp_hint(speculation: Option<&serde_json::Value>) -> String {
+    format!(
+        "MTP (multi-token prediction): {} — /mtp changes it",
+        crate::speculation::label(speculation)
+    )
+}
+
 /// Stage 1: pick a provider (or reset to gateway defaults). Stage 2 (for a
 /// provider with models) picks the model. Empty provider/model strings mean
 /// "the gateway routes" — the default posture. Arrows browse; Enter chooses.
@@ -1229,7 +1238,8 @@ pub fn open_model_picker(cx: Scope, store: Store, ctx: &UiCtx) {
             .map(|i| i + 1)
             .unwrap_or(0)
     };
-    let size = modal_size(64, (labels.len() as i32 + 7).min(26));
+    // +2: the MTP hint line.
+    let size = modal_size(64, (labels.len() as i32 + 9).min(28));
     let choose_ctx = ctx.clone();
     open_picker(
         cx,
@@ -1246,7 +1256,9 @@ pub fn open_model_picker(cx: Scope, store: Store, ctx: &UiCtx) {
             start,
             size,
             hint: None,
-            live_hint: None,
+            // Multi-token prediction lives beside the model it applies to:
+            // name the current setting and where to change it.
+            live_hint: Some(Rc::new(move || mtp_hint(store.speculation.get().as_ref()))),
             keys: Vec::new(),
             on_mount: None,
             on_selection: None,

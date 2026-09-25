@@ -140,7 +140,9 @@ OPTIONS:
   --session <ID>          durable session id (default: a fresh session)
   --resume                reopen the last session (also: --continue)
   --reasoning <LEVEL>     reasoning effort: none|minimal|low|medium|high|xhigh|auto
-  --mtp <DEPTH|off|inherit>  MTP override; requires native support on the selected host
+  --mtp <DEPTH|off|inherit>  multi-token prediction (MTP) draft depth for runs;
+                          needs native support on the selected host (/mtp in
+                          the app shows what the model supports)
   --ungated               run a gating-capable workflow unattended (skips its
                           human approval pauses); requires --permissions
   --workflow <B[:F]>      agent workflow bundle[:flow], or `default` for the

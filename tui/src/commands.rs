@@ -245,7 +245,7 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
     ("reasoning", "reasoning effort for the current route"),
     (
         "mtp",
-        "MTP depth: inherit | off | positive depth; bare opens model-aware selector",
+        "multi-token prediction depth: inherit | off | N · bare opens the model-aware picker",
     ),
     (
         "gating",
@@ -387,7 +387,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "/sessions [id]",
         "pick a recent session, or switch straight to an id",
     ),
-    ("/mtp [depth|off|inherit]", "MTP depth for next runs; bare opens the picker"),
+    (
+        "/mtp [depth|off|inherit]",
+        "multi-token prediction (MTP, speculative decoding) for new runs: a positive draft depth, off, or inherit the model's own default; bare opens the model-aware picker; the header shows it when set; --mtp at launch; /speculation is an alias",
+    ),
     (
         "/details [full|fold]",
         "transcript verbosity (Ctrl+D): `full` = tool args + results + expanded thinking; `fold` = one-line tool calls with status tags + thinking gists (default)",
@@ -531,6 +534,24 @@ pub const HELP_EXTRA: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// MTP must be discoverable everywhere a user looks: /help, the `/`
+    /// completions, `--help`, and both command spellings.
+    #[test]
+    fn mtp_is_discoverable_on_every_surface() {
+        assert!(HELP_LINES.iter().any(|(k, d)| k.starts_with("/mtp")
+            && d.contains("multi-token prediction")
+            && d.contains("--mtp")));
+        assert!(completion_matches("mt").iter().any(|(k, _)| *k == "mtp"));
+        assert!(crate::cli::usage().contains("--mtp <DEPTH|off|inherit>  multi-token prediction"));
+        assert_eq!(parse("/mtp 3"), Some(Command::Mtp(Some("3".into()))));
+        assert_eq!(parse("/speculation"), Some(Command::Mtp(None)));
+        assert_eq!(
+            crate::ui::modals::mtp_hint(None),
+            "MTP (multi-token prediction): Inherit — /mtp changes it"
+        );
+        assert!(crate::ui::modals::mtp_hint(Some(&serde_json::json!(false))).contains("Off"));
+    }
 
     #[test]
     fn plain_text_is_not_a_command() {
