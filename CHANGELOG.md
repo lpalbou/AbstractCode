@@ -16,16 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolves it when the turn starts, and the toolbar then shows what it
   started ("running Coder @0.1.0 (gateway default)"). A fresh browser uses
   it. The list shows coding agents; **Show all workflows** lists the rest.
-  Your choice is remembered per account. A conversation started on the
-  gateway default keeps following it on every turn; one started with a
-  specific workflow keeps that workflow.
+  Your choice is remembered per account. A conversation whose last run the
+  gateway started from its default keeps following it on every turn, on
+  any device; one started with a specific workflow keeps that workflow.
+  When the gateway's default does not declare the coding-agent interface,
+  the toolbar says so.
 - **Web: the Files tab shows the conversation's workspace.** Full path with a
   copy button, "on the gateway host <name>" when the browser is elsewhere,
   **Open folder** when the browser is on the gateway's machine, folders with
   sizes and dates, refresh, an explicit note for a partial listing, and a
   preview pane (Markdown, JSON, images, HTML as source, text; download for
-  other files). Any file can be attached to the next message. Admins keep
-  the operator's shared folder as **Shared workspace (admin)**.
+  other files). Text previews show at most the first 1 MiB and say so;
+  Markdown previews show images only from the conversation's workspace
+  (other images become links). Any file can be attached to the next
+  message; the gateway's size limit is checked before the file is read.
+  Admins keep the operator's shared folder as **Shared workspace (admin)**.
 - **Web: About dialog.** The header's About button shows AbstractCode's
   version, the AbstractFramework website, author and links (website,
   source, documentation, report an issue, give feedback), plus the
@@ -39,8 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Web app server** sets `X-Forwarded-For` to the address of the
-  connection it received, overwriting any incoming value, so the gateway
-  can tell whether the browser is on its machine.
+  connection it received on every call it makes to the gateway (API,
+  live streams, status check, sign-in, sign-out), overwriting any incoming
+  value and dropping `Forwarded` / `X-Real-IP`; a connection without a
+  known address is refused.
 
 ## [terminal 0.5.1 / web 0.4.2] - 2026-09-23
 
