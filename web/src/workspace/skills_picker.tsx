@@ -12,7 +12,13 @@ export type GatewaySkill = {
   source?: { source?: string; binding?: string; ambiguous?: boolean };
 };
 
-type SkillsInventory = { skills: GatewaySkill[]; warnings: string[] };
+type SkillsInventory = {
+  skills: GatewaySkill[];
+  warnings: string[];
+  /** Where the gateway reads skills from, and how that place was chosen. */
+  shelf?: string;
+  shelfSource?: string;
+};
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -59,10 +65,54 @@ export function normalizeSkillsInventory(value: unknown): SkillsInventory {
   const warnings = Array.isArray(root.warnings)
     ? root.warnings.map(text).filter(Boolean)
     : [];
+  const shelf = text(root.shelf);
+  const shelfSource = text(root.shelf_source);
   return {
     skills: skills.sort((left, right) => left.name.localeCompare(right.name)),
     warnings,
+    ...(shelf ? { shelf } : {}),
+    ...(shelfSource ? { shelfSource } : {}),
   };
+}
+
+const SHELF_SOURCES: Record<string, string> = {
+  saved: "set in the gateway's settings",
+  env: "set in the gateway's launch environment",
+  seeded: "the gateway's built-in shelf",
+};
+
+/** An empty skill list, with the gateway's own explanation shown in full. */
+export function SkillsEmptyState({
+  inventory,
+}: {
+  inventory: SkillsInventory;
+}): React.ReactElement {
+  return (
+    <div className="code-skills-empty" role="status">
+      <p>
+        <strong>This gateway offers no skills.</strong>
+      </p>
+      {inventory.warnings.length ? (
+        inventory.warnings.map((warning, index) => (
+          <p key={`${warning}:${index}`}>
+            {inventory.shelf ? warning : `The gateway has no skill shelf: ${warning}`}
+          </p>
+        ))
+      ) : (
+        <p>The gateway gave no reason for the empty list.</p>
+      )}
+      {inventory.shelf ? (
+        <p className="code-field-help">
+          Skill shelf: <code>{inventory.shelf}</code>
+          {inventory.shelfSource
+            ? ` (${SHELF_SOURCES[inventory.shelfSource] || inventory.shelfSource})`
+            : ""}
+        </p>
+      ) : (
+        <p className="code-field-help">The gateway did not report a skill shelf location.</p>
+      )}
+    </div>
+  );
 }
 
 function trustLabel(skill: GatewaySkill): string {
@@ -168,7 +218,7 @@ export function SkillsPicker({
           </button>
         </div>
       ) : null}
-      {inventory.warnings.length ? (
+      {inventory.warnings.length && inventory.skills.length ? (
         <details className="code-disabled-tools">
           <summary>
             Gateway reported {inventory.warnings.length} skills warning
@@ -179,12 +229,11 @@ export function SkillsPicker({
           ))}
         </details>
       ) : null}
-      {!loading && !error && !filtered.length ? (
-        <p className="code-muted">
-          {inventory.skills.length
-            ? "No skills match your search."
-            : "This gateway has no skills available."}
-        </p>
+      {!loading && !error && !inventory.skills.length ? (
+        <SkillsEmptyState inventory={inventory} />
+      ) : null}
+      {!loading && !error && inventory.skills.length && !filtered.length ? (
+        <p className="code-muted">No skills match your search.</p>
       ) : null}
       {filtered.map((skill) => {
         const blockedReason =

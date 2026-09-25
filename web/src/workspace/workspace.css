@@ -1822,3 +1822,13 @@ select option {
     scroll-behavior: auto !important;
   }
 }
+.code-skills-empty {
+  border: 1px solid var(--ui-border-1);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+.code-skills-empty p {
+  margin: 0 0 6px;
+}
