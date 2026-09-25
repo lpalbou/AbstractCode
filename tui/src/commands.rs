@@ -3,6 +3,9 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Help,
+    /// `/about` — app + version, AbstractFramework identity, links, and the
+    /// gateway's package versions when known.
+    About,
     NewSession,
     Theme(Option<String>),
     Workflow,
@@ -138,6 +141,7 @@ pub fn parse(text: &str) -> Option<Command> {
     let rest = parts.next().unwrap_or("").trim().to_string();
     let cmd = match head.as_str() {
         "/help" | "/?" => Command::Help,
+        "/about" | "/version" => Command::About,
         "/new" | "/clear" => Command::NewSession,
         "/theme" | "/themes" => Command::Theme(if rest.is_empty() { None } else { Some(rest) }),
         "/workflow" | "/agent" | "/workflows" => Command::Workflow,
@@ -237,6 +241,10 @@ pub fn parse(text: &str) -> Option<Command> {
 /// the canonical name; `parse` still accepts the aliases).
 pub const COMPLETIONS: &[(&str, &str)] = &[
     ("help", "commands + keys"),
+    (
+        "about",
+        "version, AbstractFramework, author, links, gateway versions",
+    ),
     ("new", "fresh session"),
     ("theme", "pick a theme"),
     ("workflow", "pick the agent workflow"),
@@ -389,7 +397,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     (
         "/mtp [depth|off|inherit]",
-        "multi-token prediction (MTP, speculative decoding) for new runs: a positive draft depth, off, or inherit the model's own default; bare opens the model-aware picker; the header shows it when set; --mtp at launch; /speculation is an alias",
+        "multi-token prediction (MTP) for new runs: depth, off or inherit; bare opens the picker; --mtp at launch",
     ),
     (
         "/details [full|fold]",
@@ -478,6 +486,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "/focus <name|agent>",
         "switch conversation focus (Alt+E cycles)",
     ),
+    ("/about", "version, author, licence, links, gateway versions"),
     ("/quit", "leave (Ctrl+Q too; Ctrl+C clears the prompt — twice in a row quits)"),
 ];
 
@@ -551,6 +560,14 @@ mod tests {
             "MTP (multi-token prediction): Inherit — /mtp changes it"
         );
         assert!(crate::ui::modals::mtp_hint(Some(&serde_json::json!(false))).contains("Off"));
+    }
+
+    #[test]
+    fn about_parses_and_is_listed() {
+        assert_eq!(parse("/about"), Some(Command::About));
+        assert_eq!(parse("/version"), Some(Command::About));
+        assert!(HELP_LINES.iter().any(|(k, _)| *k == "/about"));
+        assert!(completion_matches("abo").iter().any(|(k, _)| *k == "about"));
     }
 
     #[test]

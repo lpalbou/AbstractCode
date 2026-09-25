@@ -11474,6 +11474,7 @@ fn resources_modal_renders_host_facts_and_unload_confirms_before_sending() {
         host_state: true,
         session_caches: true,
         modality_labels: vec![("text-generation".into(), "LLM".into())],
+        package_versions: Vec::new(),
     }));
     let facts = abstractcode::discovery::host_state_from_response(&serde_json::json!({
         "ok": true,
@@ -11756,6 +11757,7 @@ fn resources_head_is_visible_at_the_default_size_and_never_scrolls_away() {
         host_state: true,
         session_caches: true,
         modality_labels: Vec::new(),
+        package_versions: Vec::new(),
     }));
     // Enough rows that the panel is comfortably taller than the window.
     let caches: Vec<serde_json::Value> = (0..20)
@@ -11844,6 +11846,7 @@ fn resources_tail_is_reachable_and_shrink_keeps_cursor_and_action_aligned() {
         host_state: true,
         session_caches: true,
         modality_labels: Vec::new(),
+        package_versions: Vec::new(),
     }));
     let caches: Vec<serde_json::Value> = (0..30)
         .map(|i| {
@@ -12109,4 +12112,46 @@ fn empty_skills_shelf_shows_the_gateways_warnings() {
     );
     assert!(screen.contains("no curated shelf found"), "{screen}");
     assert!(!screen.contains("loading…"), "loaded ≠ loading:\n{screen}");
+}
+
+/// §B: /about shows the identity from the vendored descriptor and the
+/// gateway's package versions once the capabilities probe knows them.
+#[test]
+fn about_modal_shows_identity_links_and_gateway_versions() {
+    let mut h = harness_sized(Size::new(120, 36));
+    h.turn();
+    h.type_text("/about");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let screen = h.turn();
+    for needle in [
+        "About AbstractCode",
+        &format!("AbstractCode {}", env!("CARGO_PKG_VERSION")),
+        "Part of AbstractFramework — https://abstractframework.ai",
+        "Author: Laurent-Philippe Albou, PhD (2023-2026)",
+        "Released under the MIT License.",
+        "https://abstractframework.ai/code",
+        "https://github.com/lpalbou/AbstractCode",
+        "Report an issue",
+        "Give feedback",
+        "contact@abstractframework.ai",
+        "asking the gateway…",
+    ] {
+        assert!(screen.contains(needle), "missing {needle:?}:\n{screen}");
+    }
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::LoadCapabilities)).is_some(),
+        "/about refreshes the gateway facts"
+    );
+    h.store
+        .host_contracts
+        .set(Some(abstractcode::store::HostContracts {
+            package_versions: vec![("abstractgateway".into(), "0.4.4".into())],
+            ..Default::default()
+        }));
+    h.turn();
+    let screen = h.turn();
+    assert!(screen.contains("abstractgateway"), "{screen}");
+    assert!(screen.contains("0.4.4"), "{screen}");
 }

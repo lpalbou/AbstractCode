@@ -447,6 +447,11 @@ pub struct HostContracts {
     /// this client styles with theme inks only — modality is
     /// distinguished by LABEL text.
     pub modality_labels: Vec<(String, String)>,
+    /// `(package, version)` for every AbstractFramework package the
+    /// capabilities envelope reports installed on the gateway host
+    /// (`capabilities.<abstract*>.version`), sorted — the About screen's
+    /// gateway rows. Empty on gateways that report none.
+    pub package_versions: Vec<(String, String)>,
 }
 
 impl HostContracts {

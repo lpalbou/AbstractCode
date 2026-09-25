@@ -28,6 +28,7 @@ pub mod entities;
 pub mod exec;
 pub mod export;
 pub mod gateway;
+pub mod identity;
 pub mod mention;
 pub mod paths;
 pub mod preview;

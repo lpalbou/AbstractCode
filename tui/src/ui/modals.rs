@@ -5133,6 +5133,114 @@ fn help_rows(lines: &[&(&str, &str)], desc_w: i32) -> Vec<HelpRow> {
     rows
 }
 
+/// The About screen's gateway rows: where this client is connected and the
+/// AbstractFramework package versions the gateway reports (capabilities).
+/// Pure; test-pinned. Nothing is shown for what is not known.
+pub fn about_gateway_rows(
+    gateway_label: &str,
+    contracts: Option<&crate::store::HostContracts>,
+) -> Vec<(String, String)> {
+    let mut rows = Vec::new();
+    if !gateway_label.is_empty() {
+        rows.push(("Gateway".to_string(), gateway_label.to_string()));
+    }
+    match contracts {
+        None => rows.push((
+            "Gateway versions".to_string(),
+            "asking the gateway…".to_string(),
+        )),
+        Some(c) if c.package_versions.is_empty() => rows.push((
+            "Gateway versions".to_string(),
+            "not reported by this gateway".to_string(),
+        )),
+        Some(c) => {
+            for (pkg, ver) in &c.package_versions {
+                rows.push((format!("  {pkg}"), ver.clone()));
+            }
+        }
+    }
+    rows
+}
+
+/// `/about` — who made this app and where to find it (§B). Every fact comes
+/// from the vendored framework descriptor (`crate::identity`); the gateway
+/// rows follow the capabilities probe live.
+pub fn open_about(cx: Scope, store: Store, ctx: &UiCtx) {
+    let ctx2 = ctx.clone();
+    let id = crate::identity::this_app();
+    let gateway_label = ctx.gateway_label.clone();
+    let size = modal_size(96, 28);
+    ctx.open_modal(cx, size, move |_mcx| {
+        let t = abstracttui::app::current_theme().tokens;
+        let id = id.clone();
+        let gateway_label = gateway_label.clone();
+        Element::new()
+            .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
+            .focusable()
+            .autofocus()
+            .shortcut(KeyChord::plain(Key::Escape), {
+                let ctx = ctx2.clone();
+                move |_| ctx.close_modal()
+            })
+            .shortcut(KeyChord::plain(Key::Enter), {
+                let ctx = ctx2.clone();
+                move |_| ctx.close_modal()
+            })
+            .child(title_row(&t, format!("About {}", id.name)))
+            .child(dyn_view(
+                LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)),
+                move || {
+                    let t2 = abstracttui::app::current_theme().tokens;
+                    let gw = store
+                        .host_contracts
+                        .with(|c| about_gateway_rows(&gateway_label, c.as_ref()));
+                    let rows = crate::identity::about_rows(&id, &gw);
+                    let key_w = 18;
+                    let mut col = Element::new().style(LayoutStyle::column());
+                    for (label, value) in rows {
+                        let (accent, text_c) = (t2.accent, t2.text);
+                        col = col.child(
+                            Element::new()
+                                .style(LayoutStyle::line(1))
+                                .draw(move |canvas, rect| {
+                                    let avail_all = (rect.right() - rect.x).max(0);
+                                    if label.is_empty() {
+                                        canvas.print(
+                                            Point::new(rect.x, rect.y),
+                                            &text::truncate_ellipsis(&value, avail_all),
+                                            text_c,
+                                            Rgba::TRANSPARENT,
+                                        );
+                                        return;
+                                    }
+                                    canvas.print(
+                                        Point::new(rect.x, rect.y),
+                                        &text::truncate_ellipsis(&label, key_w),
+                                        accent,
+                                        Rgba::TRANSPARENT,
+                                    );
+                                    let avail = (avail_all - key_w - 2).max(0);
+                                    canvas.print(
+                                        Point::new(rect.x + key_w + 2, rect.y),
+                                        &text::truncate_ellipsis(&value, avail),
+                                        text_c,
+                                        Rgba::TRANSPARENT,
+                                    );
+                                })
+                                .build(),
+                        );
+                    }
+                    col.build()
+                },
+            ))
+            .child(hint_row(
+                &t,
+                "select a link with the mouse to copy it · Esc/Enter closes".into(),
+            ))
+            .build()
+    });
+}
+
 pub fn open_help(cx: Scope, ctx: &UiCtx) {
     let ctx2 = ctx.clone();
     // Wide enough for comfortable one-row descriptions in the common
@@ -5666,6 +5774,7 @@ mod tests {
                 ("image-generation".into(), "IMG".into()),
                 ("text-generation".into(), "LLM".into()),
             ],
+            package_versions: Vec::new(),
         }
     }
 

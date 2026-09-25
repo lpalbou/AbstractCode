@@ -742,11 +742,27 @@ pub fn contracts_from_capabilities(v: &Value) -> HostContracts {
         }
         modality_labels.sort();
     }
+    // Installed AbstractFramework packages on the gateway host: each
+    // `capabilities.<abstract*>` object carrying a string `version`.
+    let mut package_versions: Vec<(String, String)> = root
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .filter(|(k, _)| k.starts_with("abstract"))
+                .filter_map(|(k, v)| {
+                    let ver = v.get("version").and_then(Value::as_str)?.trim();
+                    (!ver.is_empty()).then(|| (k.clone(), ver.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    package_versions.sort();
     HostContracts {
         model_residency: has("model_residency"),
         host_state: has("host_state"),
         session_caches: has("session_caches"),
         modality_labels,
+        package_versions,
     }
 }
 
@@ -1515,6 +1531,29 @@ mod tests {
         let old = contracts_from_capabilities(&json!({"flows": []}));
         assert!(!old.model_residency && !old.host_state && !old.session_caches);
         assert!(old.modality_labels.is_empty());
+    }
+
+    /// The About screen's gateway rows: installed framework package versions
+    /// from the capabilities envelope — and nothing invented when absent.
+    #[test]
+    fn capabilities_report_framework_package_versions() {
+        let v = json!({"capabilities": {
+            "abstractgateway": {"installed": true, "version": "0.4.4"},
+            "abstractcore": {"version": "2.15.3"},
+            "abstractvoice": {"installed": false, "version": null},
+            "contracts": {"version": 1},
+            "other": {"version": "9"}
+        }});
+        assert_eq!(
+            contracts_from_capabilities(&v).package_versions,
+            vec![
+                ("abstractcore".to_string(), "2.15.3".to_string()),
+                ("abstractgateway".to_string(), "0.4.4".to_string())
+            ]
+        );
+        assert!(contracts_from_capabilities(&json!({}))
+            .package_versions
+            .is_empty());
     }
 
     #[test]

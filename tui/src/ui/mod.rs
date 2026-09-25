@@ -968,6 +968,12 @@ pub(crate) fn send_start(
 fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_mode: Signal<u8>) {
     match cmd {
         Command::Help => modals::open_help(cx, ctx),
+        Command::About => {
+            // Gateway package versions come from the capabilities probe;
+            // refresh it so the modal fills in live (rows are reactive).
+            ctx.send(Cmd::LoadCapabilities);
+            modals::open_about(cx, store, ctx);
+        }
         Command::Quit => quit::request_quit(cx, store, ctx),
         Command::NewSession => new_session(store, ctx),
         Command::Theme(Some(id)) => {
