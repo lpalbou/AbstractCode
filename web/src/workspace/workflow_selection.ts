@@ -63,10 +63,11 @@ export function gatewayDefaultFromEnvelope(
   }
   const bundleId = text(row.bundle_id);
   const flowId = text(row.flow_id);
-  if (!bundleId || !flowId)
+  const registryScope = text(row.registry_scope);
+  if (!bundleId || !flowId || !registryScope)
     return {
       status: "unavailable",
-      reason: `gateway's default workflow for ${interfaceId} has no bundle or flow id`,
+      reason: `gateway's default workflow for ${interfaceId} is missing its bundle, flow or registry scope`,
     };
   const bundleVersion = text(row.bundle_version);
   const workflowId =
@@ -79,7 +80,7 @@ export function gatewayDefaultFromEnvelope(
       bundleId,
       ...(bundleVersion ? { bundleVersion } : {}),
       flowId,
-      registryScope: text(row.registry_scope) ?? "private",
+      registryScope,
       name: text(row.name) ?? flowId,
       ...(text(row.source) ? { source: text(row.source) } : {}),
     },
@@ -110,10 +111,9 @@ export function gatewayDefaultDefinition(
       workflow.flowId === target.flowId &&
       (!target.bundleVersion || workflow.bundleVersion === target.bundleVersion),
   );
-  if (match)
-    return match.interfaces.includes(interfaceId)
-      ? match
-      : { ...match, interfaces: [...match.interfaces, interfaceId] };
+  // Used as listed: a row that does not declare the interface is reported
+  // (defaultInterfaceMismatch), never patched here.
+  if (match) return match;
   return {
     id: `${target.registryScope}:${target.workflowId}`,
     workflowId: target.workflowId,
@@ -125,6 +125,18 @@ export function gatewayDefaultDefinition(
     interfaces: [interfaceId],
     registryScope: target.registryScope as WorkflowRegistryScope,
   };
+}
+
+/** Text shown next to the selector when the gateway's default workflow, as
+ * listed in its catalog, does not declare the interface it is the default
+ * for (a gateway-side inconsistency the client does not repair). */
+export function defaultInterfaceMismatch(
+  definition: WorkflowDefinition | null,
+  interfaceId: string = CODE_AGENT_INTERFACE,
+): string {
+  if (!definition || definition.interfaces.includes(interfaceId)) return "";
+  const declared = definition.interfaces.length ? definition.interfaces.join(", ") : "no interface";
+  return `The gateway default ${definition.name} does not declare ${interfaceId} (it declares ${declared}); it will not run as a coding agent here.`;
 }
 
 /** Agent workflows only, unless the person asked to see every workflow. */

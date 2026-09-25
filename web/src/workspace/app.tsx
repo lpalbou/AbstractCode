@@ -55,6 +55,7 @@ import {
 import {
   GATEWAY_DEFAULT,
   conversationSelection,
+  defaultInterfaceMismatch,
   runSelectionSource,
   selectionSourceNote,
   gatewayDefaultDefinition,
@@ -1113,6 +1114,11 @@ export function CodeWorkspace() {
               />
               <span>Show all workflows</span>
             </label>
+            {selection === GATEWAY_DEFAULT && defaultInterfaceMismatch(defaultWorkflow) ? (
+              <span className="code-workflow-resolved is-missing" role="alert" title={defaultInterfaceMismatch(defaultWorkflow)}>
+                {defaultInterfaceMismatch(defaultWorkflow)}
+              </span>
+            ) : null}
             {sourceNote ? (
               <span className="code-workflow-resolved is-missing" role="status" title={sourceNote}>
                 {sourceNote}

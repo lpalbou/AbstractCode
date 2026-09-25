@@ -6,6 +6,7 @@ import {
   GATEWAY_DEFAULT,
   NO_DEFAULT_REPORTED,
   conversationSelection,
+  defaultInterfaceMismatch,
   runSelectionSource,
   selectionSourceNote,
   gatewayDefaultDefinition,
@@ -82,6 +83,18 @@ describe("gateway default agent workflow", () => {
   it("resolves the catalog row the default points at, or the gateway's description", () => {
     const state = gatewayDefaultFromEnvelope(envelope);
     expect(gatewayDefaultDefinition(state, [report, agent])).toBe(agent);
+    expect(defaultInterfaceMismatch(gatewayDefaultDefinition(state, [report, agent]))).toBe("");
+    // A listed row that does not declare the interface is shown as a mismatch, not repaired.
+    const undeclared = { ...agent, interfaces: ["abstractassistant.agent.v1"] };
+    const listed = gatewayDefaultDefinition(state, [undeclared]);
+    expect(listed).toBe(undeclared);
+    expect(defaultInterfaceMismatch(listed)).toBe(
+      "The gateway default Coder does not declare abstractcode.agent.v1 (it declares abstractassistant.agent.v1); it will not run as a coding agent here.",
+    );
+    // A default without a registry scope is not given one by the client.
+    const noScope = JSON.parse(JSON.stringify(envelope));
+    delete noScope.default_agent_workflows["abstractcode.agent.v1"].registry_scope;
+    expect(gatewayDefaultFromEnvelope(noScope)).toMatchObject({ status: "unavailable" });
     const synthesized = gatewayDefaultDefinition(state, [report]);
     expect(synthesized).toMatchObject({
       bundleId: "coding-agent",
