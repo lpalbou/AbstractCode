@@ -560,6 +560,8 @@ struct Runner {
     /// `(session_id, note)` of the last "running <workflow>" notice — same
     /// dedup memo shape as `last_workspace_note`.
     last_workflow_note: Option<(String, String)>,
+    /// The boot "workspace: gateway-managed" notice was posted (once).
+    workspace_notice_posted: bool,
 }
 
 pub fn spawn(
@@ -591,6 +593,7 @@ pub fn spawn(
                     requested_workflow,
                     last_workspace_note: None,
                     last_workflow_note: None,
+                    workspace_notice_posted: false,
                 };
                 while let Ok(cmd) = rx.recv() {
                     if matches!(cmd, Cmd::Shutdown) {
@@ -1269,7 +1272,10 @@ impl Runner {
                 .and_then(|p| p.get("client_workspace_scope_overrides"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
-            if !overrides {
+            // Boot only: `/workflow` re-runs this load, and repeating the
+            // same notice on every picker open buried the transcript.
+            if !overrides && !self.workspace_notice_posted {
+                self.workspace_notice_posted = true;
                 self.post(move || {
                     store.fold.update(|f| {
                         f.push_item(Item::Info {
