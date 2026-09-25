@@ -38,9 +38,19 @@ All notable changes to this project are documented here. The format follows
 - **`/skills` explains an empty shelf**: where the shelf is on the gateway
   host, how it was chosen, and the gateway's warnings, instead of a bare
   "no skills".
-- **Multi-token prediction is easier to find**: `/help`, the `/` completion
-  and `--help` describe `/mtp` and `--mtp`, and the `/model` picker shows the
-  current MTP setting.
+- **MTP is a step of `/model`**: after the model and the reasoning effort,
+  `/model` asks for multi-token prediction — Inherit, "Off — no multi-token
+  prediction", or "Native MTP, N draft tokens" when the gateway reports the
+  model supports it — with the current choice pre-selected. A model that
+  cannot use MTP, or a gateway that cannot say, is named on a row; the control
+  stays. The provider list's last row opens the MTP step directly. The choice
+  is saved exactly like `/mtp` and shown in the header. `/help`, the `/`
+  completion and `--help` also describe `/mtp` and `--mtp`.
+
+### Fixed
+
+- The "workspace: gateway-managed" notice is posted once at startup instead
+  of again every time `/workflow` refreshes the catalog.
 
 ## [0.5.1] - 2026-09-23
 

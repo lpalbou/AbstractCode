@@ -822,6 +822,15 @@ fn model_stage_two_stays_interactive_when_an_approval_lands_behind_the_picker() 
     h.press_enter();
     h.turn();
     h.turn();
+    // Stage 4 — MTP — replaces stage 3 the same way; Esc closes it.
+    let screen = h.turn();
+    assert!(
+        screen.contains("MTP (multi-token prediction) —"),
+        "stage 4 opens after the reasoning choice:\n{screen}"
+    );
+    h.press_escape();
+    h.turn();
+    h.turn();
 
     // And the parked approval prompt comes back, still answerable.
     let screen = h.turn();
@@ -869,6 +878,13 @@ fn model_picker_defaults_row_and_empty_provider_apply_without_stage_two() {
     h.turn();
     h.press_enter();
     h.turn();
+    let screen = h.turn();
+    // Every route choice ends on the MTP step; Esc keeps the current one.
+    assert!(
+        screen.contains("MTP (multi-token prediction) —"),
+        "{screen}"
+    );
+    h.press_escape();
     h.turn();
     assert_eq!(h.store.provider.get_untracked(), "");
     assert_eq!(h.store.model.get_untracked(), "");
@@ -889,6 +905,10 @@ fn model_picker_defaults_row_and_empty_provider_apply_without_stage_two() {
     h.press_enter();
     h.turn();
     let screen = h.turn();
+    assert!(
+        screen.contains("MTP (multi-token prediction) —"),
+        "{screen}"
+    );
     assert_eq!(h.store.provider.get_untracked(), "endpoint:airelay");
     assert_eq!(h.store.model.get_untracked(), "");
     assert!(
@@ -10068,6 +10088,18 @@ fn reasoning_stage_probes_selects_and_route_change_resets() {
     h.turn();
     h.turn();
     assert_eq!(h.store.reasoning.get_untracked(), "high");
+    let screen = h.turn();
+    assert!(
+        screen.contains("MTP (multi-token prediction) —"),
+        "{screen}"
+    );
+    h.press_escape(); // stage 4 (MTP): keep the current request
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        !screen.contains("MTP (multi-token prediction) —"),
+        "{screen}"
+    );
     // Pair-coupled persistence.
     {
         let prefs = h.ctx.prefs.borrow();
@@ -10086,12 +10118,12 @@ fn reasoning_stage_probes_selects_and_route_change_resets() {
     );
 
     // ROUTE CHANGE RESETS (the coupling rule): pick the OTHER model,
-    // Esc at stage 3 — the override must be gone, prefs cleared.
+    // Esc at stage 3 — the override must be gone, prefs cleared. Stage 1
+    // opens ON the current provider (the MTP row now sits below the last
+    // provider, so no Down here).
     h.type_text("/model");
     h.turn();
     h.press_enter();
-    h.turn();
-    h.term.push_input(b"\x1b[B");
     h.turn();
     h.press_enter();
     h.turn();
@@ -10100,6 +10132,8 @@ fn reasoning_stage_probes_selects_and_route_change_resets() {
     h.press_enter();
     h.turn();
     h.press_escape(); // stage 3: keep gateway default for the new model
+    h.turn();
+    h.press_escape(); // stage 4 (MTP): keep the current request
     h.turn();
     assert_eq!(h.store.model.get_untracked(), "gpt-5.6-luna");
     assert_eq!(
@@ -12342,4 +12376,112 @@ fn files_modal_surfaces_a_missing_route() {
     );
     assert!(screen.contains("listing failed: HTTP 404"), "{screen}");
     assert!(!screen.contains("(empty folder)"), "{screen}");
+}
+
+/// The operator's correction: MTP is a real step of `/model`, not a hint.
+/// Stage 1 carries an MTP row; after model + reasoning the MTP step opens
+/// with the CURRENT request pre-selected; a choice persists exactly like
+/// `/mtp` and shows in the header. Removing the step/row fails this test.
+#[test]
+fn model_picker_offers_mtp_as_a_step_and_persists_it() {
+    let mut h = harness_sized(Size::new(130, 34));
+    h.turn();
+    h.store
+        .providers
+        .set(vec![abstractcode::store::ProviderInfo {
+            name: "mlx".into(),
+            models: vec!["qwen-mtp".into()],
+        }]);
+    h.type_text("/model");
+    h.turn();
+    h.press_enter();
+    let screen = h.turn();
+    assert!(
+        screen.contains("MTP (multi-token prediction): Inherit — Enter to change"),
+        "stage 1 carries the MTP row:\n{screen}"
+    );
+    // Provider -> model -> reasoning (Enter = gateway default) -> MTP.
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.turn();
+    assert!(
+        h.turn().contains("next: MTP"),
+        "stage 3 announces the MTP step"
+    );
+    h.press_enter();
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("MTP (multi-token prediction) — mlx · qwen-mtp"),
+        "stage 4 is the MTP step for the chosen model:\n{screen}"
+    );
+    // The gateway's capability answer for this model lands while open.
+    assert!(h
+        .find_cmd(|c| matches!(c, Cmd::ProbeModelExecution { .. }))
+        .is_some());
+    h.store.execution_probe.set(Some((
+        "mlx".into(),
+        "qwen-mtp".into(),
+        serde_json::json!({"execution": {"speculation": {
+            "supported": true, "ready": true, "supported_depths": [3]}}}),
+    )));
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("● Inherit"),
+        "current value pre-selected:\n{screen}"
+    );
+    assert!(
+        screen.contains("Off — no multi-token prediction"),
+        "{screen}"
+    );
+    assert!(screen.contains("Native MTP, 3 draft tokens"), "{screen}");
+    // Rows: Inherit, Off, Depth 3 → Down Down Enter.
+    h.term.push_input(b"\x1b[B\x1b[B");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let screen = h.turn();
+    let want =
+        serde_json::json!({"mode":"native_mtp","num_draft_tokens":3,"require_acceleration":true});
+    assert_eq!(h.store.speculation.get_untracked(), Some(want.clone()));
+    assert_eq!(
+        h.prefs.borrow().speculation,
+        Some(want),
+        "persisted like /mtp"
+    );
+    assert!(
+        screen.contains("MTP requested Depth 3"),
+        "header chip:\n{screen}"
+    );
+
+    // Reopening from the stage-1 row pre-selects the saved choice; a model
+    // that cannot use MTP says so on a row (the control stays).
+    h.type_text("/model");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[B\x1b[B"); // defaults, mlx, → MTP row
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.store.execution_probe.set(Some((
+        "mlx".into(),
+        "qwen-mtp".into(),
+        serde_json::json!({"execution": {"speculation": {"supported": false}}}),
+    )));
+    h.turn();
+    let screen = h.turn();
+    assert!(screen.contains("cannot use MTP"), "{screen}");
+    assert!(screen.contains("Depth 3 (saved; unavailable)"), "{screen}");
+    assert!(
+        screen.contains("Off — no multi-token prediction"),
+        "{screen}"
+    );
 }

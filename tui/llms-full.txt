@@ -196,8 +196,8 @@ Inside the app:
 - `/workflow` picks the agent: the first row, **Gateway default**, runs the
   workflow your gateway's operator set (a change there applies to your next
   turn); below it, every catalog entrypoint implementing
-  `abstractcode.agent.v1`. `/model` picks provider + model (and shows the
-  multi-token prediction setting — `/mtp` changes it), `/theme` restyles
+  `abstractcode.agent.v1`. `/model` picks provider + model, then the
+  reasoning effort, then MTP (multi-token prediction — also `/mtp`), `/theme` restyles
 - type while a run is active to steer it; `Esc Esc` cancels; `/new` starts a
   fresh session
 - tool approvals and agent questions open as modals; the run waits durably
@@ -416,9 +416,13 @@ gateway until you answer.
    which workflow each turn ran ("running Basic agent @0.0.3 (gateway
    default)"). If the gateway has no default and you have not picked one, the
    app says so and asks you to pick. `/model` lists providers and models
-   (leave it on "gateway default" to use the server's routing); its footer
-   shows the multi-token prediction (MTP) setting, which `/mtp` changes. Both
-   choices persist across launches.
+   (leave it on "gateway default" to use the server's routing), then the
+   reasoning effort, then **MTP** (multi-token prediction): Inherit, Off, or a
+   native draft depth when the gateway reports the model supports it — a model
+   that cannot use MTP says so on the row. The current choice is pre-selected;
+   `Esc` keeps it. The last row of the provider list jumps straight to the MTP
+   step, and `/mtp` still works on its own. All these choices persist across
+   launches.
 4. **Where files land.** Under the gateway's default (server-managed)
    workspace policy, tools execute in the gateway's workspace root or a
    managed per-session folder — the app tells you this at startup. To make
@@ -826,7 +830,9 @@ Anything that is not a command is a task (when idle) or steering guidance
 visit's next turn — or the held draft while a turn runs (later text
 replaces the hold; it auto-sends when the turn parks).
 
-MTP is separate from reasoning. The picker only offers depths the execution host advertises;
+MTP is separate from reasoning. It is the last step of `/model` (after the reasoning
+dial; `Esc` at either step moves on / keeps the current value) and the last row of the
+provider list, and `/mtp` opens the same step. The picker only offers depths the execution host advertises;
 unknown capabilities and head-not-ready/reload reasons remain visible. A saved unavailable
 depth is retained, not silently replaced. Typed depths are explicit requests, not a claim
 that the current backend can execute them: the host validates them and refuses unsupported
@@ -1869,9 +1875,19 @@ All notable changes to this project are documented here. The format follows
 - **`/skills` explains an empty shelf**: where the shelf is on the gateway
   host, how it was chosen, and the gateway's warnings, instead of a bare
   "no skills".
-- **Multi-token prediction is easier to find**: `/help`, the `/` completion
-  and `--help` describe `/mtp` and `--mtp`, and the `/model` picker shows the
-  current MTP setting.
+- **MTP is a step of `/model`**: after the model and the reasoning effort,
+  `/model` asks for multi-token prediction — Inherit, "Off — no multi-token
+  prediction", or "Native MTP, N draft tokens" when the gateway reports the
+  model supports it — with the current choice pre-selected. A model that
+  cannot use MTP, or a gateway that cannot say, is named on a row; the control
+  stays. The provider list's last row opens the MTP step directly. The choice
+  is saved exactly like `/mtp` and shown in the header. `/help`, the `/`
+  completion and `--help` also describe `/mtp` and `--mtp`.
+
+### Fixed
+
+- The "workspace: gateway-managed" notice is posted once at startup instead
+  of again every time `/workflow` refreshes the catalog.
 
 ## [0.5.1] - 2026-09-23
 

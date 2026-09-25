@@ -1210,13 +1210,25 @@ fn workflow_row(w: &crate::store::Workflow, current: &crate::store::Workflow) ->
     )
 }
 
-/// The model picker's MTP line: the current multi-token prediction setting
-/// and the command that changes it. Pure; test-pinned.
-pub fn mtp_hint(speculation: Option<&serde_json::Value>) -> String {
+/// The `/model` picker's MTP ROW (stage 1, after the providers): the
+/// current multi-token prediction request; Enter opens the MTP step for the
+/// current route. Pure; test-pinned.
+pub fn mtp_entry_row(speculation: Option<&serde_json::Value>) -> String {
     format!(
-        "MTP (multi-token prediction): {} — /mtp changes it",
+        "  MTP (multi-token prediction): {} — Enter to change",
         crate::speculation::label(speculation)
     )
+}
+
+/// Stage-1 rows: gateway defaults, the providers, then the MTP row.
+fn model_picker_rows(
+    providers: &[crate::store::ProviderInfo],
+    cur_provider: &str,
+    speculation: Option<&serde_json::Value>,
+) -> Vec<String> {
+    let mut rows = provider_rows(providers, cur_provider);
+    rows.push(mtp_entry_row(speculation));
+    rows
 }
 
 /// Stage 1: pick a provider (or reset to gateway defaults). Stage 2 (for a
@@ -1228,7 +1240,11 @@ pub fn open_model_picker(cx: Scope, store: Store, ctx: &UiCtx) {
         store.notify("no providers discovered yet — /model again after the gateway catalog loads");
     }
     let cur_provider = store.provider.get_untracked();
-    let labels: Vec<String> = provider_rows(&providers, &cur_provider);
+    let labels: Vec<String> = model_picker_rows(
+        &providers,
+        &cur_provider,
+        store.speculation.get_untracked().as_ref(),
+    );
     let start = if cur_provider.is_empty() {
         0
     } else {
@@ -1238,8 +1254,7 @@ pub fn open_model_picker(cx: Scope, store: Store, ctx: &UiCtx) {
             .map(|i| i + 1)
             .unwrap_or(0)
     };
-    // +2: the MTP hint line.
-    let size = modal_size(64, (labels.len() as i32 + 9).min(28));
+    let size = modal_size(72, (labels.len() as i32 + 7).min(28));
     let choose_ctx = ctx.clone();
     open_picker(
         cx,
@@ -1251,14 +1266,15 @@ pub fn open_model_picker(cx: Scope, store: Store, ctx: &UiCtx) {
             // is open (the boot probe + /model race) — rows follow.
             live: Some(Rc::new(move || {
                 let cur = store.provider.get();
-                store.providers.with(|ps| provider_rows(ps, &cur))
+                let spec = store.speculation.get();
+                store
+                    .providers
+                    .with(|ps| model_picker_rows(ps, &cur, spec.as_ref()))
             })),
             start,
             size,
             hint: None,
-            // Multi-token prediction lives beside the model it applies to:
-            // name the current setting and where to change it.
-            live_hint: Some(Rc::new(move || mtp_hint(store.speculation.get().as_ref()))),
+            live_hint: None,
             keys: Vec::new(),
             on_mount: None,
             on_selection: None,
@@ -1266,7 +1282,15 @@ pub fn open_model_picker(cx: Scope, store: Store, ctx: &UiCtx) {
                 let ctx = &choose_ctx;
                 if ix == 0 {
                     apply_route(store, ctx, "", "");
-                    ctx.close_modal();
+                    // Gateway defaults still get the MTP step: it applies
+                    // to whatever model the gateway routes to.
+                    open_mtp_stage(cx, store, ctx);
+                    return;
+                }
+                // The MTP row (last): straight to the MTP step for the
+                // current route, route unchanged.
+                if ix == store.providers.with_untracked(|ps| ps.len()) + 1 {
+                    open_mtp_stage(cx, store, ctx);
                     return;
                 }
                 // Re-read at activation (live rows rebuilt from the
@@ -1277,7 +1301,7 @@ pub fn open_model_picker(cx: Scope, store: Store, ctx: &UiCtx) {
                 };
                 if p.models.is_empty() {
                     apply_route(store, ctx, &p.name, "");
-                    ctx.close_modal();
+                    open_mtp_stage(cx, store, ctx);
                     return;
                 }
                 // Stage 2 — this provider's models. Synchronous on purpose:
@@ -1393,27 +1417,79 @@ fn mtp_rows(store: Store) -> Vec<crate::speculation::Row> {
         .as_ref()
         .filter(|(p, m, _)| *p == provider && *m == model)
         .map(|(_, _, v)| v);
-    crate::speculation::rows(payload, store.speculation.get().as_ref())
+    let probing = probe.is_none() && !model.is_empty();
+    let mut rows = crate::speculation::rows(payload, store.speculation.get().as_ref());
+    if probing {
+        // Not an answer yet: say so instead of "unknown".
+        for r in rows
+            .iter_mut()
+            .filter(|r| !r.selectable && r.value.is_none())
+        {
+            r.label = format!("checking what {model} supports…");
+        }
+    }
+    rows
 }
 
+/// MTP step labels: the current request marked `●` (pre-selected), notes
+/// indented. Pure over the rows; test-pinned.
+pub fn mtp_row_labels(
+    rows: &[crate::speculation::Row],
+    current: Option<&serde_json::Value>,
+) -> Vec<String> {
+    rows.iter()
+        .map(|r| {
+            let mark = if r.selectable && r.value.as_ref() == current {
+                "● "
+            } else if r.selectable {
+                "  "
+            } else {
+                "  · "
+            };
+            format!("{mark}{}", r.label)
+        })
+        .collect()
+}
+
+fn mtp_labels(store: Store) -> Vec<String> {
+    mtp_row_labels(&mtp_rows(store), store.speculation.get().as_ref())
+}
+
+/// The MTP step — opened by `/mtp` and as the LAST step of `/model` (and
+/// from its MTP row). Choices come from the gateway's execution
+/// capabilities for the current route: Inherit and Off always, native depths
+/// only when the gateway reports them; an unsupported or unknown model says
+/// so on a row instead of hiding the control. The current request is
+/// pre-selected; Esc keeps it.
 pub fn open_mtp_stage(cx: Scope, store: Store, ctx: &UiCtx) {
     store.execution_probe.set(None);
     let (provider, model) = mtp_route(store);
+    let route = match (provider.is_empty(), model.is_empty()) {
+        (true, true) => "the gateway's default model".to_string(),
+        (false, true) => format!("{provider} (provider default model)"),
+        _ => format!("{provider} · {model}"),
+    };
     if !model.is_empty() {
         ctx.send(crate::runner::Cmd::ProbeModelExecution { provider, model });
     }
+    let current = store.speculation.get_untracked();
+    let start = mtp_rows(store)
+        .iter()
+        .position(|r| r.selectable && r.value == current)
+        .unwrap_or(0);
     let choose_ctx = ctx.clone();
     open_picker(
         cx,
         ctx,
         Picker {
-            title: "MTP depth — requested for the next run".into(),
-            labels: mtp_rows(store).into_iter().map(|r| r.label).collect(),
-            live: Some(Rc::new(move || {
-                mtp_rows(store).into_iter().map(|r| r.label).collect()
-            })),
-            start: 0,
-            size: modal_size(76, 14),
+            title: format!(
+                "MTP (multi-token prediction) — {route} · Enter selects · Esc keeps {}",
+                crate::speculation::label(current.as_ref())
+            ),
+            labels: mtp_labels(store),
+            live: Some(Rc::new(move || mtp_labels(store))),
+            start,
+            size: modal_size(84, 14),
             hint: None,
             live_hint: None,
             keys: Vec::new(),
@@ -1431,6 +1507,16 @@ pub fn open_mtp_stage(cx: Scope, store: Store, ctx: &UiCtx) {
 }
 
 pub fn open_reasoning_stage(cx: Scope, store: Store, ctx: &UiCtx) {
+    open_reasoning_stage_inner(cx, store, ctx, false)
+}
+
+/// Stage 3 of `/model`: the reasoning dial, then (Enter OR Esc) the MTP
+/// step — so every model pick passes through MTP.
+fn open_reasoning_stage_then_mtp(cx: Scope, store: Store, ctx: &UiCtx) {
+    open_reasoning_stage_inner(cx, store, ctx, true)
+}
+
+fn open_reasoning_stage_inner(cx: Scope, store: Store, ctx: &UiCtx, then_mtp: bool) {
     let provider = store.provider.get_untracked();
     let model = store.model.get_untracked();
     store.reasoning_probe.set(None);
@@ -1453,7 +1539,11 @@ pub fn open_reasoning_stage(cx: Scope, store: Store, ctx: &UiCtx) {
         cx,
         ctx,
         Picker {
-            title: format!("reasoning — {target} · Enter selects · Esc keeps current"),
+            title: if then_mtp {
+                format!("reasoning — {target} (next: MTP) · Enter selects · Esc keeps current")
+            } else {
+                format!("reasoning — {target} · Enter selects · Esc keeps current")
+            },
             labels,
             live: Some(Rc::new(move || reasoning_rows(rows_store))),
             start: 0,
@@ -1468,10 +1558,21 @@ pub fn open_reasoning_stage(cx: Scope, store: Store, ctx: &UiCtx) {
                 // Caption rows are non-actionable: no-op, stay open.
                 if let Some(Some(level)) = rows.get(ix).map(|c| c.as_deref()) {
                     apply_reasoning(rows_store, &choose_ctx, level);
-                    choose_ctx.close_modal();
+                    if then_mtp {
+                        open_mtp_stage(cx, rows_store, &choose_ctx);
+                    } else {
+                        choose_ctx.close_modal();
+                    }
                 }
             }),
-            on_cancel: None,
+            on_cancel: if then_mtp {
+                let cancel_ctx = ctx.clone();
+                Some(Box::new(move || {
+                    open_mtp_stage(cx, rows_store, &cancel_ctx)
+                }))
+            } else {
+                None
+            },
         },
     );
 }
@@ -1597,7 +1698,7 @@ fn open_model_stage(cx: Scope, store: Store, ctx: &UiCtx, provider: crate::store
                 // axis): synchronous stage replacement, same contract
                 // as stage 1 → 2. Esc there keeps the route just
                 // applied and the pre-existing reasoning state.
-                open_reasoning_stage(cx, store, &choose_ctx);
+                open_reasoning_stage_then_mtp(cx, store, &choose_ctx);
             }),
             on_cancel: None,
         },
@@ -6820,5 +6921,16 @@ mod files_tests {
             }),
             "▸ d/"
         );
+    }
+
+    #[test]
+    fn mtp_step_marks_the_current_request() {
+        let rows = crate::speculation::rows(None, Some(&serde_json::json!(false)));
+        let labels = super::mtp_row_labels(&rows, Some(&serde_json::json!(false)));
+        assert!(labels[1].starts_with("● Off"), "{labels:?}");
+        assert!(labels[0].starts_with("  Inherit"));
+        assert!(labels
+            .iter()
+            .any(|l| l.starts_with("  · MTP capability unknown")));
     }
 }

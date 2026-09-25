@@ -83,9 +83,13 @@ gateway until you answer.
    which workflow each turn ran ("running Basic agent @0.0.3 (gateway
    default)"). If the gateway has no default and you have not picked one, the
    app says so and asks you to pick. `/model` lists providers and models
-   (leave it on "gateway default" to use the server's routing); its footer
-   shows the multi-token prediction (MTP) setting, which `/mtp` changes. Both
-   choices persist across launches.
+   (leave it on "gateway default" to use the server's routing), then the
+   reasoning effort, then **MTP** (multi-token prediction): Inherit, Off, or a
+   native draft depth when the gateway reports the model supports it — a model
+   that cannot use MTP says so on the row. The current choice is pre-selected;
+   `Esc` keeps it. The last row of the provider list jumps straight to the MTP
+   step, and `/mtp` still works on its own. All these choices persist across
+   launches.
 4. **Where files land.** Under the gateway's default (server-managed)
    workspace policy, tools execute in the gateway's workspace root or a
    managed per-session folder — the app tells you this at startup. To make

@@ -65,7 +65,7 @@ pub fn rows(payload: Option<&Value>, saved: Option<&Value>) -> Vec<Row> {
             selectable: true,
         },
         Row {
-            label: "Off".into(),
+            label: "Off — no multi-token prediction".into(),
             value: Some(Value::Bool(false)),
             selectable: true,
         },
@@ -84,7 +84,7 @@ pub fn rows(payload: Option<&Value>, saved: Option<&Value>) -> Vec<Row> {
                     json!({"mode":"native_mtp","num_draft_tokens":n,"require_acceleration":true});
                 if !rows.iter().any(|r| r.value.as_ref() == Some(&value)) {
                     rows.push(Row {
-                        label: format!("Depth {n}"),
+                        label: format!("Native MTP, {n} draft tokens"),
                         value: Some(value),
                         selectable: true,
                     });
@@ -107,6 +107,24 @@ pub fn rows(payload: Option<&Value>, saved: Option<&Value>) -> Vec<Row> {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .or_else(|| {
+            // The gateway could not answer: its error, not a guess.
+            if let Some(err) = payload
+                .and_then(|p| p.get("error"))
+                .and_then(Value::as_str)
+                .filter(|e| !e.is_empty())
+            {
+                return Some(format!("MTP capability not reported by the gateway: {err}"));
+            }
+            if caps
+                .and_then(|c| c.get("supported"))
+                .and_then(Value::as_bool)
+                == Some(false)
+            {
+                return Some(
+                    "this model cannot use MTP (needs an MTP-capable MLX build) — no depth offered"
+                        .into(),
+                );
+            }
             if caps.is_none() {
                 Some("MTP capability unknown; no depth is assumed".into())
             } else if caps
@@ -146,6 +164,28 @@ mod tests {
             assert!(parse(bad).is_err());
         }
     }
+    #[test]
+    fn unsupported_and_failed_probes_say_so_on_a_row() {
+        let no = json!({"execution":{"speculation":{"supported":false}}});
+        let r = rows(Some(&no), None);
+        assert_eq!(
+            r.iter().filter(|r| r.selectable).count(),
+            2,
+            "Inherit + Off only"
+        );
+        assert!(r
+            .iter()
+            .any(|r| !r.selectable && r.label.contains("cannot use MTP")));
+        let failed = json!({"error": "gateway HTTP 404"});
+        assert!(rows(Some(&failed), None)
+            .iter()
+            .any(|r| r.label.contains("gateway HTTP 404")));
+        let yes = json!({"execution":{"speculation":{"supported":true,"ready":true,"supported_depths":[3]}}});
+        assert!(rows(Some(&yes), None)
+            .iter()
+            .any(|r| r.selectable && r.label == "Native MTP, 3 draft tokens"));
+    }
+
     #[test]
     fn unknown_does_not_fabricate_depths() {
         assert_eq!(rows(None, None).iter().filter(|r| r.selectable).count(), 2);

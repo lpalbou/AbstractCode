@@ -185,8 +185,8 @@ Inside the app:
 - `/workflow` picks the agent: the first row, **Gateway default**, runs the
   workflow your gateway's operator set (a change there applies to your next
   turn); below it, every catalog entrypoint implementing
-  `abstractcode.agent.v1`. `/model` picks provider + model (and shows the
-  multi-token prediction setting — `/mtp` changes it), `/theme` restyles
+  `abstractcode.agent.v1`. `/model` picks provider + model, then the
+  reasoning effort, then MTP (multi-token prediction — also `/mtp`), `/theme` restyles
 - type while a run is active to steer it; `Esc Esc` cancels; `/new` starts a
   fresh session
 - tool approvals and agent questions open as modals; the run waits durably

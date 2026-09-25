@@ -569,10 +569,10 @@ mod tests {
         assert_eq!(parse("/mtp 3"), Some(Command::Mtp(Some("3".into()))));
         assert_eq!(parse("/speculation"), Some(Command::Mtp(None)));
         assert_eq!(
-            crate::ui::modals::mtp_hint(None),
-            "MTP (multi-token prediction): Inherit — /mtp changes it"
+            crate::ui::modals::mtp_entry_row(None),
+            "  MTP (multi-token prediction): Inherit — Enter to change"
         );
-        assert!(crate::ui::modals::mtp_hint(Some(&serde_json::json!(false))).contains("Off"));
+        assert!(crate::ui::modals::mtp_entry_row(Some(&serde_json::json!(false))).contains("Off"));
     }
 
     #[test]
