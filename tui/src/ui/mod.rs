@@ -761,14 +761,14 @@ fn start_run_inner(
 ) {
     let workflow = store.workflow.get_untracked();
     if workflow.flow_id.is_empty() {
-        let has_any = store.workflows.with_untracked(|w| !w.is_empty());
-        if has_any {
-            store.notify("pick an agent workflow first (/workflow)");
-        } else {
-            store.notify(
-                "no agent workflows on this gateway (abstractcode.agent.v1) — install basic-agent, then /workflow",
-            );
-        }
+        // Loud and in the transcript: the gateway reports no default and the
+        // user picked none — the client never picks one on its own.
+        let n = store.workflows.with_untracked(|w| w.len());
+        let msg = crate::discovery::no_default_workflow_message(n);
+        store.notify("no agent workflow selected — /workflow");
+        store
+            .fold
+            .update(|f| f.push_item(Item::Error { text: msg }));
         return;
     }
     // Conversation context BEFORE this turn's user card lands (whole
@@ -929,10 +929,20 @@ pub(crate) fn send_start(
     store.run_started.set(Some(std::time::Instant::now()));
     // The first prompt names the session in the /sessions picker.
     persist_prefs(ctx, |p| p.touch_session(&session_id, Some(prompt)));
+    // "Gateway default" sends the §D sentinel: the GATEWAY resolves which
+    // workflow runs (its current setting), never the id this client last saw.
+    let (flow_id, bundle_id) = if workflow.gateway_default {
+        (
+            crate::discovery::GATEWAY_DEFAULT_SENTINEL.to_string(),
+            String::new(),
+        )
+    } else {
+        (workflow.flow_id, workflow.bundle_id)
+    };
     let delivered = ctx.send(Cmd::Start {
         prompt: prompt.to_string(),
-        flow_id: workflow.flow_id,
-        bundle_id: workflow.bundle_id,
+        flow_id,
+        bundle_id,
         session_id,
         opts: Box::new(opts),
         attachments,
@@ -982,7 +992,7 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
             // the picker is open renders in place — no reopen needed.
             let (preferred_bundle, preferred_flow) = {
                 let p = ctx.prefs.borrow();
-                (p.bundle_id.clone(), p.flow_id.clone())
+                p.workflow_preference()
             };
             ctx.send(Cmd::LoadCatalog {
                 preferred_bundle,
@@ -2377,7 +2387,7 @@ fn wire_conn_self_heal(
             }
             let (preferred_bundle, preferred_flow) = {
                 let p = prefs.borrow();
-                (p.bundle_id.clone(), p.flow_id.clone())
+                p.workflow_preference()
             };
             let _ = tx.send(Cmd::LoadCatalog {
                 preferred_bundle,

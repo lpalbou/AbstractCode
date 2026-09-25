@@ -166,12 +166,11 @@ fn run_tui(args: &cli::Args) -> i32 {
 
     // Workflow preference: flag > saved (resolution happens against the
     // live catalog inside the runner).
+    // `(None, None)` = the gateway default (`--workflow default`, the saved
+    // `@default` sentinel, or a fresh install).
     let (pref_bundle, pref_flow) = match args.workflow.as_deref() {
-        Some(raw) => {
-            let (b, f) = cli::split_workflow_ref(raw);
-            (Some(b), f)
-        }
-        None => (prefs.bundle_id.clone(), prefs.flow_id.clone()),
+        Some(raw) => cli::workflow_ref_preference(raw),
+        None => prefs.workflow_preference(),
     };
 
     let workspace_root = if args.no_workspace {
@@ -339,7 +338,11 @@ fn run_tui(args: &cli::Args) -> i32 {
             store,
             tx.clone(),
             rx,
-            args.workflow.clone(),
+            // `--workflow default` is the gateway default, not a named
+            // workflow that could mismatch.
+            args.workflow
+                .clone()
+                .filter(|w| !cli::is_gateway_default_ref(w)),
         );
 
         // Boot sequence: probe, load the catalog (+ saved workflow), and

@@ -114,6 +114,8 @@ pub fn header(t: &TokenSet, store: Store, spin: Signal<u64>, cwd_base: String) -
         let workflow = store.workflow.with(|w| {
             if w.flow_id.is_empty() {
                 "no workflow yet".to_string()
+            } else if w.gateway_default {
+                format!("{} (default)", w.label())
             } else {
                 w.label()
             }

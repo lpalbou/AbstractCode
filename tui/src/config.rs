@@ -278,6 +278,12 @@ pub struct Prefs {
     pub theme: Option<String>,
     pub bundle_id: Option<String>,
     pub flow_id: Option<String>,
+    /// `"@default"` = the user chose "Gateway default" in `/workflow` (§D):
+    /// the gateway decides which workflow runs, so a change on the gateway
+    /// applies to the next new turn. `bundle_id`/`flow_id` are then `None`.
+    /// `None` here with no `bundle_id` either (a fresh install) also means
+    /// the gateway default; the explicit sentinel records the CHOICE.
+    pub workflow: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
     /// Reasoning effort override (first-citizen directive). Persisted as
@@ -364,6 +370,35 @@ pub struct Prefs {
 }
 
 impl Prefs {
+    /// The saved workflow preference as `(bundle, flow)`; `(None, None)` =
+    /// the gateway default (the `@default` sentinel, or nothing chosen yet).
+    pub fn workflow_preference(&self) -> (Option<String>, Option<String>) {
+        if self.uses_gateway_default_workflow() {
+            return (None, None);
+        }
+        (self.bundle_id.clone(), self.flow_id.clone())
+    }
+
+    /// Whether the saved choice is "the gateway default".
+    pub fn uses_gateway_default_workflow(&self) -> bool {
+        self.workflow.as_deref().map(str::trim) == Some(crate::discovery::GATEWAY_DEFAULT_SENTINEL)
+            || self.bundle_id.is_none()
+    }
+
+    /// Record "Gateway default" as the choice (the sentinel, never the id).
+    pub fn set_gateway_default_workflow(&mut self) {
+        self.workflow = Some(crate::discovery::GATEWAY_DEFAULT_SENTINEL.to_string());
+        self.bundle_id = None;
+        self.flow_id = None;
+    }
+
+    /// Record an explicit `bundle:flow` choice.
+    pub fn set_explicit_workflow(&mut self, bundle_id: &str, flow_id: &str) {
+        self.workflow = None;
+        self.bundle_id = Some(bundle_id.to_string());
+        self.flow_id = Some(flow_id.to_string());
+    }
+
     pub fn load() -> Prefs {
         // Read the pre-rename file when the current one does not exist yet, so
         // an install from before this client was named `abstractcode` keeps its
@@ -576,6 +611,7 @@ impl Prefs {
             theme: s("theme"),
             bundle_id: s("bundle_id"),
             flow_id: s("flow_id"),
+            workflow: s("workflow"),
             provider: s("provider"),
             model: s("model"),
             reasoning: s("reasoning"),
@@ -634,6 +670,7 @@ impl Prefs {
             "theme": self.theme,
             "bundle_id": self.bundle_id,
             "flow_id": self.flow_id,
+            "workflow": self.workflow,
             "provider": self.provider,
             "model": self.model,
             "reasoning": self.reasoning,
@@ -1081,6 +1118,7 @@ mod tests {
             theme: Some("nord".into()),
             bundle_id: Some("basic-agent".into()),
             flow_id: Some("81795ea9".into()),
+            workflow: None,
             provider: Some("lmstudio".into()),
             model: Some("qwen3-4b".into()),
             reasoning: Some("high".into()),
@@ -1362,6 +1400,46 @@ mod tests {
         loaded.set_session_goal("acode-a", None);
         loaded.save().expect("save");
         assert!(Prefs::load_from(path).session_goal("acode-a").is_none());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// §D: "Gateway default" persists as the `@default` SENTINEL (never the
+    /// id it currently resolves to), a fresh file means the gateway default,
+    /// and an explicit pick clears the sentinel.
+    #[test]
+    fn workflow_choice_persists_the_gateway_default_sentinel() {
+        let dir = std::env::temp_dir().join(format!("acode-prefs-wf-{}", std::process::id()));
+        let path = dir.join("prefs.json");
+        let fresh = Prefs::load_from(path.clone());
+        assert!(fresh.uses_gateway_default_workflow());
+        assert_eq!(fresh.workflow_preference(), (None, None));
+
+        let mut p = Prefs {
+            path: Some(path.clone()),
+            ..Prefs::default()
+        };
+        p.set_explicit_workflow("coding-agent", "coder");
+        p.save().expect("save");
+        let l = Prefs::load_from(path.clone());
+        assert!(!l.uses_gateway_default_workflow());
+        assert_eq!(
+            l.workflow_preference(),
+            (Some("coding-agent".into()), Some("coder".into()))
+        );
+
+        p.set_gateway_default_workflow();
+        p.save().expect("save");
+        let raw = fs::read_to_string(&path).expect("raw");
+        assert!(raw.contains("\"workflow\": \"@default\""), "{raw}");
+        let l = Prefs::load_from(path.clone());
+        assert!(l.uses_gateway_default_workflow());
+        assert_eq!(l.workflow_preference(), (None, None));
+
+        // A hand-edit that leaves a stale bundle beside the sentinel: the
+        // sentinel wins (it is the recorded choice).
+        let mut both = l.clone();
+        both.bundle_id = Some("basic-agent".into());
+        assert_eq!(both.workflow_preference(), (None, None));
         let _ = fs::remove_dir_all(dir);
     }
 }

@@ -71,6 +71,7 @@ fn harness_sized(size: Size) -> Harness {
             flow_id: "81795ea9".into(),
             name: "basic-agent".into(),
             description: String::new(),
+            ..Default::default()
         });
         let ctx = UiCtx {
             tx,
@@ -318,6 +319,7 @@ fn splash_short_pane_clips_whole_rows_and_keeps_the_logo() {
             flow_id: "81795ea9".into(),
             name: "basic-agent".into(),
             description: String::new(),
+            ..Default::default()
         });
         store.fold.update(|f| {
             f.push_item(abstractcode::transcript::Item::Info {
@@ -908,12 +910,14 @@ fn workflow_picker_selects_and_persists_on_activation() {
             flow_id: "81795ea9".into(),
             name: "basic-agent".into(),
             description: String::new(),
+            ..Default::default()
         },
         Workflow {
             bundle_id: "coder".into(),
             flow_id: "flow-2".into(),
             name: "coder".into(),
             description: "writes code".into(),
+            ..Default::default()
         },
     ]);
     h.type_text("/workflow");
@@ -975,6 +979,7 @@ fn workflow_picker_open_refetches_the_catalog() {
         flow_id: "81795ea9".into(),
         name: "basic-agent".into(),
         description: String::new(),
+        ..Default::default()
     }]);
     while h.rx.try_recv().is_ok() {} // isolate the gesture's own commands
     h.type_text("/workflow");
@@ -5385,6 +5390,7 @@ fn seed_goal_workflow(store: abstractcode::store::Store) {
             flow_id: "goal-loop".into(),
             name: "goal-loop".into(),
             description: String::new(),
+            ..Default::default()
         }]);
 }
 
@@ -9159,6 +9165,7 @@ fn workflow_picker_rows_follow_a_mid_open_catalog_refresh() {
         flow_id: "81795ea9".into(),
         name: "basic-agent".into(),
         description: String::new(),
+        ..Default::default()
     }]);
     h.turn();
     h.type_text("/workflow");
@@ -9183,12 +9190,14 @@ fn workflow_picker_rows_follow_a_mid_open_catalog_refresh() {
             flow_id: "react-coder".into(),
             name: "React coder".into(),
             description: String::new(),
+            ..Default::default()
         });
         ws.push(Workflow {
             bundle_id: "entity-life".into(),
             flow_id: "entity-chat".into(),
             name: "entity-life".into(),
             description: String::new(),
+            ..Default::default()
         })
     });
     h.turn();
@@ -10238,12 +10247,14 @@ fn gating_modal_on_coder_select_and_status_surfaces_unattended() {
             flow_id: "multiagent-coder".into(),
             name: "Multi-agent coder".into(),
             description: String::new(),
+            ..Default::default()
         },
         abstractcode::store::Workflow {
             bundle_id: "basic-agent".into(),
             flow_id: "basic".into(),
             name: "Basic agent".into(),
             description: String::new(),
+            ..Default::default()
         },
     ]);
     h.turn();
@@ -11930,4 +11941,139 @@ fn resources_modal_is_honest_when_the_contract_is_absent_or_unprobed() {
         h.find_cmd(|c| matches!(c, Cmd::LoadHostState)).is_none(),
         "never a host-state fetch before the contract is confirmed"
     );
+}
+
+/// §D: the /workflow picker lists "Gateway default → <name> @ver" FIRST;
+/// choosing it persists the `@default` SENTINEL (not the id it resolves to)
+/// and the next start sends `flow_id: "@default"` with no bundle.
+#[test]
+fn gateway_default_row_persists_the_sentinel_and_starts_with_it() {
+    let mut h = harness();
+    h.turn();
+    let basic = Workflow {
+        bundle_id: "basic-agent".into(),
+        flow_id: "81795ea9".into(),
+        name: "basic-agent".into(),
+        ..Default::default()
+    };
+    h.store.workflows.set(vec![basic.clone()]);
+    h.store.gateway_default_workflow.set(Some(Workflow {
+        bundle_id: "house-agent".into(),
+        flow_id: "house".into(),
+        name: "House agent".into(),
+        version: "2.0.0".into(),
+        gateway_default: true,
+        ..Default::default()
+    }));
+    h.store.gateway_default_loaded.set(true);
+    {
+        let mut p = h.prefs.borrow_mut();
+        p.set_explicit_workflow("basic-agent", "81795ea9");
+    }
+    h.type_text("/workflow");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("Gateway default → House agent @2.0.0"),
+        "the gateway default is listed first:\n{screen}"
+    );
+    // The current (explicit) pick is row 1; Up reaches the default row.
+    h.term.push_input(b"\x1b[A");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.turn();
+    let w = h.store.workflow.get_untracked();
+    assert!(w.gateway_default, "selection follows the gateway: {w:?}");
+    assert_eq!(w.bundle_id, "house-agent");
+    {
+        let p = h.prefs.borrow();
+        assert_eq!(
+            p.workflow.as_deref(),
+            Some("@default"),
+            "the sentinel is saved"
+        );
+        assert_eq!(p.bundle_id, None, "never the copied id");
+        assert_eq!(p.flow_id, None);
+    }
+    while h.rx.try_recv().is_ok() {}
+    h.type_text("hello");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+        Some(Cmd::Start {
+            flow_id, bundle_id, ..
+        }) => {
+            assert_eq!(flow_id, "@default");
+            assert_eq!(bundle_id, "", "the gateway resolves; no bundle is sent");
+        }
+        other => panic!("expected Cmd::Start, got {:?}", other.map(|_| "cmd")),
+    }
+    let screen = h.turn();
+    assert!(
+        screen.contains("House agent (default)"),
+        "the header names the gateway default:\n{screen}"
+    );
+}
+
+/// No default served + nothing picked: the TUI says so LOUDLY and asks the
+/// user to pick — it never substitutes a workflow of its own. Choosing the
+/// empty default row keeps the picker open.
+#[test]
+fn no_gateway_default_and_no_pick_refuses_loudly() {
+    let mut h = harness();
+    h.turn();
+    h.store.workflow.set(Workflow::default());
+    h.store.workflows.set(vec![Workflow {
+        bundle_id: "basic-agent".into(),
+        flow_id: "81795ea9".into(),
+        name: "basic-agent".into(),
+        ..Default::default()
+    }]);
+    h.store.gateway_default_workflow.set(None);
+    h.store.gateway_default_loaded.set(true);
+    h.type_text("do something");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert!(
+        h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none(),
+        "nothing starts without a workflow"
+    );
+    let errors: Vec<String> = h.store.fold.with_untracked(|f| {
+        f.items
+            .iter()
+            .filter_map(|i| match i {
+                abstractcode::transcript::Item::Error { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    });
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("reports no default agent workflow") && e.contains("/workflow")),
+        "the refusal names the cause and the fix: {errors:?}"
+    );
+    h.type_text("/workflow");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("Gateway default — none set on this gateway"),
+        "{screen}"
+    );
+    // Row 0 is the (empty) default: Enter must not close or select.
+    h.press_enter();
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("agent workflow —"),
+        "picker stays open:\n{screen}"
+    );
+    assert!(h.store.workflow.get_untracked().flow_id.is_empty());
 }

@@ -540,6 +540,9 @@ struct Runner {
     /// `(session_id, note)` of the last workspace preflight note actually
     /// printed — the dedup memo for `announce_workspace_note`.
     last_workspace_note: Option<(String, String)>,
+    /// `(session_id, note)` of the last "running <workflow>" notice — same
+    /// dedup memo shape as `last_workspace_note`.
+    last_workflow_note: Option<(String, String)>,
 }
 
 pub fn spawn(
@@ -570,6 +573,7 @@ pub fn spawn(
                     catalog_preference: (None, None),
                     requested_workflow,
                     last_workspace_note: None,
+                    last_workflow_note: None,
                 };
                 while let Ok(cmd) = rx.recv() {
                     if matches!(cmd, Cmd::Shutdown) {
@@ -1034,13 +1038,38 @@ impl Runner {
                 // fresh Folds rehydration builds worker-side.
                 let agent_ids = agent_workflow_ids_from_bundles(&v);
                 self.agent_workflow_ids = agent_ids.clone();
-                let chosen = crate::discovery::choose_workflow_with_served_default(
-                    &workflows,
-                    preferred_bundle.as_deref(),
-                    preferred_flow.as_deref(),
+                // §D: the gateway's default for our interface, from the
+                // `/bundles` envelope. No client fallback chain exists any
+                // more — `None` here with no preference means "ask".
+                let gateway_default = crate::discovery::served_default_workflow(
                     &v,
                     crate::discovery::AGENT_INTERFACE_V1,
                 );
+                let chosen = crate::discovery::choose_workflow(
+                    &workflows,
+                    preferred_bundle.as_deref(),
+                    preferred_flow.as_deref(),
+                    gateway_default.as_ref(),
+                );
+                // A saved explicit pick that no longer resolves degraded to
+                // the gateway default: say so (the CLI lane's refusal is
+                // `substitution` below).
+                let stale_pref = match (&preferred_bundle, &chosen) {
+                    (Some(b), Some(c)) if c.gateway_default && self.requested_workflow.is_none() => {
+                        Some(format!(
+                            "saved workflow '{}' is not on this gateway any more — using the gateway default ({})",
+                            match &preferred_flow {
+                                Some(f) => format!("{b}:{f}"),
+                                None => b.clone(),
+                            },
+                            c.versioned_label()
+                        ))
+                    }
+                    _ => None,
+                };
+                let no_workflow = chosen
+                    .is_none()
+                    .then(|| crate::discovery::no_default_workflow_message(workflows.len()));
                 // A workflow requested on the COMMAND LINE that resolved to
                 // something else must say so. `choose_workflow` degrades to
                 // basic-agent by design for the PREFS lane (a stale saved
@@ -1062,7 +1091,10 @@ impl Runner {
                     .as_deref()
                     .filter(|_| first_load)
                     .and_then(|raw| {
-                        let c = chosen.as_ref()?;
+                        // Nothing resolved at all still refuses by name
+                        // (an empty workflow matches no request).
+                        let none = crate::store::Workflow::default();
+                        let c = chosen.as_ref().unwrap_or(&none);
                         let catalog = crate::discovery::all_entrypoints_from_bundles(&v);
                         crate::exec::explicit_workflow_mismatch_diagnosed(
                             raw, c, &workflows, &catalog,
@@ -1072,10 +1104,36 @@ impl Runner {
                 self.catalog_loaded = true;
                 self.post(move || {
                     if let Some(w) = chosen {
-                        // Never clobber a user selection made while loading.
-                        if store.workflow.with(|cur| cur.flow_id.is_empty()) {
+                        // Never clobber a user selection made while loading —
+                        // but a "gateway default" selection FOLLOWS the
+                        // gateway: a refresh re-resolves what it points at.
+                        let (unset, following_default) = store
+                            .workflow
+                            .with(|cur| (cur.flow_id.is_empty(), cur.gateway_default));
+                        if unset {
                             store.workflow.set(w);
+                        } else if following_default {
+                            if let Some(d) = gateway_default.clone() {
+                                store.workflow.set_if_changed(d);
+                            }
                         }
+                    }
+                    store.gateway_default_workflow.set(gateway_default);
+                    store.gateway_default_loaded.set(true);
+                    if let Some(msg) = stale_pref {
+                        store.notify(msg.clone());
+                        store
+                            .fold
+                            .update(|f| f.push_item(crate::transcript::Item::Info { text: msg }));
+                    }
+                    // Loud: no default served and nothing picked. Boot only
+                    // (a picker-driven refresh must not repeat the card).
+                    if let Some(msg) = no_workflow.filter(|_| first_load && substitution.is_none())
+                    {
+                        store.notify("no agent workflow selected — /workflow");
+                        store
+                            .fold
+                            .update(|f| f.push_item(crate::transcript::Item::Error { text: msg }));
                     }
                     // A refresh that changes the set says so (the open
                     // /workflow picker is a snapshot; see catalog_change_note).
@@ -1509,11 +1567,43 @@ impl Runner {
             .client
             .start_run(&flow_id, bundle, Some(&session_id), input)
         {
-            Ok(run_id) => {
+            Ok(started) => {
+                let run_id = started.run_id;
                 let rid = run_id.clone();
                 let tx = self.tx.clone();
                 let started_session = session_id.clone();
                 let sent = attachments.clone();
+                // What the gateway says it ran (§D `resolved_workflow`):
+                // announced once per session and whenever it changes — so a
+                // gateway-side default switch is visible on the next turn.
+                let resolved_note = started.resolved.as_ref().and_then(|r| {
+                    let note = format!("running {}", r.describe());
+                    announce_workspace_note(&mut self.last_workflow_note, &session_id, &note)
+                        .then_some(note)
+                });
+                let resolved = started.resolved;
+                let sent_default = flow_id == crate::discovery::GATEWAY_DEFAULT_SENTINEL;
+                let note_session = session_id.clone();
+                self.post(move || {
+                    if store.session_id.with_untracked(|s| *s == note_session) {
+                        if let Some(r) = resolved.as_ref().filter(|_| sent_default) {
+                            // The selection stays "gateway default"; only its
+                            // displayed target follows the gateway's answer.
+                            store.workflow.update(|w| {
+                                if w.gateway_default {
+                                    let desc = std::mem::take(&mut w.description);
+                                    *w = r.to_workflow(true);
+                                    w.description = desc;
+                                }
+                            });
+                        }
+                        if let Some(note) = resolved_note {
+                            store
+                                .fold
+                                .update(|f| f.push_item(Item::Info { text: note }));
+                        }
+                    }
+                });
                 self.post(move || {
                     // Session gate for BOTH halves: a mismatch means the
                     // binding cancels the late run — the 📎 line must
@@ -4586,6 +4676,7 @@ mod tests {
             flow_id: f.into(),
             name: String::new(),
             description: String::new(),
+            ..Default::default()
         };
         let boot = vec![wf("basic-agent", "81795ea9")];
         // Boot (prev empty): silent regardless of what arrives.

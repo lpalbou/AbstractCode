@@ -570,37 +570,21 @@ impl GatewayClient {
 
     // -- runs ------------------------------------------------------------------
 
+    /// `POST /runs/start`. `flow_id == "@default"` (the §D sentinel) asks the
+    /// GATEWAY to run its default agent workflow for this client's interface:
+    /// no `bundle_id` is sent and `interface` names `abstractcode.agent.v1`.
+    /// A gateway without a usable default answers 409 with the reason, which
+    /// surfaces verbatim — there is no client-side substitute.
     pub fn start_run(
         &self,
         flow_id: &str,
         bundle_id: Option<&str>,
         session_id: Option<&str>,
         input_data: Value,
-    ) -> GwResult<String> {
-        let mut body = json!({ "flow_id": flow_id, "input_data": input_data });
-        if let Some(b) = bundle_id {
-            if !b.trim().is_empty() {
-                body["bundle_id"] = json!(b.trim());
-            }
-        }
-        if let Some(s) = session_id {
-            if !s.trim().is_empty() {
-                body["session_id"] = json!(s.trim());
-            }
-        }
+    ) -> GwResult<StartedRun> {
+        let body = start_run_body(flow_id, bundle_id, session_id, input_data);
         let resp = self.post_json("/runs/start", &body)?;
-        let run_id = resp
-            .get("run_id")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if run_id.is_empty() {
-            return Err(GwError::transport(format!(
-                "runs/start: missing run_id in {resp}"
-            )));
-        }
-        Ok(run_id)
+        started_run_from_response(&resp)
     }
 
     pub fn get_run(&self, run_id: &str) -> GwResult<Value> {
@@ -1106,6 +1090,129 @@ pub fn mint_command_id() -> String {
 }
 
 /// Percent-encode a path segment (conservative: alphanumerics and -_.~ pass).
+/// What `POST /runs/start` answered: the run id plus, from gateways that
+/// serve it (§D), the workflow the gateway actually resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartedRun {
+    pub run_id: String,
+    pub resolved: Option<ResolvedWorkflow>,
+}
+
+/// `StartRunResponse.resolved_workflow` (§D).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ResolvedWorkflow {
+    pub workflow_id: String,
+    pub bundle_id: String,
+    pub bundle_version: String,
+    pub flow_id: String,
+    pub name: String,
+    /// `"gateway_default"` | `"client"`.
+    pub source: String,
+}
+
+impl ResolvedWorkflow {
+    pub fn from_gateway_default(&self) -> bool {
+        self.source == "gateway_default"
+    }
+
+    /// "<name> @ver (gateway default)" — the run-start notice.
+    pub fn describe(&self) -> String {
+        let name = if self.name.is_empty() {
+            format!("{}:{}", self.bundle_id, self.flow_id)
+        } else {
+            self.name.clone()
+        };
+        let ver = if self.bundle_version.is_empty() {
+            String::new()
+        } else {
+            format!(" @{}", self.bundle_version)
+        };
+        let src = if self.from_gateway_default() {
+            " (gateway default)"
+        } else {
+            ""
+        };
+        format!("{name}{ver}{src}")
+    }
+
+    /// As a `Workflow` (the gateway-default selection's display target).
+    pub fn to_workflow(&self, gateway_default: bool) -> crate::store::Workflow {
+        crate::store::Workflow {
+            bundle_id: self.bundle_id.clone(),
+            flow_id: self.flow_id.clone(),
+            name: if self.name.is_empty() {
+                self.flow_id.clone()
+            } else {
+                self.name.clone()
+            },
+            description: String::new(),
+            version: self.bundle_version.clone(),
+            gateway_default,
+        }
+    }
+}
+
+/// The `/runs/start` request body (pure; test-pinned).
+pub fn start_run_body(
+    flow_id: &str,
+    bundle_id: Option<&str>,
+    session_id: Option<&str>,
+    input_data: Value,
+) -> Value {
+    let mut body = json!({ "flow_id": flow_id, "input_data": input_data });
+    if flow_id == crate::discovery::GATEWAY_DEFAULT_SENTINEL {
+        // The gateway resolves the workflow; a bundle would contradict it.
+        body["interface"] = json!(crate::discovery::AGENT_INTERFACE_V1);
+    } else if let Some(b) = bundle_id {
+        if !b.trim().is_empty() {
+            body["bundle_id"] = json!(b.trim());
+        }
+    }
+    if let Some(s) = session_id {
+        if !s.trim().is_empty() {
+            body["session_id"] = json!(s.trim());
+        }
+    }
+    body
+}
+
+/// Parse a `/runs/start` answer (pure; test-pinned).
+pub fn started_run_from_response(resp: &Value) -> GwResult<StartedRun> {
+    let run_id = resp
+        .get("run_id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if run_id.is_empty() {
+        return Err(GwError::transport(format!(
+            "runs/start: missing run_id in {resp}"
+        )));
+    }
+    let resolved = resp
+        .get("resolved_workflow")
+        .filter(|r| r.is_object())
+        .map(|r| {
+            let s = |k: &str| {
+                r.get(k)
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string()
+            };
+            ResolvedWorkflow {
+                workflow_id: s("workflow_id"),
+                bundle_id: s("bundle_id"),
+                bundle_version: s("bundle_version"),
+                flow_id: s("flow_id"),
+                name: s("name"),
+                source: s("source"),
+            }
+        })
+        .filter(|r| !r.flow_id.is_empty());
+    Ok(StartedRun { run_id, resolved })
+}
+
 pub fn url_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
@@ -1122,6 +1229,46 @@ pub fn url_encode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// §D wire shape: the `@default` sentinel sends `interface` and NO
+    /// bundle; a named workflow sends its bundle and no interface.
+    #[test]
+    fn start_body_sends_the_default_sentinel_with_the_interface() {
+        let d = start_run_body(
+            "@default",
+            Some("ignored"),
+            Some("s1"),
+            json!({"prompt": "hi"}),
+        );
+        assert_eq!(d["flow_id"], "@default");
+        assert_eq!(d["interface"], "abstractcode.agent.v1");
+        assert!(d.get("bundle_id").is_none(), "{d}");
+        assert_eq!(d["session_id"], "s1");
+        let n = start_run_body("coder", Some("coding-agent"), None, json!({}));
+        assert_eq!(n["bundle_id"], "coding-agent");
+        assert!(n.get("interface").is_none());
+        assert!(n.get("session_id").is_none());
+    }
+
+    #[test]
+    fn start_response_carries_the_resolved_workflow_when_served() {
+        let r = started_run_from_response(&json!({
+            "run_id": "r1",
+            "resolved_workflow": {"workflow_id": "basic-agent@0.0.3:main", "bundle_id": "basic-agent",
+                "bundle_version": "0.0.3", "flow_id": "main", "registry_scope": "host",
+                "name": "Basic agent", "source": "gateway_default"}
+        }))
+        .unwrap();
+        assert_eq!(r.run_id, "r1");
+        let w = r.resolved.unwrap();
+        assert!(w.from_gateway_default());
+        assert_eq!(w.describe(), "Basic agent @0.0.3 (gateway default)");
+        assert!(w.to_workflow(true).gateway_default);
+        // Older gateways: no field → None, never a guess.
+        let old = started_run_from_response(&json!({"run_id": "r2"})).unwrap();
+        assert_eq!(old.resolved, None);
+        assert!(started_run_from_response(&json!({})).is_err());
+    }
 
     /// The session board's query is PINNED, param by param.
     ///

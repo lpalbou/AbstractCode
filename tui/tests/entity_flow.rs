@@ -49,6 +49,7 @@ fn harness() -> Harness {
             flow_id: "81795ea9".into(),
             name: "basic-agent".into(),
             description: String::new(),
+            ..Default::default()
         });
         let ctx = UiCtx {
             tx,

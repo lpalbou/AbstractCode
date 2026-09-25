@@ -192,6 +192,13 @@ pub fn workflows_with_interface(v: &Value, interface_id: &str) -> Vec<Workflow> 
                     .unwrap_or("")
                     .trim()
                     .to_string(),
+                version: b
+                    .get("bundle_version")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string(),
+                gateway_default: false,
             });
         }
     }
@@ -235,15 +242,6 @@ pub fn resolve_bundle_only(workflows: &[Workflow], bundle_id: &str) -> Option<Wo
     }
 }
 
-/// Resolve the workflow to run: exact `bundle:flow` > bundle-only >
-/// coding-agent:coder (the benchmark-verified default) > basic-agent >
-/// first agent flow.
-///
-/// The trailing fallbacks serve the PREFS lane (a stale saved preference
-/// degrading to the default is the interactive contract). Callers acting on
-/// an EXPLICIT request must re-check the result — see
-/// `exec::explicit_workflow_mismatch` — because a fallback silently running
-/// a different agent breaks deterministic orchestration.
 /// Whether a bundle's loop has review nodes at all.
 ///
 /// memact does not: `MemActAgent` deprecation-warns on `review_mode` /
@@ -254,105 +252,78 @@ pub fn workflow_is_review_capable(bundle_id: &str) -> bool {
     !bundle_id.starts_with("memact")
 }
 
-/// The gateway's OWN default entrypoint, when it marks one.
+/// The run-start sentinel for "the gateway's default agent workflow" (§D):
+/// `POST /runs/start` with `flow_id: "@default"` + `interface` makes the
+/// GATEWAY resolve which workflow runs, from its `agents.default_workflow`
+/// setting. Persisted in prefs as-is (never the copied id), so a change on
+/// the gateway applies to the next new turn.
+pub const GATEWAY_DEFAULT_SENTINEL: &str = "@default";
+
+/// The gateway's default agent workflow for `interface_id`, as served by
+/// `GET /bundles` → `default_agent_workflows[interface_id]` (§D), marked
+/// `gateway_default`.
 ///
 /// Operator ruling 2026-08-21: *"there is the default set by the gateway, but
 /// it can be overridden on new turns by a client. During a turn, a
 /// workflow/agent can't be changed."* Which agent runs is the single largest
-/// determinant of what a run means, so it must not be a client ruling: this
-/// TUI picking `coding-agent:coder` from its own benchmark while a web build
-/// or a bridge picks "the first agent flow" gives one durable session two
-/// different loops across turns.
-///
-/// Read from where the gateway already serves it: `bundles[].is_default`
-/// (the platform default) narrowed by `bundles[].default_entrypoint` (that
-/// bundle's default flow). Today no bundle carries `is_default` on this
-/// gateway, so this returns `None` and `choose_workflow` degrades to its
-/// labelled client fallback — the seam is here for the day the catalog marks
-/// one, and no client edit is needed then.
-pub fn served_default_workflow(v: &Value, interface_id: &str) -> Option<(String, String)> {
-    // Same array the interface filter walks (`items`); `bundles` tolerated
-    // because the console renders that spelling.
-    let bundles = v
-        .get("items")
-        .and_then(Value::as_array)
-        .or_else(|| v.get("bundles").and_then(Value::as_array))?;
-    for b in bundles {
-        if !b
-            .get("is_default")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        let bundle_id = b.get("bundle_id").and_then(Value::as_str)?.trim();
-        let entry = b
-            .get("default_entrypoint")
+/// determinant of what a run means, so it is not a client ruling: this client
+/// no longer carries a fallback chain of its own. `None` = the gateway reports
+/// no default (or predates the field) — the caller says so and asks the user
+/// to pick; it never substitutes one.
+pub fn served_default_workflow(v: &Value, interface_id: &str) -> Option<Workflow> {
+    let row = v.get("default_agent_workflows")?.get(interface_id)?;
+    let s = |k: &str| -> String {
+        row.get(k)
             .and_then(Value::as_str)
             .unwrap_or("")
-            .trim();
-        if bundle_id.is_empty() || entry.is_empty() {
-            continue;
-        }
-        // Only when that entrypoint really declares the interface we run.
-        let declares = b
-            .get("entrypoints")
-            .and_then(Value::as_array)
-            .map(|eps| {
-                eps.iter().any(|ep| {
-                    ep.get("flow_id")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .trim()
-                        == entry
-                        && ep
-                            .get("interfaces")
-                            .and_then(Value::as_array)
-                            .map(|ifs| {
-                                ifs.iter().any(|i| {
-                                    i.as_str()
-                                        .map(|x| x.trim() == interface_id)
-                                        .unwrap_or(false)
-                                })
-                            })
-                            .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
-        if declares {
-            return Some((bundle_id.to_string(), entry.to_string()));
-        }
+            .trim()
+            .to_string()
+    };
+    let (bundle_id, flow_id) = (s("bundle_id"), s("flow_id"));
+    if bundle_id.is_empty() || flow_id.is_empty() {
+        return None;
     }
-    None
+    // The catalog row carries the human description; the envelope does not.
+    let description = workflows_with_interface(v, interface_id)
+        .into_iter()
+        .find(|w| w.bundle_id == bundle_id && w.flow_id == flow_id)
+        .map(|w| w.description)
+        .unwrap_or_default();
+    let name = s("name");
+    Some(Workflow {
+        name: if name.is_empty() {
+            flow_id.clone()
+        } else {
+            name
+        },
+        bundle_id,
+        flow_id,
+        description,
+        version: s("bundle_version"),
+        gateway_default: true,
+    })
 }
 
-/// `choose_workflow` with the gateway's served default consulted before the
-/// client's own fallback. Pass the raw bundles payload; everything else is
-/// unchanged, so an operator preference still wins over both.
-pub fn choose_workflow_with_served_default(
-    workflows: &[Workflow],
-    preferred_bundle: Option<&str>,
-    preferred_flow: Option<&str>,
-    bundles: &Value,
-    interface_id: &str,
-) -> Option<Workflow> {
-    if preferred_bundle.is_none() {
-        if let Some((b, f)) = served_default_workflow(bundles, interface_id) {
-            if let Some(w) = workflows
-                .iter()
-                .find(|w| w.bundle_id == b && w.flow_id == f)
-            {
-                return Some(w.clone());
-            }
-        }
-    }
-    choose_workflow(workflows, preferred_bundle, preferred_flow)
-}
-
+/// Resolve the workflow to run.
+///
+/// * A preference (`--workflow bundle[:flow]`, or a saved explicit pick)
+///   resolves exactly, or bundle-only within its bundle.
+/// * No preference (fresh prefs, `--workflow default`, the saved `@default`
+///   sentinel) → the gateway's default.
+/// * A preference that no longer resolves degrades to the gateway default
+///   (the PREFS-lane contract: a stale saved pick). Callers acting on an
+///   EXPLICIT request must re-check the result — see
+///   `exec::explicit_workflow_mismatch` — because running a different agent
+///   than the one named breaks deterministic orchestration.
+///
+/// `None` = nothing resolves AND the gateway reports no default: the caller
+/// must say so and ask the user to pick. The old client-side chain
+/// (`coding-agent:coder` → `basic-agent` → first) is gone on purpose.
 pub fn choose_workflow(
     workflows: &[Workflow],
     preferred_bundle: Option<&str>,
     preferred_flow: Option<&str>,
+    gateway_default: Option<&Workflow>,
 ) -> Option<Workflow> {
     if let Some(b) = preferred_bundle {
         match preferred_flow {
@@ -372,25 +343,23 @@ pub fn choose_workflow(
             }
         }
     }
-    // #FALLBACK — no bundle is marked default on this gateway. Below is a
-    // CLIENT ruling (2026-08-01, benchmark-backed): the verified coding
-    // workflow. Across a ~70-run campaign, `coding-agent:coder` had the
-    // highest quality floor of every loop design (0.795; the only heavy arm
-    // with no sub-0.6 run in any era) and the best calls-to-artifact ratio —
-    // builder + independent verifier + deterministic gates. It is a client
-    // ruling, which means another client picks differently for the same
-    // session: the benchmark is a fact about SERVER-installed bundles and
-    // belongs in the catalog as `is_default`. Filed in the conformance audit.
-    if let Some(w) = workflows
-        .iter()
-        .find(|w| w.bundle_id == "coding-agent" && w.flow_id == "coder")
-    {
-        return Some(w.clone());
+    gateway_default.cloned()
+}
+
+/// The words for "the gateway reports no default and you picked none" —
+/// one sentence shared by the TUI transcript and headless `exec`.
+pub fn no_default_workflow_message(available: usize) -> String {
+    if available == 0 {
+        format!(
+            "this gateway has no agent workflows ({AGENT_INTERFACE_V1}) and reports no default — \
+             install one on the gateway (e.g. the basic-agent bundle)"
+        )
+    } else {
+        format!(
+            "this gateway reports no default agent workflow ({AGENT_INTERFACE_V1}) and none is \
+             selected — pick one with /workflow ({available} available)"
+        )
     }
-    if let Some(w) = workflows.iter().find(|w| w.bundle_id == "basic-agent") {
-        return Some(w.clone());
-    }
-    workflows.first().cloned()
 }
 
 pub fn providers_from_discovery(v: &Value) -> Vec<ProviderInfo> {
@@ -1049,97 +1018,95 @@ mod tests {
     /// Which agent runs is the largest determinant of what a run means, so
     /// the GATEWAY decides it: "there is the default set by the gateway, but
     /// it can be overridden on new turns by a client" (operator, 2026-08-21).
-    /// A client ruling here gives one durable session two different loops
-    /// depending on which app opened the next turn.
+    /// §D: the default arrives as `default_agent_workflows[interface]`.
     #[test]
     fn the_gateways_served_default_outranks_the_clients_own_pick() {
-        let bundles = json!({"items": [
-            {"bundle_id": "coding-agent", "default_entrypoint": "coder", "entrypoints": [
-                {"flow_id": "coder", "name": "coder", "interfaces": [AGENT_INTERFACE_V1]}]},
-            {"bundle_id": "house-agent", "is_default": true, "default_entrypoint": "house",
-             "entrypoints": [{"flow_id": "house", "name": "house", "interfaces": [AGENT_INTERFACE_V1]}]}
-        ]});
+        let bundles = json!({
+            "items": [
+                {"bundle_id": "coding-agent", "bundle_version": "0.1.0", "entrypoints": [
+                    {"flow_id": "coder", "name": "coder", "interfaces": [AGENT_INTERFACE_V1]}]},
+                {"bundle_id": "house-agent", "bundle_version": "2.0.0", "entrypoints": [
+                    {"flow_id": "house", "name": "house", "description": "The house loop.",
+                     "interfaces": [AGENT_INTERFACE_V1]}]}
+            ],
+            "default_agent_workflows": {
+                AGENT_INTERFACE_V1: {
+                    "workflow_id": "house-agent@2.0.0:house", "bundle_id": "house-agent",
+                    "bundle_version": "2.0.0", "flow_id": "house", "registry_scope": "host",
+                    "name": "House agent", "source": "saved"
+                },
+                "abstractassistant.agent.v1": {
+                    "bundle_id": "other", "flow_id": "main", "name": "Other"
+                }
+            }
+        });
         let flows = agent_workflows_from_bundles(&bundles);
-
+        let default = served_default_workflow(&bundles, AGENT_INTERFACE_V1).unwrap();
         assert_eq!(
-            served_default_workflow(&bundles, AGENT_INTERFACE_V1),
-            Some(("house-agent".to_string(), "house".to_string()))
+            (default.bundle_id.as_str(), default.flow_id.as_str()),
+            ("house-agent", "house")
         );
-        let picked =
-            choose_workflow_with_served_default(&flows, None, None, &bundles, AGENT_INTERFACE_V1)
-                .unwrap();
-        assert_eq!(picked.bundle_id, "house-agent", "the server's default wins");
+        assert!(default.gateway_default);
+        assert_eq!(default.version, "2.0.0");
+        assert_eq!(default.description, "The house loop.");
+        assert_eq!(
+            default.display_label(),
+            "House agent @2.0.0 (gateway default)"
+        );
 
-        // An operator preference is an override and still wins over both.
-        let overridden = choose_workflow_with_served_default(
-            &flows,
-            Some("coding-agent"),
-            Some("coder"),
-            &bundles,
-            AGENT_INTERFACE_V1,
-        )
-        .unwrap();
+        let picked = choose_workflow(&flows, None, None, Some(&default)).unwrap();
+        assert!(
+            picked.gateway_default,
+            "no preference = the gateway default"
+        );
+        assert_eq!(picked.bundle_id, "house-agent");
+
+        // An operator preference is an override and still wins.
+        let overridden =
+            choose_workflow(&flows, Some("coding-agent"), Some("coder"), Some(&default)).unwrap();
         assert_eq!(overridden.bundle_id, "coding-agent");
+        assert!(!overridden.gateway_default);
 
-        // No bundle marked default (today's gateway): unchanged behaviour,
-        // and the client fallback is reached exactly as before.
-        let unmarked = json!({"items": [
-            {"bundle_id": "coding-agent", "default_entrypoint": "coder", "entrypoints": [
-                {"flow_id": "coder", "name": "coder", "interfaces": [AGENT_INTERFACE_V1]}]}
-        ]});
-        assert_eq!(served_default_workflow(&unmarked, AGENT_INTERFACE_V1), None);
-        let flows2 = agent_workflows_from_bundles(&unmarked);
-        assert_eq!(
-            choose_workflow_with_served_default(&flows2, None, None, &unmarked, AGENT_INTERFACE_V1)
-                .unwrap()
-                .bundle_id,
-            "coding-agent"
-        );
-
-        // A default whose entrypoint does not declare our interface is not
-        // ours to run.
-        let wrong_iface = json!({"items": [
-            {"bundle_id": "other", "is_default": true, "default_entrypoint": "x",
-             "entrypoints": [{"flow_id": "x", "name": "x", "interfaces": ["something.else.v1"]}]}
-        ]});
-        assert_eq!(
-            served_default_workflow(&wrong_iface, AGENT_INTERFACE_V1),
-            None
-        );
+        // A stale saved pick degrades to the GATEWAY default, never to a
+        // client-chosen agent.
+        let stale = choose_workflow(&flows, Some("gone"), Some("x"), Some(&default)).unwrap();
+        assert!(stale.gateway_default);
     }
 
+    /// The client carries NO fallback chain of its own any more: no default
+    /// served + no preference = `None`, even with `coding-agent:coder` and
+    /// `basic-agent` installed. The caller says so and asks the user to pick.
     #[test]
-    fn workflow_choice_prefers_saved_then_basic_agent() {
-        let flows = vec![
-            Workflow {
-                bundle_id: "coding-agent".into(),
-                flow_id: "coder".into(),
-                name: "coder".into(),
-                description: String::new(),
-            },
-            Workflow {
-                bundle_id: "basic-agent".into(),
-                flow_id: "81795ea9".into(),
-                name: "basic-agent".into(),
-                description: String::new(),
-            },
-        ];
-        let picked = choose_workflow(&flows, Some("coding-agent"), Some("coder")).unwrap();
-        assert_eq!(picked.bundle_id, "coding-agent");
-        // Default ruling 2026-08-01: coder is the default when installed
-        // (highest quality floor of the loop-design benchmark); basic-agent
-        // is the fallback when it is not.
-        let fallback = choose_workflow(&flows, None, None).unwrap();
-        assert_eq!(fallback.bundle_id, "coding-agent");
-        let missing_pref = choose_workflow(&flows, Some("gone"), Some("x")).unwrap();
-        assert_eq!(missing_pref.bundle_id, "coding-agent");
-        let no_coder: Vec<Workflow> = flows
-            .iter()
-            .filter(|w| w.bundle_id != "coding-agent")
-            .cloned()
-            .collect();
-        let basic = choose_workflow(&no_coder, None, None).unwrap();
-        assert_eq!(basic.bundle_id, "basic-agent", "fallback without coder");
+    fn no_served_default_and_no_pick_resolves_to_nothing() {
+        let legacy = json!({"items": [
+            {"bundle_id": "coding-agent", "is_default": true, "default_entrypoint": "coder",
+             "entrypoints": [{"flow_id": "coder", "name": "coder", "interfaces": [AGENT_INTERFACE_V1]}]},
+            {"bundle_id": "basic-agent", "entrypoints": [
+                {"flow_id": "81795ea9", "name": "basic-agent", "interfaces": [AGENT_INTERFACE_V1]}]}
+        ]});
+        // The pre-§D `bundles[].is_default` marker is not read.
+        assert_eq!(served_default_workflow(&legacy, AGENT_INTERFACE_V1), None);
+        let flows = agent_workflows_from_bundles(&legacy);
+        assert_eq!(choose_workflow(&flows, None, None, None), None);
+        assert_eq!(choose_workflow(&flows, Some("gone"), None, None), None);
+        // Explicit picks still resolve.
+        assert_eq!(
+            choose_workflow(&flows, Some("basic-agent"), None, None)
+                .unwrap()
+                .flow_id,
+            "81795ea9"
+        );
+        // A null / half-filled envelope row is not a default.
+        for row in [
+            json!(null),
+            json!({"bundle_id": "x"}),
+            json!({"flow_id": "y"}),
+        ] {
+            let v = json!({"items": [], "default_agent_workflows": {AGENT_INTERFACE_V1: row}});
+            assert_eq!(served_default_workflow(&v, AGENT_INTERFACE_V1), None);
+        }
+        assert!(no_default_workflow_message(2).contains("/workflow"));
+        assert!(no_default_workflow_message(0).contains("install"));
     }
 
     /// A BUNDLE-ONLY reference resolves inside its own bundle — it must never
@@ -1159,38 +1126,37 @@ mod tests {
                 flow_id: "react".into(),
                 name: "react".into(),
                 description: String::new(),
+                ..Default::default()
             },
             Workflow {
                 bundle_id: "multiagent-coding".into(),
                 flow_id: "multiagent-coder".into(),
                 name: "Multi-agent coder — chat entry".into(),
                 description: String::new(),
+                ..Default::default()
             },
             Workflow {
                 bundle_id: "basic-agent".into(),
                 flow_id: "81795ea9".into(),
                 name: "basic-agent".into(),
                 description: String::new(),
+                ..Default::default()
             },
         ];
         // The single agent flow in the bundle is the evident intent.
-        let react = choose_workflow(&flows, Some("react-agent"), None).unwrap();
+        let react = choose_workflow(&flows, Some("react-agent"), None, None).unwrap();
         assert_eq!(
             (react.bundle_id.as_str(), react.flow_id.as_str()),
             ("react-agent", "react")
         );
         // Including when the flow id is nothing like the bundle id.
-        let mc = choose_workflow(&flows, Some("multiagent-coding"), None).unwrap();
+        let mc = choose_workflow(&flows, Some("multiagent-coding"), None, None).unwrap();
         assert_eq!(mc.flow_id, "multiagent-coder");
-        // A bundle that genuinely is not installed still degrades (the prefs
-        // lane contract); explicit callers re-check via
+        // A bundle that genuinely is not installed degrades to the gateway
+        // default (the prefs lane contract) — and to NOTHING when the
+        // gateway serves none; explicit callers re-check via
         // `exec::explicit_workflow_mismatch`.
-        assert_eq!(
-            choose_workflow(&flows, Some("gone"), None)
-                .unwrap()
-                .bundle_id,
-            "basic-agent"
-        );
+        assert_eq!(choose_workflow(&flows, Some("gone"), None, None), None);
     }
 
     /// A multi-flow bundle resolves ONLY on an unambiguous name match; an
@@ -1205,12 +1171,14 @@ mod tests {
                 flow_id: "alpha".into(),
                 name: "alpha".into(),
                 description: String::new(),
+                ..Default::default()
             },
             Workflow {
                 bundle_id: "dual".into(),
                 flow_id: "beta".into(),
                 name: "beta".into(),
                 description: String::new(),
+                ..Default::default()
             },
         ];
         assert!(
@@ -1224,6 +1192,7 @@ mod tests {
             flow_id: "dual".into(),
             name: "dual".into(),
             description: String::new(),
+            ..Default::default()
         });
         assert_eq!(resolve_bundle_only(&named, "dual").unwrap().flow_id, "dual");
         assert!(resolve_bundle_only(&two, "absent").is_none());

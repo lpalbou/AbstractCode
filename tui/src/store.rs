@@ -38,6 +38,15 @@ pub struct Workflow {
     pub flow_id: String,
     pub name: String,
     pub description: String,
+    /// The bundle version the gateway resolved (`bundle_version`), when it
+    /// said one. Display only: the run-start request never pins it.
+    pub version: String,
+    /// This selection IS "the gateway default" (§D): the run-start sends
+    /// the `@default` sentinel and the gateway resolves it. `bundle_id` /
+    /// `flow_id` then hold what the gateway currently resolves it to —
+    /// display + capability hints only, refreshed from every catalog load
+    /// and every start response, never sent as the choice.
+    pub gateway_default: bool,
 }
 
 impl Workflow {
@@ -56,6 +65,27 @@ impl Workflow {
             format!("{}:{}", self.bundle_id, self.flow_id)
         } else {
             self.name.clone()
+        }
+    }
+
+    /// `label()` plus ` @version` when known — the "<name> @ver" form the
+    /// gateway-default row and the run-start notice use.
+    pub fn versioned_label(&self) -> String {
+        if self.version.trim().is_empty() {
+            self.label()
+        } else {
+            format!("{} @{}", self.label(), self.version.trim())
+        }
+    }
+
+    /// What the header / status card show: the gateway default names
+    /// itself as such, so the operator can tell "I picked X" from "the
+    /// gateway currently runs X for me".
+    pub fn display_label(&self) -> String {
+        if self.gateway_default {
+            format!("{} (gateway default)", self.versioned_label())
+        } else {
+            self.label()
         }
     }
 }
@@ -813,6 +843,13 @@ pub struct Store {
     pub run_id: Signal<String>,
     pub workflow: Signal<Workflow>,
     pub workflows: Signal<Vec<Workflow>>,
+    /// What the gateway reports as its default agent workflow for
+    /// `abstractcode.agent.v1` (`/bundles` → `default_agent_workflows`,
+    /// §D), already marked `gateway_default`. `None` = not loaded yet OR the
+    /// gateway reports none — `gateway_default_loaded` tells them apart.
+    pub gateway_default_workflow: Signal<Option<Workflow>>,
+    /// `true` once a catalog load answered (with or without a default).
+    pub gateway_default_loaded: Signal<bool>,
     pub provider: Signal<String>,
     pub model: Signal<String>,
     /// Gating mode for the current session ("" = the workflow default,
@@ -1112,6 +1149,8 @@ impl Store {
             run_id: cx.signal(String::new()),
             workflow: cx.signal(Workflow::default()),
             workflows: cx.signal(Vec::new()),
+            gateway_default_workflow: cx.signal(None),
+            gateway_default_loaded: cx.signal(false),
             provider: cx.signal(String::new()),
             model: cx.signal(String::new()),
             gating_mode: cx.signal(String::new()),

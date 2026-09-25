@@ -910,6 +910,75 @@ fn workflow_desc_line(desc: &str, budget: i32) -> String {
     text::truncate_ellipsis(first, budget)
 }
 
+/// The picker's FIRST row (§D): "Gateway default → <name> @ver". Choosing it
+/// persists the `@default` sentinel, so the gateway decides which workflow
+/// the next new turn runs.
+fn gateway_default_row(
+    default: Option<&crate::store::Workflow>,
+    loaded: bool,
+    current: &crate::store::Workflow,
+) -> String {
+    let marker = if current.gateway_default {
+        "● "
+    } else {
+        "  "
+    };
+    match default {
+        Some(d) => format!(
+            "{marker}Gateway default → {} ({}:{})",
+            d.versioned_label(),
+            d.bundle_id,
+            d.flow_id
+        ),
+        None if loaded => {
+            format!("{marker}Gateway default — none set on this gateway (pick a workflow below)")
+        }
+        None => format!("{marker}Gateway default — loading…"),
+    }
+}
+
+fn workflow_picker_rows(store: Store, tracked: bool) -> Vec<String> {
+    {
+        let (current, default, loaded) = if tracked {
+            (
+                store.workflow.get(),
+                store.gateway_default_workflow.get(),
+                store.gateway_default_loaded.get(),
+            )
+        } else {
+            (
+                store.workflow.get_untracked(),
+                store.gateway_default_workflow.get_untracked(),
+                store.gateway_default_loaded.get_untracked(),
+            )
+        };
+        let mut rows = vec![gateway_default_row(default.as_ref(), loaded, &current)];
+        let explicit = crate::store::Workflow {
+            gateway_default: false,
+            ..current.clone()
+        };
+        let marker_target = if current.gateway_default {
+            // The default row carries the marker; no explicit row does.
+            crate::store::Workflow::default()
+        } else {
+            explicit
+        };
+        let push = |ws: &Vec<crate::store::Workflow>, rows: &mut Vec<String>| {
+            rows.extend(
+                ws.iter()
+                    .filter(|w| workflow_pickable(w))
+                    .map(|w| workflow_row(w, &marker_target)),
+            )
+        };
+        if tracked {
+            store.workflows.with(|ws| push(ws, &mut rows));
+        } else {
+            store.workflows.with_untracked(|ws| push(ws, &mut rows));
+        }
+        rows
+    }
+}
+
 pub fn open_workflow_picker(cx: Scope, store: Store, ctx: &UiCtx) {
     let workflows: Vec<crate::store::Workflow> = store
         .workflows
@@ -917,22 +986,29 @@ pub fn open_workflow_picker(cx: Scope, store: Store, ctx: &UiCtx) {
         .into_iter()
         .filter(workflow_pickable)
         .collect();
-    if workflows.is_empty() {
+    let has_default = store
+        .gateway_default_workflow
+        .with_untracked(Option::is_some);
+    if workflows.is_empty() && !has_default {
         store.notify("no agent workflows discovered yet (is the gateway up?)");
         return;
     }
     let current = store.workflow.get_untracked();
-    let labels: Vec<String> = workflows
-        .iter()
-        .map(|w| workflow_row(w, &current))
-        .collect();
-    let start = workflows
-        .iter()
-        .position(|w| w.bundle_id == current.bundle_id && w.flow_id == current.flow_id)
-        .unwrap_or(0);
+    let labels = workflow_picker_rows(store, false);
+    let start = if current.gateway_default || current.flow_id.is_empty() {
+        0
+    } else {
+        workflows
+            .iter()
+            .position(|w| w.bundle_id == current.bundle_id && w.flow_id == current.flow_id)
+            .map(|i| i + 1)
+            // An explicit pick the list no longer holds: the first workflow.
+            .unwrap_or(if workflows.is_empty() { 0 } else { 1 })
+    };
     // Wide + tall: descriptions were the point of the row and 84 cols
-    // truncated nearly all of them (operator finding 2026-08-01).
-    let size = modal_size(120, (labels.len() as i32 + 7).min(30));
+    // truncated nearly all of them (operator finding 2026-08-01). +2 for
+    // the hint line.
+    let size = modal_size(120, (labels.len() as i32 + 9).min(32));
     let choose_ctx = ctx.clone();
     open_picker(
         cx,
@@ -944,38 +1020,58 @@ pub fn open_workflow_picker(cx: Scope, store: Store, ctx: &UiCtx) {
             // before this opens — entrypoints registered while the
             // picker is open render in place (the static-shell limit
             // this incident class named, retired).
-            live: Some(Rc::new(move || {
-                let current = store.workflow.get();
-                store.workflows.with(|ws| {
-                    ws.iter()
-                        .filter(|w| workflow_pickable(w))
-                        .map(|w| workflow_row(w, &current))
-                        .collect::<Vec<_>>()
-                })
-            })),
+            live: Some(Rc::new(move || workflow_picker_rows(store, true))),
             start,
             size,
-            hint: None,
+            hint: Some(
+                "Gateway default: the gateway decides which workflow runs — a change there applies to your next turn"
+                    .into(),
+            ),
             live_hint: None,
             keys: Vec::new(),
             on_mount: None,
             on_selection: None,
             on_choose: Box::new(move |ix| {
-                // Re-read at activation: the rows rebuilt from this
-                // signal, so the open-time snapshot may be stale.
-                // Index into the FILTERED view — the same predicate the rows
-                // used, or a hidden entry would shift every selection below it.
-                let picked = store.workflows.with_untracked(|ws| {
-                    ws.iter().filter(|w| workflow_pickable(w)).nth(ix).cloned()
-                });
+                // Re-read at activation: the rows rebuilt from these
+                // signals, so the open-time snapshot may be stale.
+                let picked = if ix == 0 {
+                    match store.gateway_default_workflow.get_untracked() {
+                        Some(d) => {
+                            crate::ui::persist_prefs(&choose_ctx, |p| {
+                                p.set_gateway_default_workflow()
+                            });
+                            Some(d)
+                        }
+                        None => {
+                            // Loud, and the picker stays open: there is
+                            // nothing to follow — the user must pick.
+                            store.notify(
+                                "this gateway reports no default agent workflow — pick one from the list",
+                            );
+                            return;
+                        }
+                    }
+                } else {
+                    // Index into the FILTERED view — the same predicate the
+                    // rows used, or a hidden entry would shift every
+                    // selection below it.
+                    let w = store.workflows.with_untracked(|ws| {
+                        ws.iter()
+                            .filter(|w| workflow_pickable(w))
+                            .nth(ix - 1)
+                            .cloned()
+                    });
+                    if let Some(w) = &w {
+                        crate::ui::persist_prefs(&choose_ctx, |p| {
+                            p.set_explicit_workflow(&w.bundle_id, &w.flow_id)
+                        });
+                    }
+                    w
+                };
                 if let Some(w) = picked {
                     let gating_capable = w.supports_gating();
-                    store.workflow.set(w.clone());
-                    crate::ui::persist_prefs(&choose_ctx, |p| {
-                        p.bundle_id = Some(w.bundle_id.clone());
-                        p.flow_id = Some(w.flow_id.clone());
-                    });
-                    store.notify(format!("workflow: {}", w.label()));
+                    store.notify(format!("workflow: {}", w.display_label()));
+                    store.workflow.set(w);
                     // Switching workflows resets any gating choice — a mode
                     // chosen for the coder must not silently ride onto a
                     // different workflow (the reasoning coupling rule,

@@ -365,15 +365,18 @@ pub fn run(args: &Args) -> i32 {
     let conn = config::resolve_connection(args.gateway.as_deref(), args.token.as_deref());
     let client = GatewayClient::new(&conn.base_url, conn.token.as_deref());
 
-    // Resolve the workflow: flag > prefs > basic-agent > first agent flow.
+    // Resolve the workflow: flag > saved pick > the GATEWAY's default (§D).
+    // `--workflow default` and the saved `@default` sentinel both mean "the
+    // gateway decides"; there is no client-side fallback chain.
     let prefs = config::Prefs::load();
     let (pref_bundle, pref_flow) = match args.workflow.as_deref() {
-        Some(raw) => {
-            let (b, f) = crate::cli::split_workflow_ref(raw);
-            (Some(b), f)
-        }
-        None => (prefs.bundle_id.clone(), prefs.flow_id.clone()),
+        Some(raw) => crate::cli::workflow_ref_preference(raw),
+        None => prefs.workflow_preference(),
     };
+    let explicit_ref = args
+        .workflow
+        .as_deref()
+        .filter(|raw| !crate::cli::is_gateway_default_ref(raw));
     let bundles = match client.list_bundles() {
         Ok(v) => v,
         Err(e) => {
@@ -385,34 +388,46 @@ pub fn run(args: &Args) -> i32 {
         }
     };
     let workflows = agent_workflows_from_bundles(&bundles);
-    let workflow = match crate::discovery::choose_workflow_with_served_default(
+    let gateway_default =
+        crate::discovery::served_default_workflow(&bundles, crate::discovery::AGENT_INTERFACE_V1);
+    let chosen = crate::discovery::choose_workflow(
         &workflows,
         pref_bundle.as_deref(),
         pref_flow.as_deref(),
-        &bundles,
-        crate::discovery::AGENT_INTERFACE_V1,
-    ) {
-        Some(w) => w,
-        None => {
-            eprintln!("✗ no agent workflows (interface abstractcode.agent.v1) on this gateway");
-            return 1;
-        }
-    };
+        gateway_default.as_ref(),
+    );
     // An EXPLICIT --workflow that doesn't exist must refuse, never silently
-    // substitute basic-agent (final-verifier finding 1, 2026-07-23): a
+    // substitute another agent (final-verifier finding 1, 2026-07-23): a
     // script pinning a specific agent would otherwise run a different one
-    // with exit 0 and no warning. The prefs lane keeps the fallback — a
-    // stale saved preference degrading to the default is the interactive
-    // contract, and the header names what ran.
-    if let Some(raw) = args.workflow.as_deref() {
+    // with exit 0 and no warning. The prefs lane degrades to the gateway
+    // default — a stale saved preference — and the header names what ran.
+    if let Some(raw) = explicit_ref {
         let catalog = crate::discovery::all_entrypoints_from_bundles(&bundles);
-        if let Some(msg) =
-            explicit_workflow_mismatch_diagnosed(raw, &workflow, &workflows, &catalog)
-        {
+        let none = crate::store::Workflow::default();
+        if let Some(msg) = explicit_workflow_mismatch_diagnosed(
+            raw,
+            chosen.as_ref().unwrap_or(&none),
+            &workflows,
+            &catalog,
+        ) {
             eprintln!("{msg}");
             return 2;
         }
     }
+    let workflow = match chosen {
+        Some(w) => w,
+        None => {
+            let msg = crate::discovery::no_default_workflow_message(workflows.len()).replace(
+                "pick one with /workflow",
+                "name one with --workflow <bundle[:flow]>",
+            );
+            eprintln!("✗ {msg}");
+            for w in workflows.iter().take(12) {
+                eprintln!("    {}:{}", w.bundle_id, w.flow_id);
+            }
+            return 2;
+        }
+    };
 
     // Ungated safety guard (design + adversary): an unattended run that
     // skips the workflow's human pauses must NOT also run with an
@@ -653,13 +668,23 @@ pub fn run(args: &Args) -> i32 {
         };
         input[k.as_str()] = val;
     }
-    let run_id = match client.start_run(
-        &workflow.flow_id,
-        Some(&workflow.bundle_id),
-        Some(&session_id),
-        input,
-    ) {
-        Ok(rid) => rid,
+    let started = if workflow.gateway_default {
+        client.start_run(
+            crate::discovery::GATEWAY_DEFAULT_SENTINEL,
+            None,
+            Some(&session_id),
+            input,
+        )
+    } else {
+        client.start_run(
+            &workflow.flow_id,
+            Some(&workflow.bundle_id),
+            Some(&session_id),
+            input,
+        )
+    };
+    let (run_id, resolved) = match started {
+        Ok(s) => (s.run_id, s.resolved),
         Err(e) => {
             eprintln!("✗ start: {e}");
             if e.status == Some(401) || e.status == Some(403) {
@@ -668,10 +693,13 @@ pub fn run(args: &Args) -> i32 {
             return 1;
         }
     };
-    eprintln!(
-        "run {run_id} · workflow {}:{} · session {session_id}",
-        workflow.bundle_id, workflow.flow_id
-    );
+    // What ran is the gateway's word (`resolved_workflow`), not the
+    // catalog guess made before the start.
+    let ran = match &resolved {
+        Some(r) => r.describe(),
+        None => format!("{}:{}", workflow.bundle_id, workflow.flow_id),
+    };
+    eprintln!("run {run_id} · workflow {ran} · session {session_id}");
 
     let mut fold = Fold::new();
     // Declare the catalog's agent entrypoint ids (the lane-1 fold contract)

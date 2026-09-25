@@ -1762,7 +1762,7 @@ pub fn status_card_rows(
         if w.flow_id.is_empty() {
             "none yet — /workflow picks one".to_string()
         } else {
-            w.label()
+            w.display_label()
         }
     });
     let route = crate::ui::chrome::route_label(store);

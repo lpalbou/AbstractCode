@@ -143,8 +143,9 @@ OPTIONS:
   --mtp <DEPTH|off|inherit>  MTP override; requires native support on the selected host
   --ungated               run a gating-capable workflow unattended (skips its
                           human approval pauses); requires --permissions
-  --workflow <B[:F]>      agent workflow bundle[:flow] (default: saved, else
-                          coding-agent:coder — the verified coding loop)
+  --workflow <B[:F]>      agent workflow bundle[:flow], or `default` for the
+                          gateway's default (default: your /workflow choice,
+                          else the gateway default)
   --provider <NAME>       provider override (default: gateway defaults)
   --model <NAME>          model override
   --workspace <PATH>      workspace root for tools (default: current directory)
@@ -402,6 +403,23 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
 }
 
 /// Split `bundle[:flow]` into (bundle, flow?).
+/// `--workflow default` (or `@default`): run the gateway's default agent
+/// workflow (§D) — the gateway decides, exactly like a fresh install.
+pub fn is_gateway_default_ref(raw: &str) -> bool {
+    let t = raw.trim();
+    t.eq_ignore_ascii_case("default") || t == crate::discovery::GATEWAY_DEFAULT_SENTINEL
+}
+
+/// A `--workflow` value as the `(bundle, flow)` preference pair;
+/// `(None, None)` = the gateway default.
+pub fn workflow_ref_preference(raw: &str) -> (Option<String>, Option<String>) {
+    if is_gateway_default_ref(raw) {
+        return (None, None);
+    }
+    let (b, f) = split_workflow_ref(raw);
+    (Some(b), f)
+}
+
 pub fn split_workflow_ref(raw: &str) -> (String, Option<String>) {
     match raw.split_once(':') {
         Some((b, f)) if !f.trim().is_empty() => (b.trim().to_string(), Some(f.trim().to_string())),
@@ -745,5 +763,15 @@ mod tests {
             split_workflow_ref("basic-agent"),
             ("basic-agent".into(), None)
         );
+        // `default` / `@default` = the gateway decides (§D).
+        for d in ["default", "@default", " Default "] {
+            assert!(is_gateway_default_ref(d), "{d}");
+            assert_eq!(workflow_ref_preference(d), (None, None));
+        }
+        assert_eq!(
+            workflow_ref_preference("coding-agent:coder"),
+            (Some("coding-agent".into()), Some("coder".into()))
+        );
+        assert!(usage().contains("`default` for the"));
     }
 }

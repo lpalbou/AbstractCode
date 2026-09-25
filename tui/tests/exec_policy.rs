@@ -180,6 +180,7 @@ fn explicit_missing_workflow_refuses_instead_of_silently_substituting() {
         flow_id: f.into(),
         name: String::new(),
         description: String::new(),
+        ..Default::default()
     };
     let catalog = vec![wf("basic-agent", "main"), wf("coding-agent", "coder")];
     let fallback = catalog[0].clone();
