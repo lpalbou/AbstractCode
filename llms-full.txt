@@ -915,10 +915,10 @@ Start with [getting started](getting-started.md). For hosting and authentication
 ## Working in the interface
 
 - **Conversations** restores gateway sessions and history. Search by conversation text or session ID; load more to browse older runs.
-- **Workflow** selects a private bundle entrypoint or an authorized shared catalog workflow. Agent interfaces and schema-driven workflows are both supported.
+- **Workflow** chooses what runs your next turn. The first entry, **Gateway default → name @version**, follows the default coding agent your gateway's operator set; if they change it, your next new turn uses the new one. Below it are the coding agents published on your gateway; tick **Show all workflows** to list schema-driven workflows too. Your choice is remembered in this browser for your account. After you send, the toolbar shows which workflow the gateway actually started (for example "running Coder @0.1.0 (gateway default)"). An existing conversation keeps the workflow its run used. If the list says "gateway does not report a default agent workflow", your gateway is older than this feature: pick a workflow from the list.
 - **Inputs** presents the registered input schema. Use JSON input mode for nested or custom input objects. The gateway validates submitted values.
-- **Settings** contains model, reasoning, MTP depth, tool policy, workspace requests, and gateway skills for agent workflows. Unset options preserve workflow defaults.
-- **Files** browses the gateway's authorized shared files, not a local disk or the run's private working directory. Attach a shared file or upload from your device. Agents accept attachment references; generic workflows must declare an `attachments` array input.
+- **Settings** contains model, reasoning, MTP depth, tool policy, workspace requests, and gateway skills for agent workflows. Unset options preserve workflow defaults. When the gateway offers no skills, the Skills tab shows the gateway's own explanation and where its skill shelf is.
+- **Files** shows this conversation's workspace: the folder on the gateway where the agent reads and writes. The header gives its full path with a copy button; when your browser is not on the gateway's machine it adds "on the gateway host <name>", and when it is, **Open folder** opens the folder there. Browse folders with sizes and dates, refresh after a turn, and select a file to preview it: Markdown, JSON, images, other text, and HTML as source; other files offer a download. A note says when the gateway listed only part of a large folder. **Attach to conversation** adds the selected file to your next message. Gateway admins also get **Shared workspace (admin)**, the operator's shared folder, where clicking a file attaches it. Agents accept attachment references; generic workflows must declare an `attachments` array input.
 - **Activity** shows durable workflow steps and tool arguments/results.
 - **Artifacts** downloads files stored with the selected run.
 
@@ -983,7 +983,7 @@ The terminal and browser share the gateway contract, not identical interfaces. T
 
 The redesigned web client is not a complete port of every Rust control. It does not yet expose review/verifier rounds, gating or prompt-cache settings, dedicated goal/entity-memory views, or GPU/resource/cache administration. Registered workflows can still implement those behaviors, but their generic input and activity surfaces are not substitutes for the specialized terminal controls.
 
-Project instructions are not automatically read from the browser's local filesystem. Agent workflows can receive additional instructions manually; any automatic workspace discovery must happen through authorized gateway execution. Transcript export is Markdown, not the terminal's detailed/SFT JSONL export. Attachments support upload, removal, and download, but not the terminal's local-path browser or rich preview. Tool permissions offer explicit per-tool choices rather than tier shortcuts. The prompt queue is not durable across reloads.
+Project instructions are not automatically read from the browser's local filesystem. Agent workflows can receive additional instructions manually; any automatic workspace discovery must happen through authorized gateway execution. Transcript export is Markdown, not the terminal's detailed/SFT JSONL export. Attachments support upload, removal, and download, but not the terminal's local-path browser. Tool permissions offer explicit per-tool choices rather than tier shortcuts. The prompt queue is not durable across reloads.
 
 
 ==============================================================================
@@ -1025,7 +1025,7 @@ ABSTRACTCODE_GATEWAY_URL=http://127.0.0.1:8080 HOST=127.0.0.1 npm start
 
 Put the packaged server behind your HTTPS reverse proxy. Forward the whole application, including `/api/connection/gateway` and `/api/gateway/*`; a static file host or direct gateway API proxy alone does not implement the session exchange. Allow long-lived streaming responses and disable buffering for ledger SSE.
 
-Set `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` only when the proxy strips untrusted forwarded headers and sets `X-Forwarded-Host` and `X-Forwarded-Proto` itself. These determine browser-origin validation and secure-cookie behavior. Pin `ABSTRACTCODE_GATEWAY_URL` on the server. Browser-to-gateway CORS access is not needed.
+Set `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` only when the proxy strips untrusted forwarded headers and sets `X-Forwarded-Host` and `X-Forwarded-Proto` itself. These determine browser-origin validation and secure-cookie behavior. The server passes the browser's address to the gateway as `X-Forwarded-For` (appended to the proxy's chain only when proxy headers are trusted), so the gateway can tell whether a browser sits on its own machine before offering **Open folder**. Pin `ABSTRACTCODE_GATEWAY_URL` on the server. Browser-to-gateway CORS access is not needed.
 
 Browser-supplied destination changes are limited to loopback peers using a loopback hostname, unless `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` explicitly enables remote configuration. With trusted proxy headers enabled, the server destination remains authoritative unless that opt-in is set. Do not enable remote reconfiguration on a publicly accessible app without your own access controls. Cross-origin mutation attempts are rejected before gateway egress.
 
@@ -2625,8 +2625,12 @@ Gateway browser session and stores only app-scoped session cookies. The raw
 token is not persisted in browser settings. Vite development and the packaged
 server use the same session proxy; the browser keeps API requests same-origin.
 
-Choose an agent or registered workflow in the toolbar. Agent tasks use the
-composer; structured workflows use **Inputs**. Questions, tool approvals, and
+Choose a workflow in the toolbar: **Gateway default** (the coding agent your
+gateway's operator set, resolved by the gateway when the turn starts), a
+published coding agent, or, with **Show all workflows**, any registered
+workflow. The **Files** tab shows the conversation's workspace on the gateway
+with previews. Agent tasks use the composer; structured workflows use
+**Inputs**. Questions, tool approvals, and
 event waits appear in the conversation. Runs and history remain on the gateway
 when you close the browser. Unsent drafts and queued turns do not survive reload.
 
@@ -2652,6 +2656,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Added
+
+- **Web: "Gateway default" workflow.** The toolbar's workflow list starts
+  with **Gateway default → name @version**, the coding agent your gateway's
+  operator set. Choosing it is remembered as "the gateway default", so a
+  change made on the gateway applies to your next new turn; the gateway
+  resolves it when the turn starts, and the toolbar then shows what it
+  started ("running Coder @0.1.0 (gateway default)"). A fresh browser uses
+  it. The list shows coding agents; **Show all workflows** lists the rest.
+  Your choice is remembered per account; an existing conversation keeps the
+  workflow its run used.
+- **Web: the Files tab shows the conversation's workspace.** Full path with a
+  copy button, "on the gateway host <name>" when the browser is elsewhere,
+  **Open folder** when the browser is on the gateway's machine, folders with
+  sizes and dates, refresh, an explicit note for a partial listing, and a
+  preview pane (Markdown, JSON, images, HTML as source, text; download for
+  other files). Any file can be attached to the next message. Admins keep
+  the operator's shared folder as **Shared workspace (admin)**.
+- **Web: an empty Skills tab explains itself.** It shows the gateway's
+  reasons in full, the skill shelf location and where that setting came
+  from, instead of "This gateway has no skills available."
+
+### Changed
+
+- **Web app server** passes the browser's address to the gateway as
+  `X-Forwarded-For` (appended to a trusted reverse proxy's chain, otherwise
+  replacing any browser-supplied value).
 
 ## [terminal 0.5.1 / web 0.4.2] - 2026-09-23
 

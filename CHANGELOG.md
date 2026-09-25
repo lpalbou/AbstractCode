@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Web: "Gateway default" workflow.** The toolbar's workflow list starts
+  with **Gateway default → name @version**, the coding agent your gateway's
+  operator set. Choosing it is remembered as "the gateway default", so a
+  change made on the gateway applies to your next new turn; the gateway
+  resolves it when the turn starts, and the toolbar then shows what it
+  started ("running Coder @0.1.0 (gateway default)"). A fresh browser uses
+  it. The list shows coding agents; **Show all workflows** lists the rest.
+  Your choice is remembered per account; an existing conversation keeps the
+  workflow its run used.
+- **Web: the Files tab shows the conversation's workspace.** Full path with a
+  copy button, "on the gateway host <name>" when the browser is elsewhere,
+  **Open folder** when the browser is on the gateway's machine, folders with
+  sizes and dates, refresh, an explicit note for a partial listing, and a
+  preview pane (Markdown, JSON, images, HTML as source, text; download for
+  other files). Any file can be attached to the next message. Admins keep
+  the operator's shared folder as **Shared workspace (admin)**.
+- **Web: an empty Skills tab explains itself.** It shows the gateway's
+  reasons in full, the skill shelf location and where that setting came
+  from, instead of "This gateway has no skills available."
+
+### Changed
+
+- **Web app server** passes the browser's address to the gateway as
+  `X-Forwarded-For` (appended to a trusted reverse proxy's chain, otherwise
+  replacing any browser-supplied value).
+
 ## [terminal 0.5.1 / web 0.4.2] - 2026-09-23
 
 Terminal client `abstractcode` 0.5.1 (tag `v0.5.1`) and browser client
