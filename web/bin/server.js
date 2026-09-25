@@ -96,17 +96,27 @@ function isLoopbackPeer(req) {
   );
 }
 
-function peerAddress(req) {
-  let address = String(req.socket?.remoteAddress || "").trim().toLowerCase();
-  if (address.startsWith("::ffff:")) address = address.slice("::ffff:".length);
+/**
+ * The browser connection's real transport peer (req.socket.remoteAddress),
+ * IPv4-mapped IPv6 unwrapped, or "" when unknown. Headers are never read.
+ * Every request this server sends to the gateway on a browser's behalf
+ * carries it as `X-Forwarded-For`, OVERWRITING any client value (contract
+ * A-2; same rule as abstractuic's app-server). An unknown peer is refused.
+ */
+export function socketPeerAddress(req) {
+  let address = String(req?.socket?.remoteAddress || "").trim().toLowerCase();
+  if (address.startsWith("::ffff:") && address.includes(".")) address = address.slice(7);
   return address;
 }
 
-/** X-Forwarded-For for the gateway: exactly this connection's socket peer.
- * Never appended to, never a client-supplied value (CONTRACTS A-2). */
-export function forwardedFor(req) {
-  return peerAddress(req);
-}
+const UNKNOWN_PEER = { detail: "Cannot determine the client address of this connection" };
+const FORWARDING_HEADERS = new Set([
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-real-ip",
+  "forwarded",
+]);
 
 function connectionConfigAllowed(req, config) {
   if (envBool(config.env, "ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG"))
@@ -399,6 +409,11 @@ function cookieValueFromSetCookie(rawHeaders, name) {
 }
 
 async function handleConnectionApi(req, res, config) {
+  const peer = socketPeerAddress(req);
+  if (!peer) {
+    sendJson(res, 400, UNKNOWN_PEER);
+    return;
+  }
   if (req.method === "GET") {
     const session = browserSession(req, config);
     if (!session.sessionId) {
@@ -418,6 +433,7 @@ async function handleConnectionApi(req, res, config) {
         headers: {
           Accept: "application/json",
           "X-AbstractGateway-Session": session.sessionId,
+          "X-Forwarded-For": peer,
         },
       },
       undefined,
@@ -466,6 +482,7 @@ async function handleConnectionApi(req, res, config) {
           Accept: "application/json",
           "Content-Type": "application/json",
           "Content-Length": String(body.length),
+          "X-Forwarded-For": peer,
         },
       },
       body,
@@ -523,6 +540,7 @@ async function handleConnectionApi(req, res, config) {
             "Content-Length": String(body.length),
             "X-AbstractGateway-Session": session.sessionId,
             "X-AbstractGateway-CSRF": session.csrfToken,
+            "X-Forwarded-For": peer,
           },
         },
         body,
@@ -553,6 +571,11 @@ function proxyGatewayRequest(req, res, config) {
     sendJson(res, 401, { detail: "Gateway sign-in required" });
     return;
   }
+  const peer = socketPeerAddress(req);
+  if (!peer) {
+    sendJson(res, 400, UNKNOWN_PEER);
+    return;
+  }
   if (mutatingMethod(req.method)) {
     const presented = String(req.headers["x-abstractcode-csrf"] || "").trim();
     if (!session.csrfToken || presented !== session.csrfToken) {
@@ -575,15 +598,12 @@ function proxyGatewayRequest(req, res, config) {
   const headers = { ...req.headers, host: backend.url.host };
   delete headers.cookie;
   delete headers.authorization;
-  // The gateway decides whether the BROWSER sits on its machine (workspace
-  // "Open folder", same-machine defaults). Seen from the gateway, this proxy
-  // is the peer, so it overwrites X-Forwarded-For with its own socket peer:
-  // a client-supplied value never reaches the gateway.
-  delete headers["x-forwarded-for"];
-  const peer = forwardedFor(req);
-  if (peer) headers["x-forwarded-for"] = peer;
-  delete headers["x-forwarded-host"];
-  delete headers["x-forwarded-proto"];
+  // Forwarding headers: drop every client-supplied spelling (any case, plus
+  // RFC 7239 `Forwarded` and `X-Real-IP`), then X-Forwarded-For = the socket
+  // peer, so the gateway can tell whether the browser is on its machine.
+  for (const key of Object.keys(headers))
+    if (FORWARDING_HEADERS.has(key.toLowerCase())) delete headers[key];
+  headers["x-forwarded-for"] = peer;
   delete headers["x-abstractcode-csrf"];
   headers["x-abstractgateway-session"] = session.sessionId;
   if (mutatingMethod(req.method))
