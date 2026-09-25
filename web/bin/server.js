@@ -102,20 +102,10 @@ function peerAddress(req) {
   return address;
 }
 
-/** X-Forwarded-For for the gateway: the browser's socket address, appended to
- * an existing chain only when this server trusts its reverse proxy. */
-export function forwardedForChain(req, config) {
-  const trusted =
-    envBool(config.env, "ABSTRACTCODE_TRUST_PROXY_HEADERS") ||
-    envBool(config.env, "ABSTRACTGATEWAY_TRUST_PROXY_HEADERS");
-  const prior = trusted
-    ? String(req.headers["x-forwarded-for"] || "")
-        .split(",")
-        .map((part) => part.trim())
-        .filter(Boolean)
-    : [];
-  const peer = peerAddress(req);
-  return [...prior, ...(peer ? [peer] : [])].join(", ");
+/** X-Forwarded-For for the gateway: exactly this connection's socket peer.
+ * Never appended to, never a client-supplied value (CONTRACTS A-2). */
+export function forwardedFor(req) {
+  return peerAddress(req);
 }
 
 function connectionConfigAllowed(req, config) {
@@ -587,12 +577,11 @@ function proxyGatewayRequest(req, res, config) {
   delete headers.authorization;
   // The gateway decides whether the BROWSER sits on its machine (workspace
   // "Open folder", same-machine defaults). Seen from the gateway, this proxy
-  // is the peer, so the browser's address travels as X-Forwarded-For. A
-  // chain from the browser side is kept (appended to) only behind a trusted
-  // reverse proxy; otherwise it is client-supplied and replaced.
-  const forwardedFor = forwardedForChain(req, config);
+  // is the peer, so it overwrites X-Forwarded-For with its own socket peer:
+  // a client-supplied value never reaches the gateway.
   delete headers["x-forwarded-for"];
-  if (forwardedFor) headers["x-forwarded-for"] = forwardedFor;
+  const peer = forwardedFor(req);
+  if (peer) headers["x-forwarded-for"] = peer;
   delete headers["x-forwarded-host"];
   delete headers["x-forwarded-proto"];
   delete headers["x-abstractcode-csrf"];

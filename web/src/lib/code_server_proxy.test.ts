@@ -193,7 +193,7 @@ describe("shared Code Gateway middleware", () => {
     expect((await request(codePort, "GET", "/%2e%2e/secret")).status).toBe(400);
   });
 
-  it("forwards the browser's address as X-Forwarded-For, replacing a client-supplied chain", async () => {
+  it("overwrites X-Forwarded-For with the browser's socket address, never passing a client value", async () => {
     const received: IncomingHttpHeaders[] = [];
     const gatewayPort = await listen(http.createServer((req, res) => {
       req.resume();
@@ -229,8 +229,8 @@ describe("shared Code Gateway middleware", () => {
     await request(proxied, "GET", "/api/gateway/runs/r1/workspace", {
       headers: { Cookie: proxiedCookies, "X-Forwarded-For": "198.51.100.7" },
     });
-    // Behind a trusted reverse proxy the chain is kept and this hop appended.
-    expect(received[1]["x-forwarded-for"]).toBe("198.51.100.7, 127.0.0.1");
+    // Even behind a trusted reverse proxy: overwritten, never appended to.
+    expect(received[1]["x-forwarded-for"]).toBe("127.0.0.1");
   });
 
   it("falls through for non-owned paths when mounted in Vite", async () => {

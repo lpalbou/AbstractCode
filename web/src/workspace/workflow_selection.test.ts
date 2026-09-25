@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { WorkflowDefinition } from "./catalog";
-import { parsePreferences } from "./preferences";
+import { markDefaultSession, parsePreferences, readDefaultSessions } from "./preferences";
 import { DEFAULT_PREFERENCES } from "./settings_panel";
 import {
   GATEWAY_DEFAULT,
   NO_DEFAULT_REPORTED,
+  conversationSelection,
   gatewayDefaultDefinition,
   gatewayDefaultFromEnvelope,
   gatewayDefaultOptionLabel,
@@ -171,4 +172,46 @@ describe("workflow preference persistence", () => {
     });
   });
 
+});
+
+describe("gateway default per conversation (CONTRACTS A-4)", () => {
+  it("uses the gateway's reason when it has no default for the interface", () => {
+    expect(
+      gatewayDefaultFromEnvelope({
+        default_agent_workflows: {},
+        default_agent_workflows_unavailable: {
+          "abstractcode.agent.v1": { source: "default", value: null, reason: "basic-agent is not installed" },
+        },
+      }),
+    ).toEqual({
+      status: "unavailable",
+      reason: "no default workflow for abstractcode.agent.v1: basic-agent is not installed",
+    });
+  });
+
+  it("keeps sending @default in a conversation started with it, and the exact workflow otherwise", () => {
+    const defaults = new Set(["s-default"]);
+    expect(conversationSelection({ sessionId: "s-default", defaultSessions: defaults, restored: agent })).toBe(GATEWAY_DEFAULT);
+    expect(conversationSelection({ sessionId: "s-default", defaultSessions: defaults, restored: undefined })).toBe(GATEWAY_DEFAULT);
+    expect(conversationSelection({ sessionId: "s-other", defaultSessions: defaults, restored: report })).toBe(report.id);
+    expect(conversationSelection({ sessionId: "s-other", defaultSessions: defaults, restored: undefined })).toBeUndefined();
+  });
+
+  it("remembers which conversations run on the gateway default, per account", () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+    });
+    try {
+      expect(markDefaultSession("alice", "s1", true).has("s1")).toBe(true);
+      expect(readDefaultSessions("alice").has("s1")).toBe(true);
+      expect(readDefaultSessions("bob").has("s1")).toBe(false);
+      // Choosing an explicit workflow in that conversation clears it.
+      expect(markDefaultSession("alice", "s1", false).has("s1")).toBe(false);
+      expect(readDefaultSessions("alice").size).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

@@ -50,11 +50,17 @@ export function gatewayDefaultFromEnvelope(
   const defaults = record(body.default_agent_workflows);
   if (!defaults) return { status: "unavailable", reason: NO_DEFAULT_REPORTED };
   const row = record(defaults[interfaceId]);
-  if (!row)
+  if (!row) {
+    const why = text(
+      record(record(body.default_agent_workflows_unavailable)?.[interfaceId])?.reason,
+    );
     return {
       status: "unavailable",
-      reason: `gateway reports no default workflow for ${interfaceId}`,
+      reason: why
+        ? `no default workflow for ${interfaceId}: ${why}`
+        : `gateway reports no default workflow for ${interfaceId}`,
     };
+  }
   const bundleId = text(row.bundle_id);
   const flowId = text(row.flow_id);
   if (!bundleId || !flowId)
@@ -150,6 +156,19 @@ export function reconcileSelection(options: {
   if (options.selection && valid(options.selection)) return options.selection;
   if (options.preferred && valid(options.preferred)) return options.preferred;
   return GATEWAY_DEFAULT;
+}
+
+/** Which workflow the next turn of a conversation sends. A conversation this
+ * browser started with the gateway default keeps sending "@default", so a
+ * change made on the gateway applies to its next turn (CONTRACTS A-4); any
+ * other restored conversation keeps the exact workflow its run used. */
+export function conversationSelection(options: {
+  sessionId: string;
+  defaultSessions: ReadonlySet<string>;
+  restored?: WorkflowDefinition | null;
+}): string | undefined {
+  if (options.defaultSessions.has(options.sessionId)) return GATEWAY_DEFAULT;
+  return options.restored?.id;
 }
 
 /** `POST /runs/start` body. The gateway default is sent as the sentinel and

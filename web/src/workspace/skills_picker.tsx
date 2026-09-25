@@ -75,12 +75,6 @@ export function normalizeSkillsInventory(value: unknown): SkillsInventory {
   };
 }
 
-const SHELF_SOURCES: Record<string, string> = {
-  saved: "set in the gateway's settings",
-  env: "set in the gateway's launch environment",
-  seeded: "the gateway's built-in shelf",
-};
-
 /** An empty skill list, with the gateway's own explanation shown in full. */
 export function SkillsEmptyState({
   inventory,
@@ -104,9 +98,7 @@ export function SkillsEmptyState({
       {inventory.shelf ? (
         <p className="code-field-help">
           Skill shelf: <code>{inventory.shelf}</code>
-          {inventory.shelfSource
-            ? ` (${SHELF_SOURCES[inventory.shelfSource] || inventory.shelfSource})`
-            : ""}
+          {inventory.shelfSource ? ` (source: ${inventory.shelfSource})` : ""}
         </p>
       ) : (
         <p className="code-field-help">The gateway did not report a skill shelf location.</p>

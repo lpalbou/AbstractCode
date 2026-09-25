@@ -69,7 +69,7 @@ describe("empty skills list", () => {
     expect(html).toContain("did not report a skill shelf location");
   });
 
-  it("names the shelf and where it came from in plain words", () => {
+  it("names the shelf and its source in the gateway's own word", () => {
     const html = renderToStaticMarkup(
       React.createElement(SkillsEmptyState, {
         inventory: normalizeSkillsInventory({
@@ -82,7 +82,7 @@ describe("empty skills list", () => {
     );
     expect(html).toContain("the shelf holds no skill folders");
     expect(html).toContain("/data/skills/registry");
-    expect(html).toContain("the gateway&#x27;s built-in shelf");
+    expect(html).toContain("(source: seeded)");
   });
 
   it("says so when the gateway gives no reason", () => {

@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolves it when the turn starts, and the toolbar then shows what it
   started ("running Coder @0.1.0 (gateway default)"). A fresh browser uses
   it. The list shows coding agents; **Show all workflows** lists the rest.
-  Your choice is remembered per account; an existing conversation keeps the
-  workflow its run used.
+  Your choice is remembered per account. A conversation started on the
+  gateway default keeps following it on every turn; one started with a
+  specific workflow keeps that workflow.
 - **Web: the Files tab shows the conversation's workspace.** Full path with a
   copy button, "on the gateway host <name>" when the browser is elsewhere,
   **Open folder** when the browser is on the gateway's machine, folders with
@@ -26,14 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other files). Any file can be attached to the next message. Admins keep
   the operator's shared folder as **Shared workspace (admin)**.
 - **Web: an empty Skills tab explains itself.** It shows the gateway's
-  reasons in full, the skill shelf location and where that setting came
-  from, instead of "This gateway has no skills available."
+  reasons in full, the skill shelf location and its source, instead of
+  "This gateway has no skills available."
 
 ### Changed
 
-- **Web app server** passes the browser's address to the gateway as
-  `X-Forwarded-For` (appended to a trusted reverse proxy's chain, otherwise
-  replacing any browser-supplied value).
+- **Web app server** sets `X-Forwarded-For` to the address of the
+  connection it received, overwriting any incoming value, so the gateway
+  can tell whether the browser is on its machine.
 
 ## [terminal 0.5.1 / web 0.4.2] - 2026-09-23
 

@@ -46,9 +46,15 @@ import {
   type SettingsTab,
 } from "./settings_panel";
 import { WorkspaceInspector, type InspectorTab } from "./workspace_panels";
-import { readPreferences, writePreferences } from "./preferences";
+import {
+  markDefaultSession,
+  readDefaultSessions,
+  readPreferences,
+  writePreferences,
+} from "./preferences";
 import {
   GATEWAY_DEFAULT,
+  conversationSelection,
   gatewayDefaultDefinition,
   gatewayDefaultOptionLabel,
   reconcileSelection,
@@ -165,6 +171,11 @@ export function CodeWorkspace() {
     selection === GATEWAY_DEFAULT
       ? defaultWorkflow
       : catalog.workflows.find((item) => item.id === selection) || null;
+  // Conversations this browser runs on the gateway default: their next turn
+  // sends "@default" again, so a gateway-side change applies to it.
+  const [defaultSessions, setDefaultSessions] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   // What the gateway said it started, for the run this page started.
   const [resolvedNote, setResolvedNote] = useState<
     (ResolvedWorkflowNote & { runId: string }) | null
@@ -295,7 +306,8 @@ export function CodeWorkspace() {
     restoredInputs &&
     !catalog.loading &&
     snapshot.run &&
-    !restoredWorkflow
+    !restoredWorkflow &&
+    !defaultSessions.has(session.sessionId)
       ? "This conversation's exact workflow version is unavailable. Restore it in the gateway, or start a new conversation with an available workflow."
       : "";
   const currentSession = catalog.sessions.find(
@@ -341,6 +353,7 @@ export function CodeWorkspace() {
     const saved = readPreferences(identity);
     setPreferences(saved);
     setSelection(saved.workflow);
+    setDefaultSessions(readDefaultSessions(identity));
   }, [identity]);
   useEffect(() => {
     if (!identity) return;
@@ -446,8 +459,14 @@ export function CodeWorkspace() {
     void catalog.refresh();
   }, [session.runId, snapshot.status]);
   useEffect(() => {
-    if (restoredWorkflow) setSelection(restoredWorkflow.id);
-  }, [session.runId, restoredWorkflow?.id]);
+    if (!session.runId) return;
+    const next = conversationSelection({
+      sessionId: session.sessionId,
+      defaultSessions,
+      restored: restoredWorkflow,
+    });
+    if (next) setSelection(next);
+  }, [session.runId, session.sessionId, restoredWorkflow?.id, defaultSessions]);
 
   const newConversation = useCallback(() => {
     const next = { sessionId: newId(), runId: "" };
@@ -611,10 +630,14 @@ export function CodeWorkspace() {
         throw staleSendAbort();
       attachedRun = String(result.run_id);
       startedRunInput.current = { runId: attachedRun, input };
+      // "@default" resolves at every start: refresh the label from each one.
       setResolvedNote({
         runId: attachedRun,
         ...resolvedWorkflowNote(result.resolved_workflow),
       });
+      setDefaultSessions(
+        markDefaultSession(startedIdentity, startedSession, selection === GATEWAY_DEFAULT),
+      );
       setOptimistic([
         ...messages,
         ...(text.trim()
