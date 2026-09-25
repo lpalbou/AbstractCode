@@ -132,6 +132,7 @@ export function CodeWorkspace() {
   // `GET /api/gateway/about`, fetched each time the About dialog opens.
   const [gatewayAbout, setGatewayAbout] = useState<FetchOutcome>();
   const refreshGatewayAbout = useCallback(() => {
+    setGatewayAbout(undefined);
     void gatewayRequest("/api/gateway/about")
       .then((value) => setGatewayAbout({ ok: true, value }))
       .catch((reason) =>
@@ -1061,10 +1062,7 @@ export function CodeWorkspace() {
             appearance={{ onOpen: () => setAppearanceOpen(true) }}
             about={{
               identity: APP_IDENTITY,
-              extraRows: aboutExtraRows({
-                capabilities: catalog.capabilitiesOutcome,
-                about: gatewayAbout,
-              }),
+              extraRows: aboutExtraRows(gatewayAbout),
               onOpen: refreshGatewayAbout,
             }}
             extraActions={
