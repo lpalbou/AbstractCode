@@ -14,6 +14,7 @@ import {
   useAppearanceSettings,
   useGatewayConnection,
   VoiceSettings,
+  appIdentity,
   type VoicePreferences,
 } from "@abstractframework/ui-kit";
 import {
@@ -46,6 +47,7 @@ import {
   type SettingsTab,
 } from "./settings_panel";
 import { WorkspaceInspector, type InspectorTab } from "./workspace_panels";
+import { aboutExtraRows, type FetchOutcome } from "./about_rows";
 import {
   markDefaultSession,
   readDefaultSessions,
@@ -94,6 +96,8 @@ import {
   type QueueIntent,
 } from "./app_state";
 
+const APP_IDENTITY = appIdentity("abstractcode", __APP_VERSION__);
+
 const terminal = (status: string) =>
   ["completed", "failed", "cancelled", "canceled"].includes(status);
 function route(): { sessionId: string; runId: string } {
@@ -125,6 +129,19 @@ export function CodeWorkspace() {
     defaults: { theme: "observer-night" },
   });
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  // `GET /api/gateway/about`, fetched each time the About dialog opens.
+  const [gatewayAbout, setGatewayAbout] = useState<FetchOutcome>();
+  const refreshGatewayAbout = useCallback(() => {
+    void gatewayRequest("/api/gateway/about")
+      .then((value) => setGatewayAbout({ ok: true, value }))
+      .catch((reason) =>
+        setGatewayAbout({
+          ok: false,
+          status: reason?.status,
+          message: formatError(reason),
+        }),
+      );
+  }, []);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [voicePreferences, setVoicePreferences] = useState<VoicePreferences>(
     {},
@@ -1042,6 +1059,14 @@ export function CodeWorkspace() {
           </div>
           <AfTopBarActions
             appearance={{ onOpen: () => setAppearanceOpen(true) }}
+            about={{
+              identity: APP_IDENTITY,
+              extraRows: aboutExtraRows({
+                capabilities: catalog.capabilitiesOutcome,
+                about: gatewayAbout,
+              }),
+              onOpen: refreshGatewayAbout,
+            }}
             extraActions={
               <button
                 className={`af-topbar__btn${inspectorOpen ? " is-active" : ""}`}

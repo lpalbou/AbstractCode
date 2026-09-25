@@ -1,6 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 import { resolve } from "path";
+import { readFileSync } from "fs";
 import { loadEnv, type Plugin } from "vite";
 // The published runtime is intentionally Node-builtins-only. Its middleware
 // is shared here so development cannot bypass the app-cookie session exchange.
@@ -15,8 +16,15 @@ function codeGatewayPlugin(env: Record<string, string>): Plugin {
   };
 }
 
+// The About dialog's version: the package.json this build ships as, for the
+// app and for tests alike (no runtime fallback; a missing define fails tsc).
+const APP_VERSION = String(
+  JSON.parse(readFileSync(resolve(__dirname, "package.json"), "utf8")).version,
+);
+
 export default defineConfig(({ mode }) => ({
   base: "./",
+  define: { __APP_VERSION__: JSON.stringify(APP_VERSION) },
   plugins: [
     react(),
     codeGatewayPlugin({

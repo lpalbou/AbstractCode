@@ -3,6 +3,9 @@
 import type React from "react";
 
 declare global {
+  /** web/package.json "version", injected by vite.config.ts (build and tests). */
+  const __APP_VERSION__: string;
+
   interface ImportMetaEnv {
     readonly VITE_MONITOR_GPU?: string;
   }

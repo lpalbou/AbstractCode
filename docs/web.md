@@ -14,7 +14,7 @@ Start with [getting started](getting-started.md). For hosting and authentication
 - **Activity** shows durable workflow steps and tool arguments/results.
 - **Artifacts** downloads files stored with the selected run.
 
-Use the appearance control in the header to choose an AbstractUIC theme. On narrow screens, conversation navigation and the inspector open on demand.
+Use the appearance control in the header to choose an AbstractUIC theme. The **About** button next to it shows this app's version, the AbstractFramework links (website, source, documentation, issues, feedback), and the versions your gateway reports; when the gateway cannot answer, it shows "Gateway: unavailable" with the HTTP status. On narrow screens, conversation navigation and the inspector open on demand.
 
 MTP depth is independent of reasoning. Leave it on **Inherit** to follow workflow and
 execution-host defaults, choose **Off** to send an explicit `false`, or request an advertised

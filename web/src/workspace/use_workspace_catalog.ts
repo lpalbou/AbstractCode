@@ -16,6 +16,7 @@ import {
   reconcileVisualFlowSchema,
 } from "./input_schema";
 import { defaultTextRoute } from "./model_discovery";
+import type { FetchOutcome } from "./about_rows";
 import {
   gatewayDefaultFromEnvelope,
   type GatewayDefaultState,
@@ -34,6 +35,8 @@ type CatalogState = {
   defaultModel?: { provider: string; model: string };
   /** `default_agent_workflows["abstractcode.agent.v1"]` of the `/bundles` envelope. */
   gatewayDefault: GatewayDefaultState;
+  /** `/discovery/capabilities` as fetched (package versions for About). */
+  capabilitiesOutcome?: FetchOutcome;
 };
 const empty: CatalogState = {
   gatewayDefault: { status: "loading" },
@@ -113,6 +116,14 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       capabilities: capabilityContracts(value(4)),
       defaultModel: defaultTextRoute(value(6)),
       gatewayDefault: gatewayDefaultFromEnvelope(value(0)),
+      capabilitiesOutcome:
+        result[4].status === "fulfilled"
+          ? { ok: true, value: value(4) }
+          : {
+              ok: false,
+              status: (result[4] as PromiseRejectedResult).reason?.status,
+              message: formatError((result[4] as PromiseRejectedResult).reason),
+            },
       loading: false,
       errors,
       hasMore: Boolean(value(3)?.has_more),

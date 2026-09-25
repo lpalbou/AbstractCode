@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preview pane (Markdown, JSON, images, HTML as source, text; download for
   other files). Any file can be attached to the next message. Admins keep
   the operator's shared folder as **Shared workspace (admin)**.
+- **Web: About dialog.** The header's About button shows AbstractCode's
+  version, the AbstractFramework website, author and links (website,
+  source, documentation, report an issue, give feedback), plus the
+  AbstractFramework and package versions the connected gateway reports, or
+  "Gateway: unavailable (HTTP <status>)" when it cannot. Requires
+  `@abstractframework/ui-kit` 0.1.12.
 - **Web: an empty Skills tab explains itself.** It shows the gateway's
   reasons in full, the skill shelf location and its source, instead of
   "This gateway has no skills available."
