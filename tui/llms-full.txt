@@ -387,9 +387,8 @@ gateway until you answer.
    use it — **MTP** (multi-token prediction): Inherit, Off, or a native draft
    depth. For any other model the picker ends after the reasoning step and the
    transcript says why ("<model> cannot use MTP", or "MTP support unknown:
-   <error>"). The current choice is pre-selected; `Esc` keeps it. The last row
-   of the provider list opens the MTP step for the current route either way,
-   and `/mtp` still works on its own. All these choices persist across
+   <error>"). The current choice is pre-selected; `Esc` keeps it. `/mtp` opens
+   the MTP step for the current route either way. All these choices persist across
    launches.
    **Streamed replies:** when the gateway streams, the reply appears under the
    transcript as the model writes it and the recorded reply replaces it when
@@ -871,8 +870,9 @@ dial; `Esc` at either step moves on / keeps the current value) — but only for 
 gateway's capability answer reports MTP-capable (`execution.speculation.supported: true`).
 Otherwise `/model` ends after the reasoning step with one transcript line: "<model> cannot
 use MTP — /mtp still lets you set it", or "MTP support unknown: <error> — …" when the check
-failed or reported nothing. The last row of the provider list and `/mtp` open the step for
-the current route regardless. The picker only offers depths the execution host advertises;
+failed or reported nothing. `/mtp` opens the step for the current route regardless. The
+provider list itself shows providers only — MTP is a feature of a provider's inference
+engine, not a provider. The picker only offers depths the execution host advertises;
 unknown capabilities and head-not-ready/reload reasons remain visible. A saved unavailable
 depth is retained, not silently replaced. Typed depths are explicit requests, not a claim
 that the current backend can execute them: the host validates them and refuses unsupported
@@ -2032,8 +2032,13 @@ All notable changes to this project are documented here. The format follows
 - **`/model` asks about MTP only for a model that can use it.** The MTP step
   follows the reasoning step only when the gateway reports the chosen model
   MTP-capable; otherwise the picker ends there and the transcript says why
-  ("<model> cannot use MTP", or "MTP support unknown: <error>"). The
-  provider list's MTP row, `/mtp` and `--mtp` are unchanged.
+  ("<model> cannot use MTP", or "MTP support unknown: <error>"). `/mtp` and
+  `--mtp` are unchanged.
+- **The `/model` provider list shows providers only.** The "MTP
+  (multi-token prediction): … — Enter to change" row is gone: MTP is a
+  feature of a provider's inference engine, not a provider. It is set in the
+  MTP step after the reasoning step (MTP-capable models) or with `/mtp` /
+  `--mtp`.
 - **`--permissions` and `--require-approval` now apply to the interactive
   app too**, not only to `exec`: they set this launch's tool permissions
   (saved `/permissions` level and pins are overridden for the launch, not

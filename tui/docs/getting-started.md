@@ -88,9 +88,8 @@ gateway until you answer.
    use it — **MTP** (multi-token prediction): Inherit, Off, or a native draft
    depth. For any other model the picker ends after the reasoning step and the
    transcript says why ("<model> cannot use MTP", or "MTP support unknown:
-   <error>"). The current choice is pre-selected; `Esc` keeps it. The last row
-   of the provider list opens the MTP step for the current route either way,
-   and `/mtp` still works on its own. All these choices persist across
+   <error>"). The current choice is pre-selected; `Esc` keeps it. `/mtp` opens
+   the MTP step for the current route either way. All these choices persist across
    launches.
    **Streamed replies:** when the gateway streams, the reply appears under the
    transcript as the model writes it and the recorded reply replaces it when

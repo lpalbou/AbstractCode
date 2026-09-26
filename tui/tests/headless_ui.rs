@@ -10144,8 +10144,7 @@ fn reasoning_stage_probes_selects_and_route_change_resets() {
 
     // ROUTE CHANGE RESETS (the coupling rule): pick the OTHER model,
     // Esc at stage 3 — the override must be gone, prefs cleared. Stage 1
-    // opens ON the current provider (the MTP row now sits below the last
-    // provider, so no Down here).
+    // opens ON the current provider, so no Down here.
     h.type_text("/model");
     h.turn();
     h.press_enter();
@@ -12406,10 +12405,11 @@ fn files_modal_surfaces_a_missing_route() {
     assert!(!screen.contains("(empty folder)"), "{screen}");
 }
 
-/// The operator's correction: MTP is a real step of `/model`, not a hint.
-/// Stage 1 carries an MTP row; after model + reasoning the MTP step opens
-/// with the CURRENT request pre-selected; a choice persists exactly like
-/// `/mtp` and shows in the header. Removing the step/row fails this test.
+/// MTP is a step of `/model` for an MTP-capable model, never a provider-list
+/// row (operator ruling 2026-09-26: "it's a feature of a provider/an
+/// inferencer"). After model + reasoning the MTP step opens with the
+/// CURRENT request pre-selected; a choice persists exactly like `/mtp` and
+/// shows in the header. A provider-list MTP row fails this test.
 #[test]
 fn model_picker_offers_mtp_as_a_step_and_persists_it() {
     let mut h = harness_sized(Size::new(130, 34));
@@ -12424,9 +12424,10 @@ fn model_picker_offers_mtp_as_a_step_and_persists_it() {
     h.turn();
     h.press_enter();
     let screen = h.turn();
+    assert!(screen.contains("provider —"), "stage 1 open:\n{screen}");
     assert!(
-        screen.contains("MTP (multi-token prediction): Inherit — Enter to change"),
-        "stage 1 carries the MTP row:\n{screen}"
+        !screen.contains("MTP"),
+        "the provider list shows providers only — no MTP row:\n{screen}"
     );
     // Provider -> model -> reasoning (Enter = gateway default) -> MTP.
     h.term.push_input(b"\x1b[B");
@@ -12494,13 +12495,9 @@ fn model_picker_offers_mtp_as_a_step_and_persists_it() {
         "header chip:\n{screen}"
     );
 
-    // Reopening from the stage-1 row pre-selects the saved choice; a model
+    // `/mtp` reopens the step with the saved choice pre-selected; a model
     // that cannot use MTP says so on a row (the control stays).
-    h.type_text("/model");
-    h.turn();
-    h.press_enter();
-    h.turn();
-    h.term.push_input(b"\x1b[B\x1b[B"); // defaults, mlx, → MTP row
+    h.type_text("/mtp");
     h.turn();
     h.press_enter();
     h.turn();

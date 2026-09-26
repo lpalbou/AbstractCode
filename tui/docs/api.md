@@ -121,8 +121,9 @@ dial; `Esc` at either step moves on / keeps the current value) — but only for 
 gateway's capability answer reports MTP-capable (`execution.speculation.supported: true`).
 Otherwise `/model` ends after the reasoning step with one transcript line: "<model> cannot
 use MTP — /mtp still lets you set it", or "MTP support unknown: <error> — …" when the check
-failed or reported nothing. The last row of the provider list and `/mtp` open the step for
-the current route regardless. The picker only offers depths the execution host advertises;
+failed or reported nothing. `/mtp` opens the step for the current route regardless. The
+provider list itself shows providers only — MTP is a feature of a provider's inference
+engine, not a provider. The picker only offers depths the execution host advertises;
 unknown capabilities and head-not-ready/reload reasons remain visible. A saved unavailable
 depth is retained, not silently replaced. Typed depths are explicit requests, not a claim
 that the current backend can execute them: the host validates them and refuses unsupported

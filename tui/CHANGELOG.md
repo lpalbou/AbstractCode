@@ -13,8 +13,13 @@ All notable changes to this project are documented here. The format follows
 - **`/model` asks about MTP only for a model that can use it.** The MTP step
   follows the reasoning step only when the gateway reports the chosen model
   MTP-capable; otherwise the picker ends there and the transcript says why
-  ("<model> cannot use MTP", or "MTP support unknown: <error>"). The
-  provider list's MTP row, `/mtp` and `--mtp` are unchanged.
+  ("<model> cannot use MTP", or "MTP support unknown: <error>"). `/mtp` and
+  `--mtp` are unchanged.
+- **The `/model` provider list shows providers only.** The "MTP
+  (multi-token prediction): … — Enter to change" row is gone: MTP is a
+  feature of a provider's inference engine, not a provider. It is set in the
+  MTP step after the reasoning step (MTP-capable models) or with `/mtp` /
+  `--mtp`.
 - **`--permissions` and `--require-approval` now apply to the interactive
   app too**, not only to `exec`: they set this launch's tool permissions
   (saved `/permissions` level and pins are overridden for the launch, not

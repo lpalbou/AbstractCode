@@ -1210,27 +1210,6 @@ fn workflow_row(w: &crate::store::Workflow, current: &crate::store::Workflow) ->
     )
 }
 
-/// The `/model` picker's MTP ROW (stage 1, after the providers): the
-/// current multi-token prediction request; Enter opens the MTP step for the
-/// current route. Pure; test-pinned.
-pub fn mtp_entry_row(speculation: Option<&serde_json::Value>) -> String {
-    format!(
-        "  MTP (multi-token prediction): {} — Enter to change",
-        crate::speculation::label(speculation)
-    )
-}
-
-/// Stage-1 rows: gateway defaults, the providers, then the MTP row.
-fn model_picker_rows(
-    providers: &[crate::store::ProviderInfo],
-    cur_provider: &str,
-    speculation: Option<&serde_json::Value>,
-) -> Vec<String> {
-    let mut rows = provider_rows(providers, cur_provider);
-    rows.push(mtp_entry_row(speculation));
-    rows
-}
-
 /// Stage 1: pick a provider (or reset to gateway defaults). Stage 2 (for a
 /// provider with models) picks the model. Empty provider/model strings mean
 /// "the gateway routes" — the default posture. Arrows browse; Enter chooses.
@@ -1240,11 +1219,10 @@ pub fn open_model_picker(cx: Scope, store: Store, ctx: &UiCtx) {
         store.notify("no providers discovered yet — /model again after the gateway catalog loads");
     }
     let cur_provider = store.provider.get_untracked();
-    let labels: Vec<String> = model_picker_rows(
-        &providers,
-        &cur_provider,
-        store.speculation.get_untracked().as_ref(),
-    );
+    // Providers only (operator ruling 2026-09-26): MTP is a feature of a
+    // provider/inferencer, never a row here. It is reached through the MTP
+    // step after reasoning (MTP-capable models) and `/mtp` / `--mtp`.
+    let labels: Vec<String> = provider_rows(&providers, &cur_provider);
     let start = if cur_provider.is_empty() {
         0
     } else {
@@ -1266,10 +1244,7 @@ pub fn open_model_picker(cx: Scope, store: Store, ctx: &UiCtx) {
             // is open (the boot probe + /model race) — rows follow.
             live: Some(Rc::new(move || {
                 let cur = store.provider.get();
-                let spec = store.speculation.get();
-                store
-                    .providers
-                    .with(|ps| model_picker_rows(ps, &cur, spec.as_ref()))
+                store.providers.with(|ps| provider_rows(ps, &cur))
             })),
             start,
             size,
@@ -1285,12 +1260,6 @@ pub fn open_model_picker(cx: Scope, store: Store, ctx: &UiCtx) {
                     // Gateway defaults: the MTP step only when the model
                     // the gateway routes to can use it.
                     offer_mtp_step(store, ctx);
-                    return;
-                }
-                // The MTP row (last): straight to the MTP step for the
-                // current route, route unchanged.
-                if ix == store.providers.with_untracked(|ps| ps.len()) + 1 {
-                    open_mtp_stage(cx, store, ctx);
                     return;
                 }
                 // Re-read at activation (live rows rebuilt from the
@@ -1455,8 +1424,8 @@ fn mtp_labels(store: Store) -> Vec<String> {
     mtp_row_labels(&mtp_rows(store), store.speculation.get().as_ref())
 }
 
-/// The MTP step — opened by `/mtp` and as the LAST step of `/model` (and
-/// from its MTP row). Choices come from the gateway's execution
+/// The MTP step — opened by `/mtp` and as the LAST step of `/model` for an
+/// MTP-capable model (`offer_mtp_step`). Choices come from the gateway's execution
 /// capabilities for the current route: Inherit and Off always, native depths
 /// only when the gateway reports them; an unsupported or unknown model says
 /// so on a row instead of hiding the control. The current request is

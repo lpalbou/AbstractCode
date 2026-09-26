@@ -589,11 +589,6 @@ mod tests {
         assert!(crate::cli::usage().contains("--mtp <DEPTH|off|inherit>  multi-token prediction"));
         assert_eq!(parse("/mtp 3"), Some(Command::Mtp(Some("3".into()))));
         assert_eq!(parse("/speculation"), Some(Command::Mtp(None)));
-        assert_eq!(
-            crate::ui::modals::mtp_entry_row(None),
-            "  MTP (multi-token prediction): Inherit — Enter to change"
-        );
-        assert!(crate::ui::modals::mtp_entry_row(Some(&serde_json::json!(false))).contains("Off"));
     }
 
     #[test]
