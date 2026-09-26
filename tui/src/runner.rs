@@ -5821,6 +5821,160 @@ mod tests {
         root.dispose();
     }
 
+    /// REVIEW/17: a run can END with a live bubble still open and NO
+    /// `delta_end` (the terminal status wins the race). Each ending path
+    /// must clear the bubble on its own — a stream `done` for the ROOT, a
+    /// terminal SUBRUN concluding the turn, and a terminal ledger record.
+    fn sse_done_only() -> String {
+        "event: done\ndata: {}\n\n".to_string()
+    }
+
+    fn drain_until(mut done: impl FnMut() -> bool) -> bool {
+        for _ in 0..300 {
+            abstracttui::reactive::drain_posted();
+            if done() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        false
+    }
+
+    #[test]
+    fn a_root_done_frame_clears_an_open_bubble_without_delta_end() {
+        // The live frame rides the SAME connection as the `done` (a bubble
+        // placed before `stream_run` would be dropped by the connect reset
+        // and prove nothing about the terminal clear).
+        let sse = concat!(
+            "event: llm.delta\ndata: {\"run_id\":\"root1\",\"root_run_id\":\"root1\",\"node_id\":\"reason\",\"call_id\":\"c1\",\"seq\":1,\"text\":\"never ended\",\"channel\":\"content\",\"snapshot\":false}\n\n",
+            "event: done\ndata: {}\n\n",
+        );
+        let url = fake_gateway(vec![
+            ("/runs/root1/ledger/stream", sse.to_string()),
+            (
+                "/runs/root1/ledger",
+                r#"{"items": [], "next_after": 0}"#.into(),
+            ),
+            ("/runs/root1", r#"{"status": "failed"}"#.into()),
+        ]);
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = crate::store::Store::create(cx);
+            let (tx, _rx) = std::sync::mpsc::channel::<Cmd>();
+            store.session_id.set("s1".into());
+            apply_start_binding(&store, &tx, "root1", "s1");
+            // Peak bubble count, observed on every live write.
+            let peak = std::rc::Rc::new(std::cell::Cell::new(0usize));
+            {
+                let peak = peak.clone();
+                cx.effect(move || {
+                    let n = store.live.with(|l| l.entries().len());
+                    peak.set(peak.get().max(n));
+                });
+            }
+            stream_run(
+                GatewayClient::new(&url, None),
+                abstracttui::reactive::wake_handle(),
+                store,
+                tx.clone(),
+                "root1".into(),
+                "root1".into(),
+                true,
+                Arc::new(AtomicBool::new(false)),
+                0,
+            );
+            assert!(
+                drain_until(|| store.phase.get_untracked() == Phase::Idle),
+                "the terminal status landed"
+            );
+            assert!(
+                peak.get() >= 1,
+                "the bubble really opened before the terminal"
+            );
+            assert!(
+                live_texts(&store).is_empty(),
+                "the root's terminal clears the open bubble: {:?}",
+                live_texts(&store)
+            );
+        });
+        root.dispose();
+    }
+
+    #[test]
+    fn a_terminal_subrun_clears_an_open_bubble_without_delta_end() {
+        let url = fake_gateway(vec![
+            ("/runs/agent1/ledger/stream", sse_done_only()),
+            (
+                "/runs/agent1/ledger",
+                r#"{"items": [], "next_after": 0}"#.into(),
+            ),
+            ("/runs/agent1", r#"{"status": "failed"}"#.into()),
+        ]);
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = crate::store::Store::create(cx);
+            let (tx, _rx) = std::sync::mpsc::channel::<Cmd>();
+            store.session_id.set("s1".into());
+            apply_start_binding(&store, &tx, "root1", "s1");
+            apply_stream_records(&store, &tx, "root1", "root1", &[wrapper_wait_record()]);
+            // The agent subrun starts a reason cycle (answer-source binding).
+            apply_stream_records(
+                &store,
+                &tx,
+                "root1",
+                "agent1",
+                &[
+                    json!({"run_id": "agent1", "step_id": "c1", "node_id": "reason",
+                         "status": "started", "effect": {"type": "llm_call", "payload": {}}}),
+                ],
+            );
+            apply_live_event(&store, "root1", live("c1", 1, "never ended", false));
+            assert_eq!(live_texts(&store).len(), 1, "an open bubble");
+            stream_run(
+                GatewayClient::new(&url, None),
+                abstracttui::reactive::wake_handle(),
+                store,
+                tx.clone(),
+                "root1".into(),
+                "agent1".into(),
+                false,
+                Arc::new(AtomicBool::new(false)),
+                0,
+            );
+            assert!(
+                drain_until(|| store.fold.with_untracked(|f| f.finished)),
+                "the failed answer-source concluded the turn"
+            );
+            assert!(
+                live_texts(&store).is_empty(),
+                "the subrun's terminal clears the open bubble: {:?}",
+                live_texts(&store)
+            );
+        });
+        root.dispose();
+    }
+
+    #[test]
+    fn a_terminal_ledger_record_clears_an_open_bubble_without_delta_end() {
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = crate::store::Store::create(cx);
+            let (tx, _rx) = std::sync::mpsc::channel::<Cmd>();
+            store.session_id.set("s1".into());
+            apply_start_binding(&store, &tx, "root1", "s1");
+            apply_stream_records(&store, &tx, "root1", "root1", &[wrapper_wait_record()]);
+            apply_live_event(&store, "root1", live("c9", 1, "never ended", false));
+            assert_eq!(live_texts(&store).len(), 1, "an open bubble");
+            // The answer-source's conclusion record ends the turn while the
+            // live call c9 never got a record or a delta_end.
+            apply_stream_records(&store, &tx, "root1", "agent1", &agent_answer_records());
+            assert!(store.fold.with_untracked(|f| f.finished));
+            assert!(
+                live_texts(&store).is_empty(),
+                "the terminal record clears the open bubble: {:?}",
+                live_texts(&store)
+            );
+        });
+        root.dispose();
+    }
+
     #[test]
     fn subrun_conclusion_renders_the_root_still_open_overlay() {
         let (root, ()) = abstracttui::reactive::create_root(|cx| {
