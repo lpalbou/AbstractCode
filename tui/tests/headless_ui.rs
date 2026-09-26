@@ -12983,45 +12983,14 @@ fn a_reinvoked_call_shows_reply_restarted_and_the_rerun() {
 /// line says why — "cannot use MTP", or the failed check's error.
 #[test]
 fn model_flow_offers_mtp_only_for_a_capable_model_and_says_why_otherwise() {
+    // Each scenario runs on its OWN thread: abstracttui's reactive graph and
+    // its `after` timers are thread-local, so a toast timer armed by one
+    // harness would otherwise fire inside the next one on a slow runner
+    // (Linux CI) and touch the first harness's disposed signals.
     let run = |payload: Value| -> (String, String) {
-        let mut h = harness_sized(Size::new(130, 34));
-        h.turn();
-        h.store
-            .providers
-            .set(vec![abstractcode::store::ProviderInfo {
-                name: "mlx".into(),
-                models: vec!["qwen3-4b".into()],
-            }]);
-        h.type_text("/model");
-        h.turn();
-        h.press_enter();
-        h.turn();
-        h.term.push_input(b"\x1b[B"); // mlx
-        h.turn();
-        h.press_enter();
-        h.turn();
-        h.term.push_input(b"\x1b[B"); // qwen3-4b
-        h.turn();
-        h.press_enter();
-        h.turn();
-        h.turn();
-        h.press_enter(); // reasoning: gateway default
-        h.turn();
-        answer_mtp_probe(&mut h, payload);
-        let screen = h.turn();
-        let infos = h.store.fold.with_untracked(|f| {
-            f.items
-                .iter()
-                .filter_map(|i| match i {
-                    abstractcode::transcript::Item::Info { text } if text.contains("MTP") => {
-                        Some(text.clone())
-                    }
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        });
-        (screen, infos)
+        std::thread::spawn(move || run_mtp_offer_scenario(payload))
+            .join()
+            .expect("scenario thread")
     };
     let (screen, infos) = run(mtp_supported());
     assert!(
@@ -13050,4 +13019,45 @@ fn model_flow_offers_mtp_only_for_a_capable_model_and_says_why_otherwise() {
         infos,
         "MTP support unknown: gateway timed out — /mtp still lets you set it"
     );
+}
+
+fn run_mtp_offer_scenario(payload: Value) -> (String, String) {
+    let mut h = harness_sized(Size::new(130, 34));
+    h.turn();
+    h.store
+        .providers
+        .set(vec![abstractcode::store::ProviderInfo {
+            name: "mlx".into(),
+            models: vec!["qwen3-4b".into()],
+        }]);
+    h.type_text("/model");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[B"); // mlx
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[B"); // qwen3-4b
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.turn();
+    h.press_enter(); // reasoning: gateway default
+    h.turn();
+    answer_mtp_probe(&mut h, payload);
+    let screen = h.turn();
+    let infos = h.store.fold.with_untracked(|f| {
+        f.items
+            .iter()
+            .filter_map(|i| match i {
+                abstractcode::transcript::Item::Info { text } if text.contains("MTP") => {
+                    Some(text.clone())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
+    (screen, infos)
 }
