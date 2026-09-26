@@ -11509,6 +11509,7 @@ fn resources_modal_renders_host_facts_and_unload_confirms_before_sending() {
         session_caches: true,
         modality_labels: vec![("text-generation".into(), "LLM".into())],
         package_versions: Vec::new(),
+        ..Default::default()
     }));
     let facts = abstractcode::discovery::host_state_from_response(&serde_json::json!({
         "ok": true,
@@ -11792,6 +11793,7 @@ fn resources_head_is_visible_at_the_default_size_and_never_scrolls_away() {
         session_caches: true,
         modality_labels: Vec::new(),
         package_versions: Vec::new(),
+        ..Default::default()
     }));
     // Enough rows that the panel is comfortably taller than the window.
     let caches: Vec<serde_json::Value> = (0..20)
@@ -11881,6 +11883,7 @@ fn resources_tail_is_reachable_and_shrink_keeps_cursor_and_action_aligned() {
         session_caches: true,
         modality_labels: Vec::new(),
         package_versions: Vec::new(),
+        ..Default::default()
     }));
     let caches: Vec<serde_json::Value> = (0..30)
         .map(|i| {
@@ -12562,4 +12565,231 @@ fn workspace_root_follows_the_gateway_verdict_and_the_stored_preference() {
     h.turn();
     assert_eq!(h.prefs.borrow().send_local_workspace, "always");
     assert_eq!(start_root(&mut h).as_deref(), Some("/tmp/ws"));
+}
+
+// ---------------------------------------------------------------------------
+// Live replies (contract S): the streamed bubble under the transcript, the
+// "Stream replies" setting's chip and picker.
+// ---------------------------------------------------------------------------
+
+fn live_delta(
+    call: &str,
+    seq: u64,
+    text: &str,
+    channel: &str,
+    truncated: bool,
+) -> abstractcode::live::LiveEvent {
+    let data = serde_json::json!({
+        "run_id": "root", "root_run_id": "root", "node_id": "reason",
+        "call_id": call, "seq": seq, "text": text, "channel": channel,
+        "snapshot": false, "truncated": truncated,
+    });
+    abstractcode::live::parse_event("llm.delta", &data.to_string())
+        .expect("valid frame")
+        .expect("a live event")
+}
+
+fn start_live_turn(h: &mut Harness) {
+    h.leave_splash();
+    let store = h.store;
+    store.phase.set(Phase::Running);
+    store.run_id.set("root".into());
+    store.fold.update(|f| {
+        f.begin_run("root");
+        f.push_item(abstractcode::transcript::Item::User {
+            text: "explain streaming".into(),
+        });
+    });
+    h.turn();
+}
+
+#[test]
+fn a_streamed_reply_renders_live_and_the_record_replaces_it() {
+    use abstractcode::runner::{apply_live_event, reset_live_on_connect, retire_live_replies};
+    let mut h = harness();
+    start_live_turn(&mut h);
+    let store = h.store;
+    reset_live_on_connect(&store, "root");
+    apply_live_event(
+        &store,
+        "root",
+        live_delta("c1", 1, "Streaming **bold**", "content", false),
+    );
+    let screen = h.turn();
+    assert!(screen.contains("reply · reason"), "caption:\n{screen}");
+    assert!(screen.contains("streaming…"), "state:\n{screen}");
+    assert!(
+        screen.contains("Streaming bold"),
+        "markdown text rendered:\n{screen}"
+    );
+
+    // More deltas grow the SAME bubble.
+    apply_live_event(
+        &store,
+        "root",
+        live_delta("c1", 2, " words keep arriving", "content", false),
+    );
+    let screen = h.turn();
+    assert!(
+        screen.contains("Streaming bold words keep arriving"),
+        "{screen}"
+    );
+    assert_eq!(
+        screen.matches("reply · reason").count(),
+        1,
+        "one bubble:\n{screen}"
+    );
+
+    // Reasoning shows collapsed in the header, never in the reply text.
+    apply_live_event(
+        &store,
+        "root",
+        live_delta("c1", 3, "weighing options", "reasoning", false),
+    );
+    let screen = h.turn();
+    assert!(screen.contains("∴ thinking: weighing options"), "{screen}");
+    assert!(!screen.contains("arrivingweighing"), "{screen}");
+
+    // A truncated frame is SAID.
+    apply_live_event(&store, "root", live_delta("c1", 4, ".", "content", true));
+    let screen = h.turn();
+    assert!(screen.contains("[#TRUNCATION]"), "{screen}");
+
+    // The durable llm_call record retires the bubble.
+    let recs = vec![serde_json::json!({
+        "run_id": "root", "step_id": "c1", "node_id": "reason", "status": "completed",
+        "effect": {"type": "llm_call", "payload": {}}, "result": {}
+    })];
+    store.fold.update(|f| {
+        for r in &recs {
+            let _ = f.apply("root", r);
+        }
+    });
+    retire_live_replies(&store, "root", "root", &recs);
+    let screen = h.turn();
+    assert!(!screen.contains("streaming…"), "bubble gone:\n{screen}");
+    assert!(!screen.contains("keep arriving"), "{screen}");
+
+    // A failed stream disappears with its reason in the transcript.
+    apply_live_event(
+        &store,
+        "root",
+        live_delta("c2", 1, "half a thought", "content", false),
+    );
+    assert!(h.turn().contains("half a thought"));
+    let end = abstractcode::live::parse_event(
+        "llm.delta_end",
+        r#"{"run_id":"root","root_run_id":"root","node_id":"reason","call_id":"c2","seq":2,"reason":"failed"}"#,
+    )
+    .unwrap()
+    .unwrap();
+    apply_live_event(&store, "root", end);
+    let screen = h.turn();
+    assert!(!screen.contains("half a thought"), "{screen}");
+    assert!(
+        screen.contains("live reply failed"),
+        "reason visible:\n{screen}"
+    );
+}
+
+#[test]
+fn a_new_turn_never_shows_the_previous_turns_bubble() {
+    use abstractcode::runner::apply_live_event;
+    let mut h = harness();
+    start_live_turn(&mut h);
+    let store = h.store;
+    apply_live_event(
+        &store,
+        "root",
+        live_delta("c1", 1, "old turn text", "content", false),
+    );
+    assert!(h.turn().contains("old turn text"));
+    // The next run begins before any live frame of its own arrives.
+    store.fold.update(|f| f.begin_run("root-2"));
+    let screen = h.turn();
+    assert!(!screen.contains("old turn text"), "{screen}");
+}
+
+#[test]
+fn stream_setting_chip_picker_and_persistence() {
+    let mut h = harness_sized(Size::new(180, 30));
+    h.leave_splash();
+    let store = h.store;
+    store
+        .host_contracts
+        .set(Some(abstractcode::store::HostContracts {
+            deltas: true,
+            streaming_default: Some(false),
+            ..Default::default()
+        }));
+    let screen = h.turn();
+    assert!(
+        !screen.contains("stream on") && !screen.contains("stream off"),
+        "default is silent:\n{screen}"
+    );
+
+    h.type_text("/stream on");
+    h.press_enter();
+    h.turn();
+    let screen = h.turn();
+    assert_eq!(
+        store.stream_replies.get_untracked(),
+        abstractcode::streaming::StreamReplies::On
+    );
+    assert_eq!(
+        h.prefs.borrow().stream_replies,
+        abstractcode::streaming::StreamReplies::On,
+        "saved to prefs"
+    );
+    assert!(screen.contains("stream on"), "header chip:\n{screen}");
+
+    // The bare command opens the picker, naming the gateway's own default.
+    h.type_text("/stream");
+    h.press_enter();
+    h.turn();
+    let screen = h.turn();
+    assert!(screen.contains("Stream replies"), "{screen}");
+    assert!(
+        screen.contains("Gateway default (currently off)"),
+        "{screen}"
+    );
+    assert!(screen.contains("● On"), "current marked:\n{screen}");
+
+    // A gateway without the capability: the chip says why nothing streams.
+    store
+        .host_contracts
+        .set(Some(abstractcode::store::HostContracts::default()));
+    h.press_escape();
+    let screen = h.turn();
+    assert!(
+        screen.contains("stream on (gateway has no live replies)"),
+        "{screen}"
+    );
+}
+
+#[test]
+fn start_opts_carry_stream_only_for_an_advertising_gateway() {
+    let mut h = harness();
+    h.leave_splash();
+    let store = h.store;
+    store
+        .stream_replies
+        .set(abstractcode::streaming::StreamReplies::On);
+    store
+        .host_contracts
+        .set(Some(abstractcode::store::HostContracts {
+            deltas: true,
+            ..Default::default()
+        }));
+    h.turn();
+    h.type_text("hello there");
+    h.press_enter();
+    h.turn();
+    let cmd = h
+        .find_cmd(|c| matches!(c, Cmd::Start { .. }))
+        .expect("start sent");
+    let Cmd::Start { opts, .. } = cmd else {
+        unreachable!()
+    };
+    assert_eq!(opts.stream, Some(true));
 }

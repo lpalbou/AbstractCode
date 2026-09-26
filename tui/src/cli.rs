@@ -78,6 +78,12 @@ pub struct Args {
     /// Validated at parse; empty = gateway default.
     pub reasoning: Option<String>,
     pub mtp: Option<String>,
+    /// `--stream <on|off|default>` — stream replies as they are written
+    /// (contract S). Interactive: seeds the session (`/stream` changes and
+    /// saves it). `exec`: the flag alone decides — the saved preference is
+    /// not consulted for scripted runs — and `on` prints the reply to
+    /// stdout as it arrives. `None` = not given.
+    pub stream: Option<crate::streaming::StreamReplies>,
     /// `--ungated` — run a gating-capable workflow (the multi-agent
     /// coder) unattended, skipping its human-approval pauses
     /// (`gating_mode=auto`). REFUSED unless `--permissions` is also set
@@ -143,6 +149,9 @@ OPTIONS:
   --mtp <DEPTH|off|inherit>  multi-token prediction (MTP) draft depth for runs;
                           needs native support on the selected host (/mtp in
                           the app shows what the model supports)
+  --stream <on|off|default>  stream replies as the model writes them (default:
+                          your /stream choice, else the gateway's default);
+                          exec: `on` prints the reply to stdout live
   --ungated               run a gating-capable workflow unattended (skips its
                           human approval pauses); requires --permissions
   --workflow <B[:F]>      agent workflow bundle[:flow], or `default` for the
@@ -204,6 +213,8 @@ CONFIG (prefs.json — the TUI writes it; headless `exec` reads the SAME file):
   workspace_allowed             extra allowlisted roots sent as
                                 workspace_allowed_paths (/workspace).
   animation                     launch animation on/off (--animation).
+  stream_replies                gateway_default | on | off (/stream) — the TUI's
+                                "Stream replies" setting; exec uses --stream only.
   context_window                operator-declared model context window in
                                 tokens (/context; 0 = undeclared) — drives
                                 the footer's ctx used/window (%) meter.
@@ -273,6 +284,14 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
                 let value = take(a)?;
                 crate::speculation::parse(&value)?;
                 args.mtp = Some(value);
+            }
+            "--stream" | "--streaming" => {
+                let value = take(a)?;
+                args.stream = Some(
+                    crate::streaming::StreamReplies::parse(&value).ok_or_else(|| {
+                        format!("--stream takes on | off | default (got {value:?})")
+                    })?,
+                );
             }
             "--workflow" | "--agent" => args.workflow = Some(take(a)?),
             "--provider" => args.provider = Some(take(a)?),
@@ -579,6 +598,23 @@ mod tests {
         assert_eq!(args.prompt.as_deref(), Some("do things"));
         assert_eq!(args.permissions.as_deref(), Some("all"));
         assert_eq!(args.model.as_deref(), Some("m1"));
+    }
+
+    #[test]
+    fn stream_flag_takes_three_words_and_refuses_junk() {
+        use crate::streaming::StreamReplies;
+        let p = |v: &str| parse(&["exec".into(), "go".into(), "--stream".into(), v.into()]);
+        assert_eq!(p("on").unwrap().stream, Some(StreamReplies::On));
+        assert_eq!(p("off").unwrap().stream, Some(StreamReplies::Off));
+        assert_eq!(
+            p("default").unwrap().stream,
+            Some(StreamReplies::GatewayDefault)
+        );
+        assert!(p("loud")
+            .unwrap_err()
+            .contains("--stream takes on | off | default"));
+        assert_eq!(parse(&[]).unwrap().stream, None);
+        assert!(usage().contains("--stream <on|off|default>"));
     }
 
     /// ADR-0027 §2/§3 contract for the one wall-clock cap this binary owns.

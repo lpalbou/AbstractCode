@@ -3183,6 +3183,7 @@ pub(crate) fn apply_stream_records(
     if !current {
         return; // stale stream: no signal may change
     }
+    retire_live_replies(store, root, rid, records);
     store.totals.set(SessionTotals {
         input_tokens: session.input_tokens,
         output_tokens: session.output_tokens,
@@ -3215,7 +3216,103 @@ pub(crate) fn apply_stream_records(
     }
 }
 
+/// Live-reply upkeep after a folded record batch: a finished turn drops
+/// every bubble (the final answer replaces them), and each `llm_call`
+/// whose durable record just folded retires its bubble (the record's
+/// text replaces it). Touches the `live` signal only when a bubble is on
+/// screen — record batches are frequent and the live lane re-renders on
+/// every write.
+pub fn retire_live_replies(store: &Store, root: &str, rid: &str, records: &[Value]) {
+    let (on_screen, bound) = store
+        .live
+        .with_untracked(|l| (!l.is_empty(), l.root() == root));
+    if !on_screen || !bound {
+        return;
+    }
+    if store.fold.with_untracked(|f| f.finished) {
+        store.live.update(|l| {
+            l.clear();
+        });
+        return;
+    }
+    let closes = crate::live::durable_closes(rid, records);
+    let hit = store.live.with_untracked(|l| {
+        l.entries()
+            .iter()
+            .any(|e| closes.iter().any(|c| c.step_id == e.call_id))
+    });
+    if hit {
+        store.live.update(|l| {
+            l.retire_durable(&closes);
+        });
+    }
+}
+
+/// UI-thread half of one live frame from the ROOT run's stream (contract
+/// S). Dropped when the frame belongs to another tree or turn, when the
+/// turn already finished (no bubble after the final answer), or when the
+/// call's durable record is already folded (CONTRACTS.md S-2 §2) — except
+/// an `unavailable` end, which by ordering always follows the record and
+/// must still be said. A bubble taken down for failure/cancel/unavailable
+/// leaves a one-line note in the transcript.
+pub fn apply_live_event(store: &Store, root: &str, ev: crate::live::LiveEvent) {
+    use crate::live::{EndReason, LiveEnd, LiveEvent};
+    if !ev.root_run_id().is_empty() && ev.root_run_id() != root {
+        return;
+    }
+    let (current, finished, closed) = store.fold.with_untracked(|f| {
+        (
+            f.root_run_id() == root,
+            f.finished,
+            f.llm_call_closed(ev.call_id()),
+        )
+    });
+    let unavailable = matches!(
+        ev,
+        LiveEvent::End(LiveEnd {
+            reason: EndReason::Unavailable(_),
+            ..
+        })
+    );
+    if !current || finished || (closed && !unavailable) {
+        return;
+    }
+    let mut note = None;
+    store.live.update(|l| {
+        l.bind_root(root);
+        note = l.apply(ev);
+    });
+    if let Some(text) = note {
+        store.fold.update(|f| {
+            if f.root_run_id() == root {
+                f.push_item(Item::Info { text });
+            }
+        });
+    }
+}
+
+/// The ROOT stream (re)connected: drop every live bubble before the
+/// snapshots that follow rebuild the calls still open (CONTRACTS.md S-2
+/// §3).
+pub fn reset_live_on_connect(store: &Store, root: &str) {
+    let stale = store
+        .live
+        .with_untracked(|l| !l.is_empty() || l.root() != root);
+    if stale {
+        store.live.update(|l| {
+            l.bind_root(root);
+            l.reset_on_connect();
+        });
+    }
+}
+
 /// One run's streaming loop: SSE first, polling fallback, terminal detection.
+///
+/// Live reply frames are taken from the ROOT run's stream only: the
+/// gateway's hub is keyed by the root and a root subscriber receives its
+/// children's deltas (CONTRACTS.md S-2 §1) — taking them from the child
+/// streams too would double every bubble, and each child reconnect would
+/// wipe the others (§3).
 #[allow(clippy::too_many_arguments)]
 fn stream_run(
     client: GatewayClient,
@@ -3256,6 +3353,7 @@ fn stream_run(
     // per successful poll ⇒ draws in [0, 500ms], records at near-live
     // latency — a liveness-over-load choice).
     let mut backoff = Backoff::default();
+    let mut live_frame_error_noted = false;
     let post_records = |cursor_records: Vec<Value>| {
         if cursor_records.is_empty() {
             return;
@@ -3271,6 +3369,11 @@ fn stream_run(
             return;
         }
         let wake_cursor = wake.clone();
+        if is_root {
+            let root = root_run_id.clone();
+            wake.post(move || reset_live_on_connect(&store, &root));
+        }
+        let wake_live = wake.clone();
         let outcome = client.stream_ledger(
             &run_id,
             cursor,
@@ -3320,6 +3423,37 @@ fn stream_run(
                         });
                     });
                 });
+            },
+            // Live reply frames (contract S): root stream only (see the
+            // doc above). A frame that breaks the contract is said ONCE
+            // per stream — the durable answer still lands, so one line
+            // is enough, and a broken hub must not flood the transcript.
+            |ev| {
+                if !is_root {
+                    return;
+                }
+                let root = root_run_id.clone();
+                match ev {
+                    Ok(ev) => wake_live.post(move || apply_live_event(&store, &root, ev)),
+                    Err(reason) => {
+                        if live_frame_error_noted {
+                            return;
+                        }
+                        live_frame_error_noted = true;
+                        wake_live.post(move || {
+                            store.fold.update(|f| {
+                                if f.root_run_id() != root {
+                                    return;
+                                }
+                                f.push_item(crate::transcript::Item::Info {
+                                    text: format!(
+                                        "live reply frame unreadable ({reason}) — live text may be incomplete; the answer still arrives when the call completes"
+                                    ),
+                                });
+                            });
+                        });
+                    }
+                }
             },
         );
 
@@ -3561,6 +3695,11 @@ fn finish(
                 failed = f.failed;
                 short = f.stopped_short.is_some();
             });
+            if concluded_now && store.live.with_untracked(|l| !l.is_empty()) {
+                store.live.update(|l| {
+                    l.clear();
+                });
+            }
             if concluded_now {
                 // Same ordering contract as stream_run's finished_now
                 // branch: outcome mailbox BEFORE the phase flip.
@@ -3591,6 +3730,13 @@ fn finish(
             was_finished = f.finished;
             f.run_terminal(&status);
         });
+        if current && store.live.with_untracked(|l| !l.is_empty()) {
+            // The run ended: whatever was still streaming is over (the
+            // hub sends a synthetic delta_end too — this is the belt).
+            store.live.update(|l| {
+                l.clear();
+            });
+        }
         if current {
             // Outcome mailbox for the queue-drain effect — written BEFORE
             // the phase flip (ordering contract; see the finished_now
@@ -5506,6 +5652,173 @@ mod tests {
                    "effect": {"type": "flow", "payload": {}},
                    "result": {"output": {"answer": "done!"}}}),
         ]
+    }
+
+    // -----------------------------------------------------------------
+    // Live replies (contract S + S-2): the UI-thread halves of the root
+    // stream's live frames, driven exactly as the stream thread posts them.
+    // -----------------------------------------------------------------
+
+    fn live(call: &str, seq: u64, text: &str, snapshot: bool) -> crate::live::LiveEvent {
+        crate::live::LiveEvent::Delta(crate::live::LiveDelta {
+            run_id: "agent1".into(),
+            root_run_id: "root1".into(),
+            node_id: "reason".into(),
+            call_id: call.into(),
+            seq,
+            text: text.into(),
+            channel: crate::live::Channel::Content,
+            snapshot,
+            truncated: false,
+        })
+    }
+
+    fn live_end(call: &str, reason: crate::live::EndReason) -> crate::live::LiveEvent {
+        crate::live::LiveEvent::End(crate::live::LiveEnd {
+            run_id: "agent1".into(),
+            root_run_id: "root1".into(),
+            node_id: "reason".into(),
+            call_id: call.into(),
+            seq: 99,
+            reason,
+        })
+    }
+
+    fn live_texts(store: &Store) -> Vec<(String, String)> {
+        store.live.with_untracked(|l| {
+            l.entries()
+                .iter()
+                .map(|e| (e.call_id.clone(), e.content.clone()))
+                .collect()
+        })
+    }
+
+    fn last_info(store: &Store) -> String {
+        store.fold.with_untracked(|f| {
+            f.items
+                .iter()
+                .rev()
+                .find_map(|i| match i {
+                    Item::Info { text } => Some(text.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default()
+        })
+    }
+
+    #[test]
+    fn live_bubbles_follow_the_s2_lifecycle() {
+        use crate::live::EndReason;
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = crate::store::Store::create(cx);
+            let (tx, _rx) = std::sync::mpsc::channel::<Cmd>();
+            store.session_id.set("s1".into());
+            apply_start_binding(&store, &tx, "root1", "s1");
+            apply_stream_records(&store, &tx, "root1", "root1", &[wrapper_wait_record()]);
+
+            // Connect, then a snapshot + a live delta build the bubble.
+            reset_live_on_connect(&store, "root1");
+            apply_live_event(&store, "root1", live("c1", 3, "Hel", true));
+            apply_live_event(&store, "root1", live("c1", 4, "lo", false));
+            assert_eq!(live_texts(&store), vec![("c1".into(), "Hello".into())]);
+            assert!(store.live.with_untracked(|l| l.entries()[0].child));
+
+            // (c) A reconnect drops every bubble BEFORE the snapshots.
+            reset_live_on_connect(&store, "root1");
+            assert!(live_texts(&store).is_empty(), "S-2 §3");
+            apply_live_event(&store, "root1", live("c1", 7, "Hello wor", true));
+            assert_eq!(live_texts(&store), vec![("c1".into(), "Hello wor".into())]);
+
+            // The durable llm_call record replaces the live text.
+            let recorded = vec![
+                json!({"run_id": "agent1", "step_id": "c1", "node_id": "reason",
+                       "status": "started", "effect": {"type": "llm_call", "payload": {}}}),
+                json!({"run_id": "agent1", "step_id": "c1", "node_id": "reason",
+                       "status": "completed", "effect": {"type": "llm_call", "payload": {}},
+                       "result": {}}),
+            ];
+            apply_stream_records(&store, &tx, "root1", "agent1", &recorded);
+            assert!(
+                live_texts(&store).is_empty(),
+                "the record retired the bubble"
+            );
+
+            // (b) Late frames — and a reconnect snapshot — for a recorded
+            // call never recreate its bubble.
+            apply_live_event(&store, "root1", live("c1", 8, "ld", false));
+            reset_live_on_connect(&store, "root1");
+            apply_live_event(&store, "root1", live("c1", 9, "Hello world", true));
+            assert!(live_texts(&store).is_empty(), "S-2 §2");
+
+            // (b) The record can fold while NO bubble is on screen (a
+            // reconnect just dropped them all); the snapshot that follows
+            // for that call must still not recreate it — only the fold's
+            // record of closed calls knows.
+            apply_live_event(&store, "root1", live("c5", 1, "racing", false));
+            reset_live_on_connect(&store, "root1");
+            apply_stream_records(
+                &store,
+                &tx,
+                "root1",
+                "agent1",
+                &[
+                    json!({"run_id": "agent1", "step_id": "c5", "node_id": "reason",
+                         "status": "completed", "effect": {"type": "llm_call", "payload": {}},
+                         "result": {}}),
+                ],
+            );
+            apply_live_event(&store, "root1", live("c5", 2, "racing ahead", true));
+            assert!(
+                live_texts(&store).is_empty(),
+                "recorded while off screen, never recreated"
+            );
+
+            // A failed stream goes, and says so with the reason.
+            apply_live_event(&store, "root1", live("c2", 1, "doomed", false));
+            apply_live_event(&store, "root1", live_end("c2", EndReason::Failed));
+            assert!(live_texts(&store).is_empty());
+            let note = last_info(&store);
+            assert!(note.contains("live reply failed"), "{note}");
+
+            // (d) `unavailable` + detail → a one-line note, even for a
+            // call that never streamed (and whose record already folded).
+            apply_live_event(
+                &store,
+                "root1",
+                live_end("c1", EndReason::Unavailable("structured_output".into())),
+            );
+            let note = last_info(&store);
+            assert!(
+                note.contains("live reply unavailable") && note.contains("structured_output"),
+                "{note}"
+            );
+
+            // A frame from another tree is never shown.
+            let mut foreign = live("x1", 1, "not ours", false);
+            if let crate::live::LiveEvent::Delta(d) = &mut foreign {
+                d.root_run_id = "other-root".into();
+            }
+            apply_live_event(&store, "root1", foreign);
+            apply_live_event(&store, "stale-root", live("x2", 1, "stale", false));
+            assert!(live_texts(&store).is_empty());
+
+            // The final answer concludes the turn: every bubble goes, and
+            // nothing streams back in after it.
+            apply_live_event(&store, "root1", live("c3", 1, "almost", false));
+            assert_eq!(live_texts(&store).len(), 1);
+            apply_stream_records(&store, &tx, "root1", "agent1", &agent_answer_records());
+            assert!(store.fold.with_untracked(|f| f.finished));
+            assert!(
+                live_texts(&store).is_empty(),
+                "the final answer replaces the bubble"
+            );
+            apply_live_event(&store, "root1", live("c4", 1, "after the end", false));
+            assert!(
+                live_texts(&store).is_empty(),
+                "no bubble after the final answer"
+            );
+        });
+        root.dispose();
     }
 
     #[test]

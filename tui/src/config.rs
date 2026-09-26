@@ -307,6 +307,10 @@ pub struct Prefs {
     /// the same path, e.g. a shared mount), `never`. Stored as the word;
     /// `/workspace send` edits it.
     pub send_local_workspace: String,
+    /// "Stream replies" (`/stream`): `gateway_default` (the default — no
+    /// `_runtime.stream` is sent), `on`, `off`. Stored as the word; an
+    /// unknown word reads as the default.
+    pub stream_replies: crate::streaming::StreamReplies,
     pub show_details: Option<bool>,
     /// Launch animation on/off (`--animation`). `None` = never chosen,
     /// which reads as ON — the identity plays for a new install, and one
@@ -638,6 +642,9 @@ impl Prefs {
             send_local_workspace: s("send_local_workspace")
                 .filter(|w| crate::workspace_files::SendLocalWorkspace::parse(w).is_some())
                 .unwrap_or_default(),
+            stream_replies: s("stream_replies")
+                .and_then(|w| crate::streaming::StreamReplies::parse(&w))
+                .unwrap_or_default(),
             animation: v.get("animation").and_then(Value::as_bool),
             tool_accepted_tier,
             tool_overrides,
@@ -702,6 +709,7 @@ impl Prefs {
             )
             .unwrap_or_default()
             .word(),
+            "stream_replies": self.stream_replies.word(),
             "animation": self.animation,
             // Always written normalized + legible: headless users edit
             // this by hand (config-first for exec runs).
@@ -980,6 +988,32 @@ mod tests {
     }
 
     #[test]
+    fn stream_replies_defaults_to_the_gateway_and_reads_junk_as_default() {
+        use crate::streaming::StreamReplies;
+        let dir = std::env::temp_dir().join(format!("acode-prefs-stream-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("prefs.json");
+        for (raw, want) in [
+            ("{}", StreamReplies::GatewayDefault),
+            (r#"{"stream_replies": "on"}"#, StreamReplies::On),
+            (r#"{"stream_replies": "off"}"#, StreamReplies::Off),
+            (
+                r#"{"stream_replies": "gateway_default"}"#,
+                StreamReplies::GatewayDefault,
+            ),
+            (
+                r#"{"stream_replies": "sometimes"}"#,
+                StreamReplies::GatewayDefault,
+            ),
+            (r#"{"stream_replies": true}"#, StreamReplies::GatewayDefault),
+        ] {
+            fs::write(&path, raw).expect("write");
+            assert_eq!(Prefs::load_from(path.clone()).stream_replies, want, "{raw}");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn session_ids_are_unique_enough() {
         let a = mint_session_id();
         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -1151,6 +1185,7 @@ mod tests {
             workspace_allowed: vec!["/srv/data".into(), "/opt/shared".into()],
             show_details: Some(false),
             send_local_workspace: "always".into(),
+            stream_replies: crate::streaming::StreamReplies::Off,
             animation: Some(false),
             tool_accepted_tier: "write".into(),
             tool_overrides: vec![("fetch_url".into(), "auto".into())],
@@ -1185,6 +1220,7 @@ mod tests {
             "\"workspace_allowed\"",
             "\"show_details\"",
             "\"send_local_workspace\"",
+            "\"stream_replies\"",
             "\"animation\"",
             "\"accepted_tier\"",
             "\"overrides\"",
@@ -1218,6 +1254,8 @@ mod tests {
         );
         assert_eq!(l.show_details, Some(false));
         assert_eq!(l.send_local_workspace, "always");
+        assert_eq!(l.stream_replies, crate::streaming::StreamReplies::Off);
+        assert!(raw.contains("\"stream_replies\": \"off\""), "{raw}");
         assert_eq!(l.tool_accepted_tier, "write");
         assert_eq!(
             l.tool_overrides,

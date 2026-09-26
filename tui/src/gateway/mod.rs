@@ -929,10 +929,15 @@ impl GatewayClient {
     /// events (undecodable JSON, or a valid envelope with no record
     /// object) are SKIPPED and COUNTED through `on_skipped(n)` per read
     /// (F7 — they used to vanish silently); the good records around them
-    /// keep folding. Returns:
+    /// keep folding. Live reply frames (`llm.delta` / `llm.delta_end`,
+    /// contract S) go to `on_live` as they parse — they carry NO `id:` and
+    /// are not ledger records, so they never touch the cursor; a live
+    /// frame that breaks the contract arrives as `Err(reason)` for the
+    /// caller to surface. Returns:
     /// - `Ok(true)` when the gateway closed with `event: done` (run terminal),
     /// - `Ok(false)` when the stream ended/idled without a done event
     ///   (caller should poll run status and maybe reconnect from the cursor).
+    #[allow(clippy::too_many_arguments)] // one callback per event class
     pub fn stream_ledger(
         &self,
         run_id: &str,
@@ -941,6 +946,7 @@ impl GatewayClient {
         mut on_cursor: impl FnMut(u64),
         mut on_batch: impl FnMut(Vec<Value>),
         mut on_skipped: impl FnMut(usize),
+        mut on_live: impl FnMut(Result<crate::live::LiveEvent, String>),
     ) -> GwResult<bool> {
         let path = format!("/runs/{}/ledger/stream?after={after}", url_encode(run_id));
         let req = self.with_auth(
@@ -994,7 +1000,20 @@ impl GatewayClient {
                         Err(()) => skipped += 1,
                     },
                     "done" => saw_done = true,
-                    _ => {}
+                    other => match crate::live::parse_event(other, &ev.data) {
+                        // Live frames flush any records parsed ahead of
+                        // them first: arrival order is the contract (a
+                        // durable record that preceded a delta must fold
+                        // before it).
+                        Ok(Some(live)) => {
+                            if !records.is_empty() {
+                                on_batch(std::mem::take(&mut records));
+                            }
+                            on_live(Ok(live));
+                        }
+                        Ok(None) => {} // unknown event names stay ignored
+                        Err(reason) => on_live(Err(reason)),
+                    },
                 }
             }
             if !records.is_empty() {
@@ -1310,6 +1329,81 @@ mod tests {
             let _ = sock.write_all(&body);
         });
         (url, rx)
+    }
+
+    /// Contract S on the wire: a fake SSE gateway interleaves ledger
+    /// `step` events with live `llm.delta` / `llm.delta_end` frames (no
+    /// `id:` line). Records and live events come out in arrival order,
+    /// the cursor moves ONLY with step events, and a contract-breaking
+    /// live frame is reported, never dropped silently.
+    #[test]
+    fn live_frames_are_dispatched_in_order_and_never_move_the_cursor() {
+        let body = concat!(
+            "id: 3\nevent: step\ndata: {\"cursor\": 3, \"record\": {\"step_id\": \"a\"}}\n\n",
+            // Snapshot of an open call on (re)subscribe.
+            "event: llm.delta\ndata: {\"kind\":\"llm.delta\",\"run_id\":\"child\",\"root_run_id\":\"root\",\"parent_run_id\":\"root\",\"node_id\":\"reason\",\"call_id\":\"c1\",\"seq\":4,\"text\":\"Hel\",\"channel\":\"content\",\"snapshot\":true}\n\n",
+            "event: llm.delta\ndata: {\"run_id\":\"child\",\"root_run_id\":\"root\",\"node_id\":\"reason\",\"call_id\":\"c1\",\"seq\":5,\"text\":\"lo\",\"channel\":\"content\",\"snapshot\":false,\"truncated\":true}\n\n",
+            ": keep-alive\n\n",
+            "event: llm.delta_end\ndata: {\"run_id\":\"child\",\"root_run_id\":\"root\",\"node_id\":\"reason\",\"call_id\":\"c2\",\"seq\":1,\"reason\":\"failed\"}\n\n",
+            "event: llm.delta\ndata: {\"call_id\":\"c3\",\"seq\":1,\"text\":\"x\",\"channel\":\"tool\"}\n\n",
+            "id: 4\nevent: step\ndata: {\"cursor\": 4, \"record\": {\"step_id\": \"b\"}}\n\n",
+            "event: done\ndata: {}\n\n",
+        );
+        let (url, _rx) = one_shot_server(body.as_bytes().to_vec(), "text/event-stream");
+        let c = GatewayClient::new(&url, None);
+        #[derive(Debug, PartialEq)]
+        enum Seen {
+            Cursor(u64),
+            Records(Vec<String>),
+            Live(String),
+            Broken(String),
+        }
+        let seen = std::cell::RefCell::new(Vec::new());
+        let stop = Arc::new(AtomicBool::new(false));
+        let done = c
+            .stream_ledger(
+                "root",
+                2,
+                &stop,
+                |cur| seen.borrow_mut().push(Seen::Cursor(cur)),
+                |recs| {
+                    seen.borrow_mut().push(Seen::Records(
+                        recs.iter()
+                            .map(|r| r["step_id"].as_str().unwrap_or("").to_string())
+                            .collect(),
+                    ))
+                },
+                |_| panic!("no skipped records in this stream"),
+                |ev| {
+                    seen.borrow_mut().push(match ev {
+                        Ok(crate::live::LiveEvent::Delta(d)) => Seen::Live(format!(
+                            "delta {} {} {:?} snap={} trunc={} root={}",
+                            d.call_id, d.seq, d.text, d.snapshot, d.truncated, d.root_run_id
+                        )),
+                        Ok(crate::live::LiveEvent::End(e)) => {
+                            Seen::Live(format!("end {} {}", e.call_id, e.reason.word()))
+                        }
+                        Err(reason) => Seen::Broken(reason),
+                    })
+                },
+            )
+            .expect("stream");
+        assert!(done, "event: done ends the stream");
+        let seen = seen.into_inner();
+        assert_eq!(
+            seen,
+            vec![
+                Seen::Cursor(3),
+                Seen::Records(vec!["a".into()]),
+                Seen::Live("delta c1 4 \"Hel\" snap=true trunc=false root=root".into()),
+                Seen::Live("delta c1 5 \"lo\" snap=false trunc=true root=root".into()),
+                Seen::Live("end c2 failed".into()),
+                Seen::Broken("llm.delta: unknown channel \"tool\"".into()),
+                Seen::Cursor(4),
+                Seen::Records(vec!["b".into()]),
+            ],
+            "the cursor moved only with the two step events"
+        );
     }
 
     /// §W content read: a file bigger than the preview limit is asked for

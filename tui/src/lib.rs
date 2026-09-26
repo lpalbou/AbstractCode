@@ -29,6 +29,7 @@ pub mod exec;
 pub mod export;
 pub mod gateway;
 pub mod identity;
+pub mod live;
 pub mod mention;
 pub mod paths;
 pub mod preview;
@@ -38,6 +39,7 @@ pub mod run_input;
 pub mod runner;
 pub mod speculation;
 pub mod store;
+pub mod streaming;
 pub mod tool_policy;
 pub mod transcript;
 pub mod ui;
@@ -306,6 +308,11 @@ fn run_tui(args: &cli::Args) -> i32 {
                 .and_then(|v| speculation::parse(v).ok())
                 .unwrap_or_else(|| prefs.speculation.clone()),
         );
+        // Stream replies: `--stream` seeds this session; the saved
+        // `/stream` choice otherwise.
+        store
+            .stream_replies
+            .set(args.stream.unwrap_or(prefs.stream_replies));
         // Verifier-before-conclude: `--review`/`--no-review` seeds the
         // session; `/review` retunes it. The default is ON (see
         // `cli::DEFAULT_REVIEW_MODE`).

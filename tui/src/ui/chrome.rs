@@ -58,13 +58,24 @@ pub fn route_label(store: Store) -> String {
     } else {
         format!("{base} · {reasoning}")
     };
-    if let Some(value) = store.speculation.get() {
+    let base = if let Some(value) = store.speculation.get() {
         format!(
             "{base} · MTP requested {}",
             crate::speculation::label(Some(&value))
         )
     } else {
         base
+    };
+    // Stream replies: shown only when not the gateway default, with the
+    // reason when this gateway cannot honour it.
+    let chip = crate::streaming::chip(
+        store.stream_replies.get(),
+        store.host_contracts.with(|c| c.as_ref().map(|c| c.deltas)),
+    );
+    if chip.is_empty() {
+        base
+    } else {
+        format!("{base} · {chip}")
     }
 }
 

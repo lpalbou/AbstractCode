@@ -202,6 +202,9 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     let scroll_offset = cx.signal(0i32);
     let follow = cx.signal(true);
     let feed = abstracttui::widgets::FeedState::new(cx);
+    // Live (streamed) replies: their own feed under the transcript — see
+    // `transcript_view::wire_live_feed`.
+    let live_feed = abstracttui::widgets::FeedState::new(cx);
     // The splash predicate (IDLE-2), hoisted HERE so the pane's render
     // branch and the animation ticker read ONE truth (a predicate
     // duplicated across an effect and a render is the mirror-drift
@@ -276,6 +279,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
         &feed,
         ctx.workspace_root.as_deref().map(std::rc::Rc::from),
     );
+    transcript_view::wire_live_feed(cx, store, &live_feed);
     entity_actions::wire_poller_view(cx, store);
     entity_actions::wire_focus_follow(cx, store, follow);
     wire_history_autoload(cx, store, &ctx, follow, scroll_offset);
@@ -354,8 +358,10 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     // streaming never fights a reading user.
     {
         let feed = feed.clone();
+        let live_feed = live_feed.clone();
         cx.effect(move || {
-            let total = feed.total_rows().get();
+            // The content extent is BOTH feeds (live replies sit below).
+            let total = feed.total_rows().get() + live_feed.total_rows().get();
             if follow.get_untracked() {
                 return; // the engine's follow pin owns the offset
             }
@@ -384,10 +390,12 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     // scrolled.
     let page = {
         let feed = feed.clone();
+        let live_feed = live_feed.clone();
         move |delta: i32| {
             let vp = current_viewport();
             let pane_h = (vp.h - CHROME_ROWS).max(3);
-            let max_off = (feed.total_rows().get_untracked() - pane_h).max(0);
+            let total = feed.total_rows().get_untracked() + live_feed.total_rows().get_untracked();
+            let max_off = (total - pane_h).max(0);
             let next = (scroll_offset.get_untracked() + delta).clamp(0, max_off);
             if next < max_off {
                 // Release BEFORE the offset write (the old up-branch's
@@ -565,6 +573,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
         .child(dyn_view_scoped(LayoutStyle::column().grow(1.0), {
             let ctx = ctx.clone();
             let feed = feed.clone();
+            let live_feed = live_feed.clone();
             let overlays = ctx.overlays.clone();
             move |scx| {
                 let t = theme.get().tokens;
@@ -601,6 +610,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                         store,
                         &ctx,
                         &feed,
+                        &live_feed,
                         scroll_offset,
                         follow,
                         splash_visible,
@@ -892,6 +902,14 @@ pub(crate) fn agent_start_opts(
         gating_mode: store.gating_mode.get_untracked(),
         reasoning: store.reasoning.get_untracked(),
         speculation: store.speculation.get_untracked(),
+        // Stream replies: the key rides only for on/off, and only to a
+        // gateway that advertises live replies (`crate::streaming`).
+        stream: crate::streaming::run_input_value(
+            store.stream_replies.get_untracked(),
+            store
+                .host_contracts
+                .with_untracked(|c| c.as_ref().map(|c| c.deltas)),
+        ),
         // The operator-declared window rides as `_limits.max_tokens`
         // (CTX-0); 0 = undeclared = the key stays absent.
         context_window: store.context_window.get_untracked(),
@@ -1255,6 +1273,13 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
             Some(value) => match crate::speculation::parse(value) {
                 Ok(value) => modals::apply_speculation(store, ctx, value),
                 Err(error) => store.notify(error),
+            },
+        },
+        Command::Stream(arg) => match arg.as_deref().map(str::trim) {
+            None | Some("") => modals::open_stream_stage(cx, store, ctx),
+            Some(value) => match crate::streaming::StreamReplies::parse(value) {
+                Some(choice) => modals::apply_stream_replies(store, ctx, choice),
+                None => store.notify(format!("/stream takes on | off | default (got {value:?})")),
             },
         },
         Command::Reasoning(arg) => match arg.as_deref().map(str::trim) {

@@ -474,6 +474,15 @@ pub struct HostContracts {
     /// (`capabilities.<abstract*>.version`), sorted — the About screen's
     /// gateway rows. Empty on gateways that report none.
     pub package_versions: Vec<(String, String)>,
+    /// `capabilities.streaming.deltas === true`: the gateway streams live
+    /// replies on the run SSE (contract S) and honours `_runtime.stream`.
+    /// False = not advertised (older gateway) — nothing streams and the
+    /// client sends no stream setting.
+    pub deltas: bool,
+    /// `capabilities.streaming.default` — the gateway's own
+    /// `agents.streaming_default`, which a run without `_runtime.stream`
+    /// gets. `None` when the gateway does not say.
+    pub streaming_default: Option<bool>,
 }
 
 impl HostContracts {
@@ -930,6 +939,14 @@ pub struct Store {
     /// for).
     pub reasoning: Signal<String>,
     pub speculation: Signal<Option<serde_json::Value>>,
+    /// The "Stream replies" setting (`/stream`, `--stream`, prefs
+    /// `stream_replies`) — see `crate::streaming`.
+    pub stream_replies: Signal<crate::streaming::StreamReplies>,
+    /// Live (streamed) replies of the current run tree — a SEPARATE
+    /// signal from `fold` on purpose: deltas arrive many times a second
+    /// and must not wake every fold reader (the transcript sync, chrome,
+    /// strip); only the live lane re-renders per delta.
+    pub live: Signal<crate::live::LiveReplies>,
     pub execution_probe: Signal<Option<(String, String, serde_json::Value)>>,
     /// Per-model reasoning capability probe result for the picker's
     /// third stage: (provider, model, probe). None while in flight.
@@ -1219,6 +1236,8 @@ impl Store {
             max_iterations: cx.signal(0u32),
             reasoning: cx.signal(String::new()),
             speculation: cx.signal(None),
+            stream_replies: cx.signal(crate::streaming::StreamReplies::default()),
+            live: cx.signal(crate::live::LiveReplies::default()),
             execution_probe: cx.signal(None),
             reasoning_probe: cx.signal(None),
             providers: cx.signal(Vec::new()),

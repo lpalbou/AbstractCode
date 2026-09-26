@@ -769,12 +769,23 @@ pub fn contracts_from_capabilities(v: &Value) -> HostContracts {
         })
         .unwrap_or_default();
     package_versions.sort();
+    // Contract S-2 §6: `streaming: {deltas: true, default: bool}`. Only a
+    // literal `true` advertises live replies — any other shape reads as
+    // "not advertised", which the header and `/stream` then SAY.
+    let streaming = root.get("streaming");
     HostContracts {
         model_residency: has("model_residency"),
         host_state: has("host_state"),
         session_caches: has("session_caches"),
         modality_labels,
         package_versions,
+        deltas: streaming
+            .and_then(|s| s.get("deltas"))
+            .and_then(Value::as_bool)
+            == Some(true),
+        streaming_default: streaming
+            .and_then(|s| s.get("default"))
+            .and_then(Value::as_bool),
     }
 }
 
@@ -1557,6 +1568,26 @@ mod tests {
 
     /// The About screen's gateway rows: installed framework package versions
     /// from the capabilities envelope — and nothing invented when absent.
+    #[test]
+    fn streaming_capability_reads_only_the_contract_shape() {
+        let c = contracts_from_capabilities(&json!({"capabilities": {
+            "streaming": {"deltas": true, "default": false}
+        }}));
+        assert!(c.deltas);
+        assert_eq!(c.streaming_default, Some(false));
+        // Older gateways (no key) and wrong shapes never advertise.
+        for v in [
+            json!({"capabilities": {}}),
+            json!({"capabilities": {"deltas": true}}),
+            json!({"capabilities": {"streaming": {"deltas": "yes"}}}),
+            json!({"capabilities": {"streaming": true}}),
+        ] {
+            let c = contracts_from_capabilities(&v);
+            assert!(!c.deltas, "{v}");
+            assert_eq!(c.streaming_default, None, "{v}");
+        }
+    }
+
     #[test]
     fn capabilities_report_framework_package_versions() {
         let v = json!({"capabilities": {

@@ -674,6 +674,11 @@ pub struct Fold {
     /// OTHER run's completion cleared the hint while a slow call kept
     /// running (coder trees cycle builder + verifier concurrently).
     llm_inflight: HashMap<String, std::time::Instant>,
+    /// Step ids of `llm_call`s whose durable completed/failed record this
+    /// turn has folded — the live-reply lane's "the transcript already
+    /// holds this call" check (CONTRACTS.md S-2 §2: no live bubble may be
+    /// created for, or survive, a recorded call). Cleared at `begin_run`.
+    closed_llm_calls: HashSet<String>,
     /// When the OLDEST still-inflight llm_call started (client clock) —
     /// derived from `llm_inflight`, kept as a plain field because it is
     /// the worker-1 seam the chrome/strip reads. Drives the "model call
@@ -848,6 +853,13 @@ impl Fold {
         self.seen_waits.clear();
         self.answered_waits.clear();
         self.seen_call_ids.clear();
+        self.closed_llm_calls.clear();
+    }
+
+    /// True once this turn folded the durable completed/failed record of
+    /// the `llm_call` step `step_id` (the live lane's `call_id`).
+    pub fn llm_call_closed(&self, step_id: &str) -> bool {
+        self.closed_llm_calls.contains(step_id)
     }
 
     pub fn root_run_id(&self) -> &str {
@@ -1164,6 +1176,11 @@ impl Fold {
                 }
                 "completed" | "failed" => {
                     self.llm_inflight.remove(&rec_run);
+                    if let Some(step) = rec.get("step_id").and_then(Value::as_str) {
+                        if !step.trim().is_empty() {
+                            self.closed_llm_calls.insert(step.trim().to_string());
+                        }
+                    }
                 }
                 _ => {}
             }

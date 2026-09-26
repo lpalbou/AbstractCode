@@ -28,6 +28,11 @@ pub struct StartOpts {
     /// one vocabulary, no third name (contract v1, plan v13).
     pub reasoning: String,
     pub speculation: Option<Value>,
+    /// Live reply streaming (`_runtime.stream`, contract S). `None` =
+    /// absent = the gateway's `agents.streaming_default` decides; callers
+    /// fill it through `crate::streaming::run_input_value`, which also
+    /// withholds it from a gateway that does not advertise live replies.
+    pub stream: Option<bool>,
     pub workspace_root: Option<String>,
     pub workspace_mode: Option<String>,
     /// Extra allowlisted root directories (`workspace_allowed_paths`) —
@@ -199,6 +204,11 @@ pub fn build_input_data(prompt: &str, opts: &StartOpts) -> Value {
     }
     if let Some(value) = &opts.speculation {
         runtime.insert("speculation".into(), value.clone());
+    }
+    // Stream replies: a boolean or nothing (the gateway refuses any other
+    // shape — CONTRACTS.md S-2 §6).
+    if let Some(stream) = opts.stream {
+        runtime.insert("stream".into(), json!(stream));
     }
     // Project instructions (AGENTS.md): APPENDED to whatever system prompt
     // the workflow bakes in, never replacing it — `system_prompt_extra` is
@@ -597,6 +607,7 @@ mod tests {
             max_iterations_explicit: true,
             system: "be brief".into(),
             speculation: Some(json!(false)),
+            stream: Some(true),
             system_prompt_extra: "Project instructions: run cargo fmt.".into(),
             review_mode: Some(true),
             review_capable: true,
@@ -681,16 +692,48 @@ mod tests {
         // Prompt-cache posture rides the SAME map (`--no-prompt-cache`).
         assert_eq!(runtime["prompt_cache"], json!(false));
         assert_eq!(runtime["speculation"], json!(false));
+        assert_eq!(runtime["stream"], json!(true));
         assert_eq!(
             runtime.len(),
-            9,
-            "exactly provider + model + thinking + speculation + system_prompt_extra + review_mode + review_max_rounds + tool_policy + prompt_cache — a new _runtime writer must extend this test"
+            10,
+            "exactly provider + model + thinking + speculation + stream + system_prompt_extra + review_mode + review_max_rounds + tool_policy + prompt_cache — a new _runtime writer must extend this test"
         );
         // The declared window rides its own namespace, never _runtime —
         // beside the iteration budget, which must reach the resolver here or
         // the runtime's 20-iteration default wins.
         assert_eq!(input["_limits"]["max_tokens"], json!(262_144));
         assert_eq!(input["_limits"]["max_iterations"], json!(20));
+    }
+
+    #[test]
+    fn stream_rides_as_a_boolean_only_for_on_or_off() {
+        use crate::streaming::{run_input_value, StreamReplies};
+        let input_for = |pref: StreamReplies| {
+            build_input_data(
+                "go",
+                &StartOpts {
+                    stream: run_input_value(pref, Some(true)),
+                    ..Default::default()
+                },
+            )
+        };
+        // Gateway default: the key is ABSENT (not null, not false) so the
+        // gateway's agents.streaming_default applies.
+        let default = input_for(StreamReplies::GatewayDefault);
+        assert!(default.get("_runtime").is_none(), "{default}");
+        let on = input_for(StreamReplies::On);
+        assert_eq!(on["_runtime"], json!({"stream": true}));
+        let off = input_for(StreamReplies::Off);
+        assert_eq!(off["_runtime"], json!({"stream": false}));
+        // A gateway without the capability gets nothing, whatever the pref.
+        let old = build_input_data(
+            "go",
+            &StartOpts {
+                stream: run_input_value(StreamReplies::On, Some(false)),
+                ..Default::default()
+            },
+        );
+        assert!(old.get("_runtime").is_none(), "{old}");
     }
 
     #[test]

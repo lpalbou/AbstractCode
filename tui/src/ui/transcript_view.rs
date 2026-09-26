@@ -1418,6 +1418,162 @@ pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState, link_root: Option<Rc
     });
 }
 
+// ---------------------------------------------------------------------------
+// Live replies (contract S): a SECOND feed under the transcript
+// ---------------------------------------------------------------------------
+
+/// Header item for one live bubble: a blank row, the caption, the state,
+/// then (when present) the collapsed reasoning line and the truncation
+/// note. Rebuilt per header change only — never per content delta.
+pub fn live_header_item(t: &TokenSet, e: &crate::live::LiveReply) -> FeedItem {
+    let caption = if e.child {
+        format!("sub-agent · {}", e.node_id)
+    } else if e.node_id.is_empty() {
+        "reply".to_string()
+    } else {
+        format!("reply · {}", e.node_id)
+    };
+    let state = if e.finished {
+        "complete — the recorded reply replaces this"
+    } else {
+        "streaming…"
+    };
+    let mut lines = vec![
+        RichLine::new(),
+        header_line("✎", t.accent, &caption, t.text_muted, state, t.text_faint),
+    ];
+    if !e.reasoning.is_empty() {
+        lines.push(RichLine::from_spans(vec![Span::new(
+            live_reasoning_line(&e.reasoning),
+            Style::new().fg(t.text_faint),
+        )]));
+    }
+    if e.truncated {
+        lines.push(RichLine::from_spans(vec![Span::new(
+            "[#TRUNCATION] the gateway dropped the start of this live text (its per-call buffer is full); the full reply appears when the call completes",
+            Style::new().fg(t.warn),
+        )]));
+    }
+    FeedItem::new().rich_block(RichText::from_lines(lines))
+}
+
+/// The collapsed reasoning line: its NEWEST line, cut to 100 chars with
+/// the cut said, plus the total size. The full reasoning lands in the
+/// cycle card when the call's record arrives; it is never mixed into the
+/// reply text.
+pub fn live_reasoning_line(reasoning: &str) -> String {
+    const SHOWN: usize = 100;
+    let total = reasoning.chars().count();
+    let last = reasoning
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    let n = last.chars().count();
+    let tail: String = if n > SHOWN {
+        //[WARNING:TRUNCATION] live reasoning gist; the full text lands in the cycle card
+        let t: String = last.chars().skip(n - SHOWN).collect();
+        format!("…{t}")
+    } else {
+        last.to_string()
+    };
+    format!("  ∴ thinking: {tail}  ({total} chars of reasoning so far)")
+}
+
+/// Keep `live_feed` matched to `store.live`. Per content delta the ONLY
+/// work is one `stream_append` of the new text (the engine re-typesets
+/// just the open tail region); the main transcript feed is never touched.
+/// Structural changes — a bubble added or retired, a snapshot replacing a
+/// call's text, a theme switch, focus leaving the agent lane — clear and
+/// rebuild this small feed (it holds only the calls in flight).
+///
+/// Visible only for the agent lane's CURRENT, unfinished turn: a bubble
+/// never outlives the turn's final answer or crosses into another run
+/// (the fold's root/finished state gates it, so a reset or a session
+/// switch hides stale bubbles even before the live state is rebound).
+pub fn wire_live_feed(cx: Scope, store: Store, live_feed: &FeedState) {
+    #[derive(Default)]
+    struct LiveSync {
+        /// (call_id, content_gen) per rendered bubble, in feed order.
+        keys: Vec<(String, u64)>,
+        /// Content bytes already appended, per bubble.
+        lens: Vec<usize>,
+        /// (header fingerprint, finished) per bubble.
+        heads: Vec<(u64, bool)>,
+        theme: &'static str,
+    }
+    let state = Rc::new(RefCell::new(LiveSync::default()));
+    let feed = live_feed.clone();
+    cx.effect(move || {
+        let theme = abstracttui::app::use_theme(cx).get();
+        let t = theme.tokens;
+        let agent = matches!(store.focus.get(), Focus::Agent);
+        let (root, finished) = store
+            .fold
+            .with(|f| (f.root_run_id().to_string(), f.finished));
+        let entries: Vec<crate::live::LiveReply> = store.live.with(|l| {
+            if agent && !finished && l.root() == root {
+                l.entries().to_vec()
+            } else {
+                Vec::new()
+            }
+        });
+        let head_fp = |e: &crate::live::LiveReply| -> (u64, bool) {
+            let mut h = Fnv::new();
+            h.str(&e.node_id);
+            h.byte(u8::from(e.child));
+            h.byte(u8::from(e.truncated));
+            h.byte(u8::from(e.finished));
+            h.body(&live_reasoning_line(&e.reasoning));
+            (h.finish(), e.finished)
+        };
+        let mut st = state.borrow_mut();
+        let keys: Vec<(String, u64)> = entries
+            .iter()
+            .map(|e| (e.call_id.clone(), e.content_gen))
+            .collect();
+        if keys != st.keys || theme.id != st.theme {
+            feed.clear();
+            st.theme = theme.id;
+            st.keys = keys;
+            st.lens.clear();
+            st.heads.clear();
+            for e in &entries {
+                feed.push(format!("h:{}", e.call_id), live_header_item(&t, e));
+                let sk = format!("s:{}", e.call_id);
+                feed.push_stream(sk.clone());
+                if !e.content.is_empty() {
+                    feed.stream_append(&sk, &e.content);
+                }
+                if e.finished {
+                    feed.stream_finish(&sk);
+                }
+                st.lens.push(e.content.len());
+                st.heads.push(head_fp(e));
+            }
+            return;
+        }
+        for (i, e) in entries.iter().enumerate() {
+            let sk = format!("s:{}", e.call_id);
+            if e.content.len() > st.lens[i] {
+                // Same generation = append-only text: the new bytes are
+                // exactly the suffix past what the feed already holds.
+                feed.stream_append(&sk, &e.content[st.lens[i]..]);
+                st.lens[i] = e.content.len();
+            }
+            let fp = head_fp(e);
+            if fp != st.heads[i] {
+                feed.update(&format!("h:{}", e.call_id), live_header_item(&t, e));
+                if fp.1 && !st.heads[i].1 {
+                    feed.stream_finish(&sk);
+                }
+                st.heads[i] = fp;
+            }
+        }
+    });
+}
+
 /// Mirror of `render_item`'s hide rules (cheap, no rendering). The sync
 /// effect's ORDER correctness depends on this mirror staying exact —
 /// `render_item` returning `Some` for an item this predicate calls
@@ -1460,6 +1616,7 @@ pub fn pane(
     store: Store,
     ctx: &crate::ui::UiCtx,
     feed: &FeedState,
+    live_feed: &FeedState,
     offset: Signal<i32>,
     follow: Signal<bool>,
     empty: abstracttui::reactive::Memo<bool>,
@@ -1469,6 +1626,7 @@ pub fn pane(
 ) -> View {
     let tokens = *t;
     let feed = feed.clone();
+    let live_feed = live_feed.clone();
     let gateway_label = ctx.gateway_label.clone();
     let workspace_root = ctx.workspace_root.clone().unwrap_or_default();
     // Right-click context menu inputs (operator ask, 2026-08-28): the
@@ -1649,6 +1807,10 @@ pub fn pane(
                     }
                 })
                 .child(Feed::new(&feed).gap(0).view(scx))
+                // Live replies (contract S) render BELOW the transcript in
+                // their own feed: a token appends there, never re-laying
+                // out the transcript above it.
+                .child(Feed::new(&live_feed).gap(0).view(scx))
                 .build();
             // gap 0: spacing lives INSIDE items (`gap_row`), so tool
             // rows pack under their cycle while sections keep air.

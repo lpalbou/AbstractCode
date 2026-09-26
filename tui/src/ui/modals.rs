@@ -1506,6 +1506,95 @@ pub fn open_mtp_stage(cx: Scope, store: Store, ctx: &UiCtx) {
     );
 }
 
+/// Persist + announce a "Stream replies" choice. The notice says what the
+/// choice does against THIS gateway (an older gateway gets no stream
+/// setting at all — `crate::streaming`).
+pub fn apply_stream_replies(store: Store, ctx: &UiCtx, value: crate::streaming::StreamReplies) {
+    store.stream_replies.set(value);
+    crate::ui::persist_prefs(ctx, move |prefs| prefs.stream_replies = value);
+    let deltas = store
+        .host_contracts
+        .with_untracked(|c| c.as_ref().map(|c| c.deltas));
+    store.notify(format!(
+        "stream replies: {} — {}",
+        value.label(),
+        crate::streaming::effect_note(value, deltas)
+    ));
+}
+
+/// `/stream` picker rows: the three choices (current marked `●`), then —
+/// when the gateway cannot honour them — a non-selectable note saying so.
+/// Pure over its inputs; test-pinned.
+pub fn stream_row_labels(
+    current: crate::streaming::StreamReplies,
+    contracts: Option<&crate::store::HostContracts>,
+) -> Vec<String> {
+    use crate::streaming::{StreamReplies, ALL_ROWS};
+    let mut rows: Vec<String> = ALL_ROWS
+        .iter()
+        .map(|choice| {
+            let mark = if *choice == current { "● " } else { "  " };
+            let label = match choice {
+                StreamReplies::GatewayDefault => crate::streaming::gateway_default_label(
+                    contracts.and_then(|c| c.streaming_default),
+                ),
+                other => other.label().to_string(),
+            };
+            format!("{mark}{label}")
+        })
+        .collect();
+    let deltas = contracts.map(|c| c.deltas);
+    if deltas != Some(true) {
+        rows.push(format!(
+            "  · {}",
+            crate::streaming::effect_note(current, deltas)
+        ));
+    }
+    rows
+}
+
+/// The `/stream` picker (the `/mtp` shape): Enter selects and saves, Esc
+/// keeps the current choice.
+pub fn open_stream_stage(cx: Scope, store: Store, ctx: &UiCtx) {
+    let current = store.stream_replies.get_untracked();
+    let labels = move || {
+        let contracts = store.host_contracts.get();
+        stream_row_labels(store.stream_replies.get(), contracts.as_ref())
+    };
+    let start = crate::streaming::ALL_ROWS
+        .iter()
+        .position(|c| *c == current)
+        .unwrap_or(0);
+    let choose_ctx = ctx.clone();
+    open_picker(
+        cx,
+        ctx,
+        Picker {
+            title: format!(
+                "Stream replies · Enter selects · Esc keeps {}",
+                current.label()
+            ),
+            labels: labels(),
+            live: Some(Rc::new(labels)),
+            start,
+            size: modal_size(84, 10),
+            hint: None,
+            live_hint: None,
+            keys: Vec::new(),
+            on_mount: None,
+            on_selection: None,
+            on_choose: Box::new(move |ix| {
+                // The note row (past the three choices) is not a choice.
+                if let Some(choice) = crate::streaming::ALL_ROWS.get(ix) {
+                    apply_stream_replies(store, &choose_ctx, *choice);
+                    choose_ctx.close_modal();
+                }
+            }),
+            on_cancel: None,
+        },
+    );
+}
+
 pub fn open_reasoning_stage(cx: Scope, store: Store, ctx: &UiCtx) {
     open_reasoning_stage_inner(cx, store, ctx, false)
 }
@@ -6240,6 +6329,8 @@ mod tests {
                 ("text-generation".into(), "LLM".into()),
             ],
             package_versions: Vec::new(),
+            deltas: false,
+            streaming_default: None,
         }
     }
 

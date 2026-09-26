@@ -44,6 +44,9 @@ pub enum Command {
     /// applies the level without the modal.
     Reasoning(Option<String>),
     Mtp(Option<String>),
+    /// `/stream [on|off|default]` (alias `/streaming`): the "Stream
+    /// replies" setting; bare opens the picker.
+    Stream(Option<String>),
     /// `/gating [auto|wait]` — gating mode for gating-capable workflows
     /// (the multi-agent coder): auto runs unattended (skips human
     /// approval pauses), wait restores gated. Bare shows/toggles.
@@ -191,6 +194,9 @@ pub fn parse(text: &str) -> Option<Command> {
             Command::Reasoning(if rest.is_empty() { None } else { Some(rest) })
         }
         "/mtp" | "/speculation" => Command::Mtp(if rest.is_empty() { None } else { Some(rest) }),
+        "/stream" | "/streaming" => {
+            Command::Stream(if rest.is_empty() { None } else { Some(rest) })
+        }
         "/gating" | "/gate" => Command::Gating(if rest.is_empty() { None } else { Some(rest) }),
         "/review" | "/verify" => Command::Review(if rest.is_empty() { None } else { Some(rest) }),
         "/status" => Command::Status,
@@ -266,6 +272,10 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
     (
         "mtp",
         "multi-token prediction depth: inherit | off | N · bare opens the model-aware picker",
+    ),
+    (
+        "stream",
+        "stream replies as they are written: on | off | default · bare opens the picker",
     ),
     (
         "gating",
@@ -414,6 +424,10 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     (
         "/mtp [depth|off|inherit]",
         "multi-token prediction (MTP) for new runs: depth, off or inherit; bare opens the picker; --mtp at launch",
+    ),
+    (
+        "/stream [on|off|default]",
+        "stream replies as the model writes them (default: the gateway's setting); bare opens the picker; --stream at launch",
     ),
     (
         "/details [full|fold]",
@@ -580,6 +594,21 @@ mod tests {
             "  MTP (multi-token prediction): Inherit — Enter to change"
         );
         assert!(crate::ui::modals::mtp_entry_row(Some(&serde_json::json!(false))).contains("Off"));
+    }
+
+    #[test]
+    fn stream_is_discoverable_on_every_surface() {
+        assert!(HELP_LINES
+            .iter()
+            .any(|(k, d)| k.starts_with("/stream") && d.contains("--stream")));
+        assert!(completion_matches("stre")
+            .iter()
+            .any(|(k, _)| *k == "stream"));
+        assert_eq!(parse("/stream"), Some(Command::Stream(None)));
+        assert_eq!(
+            parse("/streaming on"),
+            Some(Command::Stream(Some("on".into())))
+        );
     }
 
     #[test]

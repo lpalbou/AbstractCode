@@ -5,9 +5,14 @@
 //! refusal so unattended runs never stall), and exits 0/1/124.
 //!
 //! This path follows runs by POLLING the REST ledger (the TUI uses SSE), so
-//! the two clients between them exercise both transports.
+//! the two clients between them exercise both transports. The one SSE use
+//! is `--stream on`: a tap thread reads the ROOT run's stream for live
+//! reply frames only (contract S) and prints the reply as it is written;
+//! records still come from the REST poll.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use abstracttui::reactive::Backoff;
@@ -648,7 +653,35 @@ pub fn run(args: &Args) -> i32 {
         |line| eprintln!("⚠ {line}"),
         |sources, chars| eprintln!("project context: {sources} ({chars} chars)"),
     );
+    // Stream replies: the FLAG alone decides for scripted runs (the saved
+    // TUI preference is not consulted — the reasoning/MTP rule above). The
+    // key rides only to a gateway that advertises live replies; asking
+    // for them from one that does not is said, not silently dropped.
+    let stream_pref = args.stream.unwrap_or_default();
+    let deltas: Option<bool> = if stream_pref == crate::streaming::StreamReplies::GatewayDefault {
+        None
+    } else {
+        match client.discovery_capabilities() {
+            Ok(v) => Some(crate::discovery::contracts_from_capabilities(&v).deltas),
+            Err(e) if e.status == Some(404) => Some(false),
+            Err(e) => {
+                eprintln!("note: could not read the gateway's capabilities ({e})");
+                None
+            }
+        }
+    };
+    if stream_pref != crate::streaming::StreamReplies::GatewayDefault && deltas != Some(true) {
+        eprintln!(
+            "note: --stream {}: {}",
+            stream_pref.word(),
+            crate::streaming::effect_note(stream_pref, deltas)
+        );
+    }
+    let live_printer: Option<Arc<Mutex<crate::live::ExecPrinter>>> =
+        (stream_pref == crate::streaming::StreamReplies::On && deltas == Some(true))
+            .then(|| Arc::new(Mutex::new(crate::live::ExecPrinter::default())));
     let opts = StartOpts {
+        stream: crate::streaming::run_input_value(stream_pref, deltas),
         attachments: attachment_refs,
         provider: args.provider.clone().unwrap_or_default(),
         model: args.model.clone().unwrap_or_default(),
@@ -764,6 +797,24 @@ pub fn run(args: &Args) -> i32 {
         None => format!("{}:{}", workflow.bundle_id, workflow.flow_id),
     };
     eprintln!("run {run_id} · workflow {ran} · session {session_id}");
+    let live_stop = Arc::new(AtomicBool::new(false));
+    if let Some(printer) = &live_printer {
+        spawn_live_tap(
+            client.clone(),
+            run_id.clone(),
+            printer.clone(),
+            live_stop.clone(),
+        );
+    }
+    // Every return below ends the tap (the process usually exits right
+    // after, but `run` is also a library entry).
+    struct StopOnDrop(Arc<AtomicBool>);
+    impl Drop for StopOnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+    let _live_guard = StopOnDrop(live_stop);
 
     let mut fold = Fold::new();
     // Declare the catalog's agent entrypoint ids (the lane-1 fold contract)
@@ -801,7 +852,12 @@ pub fn run(args: &Args) -> i32 {
         std::thread::sleep(draw.min(budget));
     };
 
-    print_new(&fold, &mut printed, &mut printed_tool_state);
+    print_new(
+        &fold,
+        &mut printed,
+        &mut printed_tool_state,
+        live_printer.as_deref(),
+    );
 
     loop {
         if Instant::now() > deadline {
@@ -859,7 +915,12 @@ pub fn run(args: &Args) -> i32 {
                 }
             }
         }
-        print_new(&fold, &mut printed, &mut printed_tool_state);
+        print_new(
+            &fold,
+            &mut printed,
+            &mut printed_tool_state,
+            live_printer.as_deref(),
+        );
 
         // Resolve pending waits per policy: --approve-all approves
         // everything; otherwise the PERSISTED tier policy decides
@@ -971,7 +1032,12 @@ pub fn run(args: &Args) -> i32 {
                         if status != "completed" || fully_drained {
                             let was_finished = fold.finished;
                             fold.subrun_terminal(&agent_rid, status);
-                            print_new(&fold, &mut printed, &mut printed_tool_state);
+                            print_new(
+                                &fold,
+                                &mut printed,
+                                &mut printed_tool_state,
+                                live_printer.as_deref(),
+                            );
                             // Exit-code truth (cycle-2 review F2): a turn
                             // CONCLUDED BY a cancelled answer-source is a
                             // cancel (130, root-cancel parity) — the fold
@@ -1029,7 +1095,12 @@ pub fn run(args: &Args) -> i32 {
                         }
                     }
                     fold.run_terminal(&status);
-                    print_new(&fold, &mut printed, &mut printed_tool_state);
+                    print_new(
+                        &fold,
+                        &mut printed,
+                        &mut printed_tool_state,
+                        live_printer.as_deref(),
+                    );
                     let stats = &fold.stats;
                     eprintln!(
                         "done: {status} · {} llm calls · {} tools · {}",
@@ -1124,10 +1195,101 @@ fn fmt_stats_tokens(stats: &crate::transcript::Stats) -> String {
     }
 }
 
-fn print_new(fold: &Fold, printed: &mut usize, tool_state: &mut HashMap<usize, ToolStatus>) {
+/// `exec --stream on`: follow the ROOT run's SSE for live reply frames
+/// only (a root subscriber receives its children's deltas — CONTRACTS.md
+/// S-2 §1) and print them through the shared printer. Ledger records on
+/// this stream are ignored: the REST poll owns the fold. Reconnects resume
+/// from the stream's own cursor; the gateway's snapshot then re-sends the
+/// open call's text, which the printer extends or restarts visibly.
+fn spawn_live_tap(
+    client: GatewayClient,
+    run_id: String,
+    printer: Arc<Mutex<crate::live::ExecPrinter>>,
+    stop: Arc<AtomicBool>,
+) {
+    std::thread::spawn(move || {
+        let mut cursor = 0u64;
+        let mut frame_error_noted = false;
+        let mut backoff = Backoff::default();
+        while !stop.load(Ordering::Relaxed) {
+            let after = cursor;
+            let outcome = client.stream_ledger(
+                &run_id,
+                after,
+                &stop,
+                |c| cursor = cursor.max(c),
+                |_records| {},
+                |_skipped| {},
+                |ev| match ev {
+                    Ok(ev) => {
+                        let mut p = printer.lock().unwrap_or_else(|e| e.into_inner());
+                        p.on_event(&ev, &mut std::io::stdout().lock());
+                    }
+                    Err(reason) => {
+                        if !frame_error_noted {
+                            frame_error_noted = true;
+                            eprintln!("· live reply frame unreadable ({reason}); the answer still prints when complete");
+                        }
+                    }
+                },
+            );
+            match outcome {
+                Ok(true) => return,
+                Ok(false) => backoff.reset(),
+                Err(e) => {
+                    if matches!(e.status, Some(401) | Some(403) | Some(404)) {
+                        eprintln!("· live replies unavailable ({e}); the answer still prints when complete");
+                        return;
+                    }
+                    std::thread::sleep(backoff.next_delay());
+                }
+            }
+        }
+    });
+}
+
+fn print_new(
+    fold: &Fold,
+    printed: &mut usize,
+    tool_state: &mut HashMap<usize, ToolStatus>,
+    live: Option<&Mutex<crate::live::ExecPrinter>>,
+) {
+    // Hold the live printer for the whole pass: a delta must never land
+    // in the middle of a printed item, and an open live line is ended
+    // before anything else prints.
+    let mut live = live.map(|m| m.lock().unwrap_or_else(|e| e.into_inner()));
+    let has_new = fold.items.len() > *printed;
+    let has_transition = fold
+        .items
+        .iter()
+        .enumerate()
+        .take(*printed)
+        .any(|(i, item)| {
+            matches!(item, Item::Tool { status, .. }
+                if tool_state.get(&i).is_some_and(|prev| prev != status))
+        });
+    if has_new || has_transition {
+        if let Some(p) = live.as_mut() {
+            p.close_line(&mut std::io::stdout().lock());
+        }
+    }
     // Newly appended items.
     for (i, item) in fold.items.iter().enumerate().skip(*printed) {
-        print_item(item);
+        match (item, live.as_ref()) {
+            // The final answer was already printed live, whole: say so
+            // once instead of printing it twice (a truncated, restarted or
+            // failed live text never matches — then it prints in full).
+            (
+                Item::Assistant {
+                    text,
+                    final_answer: true,
+                },
+                Some(p),
+            ) if p.streamed_whole(text) => {
+                println!("\n━━━ answer ━━━ (streamed above)\n");
+            }
+            _ => print_item(item),
+        }
         if let Item::Tool { status, .. } = item {
             tool_state.insert(i, *status);
         }
