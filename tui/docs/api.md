@@ -154,6 +154,11 @@ What the app does with them:
   `unavailable` adds "live reply unavailable (<node>): <detail>" — once per
   reason per turn. An end for a call that never streamed is normal and shows
   nothing (except `unavailable`).
+- `cancelled` with `detail: "reinvoked"` (the model call is run again after a
+  stray kill) is not a cancellation: the bubble goes, the transcript says
+  "reply restarted", and the re-run streams as a new bubble (call id
+  `<step_id>:reinvoke`), retired by the step's record like any other.
+  `exec` prints `[reply restarted]` and the re-run on a new `✎` line.
 - On every (re)connect all bubbles are dropped; the gateway's `snapshot`
   frames then rebuild the calls still open.
 - A live frame that breaks this shape is reported once per stream as a

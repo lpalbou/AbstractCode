@@ -12889,3 +12889,63 @@ fn launch_permission_flags_set_the_session_posture_without_saving() {
     abstractcode::ui::apply_launch_tool_flags(store, None, &[]);
     assert_eq!(store.accepted_tier.get_untracked(), "write");
 }
+
+/// A stray kill forces the model call to run again (`cancelled` +
+/// `detail: "reinvoked"`): "reply restarted", the first item goes, the
+/// re-run's item (`<step_id>:reinvoke`) appears, and the step's record
+/// retires it.
+#[test]
+fn a_reinvoked_call_shows_reply_restarted_and_the_rerun() {
+    use abstractcode::runner::{apply_live_event, retire_live_replies};
+    let mut h = harness();
+    start_live_turn(&mut h);
+    let store = h.store;
+    apply_live_event(
+        &store,
+        "root",
+        live_delta("s1", 1, "first attempt", "content", false),
+    );
+    assert!(h.turn().contains("first attempt"));
+    let end = abstractcode::live::parse_event(
+        "llm.delta_end",
+        r#"{"run_id":"root","root_run_id":"root","node_id":"reason","call_id":"s1","seq":2,"reason":"cancelled","detail":"reinvoked"}"#,
+    )
+    .unwrap()
+    .unwrap();
+    apply_live_event(&store, "root", end);
+    apply_live_event(
+        &store,
+        "root",
+        live_delta("s1:reinvoke", 1, "second attempt", "content", false),
+    );
+    let screen = h.turn();
+    assert!(screen.contains("reply restarted"), "{screen}");
+    assert!(!screen.contains("live reply cancelled"), "{screen}");
+    assert!(
+        !screen.contains("first attempt"),
+        "first item dropped:\n{screen}"
+    );
+    assert!(screen.contains("second attempt"), "re-run shown:\n{screen}");
+    let recs = vec![serde_json::json!({
+        "run_id": "root", "step_id": "s1", "node_id": "reason", "status": "completed",
+        "effect": {"type": "llm_call", "payload": {}}, "result": {}
+    })];
+    store.fold.update(|f| {
+        for r in &recs {
+            let _ = f.apply("root", r);
+        }
+    });
+    retire_live_replies(&store, "root", "root", &recs);
+    let screen = h.turn();
+    assert!(
+        !screen.contains("second attempt"),
+        "the step's record retires the re-run:\n{screen}"
+    );
+    // And a late frame for the re-run never comes back.
+    apply_live_event(
+        &store,
+        "root",
+        live_delta("s1:reinvoke", 2, " zombie", "content", false),
+    );
+    assert!(!h.turn().contains("zombie"));
+}

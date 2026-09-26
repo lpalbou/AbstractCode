@@ -902,6 +902,11 @@ What the app does with them:
   `unavailable` adds "live reply unavailable (<node>): <detail>" — once per
   reason per turn. An end for a call that never streamed is normal and shows
   nothing (except `unavailable`).
+- `cancelled` with `detail: "reinvoked"` (the model call is run again after a
+  stray kill) is not a cancellation: the bubble goes, the transcript says
+  "reply restarted", and the re-run streams as a new bubble (call id
+  `<step_id>:reinvoke`), retired by the step's record like any other.
+  `exec` prints `[reply restarted]` and the re-run on a new `✎` line.
 - On every (re)connect all bubbles are dropped; the gateway's `snapshot`
   frames then rebuild the calls still open.
 - A live frame that breaks this shape is reported once per stream as a
@@ -2061,7 +2066,8 @@ All notable changes to this project are documented here. The format follows
   into the reply. The recorded reply replaces the bubble when the call
   completes; a call that fails or is cancelled mid-stream leaves a one-line
   note instead, and so does a call the gateway could not stream ("live reply
-  unavailable: <reason>"). A reconnect rebuilds the bubbles from the
+  unavailable: <reason>"). A model call that is run again after a stray kill
+  shows "reply restarted" and streams afresh. A reconnect rebuilds the bubbles from the
   gateway's snapshot; nothing streams back after the final answer.
 - **"Stream replies" setting.** `/stream` (also `/streaming`) opens a picker:
   **Gateway default** (the default — the gateway's own setting decides, and

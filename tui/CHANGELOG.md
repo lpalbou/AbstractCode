@@ -53,7 +53,8 @@ All notable changes to this project are documented here. The format follows
   into the reply. The recorded reply replaces the bubble when the call
   completes; a call that fails or is cancelled mid-stream leaves a one-line
   note instead, and so does a call the gateway could not stream ("live reply
-  unavailable: <reason>"). A reconnect rebuilds the bubbles from the
+  unavailable: <reason>"). A model call that is run again after a stray kill
+  shows "reply restarted" and streams afresh. A reconnect rebuilds the bubbles from the
   gateway's snapshot; nothing streams back after the final answer.
 - **"Stream replies" setting.** `/stream` (also `/streaming`) opens a picker:
   **Gateway default** (the default — the gateway's own setting decides, and

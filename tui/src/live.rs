@@ -42,6 +42,16 @@ use std::io::Write;
 use serde_json::Value;
 
 pub const DELTA_EVENT: &str = "llm.delta";
+
+/// Suffix of the call id a REINVOKED model call streams under.
+pub const REINVOKE_SUFFIX: &str = ":reinvoke";
+
+/// The ledger step id a live call id belongs to: the id itself, or the
+/// original step for a reinvoked re-run (`<step_id>:reinvoke`) — whose
+/// durable record carries the step's own id.
+pub fn step_id_of(call_id: &str) -> &str {
+    call_id.strip_suffix(REINVOKE_SUFFIX).unwrap_or(call_id)
+}
 pub const DELTA_END_EVENT: &str = "llm.delta_end";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +79,11 @@ pub enum EndReason {
     Completed,
     Failed,
     Cancelled,
+    /// `cancelled` with `detail: "reinvoked"`: a stray kill forced the
+    /// model call to run again; the re-run streams under
+    /// `<step_id>:reinvoke` (see [`step_id_of`]). Shown as "reply
+    /// restarted", never as a cancellation.
+    Restarted,
     /// The run asked for streaming but this call could not stream; the
     /// detail names why (`structured_output`, `remote_core`,
     /// `provider_cannot_stream`, `sink_error`, `usage_unavailable`).
@@ -84,6 +99,7 @@ impl EndReason {
             EndReason::Completed => "completed",
             EndReason::Failed => "failed",
             EndReason::Cancelled => "cancelled",
+            EndReason::Restarted => "restarted",
             EndReason::Unavailable(_) => "unavailable",
             EndReason::Other(w) => w,
         }
@@ -157,6 +173,7 @@ pub fn parse_event(event: &str, data: &str) -> Result<Option<LiveEvent>, String>
         let reason = match text_field("reason").as_str() {
             "completed" => EndReason::Completed,
             "failed" => EndReason::Failed,
+            "cancelled" if text_field("detail") == "reinvoked" => EndReason::Restarted,
             "cancelled" => EndReason::Cancelled,
             "unavailable" => EndReason::Unavailable({
                 let detail = text_field("detail");
@@ -335,6 +352,11 @@ impl LiveReplies {
                 let gone = self.entries.remove(ix);
                 self.retired.insert(gone.call_id.clone());
                 let chars = gone.content.chars().count();
+                if end.reason == EndReason::Restarted {
+                    return Some(format!(
+                        "reply restarted — the model call runs again; its partial text ({chars} chars) was discarded"
+                    ));
+                }
                 Some(format!(
                     "live reply {} — the partial text ({chars} chars) was discarded; the run's record shows what happened",
                     end.reason.word()
@@ -414,7 +436,10 @@ impl LiveReplies {
         for c in closed {
             self.retired.insert(c.step_id.clone());
             let before = self.entries.len();
-            self.entries.retain(|e| e.call_id != c.step_id);
+            // A reinvoked re-run's bubble belongs to the same step.
+            self.retired
+                .insert(format!("{}{REINVOKE_SUFFIX}", c.step_id));
+            self.entries.retain(|e| step_id_of(&e.call_id) != c.step_id);
             changed |= self.entries.len() != before;
         }
         changed
@@ -534,7 +559,10 @@ impl ExecPrinter {
             }
             LiveEvent::End(end) => {
                 if self.open.as_deref() == Some(end.call_id.as_str()) {
-                    if end.reason != EndReason::Completed
+                    if end.reason == EndReason::Restarted {
+                        let _ = write!(out, " [reply restarted]");
+                        self.printed.retain(|(c, _)| *c != end.call_id);
+                    } else if end.reason != EndReason::Completed
                         && self.printed.iter().any(|(c, _)| *c == end.call_id)
                     {
                         let _ = write!(out, " [live reply {}]", end.reason.word());
@@ -723,6 +751,59 @@ mod tests {
         l.apply(delta("c3", 1, "x"));
         let note = l.apply(end("c3", EndReason::Cancelled)).unwrap();
         assert!(note.contains("cancelled"), "{note}");
+    }
+
+    #[test]
+    fn a_reinvoked_call_restarts_the_reply_under_its_new_id() {
+        let mut l = LiveReplies::default();
+        l.apply(delta("s1", 1, "first try"));
+        let ev = parse_event(
+            "llm.delta_end",
+            r#"{"call_id":"s1","seq":2,"reason":"cancelled","detail":"reinvoked"}"#,
+        )
+        .unwrap()
+        .unwrap();
+        let note = l.apply(ev).expect("said");
+        assert!(note.starts_with("reply restarted"), "{note}");
+        assert!(!note.contains("cancelled"), "{note}");
+        assert!(l.is_empty(), "the first item is dropped");
+        l.apply(delta("s1:reinvoke", 1, "second try"));
+        assert_eq!(l.entries().len(), 1, "the re-run's item appears");
+        assert_eq!(l.entries()[0].content, "second try");
+        // The step's durable record retires the re-run's bubble too.
+        assert!(l.retire_durable(&[DurableClose {
+            run_id: "r".into(),
+            step_id: "s1".into(),
+            node_id: "reason".into(),
+        }]));
+        assert!(l.is_empty());
+        l.apply(delta("s1:reinvoke", 2, "late"));
+        assert!(l.is_empty());
+        // Other cancelled ends are unchanged.
+        l.apply(delta("s2", 1, "x"));
+        let other = parse_event(
+            "llm.delta_end",
+            r#"{"call_id":"s2","seq":2,"reason":"cancelled","detail":"user"}"#,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(l.apply(other).unwrap().contains("live reply cancelled"));
+        assert_eq!(step_id_of("s1:reinvoke"), "s1");
+        assert_eq!(step_id_of("s1"), "s1");
+    }
+
+    #[test]
+    fn exec_prints_reply_restarted_then_the_rerun() {
+        let mut p = ExecPrinter::default();
+        let mut out: Vec<u8> = Vec::new();
+        p.on_event(&delta("s1", 1, "first"), &mut out);
+        p.on_event(&end("s1", EndReason::Restarted), &mut out);
+        p.on_event(&delta("s1:reinvoke", 1, "The answer"), &mut out);
+        p.on_event(&end("s1:reinvoke", EndReason::Completed), &mut out);
+        let s = String::from_utf8(out).unwrap();
+        assert_eq!(s, "✎ first [reply restarted]\n✎ The answer\n");
+        assert!(p.streamed_whole("The answer"));
+        assert!(!p.streamed_whole("first"));
     }
 
     #[test]

@@ -3259,9 +3259,11 @@ pub fn retire_live_replies(store: &Store, root: &str, rid: &str, records: &[Valu
     }
     let closes = crate::live::durable_closes(rid, records);
     let hit = store.live.with_untracked(|l| {
-        l.entries()
-            .iter()
-            .any(|e| closes.iter().any(|c| c.step_id == e.call_id))
+        l.entries().iter().any(|e| {
+            closes
+                .iter()
+                .any(|c| c.step_id == crate::live::step_id_of(&e.call_id))
+        })
     });
     if hit {
         store.live.update(|l| {
@@ -3286,7 +3288,7 @@ pub fn apply_live_event(store: &Store, root: &str, ev: crate::live::LiveEvent) {
         (
             f.root_run_id() == root,
             f.finished,
-            f.llm_call_closed(ev.call_id()),
+            f.llm_call_closed(crate::live::step_id_of(ev.call_id())),
         )
     });
     let unavailable = matches!(
