@@ -346,11 +346,15 @@ fn run_tui(args: &cli::Args) -> i32 {
         // camera-default-off arms via the pending flag and fires when the
         // inventory loads (the tools-load effect — no ctx exists yet here).
         let _fresh = ui::seed_tool_pref_signals(store, &prefs, &session_id);
+        // `--permissions` / `--require-approval` apply to the interactive
+        // session too (they are "for this invocation"), over the saved slot.
+        ui::apply_launch_tool_flags(store, args.permissions.as_deref(), &args.require_approval);
         // Live workspace scope (seeded from flags/prefs; /workspace edits).
         // The signal is the ONE authority — UiCtx carries no copy.
         store.workspace_mode.set(workspace_mode.unwrap_or_default());
         store.send_local_workspace.set(send_local_pref);
         store.workspace_explicit.set(workspace_explicit);
+        store.workspace_candidate.set(workspace_root.clone());
         store.workspace_allowed.set(prefs.workspace_allowed.clone());
 
         let wake = abstracttui::reactive::wake_handle();

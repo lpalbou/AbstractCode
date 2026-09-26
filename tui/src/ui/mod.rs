@@ -1807,6 +1807,40 @@ fn set_permissions(store: Store, ctx: &UiCtx, arg: Option<String>) {
     }
 }
 
+/// Launch flags for tool permissions (E2E N1): `--permissions <level>` and
+/// `--require-approval <names>` set THIS launch's session posture, the
+/// same way `exec` resolves them — the flag wins over the saved level, and
+/// each named tool is pinned `ask` (flag wins per name). Session-only: not
+/// written to prefs (`/permissions` is the saving gesture). Called at boot
+/// after the saved slot seeds the signals; a notice names what is in force.
+pub fn apply_launch_tool_flags(
+    store: Store,
+    permissions: Option<&str>,
+    require_approval: &[String],
+) {
+    use crate::tool_policy::Tier;
+    if let Some(tier) = permissions.and_then(Tier::parse) {
+        store.accepted_tier.set(tier.label().to_string());
+        store.notify(format!(
+            "permissions: {} (from --permissions, this launch) — {}",
+            tier.label(),
+            tier.description()
+        ));
+    }
+    if !require_approval.is_empty() {
+        store.tool_overrides.update(|pins| {
+            pins.retain(|(name, _)| !require_approval.contains(name));
+            for name in require_approval {
+                pins.push((name.clone(), "ask".to_string()));
+            }
+        });
+        store.notify(format!(
+            "approval required for: {} (from --require-approval, this launch)",
+            require_approval.join(", ")
+        ));
+    }
+}
+
 pub(crate) fn apply_permissions(store: Store, ctx: &UiCtx, tier: crate::tool_policy::Tier) {
     store.accepted_tier.set(tier.label().to_string());
     // Per-session (operator ask): the level is part of "those preferences"

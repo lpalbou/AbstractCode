@@ -2011,6 +2011,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`--permissions` and `--require-approval` now apply to the interactive
+  app too**, not only to `exec`: they set this launch's tool permissions
+  (saved `/permissions` level and pins are overridden for the launch, not
+  changed), and a notice says what is in force.
+- **The "gateway runs on this machine" notice names the folder actually
+  sent.** With `--no-workspace` it says no folder is sent; when the launch
+  folder does not exist it says so instead of implying a working folder.
+
 - **The default agent workflow is now the gateway's setting.** `/workflow`
   starts with **Gateway default → name @version**; choosing it (or never
   choosing anything, as on a new install) lets the gateway decide which

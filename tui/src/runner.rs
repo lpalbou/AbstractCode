@@ -486,11 +486,33 @@ pub(crate) fn learn_same_machine(store: &Store, same: bool) {
             == crate::workspace_files::SendLocalWorkspace::Auto
         && !store.workspace_explicit.get_untracked()
     {
-        store.notify(if same {
-            "the gateway reports it runs on this machine — your folder is sent as the workspace from the next turn"
-        } else {
-            "the gateway reports it runs on another machine — your folder is not sent as the workspace"
-        });
+        store.notify(same_machine_notice(
+            same,
+            store.workspace_candidate.get_untracked().as_deref(),
+        ));
+    }
+}
+
+/// The one-line same-machine notice — truthful about WHICH folder, if
+/// any, the next turn sends (E2E N2: with `--no-workspace` it used to say
+/// "your folder is sent"). A launch folder missing on disk is still sent
+/// as named (the send rule does not change), and the notice says it is
+/// missing rather than implying a working folder.
+pub fn same_machine_notice(same: bool, candidate: Option<&str>) -> String {
+    match (same, candidate) {
+        (_, None) => format!(
+            "the gateway reports it runs on {} — no folder is sent as the workspace (--no-workspace); the agent works in a gateway-side session folder",
+            if same { "this machine" } else { "another machine" }
+        ),
+        (true, Some(p)) if !std::path::Path::new(p).is_dir() => format!(
+            "the gateway reports it runs on this machine, but the launch folder {p} does not exist here — it is still sent as named; pass --workspace <folder> to name an existing one"
+        ),
+        (true, Some(p)) => format!(
+            "the gateway reports it runs on this machine — {p} is sent as the workspace from the next turn"
+        ),
+        (false, Some(_)) => {
+            "the gateway reports it runs on another machine — your folder is not sent as the workspace".into()
+        }
     }
 }
 
@@ -4597,11 +4619,50 @@ mod tests {
     fn same_machine_verdict_is_learned_and_announced_once() {
         let (root, ()) = abstracttui::reactive::create_root(|cx| {
             let store = Store::create(cx);
+            store
+                .workspace_candidate
+                .set(Some(std::env::temp_dir().display().to_string()));
             learn_same_machine(&store, true);
             assert_eq!(store.gateway_same_machine.get_untracked(), Some(true));
             assert_eq!(store.notices.get_untracked().len(), 1);
             learn_same_machine(&store, true);
             assert_eq!(store.notices.get_untracked().len(), 1, "no repeat");
+        });
+        root.dispose();
+    }
+
+    /// E2E N2: the same-machine notice names the folder actually sent — none
+    /// with `--no-workspace`, none (and why) for a launch folder that does
+    /// not exist.
+    #[test]
+    fn same_machine_notice_is_truthful_about_the_folder() {
+        let tmp = std::env::temp_dir().display().to_string();
+        let sent = same_machine_notice(true, Some(&tmp));
+        assert!(sent.contains(&tmp) && sent.contains("is sent"), "{sent}");
+        let none = same_machine_notice(true, None);
+        assert!(
+            none.contains("no folder is sent") && none.contains("--no-workspace"),
+            "{none}"
+        );
+        assert!(!none.contains("is sent as the workspace from"), "{none}");
+        let gone = "/definitely/not/a/real/folder-acode";
+        let missing = same_machine_notice(true, Some(gone));
+        assert!(
+            missing.contains("does not exist") && missing.contains(gone),
+            "{missing}"
+        );
+        assert!(!missing.contains("from the next turn"), "{missing}");
+        assert!(same_machine_notice(false, Some(&tmp)).contains("not sent"));
+        assert!(same_machine_notice(false, None).contains("--no-workspace"));
+        // Wired: learn_same_machine posts THIS text.
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = Store::create(cx);
+            learn_same_machine(&store, true);
+            let notices = store.notices.get_untracked();
+            assert!(
+                format!("{notices:?}").contains("--no-workspace"),
+                "{notices:?}"
+            );
         });
         root.dispose();
     }

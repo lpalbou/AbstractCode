@@ -12844,3 +12844,48 @@ fn stream_on_against_a_gateway_without_deltas_notices_once_per_session_and_off_a
     };
     assert_eq!(opts.stream, Some(false));
 }
+
+/// E2E N1: `--permissions` / `--require-approval` apply to the interactive
+/// session as they do to `exec` — this launch only, never saved.
+#[test]
+fn launch_permission_flags_set_the_session_posture_without_saving() {
+    let mut h = harness();
+    h.leave_splash();
+    let store = h.store;
+    store.accepted_tier.set("read".into());
+    store
+        .tool_overrides
+        .set(vec![("fetch_url".into(), "auto".into())]);
+    abstractcode::ui::apply_launch_tool_flags(
+        store,
+        Some("write"),
+        &["fetch_url".into(), "execute_command".into()],
+    );
+    assert_eq!(store.accepted_tier.get_untracked(), "write");
+    let pins = store.tool_overrides.get_untracked();
+    assert!(
+        pins.contains(&("fetch_url".into(), "ask".into())),
+        "flag wins per name: {pins:?}"
+    );
+    assert!(
+        pins.contains(&("execute_command".into(), "ask".into())),
+        "{pins:?}"
+    );
+    assert!(
+        !pins.contains(&("fetch_url".into(), "auto".into())),
+        "{pins:?}"
+    );
+    assert_eq!(
+        h.prefs.borrow().tool_accepted_tier,
+        Prefs::default().tool_accepted_tier,
+        "not saved"
+    );
+    let said = format!("{:?}", store.notices.get_untracked());
+    assert!(
+        said.contains("from --permissions") && said.contains("from --require-approval"),
+        "{said}"
+    );
+    // No flags: nothing changes.
+    abstractcode::ui::apply_launch_tool_flags(store, None, &[]);
+    assert_eq!(store.accepted_tier.get_untracked(), "write");
+}

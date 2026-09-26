@@ -981,6 +981,10 @@ pub struct Store {
     pub send_local_workspace: Signal<crate::workspace_files::SendLocalWorkspace>,
     /// The launch root came from an explicit `--workspace` (always sent).
     pub workspace_explicit: Signal<bool>,
+    /// The launch root CANDIDATE (`--workspace`, else the cwd); `None` with
+    /// `--no-workspace`. Read by the same-machine notice so it never claims
+    /// a folder is sent when there is none.
+    pub workspace_candidate: Signal<Option<String>>,
     /// Skill names attached to every run (persisted; `input_data.skills`).
     pub selected_skills: Signal<Vec<String>>,
     /// Gateway MCP server registry (`/mcp`), plus its honest empty-state note.
@@ -1256,6 +1260,7 @@ impl Store {
             gateway_same_machine: cx.signal(None),
             send_local_workspace: cx.signal(Default::default()),
             workspace_explicit: cx.signal(false),
+            workspace_candidate: cx.signal(None),
             selected_skills: cx.signal(Vec::new()),
             mcp_servers: cx.signal(Vec::new()),
             mcp_note: cx.signal(String::new()),
