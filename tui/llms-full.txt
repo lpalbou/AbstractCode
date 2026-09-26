@@ -2025,6 +2025,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-26
+
 ### Changed
 
 - **`/model` asks about MTP only for a model that can use it.** The MTP step
@@ -2032,11 +2034,6 @@ All notable changes to this project are documented here. The format follows
   MTP-capable; otherwise the picker ends there and the transcript says why
   ("<model> cannot use MTP", or "MTP support unknown: <error>"). The
   provider list's MTP row, `/mtp` and `--mtp` are unchanged.
-
-## [0.6.0] - 2026-09-26
-
-### Changed
-
 - **`--permissions` and `--require-approval` now apply to the interactive
   app too**, not only to `exec`: they set this launch's tool permissions
   (saved `/permissions` level and pins are overridden for the launch, not

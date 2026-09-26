@@ -72,6 +72,7 @@ entries.
 
 ### Changed
 
+- Terminal: `/model` asks about MTP only for a model that can use it; otherwise the picker ends after the reasoning step and the transcript says why (`/mtp` still sets it).
 - **Web app server** sets `X-Forwarded-For` to the address of the
   connection it received on every call it makes to the gateway (API,
   live streams, status check, sign-in, sign-out), overwriting any incoming
