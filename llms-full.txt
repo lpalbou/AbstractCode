@@ -939,11 +939,13 @@ shared Core default. Fresh Core configurations use depth 2 only for compatible m
 - **Gateway default** (the default): the gateway operator's setting decides. When the gateway reports it, the option reads **Gateway default (on)** or **Gateway default (off)**.
 - **On** or **Off**: your choice for every new turn, whatever the gateway default.
 
-The choice is remembered in this browser for your account and applies to the next turn. It is sent as `_runtime.stream` (`true` for On, `false` for Off, nothing for Gateway default); no other run setting changes.
+The choice is remembered in this browser for your account and applies to the next turn. It is sent as `_runtime.stream` (`true` for On, `false` for Off, nothing for Gateway default); no other run setting changes. Off is always sent, so a gateway whose default is on never streams your replies against your choice.
 
-While a reply streams, a live assistant bubble grows as text arrives; a sub-agent's live reply is labelled with its step. When the model call ends, the complete message replaces the live text. If the call fails or is cancelled, the bubble becomes a short note saying so. If the connection drops, the live text disappears and comes back from the gateway when the page reconnects; nothing is shown twice. When the gateway runs a call without streaming (for example a call that must return structured output), the transcript shows a one-line note saying why, and the reply appears when it is complete.
+While a reply streams, a live assistant bubble grows as text arrives (redrawn a few times per second); a sub-agent's live reply is labelled with its step. Images in assistant messages load only from this app's own address, such as files in the conversation's workspace; other images appear as links. When the model call ends, the complete message replaces the live text. If the call fails or is cancelled, the bubble becomes a short note saying so. If the connection drops, the live text disappears and comes back from the gateway when the page reconnects; nothing is shown twice. When the gateway runs a call without streaming (for example a call that must return structured output), the transcript shows a one-line note saying why, and the reply appears when it is complete.
 
-The setting is available only when the gateway advertises live replies. Otherwise it stays visible but disabled, with the reason ("not supported by this gateway", or why the gateway's capabilities could not be read), and replies appear when they are complete.
+The setting is available only when the gateway advertises live replies. Otherwise it stays visible but disabled, with the reason ("not supported by this gateway", or why the gateway's capabilities could not be read), and replies appear when they are complete. If you had chosen On, the conversation also shows one note: "Streaming is on in your settings but this gateway does not support live replies".
+
+If the gateway sends a live update the app cannot read, the transcript shows one note for that model call, the update is skipped, and the run keeps going: the complete reply still arrives.
 
 ## Running and supervising work
 
@@ -1284,6 +1286,9 @@ Inside the app:
   turn); below it, every catalog entrypoint implementing
   `abstractcode.agent.v1`. `/model` picks provider + model, then the
   reasoning effort, then MTP (multi-token prediction — also `/mtp`), `/theme` restyles
+- `/stream` chooses whether replies stream in as the model writes them
+  (gateway default, on, off); a streamed reply shows under the transcript
+  and the recorded reply replaces it when the call completes
 - type while a run is active to steer it; `Esc Esc` cancels; `/new` starts a
   fresh session
 - tool approvals and agent questions open as modals; the run waits durably
@@ -1306,6 +1311,8 @@ without a raised level, mutating tools are denied with an explanation the
 model sees.
 Ask-user waits get an honest "no interactive user" refusal so unattended
 runs never stall.
+`--stream on` prints the reply as it is written (when the gateway streams)
+and does not print it a second time at the end.
 
 ## Options
 
@@ -1316,6 +1323,8 @@ runs never stall.
 --workflow <bundle[:flow]|default>  agent workflow (default: your /workflow
                                   choice, else the gateway's default)
 --provider <P> --model <M>        route override (default: gateway defaults)
+--stream <on|off|default>         stream replies (default: your /stream choice,
+                                  else the gateway's setting; exec: the flag only)
 --workspace <PATH>                requested workspace root (see note)
 --theme <ID>                      start theme (ABSTRACTTUI_THEME works too)
 --animation <on|off>              launch animation (default: on) — SAVED, so
@@ -1510,6 +1519,11 @@ gateway until you answer.
    `Esc` keeps it. The last row of the provider list jumps straight to the MTP
    step, and `/mtp` still works on its own. All these choices persist across
    launches.
+   **Streamed replies:** when the gateway streams, the reply appears under the
+   transcript as the model writes it and the recorded reply replaces it when
+   the call completes. `/stream` picks **Gateway default** (what a new install
+   uses), **On** or **Off**; the header shows the choice when it is not the
+   default.
 4. **Where files land.** Under the gateway's default (server-managed)
    workspace policy, tools execute in the gateway's workspace root or a
    managed per-session folder — the app tells you this at startup. To make
@@ -1670,6 +1684,7 @@ abstractcode --help | --version
 | `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
 | `--reasoning <LEVEL>` | Reasoning effort: `none\|minimal\|low\|medium\|high\|xhigh\|auto` (also `--thinking`; validated at launch; works on `exec` too) | gateway default |
 | `--mtp <DEPTH\|off\|inherit>` | Native-MTP request override; an explicit depth must be honored by the execution host. Works on `exec` too | saved TUI choice, otherwise inherit; `exec` inherits unless the flag is supplied |
+| `--stream <on\|off\|default>` | Stream replies as the model writes them (`--streaming` too). Interactive: this launch only (`/stream` saves). `exec`: the flag alone decides, and `on` prints the reply to stdout live | saved `/stream` choice, else **gateway default**; `exec`: gateway default unless the flag is given |
 | `--workflow <bundle[:flow]\|default>` | Agent workflow; `default` = the gateway's default (the gateway resolves it at every run start) | your `/workflow` choice, else the gateway default; with neither, the app asks you to pick (`exec` exits 2 and lists the workflows) |
 | `--provider <NAME>` | Provider override | gateway defaults |
 | `--model <NAME>` | Model override | gateway defaults |
@@ -1714,6 +1729,7 @@ abstractcode --help | --version
 | `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
 | `/model` | Pick provider + model from gateway discovery |
 | `/mtp [depth\|off\|inherit]` | Native-MTP request policy (`/speculation` alias). Bare command opens a provider/model capability-driven picker; explicit values persist locally and ride `_runtime.speculation`. Inherit omits the override; Off sends `false`; a depth sends `native_mtp` with `require_acceleration=true` |
+| `/stream [on\|off\|default]` | "Stream replies" (`/streaming` alias). Bare opens the picker: **Gateway default** (names the gateway's current setting), **On**, **Off**. Saved in `prefs.json` as `stream_replies`; see "Streamed replies" below |
 | `/tools` | Enable/disable gateway tools (`Space` toggles; checked set = the run's exact allowlist; untouched = workflow defaults). In-modal: `p` cycles a per-tool approval pin, `t` cycles the tier — see the modal keys below |
 | `/permissions [read\|write\|all]` | THE tool-permission surface (bare = report): batches classifying at-or-below the level auto-approve. `read` = proven read-only tools only; `write` adds workspace file mutations; `all` auto-approves everything, **including arbitrary shell and network egress** — deliberate use only. Per-tool `ask` pins and gateway-disabled tools still gate. Sticky per session (`/tools tier` remains a spelling alias) |
 | `/workspace` | Inspect + edit the filesystem scope tools may touch: root (from `--workspace`/cwd), access mode, allowed paths. Mode + paths persist and ride every run |
@@ -1761,6 +1777,57 @@ depth is retained, not silently replaced. Typed depths are explicit requests, no
 that the current backend can execute them: the host validates them and refuses unsupported
 strict requests. Neither discovery nor `/mtp` downloads a head or loads a model. Inherited
 defaults remain host-owned (fresh Core configurations use depth 2 for compatible models).
+
+### Streamed replies (`/stream`)
+
+A gateway that streams replies says so in `GET /discovery/capabilities` as
+`streaming: {"deltas": true, "default": <bool>}`. Its run stream
+(`GET /runs/{id}/ledger/stream`) then carries two extra events with no `id:`
+line — they are not ledger records and never move the resume cursor:
+`llm.delta` (`run_id`, `root_run_id`, `node_id`, `call_id`, `seq`, `text`,
+`channel` = `content` | `reasoning`, `snapshot`, optional `truncated`) and
+`llm.delta_end` (`call_id`, `seq`, `reason` = `completed` | `failed` |
+`cancelled` | `unavailable` with a `detail`).
+
+What the app does with them:
+
+- It reads them from the turn's ROOT run stream only (the gateway sends a
+  child run's deltas there too) and shows one live bubble per call, below the
+  transcript: "reply · <node>", or "sub-agent · <node>" for a child run.
+  `content` text grows in the bubble (Markdown, rendered as it arrives);
+  `reasoning` text is shown only as a collapsed "∴ thinking: <newest line>
+  (N chars of reasoning so far)" line — its newest line cut to 100
+  characters, with "…" marking the cut — and never joins the reply.
+  `truncated: true` adds a `[#TRUNCATION]` line to the bubble.
+- The call's recorded `llm_call` step (its `step_id` is the `call_id`)
+  replaces the bubble; the final answer removes every bubble; no bubble is
+  created for a call already recorded, or after the final answer.
+- `failed` / `cancelled` remove the bubble and add a transcript line
+  ("live reply failed — the partial text (N chars) was discarded…").
+  `unavailable` adds "live reply unavailable (<node>): <detail>" — once per
+  reason per turn. An end for a call that never streamed is normal and shows
+  nothing (except `unavailable`).
+- On every (re)connect all bubbles are dropped; the gateway's `snapshot`
+  frames then rebuild the calls still open.
+- A live frame that breaks this shape is reported once per stream as a
+  transcript line and skipped; the stream keeps going and the recorded
+  answer still arrives.
+
+The setting: **Gateway default** sends nothing, so the gateway's own
+`agents.streaming_default` applies. **Off** always sends
+`input_data._runtime.stream: false` — your "off" is never left to the
+gateway's default. **On** sends `true` only to a gateway that advertises
+`streaming.deltas`: an older gateway would accept it but stream the provider
+call internally with nothing to show for it, so the app sends nothing, the
+header says "stream on (gateway has no live replies)", and the transcript
+says "this gateway does not support streaming" once per session.
+
+`exec --stream on` opens the root run's stream for these frames only (the
+transcript still comes from the REST ledger) and prints the reply as it
+arrives, as a line starting `✎ `. When the final answer is exactly what was
+printed live, the answer block reads `━━━ answer ━━━ (streamed above)`
+instead of repeating it; otherwise (a failed, restarted or cut live text) the
+answer prints in full. Reasoning is not printed.
 
 ### Transcript export (`/export`)
 
@@ -2487,6 +2554,26 @@ Your terminal likely renders ambiguous-width characters wide. Use a
 terminal/font configured for narrow ambiguous width (the norm), and check
 `--caps` for what was detected.
 
+## Replies do not stream even though `/stream` is on
+
+The header says "stream on (gateway has no live replies)" and the transcript
+says "this gateway does not support streaming" (once per session): the
+gateway does not advertise `streaming.deltas` in `GET /discovery/capabilities`
+(an older gateway, or one without the feature). The app then does not ask it
+to stream — answers appear when each call completes. "(gateway not checked yet)" means the
+capabilities have not loaded; they load at startup, so a reconnect usually
+settles it.
+
+"live reply unavailable: <reason>" in the transcript means the gateway was
+asked to stream but this call could not: `structured_output` (calls that must
+return structured data never stream), `remote_core`, `provider_cannot_stream`,
+`usage_unavailable` (the provider cannot report token usage while streaming,
+so the gateway runs the call normally), or `sink_error`. The answer still
+arrives when the call completes.
+
+"live reply failed/cancelled — the partial text was discarded" means the call
+ended without completing; the run's record shows what happened.
+
 ## `exec` hangs then exits 124
 
 The run outlived `--timeout`. The run itself stays durable on the gateway —
@@ -2725,11 +2812,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the model writes it: a live bubble grows and is replaced by the complete
   message when the model call ends. It sets `_runtime.stream` on the next
   run (nothing for Gateway default, so the gateway's own setting decides).
+  Off is always sent, so a gateway default of on never overrides it.
   When the gateway does not advertise live replies, the setting is shown
-  disabled with the reason. A call the gateway could not stream gets a
-  one-line note. Requires `@abstractframework/panel-chat` 0.1.17 and a
-  gateway that sends live reply events; a malformed live event is reported
-  as an error rather than ignored.
+  disabled with the reason, and a saved On adds one note to the
+  conversation. A call the gateway could not stream gets a one-line note.
+  A malformed live update is reported once per model call and skipped; the
+  run keeps streaming and the complete reply still arrives. Images in
+  assistant messages load only from the app's own address (workspace
+  files); others are links. Requires `@abstractframework/panel-chat` 0.1.17
+  and a gateway that sends live reply events.
 - **Web: "Gateway default" workflow.** The toolbar's workflow list starts
   with **Gateway default → name @version**, the coding agent your gateway's
   operator set. Choosing it is remembered as "the gateway default", so a

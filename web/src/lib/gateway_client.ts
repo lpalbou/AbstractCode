@@ -199,12 +199,16 @@ export class GatewayClient {
    * carry the ledger cursor). `llm.delta` / `llm.delta_end` frames (live model
    * reply text, sent with no `id:`) go to `on_delta` when the caller wants
    * them: they are volatile, never reach `on_step`, and never move the cursor
-   * the caller resumes from. A malformed delta frame ends the stream with an
-   * error naming the problem (the caller reconnects and shows it).
+   * the caller resumes from. A malformed delta frame is handed to
+   * `on_delta_error` (required with `on_delta`) and skipped: the optional
+   * live lane never ends the ledger stream. Without `on_delta`, delta frames
+   * are ignored, as they were before live replies existed.
    */
-  async stream_ledger(run_id: string, opts: { after: number; on_step: (ev: LedgerStreamEvent) => void; signal?: AbortSignal; on_open?: () => void; on_delta?: (ev: LlmDeltaEvent) => void }): Promise<void> {
+  async stream_ledger(run_id: string, opts: { after: number; on_step: (ev: LedgerStreamEvent) => void; signal?: AbortSignal; on_open?: () => void; on_delta?: (ev: LlmDeltaEvent) => void; on_delta_error?: (error: Error, frame: { event: string; data: string }) => void }): Promise<void> {
     const rid = String(run_id || "").trim();
     if (!rid) throw new Error("stream_ledger: run_id is required");
+    if (opts.on_delta && !opts.on_delta_error)
+      throw new Error("stream_ledger: on_delta requires on_delta_error (malformed live frames must be reported)");
     const after = Number(opts?.after || 0);
     const on_step = opts.on_step;
     const signal = opts.signal;
@@ -224,32 +228,36 @@ export class GatewayClient {
     const parser = new SseParser();
 
     const on_delta = opts.on_delta;
+    const on_delta_error = opts.on_delta_error;
     while (true) {
       const { value, done } = await reader.read();
       if (done) return;
       const text = decoder.decode(value, { stream: true });
-      try {
-        parser.push(text, (ev) => {
-          if (on_delta) {
-            // Throws for a malformed delta frame; null for every other frame.
-            const delta = llmDeltaFromSse(ev.event || "message", ev.data ?? "");
-            if (delta) {
-              on_delta(delta);
-              return;
-            }
-          }
-          if (ev.event !== "step" || !ev.data) return;
+      parser.push(text, (ev) => {
+        if (on_delta && on_delta_error) {
+          const event = ev.event || "message";
+          const data = ev.data ?? "";
+          let delta: LlmDeltaEvent | null;
           try {
-            const parsed = JSON.parse(ev.data);
-            if (parsed && typeof parsed.cursor === "number" && parsed.record) on_step(parsed as LedgerStreamEvent);
-          } catch {
-            // ignore malformed ledger events (unchanged behaviour)
+            // Throws for a malformed delta frame; null for every other frame.
+            delta = llmDeltaFromSse(event, data);
+          } catch (error) {
+            on_delta_error(error instanceof Error ? error : new Error(String(error)), { event, data });
+            return;
           }
-        });
-      } catch (error) {
-        void reader.cancel().catch(() => undefined);
-        throw error;
-      }
+          if (delta) {
+            on_delta(delta);
+            return;
+          }
+        }
+        if (ev.event !== "step" || !ev.data) return;
+        try {
+          const parsed = JSON.parse(ev.data);
+          if (parsed && typeof parsed.cursor === "number" && parsed.record) on_step(parsed as LedgerStreamEvent);
+        } catch {
+          // ignore malformed ledger events (unchanged behaviour)
+        }
+      });
     }
   }
 

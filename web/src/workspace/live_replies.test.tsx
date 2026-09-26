@@ -6,7 +6,10 @@ import {
   WorkflowSessionController,
   type ChatMessage,
 } from "@abstractframework/panel-chat";
-import { workflowTransport } from "./session_transport";
+import { createWorkflowTransport, type DeltaFrameError } from "./session_transport";
+
+const deltaErrors: DeltaFrameError[] = [];
+const workflowTransport = createWorkflowTransport({ onDeltaError: (report) => deltaErrors.push(report) });
 
 // End to end inside the page: the app's own workflow transport (fetch → SSE
 // parser → onDelta) feeding panel-chat's controller, rendered by WorkflowChat.
@@ -85,8 +88,11 @@ function fakeGateway() {
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+// The controller keeps panel-chat's default live-render throttle (60 ms, as
+// in the app): wait past one interval so the latest live text is rendered.
 async function settle() {
   for (let i = 0; i < 6; i += 1) await tick();
+  await new Promise((resolve) => setTimeout(resolve, 90));
 }
 const live = (messages: ChatMessage[]) => messages.filter((m) => String(m.id).startsWith("live:"));
 const render = (messages: ChatMessage[]) =>
@@ -101,6 +107,7 @@ const render = (messages: ChatMessage[]) =>
   );
 
 beforeEach(() => {
+  deltaErrors.length = 0;
   vi.stubGlobal("document", { cookie: "" });
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -170,14 +177,29 @@ describe("live replies through the app's transport", () => {
     controller.dispose();
   });
 
-  it("a malformed delta frame surfaces an error instead of vanishing", async () => {
+  it("a malformed delta frame is reported and skipped; the run keeps streaming", async () => {
     const gw = fakeGateway();
     const controller = new WorkflowSessionController(workflowTransport, { clientId: "code-web-test" });
     await controller.load(ROOT);
     await settle();
-    gw.streams[0].push("event: llm.delta\ndata: {not json\n\n");
+    const stream = gw.streams[0];
+    stream.push(llmStarted(1));
+    stream.push("event: llm.delta\ndata: {not json\n\n");
+    stream.push(frame("llm.delta", delta(0, "still ", { snapshot: true })));
+    stream.push(frame("llm.delta", delta(1, "live")));
     await settle();
-    expect(controller.getSnapshot().error || "").toMatch(/llm\.delta/);
+    expect(deltaErrors).toHaveLength(1);
+    expect(deltaErrors[0]).toMatchObject({ runId: ROOT, frame: { event: "llm.delta" } });
+    expect(deltaErrors[0].error.message).toMatch(/llm\.delta/);
+    expect(live(controller.getSnapshot().messages)[0].content).toBe("still live");
+    stream.push(llmCompleted(2, "final text"));
+    stream.push(answer(3, "final text"));
+    await settle();
+    // Same stream, no reconnect: the ledger tail was never ended.
+    expect(gw.streams).toHaveLength(1);
+    expect(controller.getSnapshot().records.map((r) => r.cursor)).toEqual([1, 2, 3]);
+    expect(controller.getSnapshot().messages.some((m) => m.role === "assistant" && m.content === "final text")).toBe(true);
+    expect(live(controller.getSnapshot().messages)).toHaveLength(0);
     controller.dispose();
   });
 });

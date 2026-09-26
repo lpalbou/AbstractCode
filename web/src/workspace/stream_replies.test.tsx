@@ -4,9 +4,14 @@ import { describe, expect, it } from "vitest";
 import { buildWorkflowInput, type WorkflowDefinition } from "./catalog";
 import { parsePreferences } from "./preferences";
 import { DEFAULT_PREFERENCES, StreamRepliesField } from "./settings_panel";
+import type { ChatMessage } from "@abstractframework/panel-chat";
 import {
+  addStreamNote,
   effectiveStreamReplies,
+  malformedDeltaNote,
+  mergeStreamNotes,
   normalizeStreamReplies,
+  streamingUnsupportedNote,
   streamingCapability,
   type StreamingCapability,
 } from "./stream_replies";
@@ -109,14 +114,58 @@ describe("Stream replies: gateway capability", () => {
     expect((cap as any).reason).toMatch(/HTTP 502/);
   });
 
-  it("sends nothing to a gateway that does not advertise live replies", () => {
+  it("always sends Off; sends On only to a gateway that advertises live replies", () => {
     const unsupported = streamingCapability({ capabilities: {} });
+    const failed = streamingCapability(undefined, "HTTP 502");
+    const supported = streamingCapability({ capabilities: { streaming: { deltas: true, default: true } } });
+    for (const cap of [unsupported, failed, { status: "loading" } as StreamingCapability, supported])
+      expect(effectiveStreamReplies("off", cap)).toBe("off");
     expect(effectiveStreamReplies("on", unsupported)).toBe("gateway_default");
-    expect(effectiveStreamReplies("off", unsupported)).toBe("gateway_default");
+    expect(effectiveStreamReplies("on", failed)).toBe("gateway_default");
     expect(effectiveStreamReplies("on", { status: "loading" })).toBe("gateway_default");
-    const supported = streamingCapability({ capabilities: { streaming: { deltas: true, default: false } } });
     expect(effectiveStreamReplies("on", supported)).toBe("on");
-    expect(effectiveStreamReplies("off", supported)).toBe("off");
+    expect(effectiveStreamReplies("gateway_default", unsupported)).toBe("gateway_default");
+    // Off reaches the run input even when the capabilities failed to load.
+    const input = buildWorkflowInput({ ...baseInput, streamReplies: effectiveStreamReplies("off", failed) });
+    expect((input._runtime as any).stream).toBe(false);
+  });
+});
+
+describe("Stream replies: transcript notes", () => {
+  const user = { id: "u1", role: "user", content: "hi" } as ChatMessage;
+  const reply = { id: "a1", role: "assistant", content: "hello" } as ChatMessage;
+  const unsupported = streamingCapability({ capabilities: {} });
+
+  it("adds one note after the first message when On is saved but the gateway lacks live replies", () => {
+    const note = streamingUnsupportedNote("on", unsupported, [user, reply]);
+    expect(note).not.toBeNull();
+    expect(note!.message.content).toContain("Streaming is on in your settings but this gateway does not support live replies");
+    expect(note!.message.content).toContain("not supported by this gateway");
+    const merged = mergeStreamNotes([user, reply], [note]);
+    expect(merged.map((m) => m.id)).toEqual(["u1", "stream-replies:unsupported", "a1"]);
+    expect(merged.filter((m) => m.id === "stream-replies:unsupported")).toHaveLength(1);
+  });
+
+  it("adds no note for other choices, a supported gateway, loading, or an empty transcript", () => {
+    const supported = streamingCapability({ capabilities: { streaming: { deltas: true } } });
+    expect(streamingUnsupportedNote("off", unsupported, [user])).toBeNull();
+    expect(streamingUnsupportedNote("gateway_default", unsupported, [user])).toBeNull();
+    expect(streamingUnsupportedNote("on", supported, [user])).toBeNull();
+    expect(streamingUnsupportedNote("on", { status: "loading" }, [user])).toBeNull();
+    expect(streamingUnsupportedNote("on", unsupported, [])).toBeNull();
+  });
+
+  it("reports a malformed frame once per model call", () => {
+    const report = (data: string) => ({ runId: "r1", error: new Error("bad channel"), frame: { event: "llm.delta", data } });
+    let notes = addStreamNote([], malformedDeltaNote(report('{"call_id":"c1","channel":"x"}'), "a1"));
+    notes = addStreamNote(notes, malformedDeltaNote(report('{"call_id":"c1","channel":"y"}'), "a1"));
+    expect(notes).toHaveLength(1);
+    notes = addStreamNote(notes, malformedDeltaNote(report('{"call_id":"c2"}'), "a1"));
+    expect(notes).toHaveLength(2);
+    const merged = mergeStreamNotes([user, reply], notes);
+    expect(merged.map((m) => m.id)).toEqual(["u1", "a1", notes[0].message.id, notes[1].message.id]);
+    expect(merged[2]).toMatchObject({ role: "system", level: "warn" });
+    expect(merged[2].content).toMatch(/malformed live reply update.*skipped/);
   });
 });
 

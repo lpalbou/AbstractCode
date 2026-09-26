@@ -14,11 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the model writes it: a live bubble grows and is replaced by the complete
   message when the model call ends. It sets `_runtime.stream` on the next
   run (nothing for Gateway default, so the gateway's own setting decides).
+  Off is always sent, so a gateway default of on never overrides it.
   When the gateway does not advertise live replies, the setting is shown
-  disabled with the reason. A call the gateway could not stream gets a
-  one-line note. Requires `@abstractframework/panel-chat` 0.1.17 and a
-  gateway that sends live reply events; a malformed live event is reported
-  as an error rather than ignored.
+  disabled with the reason, and a saved On adds one note to the
+  conversation. A call the gateway could not stream gets a one-line note.
+  A malformed live update is reported once per model call and skipped; the
+  run keeps streaming and the complete reply still arrives. Images in
+  assistant messages load only from the app's own address (workspace
+  files); others are links. Requires `@abstractframework/panel-chat` 0.1.17
+  and a gateway that sends live reply events.
 - **Web: "Gateway default" workflow.** The toolbar's workflow list starts
   with **Gateway default → name @version**, the coding agent your gateway's
   operator set. Choosing it is remembered as "the gateway default", so a

@@ -60,13 +60,20 @@ async function run(wire: string, withDelta = true) {
   vi.stubGlobal("fetch", fetchMock);
   const steps: LedgerStreamEvent[] = [];
   const deltas: LlmDeltaEvent[] = [];
+  const errors: Array<{ message: string; event: string }> = [];
   const client = new GatewayClient({ base_url: "" });
   await client.stream_ledger(RUN, {
     after: 3,
     on_step: (ev) => steps.push(ev),
-    ...(withDelta ? { on_delta: (ev: LlmDeltaEvent) => deltas.push(ev) } : {}),
+    ...(withDelta
+      ? {
+          on_delta: (ev: LlmDeltaEvent) => deltas.push(ev),
+          on_delta_error: (error: Error, frame: { event: string }) =>
+            errors.push({ message: error.message, event: frame.event }),
+        }
+      : {}),
   });
-  return { steps, deltas, fetchMock };
+  return { steps, deltas, errors, fetchMock };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -102,16 +109,30 @@ describe("ledger stream: live reply frames", () => {
     );
   });
 
-  it("fails loudly on a malformed delta frame", async () => {
-    await expect(run(stepFrame(4) + deltaFrame("llm.delta", "{not json"))).rejects.toThrow(
-      /llm\.delta/,
+  it("reports a malformed delta frame, skips it, and keeps the ledger stream open", async () => {
+    const { steps, deltas, errors } = await run(
+      stepFrame(4) +
+        deltaFrame("llm.delta", "{not json") +
+        deltaFrame("llm.delta", { ...delta(1, "x"), channel: "tools" }) +
+        deltaFrame("llm.delta_end", { ...deltaEnd(1), reason: "done" }) +
+        deltaFrame("llm.delta", delta(2, "ok")) +
+        stepFrame(5),
     );
+    expect(errors.map((e) => e.event)).toEqual(["llm.delta", "llm.delta", "llm.delta_end"]);
+    expect(errors[0].message).toMatch(/llm\.delta/);
+    expect(errors[1].message).toMatch(/channel/);
+    expect(errors[2].message).toMatch(/reason/);
+    // Frames after the bad ones still arrive: the optional lane never ends the tail.
+    expect(deltas.map((d) => (d as any).text)).toEqual(["ok"]);
+    expect(steps.map((s) => s.cursor)).toEqual([4, 5]);
+  });
+
+  it("refuses on_delta without an error reporter", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([])));
+    const client = new GatewayClient({ base_url: "" });
     await expect(
-      run(deltaFrame("llm.delta", { ...delta(1, "x"), channel: "tools" })),
-    ).rejects.toThrow(/channel/);
-    await expect(
-      run(deltaFrame("llm.delta_end", { ...deltaEnd(1), reason: "done" })),
-    ).rejects.toThrow(/reason/);
+      client.stream_ledger(RUN, { after: 0, on_step: () => {}, on_delta: () => {} }),
+    ).rejects.toThrow(/on_delta_error/);
   });
 
   it("a caller that does not ask for deltas keeps the old behaviour", async () => {

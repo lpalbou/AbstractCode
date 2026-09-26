@@ -38,7 +38,7 @@ import {
   useWorkspaceCatalog,
 } from "./use_workspace_catalog";
 import { gateway, gatewayRequest, formatError, newId } from "./transport";
-import { workflowTransport } from "./session_transport";
+import { createWorkflowTransport } from "./session_transport";
 import { presentInteraction } from "./interaction";
 import {
   SettingsPanel,
@@ -52,7 +52,14 @@ import {
   readPreferences,
   writePreferences,
 } from "./preferences";
-import { effectiveStreamReplies } from "./stream_replies";
+import {
+  addStreamNote,
+  effectiveStreamReplies,
+  malformedDeltaNote,
+  mergeStreamNotes,
+  streamingUnsupportedNote,
+  type StreamNote,
+} from "./stream_replies";
 import {
   GATEWAY_DEFAULT,
   conversationSelection,
@@ -258,6 +265,27 @@ export function CodeWorkspace() {
     // use the same policy in the browser and the next run's Runtime namespace.
     return { ...policy, autoApproveTools: preferences.toolsCustomized || preferences.permissions !== "default" ? policy.autoApproveTools : [] };
   }, [toolPermissions, restoredInputs, session.runId, preferences.toolsCustomized, preferences.permissions]);
+  // Notes about the live-reply lane (a malformed frame from the gateway),
+  // scoped to the conversation they were raised in.
+  const streamScope = `${identity}:${session.sessionId}:${session.runId}`;
+  const streamScopeRef = useRef(streamScope);
+  streamScopeRef.current = streamScope;
+  const lastMessageIdRef = useRef<string | null>(null);
+  const [streamNotes, setStreamNotes] = useState<{ scope: string; notes: StreamNote[] }>({ scope: "", notes: [] });
+  const workflowTransport = useMemo(
+    () =>
+      createWorkflowTransport({
+        onDeltaError: (report) => {
+          const scope = streamScopeRef.current;
+          const note = malformedDeltaNote(report, lastMessageIdRef.current);
+          setStreamNotes((previous) => ({
+            scope,
+            notes: addStreamNote(previous.scope === scope ? previous.notes : [], note),
+          }));
+        },
+      }),
+    [],
+  );
   const { controller, snapshot } = useWorkflowSession({
     transport: workflowTransport,
     runId: session.runId,
@@ -273,8 +301,14 @@ export function CodeWorkspace() {
     snapshot.status !== "idle";
   const paused = snapshot.run?.paused === true || snapshot.status === "paused";
   const locked = active || sending;
-  const messages =
+  const baseMessages =
     snapshot.loading && optimistic.length ? optimistic : snapshot.messages;
+  const lastBase = baseMessages[baseMessages.length - 1];
+  lastMessageIdRef.current = lastBase?.id ? String(lastBase.id) : null;
+  const messages = mergeStreamNotes(baseMessages, [
+    streamingUnsupportedNote(preferences.streamReplies, catalog.streaming, baseMessages),
+    ...(streamNotes.scope === streamScope ? streamNotes.notes : []),
+  ]);
   const voiceCapability = catalog.capabilities?.assistant?.voice || {};
   const voice = useWorkspaceVoice({
     scope: `${identity}:${session.sessionId}:${session.runId}`,
