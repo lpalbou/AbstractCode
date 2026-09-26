@@ -199,6 +199,9 @@ Inside the app:
   turn); below it, every catalog entrypoint implementing
   `abstractcode.agent.v1`. `/model` picks provider + model, then the
   reasoning effort, then MTP (multi-token prediction — also `/mtp`), `/theme` restyles
+- `/stream` chooses whether replies stream in as the model writes them
+  (gateway default, on, off); a streamed reply shows under the transcript
+  and the recorded reply replaces it when the call completes
 - type while a run is active to steer it; `Esc Esc` cancels; `/new` starts a
   fresh session
 - tool approvals and agent questions open as modals; the run waits durably
@@ -221,6 +224,8 @@ without a raised level, mutating tools are denied with an explanation the
 model sees.
 Ask-user waits get an honest "no interactive user" refusal so unattended
 runs never stall.
+`--stream on` prints the reply as it is written (when the gateway streams)
+and does not print it a second time at the end.
 
 ## Options
 
@@ -231,6 +236,8 @@ runs never stall.
 --workflow <bundle[:flow]|default>  agent workflow (default: your /workflow
                                   choice, else the gateway's default)
 --provider <P> --model <M>        route override (default: gateway defaults)
+--stream <on|off|default>         stream replies (default: your /stream choice,
+                                  else the gateway's setting; exec: the flag only)
 --workspace <PATH>                requested workspace root (see note)
 --theme <ID>                      start theme (ABSTRACTTUI_THEME works too)
 --animation <on|off>              launch animation (default: on) — SAVED, so
@@ -424,6 +431,11 @@ gateway until you answer.
    `Esc` keeps it. The last row of the provider list jumps straight to the MTP
    step, and `/mtp` still works on its own. All these choices persist across
    launches.
+   **Streamed replies:** when the gateway streams, the reply appears under the
+   transcript as the model writes it and the recorded reply replaces it when
+   the call completes. `/stream` picks **Gateway default** (what a new install
+   uses), **On** or **Off**; the header shows the choice when it is not the
+   default.
 4. **Where files land.** Under the gateway's default (server-managed)
    workspace policy, tools execute in the gateway's workspace root or a
    managed per-session folder — the app tells you this at startup. To make
@@ -752,6 +764,7 @@ abstractcode --help | --version
 | `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
 | `--reasoning <LEVEL>` | Reasoning effort: `none\|minimal\|low\|medium\|high\|xhigh\|auto` (also `--thinking`; validated at launch; works on `exec` too) | gateway default |
 | `--mtp <DEPTH\|off\|inherit>` | Native-MTP request override; an explicit depth must be honored by the execution host. Works on `exec` too | saved TUI choice, otherwise inherit; `exec` inherits unless the flag is supplied |
+| `--stream <on\|off\|default>` | Stream replies as the model writes them (`--streaming` too). Interactive: this launch only (`/stream` saves). `exec`: the flag alone decides, and `on` prints the reply to stdout live | saved `/stream` choice, else **gateway default**; `exec`: gateway default unless the flag is given |
 | `--workflow <bundle[:flow]\|default>` | Agent workflow; `default` = the gateway's default (the gateway resolves it at every run start) | your `/workflow` choice, else the gateway default; with neither, the app asks you to pick (`exec` exits 2 and lists the workflows) |
 | `--provider <NAME>` | Provider override | gateway defaults |
 | `--model <NAME>` | Model override | gateway defaults |
@@ -796,6 +809,7 @@ abstractcode --help | --version
 | `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
 | `/model` | Pick provider + model from gateway discovery |
 | `/mtp [depth\|off\|inherit]` | Native-MTP request policy (`/speculation` alias). Bare command opens a provider/model capability-driven picker; explicit values persist locally and ride `_runtime.speculation`. Inherit omits the override; Off sends `false`; a depth sends `native_mtp` with `require_acceleration=true` |
+| `/stream [on\|off\|default]` | "Stream replies" (`/streaming` alias). Bare opens the picker: **Gateway default** (names the gateway's current setting), **On**, **Off**. Saved in `prefs.json` as `stream_replies`; see "Streamed replies" below |
 | `/tools` | Enable/disable gateway tools (`Space` toggles; checked set = the run's exact allowlist; untouched = workflow defaults). In-modal: `p` cycles a per-tool approval pin, `t` cycles the tier — see the modal keys below |
 | `/permissions [read\|write\|all]` | THE tool-permission surface (bare = report): batches classifying at-or-below the level auto-approve. `read` = proven read-only tools only; `write` adds workspace file mutations; `all` auto-approves everything, **including arbitrary shell and network egress** — deliberate use only. Per-tool `ask` pins and gateway-disabled tools still gate. Sticky per session (`/tools tier` remains a spelling alias) |
 | `/workspace` | Inspect + edit the filesystem scope tools may touch: root (from `--workspace`/cwd), access mode, allowed paths. Mode + paths persist and ride every run |
@@ -843,6 +857,55 @@ depth is retained, not silently replaced. Typed depths are explicit requests, no
 that the current backend can execute them: the host validates them and refuses unsupported
 strict requests. Neither discovery nor `/mtp` downloads a head or loads a model. Inherited
 defaults remain host-owned (fresh Core configurations use depth 2 for compatible models).
+
+### Streamed replies (`/stream`)
+
+A gateway that streams replies says so in `GET /discovery/capabilities` as
+`streaming: {"deltas": true, "default": <bool>}`. Its run stream
+(`GET /runs/{id}/ledger/stream`) then carries two extra events with no `id:`
+line — they are not ledger records and never move the resume cursor:
+`llm.delta` (`run_id`, `root_run_id`, `node_id`, `call_id`, `seq`, `text`,
+`channel` = `content` | `reasoning`, `snapshot`, optional `truncated`) and
+`llm.delta_end` (`call_id`, `seq`, `reason` = `completed` | `failed` |
+`cancelled` | `unavailable` with a `detail`).
+
+What the app does with them:
+
+- It reads them from the turn's ROOT run stream only (the gateway sends a
+  child run's deltas there too) and shows one live bubble per call, below the
+  transcript: "reply · <node>", or "sub-agent · <node>" for a child run.
+  `content` text grows in the bubble (Markdown, rendered as it arrives);
+  `reasoning` text is shown only as a collapsed "∴ thinking: <newest line>
+  (N chars of reasoning so far)" line — its newest line cut to 100
+  characters, with "…" marking the cut — and never joins the reply.
+  `truncated: true` adds a `[#TRUNCATION]` line to the bubble.
+- The call's recorded `llm_call` step (its `step_id` is the `call_id`)
+  replaces the bubble; the final answer removes every bubble; no bubble is
+  created for a call already recorded, or after the final answer.
+- `failed` / `cancelled` remove the bubble and add a transcript line
+  ("live reply failed — the partial text (N chars) was discarded…").
+  `unavailable` adds "live reply unavailable (<node>): <detail>" — once per
+  reason per turn. An end for a call that never streamed is normal and shows
+  nothing (except `unavailable`).
+- On every (re)connect all bubbles are dropped; the gateway's `snapshot`
+  frames then rebuild the calls still open.
+- A live frame that breaks this shape is reported once per stream as a
+  transcript line; the recorded answer still arrives.
+
+The setting: **Gateway default** sends nothing, so the gateway's own
+`agents.streaming_default` applies; **On** / **Off** send
+`input_data._runtime.stream: true` / `false`. The key is sent only to a
+gateway that advertises `streaming.deltas` — an older gateway would accept it
+but stream the provider call internally with nothing to show for it, so the
+app sends nothing and the header says "stream on (gateway has no live
+replies)".
+
+`exec --stream on` opens the root run's stream for these frames only (the
+transcript still comes from the REST ledger) and prints the reply as it
+arrives, as a line starting `✎ `. When the final answer is exactly what was
+printed live, the answer block reads `━━━ answer ━━━ (streamed above)`
+instead of repeating it; otherwise (a failed, restarted or cut live text) the
+answer prints in full. Reasoning is not printed.
 
 ### Transcript export (`/export`)
 
@@ -1534,6 +1597,25 @@ Your terminal likely renders ambiguous-width characters wide. Use a
 terminal/font configured for narrow ambiguous width (the norm), and check
 `--caps` for what was detected.
 
+## Replies do not stream even though `/stream` is on
+
+The header says "stream on (gateway has no live replies)": the gateway does
+not advertise `streaming.deltas` in `GET /discovery/capabilities` (an older
+gateway, or one without the feature). The app then sends no stream setting —
+answers appear when each call completes. "(gateway not checked yet)" means the
+capabilities have not loaded; they load at startup, so a reconnect usually
+settles it.
+
+"live reply unavailable: <reason>" in the transcript means the gateway was
+asked to stream but this call could not: `structured_output` (calls that must
+return structured data never stream), `remote_core`, `provider_cannot_stream`,
+`usage_unavailable` (the provider cannot report token usage while streaming,
+so the gateway runs the call normally), or `sink_error`. The answer still
+arrives when the call completes.
+
+"live reply failed/cancelled — the partial text was discarded" means the call
+ended without completing; the run's record shows what happened.
+
 ## `exec` hangs then exits 124
 
 The run outlived `--timeout`. The run itself stays durable on the gateway —
@@ -1879,6 +1961,30 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Streamed replies.** When the gateway streams (it advertises
+  `streaming.deltas` in `/discovery/capabilities`), the reply appears under
+  the transcript as the model writes it — a live bubble captioned
+  "reply · <node>" (or "sub-agent · <node>" for a child run), with the
+  model's reasoning shown as one collapsed "∴ thinking" line, never mixed
+  into the reply. The recorded reply replaces the bubble when the call
+  completes; a call that fails or is cancelled mid-stream leaves a one-line
+  note instead, and so does a call the gateway could not stream ("live reply
+  unavailable: <reason>"). A reconnect rebuilds the bubbles from the
+  gateway's snapshot; nothing streams back after the final answer.
+- **"Stream replies" setting.** `/stream` (also `/streaming`) opens a picker:
+  **Gateway default** (the default — the gateway's own setting decides, and
+  the row says whether it is currently on or off), **On**, **Off**;
+  `/stream on|off|default` sets it directly. Saved in `prefs.json` as
+  `stream_replies`; `--stream on|off|default` sets it for one launch. The
+  header shows "stream on"/"stream off" when it is not the default, and says
+  when the gateway cannot stream ("gateway has no live replies"). Against
+  such a gateway the app sends no stream setting at all.
+- **`exec --stream on`** prints the reply to stdout as it is written (a line
+  starting `✎`) and then `━━━ answer ━━━ (streamed above)` instead of
+  printing the same answer twice; a reply that did not stream whole (failed,
+  restarted, cut) is printed in full as before. `exec` uses only the flag,
+  never the saved setting; `--stream on` against a gateway without live
+  replies prints a note and runs normally.
 - **`/files`** (also `/workspace files`): the run's workspace on the gateway
   host — its full path and the machine it is on, folders you can open, file
   sizes, and a preview of text, Markdown, JSON and images. Large files show

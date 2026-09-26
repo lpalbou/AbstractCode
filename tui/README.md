@@ -188,6 +188,9 @@ Inside the app:
   turn); below it, every catalog entrypoint implementing
   `abstractcode.agent.v1`. `/model` picks provider + model, then the
   reasoning effort, then MTP (multi-token prediction — also `/mtp`), `/theme` restyles
+- `/stream` chooses whether replies stream in as the model writes them
+  (gateway default, on, off); a streamed reply shows under the transcript
+  and the recorded reply replaces it when the call completes
 - type while a run is active to steer it; `Esc Esc` cancels; `/new` starts a
   fresh session
 - tool approvals and agent questions open as modals; the run waits durably
@@ -210,6 +213,8 @@ without a raised level, mutating tools are denied with an explanation the
 model sees.
 Ask-user waits get an honest "no interactive user" refusal so unattended
 runs never stall.
+`--stream on` prints the reply as it is written (when the gateway streams)
+and does not print it a second time at the end.
 
 ## Options
 
@@ -220,6 +225,8 @@ runs never stall.
 --workflow <bundle[:flow]|default>  agent workflow (default: your /workflow
                                   choice, else the gateway's default)
 --provider <P> --model <M>        route override (default: gateway defaults)
+--stream <on|off|default>         stream replies (default: your /stream choice,
+                                  else the gateway's setting; exec: the flag only)
 --workspace <PATH>                requested workspace root (see note)
 --theme <ID>                      start theme (ABSTRACTTUI_THEME works too)
 --animation <on|off>              launch animation (default: on) — SAVED, so

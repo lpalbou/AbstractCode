@@ -37,6 +37,30 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Streamed replies.** When the gateway streams (it advertises
+  `streaming.deltas` in `/discovery/capabilities`), the reply appears under
+  the transcript as the model writes it — a live bubble captioned
+  "reply · <node>" (or "sub-agent · <node>" for a child run), with the
+  model's reasoning shown as one collapsed "∴ thinking" line, never mixed
+  into the reply. The recorded reply replaces the bubble when the call
+  completes; a call that fails or is cancelled mid-stream leaves a one-line
+  note instead, and so does a call the gateway could not stream ("live reply
+  unavailable: <reason>"). A reconnect rebuilds the bubbles from the
+  gateway's snapshot; nothing streams back after the final answer.
+- **"Stream replies" setting.** `/stream` (also `/streaming`) opens a picker:
+  **Gateway default** (the default — the gateway's own setting decides, and
+  the row says whether it is currently on or off), **On**, **Off**;
+  `/stream on|off|default` sets it directly. Saved in `prefs.json` as
+  `stream_replies`; `--stream on|off|default` sets it for one launch. The
+  header shows "stream on"/"stream off" when it is not the default, and says
+  when the gateway cannot stream ("gateway has no live replies"). Against
+  such a gateway the app sends no stream setting at all.
+- **`exec --stream on`** prints the reply to stdout as it is written (a line
+  starting `✎`) and then `━━━ answer ━━━ (streamed above)` instead of
+  printing the same answer twice; a reply that did not stream whole (failed,
+  restarted, cut) is printed in full as before. `exec` uses only the flag,
+  never the saved setting; `--stream on` against a gateway without live
+  replies prints a note and runs normally.
 - **`/files`** (also `/workspace files`): the run's workspace on the gateway
   host — its full path and the machine it is on, folders you can open, file
   sizes, and a preview of text, Markdown, JSON and images. Large files show

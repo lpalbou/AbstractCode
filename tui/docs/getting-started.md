@@ -90,6 +90,11 @@ gateway until you answer.
    `Esc` keeps it. The last row of the provider list jumps straight to the MTP
    step, and `/mtp` still works on its own. All these choices persist across
    launches.
+   **Streamed replies:** when the gateway streams, the reply appears under the
+   transcript as the model writes it and the recorded reply replaces it when
+   the call completes. `/stream` picks **Gateway default** (what a new install
+   uses), **On** or **Off**; the header shows the choice when it is not the
+   default.
 4. **Where files land.** Under the gateway's default (server-managed)
    workspace policy, tools execute in the gateway's workspace root or a
    managed per-session folder — the app tells you this at startup. To make

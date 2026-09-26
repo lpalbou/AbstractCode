@@ -159,6 +159,25 @@ Your terminal likely renders ambiguous-width characters wide. Use a
 terminal/font configured for narrow ambiguous width (the norm), and check
 `--caps` for what was detected.
 
+## Replies do not stream even though `/stream` is on
+
+The header says "stream on (gateway has no live replies)": the gateway does
+not advertise `streaming.deltas` in `GET /discovery/capabilities` (an older
+gateway, or one without the feature). The app then sends no stream setting —
+answers appear when each call completes. "(gateway not checked yet)" means the
+capabilities have not loaded; they load at startup, so a reconnect usually
+settles it.
+
+"live reply unavailable: <reason>" in the transcript means the gateway was
+asked to stream but this call could not: `structured_output` (calls that must
+return structured data never stream), `remote_core`, `provider_cannot_stream`,
+`usage_unavailable` (the provider cannot report token usage while streaming,
+so the gateway runs the call normally), or `sink_error`. The answer still
+arrives when the call completes.
+
+"live reply failed/cancelled — the partial text was discarded" means the call
+ended without completing; the run's record shows what happened.
+
 ## `exec` hangs then exits 124
 
 The run outlived `--timeout`. The run itself stays durable on the gateway —

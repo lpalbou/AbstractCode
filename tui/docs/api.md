@@ -21,6 +21,7 @@ abstractcode --help | --version
 | `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
 | `--reasoning <LEVEL>` | Reasoning effort: `none\|minimal\|low\|medium\|high\|xhigh\|auto` (also `--thinking`; validated at launch; works on `exec` too) | gateway default |
 | `--mtp <DEPTH\|off\|inherit>` | Native-MTP request override; an explicit depth must be honored by the execution host. Works on `exec` too | saved TUI choice, otherwise inherit; `exec` inherits unless the flag is supplied |
+| `--stream <on\|off\|default>` | Stream replies as the model writes them (`--streaming` too). Interactive: this launch only (`/stream` saves). `exec`: the flag alone decides, and `on` prints the reply to stdout live | saved `/stream` choice, else **gateway default**; `exec`: gateway default unless the flag is given |
 | `--workflow <bundle[:flow]\|default>` | Agent workflow; `default` = the gateway's default (the gateway resolves it at every run start) | your `/workflow` choice, else the gateway default; with neither, the app asks you to pick (`exec` exits 2 and lists the workflows) |
 | `--provider <NAME>` | Provider override | gateway defaults |
 | `--model <NAME>` | Model override | gateway defaults |
@@ -65,6 +66,7 @@ abstractcode --help | --version
 | `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
 | `/model` | Pick provider + model from gateway discovery |
 | `/mtp [depth\|off\|inherit]` | Native-MTP request policy (`/speculation` alias). Bare command opens a provider/model capability-driven picker; explicit values persist locally and ride `_runtime.speculation`. Inherit omits the override; Off sends `false`; a depth sends `native_mtp` with `require_acceleration=true` |
+| `/stream [on\|off\|default]` | "Stream replies" (`/streaming` alias). Bare opens the picker: **Gateway default** (names the gateway's current setting), **On**, **Off**. Saved in `prefs.json` as `stream_replies`; see "Streamed replies" below |
 | `/tools` | Enable/disable gateway tools (`Space` toggles; checked set = the run's exact allowlist; untouched = workflow defaults). In-modal: `p` cycles a per-tool approval pin, `t` cycles the tier — see the modal keys below |
 | `/permissions [read\|write\|all]` | THE tool-permission surface (bare = report): batches classifying at-or-below the level auto-approve. `read` = proven read-only tools only; `write` adds workspace file mutations; `all` auto-approves everything, **including arbitrary shell and network egress** — deliberate use only. Per-tool `ask` pins and gateway-disabled tools still gate. Sticky per session (`/tools tier` remains a spelling alias) |
 | `/workspace` | Inspect + edit the filesystem scope tools may touch: root (from `--workspace`/cwd), access mode, allowed paths. Mode + paths persist and ride every run |
@@ -112,6 +114,55 @@ depth is retained, not silently replaced. Typed depths are explicit requests, no
 that the current backend can execute them: the host validates them and refuses unsupported
 strict requests. Neither discovery nor `/mtp` downloads a head or loads a model. Inherited
 defaults remain host-owned (fresh Core configurations use depth 2 for compatible models).
+
+### Streamed replies (`/stream`)
+
+A gateway that streams replies says so in `GET /discovery/capabilities` as
+`streaming: {"deltas": true, "default": <bool>}`. Its run stream
+(`GET /runs/{id}/ledger/stream`) then carries two extra events with no `id:`
+line — they are not ledger records and never move the resume cursor:
+`llm.delta` (`run_id`, `root_run_id`, `node_id`, `call_id`, `seq`, `text`,
+`channel` = `content` | `reasoning`, `snapshot`, optional `truncated`) and
+`llm.delta_end` (`call_id`, `seq`, `reason` = `completed` | `failed` |
+`cancelled` | `unavailable` with a `detail`).
+
+What the app does with them:
+
+- It reads them from the turn's ROOT run stream only (the gateway sends a
+  child run's deltas there too) and shows one live bubble per call, below the
+  transcript: "reply · <node>", or "sub-agent · <node>" for a child run.
+  `content` text grows in the bubble (Markdown, rendered as it arrives);
+  `reasoning` text is shown only as a collapsed "∴ thinking: <newest line>
+  (N chars of reasoning so far)" line — its newest line cut to 100
+  characters, with "…" marking the cut — and never joins the reply.
+  `truncated: true` adds a `[#TRUNCATION]` line to the bubble.
+- The call's recorded `llm_call` step (its `step_id` is the `call_id`)
+  replaces the bubble; the final answer removes every bubble; no bubble is
+  created for a call already recorded, or after the final answer.
+- `failed` / `cancelled` remove the bubble and add a transcript line
+  ("live reply failed — the partial text (N chars) was discarded…").
+  `unavailable` adds "live reply unavailable (<node>): <detail>" — once per
+  reason per turn. An end for a call that never streamed is normal and shows
+  nothing (except `unavailable`).
+- On every (re)connect all bubbles are dropped; the gateway's `snapshot`
+  frames then rebuild the calls still open.
+- A live frame that breaks this shape is reported once per stream as a
+  transcript line; the recorded answer still arrives.
+
+The setting: **Gateway default** sends nothing, so the gateway's own
+`agents.streaming_default` applies; **On** / **Off** send
+`input_data._runtime.stream: true` / `false`. The key is sent only to a
+gateway that advertises `streaming.deltas` — an older gateway would accept it
+but stream the provider call internally with nothing to show for it, so the
+app sends nothing and the header says "stream on (gateway has no live
+replies)".
+
+`exec --stream on` opens the root run's stream for these frames only (the
+transcript still comes from the REST ledger) and prints the reply as it
+arrives, as a line starting `✎ `. When the final answer is exactly what was
+printed live, the answer block reads `━━━ answer ━━━ (streamed above)`
+instead of repeating it; otherwise (a failed, restarted or cut live text) the
+answer prints in full. Reasoning is not printed.
 
 ### Transcript export (`/export`)
 
