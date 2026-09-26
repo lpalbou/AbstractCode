@@ -130,6 +130,13 @@ pub struct Args {
 }
 
 pub fn usage() -> String {
+    // Every default printed below comes from the constant the code uses —
+    // a literal here drifted once (`--replay-turns` said 20 while the code
+    // used 5); `tests::help_defaults_come_from_the_constants` pins it.
+    let replay_default = crate::runner::REHYDRATE_DEFAULT_TURNS;
+    let review_rounds_default = DEFAULT_REVIEW_ROUNDS;
+    let timeout_default = DEFAULT_EXEC_TIMEOUT_SECS;
+    let timeout_hours = DEFAULT_EXEC_TIMEOUT_SECS / 3600;
     format!(
         r#"abstractcode {VERSION} — AbstractCode on AbstractTUI (gateway client)
 
@@ -159,7 +166,11 @@ OPTIONS:
                           else the gateway default)
   --provider <NAME>       provider override (default: gateway defaults)
   --model <NAME>          model override
-  --workspace <PATH>      workspace root for tools (default: current directory)
+  --workspace <PATH>      workspace root for tools; always sent when given
+                          (default: the current directory, sent only when the
+                          gateway is on this machine or prefs
+                          send_local_workspace is `always`; otherwise the agent
+                          works in a gateway-side session folder)
   --no-workspace          do not send a workspace root
   --no-project-context    do not inject the workspace AGENTS.md into the
                           agent system prompt (injected by default)
@@ -169,7 +180,7 @@ OPTIONS:
                           tool-call-free response as final, a strict
                           verifier re-reads the transcript and can force
                           more tool calls (default: on; /review toggles)
-  --review-rounds <N>     verifier round budget (default 3)
+  --review-rounds <N>     verifier round budget (default {review_rounds_default})
   --workspace-mode <M>    workspace access mode: workspace_only |
                           workspace_or_allowed | all_except_ignored
                           (default: server-managed; /workspace edits + persists)
@@ -186,7 +197,7 @@ OPTIONS:
                           meter and rides runs as _limits.max_tokens;
                           /context <tokens> sets + persists it
                           (aliases: --context, --context-window)
-  --replay-turns <N>      prior turns replayed in full at boot (default: 20; 0 disables)
+  --replay-turns <N>      prior turns replayed in full at boot (default: {replay_default}; 0 disables)
   --permissions <LEVEL>   tool permissions for this invocation: read | write | all
                           (all = every tool auto-approves; per-tool 'ask' pins and
                           gateway-disabled tools still gate)
@@ -198,9 +209,9 @@ OPTIONS:
                           (repeatable; numbers/booleans parse, else string —
                           e.g. --param verify_command='node --check game.js'
                           --param max_steps_per_cycle=16)
-  --timeout <SECS>        exec: wall-clock safeguard, 0 = none (default: 7200 = 2h;
-                          ADR-0014/0027 — a complex agentic run may take hours,
-                          so this never doubles as a performance knob)
+  --timeout <SECS>        exec: wall-clock safeguard, 0 = none (default:
+                          {timeout_default} = {timeout_hours}h — a complex agentic run may take
+                          hours, so this is a safeguard, not a performance knob)
   -h, --help              this help
   -V, --version           version
 
@@ -212,6 +223,11 @@ CONFIG (prefs.json — the TUI writes it; headless `exec` reads the SAME file):
   workspace_mode                access mode sent with runs (/workspace).
   workspace_allowed             extra allowlisted roots sent as
                                 workspace_allowed_paths (/workspace).
+  send_local_workspace          auto | always | never — whether this folder is
+                                sent as the workspace root (auto: only when the
+                                gateway is on this machine; /workspace send).
+  speculation                   MTP request: absent = inherit, false = off, or
+                                a native_mtp depth object (/mtp, --mtp).
   animation                     launch animation on/off (--animation).
   stream_replies                gateway_default | on | off (/stream) — the TUI's
                                 "Stream replies" setting; exec uses --stream only.
@@ -615,6 +631,45 @@ mod tests {
             .contains("--stream takes on | off | default"));
         assert_eq!(parse(&[]).unwrap().stream, None);
         assert!(usage().contains("--stream <on|off|default>"));
+    }
+
+    #[test]
+    fn help_defaults_come_from_the_constants() {
+        let help = usage();
+        assert!(
+            help.contains(&format!(
+                "(default: {}; 0 disables)",
+                crate::runner::REHYDRATE_DEFAULT_TURNS
+            )),
+            "--replay-turns default"
+        );
+        assert_eq!(
+            parse(&[]).unwrap().replay_turns,
+            crate::runner::REHYDRATE_DEFAULT_TURNS
+        );
+        assert!(help.contains(&format!(
+            "verifier round budget (default {DEFAULT_REVIEW_ROUNDS})"
+        )));
+        assert!(help.contains(&format!(
+            "{DEFAULT_EXEC_TIMEOUT_SECS} = {}h",
+            DEFAULT_EXEC_TIMEOUT_SECS / 3600
+        )));
+        // User-facing text carries no internal references.
+        assert!(!help.contains("ADR-"), "internal reference in --help");
+        // The workspace default states its condition.
+        assert!(help.contains("sent only when the"));
+        // Every documented pref is listed.
+        for key in [
+            "send_local_workspace",
+            "speculation",
+            "stream_replies",
+            "animation",
+        ] {
+            assert!(
+                help.contains(&format!("\n  {key} ")),
+                "{key} missing from CONFIG"
+            );
+        }
     }
 
     /// ADR-0027 §2/§3 contract for the one wall-clock cap this binary owns.
