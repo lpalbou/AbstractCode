@@ -24,7 +24,7 @@ abstractcode --help | --version
 | `--workflow <bundle[:flow]\|default>` | Agent workflow; `default` = the gateway's default (the gateway resolves it at every run start) | your `/workflow` choice, else the gateway default; with neither, the app asks you to pick (`exec` exits 2 and lists the workflows) |
 | `--provider <NAME>` | Provider override | gateway defaults |
 | `--model <NAME>` | Model override | gateway defaults |
-| `--workspace <PATH>` | Requested workspace root | current directory when the gateway is on this machine (loopback URL); none for a remote gateway (the agent works in a gateway-side session folder) |
+| `--workspace <PATH>` | Requested workspace root (always sent when given) | current directory when the gateway is on this machine — the gateway's own verdict once a run has started, a loopback URL before that; none for a gateway on another machine (the agent works in a gateway-side session folder). `/workspace send auto\|always\|never` overrides (saved as `send_local_workspace`) |
 | `--no-workspace` | Send no workspace root | — |
 | `--workspace-mode <M>` | Workspace access mode | server default |
 | `--theme <ID>` | Start theme | `ABSTRACTTUI_THEME`, else saved pick |
@@ -60,7 +60,8 @@ abstractcode --help | --version
 | `/new` | Fresh session (new durable id, cleared view) |
 | `/theme [id]` | Live-preview theme picker, or set directly |
 | `/workflow` | Pick the agent workflow. First row: **Gateway default → name @version** — saved as "the gateway default", so the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran |
-| `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` opens the folder with your file manager only when the gateway is on this machine and allows it; `r` refreshes |
+| `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` shows the workspace folder itself (never a sub-folder; never a folder that would be launched, such as `.app`) in your file manager, only when the gateway is on this machine and allows it; `r` refreshes |
+| `/workspace send [auto\|always\|never]` | Whether your folder is sent as the workspace: `auto` (default) = only when the gateway is on this machine; `always` = also to a gateway on another machine that sees the same path (a shared mount); `never`. Bare reports what is in force. Saved in `prefs.json` |
 | `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
 | `/model` | Pick provider + model from gateway discovery |
 | `/mtp [depth\|off\|inherit]` | Native-MTP request policy (`/speculation` alias). Bare command opens a provider/model capability-driven picker; explicit values persist locally and ride `_runtime.speculation`. Inherit omits the override; Off sends `false`; a depth sends `native_mtp` with `require_acceleration=true` |

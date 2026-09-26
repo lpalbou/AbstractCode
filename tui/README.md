@@ -88,7 +88,8 @@ top of 0.4.0's conclusion + presence wave: declared context meter,
 - **Session files**: `/files` browses the run's workspace on the gateway
   host — its full path and which machine it is on, folders with sizes, and a
   preview of any text, Markdown, JSON or image file (`Enter`). `c` copies a
-  path; `o` opens the folder when the gateway is on this machine.
+  path; `o` shows the workspace folder in your file manager when the gateway
+  is on this machine.
 - **Sessions and memory**: one durable session id per conversation, and a
   `/sessions` picker over your recent ones (named by their first prompt).
   The client carries the live conversation into each run; the gateway

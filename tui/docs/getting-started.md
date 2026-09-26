@@ -99,7 +99,10 @@ gateway until you answer.
    the machine it is on, and a preview of any file. When the gateway runs on
    another machine, the app does not send your local folder (it would name a
    path on the gateway host); the agent works in a gateway-side session
-   folder, and `--workspace <path>` names a folder on the gateway host.
+   folder, and `--workspace <path>` names a folder on the gateway host. The
+   gateway itself says whether you are on its machine (from your first run);
+   if it sees your folder through a shared mount, `/workspace send always`
+   sends it anyway.
 5. **Themes.** `/theme` opens a live-preview picker over the 26 built-in
    AbstractTUI themes; `Ctrl+T` cycles. Your pick persists.
 

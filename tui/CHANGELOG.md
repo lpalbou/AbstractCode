@@ -19,19 +19,33 @@ All notable changes to this project are documented here. The format follows
   asks you to pick. Each turn names what ran ("running Basic agent @0.0.3
   (gateway default)"). `--workflow default` does the same from the command
   line and in `exec`.
-- **A remote gateway is not sent your local folder.** When the gateway URL is
-  not on this machine, the app no longer sends its current directory as the
+- **A remote gateway is not sent your local folder.** When the gateway is on
+  another machine, the app no longer sends its current directory as the
   workspace (it would name a path on the gateway host); the agent works in a
-  gateway-side session folder and a notice says so. `--workspace <path>` still
-  names a folder explicitly.
+  gateway-side session folder and a notice says so, once. "Same machine" is
+  the gateway's own verdict, learned from your first run; before that, a
+  loopback address (`localhost`, `127.x`, `::1`) counts as this machine. If
+  the gateway sees the same folder (a shared mount), `/workspace send always`
+  sends it anyway (`auto` is the default, `never` never sends it; saved in
+  `prefs.json` as `send_local_workspace`). `--workspace <path>` still names a
+  folder explicitly.
+- **`exec` refuses a saved workflow that is gone.** Without `--workflow`, a
+  saved pick that is no longer on the gateway stops the run (exit 2) with a
+  warning instead of running another agent; `--workflow default` runs the
+  gateway default. The interactive app still falls back to the gateway default
+  and says so.
 
 ### Added
 
 - **`/files`** (also `/workspace files`): the run's workspace on the gateway
   host — its full path and the machine it is on, folders you can open, file
   sizes, and a preview of text, Markdown, JSON and images. Large files show
-  their first 512 KiB, labelled. `c` copies a path; `o` opens the folder when
-  the gateway is on this machine and allows it.
+  their first 512 KiB, labelled. `c` copies a path; `o` shows the workspace
+  folder in your file manager when the gateway is on this machine and allows
+  it — only the workspace folder itself, never a browsed sub-folder, and never
+  a folder that would be launched (an `.app`, `.bundle`, `.framework` or
+  `.pkg`). A malformed answer from the gateway is shown as an error, never as
+  an empty folder.
 - **`/about`** (also `/version`): version, "Part of AbstractFramework",
   author and licence, links to the website, source, documentation, issues and
   feedback, the contact address, and the gateway's package versions.
@@ -49,6 +63,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- `exec`'s rejected-token hint names `abstractcode login` and `--token`
+  instead of an environment variable.
 - The "workspace: gateway-managed" notice is posted once at startup instead
   of again every time `/workflow` refreshes the catalog.
 
