@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Web: Stream replies.** Settings → Model & behavior → **Stream replies**
+  (Gateway default / On / Off; default Gateway default) shows the reply as
+  the model writes it: a live bubble grows and is replaced by the complete
+  message when the model call ends. It sets `_runtime.stream` on the next
+  run (nothing for Gateway default, so the gateway's own setting decides).
+  When the gateway does not advertise live replies, the setting is shown
+  disabled with the reason. A call the gateway could not stream gets a
+  one-line note. Requires `@abstractframework/panel-chat` 0.1.17 and a
+  gateway that sends live reply events; a malformed live event is reported
+  as an error rather than ignored.
 - **Web: "Gateway default" workflow.** The toolbar's workflow list starts
   with **Gateway default → name @version**, the coding agent your gateway's
   operator set. Choosing it is remembered as "the gateway default", so a

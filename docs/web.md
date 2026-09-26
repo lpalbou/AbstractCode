@@ -24,6 +24,19 @@ so the host must honor it or report an error. The browser saves this preference 
 sends it as `_runtime.speculation`; it does not load models, download heads, or change the
 shared Core default. Fresh Core configurations use depth 2 only for compatible models.
 
+## Stream replies
+
+**Settings → Model & behavior → Stream replies** shows the assistant's reply while the model writes it, instead of only when it is complete. Choose:
+
+- **Gateway default** (the default): the gateway operator's setting decides. When the gateway reports it, the option reads **Gateway default (on)** or **Gateway default (off)**.
+- **On** or **Off**: your choice for every new turn, whatever the gateway default.
+
+The choice is remembered in this browser for your account and applies to the next turn. It is sent as `_runtime.stream` (`true` for On, `false` for Off, nothing for Gateway default); no other run setting changes.
+
+While a reply streams, a live assistant bubble grows as text arrives; a sub-agent's live reply is labelled with its step. When the model call ends, the complete message replaces the live text. If the call fails or is cancelled, the bubble becomes a short note saying so. If the connection drops, the live text disappears and comes back from the gateway when the page reconnects; nothing is shown twice. When the gateway runs a call without streaming (for example a call that must return structured output), the transcript shows a one-line note saying why, and the reply appears when it is complete.
+
+The setting is available only when the gateway advertises live replies. Otherwise it stays visible but disabled, with the reason ("not supported by this gateway", or why the gateway's capabilities could not be read), and replies appear when they are complete.
+
 ## Running and supervising work
 
 For an agent, type a task and press Enter; Shift+Enter inserts a newline. For a structured workflow, configure its required inputs and select **Run workflow**. Text, structured JSON results, and workflow messages appear in the transcript.
