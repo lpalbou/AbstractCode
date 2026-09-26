@@ -473,6 +473,27 @@ fn workspace_preflight_note(policy_response: &Value, opts: &StartOpts) -> Option
 /// CHANGES — a policy that flips mid-session is news and must not be
 /// swallowed by the dedup. `last` is the runner-thread memo, updated in
 /// place when the note earns its line.
+/// Record the gateway's same-machine verdict. When it CHANGES whether this
+/// folder is sent (auto preference, no explicit root), say so once.
+pub(crate) fn learn_same_machine(store: &Store, same: bool) {
+    let before = store.gateway_same_machine.get_untracked();
+    if before == Some(same) {
+        return;
+    }
+    store.gateway_same_machine.set(Some(same));
+    if before.is_none()
+        && store.send_local_workspace.get_untracked()
+            == crate::workspace_files::SendLocalWorkspace::Auto
+        && !store.workspace_explicit.get_untracked()
+    {
+        store.notify(if same {
+            "the gateway reports it runs on this machine — your folder is sent as the workspace from the next turn"
+        } else {
+            "the gateway reports it runs on another machine — your folder is not sent as the workspace"
+        });
+    }
+}
+
 fn announce_workspace_note(
     last: &mut Option<(String, String)>,
     session_id: &str,
@@ -562,6 +583,8 @@ struct Runner {
     last_workflow_note: Option<(String, String)>,
     /// The boot "workspace: gateway-managed" notice was posted (once).
     workspace_notice_posted: bool,
+    /// The gateway's same-machine verdict was asked for (once).
+    same_machine_probed: bool,
 }
 
 pub fn spawn(
@@ -594,6 +617,7 @@ pub fn spawn(
                     last_workspace_note: None,
                     last_workflow_note: None,
                     workspace_notice_posted: false,
+                    same_machine_probed: false,
                 };
                 while let Ok(cmd) = rx.recv() {
                     if matches!(cmd, Cmd::Shutdown) {
@@ -1661,6 +1685,20 @@ impl Runner {
                         clear_sent_attachments(&store, &tx, &sent);
                     }
                 });
+                // The gateway's same-machine verdict, once per process: the
+                // first run's workspace answer says whether this terminal is
+                // on the gateway's machine, which decides whether the NEXT
+                // turns send this folder (`ui::effective_workspace_root`).
+                // A gateway without the route keeps the loopback-URL rule.
+                if !self.same_machine_probed {
+                    self.same_machine_probed = true;
+                    if let Ok(v) = self.client.run_workspace(&run_id) {
+                        if let Ok(i) = crate::workspace_files::workspace_info_from(&v) {
+                            let same = i.caller_is_this_machine;
+                            self.post(move || learn_same_machine(&store, same));
+                        }
+                    }
+                }
                 // The stream spawns regardless (the runner cannot see the
                 // UI-thread session check): a mismatch-cancelled run's
                 // records drop at the fold's root guard, and the next
@@ -2467,11 +2505,17 @@ impl Runner {
                 use crate::store::Fetch;
                 if with_info {
                     let info = match client.run_workspace(&run_id) {
-                        Ok(v) => Fetch::Ready(crate::workspace_files::workspace_info_from(&v)),
+                        Ok(v) => match crate::workspace_files::workspace_info_from(&v) {
+                            Ok(i) => Fetch::Ready(i),
+                            Err(e) => Fetch::Failed(e),
+                        },
                         Err(e) => Fetch::Failed(e.to_string()),
                     };
                     let rid = run_id.clone();
                     wake.post(move || {
+                        if let Fetch::Ready(i) = &info {
+                            learn_same_machine(&store, i.caller_is_this_machine);
+                        }
                         store.files.update(|f| {
                             if f.run_id == rid {
                                 f.info = info;
@@ -2480,7 +2524,10 @@ impl Runner {
                     });
                 }
                 let listing = match client.run_workspace_files(&run_id, &dir) {
-                    Ok(v) => Fetch::Ready(crate::workspace_files::workspace_listing_from(&v)),
+                    Ok(v) => match crate::workspace_files::workspace_listing_from(&v) {
+                        Ok(l) => Fetch::Ready(l),
+                        Err(e) => Fetch::Failed(e),
+                    },
                     Err(e) => Fetch::Failed(e.to_string()),
                 };
                 wake.post(move || {
@@ -4289,6 +4336,158 @@ pub(crate) fn spawn_estimate_context(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A tiny HTTP gateway for runner tests: answers each request by the
+    /// first route whose prefix matches the path (after `/api/gateway`),
+    /// 404 `{}` otherwise. Serves until the test process exits.
+    fn fake_gateway(routes: Vec<(&'static str, String)>) -> String {
+        use std::io::{BufRead, BufReader, Write};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let url = format!("http://{}", l.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for sock in l.incoming() {
+                let Ok(mut sock) = sock else { continue };
+                let mut reader = BufReader::new(sock.try_clone().unwrap());
+                let mut first = String::new();
+                let _ = reader.read_line(&mut first);
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                }
+                let path = first.split_whitespace().nth(1).unwrap_or("").to_string();
+                let path = path.trim_start_matches("/api/gateway").to_string();
+                let (status, body) = routes
+                    .iter()
+                    .find(|(prefix, _)| path.starts_with(prefix))
+                    .map(|(_, b)| ("200 OK", b.clone()))
+                    .unwrap_or(("404 Not Found", "{}".to_string()));
+                let _ = write!(
+                    sock,
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        url
+    }
+
+    fn runner_for(url: &str, store: Store) -> Runner {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        Runner {
+            client: GatewayClient::new(url, None),
+            wake: abstracttui::reactive::wake_handle(),
+            store,
+            tx,
+            stream_stops: Vec::new(),
+            agent_workflow_ids: Vec::new(),
+            soft_failures: 0,
+            catalog_attempted: false,
+            catalog_loaded: false,
+            catalog_preference: (None, None),
+            requested_workflow: None,
+            last_workspace_note: None,
+            last_workflow_note: None,
+            workspace_notice_posted: false,
+            same_machine_probed: false,
+        }
+    }
+
+    /// Review S3: a SAVED pick that is gone degrades to the gateway default
+    /// ONLY with a notice — toast AND transcript line — and the selection is
+    /// the gateway default. (Silencing the notice turns this red.)
+    #[test]
+    fn a_stale_saved_workflow_falls_back_to_the_gateway_default_loudly() {
+        let bundles = json!({
+            "items": [{"bundle_id": "basic-agent", "bundle_version": "0.0.5", "entrypoints": [
+                {"flow_id": "main", "name": "Basic agent",
+                 "interfaces": [crate::discovery::AGENT_INTERFACE_V1]}]}],
+            "default_agent_workflows": {crate::discovery::AGENT_INTERFACE_V1: {
+                "bundle_id": "basic-agent", "bundle_version": "0.0.5", "flow_id": "main",
+                "name": "Basic agent", "source": "default"}}
+        })
+        .to_string();
+        let policy = json!({"policy": {"client_workspace_scope_overrides": true}}).to_string();
+        let url = fake_gateway(vec![("/bundles", bundles), ("/workspace/policy", policy)]);
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = Store::create(cx);
+            let mut runner = runner_for(&url, store);
+            runner.load_catalog(Some("gone-agent".into()), Some("x".into()));
+            for _ in 0..50 {
+                abstracttui::reactive::drain_posted();
+                if store.gateway_default_loaded.get_untracked() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let w = store.workflow.get_untracked();
+            assert!(w.gateway_default, "selection = the gateway default: {w:?}");
+            assert_eq!(w.bundle_id, "basic-agent");
+            let wanted = "saved workflow 'gone-agent:x' is not on this gateway any more";
+            assert!(
+                store
+                    .notices
+                    .get_untracked()
+                    .iter()
+                    .any(|n| n.contains(wanted)),
+                "toast: {:?}",
+                store.notices.get_untracked()
+            );
+            let in_transcript = store.fold.with_untracked(|f| {
+                f.items.iter().any(|i| {
+                    matches!(i, crate::transcript::Item::Info { text } if text.contains(wanted))
+                })
+            });
+            assert!(in_transcript, "the transcript records what changed");
+        });
+        root.dispose();
+    }
+
+    /// Review S4: the gateway's same-machine verdict is learned from a run's
+    /// workspace answer; the first verdict that changes the send decision is
+    /// announced once.
+    #[test]
+    fn same_machine_verdict_is_learned_and_announced_once() {
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = Store::create(cx);
+            learn_same_machine(&store, true);
+            assert_eq!(store.gateway_same_machine.get_untracked(), Some(true));
+            assert_eq!(store.notices.get_untracked().len(), 1);
+            learn_same_machine(&store, true);
+            assert_eq!(store.notices.get_untracked().len(), 1, "no repeat");
+        });
+        root.dispose();
+    }
+
+    /// The boot workspace notice is posted once, not on every catalog load.
+    #[test]
+    fn the_gateway_managed_notice_is_posted_once() {
+        let bundles = json!({"items": []}).to_string();
+        let policy = json!({"policy": {"client_workspace_scope_overrides": false}}).to_string();
+        let url = fake_gateway(vec![("/bundles", bundles), ("/workspace/policy", policy)]);
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = Store::create(cx);
+            let mut runner = runner_for(&url, store);
+            runner.load_catalog(None, None);
+            runner.load_catalog(None, None);
+            for _ in 0..20 {
+                abstracttui::reactive::drain_posted();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let n = store.fold.with_untracked(|f| {
+                f.items
+                    .iter()
+                    .filter(|i| {
+                        matches!(i, crate::transcript::Item::Info { text }
+                            if text.starts_with("workspace: gateway-managed"))
+                    })
+                    .count()
+            });
+            assert_eq!(n, 1, "posted once across two catalog loads");
+        });
+        root.dispose();
+    }
 
     #[test]
     fn workspace_preflight_note_names_mounts_and_disallowed_override_mode() {

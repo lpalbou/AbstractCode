@@ -302,6 +302,11 @@ pub struct Prefs {
     /// `workspace_allowed_paths` with every run (used by the gateway in
     /// `workspace_or_allowed` mode; server policy may clamp them).
     pub workspace_allowed: Vec<String>,
+    /// `send_local_workspace`: `auto` (default; this folder is sent only
+    /// when the gateway is on this machine), `always` (a gateway that sees
+    /// the same path, e.g. a shared mount), `never`. Stored as the word;
+    /// `/workspace send` edits it.
+    pub send_local_workspace: String,
     pub show_details: Option<bool>,
     /// Launch animation on/off (`--animation`). `None` = never chosen,
     /// which reads as ON — the identity plays for a new install, and one
@@ -370,6 +375,12 @@ pub struct Prefs {
 }
 
 impl Prefs {
+    /// The stored `send_local_workspace` preference (default: auto).
+    pub fn send_local_workspace(&self) -> crate::workspace_files::SendLocalWorkspace {
+        crate::workspace_files::SendLocalWorkspace::parse(&self.send_local_workspace)
+            .unwrap_or_default()
+    }
+
     /// The saved workflow preference as `(bundle, flow)`; `(None, None)` =
     /// the gateway default (the `@default` sentinel, or nothing chosen yet).
     pub fn workflow_preference(&self) -> (Option<String>, Option<String>) {
@@ -622,6 +633,11 @@ impl Prefs {
             workspace_mode: s("workspace_mode"),
             workspace_allowed: string_list("workspace_allowed"),
             show_details: v.get("show_details").and_then(Value::as_bool),
+            // Unknown words read as "auto" (the safe default), never as
+            // "always".
+            send_local_workspace: s("send_local_workspace")
+                .filter(|w| crate::workspace_files::SendLocalWorkspace::parse(w).is_some())
+                .unwrap_or_default(),
             animation: v.get("animation").and_then(Value::as_bool),
             tool_accepted_tier,
             tool_overrides,
@@ -681,6 +697,11 @@ impl Prefs {
             "workspace_mode": self.workspace_mode,
             "workspace_allowed": self.workspace_allowed,
             "show_details": self.show_details,
+            "send_local_workspace": crate::workspace_files::SendLocalWorkspace::parse(
+                &self.send_local_workspace
+            )
+            .unwrap_or_default()
+            .word(),
             "animation": self.animation,
             // Always written normalized + legible: headless users edit
             // this by hand (config-first for exec runs).
@@ -1129,6 +1150,7 @@ mod tests {
             workspace_mode: Some("workspace_or_allowed".into()),
             workspace_allowed: vec!["/srv/data".into(), "/opt/shared".into()],
             show_details: Some(false),
+            send_local_workspace: "always".into(),
             animation: Some(false),
             tool_accepted_tier: "write".into(),
             tool_overrides: vec![("fetch_url".into(), "auto".into())],
@@ -1162,6 +1184,7 @@ mod tests {
             "\"workspace_mode\"",
             "\"workspace_allowed\"",
             "\"show_details\"",
+            "\"send_local_workspace\"",
             "\"animation\"",
             "\"accepted_tier\"",
             "\"overrides\"",
@@ -1194,6 +1217,7 @@ mod tests {
             vec!["/srv/data".to_string(), "/opt/shared".to_string()]
         );
         assert_eq!(l.show_details, Some(false));
+        assert_eq!(l.send_local_workspace, "always");
         assert_eq!(l.tool_accepted_tier, "write");
         assert_eq!(
             l.tool_overrides,

@@ -12485,3 +12485,81 @@ fn model_picker_offers_mtp_as_a_step_and_persists_it() {
         "{screen}"
     );
 }
+
+/// Review S1: `o` shows the workspace ROOT only and never launches — a root
+/// that is an `.app` folder is refused (with the reason), and a browsed
+/// sub-folder is never what gets opened.
+#[test]
+fn files_open_refuses_a_launchable_root() {
+    use abstractcode::store::{Fetch, FilesView};
+    use abstractcode::workspace_files::{WorkspaceInfo, WorkspaceListing};
+    let mut h = harness_sized(Size::new(130, 30));
+    h.turn();
+    h.store.run_id.set("run-1".into());
+    h.type_text("/files");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.store.files.set(FilesView {
+        run_id: "run-1".into(),
+        info: Fetch::Ready(WorkspaceInfo {
+            workspace_root: "/w/Tool.app".into(),
+            exists: true,
+            hostname: "here".into(),
+            caller_is_this_machine: true,
+            open_supported: true,
+            ..Default::default()
+        }),
+        dir: String::new(),
+        listing: Fetch::Ready(WorkspaceListing::default()),
+    });
+    h.turn();
+    let screen = h.turn();
+    assert!(screen.contains("o shows the workspace folder"), "{screen}");
+    h.type_text("o");
+    h.turn();
+    assert!(
+        h.store
+            .notices
+            .get_untracked()
+            .iter()
+            .any(|n| n.contains("would be launched, not shown")),
+        "{:?}",
+        h.store.notices.get_untracked()
+    );
+}
+
+/// Review S4/S5: whether this folder is sent follows the gateway's verdict
+/// when known, and the stored `/workspace send` preference overrides it
+/// (persisted in prefs).
+#[test]
+fn workspace_root_follows_the_gateway_verdict_and_the_stored_preference() {
+    let mut h = harness();
+    h.turn();
+    let start_root = |h: &mut Harness| -> Option<String> {
+        while h.rx.try_recv().is_ok() {}
+        h.type_text("go");
+        h.turn();
+        h.press_enter();
+        h.turn();
+        let root = match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
+            Some(Cmd::Start { opts, .. }) => opts.workspace_root.clone(),
+            _ => panic!("expected a start"),
+        };
+        h.store.phase.set(Phase::Idle);
+        h.turn();
+        root
+    };
+    // Loopback harness gateway, no verdict yet → sent.
+    assert_eq!(start_root(&mut h).as_deref(), Some("/tmp/ws"));
+    // The gateway says the caller is elsewhere → withheld.
+    h.store.gateway_same_machine.set(Some(false));
+    assert_eq!(start_root(&mut h), None);
+    // The stored preference overrides (shared mount) and persists.
+    h.type_text("/workspace send always");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    assert_eq!(h.prefs.borrow().send_local_workspace, "always");
+    assert_eq!(start_root(&mut h).as_deref(), Some("/tmp/ws"));
+}

@@ -953,6 +953,14 @@ pub struct Store {
     pub skills_shelf: Signal<Option<SkillShelf>>,
     /// `/files` browser state (§W).
     pub files: Signal<FilesView>,
+    /// The GATEWAY's verdict on whether this terminal is on its machine
+    /// (`host.caller_is_this_machine` from `GET /runs/{rid}/workspace`);
+    /// `None` until a run's workspace has been read.
+    pub gateway_same_machine: Signal<Option<bool>>,
+    /// Stored `send_local_workspace` preference (`/workspace send`).
+    pub send_local_workspace: Signal<crate::workspace_files::SendLocalWorkspace>,
+    /// The launch root came from an explicit `--workspace` (always sent).
+    pub workspace_explicit: Signal<bool>,
     /// Skill names attached to every run (persisted; `input_data.skills`).
     pub selected_skills: Signal<Vec<String>>,
     /// Gateway MCP server registry (`/mcp`), plus its honest empty-state note.
@@ -1222,6 +1230,9 @@ impl Store {
             skills_error: cx.signal(String::new()),
             skills_shelf: cx.signal(None),
             files: cx.signal(FilesView::default()),
+            gateway_same_machine: cx.signal(None),
+            send_local_workspace: cx.signal(Default::default()),
+            workspace_explicit: cx.signal(false),
             selected_skills: cx.signal(Vec::new()),
             mcp_servers: cx.signal(Vec::new()),
             mcp_note: cx.signal(String::new()),

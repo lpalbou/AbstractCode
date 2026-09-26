@@ -782,6 +782,54 @@ fn start_run_inner(
     send_start(store, ctx, workflow, prompt, opts, attachments);
 }
 
+/// `/workspace send [auto|always|never]`: report or set the stored
+/// `send_local_workspace` preference.
+pub(crate) fn workspace_send(store: Store, ctx: &UiCtx, arg: Option<&str>) {
+    use crate::workspace_files::SendLocalWorkspace;
+    let Some(raw) = arg else {
+        let pref = store.send_local_workspace.get_untracked();
+        let sent = effective_workspace_root(store, ctx);
+        store.notify(format!(
+            "send_local_workspace: {} — {}",
+            pref.word(),
+            match sent {
+                Some(root) => format!("your folder {root} is sent as the workspace"),
+                None => "your folder is not sent; the gateway's session folder is used".into(),
+            }
+        ));
+        return;
+    };
+    let Some(pref) = SendLocalWorkspace::parse(raw) else {
+        store.notify("usage: /workspace send auto|always|never");
+        return;
+    };
+    store.send_local_workspace.set(pref);
+    persist_prefs(ctx, move |p| {
+        p.send_local_workspace = pref.word().to_string()
+    });
+    let sent = effective_workspace_root(store, ctx).is_some();
+    store.notify(format!(
+        "send_local_workspace: {} — from the next turn your folder is {}",
+        pref.word(),
+        if sent { "sent" } else { "not sent" }
+    ));
+}
+
+/// The workspace root THIS run sends: the launch candidate, only when
+/// `workspace_files::sends_local_workspace` says so — the gateway's
+/// same-machine verdict when known, else a loopback URL, with the stored
+/// `send_local_workspace` preference and an explicit `--workspace` on top.
+pub(crate) fn effective_workspace_root(store: Store, ctx: &UiCtx) -> Option<String> {
+    let root = ctx.workspace_root.clone()?;
+    crate::workspace_files::sends_local_workspace(
+        store.send_local_workspace.get_untracked(),
+        store.workspace_explicit.get_untracked(),
+        &ctx.client.connection().0,
+        store.gateway_same_machine.get_untracked(),
+    )
+    .then_some(root)
+}
+
 /// The run infrastructure every start shares (provider/model, workspace
 /// scope, tool selection + policy, skills) — used by plain prompts and
 /// `/goal` runs (which add goal params on top).
@@ -859,7 +907,7 @@ pub(crate) fn agent_start_opts(
         } else {
             None
         },
-        workspace_root: ctx.workspace_root.clone(),
+        workspace_root: effective_workspace_root(store, ctx),
         workspace_mode: if ws_mode.trim().is_empty() {
             None
         } else {
@@ -887,7 +935,7 @@ pub(crate) fn agent_start_opts(
         // surfaces inject identical context for identical workspaces. The
         // notices ride the toast lane; a missing file stays silent.
         system_prompt_extra: crate::project_context::resolve_project_context(
-            ctx.workspace_root.as_deref(),
+            effective_workspace_root(store, ctx).as_deref(),
             ctx.no_project_context,
             |line| store.notify(line),
             |sources, chars| store.notify(format!("project context: {sources} ({chars} chars)")),
@@ -1267,6 +1315,7 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
         Command::Permissions(arg) => set_permissions(store, ctx, arg),
         Command::Workspace => modals::open_workspace(cx, store, ctx),
         Command::Files => modals::open_files(cx, store, ctx),
+        Command::WorkspaceSend(arg) => workspace_send(store, ctx, arg.as_deref()),
         Command::Steer(text) => {
             if text.is_empty() {
                 store.notify("usage: /steer <guidance>");

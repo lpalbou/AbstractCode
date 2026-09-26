@@ -235,6 +235,38 @@ pub fn resolve_approval(
     }
 }
 
+/// What `exec` says when the gateway rejects its credentials: the sign-in
+/// command and the flag, never an environment variable.
+pub const TOKEN_HINT: &str =
+    "token rejected — sign in with `abstractcode login --gateway <url> --token <token>`, or pass --token <token>";
+
+/// `exec` without `--workflow` whose SAVED pick (`bundle[:flow]`) no longer
+/// resolves: `choose_workflow` degrades it to the gateway default for the
+/// interactive lane, but a headless run must not silently run another
+/// agent. `Some(message)` = refuse (exit 2). Pure; test-pinned.
+pub fn stale_saved_workflow_refusal(
+    saved_bundle: Option<&str>,
+    saved_flow: Option<&str>,
+    chosen: Option<&crate::store::Workflow>,
+) -> Option<String> {
+    let bundle = saved_bundle?;
+    if chosen.is_some_and(|w| !w.gateway_default) {
+        return None;
+    }
+    let saved = match saved_flow {
+        Some(f) => format!("{bundle}:{f}"),
+        None => bundle.to_string(),
+    };
+    let fallback = match chosen {
+        Some(w) => format!(" (the gateway default is {})", w.versioned_label()),
+        None => String::new(),
+    };
+    Some(format!(
+        "warning: saved workflow '{saved}' is not on this gateway — refusing to run a different agent{fallback}\n  \
+         pass --workflow default to run the gateway default, or --workflow <bundle[:flow]> to pick one"
+    ))
+}
+
 /// Refusal message when an EXPLICITLY requested `--workflow` doesn't match
 /// what `choose_workflow` resolved (i.e. the request fell through to the
 /// basic-agent/first fallback). Pure so the headless refusal is testable
@@ -382,7 +414,7 @@ pub fn run(args: &Args) -> i32 {
         Err(e) => {
             eprintln!("✗ catalog: {e}");
             if e.status == Some(401) || e.status == Some(403) {
-                eprintln!("  hint: token rejected — run `abstractcode login` (or check ABSTRACTGATEWAY_AUTH_TOKEN)");
+                eprintln!("  hint: {}", TOKEN_HINT);
             }
             return 1;
         }
@@ -409,6 +441,19 @@ pub fn run(args: &Args) -> i32 {
             chosen.as_ref().unwrap_or(&none),
             &workflows,
             &catalog,
+        ) {
+            eprintln!("{msg}");
+            return 2;
+        }
+    }
+    // A STALE SAVED pick (no --workflow): refuse rather than run the gateway
+    // default in its place — a script relying on its saved agent must not
+    // silently get another one. `--workflow default` is the explicit opt-in.
+    if args.workflow.is_none() {
+        if let Some(msg) = stale_saved_workflow_refusal(
+            pref_bundle.as_deref(),
+            pref_flow.as_deref(),
+            chosen.as_ref(),
         ) {
             eprintln!("{msg}");
             return 2;
@@ -570,20 +615,29 @@ pub fn run(args: &Args) -> i32 {
             }
         }
     }
-    // A remote gateway does not get this machine's cwd implicitly (see
-    // `workspace_files::launch_workspace_root`); say so on stderr.
+    // Headless: no run has told us the gateway's same-machine verdict yet,
+    // so a loopback URL counts as this machine; the stored
+    // `send_local_workspace` preference and an explicit --workspace win.
     let cwd = std::env::current_dir()
         .ok()
         .map(|p| p.display().to_string());
-    let (workspace_root, workspace_note) = crate::workspace_files::launch_workspace_root(
+    let (candidate, explicit) = crate::workspace_files::launch_workspace_candidate(
         args.no_workspace,
         args.workspace.as_deref(),
         cwd.as_deref(),
-        &conn.base_url,
     );
-    if let Some(note) = workspace_note {
-        eprintln!("note: {note}");
-    }
+    let workspace_root = candidate.filter(|_| {
+        let send = crate::workspace_files::sends_local_workspace(
+            prefs.send_local_workspace(),
+            explicit,
+            &conn.base_url,
+            None,
+        );
+        if !send {
+            eprintln!("note: {}", crate::workspace_files::REMOTE_WORKSPACE_NOTICE);
+        }
+        send
+    });
     // Project instructions (AGENTS.md) for the run's workspace — parity with
     // the Python client, which has always injected them. Scoped to the
     // workspace: `--no-workspace` runs have no project to read conventions
@@ -698,7 +752,7 @@ pub fn run(args: &Args) -> i32 {
         Err(e) => {
             eprintln!("✗ start: {e}");
             if e.status == Some(401) || e.status == Some(403) {
-                eprintln!("  hint: token rejected — run `abstractcode login` (or check ABSTRACTGATEWAY_AUTH_TOKEN)");
+                eprintln!("  hint: {}", TOKEN_HINT);
             }
             return 1;
         }
@@ -1207,7 +1261,43 @@ fn print_item(item: &Item) {
 #[cfg(test)]
 mod tests {
     use super::{resolve_headless_ask, stopped_head, ASK_REFUSAL};
+    use super::{stale_saved_workflow_refusal, TOKEN_HINT};
     use crate::transcript::StopVerdict;
+
+    /// Review S2: a stale SAVED pick refuses in `exec` (the interactive lane
+    /// degrades with a notice; a script must not silently get another agent).
+    #[test]
+    fn exec_refuses_a_stale_saved_workflow() {
+        let default = crate::store::Workflow {
+            bundle_id: "basic-agent".into(),
+            flow_id: "main".into(),
+            name: "Basic".into(),
+            version: "0.0.5".into(),
+            gateway_default: true,
+            ..Default::default()
+        };
+        let msg = stale_saved_workflow_refusal(Some("gone"), Some("x"), Some(&default)).unwrap();
+        assert!(msg.starts_with("warning: saved workflow 'gone:x' is not on this gateway"));
+        assert!(msg.contains("Basic @0.0.5") && msg.contains("--workflow default"));
+        assert!(stale_saved_workflow_refusal(Some("gone"), None, None).is_some());
+        let pinned = crate::store::Workflow {
+            gateway_default: false,
+            ..default.clone()
+        };
+        assert!(stale_saved_workflow_refusal(Some("basic-agent"), None, Some(&pinned)).is_none());
+        assert!(stale_saved_workflow_refusal(None, None, Some(&default)).is_none());
+    }
+
+    /// Review S7: user-facing hints name the sign-in command and flag, never
+    /// an environment variable.
+    #[test]
+    fn token_hint_names_no_environment_variable() {
+        assert!(TOKEN_HINT.contains("abstractcode login") && TOKEN_HINT.contains("--token"));
+        assert!(!TOKEN_HINT.contains("ABSTRACT"));
+        let src = include_str!("exec.rs");
+        let needle = ["check ", "ABSTRACTGATEWAY_AUTH_TOKEN"].concat();
+        assert!(!src.contains(&needle));
+    }
 
     fn worded(label: &str) -> StopVerdict {
         StopVerdict {

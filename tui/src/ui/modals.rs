@@ -2375,20 +2375,26 @@ pub fn open_files(cx: Scope, store: Store, ctx: &UiCtx) {
                     store.notify(why);
                     return;
                 }
-                let dir = store.files.with_untracked(|f| f.dir.clone());
-                let path = crate::workspace_files::absolute_path(&info.workspace_root, &dir);
-                let Some(program) = crate::workspace_files::opener_program() else {
-                    store.notify(format!("no folder opener on this platform — {path}"));
-                    return;
+                // The workspace ROOT only, the gateway's string verbatim —
+                // never the browsed sub-folder, never a path assembled here
+                // (review S1): a folder the agent made can be an `.app`
+                // that `open` would LAUNCH. Reveal, never launch.
+                let path = info.workspace_root.clone();
+                let (program, args) = match crate::workspace_files::reveal_command(&path) {
+                    Ok(cmd) => cmd,
+                    Err(why) => {
+                        store.notify(why);
+                        return;
+                    }
                 };
                 match std::process::Command::new(program)
-                    .arg(&path)
+                    .args(&args)
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .spawn()
                 {
-                    Ok(_) => store.notify(format!("opened {path}")),
+                    Ok(_) => store.notify(format!("showing {path} in the file manager")),
                     Err(e) => store.notify(format!("could not open {path}: {e}")),
                 }
             }
@@ -2526,7 +2532,7 @@ pub fn open_files(cx: Scope, store: Store, ctx: &UiCtx) {
                     }
                     _ => false,
                 });
-                let open = if can_open { " · o opens the folder" } else { "" };
+                let open = if can_open { " · o shows the workspace folder" } else { "" };
                 hint_row(
                     &t2,
                     format!(

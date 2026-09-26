@@ -6,6 +6,9 @@ pub enum Command {
     /// `/files` (also `/workspace files`) — the current run's workspace
     /// on the gateway host: browse folders, preview files (§W).
     Files,
+    /// `/workspace send [auto|always|never]` — the stored
+    /// `send_local_workspace` preference (`None` reports it).
+    WorkspaceSend(Option<String>),
     /// `/about` — app + version, AbstractFramework identity, links, and the
     /// gateway's package versions when known.
     About,
@@ -167,6 +170,10 @@ pub fn parse(text: &str) -> Option<Command> {
             Command::Permissions(if rest.is_empty() { None } else { Some(rest) })
         }
         "/workspace" | "/ws" if rest.eq_ignore_ascii_case("files") => Command::Files,
+        "/workspace" | "/ws" if rest.to_ascii_lowercase().starts_with("send") => {
+            let arg = rest[4..].trim().to_string();
+            Command::WorkspaceSend(if arg.is_empty() { None } else { Some(arg) })
+        }
         "/workspace" | "/ws" => Command::Workspace,
         "/files" | "/file" => Command::Files,
         "/skills" | "/skill" => Command::Skills,
@@ -549,7 +556,7 @@ pub const HELP_EXTRA: &[(&str, &str)] = &[
     ),
     (
         "workspace",
-        "gateway-managed by default: server policy clamps client paths; /workspace shows and extends the scope (mode + allowed paths persist in prefs.json); /files browses the run's workspace on the gateway host. A remote gateway is not sent this machine's folder unless you pass --workspace",
+        "gateway-managed by default: server policy clamps client paths; /workspace shows and extends the scope (mode + allowed paths persist in prefs.json); /files browses the run's workspace on the gateway host. A remote gateway is not sent this machine's folder unless you pass --workspace or set /workspace send always (auto|always|never)",
     ),
 ];
 
@@ -581,6 +588,11 @@ mod tests {
         assert_eq!(parse("/workspace files"), Some(Command::Files));
         assert_eq!(parse("/ws files"), Some(Command::Files));
         assert_eq!(parse("/workspace"), Some(Command::Workspace));
+        assert_eq!(
+            parse("/workspace send always"),
+            Some(Command::WorkspaceSend(Some("always".into())))
+        );
+        assert_eq!(parse("/ws send"), Some(Command::WorkspaceSend(None)));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "/files"));
         assert!(completion_matches("fil").iter().any(|(k, _)| *k == "files"));
     }

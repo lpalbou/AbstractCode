@@ -175,18 +175,28 @@ fn run_tui(args: &cli::Args) -> i32 {
         None => prefs.workflow_preference(),
     };
 
-    // A remote gateway does not get this machine's cwd implicitly — see
-    // `workspace_files::launch_workspace_root` for the decision; the notice
-    // lands in the transcript at boot.
+    // The launch root candidate (`--workspace`, else the cwd). Whether it is
+    // SENT is decided per run (`ui::effective_workspace_root`): the
+    // gateway's same-machine verdict when known, else a loopback URL, and
+    // the stored `send_local_workspace` preference over both.
     let cwd = std::env::current_dir()
         .ok()
         .map(|p| p.display().to_string());
-    let (workspace_root, workspace_note) = workspace_files::launch_workspace_root(
+    let (workspace_root, workspace_explicit) = workspace_files::launch_workspace_candidate(
         args.no_workspace,
         args.workspace.as_deref(),
         cwd.as_deref(),
-        &conn.base_url,
     );
+    let send_local_pref = prefs.send_local_workspace();
+    // Once per session, at boot: the folder is withheld.
+    let workspace_note = (workspace_root.is_some()
+        && !workspace_files::sends_local_workspace(
+            send_local_pref,
+            workspace_explicit,
+            &conn.base_url,
+            None,
+        ))
+    .then(|| workspace_files::REMOTE_WORKSPACE_NOTICE.to_string());
     let workspace_mode = args
         .workspace_mode
         .clone()
@@ -332,6 +342,8 @@ fn run_tui(args: &cli::Args) -> i32 {
         // Live workspace scope (seeded from flags/prefs; /workspace edits).
         // The signal is the ONE authority — UiCtx carries no copy.
         store.workspace_mode.set(workspace_mode.unwrap_or_default());
+        store.send_local_workspace.set(send_local_pref);
+        store.workspace_explicit.set(workspace_explicit);
         store.workspace_allowed.set(prefs.workspace_allowed.clone());
 
         let wake = abstracttui::reactive::wake_handle();
