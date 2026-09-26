@@ -2,19 +2,8 @@ import type { WorkflowTransport } from "@abstractframework/panel-chat";
 import { gateway, gatewayRequest } from "./transport";
 
 const runPath = (id: string) => `/api/gateway/runs/${encodeURIComponent(id)}`;
-// Keep source compatibility with the currently vendored panel-chat type while
-// forwarding the optional SSE-open signal introduced by the next package cut.
-type OpeningWorkflowTransport = Omit<WorkflowTransport, "streamLedger"> & {
-  streamLedger(
-    runId: string,
-    after: number,
-    onStep: (item: unknown) => void,
-    signal: AbortSignal,
-    onOpen?: () => void,
-  ): Promise<void>;
-};
 
-export const workflowTransport: OpeningWorkflowTransport = {
+export const workflowTransport: WorkflowTransport = {
   getRun: (id, signal) => gatewayRequest(runPath(id), { signal }),
   getHistory: (id, signal) =>
     gatewayRequest(
@@ -25,12 +14,15 @@ export const workflowTransport: OpeningWorkflowTransport = {
     gatewayRequest(`${runPath(id)}/ledger?after=${after}&limit=200`, {
       signal,
     }),
-  streamLedger: (id, after, onStep, signal, onOpen) =>
+  // `onDelta` (live reply text) is handed straight to the controller, which
+  // owns the live bubbles; delta frames never reach `onStep` or the cursor.
+  streamLedger: (id, after, onStep, signal, onOpen, onDelta) =>
     gateway.stream_ledger(id, {
       after,
       on_step: onStep,
       signal,
       on_open: onOpen,
+      on_delta: onDelta,
     }),
   submitCommand: (command, signal) =>
     gatewayRequest("/api/gateway/commands", {

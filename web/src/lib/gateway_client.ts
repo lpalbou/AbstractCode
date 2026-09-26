@@ -1,5 +1,6 @@
 import { LedgerStreamEvent, type AttachmentRef } from "./types";
 import { SseParser } from "./sse_parser";
+import { llmDeltaFromSse, type LlmDeltaEvent } from "@abstractframework/panel-chat";
 
 export type GatewayClientConfig = {
   base_url: string; // e.g. "http://localhost:8081" (no trailing slash) or "" for same-origin
@@ -193,7 +194,15 @@ export class GatewayClient {
     return { items, next_after };
   }
 
-  async stream_ledger(run_id: string, opts: { after: number; on_step: (ev: LedgerStreamEvent) => void; signal?: AbortSignal; on_open?: () => void }): Promise<void> {
+  /**
+   * Tail `GET /runs/{id}/ledger/stream`. `step` frames go to `on_step` (they
+   * carry the ledger cursor). `llm.delta` / `llm.delta_end` frames (live model
+   * reply text, sent with no `id:`) go to `on_delta` when the caller wants
+   * them: they are volatile, never reach `on_step`, and never move the cursor
+   * the caller resumes from. A malformed delta frame ends the stream with an
+   * error naming the problem (the caller reconnects and shows it).
+   */
+  async stream_ledger(run_id: string, opts: { after: number; on_step: (ev: LedgerStreamEvent) => void; signal?: AbortSignal; on_open?: () => void; on_delta?: (ev: LlmDeltaEvent) => void }): Promise<void> {
     const rid = String(run_id || "").trim();
     if (!rid) throw new Error("stream_ledger: run_id is required");
     const after = Number(opts?.after || 0);
@@ -214,19 +223,33 @@ export class GatewayClient {
     const decoder = new TextDecoder("utf-8");
     const parser = new SseParser();
 
+    const on_delta = opts.on_delta;
     while (true) {
       const { value, done } = await reader.read();
       if (done) return;
       const text = decoder.decode(value, { stream: true });
-      parser.push(text, (ev) => {
-        if (ev.event !== "step" || !ev.data) return;
-        try {
-          const parsed = JSON.parse(ev.data);
-          if (parsed && typeof parsed.cursor === "number" && parsed.record) on_step(parsed as LedgerStreamEvent);
-        } catch {
-          // ignore malformed events
-        }
-      });
+      try {
+        parser.push(text, (ev) => {
+          if (on_delta) {
+            // Throws for a malformed delta frame; null for every other frame.
+            const delta = llmDeltaFromSse(ev.event || "message", ev.data ?? "");
+            if (delta) {
+              on_delta(delta);
+              return;
+            }
+          }
+          if (ev.event !== "step" || !ev.data) return;
+          try {
+            const parsed = JSON.parse(ev.data);
+            if (parsed && typeof parsed.cursor === "number" && parsed.record) on_step(parsed as LedgerStreamEvent);
+          } catch {
+            // ignore malformed ledger events (unchanged behaviour)
+          }
+        });
+      } catch (error) {
+        void reader.cancel().catch(() => undefined);
+        throw error;
+      }
     }
   }
 

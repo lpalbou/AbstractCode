@@ -52,6 +52,7 @@ import {
   readPreferences,
   writePreferences,
 } from "./preferences";
+import { effectiveStreamReplies } from "./stream_replies";
 import {
   GATEWAY_DEFAULT,
   conversationSelection,
@@ -176,6 +177,12 @@ export function CodeWorkspace() {
     useState<RunPreferences>(DEFAULT_PREFERENCES);
   const preferencesRef = useRef(preferences);
   preferencesRef.current = preferences;
+  // "Stream replies" as sent with the next run (nothing when the gateway does
+  // not advertise live replies; the setting then says why).
+  const streamReplies = effectiveStreamReplies(
+    preferences.streamReplies,
+    catalog.streaming,
+  );
   // "@default" (the gateway default agent workflow) or a catalog workflow id.
   const [selection, setSelection] = useState(DEFAULT_PREFERENCES.workflow);
   const visibleChoices = useMemo(
@@ -580,6 +587,7 @@ export function CodeWorkspace() {
         model: preferences,
         reasoning: preferences.reasoning || undefined,
         speculation: preferences.speculation,
+        streamReplies: streamReplies,
         systemPromptExtra: preferences.system || undefined,
         attachments,
         limits: {
@@ -1297,6 +1305,7 @@ export function CodeWorkspace() {
               />
             ) : null}
             <WorkflowChat
+              streamReplies={streamReplies}
               messages={
                 interaction?.kind === "tool-approval"
                   ? messages.filter(
@@ -1610,6 +1619,7 @@ export function CodeWorkspace() {
               : catalog.defaultModel
           }
           workflowDefault={Boolean(inputs.provider && inputs.model)}
+          streaming={catalog.streaming}
           disabled={locked || !connection.connected}
         />
       <AfDrawer

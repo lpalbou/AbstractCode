@@ -17,6 +17,11 @@ import {
 } from "./input_schema";
 import { defaultTextRoute } from "./model_discovery";
 import {
+  STREAMING_LOADING,
+  streamingCapability,
+  type StreamingCapability,
+} from "./stream_replies";
+import {
   gatewayDefaultFromEnvelope,
   type GatewayDefaultState,
 } from "./workflow_selection";
@@ -28,6 +33,8 @@ type CatalogState = {
   tools: ToolSpec[];
   sessions: SessionSummary[];
   capabilities: Record<string, any>;
+  /** Live-reply support (`capabilities.streaming`) for "Stream replies". */
+  streaming: StreamingCapability;
   loading: boolean;
   errors: string[];
   hasMore: boolean;
@@ -43,6 +50,7 @@ const empty: CatalogState = {
   tools: [],
   sessions: [],
   capabilities: {},
+  streaming: STREAMING_LOADING,
   loading: false,
   errors: [],
   hasMore: false,
@@ -111,6 +119,12 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       tools: normalizeToolCatalog(value(2)),
       sessions: normalizeSessionSummaries(value(3), inputCache.current.values),
       capabilities: capabilityContracts(value(4)),
+      streaming: streamingCapability(
+        value(4),
+        result[4].status === "rejected"
+          ? formatError((result[4] as PromiseRejectedResult).reason)
+          : undefined,
+      ),
       defaultModel: defaultTextRoute(value(6)),
       gatewayDefault: gatewayDefaultFromEnvelope(value(0)),
       loading: false,

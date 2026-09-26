@@ -12,6 +12,12 @@ import { SkillsPicker } from "./skills_picker";
 import { navigateTabs } from "./tabs";
 import { modelDiscovery } from "./model_discovery";
 import { resolveToolPermissions, type PermissionLevel } from "./tool_permissions";
+import {
+  gatewayDefaultStreamLabel,
+  STREAMING_LOADING,
+  type StreamRepliesMode,
+  type StreamingCapability,
+} from "./stream_replies";
 
 export type RunPreferences = {
   provider: string;
@@ -33,6 +39,8 @@ export type RunPreferences = {
   workflow: string;
   /** List non-agent workflows in the selector too. */
   showAllWorkflows: boolean;
+  /** "Stream replies": show the reply while the model writes it. */
+  streamReplies: StreamRepliesMode;
 };
 export const DEFAULT_PREFERENCES: RunPreferences = {
   provider: "",
@@ -50,6 +58,7 @@ export const DEFAULT_PREFERENCES: RunPreferences = {
   skills: [],
   workflow: "@default",
   showAllWorkflows: false,
+  streamReplies: "gateway_default",
 };
 export type SettingsTab = "model" | "workspace" | "tools" | "skills";
 
@@ -65,6 +74,7 @@ export function SettingsPanel({
   disabled,
   defaultModel,
   workflowDefault,
+  streaming = STREAMING_LOADING,
 }: {
   open: boolean;
   onClose: () => void;
@@ -77,6 +87,8 @@ export function SettingsPanel({
   disabled: boolean;
   defaultModel?: { provider: string; model: string };
   workflowDefault?: boolean;
+  /** The gateway's live-reply support (`/discovery/capabilities`). */
+  streaming?: StreamingCapability;
 }) {
   const update = (patch: Partial<RunPreferences>) =>
     onChange({ ...value, ...patch });
@@ -209,6 +221,12 @@ export function SettingsPanel({
                 Reasoning and additional instructions depend on the selected
                 workflow and model.
               </p>
+              <StreamRepliesField
+                value={value.streamReplies}
+                onChange={(streamReplies) => update({ streamReplies })}
+                disabled={disabled}
+                streaming={streaming}
+              />
             </section>
           </>
         ) : tab === "workspace" ? (
@@ -349,5 +367,56 @@ export function SettingsPanel({
         )}
       </div>
     </AfDrawer>
+  );
+}
+
+/** "Stream replies": gateway default / on / off. Shown disabled, with the
+ * reason, when the gateway does not advertise live replies — never hidden. */
+export function StreamRepliesField({
+  value,
+  onChange,
+  disabled,
+  streaming,
+}: {
+  value: StreamRepliesMode;
+  onChange: (value: StreamRepliesMode) => void;
+  disabled: boolean;
+  streaming: StreamingCapability;
+}) {
+  const unsupported = streaming.status !== "supported";
+  const help =
+    streaming.status === "unsupported"
+      ? `Unavailable: ${streaming.reason}. Replies appear when they are complete.`
+      : streaming.status === "loading"
+        ? "Checking whether this gateway supports live replies…"
+        : "Show the reply while the model writes it. The complete reply replaces the live text when the model call ends.";
+  return (
+    <>
+      <label className="code-field">
+        Stream replies
+        <select
+          aria-label="Stream replies"
+          aria-describedby="code-stream-replies-help"
+          value={value}
+          disabled={disabled || unsupported}
+          onChange={(event) =>
+            onChange(event.target.value as StreamRepliesMode)
+          }
+        >
+          <option value="gateway_default">
+            {gatewayDefaultStreamLabel(streaming)}
+          </option>
+          <option value="on">On</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <p
+        id="code-stream-replies-help"
+        className="code-field-help"
+        data-streaming={streaming.status}
+      >
+        {help}
+      </p>
+    </>
   );
 }

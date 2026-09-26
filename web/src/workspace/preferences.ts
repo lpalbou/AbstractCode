@@ -1,5 +1,6 @@
 import { normalizeSpeculationValue } from "@abstractframework/ui-kit";
 import { DEFAULT_PREFERENCES, type RunPreferences } from "./settings_panel";
+import { normalizeStreamReplies } from "./stream_replies";
 
 export function preferencesKey(identity: string): string {
   return `abstractcode.workspace.v2:${identity}`;
@@ -20,6 +21,7 @@ export function parsePreferences(raw: string | null): RunPreferences {
       workflow,
       showAllWorkflows: saved.showAllWorkflows === true,
       speculation: normalizeSpeculationValue(saved.speculation),
+      streamReplies: normalizeStreamReplies(saved.streamReplies),
       tools: { ...DEFAULT_PREFERENCES.tools, ...saved.tools },
     };
   } catch {

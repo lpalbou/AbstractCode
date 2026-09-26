@@ -1,4 +1,8 @@
 import type { SpeculationValue } from "@abstractframework/ui-kit";
+import {
+  streamRepliesRuntime,
+  type StreamRepliesMode,
+} from "@abstractframework/panel-chat";
 export type JsonObject = Record<string, unknown>;
 export type JsonSchema = JsonObject;
 
@@ -130,6 +134,9 @@ export interface WorkflowInputOptions {
   limits?: WorkflowLimits;
   reasoning?: string;
   speculation?: SpeculationValue;
+  /** "Stream replies": `on` → `_runtime.stream: true`, `off` → `false`,
+   * `gateway_default` (or omitted) → `_runtime.stream` left unset. */
+  streamReplies?: StreamRepliesMode;
   /** Replaces the agent workflow's system prompt when explicitly set. */
   system?: string;
   systemPromptExtra?: string;
@@ -722,6 +729,8 @@ function assignCommonRuntimeInputs(
   runtimeAssign("model", model);
   runtimeAssign("thinking", text(options.reasoning));
   runtimeAssign("speculation", options.speculation);
+  if (options.streamReplies !== undefined)
+    runtimeAssign("stream", streamRepliesRuntime(options.streamReplies).stream);
   runtimeAssign("system_prompt_extra", text(options.systemPromptExtra));
   if (options.tools !== undefined) {
     const requested = cleanStrings(options.tools) ?? [];
