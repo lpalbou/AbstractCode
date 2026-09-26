@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [terminal 0.6.0 / web 0.5.0] - 2026-09-26
+
 ### Added
 
 - **Web: Stream replies.** Settings → Model & behavior → **Stream replies**

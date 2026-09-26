@@ -7,7 +7,7 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.5.1**, pre-alpha. Release history is in
+Status: **0.6.0**, pre-alpha. Release history is in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## What it looks like

@@ -56,8 +56,8 @@
 ## Project
 
 - [Changelog](CHANGELOG.md): Release history, from 0.1.0 (the first
-  application built on AbstractTUI) through 0.5.1 (native-MTP request
-  controls), plus the unreleased section.
+  application built on AbstractTUI) through 0.6.0 (gateway default workflow,
+  live replies, workspace files, About).
 - [Contributing](CONTRIBUTING.md): Build/test gates, live verification and
   the benchmark smoke mode, the layering rules (signal ownership, pure
   protocol layer, replay-safe fold), which test to write for which change.

@@ -1,6 +1,6 @@
 [package]
 name = "abstractcode"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2021"
 license = "MIT"
 # MSRV floor comes from the locked dependency set (abstracttui 0.6.0

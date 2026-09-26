@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-26
+
 ### Changed
 
 - **`--permissions` and `--require-approval` now apply to the interactive
