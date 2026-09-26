@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`/model` asks about MTP only for a model that can use it.** The MTP step
+  follows the reasoning step only when the gateway reports the chosen model
+  MTP-capable; otherwise the picker ends there and the transcript says why
+  ("<model> cannot use MTP", or "MTP support unknown: <error>"). The
+  provider list's MTP row, `/mtp` and `--mtp` are unchanged.
+
 ## [0.6.0] - 2026-09-26
 
 ### Changed

@@ -1282,9 +1282,9 @@ pub fn open_model_picker(cx: Scope, store: Store, ctx: &UiCtx) {
                 let ctx = &choose_ctx;
                 if ix == 0 {
                     apply_route(store, ctx, "", "");
-                    // Gateway defaults still get the MTP step: it applies
-                    // to whatever model the gateway routes to.
-                    open_mtp_stage(cx, store, ctx);
+                    // Gateway defaults: the MTP step only when the model
+                    // the gateway routes to can use it.
+                    offer_mtp_step(store, ctx);
                     return;
                 }
                 // The MTP row (last): straight to the MTP step for the
@@ -1301,7 +1301,7 @@ pub fn open_model_picker(cx: Scope, store: Store, ctx: &UiCtx) {
                 };
                 if p.models.is_empty() {
                     apply_route(store, ctx, &p.name, "");
-                    open_mtp_stage(cx, store, ctx);
+                    offer_mtp_step(store, ctx);
                     return;
                 }
                 // Stage 2 — this provider's models. Synchronous on purpose:
@@ -1595,6 +1595,71 @@ pub fn open_stream_stage(cx: Scope, store: Store, ctx: &UiCtx) {
     );
 }
 
+/// End of `/model`: offer the MTP step ONLY for a route whose model the
+/// gateway reports MTP-capable. The picker closes; the capability answer
+/// (already held for this route, or fetched now) decides in
+/// [`wire_mtp_offer`]: supported → the MTP step opens; anything else →
+/// one transcript line saying why. `/mtp`, `--mtp` and the stage-1 "MTP"
+/// row are not gated (they open the step for the current route).
+pub fn offer_mtp_step(store: Store, ctx: &UiCtx) {
+    ctx.close_modal();
+    let (provider, model) = {
+        let provider = store.provider.get_untracked();
+        let model = store.model.get_untracked();
+        if provider.is_empty() && model.is_empty() {
+            store.default_route.get_untracked()
+        } else {
+            (provider, model)
+        }
+    };
+    if model.is_empty() {
+        let line = "MTP support unknown: no model is resolved for this route yet — /mtp still lets you set it".to_string();
+        store
+            .fold
+            .update(|f| f.push_item(crate::transcript::Item::Info { text: line }));
+        return;
+    }
+    let answered = store.execution_probe.with_untracked(|p| {
+        p.as_ref()
+            .is_some_and(|(pp, mm, _)| *pp == provider && *mm == model)
+    });
+    if !answered {
+        store.execution_probe.set(None);
+        ctx.send(crate::runner::Cmd::ProbeModelExecution {
+            provider: provider.clone(),
+            model: model.clone(),
+        });
+    }
+    store.mtp_step_pending.set(Some((provider, model)));
+}
+
+/// Resolves a pending [`offer_mtp_step`] when the capability answer for
+/// its route is in: open the MTP step, or post the one-line reason.
+pub fn wire_mtp_offer(cx: Scope, store: Store, ctx: UiCtx) {
+    cx.effect(move || {
+        let Some((provider, model)) = store.mtp_step_pending.get() else {
+            return;
+        };
+        let payload = store.execution_probe.with(|p| {
+            p.as_ref()
+                .filter(|(pp, mm, _)| *pp == provider && *mm == model)
+                .map(|(_, _, v)| v.clone())
+        });
+        let Some(payload) = payload else {
+            return; // still checking
+        };
+        store.mtp_step_pending.set(None);
+        match crate::speculation::mtp_offer(&model, &payload) {
+            crate::speculation::MtpOffer::Offer => open_mtp_stage(cx, store, &ctx),
+            crate::speculation::MtpOffer::Skip(line) => {
+                store
+                    .fold
+                    .update(|f| f.push_item(crate::transcript::Item::Info { text: line }));
+            }
+        }
+    });
+}
+
 pub fn open_reasoning_stage(cx: Scope, store: Store, ctx: &UiCtx) {
     open_reasoning_stage_inner(cx, store, ctx, false)
 }
@@ -1629,7 +1694,7 @@ fn open_reasoning_stage_inner(cx: Scope, store: Store, ctx: &UiCtx, then_mtp: bo
         ctx,
         Picker {
             title: if then_mtp {
-                format!("reasoning — {target} (next: MTP) · Enter selects · Esc keeps current")
+                format!("reasoning — {target} (next: MTP, if the model supports it) · Enter selects · Esc keeps current")
             } else {
                 format!("reasoning — {target} · Enter selects · Esc keeps current")
             },
@@ -1648,7 +1713,7 @@ fn open_reasoning_stage_inner(cx: Scope, store: Store, ctx: &UiCtx, then_mtp: bo
                 if let Some(Some(level)) = rows.get(ix).map(|c| c.as_deref()) {
                     apply_reasoning(rows_store, &choose_ctx, level);
                     if then_mtp {
-                        open_mtp_stage(cx, rows_store, &choose_ctx);
+                        offer_mtp_step(rows_store, &choose_ctx);
                     } else {
                         choose_ctx.close_modal();
                     }
@@ -1656,9 +1721,7 @@ fn open_reasoning_stage_inner(cx: Scope, store: Store, ctx: &UiCtx, then_mtp: bo
             }),
             on_cancel: if then_mtp {
                 let cancel_ctx = ctx.clone();
-                Some(Box::new(move || {
-                    open_mtp_stage(cx, rows_store, &cancel_ctx)
-                }))
+                Some(Box::new(move || offer_mtp_step(rows_store, &cancel_ctx)))
             } else {
                 None
             },

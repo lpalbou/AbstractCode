@@ -117,8 +117,12 @@ visit's next turn — or the held draft while a turn runs (later text
 replaces the hold; it auto-sends when the turn parks).
 
 MTP is separate from reasoning. It is the last step of `/model` (after the reasoning
-dial; `Esc` at either step moves on / keeps the current value) and the last row of the
-provider list, and `/mtp` opens the same step. The picker only offers depths the execution host advertises;
+dial; `Esc` at either step moves on / keeps the current value) — but only for a model the
+gateway's capability answer reports MTP-capable (`execution.speculation.supported: true`).
+Otherwise `/model` ends after the reasoning step with one transcript line: "<model> cannot
+use MTP — /mtp still lets you set it", or "MTP support unknown: <error> — …" when the check
+failed or reported nothing. The last row of the provider list and `/mtp` open the step for
+the current route regardless. The picker only offers depths the execution host advertises;
 unknown capabilities and head-not-ready/reload reasons remain visible. A saved unavailable
 depth is retained, not silently replaced. Typed depths are explicit requests, not a claim
 that the current backend can execute them: the host validates them and refuses unsupported

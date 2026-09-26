@@ -201,6 +201,25 @@ fn settle_session_board(h: &mut Harness) {
     h.turn();
 }
 
+/// Answer the gateway capability check `/model` is waiting on (the MTP
+/// step opens only for a supported model).
+fn answer_mtp_probe(h: &mut Harness, payload: Value) {
+    let (provider, model) = h
+        .store
+        .mtp_step_pending
+        .get_untracked()
+        .expect("/model is waiting on the MTP capability answer");
+    h.store
+        .execution_probe
+        .set(Some((provider, model, payload)));
+    h.turn();
+}
+
+fn mtp_supported() -> Value {
+    serde_json::json!({"execution": {"speculation": {
+        "supported": true, "ready": true, "supported_depths": [3]}}})
+}
+
 fn fixture_records() -> Vec<(String, Value)> {
     let raw = include_str!("fixtures/agent_subrun_ledger.json");
     let records: Vec<Value> = serde_json::from_str(raw).expect("fixture parses");
@@ -822,7 +841,9 @@ fn model_stage_two_stays_interactive_when_an_approval_lands_behind_the_picker() 
     h.press_enter();
     h.turn();
     h.turn();
-    // Stage 4 — MTP — replaces stage 3 the same way; Esc closes it.
+    // Stage 4 — MTP (the model is MTP-capable) — replaces stage 3 the
+    // same way; Esc closes it.
+    answer_mtp_probe(&mut h, mtp_supported());
     let screen = h.turn();
     assert!(
         screen.contains("MTP (multi-token prediction) —"),
@@ -879,13 +900,16 @@ fn model_picker_defaults_row_and_empty_provider_apply_without_stage_two() {
     h.press_enter();
     h.turn();
     let screen = h.turn();
-    // Every route choice ends on the MTP step; Esc keeps the current one.
+    // No model is resolved for "gateway defaults" here, so there is no MTP
+    // step — and the transcript says why.
     assert!(
-        screen.contains("MTP (multi-token prediction) —"),
+        !screen.contains("MTP (multi-token prediction) —"),
         "{screen}"
     );
-    h.press_escape();
-    h.turn();
+    assert!(
+        screen.contains("MTP support unknown: no model is resolved"),
+        "{screen}"
+    );
     assert_eq!(h.store.provider.get_untracked(), "");
     assert_eq!(h.store.model.get_untracked(), "");
     let notices = h.store.notices.get_untracked();
@@ -906,8 +930,8 @@ fn model_picker_defaults_row_and_empty_provider_apply_without_stage_two() {
     h.turn();
     let screen = h.turn();
     assert!(
-        screen.contains("MTP (multi-token prediction) —"),
-        "{screen}"
+        !screen.contains("MTP (multi-token prediction) —"),
+        "no model, no MTP step:\n{screen}"
     );
     assert_eq!(h.store.provider.get_untracked(), "endpoint:airelay");
     assert_eq!(h.store.model.get_untracked(), "");
@@ -10088,6 +10112,7 @@ fn reasoning_stage_probes_selects_and_route_change_resets() {
     h.turn();
     h.turn();
     assert_eq!(h.store.reasoning.get_untracked(), "high");
+    answer_mtp_probe(&mut h, mtp_supported());
     let screen = h.turn();
     assert!(
         screen.contains("MTP (multi-token prediction) —"),
@@ -12419,6 +12444,11 @@ fn model_picker_offers_mtp_as_a_step_and_persists_it() {
     );
     h.press_enter();
     h.turn();
+    // The capability check for the chosen model runs; it says MTP-capable.
+    assert!(h
+        .find_cmd(|c| matches!(c, Cmd::ProbeModelExecution { model, .. } if model == "qwen-mtp"))
+        .is_some());
+    answer_mtp_probe(&mut h, mtp_supported());
     let screen = h.turn();
     assert!(
         screen.contains("MTP (multi-token prediction) — mlx · qwen-mtp"),
@@ -12948,4 +12978,79 @@ fn a_reinvoked_call_shows_reply_restarted_and_the_rerun() {
         live_delta("s1:reinvoke", 2, " zombie", "content", false),
     );
     assert!(!h.turn().contains("zombie"));
+}
+
+/// Operator: "the MTP question should only appear for MTP model". After the
+/// reasoning step, `/model` opens the MTP step only when the gateway says
+/// the chosen model can use MTP; otherwise it ends there and ONE transcript
+/// line says why — "cannot use MTP", or the failed check's error.
+#[test]
+fn model_flow_offers_mtp_only_for_a_capable_model_and_says_why_otherwise() {
+    let run = |payload: Value| -> (String, String) {
+        let mut h = harness_sized(Size::new(130, 34));
+        h.turn();
+        h.store
+            .providers
+            .set(vec![abstractcode::store::ProviderInfo {
+                name: "mlx".into(),
+                models: vec!["qwen3-4b".into()],
+            }]);
+        h.type_text("/model");
+        h.turn();
+        h.press_enter();
+        h.turn();
+        h.term.push_input(b"\x1b[B"); // mlx
+        h.turn();
+        h.press_enter();
+        h.turn();
+        h.term.push_input(b"\x1b[B"); // qwen3-4b
+        h.turn();
+        h.press_enter();
+        h.turn();
+        h.turn();
+        h.press_enter(); // reasoning: gateway default
+        h.turn();
+        answer_mtp_probe(&mut h, payload);
+        let screen = h.turn();
+        let infos = h.store.fold.with_untracked(|f| {
+            f.items
+                .iter()
+                .filter_map(|i| match i {
+                    abstractcode::transcript::Item::Info { text } if text.contains("MTP") => {
+                        Some(text.clone())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        });
+        (screen, infos)
+    };
+    let (screen, infos) = run(mtp_supported());
+    assert!(
+        screen.contains("MTP (multi-token prediction) — mlx · qwen3-4b"),
+        "{screen}"
+    );
+    assert!(infos.is_empty(), "no line when the step opens: {infos}");
+
+    let (screen, infos) =
+        run(serde_json::json!({"execution": {"speculation": {"supported": false}}}));
+    assert!(
+        !screen.contains("MTP (multi-token prediction) —"),
+        "no step:\n{screen}"
+    );
+    assert_eq!(
+        infos,
+        "qwen3-4b cannot use MTP — /mtp still lets you set it"
+    );
+
+    let (screen, infos) = run(serde_json::json!({"error": "gateway timed out"}));
+    assert!(
+        !screen.contains("MTP (multi-token prediction) —"),
+        "no step:\n{screen}"
+    );
+    assert_eq!(
+        infos,
+        "MTP support unknown: gateway timed out — /mtp still lets you set it"
+    );
 }

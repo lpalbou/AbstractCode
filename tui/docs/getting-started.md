@@ -84,11 +84,13 @@ gateway until you answer.
    default)"). If the gateway has no default and you have not picked one, the
    app says so and asks you to pick. `/model` lists providers and models
    (leave it on "gateway default" to use the server's routing), then the
-   reasoning effort, then **MTP** (multi-token prediction): Inherit, Off, or a
-   native draft depth when the gateway reports the model supports it — a model
-   that cannot use MTP says so on the row. The current choice is pre-selected;
-   `Esc` keeps it. The last row of the provider list jumps straight to the MTP
-   step, and `/mtp` still works on its own. All these choices persist across
+   reasoning effort, then — only when the gateway reports the chosen model can
+   use it — **MTP** (multi-token prediction): Inherit, Off, or a native draft
+   depth. For any other model the picker ends after the reasoning step and the
+   transcript says why ("<model> cannot use MTP", or "MTP support unknown:
+   <error>"). The current choice is pre-selected; `Esc` keeps it. The last row
+   of the provider list opens the MTP step for the current route either way,
+   and `/mtp` still works on its own. All these choices persist across
    launches.
    **Streamed replies:** when the gateway streams, the reply appears under the
    transcript as the model writes it and the recorded reply replaces it when

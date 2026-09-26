@@ -951,6 +951,10 @@ pub struct Store {
     /// this gateway" transcript notice (once per session, REVIEW/15).
     pub stream_notice_session: Signal<String>,
     pub execution_probe: Signal<Option<(String, String, serde_json::Value)>>,
+    /// `/model` finished its reasoning step and waits for the capability
+    /// answer for this (provider, model) to decide whether the MTP step
+    /// opens (`ui::modals::offer_mtp_step`).
+    pub mtp_step_pending: Signal<Option<(String, String)>>,
     /// Per-model reasoning capability probe result for the picker's
     /// third stage: (provider, model, probe). None while in flight.
     pub reasoning_probe: Signal<Option<ReasoningProbe>>,
@@ -1247,6 +1251,7 @@ impl Store {
             live: cx.signal(crate::live::LiveReplies::default()),
             stream_notice_session: cx.signal(String::new()),
             execution_probe: cx.signal(None),
+            mtp_step_pending: cx.signal(None),
             reasoning_probe: cx.signal(None),
             providers: cx.signal(Vec::new()),
             tools: cx.signal(Vec::new()),

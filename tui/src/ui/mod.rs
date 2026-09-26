@@ -268,6 +268,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     wire_toasts(cx, store, ctx.overlays.clone());
     wire_startup_notices(cx, store);
     wire_wait_modals(cx, store, ctx.clone());
+    modals::wire_mtp_offer(cx, store, ctx.clone());
     wire_queue_drain(cx, store, ctx.clone());
     wire_queue_persistence(cx, store, ctx.clone());
     wire_pending_steer(cx, store, ctx.clone());

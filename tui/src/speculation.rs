@@ -149,9 +149,71 @@ pub fn rows(payload: Option<&Value>, saved: Option<&Value>) -> Vec<Row> {
     rows
 }
 
+/// Whether `/model` offers its MTP step for a route (operator: "the MTP
+/// question should only appear for MTP model"). Only the gateway's
+/// capability answer saying `supported: true` offers it; every other
+/// answer — unsupported, not reported, or a failed check — skips the step
+/// with ONE transcript line saying why (never silence).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MtpOffer {
+    Offer,
+    Skip(String),
+}
+
+pub fn mtp_offer(model: &str, payload: &Value) -> MtpOffer {
+    const HINT: &str = "/mtp still lets you set it";
+    if let Some(err) = payload
+        .get("error")
+        .and_then(Value::as_str)
+        .filter(|e| !e.is_empty())
+    {
+        return MtpOffer::Skip(format!("MTP support unknown: {err} — {HINT}"));
+    }
+    let caps = payload.pointer("/execution/speculation");
+    match caps
+        .and_then(|c| c.get("supported"))
+        .and_then(Value::as_bool)
+    {
+        Some(true) => MtpOffer::Offer,
+        Some(false) => {
+            let why = caps
+                .and_then(|c| c.get("reason"))
+                .and_then(Value::as_str)
+                .filter(|r| !r.is_empty())
+                .map(|r| format!(" ({r})"))
+                .unwrap_or_default();
+            MtpOffer::Skip(format!("{model} cannot use MTP{why} — {HINT}"))
+        }
+        None => MtpOffer::Skip(format!(
+            "MTP support unknown: the gateway did not report it for {model} — {HINT}"
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_mtp_step_is_offered_only_for_a_supported_model() {
+        let yes =
+            json!({"execution": {"speculation": {"supported": true, "supported_depths": [3]}}});
+        assert_eq!(mtp_offer("qwen-mtp", &yes), MtpOffer::Offer);
+        let no = json!({"execution": {"speculation": {"supported": false}}});
+        assert_eq!(
+            mtp_offer("qwen3-4b", &no),
+            MtpOffer::Skip("qwen3-4b cannot use MTP — /mtp still lets you set it".into())
+        );
+        let failed = json!({"error": "HTTP 500"});
+        assert_eq!(
+            mtp_offer("m", &failed),
+            MtpOffer::Skip("MTP support unknown: HTTP 500 — /mtp still lets you set it".into())
+        );
+        let MtpOffer::Skip(unknown) = mtp_offer("m", &json!({})) else {
+            panic!("unknown never offers")
+        };
+        assert!(unknown.starts_with("MTP support unknown"), "{unknown}");
+    }
     #[test]
     fn intent_preserves_off_and_strict_depth() {
         assert_eq!(parse("off").unwrap(), Some(json!(false)));
