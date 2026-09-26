@@ -110,7 +110,13 @@ export function socketPeerAddress(req) {
 }
 
 const UNKNOWN_PEER = { detail: "Cannot determine the client address of this connection" };
+/** Marks every request this server sends to the gateway as coming through
+ * the Code app proxy (the gateway's same-machine fail-safe keys on it). A
+ * browser-supplied value is always dropped and replaced. */
+const APP_PROXY_HEADER = "X-AbstractFramework-App-Proxy";
+const APP_PROXY_NAME = "code";
 const FORWARDING_HEADERS = new Set([
+  "x-abstractframework-app-proxy",
   "x-forwarded-for",
   "x-forwarded-host",
   "x-forwarded-proto",
@@ -434,6 +440,7 @@ async function handleConnectionApi(req, res, config) {
           Accept: "application/json",
           "X-AbstractGateway-Session": session.sessionId,
           "X-Forwarded-For": peer,
+          [APP_PROXY_HEADER]: APP_PROXY_NAME,
         },
       },
       undefined,
@@ -483,6 +490,7 @@ async function handleConnectionApi(req, res, config) {
           "Content-Type": "application/json",
           "Content-Length": String(body.length),
           "X-Forwarded-For": peer,
+          [APP_PROXY_HEADER]: APP_PROXY_NAME,
         },
       },
       body,
@@ -541,6 +549,7 @@ async function handleConnectionApi(req, res, config) {
             "X-AbstractGateway-Session": session.sessionId,
             "X-AbstractGateway-CSRF": session.csrfToken,
             "X-Forwarded-For": peer,
+          [APP_PROXY_HEADER]: APP_PROXY_NAME,
           },
         },
         body,
@@ -604,6 +613,7 @@ function proxyGatewayRequest(req, res, config) {
   for (const key of Object.keys(headers))
     if (FORWARDING_HEADERS.has(key.toLowerCase())) delete headers[key];
   headers["x-forwarded-for"] = peer;
+  headers["x-abstractframework-app-proxy"] = APP_PROXY_NAME;
   delete headers["x-abstractcode-csrf"];
   headers["x-abstractgateway-session"] = session.sessionId;
   if (mutatingMethod(req.method))

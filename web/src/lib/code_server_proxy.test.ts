@@ -229,7 +229,7 @@ describe("shared Code Gateway middleware", () => {
     }));
 
     const login = await request(codePort, "POST", "/api/connection/gateway", {
-      headers: { "X-Forwarded-For": "127.0.0.1", "x-test-peer": "192.168.1.51" },
+      headers: { "X-Forwarded-For": "127.0.0.1", "x-test-peer": "192.168.1.51", "X-AbstractFramework-App-Proxy": "none" },
       body: { gateway_user_id: "alice", gateway_token: "secret" },
     });
     expect(login.status).toBe(200);
@@ -248,6 +248,7 @@ describe("shared Code Gateway middleware", () => {
         "X-Forwarded-For": "203.0.113.9, 198.51.100.4",
         Forwarded: "for=203.0.113.9",
         "X-Real-IP": "203.0.113.9",
+        "X-AbstractFramework-App-Proxy": "assistant",
       },
     });
     const proxied = saw["/api/gateway/runs/r1/workspace"];
@@ -271,6 +272,19 @@ describe("shared Code Gateway middleware", () => {
     });
     expect(logout.status).toBe(200);
     expect(saw["/api/gateway/session/logout"]["x-forwarded-for"]).toBe("192.168.1.52");
+
+    // Every gateway-bound call carries the app-proxy marker, and a browser
+    // cannot choose its value.
+    for (const path of [
+      "/api/gateway/session/login",
+      "/api/gateway/me",
+      "/api/gateway/runs/r1/workspace",
+      "/api/gateway/runs/r1/ledger/stream",
+      "/api/gateway/v4mapped",
+      "/api/gateway/v6",
+      "/api/gateway/session/logout",
+    ])
+      expect([path, saw[path]["x-abstractframework-app-proxy"]]).toEqual([path, "code"]);
   });
 
   it("refuses (400) a request whose socket peer is unknown, on the proxy and the connection API", async () => {
