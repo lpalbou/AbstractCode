@@ -452,6 +452,11 @@ Per-tool pins (`p` in `/tools`) override the level in both directions: pin
 `auto` to lift one tool above the level, pin `ask` to force a prompt below
 it — pins gate even at `all`, and gateway-disabled tools never run.
 
+At launch, `--permissions <read|write|all>` sets the level and
+`--require-approval <names>` pins tools to ask, for that launch only — in
+the app as in `exec`. Neither is saved (`/permissions` saves a level), and a
+notice at startup says what is in force.
+
 ## Headless one-shots
 
 For scripts and CI:
@@ -775,8 +780,8 @@ abstractcode --help | --version
 | `--animation <on\|off>` | Launch animation; **persisted** to `prefs.json` (`animation`). Also skipped when stdout is not a tty, `NO_COLOR`/`TERM=dumb` is set, or `ABSTRACTTUI_NO_SPLASH` is set | on |
 | `--max-iterations <N>` | Ask the server for a specific iteration budget | none — **this client sets no budget**. Absent the flag the server's own default applies (the same one every client gets); the hard ceiling is the runtime's, enforced at run start |
 | `--replay-turns <N>` | Prior turns replayed in full detail at boot (0 disables; at most 100) | 5 |
-| `--permissions <level>` | tool permissions for the invocation: `read` \| `write` \| `all` | prefs level |
-| `--require-approval <t>` | gate these tools regardless of level (comma list, repeatable); exec denies them | — |
+| `--permissions <level>` | Tool permissions for this launch: `read` \| `write` \| `all`. Applies to interactive launches and `exec` alike, for that launch only — never saved (`/permissions` is what saves a level). Interactive: a startup notice says the level in force ("permissions: write (from --permissions, this launch)") | the saved level of the session |
+| `--require-approval <t>` | Gate these tools regardless of level (comma list, repeatable), for this launch only (not saved). Interactive: the app asks before each one, and a startup notice names them; `exec` denies them | — |
 | `--review` / `--no-review` | Verifier before conclude: before a tool-call-free response is accepted as final, a verifier re-reads the transcript and can send the agent back for more work (`/review` toggles in the app) | on |
 | `--review-rounds <N>` | Verifier round budget | 3 |
 | `--no-project-context` | Do not add the workspace `AGENTS.md` to the agent's system prompt | added |

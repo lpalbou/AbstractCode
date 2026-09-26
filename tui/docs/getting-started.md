@@ -153,6 +153,11 @@ Per-tool pins (`p` in `/tools`) override the level in both directions: pin
 `auto` to lift one tool above the level, pin `ask` to force a prompt below
 it — pins gate even at `all`, and gateway-disabled tools never run.
 
+At launch, `--permissions <read|write|all>` sets the level and
+`--require-approval <names>` pins tools to ask, for that launch only — in
+the app as in `exec`. Neither is saved (`/permissions` saves a level), and a
+notice at startup says what is in force.
+
 ## Headless one-shots
 
 For scripts and CI:
