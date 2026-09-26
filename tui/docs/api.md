@@ -147,15 +147,17 @@ What the app does with them:
 - On every (re)connect all bubbles are dropped; the gateway's `snapshot`
   frames then rebuild the calls still open.
 - A live frame that breaks this shape is reported once per stream as a
-  transcript line; the recorded answer still arrives.
+  transcript line and skipped; the stream keeps going and the recorded
+  answer still arrives.
 
 The setting: **Gateway default** sends nothing, so the gateway's own
-`agents.streaming_default` applies; **On** / **Off** send
-`input_data._runtime.stream: true` / `false`. The key is sent only to a
-gateway that advertises `streaming.deltas` — an older gateway would accept it
-but stream the provider call internally with nothing to show for it, so the
-app sends nothing and the header says "stream on (gateway has no live
-replies)".
+`agents.streaming_default` applies. **Off** always sends
+`input_data._runtime.stream: false` — your "off" is never left to the
+gateway's default. **On** sends `true` only to a gateway that advertises
+`streaming.deltas`: an older gateway would accept it but stream the provider
+call internally with nothing to show for it, so the app sends nothing, the
+header says "stream on (gateway has no live replies)", and the transcript
+says "this gateway does not support streaming" once per session.
 
 `exec --stream on` opens the root run's stream for these frames only (the
 transcript still comes from the REST ledger) and prints the reply as it

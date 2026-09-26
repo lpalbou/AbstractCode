@@ -161,10 +161,11 @@ terminal/font configured for narrow ambiguous width (the norm), and check
 
 ## Replies do not stream even though `/stream` is on
 
-The header says "stream on (gateway has no live replies)": the gateway does
-not advertise `streaming.deltas` in `GET /discovery/capabilities` (an older
-gateway, or one without the feature). The app then sends no stream setting —
-answers appear when each call completes. "(gateway not checked yet)" means the
+The header says "stream on (gateway has no live replies)" and the transcript
+says "this gateway does not support streaming" (once per session): the
+gateway does not advertise `streaming.deltas` in `GET /discovery/capabilities`
+(an older gateway, or one without the feature). The app then does not ask it
+to stream — answers appear when each call completes. "(gateway not checked yet)" means the
 capabilities have not loaded; they load at startup, so a reconnect usually
 settles it.
 

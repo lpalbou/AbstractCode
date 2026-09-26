@@ -52,15 +52,16 @@ All notable changes to this project are documented here. The format follows
   the row says whether it is currently on or off), **On**, **Off**;
   `/stream on|off|default` sets it directly. Saved in `prefs.json` as
   `stream_replies`; `--stream on|off|default` sets it for one launch. The
-  header shows "stream on"/"stream off" when it is not the default, and says
-  when the gateway cannot stream ("gateway has no live replies"). Against
-  such a gateway the app sends no stream setting at all.
+  header shows "stream on"/"stream off" when it is not the default. **Off**
+  is always sent to the gateway (never left to its default). **On** is sent
+  only to a gateway that can stream; with one that cannot, the header says
+  "gateway has no live replies" and the transcript says so once per session.
 - **`exec --stream on`** prints the reply to stdout as it is written (a line
   starting `✎`) and then `━━━ answer ━━━ (streamed above)` instead of
   printing the same answer twice; a reply that did not stream whole (failed,
   restarted, cut) is printed in full as before. `exec` uses only the flag,
   never the saved setting; `--stream on` against a gateway without live
-  replies prints a note and runs normally.
+  replies prints a note and runs normally; `--stream off` is always sent.
 - **`/files`** (also `/workspace files`): the run's workspace on the gateway
   host — its full path and the machine it is on, folders you can open, file
   sizes, and a preview of text, Markdown, JSON and images. Large files show

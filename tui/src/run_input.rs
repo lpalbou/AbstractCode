@@ -725,7 +725,7 @@ mod tests {
         assert_eq!(on["_runtime"], json!({"stream": true}));
         let off = input_for(StreamReplies::Off);
         assert_eq!(off["_runtime"], json!({"stream": false}));
-        // A gateway without the capability gets nothing, whatever the pref.
+        // A gateway without the capability gets no `true`…
         let old = build_input_data(
             "go",
             &StartOpts {
@@ -734,6 +734,15 @@ mod tests {
             },
         );
         assert!(old.get("_runtime").is_none(), "{old}");
+        // …but "off" is ALWAYS stated (REVIEW/15 rule 1).
+        let old_off = build_input_data(
+            "go",
+            &StartOpts {
+                stream: run_input_value(StreamReplies::Off, Some(false)),
+                ..Default::default()
+            },
+        );
+        assert_eq!(old_off["_runtime"], json!({"stream": false}));
     }
 
     #[test]

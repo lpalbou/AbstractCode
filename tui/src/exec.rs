@@ -658,7 +658,8 @@ pub fn run(args: &Args) -> i32 {
     // key rides only to a gateway that advertises live replies; asking
     // for them from one that does not is said, not silently dropped.
     let stream_pref = args.stream.unwrap_or_default();
-    let deltas: Option<bool> = if stream_pref == crate::streaming::StreamReplies::GatewayDefault {
+    // Only "on" depends on the capability ("off" always rides as `false`).
+    let deltas: Option<bool> = if stream_pref != crate::streaming::StreamReplies::On {
         None
     } else {
         match client.discovery_capabilities() {
@@ -670,7 +671,7 @@ pub fn run(args: &Args) -> i32 {
             }
         }
     };
-    if stream_pref != crate::streaming::StreamReplies::GatewayDefault && deltas != Some(true) {
+    if stream_pref == crate::streaming::StreamReplies::On && deltas != Some(true) {
         eprintln!(
             "note: --stream {}: {}",
             stream_pref.word(),

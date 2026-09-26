@@ -947,6 +947,9 @@ pub struct Store {
     /// and must not wake every fold reader (the transcript sync, chrome,
     /// strip); only the live lane re-renders per delta.
     pub live: Signal<crate::live::LiveReplies>,
+    /// The session that already got the "streaming is not supported by
+    /// this gateway" transcript notice (once per session, REVIEW/15).
+    pub stream_notice_session: Signal<String>,
     pub execution_probe: Signal<Option<(String, String, serde_json::Value)>>,
     /// Per-model reasoning capability probe result for the picker's
     /// third stage: (provider, model, probe). None while in flight.
@@ -1238,6 +1241,7 @@ impl Store {
             speculation: cx.signal(None),
             stream_replies: cx.signal(crate::streaming::StreamReplies::default()),
             live: cx.signal(crate::live::LiveReplies::default()),
+            stream_notice_session: cx.signal(String::new()),
             execution_probe: cx.signal(None),
             reasoning_probe: cx.signal(None),
             providers: cx.signal(Vec::new()),

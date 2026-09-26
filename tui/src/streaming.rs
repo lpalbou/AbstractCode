@@ -3,8 +3,9 @@
 //!
 //! Three states, one wire key. `gateway_default` (the default) sends
 //! NOTHING — the gateway applies its own `agents.streaming_default`.
-//! `on` / `off` send `_runtime.stream: true|false`, but ONLY to a gateway
-//! whose `GET /discovery/capabilities` advertises
+//! `off` ALWAYS sends `_runtime.stream: false` — the user's "off" must never
+//! be left to a gateway default (REVIEW/15). `on` sends `true` ONLY to a
+//! gateway whose `GET /discovery/capabilities` advertises
 //! `streaming: {deltas: true, default: bool}` (CONTRACTS.md S-2 §6).
 //!
 //! Why the capability gate: an older gateway does not reject an unknown
@@ -15,7 +16,9 @@
 //! streams and is re-aggregated server-side with no live frames to show
 //! for it, and some OpenAI-compatible servers then report no usage. So
 //! "on" against such a gateway would change how the call runs while
-//! showing nothing — the key is withheld and the header/picker say why.
+//! showing nothing — `true` is withheld and the header/picker (and one
+//! transcript notice per session) say why. `false` is harmless there and
+//! always rides.
 
 /// The stored preference.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -72,17 +75,24 @@ pub const ALL_ROWS: [StreamReplies; 3] = [
 /// The `_runtime.stream` value a new run carries. `deltas` is the
 /// gateway's `streaming.deltas` capability: `Some(true)` advertised,
 /// `Some(false)` known absent, `None` not known yet (capabilities not
-/// loaded). Only an advertised capability carries the key.
+/// loaded). `Off` always carries `false`; `On` carries `true` only for an
+/// advertised capability; the default carries nothing.
 pub fn run_input_value(pref: StreamReplies, deltas: Option<bool>) -> Option<bool> {
-    if deltas != Some(true) {
-        return None;
-    }
     match pref {
         StreamReplies::GatewayDefault => None,
-        StreamReplies::On => Some(true),
+        StreamReplies::On => (deltas == Some(true)).then_some(true),
         StreamReplies::Off => Some(false),
     }
 }
+
+/// True when "on" was chosen but this gateway is KNOWN not to stream —
+/// the case that earns the once-per-session transcript notice.
+pub fn on_but_unsupported(pref: StreamReplies, deltas: Option<bool>) -> bool {
+    pref == StreamReplies::On && deltas == Some(false)
+}
+
+/// The once-per-session transcript notice for [`on_but_unsupported`].
+pub const UNSUPPORTED_NOTICE: &str = "Stream replies is on, but this gateway does not support streaming (no \"streaming.deltas\" capability) — answers appear when each call completes";
 
 /// The header chip: empty for the default; otherwise `stream on|off`,
 /// with the reason when the gateway cannot honour it.
@@ -90,7 +100,8 @@ pub fn chip(pref: StreamReplies, deltas: Option<bool>) -> String {
     let base = match pref {
         StreamReplies::GatewayDefault => return String::new(),
         StreamReplies::On => "stream on",
-        StreamReplies::Off => "stream off",
+        // Off is honoured by every gateway (the key always rides).
+        StreamReplies::Off => return "stream off".into(),
     };
     match deltas {
         Some(true) => base.to_string(),
@@ -113,6 +124,7 @@ pub fn gateway_default_label(streaming_default: Option<bool>) -> String {
 /// the picker's note and the `/stream` confirmation.
 pub fn effect_note(pref: StreamReplies, deltas: Option<bool>) -> String {
     match (pref, deltas) {
+        (StreamReplies::Off, _) => "new runs show the reply only when it is complete".into(),
         (_, Some(false)) => {
             "this gateway does not advertise live replies (no \"deltas\" capability): \
              new runs send no stream setting and answers appear when complete"
@@ -125,9 +137,6 @@ pub fn effect_note(pref: StreamReplies, deltas: Option<bool>) -> String {
             "new runs follow the gateway's streaming default".into()
         }
         (StreamReplies::On, Some(true)) => "new runs stream the reply as it is written".into(),
-        (StreamReplies::Off, Some(true)) => {
-            "new runs show the reply only when it is complete".into()
-        }
     }
 }
 
@@ -156,10 +165,17 @@ mod tests {
         assert_eq!(run_input_value(On, Some(true)), Some(true));
         assert_eq!(run_input_value(Off, Some(true)), Some(false));
         for deltas in [Some(false), None] {
-            for pref in StreamReplies::ALL {
-                assert_eq!(run_input_value(pref, deltas), None, "{pref:?} {deltas:?}");
-            }
+            assert_eq!(run_input_value(On, deltas), None, "{deltas:?}");
+            assert_eq!(run_input_value(GatewayDefault, deltas), None, "{deltas:?}");
+            // REVIEW/15 rule 1: "off" is never left to the gateway default.
+            assert_eq!(run_input_value(Off, deltas), Some(false), "{deltas:?}");
         }
+        assert!(on_but_unsupported(On, Some(false)));
+        assert!(
+            !on_but_unsupported(On, None),
+            "unknown is not 'unsupported'"
+        );
+        assert!(!on_but_unsupported(Off, Some(false)));
     }
 
     #[test]
@@ -174,5 +190,10 @@ mod tests {
             "stream on (gateway has no live replies)"
         );
         assert!(chip(On, None).contains("not checked"));
+        assert_eq!(
+            chip(Off, Some(false)),
+            "stream off",
+            "off is honoured everywhere"
+        );
     }
 }

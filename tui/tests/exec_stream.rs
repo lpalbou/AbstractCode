@@ -276,3 +276,21 @@ fn exec_stream_off_sends_false_and_opens_no_stream() {
         "{stdout}"
     );
 }
+
+#[test]
+fn exec_stream_off_is_stated_even_to_a_gateway_without_deltas() {
+    let fake = fake_gateway(false, false);
+    let (code, stdout, stderr) = run_exec(&fake.url, "off");
+    assert_eq!(code, 0, "stdout:\n{stdout}\nstderr:\n{stderr}");
+    let body: serde_json::Value =
+        serde_json::from_str(&fake.start_body.lock().unwrap()).expect("start body");
+    assert_eq!(
+        body["input_data"]["_runtime"]["stream"],
+        serde_json::json!(false),
+        "{body}"
+    );
+    assert!(
+        !stderr.contains("--stream off"),
+        "off needs no warning: {stderr}"
+    );
+}

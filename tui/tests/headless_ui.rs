@@ -12793,3 +12793,54 @@ fn start_opts_carry_stream_only_for_an_advertising_gateway() {
     };
     assert_eq!(opts.stream, Some(true));
 }
+
+#[test]
+fn stream_on_against_a_gateway_without_deltas_notices_once_per_session_and_off_always_rides() {
+    let mut h = harness();
+    h.leave_splash();
+    let store = h.store;
+    store
+        .stream_replies
+        .set(abstractcode::streaming::StreamReplies::On);
+    store
+        .host_contracts
+        .set(Some(abstractcode::store::HostContracts::default()));
+    h.turn();
+    let notices = |store: &Store| {
+        store.fold.with_untracked(|f| {
+            f.items
+                .iter()
+                .filter(|i| {
+                    matches!(i, abstractcode::transcript::Item::Info { text }
+                    if text == abstractcode::streaming::UNSUPPORTED_NOTICE)
+                })
+                .count()
+        })
+    };
+    for prompt in ["first", "second"] {
+        store.phase.set(Phase::Idle);
+        h.type_text(prompt);
+        h.press_enter();
+        h.turn();
+        let Some(Cmd::Start { opts, .. }) = h.find_cmd(|c| matches!(c, Cmd::Start { .. })) else {
+            panic!("start sent")
+        };
+        assert_eq!(opts.stream, None, "no `true` for a gateway without deltas");
+    }
+    assert_eq!(notices(&store), 1, "one notice per session");
+    let screen = h.turn();
+    assert!(screen.contains("does not support streaming"), "{screen}");
+
+    // "off" is stated even to this gateway (REVIEW/15 rule 1).
+    store
+        .stream_replies
+        .set(abstractcode::streaming::StreamReplies::Off);
+    store.phase.set(Phase::Idle);
+    h.type_text("third");
+    h.press_enter();
+    h.turn();
+    let Some(Cmd::Start { opts, .. }) = h.find_cmd(|c| matches!(c, Cmd::Start { .. })) else {
+        panic!("start sent")
+    };
+    assert_eq!(opts.stream, Some(false));
+}

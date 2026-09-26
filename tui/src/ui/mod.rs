@@ -840,6 +840,32 @@ pub(crate) fn effective_workspace_root(store: Store, ctx: &UiCtx) -> Option<Stri
     .then_some(root)
 }
 
+/// `_runtime.stream` for a new run (`crate::streaming::run_input_value`),
+/// and — when "on" meets a gateway known not to stream — ONE transcript
+/// notice per session saying so (the header chip says it too, but a chip
+/// is easy to miss when the reply simply never streams).
+fn stream_run_value(store: Store) -> Option<bool> {
+    let pref = store.stream_replies.get_untracked();
+    let deltas = store
+        .host_contracts
+        .with_untracked(|c| c.as_ref().map(|c| c.deltas));
+    if crate::streaming::on_but_unsupported(pref, deltas) {
+        let session = store.session_id.get_untracked();
+        if store
+            .stream_notice_session
+            .with_untracked(|s| *s != session)
+        {
+            store.stream_notice_session.set(session);
+            store.fold.update(|f| {
+                f.push_item(crate::transcript::Item::Info {
+                    text: crate::streaming::UNSUPPORTED_NOTICE.into(),
+                })
+            });
+        }
+    }
+    crate::streaming::run_input_value(pref, deltas)
+}
+
 /// The run infrastructure every start shares (provider/model, workspace
 /// scope, tool selection + policy, skills) — used by plain prompts and
 /// `/goal` runs (which add goal params on top).
@@ -904,12 +930,7 @@ pub(crate) fn agent_start_opts(
         speculation: store.speculation.get_untracked(),
         // Stream replies: the key rides only for on/off, and only to a
         // gateway that advertises live replies (`crate::streaming`).
-        stream: crate::streaming::run_input_value(
-            store.stream_replies.get_untracked(),
-            store
-                .host_contracts
-                .with_untracked(|c| c.as_ref().map(|c| c.deltas)),
-        ),
+        stream: stream_run_value(store),
         // The operator-declared window rides as `_limits.max_tokens`
         // (CTX-0); 0 = undeclared = the key stays absent.
         context_window: store.context_window.get_untracked(),
