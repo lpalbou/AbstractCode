@@ -57,9 +57,25 @@ Your choice is remembered in `~/.abstractcode/prefs.json`.
 
 ## What is a workflow?
 
-A named agent bundle the run executes, `coding-agent:coder` by default.
-`--workflow <bundle[:flow]>` selects another, and `abstractcode doctor` lists
-what the gateway has installed. See [`workflows.md`](workflows.md).
+A named agent bundle the run executes. Unless you pick one, the gateway's
+default agent workflow runs (the shipped `basic-agent` until the gateway's
+operator sets another). `--workflow <bundle[:flow]>` selects another, and
+`abstractcode doctor` lists what the gateway has installed. See
+[`workflows.md`](workflows.md).
+
+## Can I see the reply while the model writes it?
+
+Yes, when the gateway supports live replies. The **Stream replies** setting in
+the browser and `/stream` in the terminal choose Gateway default, On, or Off.
+The live text is a preview; the recorded reply replaces it when the model call
+completes. See [`web.md`](web.md#stream-replies) and the terminal
+[reference](../tui/docs/api.md#streamed-replies-stream).
+
+## Where are the files the agent writes?
+
+On the gateway host, in the run's workspace. The browser's **Files** tab and the
+terminal's `/files` command show its absolute path, the host it is on, and a
+preview of each file.
 
 ## Where are my settings stored?
 
@@ -67,9 +83,9 @@ what the gateway has installed. See [`workflows.md`](workflows.md).
   `abstractcode login`
 - `~/.abstractcode/prefs.json` — theme, model, workflow, last session
 
-`ABSTRACTCODE_PREFS_FILE` relocates the second. A build older than the rename
-wrote `~/.abstractcode-tui/prefs.json`; that file is read once and saved
-forward.
+`ABSTRACTCODE_PREFS_FILE` relocates the second. An existing
+`~/.abstractcode-tui/prefs.json` is read once and saved forward to the current
+path.
 
 ## Can I run it without an interface?
 

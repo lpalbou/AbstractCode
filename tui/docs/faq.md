@@ -12,9 +12,10 @@ come back to the state you left: prior turns replay IN FULL DETAIL from
 their run ledgers (prompts, reasoning cycles, tool cards, answers — through
 the same fold as live streaming, so the details toggle applies), a live run
 reattaches with its original prompt and full activity, and pending
-approvals re-surface. Replay depth defaults to the last 20 turns
-(`--replay-turns N` raises it, `0` disables) because each turn costs one
-history-bundle fetch carrying its complete run-tree ledgers.
+approvals re-surface. Boot replays the last 5 turns (`--replay-turns N`
+changes it, `0` disables) because each turn costs one history-bundle fetch
+carrying its complete run-tree ledgers; `/history`, or scrolling to the top of
+the transcript, loads earlier turns.
 
 **Can I pause a run?**
 Yes — `/pause` pauses the whole run tree durably on the gateway (it stops
@@ -26,8 +27,11 @@ including after a restart.
 On the gateway host, under its workspace policy. The default posture is
 server-managed: client-supplied paths are clamped to the gateway's workspace
 root or a managed per-session folder, and the app says so at startup. For
-trusted local setups, start the gateway with
-`ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1` and pass `--workspace`.
+trusted local setups, the gateway's operator allows client workspace scope in
+the gateway console's workspace settings, and you pass `--workspace`.
+`/files` shows the run's workspace: its absolute path, the host it is on, and
+a preview of each file. A gateway on another machine is not sent your local
+folder unless you run `/workspace send always`.
 
 **How does conversation memory work?**
 Two layers. Live, the client carries the visible conversation (completed
@@ -61,8 +65,8 @@ and the derived split still tells you what a cache could save.
 `exec --no-prompt-cache` opts a headless run out, which is enough to A/B one
 gateway against itself. It is `exec`-only, and it reaches the model calls of the
 run it starts — so pair it with `--workflow react-agent:react`. Flow-graph
-bundles (`coding-agent`, `basic-agent`, `multiagent-coding`, and the default
-workflow) run their agent loop in a child run that does not inherit the posture,
+bundles (`coding-agent`, `basic-agent` — the gateway's shipped default — and
+`multiagent-coding`) run their agent loop in a child run that does not inherit the posture,
 so they cannot be A/B'd from the client. Confirm the lane you actually got from
 the run ledger, not from the flag. See
 [Caching and context](api.md#caching-and-context) for the full scope and what to
@@ -103,8 +107,14 @@ terminal offers with `abstractcode --caps`.
 
 **Where are my settings?**
 Connection: `~/.abstractcode/gateway.json`.
-Preferences (theme, workflow, route, session, tool/skill selections, recent
-sessions): `~/.abstractcode/prefs.json`.
+Preferences (theme, workflow, route, reasoning, MTP, Stream replies,
+`send_local_workspace`, session, tool/skill selections, recent sessions):
+`~/.abstractcode/prefs.json`.
+
+**Why does the workflow in the header end with "(gateway default)"?**
+You have not pinned a workflow, so each new turn runs the gateway's default
+agent workflow, which its operator can change; the transcript names what ran.
+Pick a named workflow in `/workflow` to pin one.
 
 **Why did my queued prompt not start?**
 The queue only advances after the current run **succeeds** — a failure or a

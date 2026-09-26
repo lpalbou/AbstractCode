@@ -15,14 +15,14 @@ abstractcode --help | --version
 
 | Option | Meaning | Default |
 | --- | --- | --- |
-| `--gateway <URL>` | Gateway base URL | flag > env > login store > `http://127.0.0.1:8080` |
+| `--gateway <URL>` | Gateway base URL (`--gateway-url` too) | flag > env > login store > `http://127.0.0.1:8080` |
 | `--token <TOKEN>` | Bearer token | flag > env > login store |
 | `--session <ID>` | Durable session id | a fresh mint (`acode-<hex>`); `--resume`/`--continue` reopens the last one |
 | `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
 | `--reasoning <LEVEL>` | Reasoning effort: `none\|minimal\|low\|medium\|high\|xhigh\|auto` (also `--thinking`; validated at launch; works on `exec` too) | gateway default |
 | `--mtp <DEPTH\|off\|inherit>` | Native-MTP request override; an explicit depth must be honored by the execution host. Works on `exec` too | saved TUI choice, otherwise inherit; `exec` inherits unless the flag is supplied |
 | `--stream <on\|off\|default>` | Stream replies as the model writes them (`--streaming` too). Interactive: this launch only (`/stream` saves). `exec`: the flag alone decides, and `on` prints the reply to stdout live | saved `/stream` choice, else **gateway default**; `exec`: gateway default unless the flag is given |
-| `--workflow <bundle[:flow]\|default>` | Agent workflow; `default` = the gateway's default (the gateway resolves it at every run start) | your `/workflow` choice, else the gateway default; with neither, the app asks you to pick (`exec` exits 2 and lists the workflows) |
+| `--workflow <bundle[:flow]\|default>` | Agent workflow (`--agent` too); `default` = the gateway's default (the gateway resolves it at every run start) | your `/workflow` choice, else the gateway default; with neither, the app asks you to pick (`exec` exits 2 and lists the workflows) |
 | `--provider <NAME>` | Provider override | gateway defaults |
 | `--model <NAME>` | Model override | gateway defaults |
 | `--workspace <PATH>` | Requested workspace root (always sent when given) | current directory when the gateway is on this machine — the gateway's own verdict once a run has started, a loopback URL before that; none for a gateway on another machine (the agent works in a gateway-side session folder). `/workspace send auto\|always\|never` overrides (saved as `send_local_workspace`) |
@@ -31,11 +31,17 @@ abstractcode --help | --version
 | `--theme <ID>` | Start theme | `ABSTRACTTUI_THEME`, else saved pick |
 | `--animation <on\|off>` | Launch animation; **persisted** to `prefs.json` (`animation`). Also skipped when stdout is not a tty, `NO_COLOR`/`TERM=dumb` is set, or `ABSTRACTTUI_NO_SPLASH` is set | on |
 | `--max-iterations <N>` | Ask the server for a specific iteration budget | none — **this client sets no budget**. Absent the flag the server's own default applies (the same one every client gets); the hard ceiling is the runtime's, enforced at run start |
-| `--replay-turns <N>` | Prior turns replayed in full detail at boot (0 disables) | 20 |
+| `--replay-turns <N>` | Prior turns replayed in full detail at boot (0 disables; at most 100) | 5 |
 | `--permissions <level>` | tool permissions for the invocation: `read` \| `write` \| `all` | prefs level |
 | `--require-approval <t>` | gate these tools regardless of level (comma list, repeatable); exec denies them | — |
+| `--review` / `--no-review` | Verifier before conclude: before a tool-call-free response is accepted as final, a verifier re-reads the transcript and can send the agent back for more work (`/review` toggles in the app) | on |
+| `--review-rounds <N>` | Verifier round budget | 3 |
+| `--no-project-context` | Do not add the workspace `AGENTS.md` to the agent's system prompt | added |
+| `--max-tokens <N>` | Declare the model's context window for this session (`262144`, `262k`; `--context`, `--context-window` too) — see `/context` | undeclared |
+| `--attach <PATH>` | exec: upload a file before the run starts and attach it to the prompt (repeatable; exits 1 on failure) | — |
+| `--param <K=V>` | exec: extra `input_data` key for a workflow input pin (repeatable; numbers and booleans parse, else a string; client-owned keys such as `prompt` are refused) | — |
 | `--no-prompt-cache` | exec: opt the run out of the runtime prompt cache (`_runtime.prompt_cache=false`) | server truth (on) |
-| `--timeout <SECS>` | exec: overall deadline | 900 |
+| `--timeout <SECS>` | exec: wall-clock safeguard (`0` = none) | 7200 (2 h) |
 
 ### Environment
 
@@ -60,13 +66,15 @@ abstractcode --help | --version
 | `/help` | Command + key reference modal |
 | `/new` | Fresh session (new durable id, cleared view) |
 | `/theme [id]` | Live-preview theme picker, or set directly |
-| `/workflow` | Pick the agent workflow. First row: **Gateway default → name @version** — saved as "the gateway default", so the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran |
+| `/workflow` | Pick the agent workflow (`/agent` too). First row: **Gateway default → name @version** — saved as "the gateway default", so the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran |
 | `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` shows the workspace folder itself (never a sub-folder; never a folder that would be launched, such as `.app`) in your file manager, only when the gateway is on this machine and allows it; `r` refreshes |
 | `/workspace send [auto\|always\|never]` | Whether your folder is sent as the workspace: `auto` (default) = only when the gateway is on this machine; `always` = also to a gateway on another machine that sees the same path (a shared mount); `never`. Bare reports what is in force. Saved in `prefs.json` |
 | `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
-| `/model` | Pick provider + model from gateway discovery |
+| `/model` | Pick provider, then model, from gateway discovery, then the reasoning effort, then MTP (see below). `Esc` at a step keeps the current value |
 | `/mtp [depth\|off\|inherit]` | Native-MTP request policy (`/speculation` alias). Bare command opens a provider/model capability-driven picker; explicit values persist locally and ride `_runtime.speculation`. Inherit omits the override; Off sends `false`; a depth sends `native_mtp` with `require_acceleration=true` |
 | `/stream [on\|off\|default]` | "Stream replies" (`/streaming` alias). Bare opens the picker: **Gateway default** (names the gateway's current setting), **On**, **Off**. Saved in `prefs.json` as `stream_replies`; see "Streamed replies" below |
+| `/review [on\|off\|rounds N]` | The verifier the agent must pass before it may conclude (`/verify` too); same as `--review` / `--review-rounds` |
+| `/iterations [n\|off]` | Iteration budget requested for new runs (`_limits.max_iterations`; `/iters` too). Bare reports what is in force and where it came from; `off` takes the server's own. Applies to the next run; persisted |
 | `/tools` | Enable/disable gateway tools (`Space` toggles; checked set = the run's exact allowlist; untouched = workflow defaults). In-modal: `p` cycles a per-tool approval pin, `t` cycles the tier — see the modal keys below |
 | `/permissions [read\|write\|all]` | THE tool-permission surface (bare = report): batches classifying at-or-below the level auto-approve. `read` = proven read-only tools only; `write` adds workspace file mutations; `all` auto-approves everything, **including arbitrary shell and network egress** — deliberate use only. Per-tool `ask` pins and gateway-disabled tools still gate. Sticky per session (`/tools tier` remains a spelling alias) |
 | `/workspace` | Inspect + edit the filesystem scope tools may touch: root (from `--workspace`/cwd), access mode, allowed paths. Mode + paths persist and ride every run |
@@ -82,8 +90,8 @@ abstractcode --help | --version
 | `/gating [auto\|wait]` | Approval gating for gating-capable workflows (the multi-agent coder): `auto` runs unattended (skips the workflow's human-approval pauses), `wait` re-gates (the default). Selecting the coder also opens a gated/unattended choice. Rides `input_data.gating_mode`; tool approval is a SEPARATE axis (`/permissions`) |
 | `/reasoning [level]` | Reasoning effort for the current route (`none\|minimal\|low\|medium\|high\|xhigh\|auto`; `default` clears). Bare `/reasoning` opens the dial — also stage 3 of `/model`: pick provider, then model, then effort. Non-reasoning models show a locked `none` (set-anyway override available while capability provenance is unserved); the choice is pair-coupled — changing provider or model resets it. Rides the run as `_runtime.thinking` (absent = gateway default) |
 | `/export [md\|jsonl] [--details] [path]` | Export the agent transcript to a file: `md` (default) = archival markdown; `jsonl` = SFT training lines. `--details` adds reasoning + full tool cards. Bare `/export` auto-names in the cwd; never overwrites — see "Transcript export" below |
-| `/attach [path\|preview\|clear]` | Stage a file for your NEXT message (chips above the composer; uploaded at send as `context.attachments`; **session uploads are permanent** server-side). Accepts `~`, quotes, escaped spaces, `file://`, relative paths. Bare `/attach` opens the file browser (nothing staged) or the pending manager (chips staged); `preview [n\|path]` opens the file itself (text or PNG/JPEG — staged or not); `clear` discards. Dropping a file onto the terminal attaches directly — `Ctrl+O` undoes (chips out, path text back). Agent-lane only (v1) — see "Attachments" below |
-| `/auto` | Removed (the session blanket had latent holes) — opens the `/permissions` report teaching the replacement |
+| `/attach [path\|preview\|clear]` | Stage a file for your NEXT message (chips above the composer; uploaded at send as `context.attachments`; **session uploads are permanent** server-side). Accepts `~`, quotes, escaped spaces, `file://`, relative paths. Bare `/attach` opens the file browser (nothing staged) or the pending manager (chips staged); `preview [n\|path]` opens the file itself (text or PNG/JPEG — staged or not); `clear` discards. Dropping a file onto the terminal attaches directly — `Ctrl+O` undoes (chips out, path text back). Agent lane only — see "Attachments" below |
+| `/auto` | Opens the `/permissions` report; use `/permissions` to set the auto-approval level |
 | `/pause` | Pause the run tree durably on the gateway (stops at the next step boundary; survives quitting the client) |
 | `/resume` | Resume a paused run tree |
 | `/cancel` | Cancel the active run |
@@ -92,6 +100,8 @@ abstractcode --help | --version
 | `/queue [text]` | Queue a prompt (FIFO): auto-runs after the current run **succeeds**; halts on failure/cancel (explicit resume). Persists per session and restores **paused** — a restore never auto-starts. Bare `/queue` opens the manager (keys under "Modal keys" below). Agent-lane only: under entity focus the visit's held-draft lane is the queue |
 | `/goal [text\|stop]` | Start a goal run on a goal workflow (`abstractcode.goal.v1`): loops until verified done or `max_cycles` (prefs `goal_max_cycles`, default 8). Bare `/goal` shows status; `/goal stop` cancels durably. Ships dark until a goal bundle is published on the gateway |
 | `/context [n\|off]` | Declare the model's context window in tokens (`262144`, `262k`, `1m`) — the footer meter becomes `ctx used/window tk (%, declared)`, warn ≥75% / error ≥90%, and the declaration rides runs as `_limits.max_tokens`. Bare `/context` reports; `off` clears. Persisted (`context_window`); `--max-tokens` declares for one session. Source-labeled "declared" — never a client capability table |
+| `/gpu` | Toggle the gateway-host GPU meter in the footer |
+| `/stance [line\|figure\|off]` | How the turn is going, from mechanical facts (effort, calls, verify-shaped share of calls); floats bottom-right over the transcript, `Ctrl+G` folds it (`/conduct` too) |
 | `/redraw` | Force a full-screen repaint (`Ctrl+L`) — recovery from an external terminal clear (Cmd+K), which damage-tracked rendering cannot detect |
 | `@name [text]` | Talk with a summoned entity: bare `@name` opens (or focuses) a durable visit; `@name <text>` opens and sends the first turn. An unknown name never becomes an agent prompt — the draft is preserved with a roster hint. A partial `@na` opens a completion dropdown (cached roster); accepting inserts the name and the NEXT Enter submits |
 | `/entities [name]` | Entity roster + identity cards (opens instantly on the cached roster, refreshes async — the live fetch can be slow behind the gateway's drives fold). `[name]` deep-links to that card |
@@ -154,7 +164,7 @@ The setting: **Gateway default** sends nothing, so the gateway's own
 `agents.streaming_default` applies. **Off** always sends
 `input_data._runtime.stream: false` — your "off" is never left to the
 gateway's default. **On** sends `true` only to a gateway that advertises
-`streaming.deltas`: an older gateway would accept it but stream the provider
+`streaming.deltas`: a gateway without live replies would accept it but stream the provider
 call internally with nothing to show for it, so the app sends nothing, the
 header says "stream on (gateway has no live replies)", and the transcript
 says "this gateway does not support streaming" once per session.
@@ -174,7 +184,7 @@ Bare `/export` writes markdown, auto-named
 directory. The format word wins over the path's extension; a conflict
 (`/export md out.jsonl`) refuses. A known extension alone infers the
 format. `--details` is the export's own flag — the `Ctrl+D` view toggle
-never changes the output. v1 exports the **agent-lane** transcript
+never changes the output. `/export` writes the **agent-lane** transcript
 (entity visits are separate conversations).
 
 - **Markdown** (archival): a header (session, workflow, timestamp, item
@@ -261,7 +271,7 @@ need a vision-capable route, other binaries are listable-not-readable
 - **Boundaries**: session uploads are PERMANENT server-side (the
   session's attachment index has no delete surface). `/new` and session
   switches discard pending chips with a notice. Chips never ride
-  steers, `/queue` drains, or `/goal` runs; entity lanes refuse (v1).
+  steers, `/queue` drains, or `/goal` runs; entity lanes refuse.
 - **Headless**: `exec --attach <path>` (repeatable) uploads before the
   run starts and exits 1 on any failure — nothing spent.
 
@@ -278,9 +288,8 @@ relaunch continues it), **cancel it, then quit** (`c`). `Esc` stays.
 Honesty mechanics: pause/cancel quit only after the gateway ACCEPTS the
 durable command (up to 8s) — a failure shows an honest state offering
 quit-anyway/stay instead of pretending delivery. Repeat quit gestures
-always resolve to the safe verb (leave), so hammering `Ctrl+C`×3 /
-`Ctrl+Q`×2 exits at worst one press slower than before — and cancel is
-never reachable by repetition. A run concluding while the modal is open
+always resolve to the safe verb (leave): `Ctrl+C`×3 or `Ctrl+Q`×2 leaves
+the run going and quits, and cancel is never reachable by repetition. A run concluding while the modal is open
 auto-quits (queued prompts are held back and restore paused next
 launch). Entity visits never gate — visits park on quit by design;
 reopening resumes them. Honest limit: closing the terminal window
@@ -304,6 +313,7 @@ recovers it.
 | `Ctrl+D` | anywhere | Toggle detail view (thinking + tool results vs answers only) |
 | `Alt+E` | anywhere | Cycle conversation focus: agent → entity visit 1 → … → agent. Cycle order is the order conversations were opened — it never changes with how the header paints chips. Option+E on macOS with "Option as Meta/Esc+"; `/focus <name\|agent>` needs no modifier setting. (`Ctrl+E` is move-to-line-end in the composer) |
 | `Ctrl+T` | anywhere | Cycle theme |
+| `Ctrl+G` | anywhere | Fold / unfold the `/stance` panel |
 | `Ctrl+L` | anywhere | Force a full-screen repaint (`/redraw`) — recovers from a terminal clear |
 | `Ctrl+O` | while a drop's chips are still pending | Undo the newest file drop: chips out, the pasted path text back in the composer. Expires once the chips ride a run or are removed |
 | `?` + Enter | empty composer | Open the keys + commands reference (the footer's `? keys + commands`) |
@@ -323,6 +333,8 @@ recovers it.
 | --- | --- |
 | approval | `a` approve · `A` approve all (sets permissions: `all`, sticky per session) · `d` deny · `f` toggle full JSON of the calls · `Esc` defer (the run keeps waiting; Enter on the empty composer reopens) |
 | ask (agent question) | `Enter` send the answer · `Esc` keeps the run waiting |
+| `/review [on\|off\|rounds N]` | The verifier the agent must pass before it may conclude (`/verify` too); same as `--review` / `--review-rounds` |
+| `/iterations [n\|off]` | Iteration budget requested for new runs (`_limits.max_iterations`; `/iters` too). Bare reports what is in force and where it came from; `off` takes the server's own. Applies to the next run; persisted |
 | `/tools` | `Space` toggle · `a` all on · `n` all off · `p` cycle the per-tool pin (none → auto → ask → none; a pin beats the tier both ways) · `t` cycle the approval tier (read → write → all, persisted) · `Enter`/`Esc` close |
 | `/queue` | `↑↓` select · `x` remove · `u`/`d` move up/down · `c` clear all · `r` resume a paused queue · `e` pop the prompt into the composer for editing · `Enter`/`Esc` close |
 | chips row | click a staged file's name to preview it · click its `×` to unstage it |
@@ -365,7 +377,7 @@ and thinking gists; full shows args, result bodies, and the labeled
 reasoning channel. Thinking and every called tool stay visible in BOTH
 states.
 
-**`/details full` truncates nothing** (2026-08-20). *Every* body renders
+**`/details full` truncates nothing.** *Every* body renders
 whole: your own prompts and steers, tool arguments, result bodies, tool
 errors, thinking and its reasoning channel, error and info notices,
 memory-probe digests, and an image's fetch error. No row cap, no
@@ -395,11 +407,8 @@ entries, tools ran); the full memory digests sit behind the details toggle
 AbstractCode's TUI is a **thin host**. The gateway is the single place run
 semantics live, because the same session is meant to be watched from
 AbstractObserver, a web client, or a chat bridge, and all of them must show the
-same answer to "did it finish, and what do I do about it?" A host that derives
-that answer locally has to be kept in sync with every other host by hand — and
-this one already got it wrong once, reading `outcome: "iteration_budget"` alone
-while the additive `conclusion_forced` sat beside it, telling operators to
-raise a budget that still had 38 of its 50 iterations unspent.
+same answer to "did it finish, and what do I do about it?" A verdict derived
+locally by each host would drift between hosts.
 
 So the loop's terminal node authors the verdict and this client renders it:
 
@@ -412,11 +421,11 @@ So the loop's terminal node authors the verdict and this client renders it:
 | `stop_reason.budget_exhausted` | agent loop | whether the iterations were actually SPENT — false for a stuck-loop stop; carried so no host re-derives the cause |
 | `notices[].{code,severity,text}` | agent loop | `text` printed verbatim; `severity` picks the ink (`error` renders as an error line, anything else as info); `code` is the stable key |
 
-**Legacy engines** (before this contract) send no `stop_reason`. The host then
+**Engines without this contract** send no `stop_reason`. The host then
 reports the bare fact — "the agent STOPPED, it did not finish" — and says
 explicitly that the engine reported no reason. It does not guess one: an
 exhausted budget and a stuck-loop stop both arrive as
-`outcome: "iteration_budget"`, and inventing the difference is the bug above.
+`outcome: "iteration_budget"`, and only the engine can tell them apart.
 
 ## Status surfaces
 
@@ -513,7 +522,7 @@ those.
 
 - **It is `exec`-only.** The interactive client always takes the server default.
 - **It does not reach flow-graph bundles.** `coding-agent`, `basic-agent` and
-  `multiagent-coding` — including the default workflow — run their agent loop in
+  `multiagent-coding` — `basic-agent` is the gateway's shipped default — run their agent loop in
   an Agent-node child run. The visual-flow compiler builds that child's
   `_runtime` namespace from an explicit inheritance list: provider, model,
   thinking, audio policy, transcription language, skills block and

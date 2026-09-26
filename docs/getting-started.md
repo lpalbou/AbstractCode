@@ -10,8 +10,9 @@ pip install abstractgateway
 abstractgateway serve            # binds 0.0.0.0:8080 by default
 ```
 
-The gateway ships working agent bundles out of the box, including
-`coding-agent:coder`, which the terminal client uses by default.
+The gateway ships working agent bundles out of the box. Its default agent
+workflow is the shipped `basic-agent` until its operator chooses another, and
+both clients use that gateway default unless you pick a workflow yourself.
 
 ## 2. Install a client
 
@@ -102,7 +103,22 @@ abstractcode --workflow coding-agent:coder --provider lmstudio --model qwen3.6-3
 ```
 
 Both are optional: without them, the gateway's defaults apply and your last
-choice is remembered in `~/.abstractcode/prefs.json`.
+choice is remembered in `~/.abstractcode/prefs.json`. `--workflow default`
+selects the gateway's default workflow explicitly; see
+[`workflows.md`](workflows.md#the-gateway-default).
+
+In the browser, the toolbar's **Workflow** list starts with **Gateway default →
+name @version**, and **Settings** holds the model, reasoning, MTP and
+**Stream replies** choices.
+
+## Where the files are
+
+The agent reads and writes files on the gateway host, in the run's workspace.
+The browser's **Files** tab and the terminal's `/files` command show that
+folder: its absolute path, the host it is on, and a preview of each file. When
+the gateway runs on another machine, the terminal client does not send your
+local folder as the workspace; the agent works in a gateway-side session folder
+instead (see the terminal [getting started](../tui/docs/getting-started.md)).
 
 ## Where to go next
 

@@ -60,7 +60,45 @@ abstractcode --resume
 
 **The workflow is not found.**
 The bundle is not installed on that gateway. `doctor` lists what is available.
-The default is `coding-agent:coder`, which ships with the gateway.
+Pick one that is, or use the gateway default (`--workflow default`, or
+**Gateway default** at the top of the workflow list). A headless `exec` whose
+saved workflow is gone exits with code 2 rather than running another agent.
+
+**"no default agent workflow".**
+You have not picked a workflow and the gateway has no usable default for
+`abstractcode.agent.v1`; the message quotes the gateway's reason when it gives
+one. Pick a workflow from the list (or `--workflow bundle:flow`), or ask the
+gateway's operator to set its default agent workflow. The browser shows "gateway
+does not report a default agent workflow" when the gateway's workflow list
+carries no default at all; update AbstractGateway to get the **Gateway
+default** entry.
+
+**Replies appear only when they are complete.**
+Streaming is off for this run, or the gateway does not support live replies.
+Check the **Stream replies** setting (browser) or `/stream` (terminal). When the
+gateway does not advertise live replies, the setting is shown disabled with the
+reason, and a saved On adds one note to the conversation. A one-line
+"unavailable" note on a single model call means the gateway ran that call
+without streaming (for example, a call that must return structured output); the
+reply still arrives when the call completes. See [`web.md`](web.md#stream-replies).
+
+## Workspace files
+
+**The Files tab or `/files` reports HTTP 404.**
+The gateway does not offer workspace browsing. Update AbstractGateway; the run
+itself is unaffected.
+
+**There is no Open folder button, or `o` does nothing.**
+Opening the folder happens on the gateway's machine, so it is offered only when
+the gateway says you are on that machine and allows it (the open action is
+admin-only). Otherwise the client shows the absolute path with "on the gateway
+host <name>" and a copy action.
+
+**The browser client answers HTTP 400 "Cannot determine the client address of
+this connection".**
+The app server could not read the address of the incoming connection, which it
+must forward to the gateway. Connect to the app server directly or through a
+reverse proxy that opens a normal TCP connection to it.
 
 ## Terminal
 
@@ -104,6 +142,6 @@ config points at another checkout instead of the published package.
 
 **Your theme or model choice did not persist.**
 Preferences live in `~/.abstractcode/prefs.json`. Set
-`ABSTRACTCODE_PREFS_FILE` to relocate it. If you used an earlier build that
-wrote `~/.abstractcode-tui/prefs.json`, that file is read once and saved
-forward to the current path.
+`ABSTRACTCODE_PREFS_FILE` to relocate it. An existing
+`~/.abstractcode-tui/prefs.json` is read once and saved forward to the current
+path.

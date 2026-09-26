@@ -64,7 +64,7 @@ rendered as markdown. When the agent wants to run a mutating tool
 arguments — press `a` to approve, `d` to deny. The run waits durably on the
 gateway until you answer.
 
-## The five things worth knowing on day one
+## What to know on day one
 
 1. **Type while it works to steer.** Anything you submit during a run is
    folded into the agent's next reasoning cycle as guidance. `Esc Esc`
@@ -98,9 +98,9 @@ gateway until you answer.
 4. **Where files land.** Under the gateway's default (server-managed)
    workspace policy, tools execute in the gateway's workspace root or a
    managed per-session folder — the app tells you this at startup. To make
-   the gateway honor client workspace paths (`--workspace`), set
-   `ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1` on the gateway
-   (trusted/local setups). `/files` shows the run's workspace — the full path,
+   the gateway honor client workspace paths (`--workspace`), its operator
+   allows client workspace scope in the gateway console's workspace
+   settings (trusted/local setups). `/files` shows the run's workspace — the full path,
    the machine it is on, and a preview of any file. When the gateway runs on
    another machine, the app does not send your local folder (it would name a
    path on the gateway host); the agent works in a gateway-side session
@@ -163,7 +163,10 @@ abstractcode exec "List the files in the workspace and summarize them" \
 ```
 
 Events print as they fold; the final answer prints under an `answer` rule.
-Exit codes: 0 completed, 1 failed, 124 timeout, 130 cancelled. Without a
+Exit codes: 0 completed, 1 failed, 2 usage/config error (including a saved
+workflow that is no longer on the gateway), 124 timeout, 130 cancelled.
+`--stream on` prints the reply as the model writes it, on lines starting `✎`,
+and does not print it again under the `answer` rule. Without a
 raised `--permissions` level, mutating tools are denied with an explanation
 the agent sees (it will finish as best it can without them);
 `--require-approval <names>` gates specific tools even at `all`. Ask-user

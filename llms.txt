@@ -29,9 +29,9 @@ Ground rules for reading this repository:
 
 - [README](README.md): what AbstractCode is, the two clients, and a quick start
 - [Getting started](docs/getting-started.md): running a gateway, installing a client, credentials, first run
-- [Architecture](docs/architecture.md): the clients, the gateway, the thin-client contract, and repository layout
-- [API and integration points](docs/api.md): the command-line surface, the library surface, and the gateway contract
-- [Workflows](docs/workflows.md): workflow bundles and the `abstractcode.agent.v1` interface
+- [Architecture](docs/architecture.md): the clients, the browser app server, the gateway, the run stream with live reply deltas, the thin-client contract, and repository layout
+- [API and integration points](docs/api.md): the command-line surface, the library surface, and the gateway contract (runs, streams, discovery, workspace files, about)
+- [Workflows](docs/workflows.md): the gateway default agent workflow, selecting a workflow, and the `abstractcode.agent.v1` interface
 - [Interface events](docs/ui_events.md): the workflow-driven event contract
 - [FAQ](docs/faq.md): recurring questions and current limitations
 - [Troubleshooting](docs/troubleshooting.md): symptom-oriented diagnosis and fixes
@@ -41,16 +41,17 @@ Ground rules for reading this repository:
 
 - [Terminal client README](tui/README.md): features, interface tour, keys, themes
 - [Terminal getting started](tui/docs/getting-started.md): terminal-specific setup
-- [Terminal API](tui/docs/api.md): command-line surface and library entry points
-- [Terminal architecture](tui/docs/architecture.md): how the client is built on AbstractTUI
+- [Terminal API](tui/docs/api.md): command-line options, slash commands (`/workflow`, `/files`, `/stream`, `/about`, `/model`, `/mtp`, …), keys, streamed replies, exit codes
+- [Terminal architecture](tui/docs/architecture.md): how the client is built on AbstractTUI — threads, the ledger fold, live replies
 - [Terminal troubleshooting](tui/docs/troubleshooting.md): terminal, rendering, and connection problems
 - [Terminal FAQ](tui/docs/faq.md): durability, workspaces, tokens, steering semantics
+- [Orchestration cards](tui/docs/orchestration-cards.md): the coding workflows accepted by `--workflow` and when to choose each
 
 ## Browser client
 
 - [Browser client README](web/README.md): running it, configuration, credential handling
-- [Web overview](docs/web.md): reusable workflow chat, schema inputs, approvals, workspace policy, and optional voice
-- [Web deployment](docs/deployment-web.md): hosting it, gateway-first
+- [Web overview](docs/web.md): workflow selection with the gateway default, the conversation Files tab, Stream replies, MTP and other settings, the About dialog, approvals, workspace policy, and optional voice
+- [Web deployment](docs/deployment-web.md): hosting it behind HTTPS, reverse proxies, forwarded client addresses
 - [iPhone notes](docs/deployment-iphone.md): Safari and progressive web app behavior
 
 ## Policies

@@ -54,13 +54,15 @@ Both clients use the same endpoints. This is the integration contract:
 
 | Purpose | Shape |
 |---|---|
-| Start a run | `POST` a run request with the workflow, prompt, and options |
-| Stream a run | `GET` the run's ledger stream as SSE (`event: step`, terminated by `event: done`) |
+| Start a run | `POST` a run request with the workflow (or `@default` plus the agent interface), prompt, and options; the response names the resolved workflow |
+| Stream a run | `GET` the run's ledger stream as SSE (`event: step`, terminated by `event: done`); with streaming on, `llm.delta` / `llm.delta_end` frames carry live reply text |
 | Resolve a wait | `POST` a durable command — approve, reject, or answer |
 | Steer a run | `POST` a guidance command against the live run |
 | Pause / cancel | `POST` the corresponding durable command |
 | Session history | `GET` the session's history bundle for replay |
-| Discovery | `GET` the available workflows, providers, models, and tools |
+| Discovery | `GET` the available workflows (with the gateway's default agent workflow), providers, models, tools, skills, and capabilities such as live replies |
+| Workspace files | `GET` a run's workspace location, a folder listing, and file content (with `Range`) |
+| About | `GET` the gateway's AbstractFramework and package versions |
 
 Two properties follow from the gateway owning all of this, and both are relied
 on by the clients:
@@ -78,8 +80,9 @@ guarantee drift.
 
 ## Workflow contract
 
-A run names a workflow bundle, `coding-agent:coder` by default. Agents exposed
-to AbstractCode implement the `abstractcode.agent.v1` interface, described in
+A run names a workflow bundle, or asks for the gateway's default agent workflow
+(see [`workflows.md`](workflows.md#the-gateway-default)). Agents exposed to
+AbstractCode implement the `abstractcode.agent.v1` interface, described in
 [`workflows.md`](workflows.md). Workflow-driven interface events — status lines,
 messages, and tool-execution cards — are described in [`ui_events.md`](ui_events.md).
 

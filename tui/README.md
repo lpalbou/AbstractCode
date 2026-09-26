@@ -7,15 +7,8 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.5.1** (adds native-MTP request controls — `/mtp` and
-`--mtp` — to 0.5.0, the attachments + host-resources wave: file
-attachments with preview and drag & drop, the quit gate with durable
-pause/cancel delivery, `/conclude`, bloc history replay + `/history`,
-the reasoning dial, a launch animation, and `/resources` — the gateway
-host's memory, resident models and session caches, with model
-unload/lock and context-estimate actions and a footer `mem` meter — on
-top of 0.4.0's conclusion + presence wave: declared context meter,
-`/gpu`, `Ctrl+L`/`/redraw` screen recovery).
+Status: **0.5.1**, pre-alpha. Release history is in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## What it looks like
 
@@ -228,6 +221,7 @@ and does not print it a second time at the end.
 --stream <on|off|default>         stream replies (default: your /stream choice,
                                   else the gateway's setting; exec: the flag only)
 --workspace <PATH>                requested workspace root (see note)
+--mtp <DEPTH|off|inherit>         multi-token prediction request (default: /mtp)
 --theme <ID>                      start theme (ABSTRACTTUI_THEME works too)
 --animation <on|off>              launch animation (default: on) — SAVED, so
                                   `--animation off` once disables it for good
@@ -237,8 +231,10 @@ and does not print it a second time at the end.
 **Workspace note**: the gateway's server-managed workspace policy (the default
 posture) clamps client-provided paths — tools then execute in the gateway's
 workspace root or a managed per-session folder, and the app tells you so at
-startup. Set `ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1` on the gateway
-to honor client workspace roots (trusted/local setups).
+startup. To honor client workspace roots (trusted/local setups), the gateway's
+operator allows client workspace scope in the gateway console's workspace
+settings. A gateway on another machine is not sent your current folder
+(`/workspace send always` overrides this for a shared mount).
 
 ## How it relates to the browser client
 
@@ -255,49 +251,10 @@ can be approved there, and the reverse.
   fold, gateway contract
 - [docs/api.md](docs/api.md) — CLI options, slash commands, key bindings
 - [docs/faq.md](docs/faq.md) and [docs/troubleshooting.md](docs/troubleshooting.md)
+- [docs/orchestration-cards.md](docs/orchestration-cards.md) — the coding
+  workflows you can pass to `--workflow`
+- [CHANGELOG.md](CHANGELOG.md) — release history
 - Agent-oriented: [llms.txt](llms.txt)
-
-## Benchmark smoke mode
-
-`scripts/zelda_headless_bench.py` includes a smoke mode for checking the real
-selected benchmark client without running the full Zelda prompt. Set
-`ZELDA_BENCH_SMOKE` to an exact-answer prompt:
-
-```sh
-ZELDA_BENCH_SMOKE='Reply with exactly: smoke-ok' \
-ZELDA_BENCH_TIMEOUT_S=120 ZELDA_BENCH_MAX_ITER=3 \
-python3 scripts/zelda_headless_bench.py code-1
-```
-
-On success, stdout is exactly:
-
-```text
-smoke-ok
-```
-
-The smoke path still launches the selected child (`abstractcode` for `code-1`
-or the release `abstractcode` binary for `code-tui-1`). It exits 0 and
-prints the requested answer only when every selected run exits successfully
-and its captured final answer contains that value; otherwise it exits nonzero
-without printing a success value. As in full benchmark mode, run logs and
-reports are written under `untracked/zelda-bench/`.
-
-Controls:
-
-- Select lanes with `code-1`, `code-tui-1`, `code-2`, or `code-tui-2`; omit
-  lane arguments to run the four-step matrix.
-- `ZELDA_BENCH_CODE_LOOP` and `ZELDA_BENCH_CODE_AGENT` select the local
-  `abstractcode` loop and agent.
-- `ZELDA_BENCH_TUI_LOOP` selects a built-in TUI workflow mapping (`basic`,
-  `react`, `codeact`, `memact`, or `multi-coder`), while
-  `ZELDA_BENCH_TUI_WORKFLOW` overrides it with an explicit workflow reference.
-- `ZELDA_BENCH_PROVIDER`, `ZELDA_BENCH_MODEL`, `ZELDA_BENCH_BASE_URL`,
-  `ZELDA_BENCH_REASONING`, `ZELDA_BENCH_MAX_ITER`, and
-  `ZELDA_BENCH_TIMEOUT_S` configure the child run.
-- TUI benchmark lanes require `target/release/abstractcode`; build it with
-  `cargo build --release`. Gateway credentials come from
-  `~/.abstractcode/gateway.json`, falling back to `ABSTRACTGATEWAY_URL` and
-  `ABSTRACTGATEWAY_AUTH_TOKEN`.
 
 ## Repository structure
 
@@ -305,9 +262,10 @@ Controls:
   and TUI modules.
 - `tests/` — integration, replay, policy, and headless UI coverage.
 - `scripts/` — live checks and benchmark drivers, including
-  `zelda_headless_bench.py`.
+  `zelda_headless_bench.py` (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 - `docs/` — getting started, command/key reference, architecture,
-  troubleshooting, design notes, and reports.
+  troubleshooting, FAQ, orchestration cards; plus design notes, reports
+  and backlog for contributors.
 - `untracked/` — generated benchmark artifacts and logs; not application
   source.
 

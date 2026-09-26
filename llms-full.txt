@@ -68,11 +68,16 @@ for credentials, remote gateways, and first-run configuration.
 - **Approval-gated tools** — tools stop and wait for you by default; approve or
   reject from either client.
 - **Steering** — inject guidance into a run without restarting it.
-- **Workflows** — run a named agent bundle, `coding-agent:coder` by default.
+- **Workflows** — run the gateway's default agent workflow, or pick a named
+  agent bundle; the gateway resolves its default at every new turn.
 - **Review mode** — before a tool-call-free answer is accepted as final, a
   verifier re-reads the transcript and can force more work.
 - **Live activity** — reasoning cycles, tool cards that update in place, token
   counts, and context metering, streamed from the run ledger.
+- **Streamed replies** — watch the answer as the model writes it, when the
+  gateway supports live replies (**Stream replies** setting, `/stream`).
+- **Workspace files** — browse and preview the files a run works on, with their
+  absolute path on the gateway host (the **Files** tab, `/files`).
 
 ## Documentation
 
@@ -121,8 +126,9 @@ pip install abstractgateway
 abstractgateway serve            # binds 0.0.0.0:8080 by default
 ```
 
-The gateway ships working agent bundles out of the box, including
-`coding-agent:coder`, which the terminal client uses by default.
+The gateway ships working agent bundles out of the box. Its default agent
+workflow is the shipped `basic-agent` until its operator chooses another, and
+both clients use that gateway default unless you pick a workflow yourself.
 
 ## 2. Install a client
 
@@ -213,7 +219,22 @@ abstractcode --workflow coding-agent:coder --provider lmstudio --model qwen3.6-3
 ```
 
 Both are optional: without them, the gateway's defaults apply and your last
-choice is remembered in `~/.abstractcode/prefs.json`.
+choice is remembered in `~/.abstractcode/prefs.json`. `--workflow default`
+selects the gateway's default workflow explicitly; see
+[`workflows.md`](workflows.md#the-gateway-default).
+
+In the browser, the toolbar's **Workflow** list starts with **Gateway default →
+name @version**, and **Settings** holds the model, reasoning, MTP and
+**Stream replies** choices.
+
+## Where the files are
+
+The agent reads and writes files on the gateway host, in the run's workspace.
+The browser's **Files** tab and the terminal's `/files` command show that
+folder: its absolute path, the host it is on, and a preview of each file. When
+the gateway runs on another machine, the terminal client does not send your
+local folder as the workspace; the agent works in a gateway-side session folder
+instead (see the terminal [getting started](../tui/docs/getting-started.md)).
 
 ## Where to go next
 
@@ -236,29 +257,71 @@ the coding agent; both observe and steer a run that lives on
 ## Shape
 
 ```mermaid
-flowchart TB
-    subgraph clients["AbstractCode clients"]
+flowchart LR
+    subgraph term["Terminal"]
         tui["Terminal client<br/><code>tui/</code> — Rust<br/>crate <code>abstractcode</code>"]
-        web["Browser client<br/><code>web/</code> — TypeScript<br/>npm <code>@abstractframework/code</code>"]
     end
-
-    gw["<b>AbstractGateway</b><br/>durable runs, sessions, run ledger"]
-
-    subgraph server["Runs on the gateway host"]
+    subgraph browser["Browser"]
+        spa["Browser client<br/><code>web/src/</code> — React"]
+    end
+    proxy["App server<br/><code>web/bin/server.js</code><br/>session exchange, CSRF,<br/>same-origin proxy"]
+    gw["<b>AbstractGateway</b><br/>durable runs, sessions,<br/>run ledger, workspaces"]
+    subgraph server["Gateway host"]
         rt["AbstractRuntime<br/>executes the run"]
         core["AbstractCore<br/>providers and tools"]
     end
 
-    tui -- "HTTP: start, resume, cancel, steer" --> gw
-    web -- "HTTP: start, resume, cancel, steer" --> gw
-    gw -- "SSE: run ledger" --> tui
-    gw -- "SSE: run ledger" --> web
+    tui -- "HTTP: start, commands,<br/>discovery, workspace files" --> gw
+    gw -- "SSE: ledger steps<br/>+ live reply deltas" --> tui
+    spa -- "same-origin <code>/api/gateway/*</code>" --> proxy
+    proxy -- "HTTP + SSE, X-Forwarded-For<br/>= browser socket address" --> gw
     gw --> rt --> core
 ```
+
+The terminal client talks to the gateway directly. The browser client talks
+only to its own app server, which exchanges gateway credentials for an
+app-scoped session and forwards every API call and stream to the gateway.
 
 Both clients speak the same surface, so a session is portable between them: a
 run gated on approval in the terminal can be approved in the browser, and a run
 started in the browser can be reattached from the terminal.
+
+## The run stream
+
+Each client follows a run through one Server-Sent Events stream,
+`GET /runs/{id}/ledger/stream`. It carries two kinds of frame:
+
+- **Ledger steps** (`event: step`, with an `id:` cursor) are the durable record.
+  Everything a client renders about a run comes from them, and a reconnect
+  resumes from the last cursor.
+- **Live reply deltas** (`event: llm.delta` and `event: llm.delta_end`, with no
+  `id:`) carry the model's text while it is being written. They appear only
+  when the gateway advertises `streaming.deltas` in
+  `GET /discovery/capabilities` and the run asked to stream. They never move
+  the cursor and are never stored; the recorded `llm_call` step replaces the
+  live text when the call completes.
+
+```mermaid
+sequenceDiagram
+    participant C as Client (terminal or browser)
+    participant G as AbstractGateway
+    participant R as AbstractRuntime
+    C->>G: POST /runs/start (input_data._runtime.stream)
+    C->>G: GET /runs/{id}/ledger/stream
+    R-->>G: text deltas for the model call
+    G-->>C: event: llm.delta (call_id, seq, text)
+    R->>G: llm_call step written to the ledger
+    G-->>C: event: step (id: cursor)
+    G-->>C: event: llm.delta_end (reason)
+    Note over C: the recorded step replaces the live bubble
+    G-->>C: event: done (root run finished)
+```
+
+The run's `_runtime.stream` value comes from the client's **Stream replies**
+setting: nothing for "Gateway default" (the gateway's own default applies),
+`false` for Off, and `true` for On only when the gateway advertises live
+replies. See [`web.md`](web.md#stream-replies) and the terminal client's
+[`/stream` reference](../tui/docs/api.md#streamed-replies-stream).
 
 ## The thin-client contract
 
@@ -305,6 +368,14 @@ client. See [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
   the same wire contract in different languages, deliberately: each is idiomatic
   for its platform. The contract they share is the gateway's, documented in
   [`api.md`](api.md).
+- **The gateway chooses the default workflow.** A client that follows the
+  gateway default starts runs with `flow_id: "@default"` and the agent
+  interface; the gateway resolves it at every run start and reports what it
+  started. Neither client keeps a fallback workflow of its own. See
+  [`workflows.md`](workflows.md#the-gateway-default).
+- **Files live on the gateway host.** Both clients browse a run's workspace
+  through the gateway's workspace routes and show its absolute path together
+  with the host it is on.
 - **Shared browser components are package dependencies.** `web/` consumes
   AbstractUIC packages from the npm registry, without sibling-checkout aliases,
   so the checkout builds independently.
@@ -327,15 +398,22 @@ flowchart LR
 questions, approvals, event waits, and structured results. It does not store
 credentials, select workspace scope, or invoke tools. Code supplies the HTTP
 adapter, workflow catalog, session navigation, schema inputs, and inspector.
-The app server owns session exchange and CSRF/origin checks.
+The app server owns session exchange and CSRF/origin checks. On every request it
+sends to the gateway (API calls, run streams, status, sign-in and sign-out) it
+sets `X-Forwarded-For` to the browser connection's socket address, replacing
+any incoming `X-Forwarded-For`, `Forwarded` or `X-Real-IP` value, and sets
+`X-AbstractFramework-App-Proxy: code`. The gateway uses these to decide whether
+the browser sits on its own machine (for example before offering **Open
+folder**). A connection whose address cannot be determined is refused with
+HTTP 400.
 
 Run lifecycle comes from gateway run snapshots; a completed ledger step does
 not imply a completed workflow. Ledger records own replayable messages and
 activity. UI-only status events never replace authoritative run status.
 Account and session changes abort or isolate pending requests and local queues.
 
-The legacy `web/src/ui/` implementation is retained as unmounted source; the
-entrypoint mounts only `web/src/workspace/app.tsx`.
+The entrypoint (`web/src/main.tsx`) mounts `web/src/workspace/app.tsx`. The
+modules under `web/src/ui/` are not mounted by the application.
 
 
 ==============================================================================
@@ -398,13 +476,15 @@ Both clients use the same endpoints. This is the integration contract:
 
 | Purpose | Shape |
 |---|---|
-| Start a run | `POST` a run request with the workflow, prompt, and options |
-| Stream a run | `GET` the run's ledger stream as SSE (`event: step`, terminated by `event: done`) |
+| Start a run | `POST` a run request with the workflow (or `@default` plus the agent interface), prompt, and options; the response names the resolved workflow |
+| Stream a run | `GET` the run's ledger stream as SSE (`event: step`, terminated by `event: done`); with streaming on, `llm.delta` / `llm.delta_end` frames carry live reply text |
 | Resolve a wait | `POST` a durable command — approve, reject, or answer |
 | Steer a run | `POST` a guidance command against the live run |
 | Pause / cancel | `POST` the corresponding durable command |
 | Session history | `GET` the session's history bundle for replay |
-| Discovery | `GET` the available workflows, providers, models, and tools |
+| Discovery | `GET` the available workflows (with the gateway's default agent workflow), providers, models, tools, skills, and capabilities such as live replies |
+| Workspace files | `GET` a run's workspace location, a folder listing, and file content (with `Range`) |
+| About | `GET` the gateway's AbstractFramework and package versions |
 
 Two properties follow from the gateway owning all of this, and both are relied
 on by the clients:
@@ -422,8 +502,9 @@ guarantee drift.
 
 ## Workflow contract
 
-A run names a workflow bundle, `coding-agent:coder` by default. Agents exposed
-to AbstractCode implement the `abstractcode.agent.v1` interface, described in
+A run names a workflow bundle, or asks for the gateway's default agent workflow
+(see [`workflows.md`](workflows.md#the-gateway-default)). Agents exposed to
+AbstractCode implement the `abstractcode.agent.v1` interface, described in
 [`workflows.md`](workflows.md). Workflow-driven interface events — status lines,
 messages, and tool-execution cards — are described in [`ui_events.md`](ui_events.md).
 
@@ -455,19 +536,40 @@ Related:
 - API and CLI surface: [`docs/api.md`](api.md)
 - Interface events a workflow can drive: [`ui_events.md`](ui_events.md)
 
+## The gateway default
+
+Each gateway has a default agent workflow for the `abstractcode.agent.v1`
+interface, set by its operator (gateway setting
+`agents.default_workflow`). Out of the box it is the shipped `basic-agent`
+bundle. Both clients list it first as **Gateway default → name @version**.
+
+Choosing it is saved as "the gateway default", not as a copy of the workflow
+id. The client then starts each run with `flow_id: "@default"` and
+`interface: "abstractcode.agent.v1"`, and the gateway resolves the default at
+that moment, so a change on the gateway applies to your next turn. The run's
+start response names the workflow the gateway actually started, and both
+clients show it (for example "running Basic agent @0.0.3 (gateway default)").
+
+When the gateway has no usable default and you have not picked a workflow, the
+clients say so and ask you to pick one; they never substitute a workflow of
+their own.
+
 ## Selecting a workflow
 
 ```bash
+abstractcode --workflow default
 abstractcode --workflow coding-agent:coder
 abstractcode --workflow <bundle_id>[@version][:<flow_id>]
 ```
 
-`--agent` is accepted as an alias. Without either flag the client uses your
-saved choice, falling back to `coding-agent:coder` — the verified coding loop,
-which ships with the gateway.
+`--agent` is accepted as an alias. Without either flag the terminal client uses
+your saved choice, and otherwise the gateway default. `default` selects the
+gateway default explicitly. In headless `exec`, a saved workflow that is no
+longer on the gateway stops the run with exit code 2 instead of running a
+different agent; `--workflow default` runs the gateway default.
 
-Inside a session, `/agent` changes the workflow, and your selection persists to
-`~/.abstractcode/prefs.json`.
+Inside a session, `/workflow` (alias `/agent`) changes the workflow, and your
+selection persists to `~/.abstractcode/prefs.json`.
 
 To see what a given gateway actually has installed:
 
@@ -475,17 +577,24 @@ To see what a given gateway actually has installed:
 abstractcode doctor
 ```
 
-Installing and managing bundles is a gateway operation, not a client one — see
-the [AbstractGateway](https://github.com/lpalbou/abstractgateway) documentation.
+Installing and managing bundles, and setting the default, are gateway
+operations, not client ones — see the
+[AbstractGateway](https://github.com/lpalbou/abstractgateway) documentation.
 
 ### In the browser
 
-Use Workflow to choose an authorized private entrypoint or shared catalog
-workflow. The browser is not restricted to `abstractcode.agent.v1`: ordinary
-AbstractFlow workflows run from their registered schema using **Inputs** and
-**Run workflow**. Generic workflows receive the configured input object;
-agent-only model/tool/runtime settings are not injected. Questions, messages,
-event waits, and structured results use the shared workflow chat. See [web](web.md).
+The **Workflow** list in the toolbar starts with the gateway default, then the
+coding agents published on your gateway. Tick **Show all workflows** to list
+every authorized workflow, including shared catalog workflows. The browser is
+not restricted to `abstractcode.agent.v1`: ordinary AbstractFlow workflows run
+from their registered schema using **Inputs** and **Run workflow**. Generic
+workflows receive the configured input object; agent-only model/tool/runtime
+settings are not injected. Questions, messages, event waits, and structured
+results use the shared workflow chat.
+
+A restored conversation follows how its last run was started: if the gateway
+recorded it as started from its default, the next turn follows the gateway
+default again; otherwise it keeps its specific workflow. See [web](web.md).
 
 ## The `abstractcode.agent.v1` interface
 
@@ -516,7 +625,7 @@ A run is given:
 | `vars.context.messages` | conversation history |
 | `vars.context.attachments` | attachment references, when files were attached |
 | `vars._limits` | host limits such as maximum iterations and tokens |
-| `vars._runtime` | run directives — reasoning effort, review mode, tool policy, prompt caching |
+| `vars._runtime` | run directives — reasoning effort, MTP (`speculation`), live reply streaming (`stream`), review mode, tool policy, prompt caching |
 
 Absence is meaningful here: an omitted `provider` means "use server truth", not
 "use nothing". A workflow that reads these should treat a missing key as
@@ -689,9 +798,25 @@ Your choice is remembered in `~/.abstractcode/prefs.json`.
 
 ## What is a workflow?
 
-A named agent bundle the run executes, `coding-agent:coder` by default.
-`--workflow <bundle[:flow]>` selects another, and `abstractcode doctor` lists
-what the gateway has installed. See [`workflows.md`](workflows.md).
+A named agent bundle the run executes. Unless you pick one, the gateway's
+default agent workflow runs (the shipped `basic-agent` until the gateway's
+operator sets another). `--workflow <bundle[:flow]>` selects another, and
+`abstractcode doctor` lists what the gateway has installed. See
+[`workflows.md`](workflows.md).
+
+## Can I see the reply while the model writes it?
+
+Yes, when the gateway supports live replies. The **Stream replies** setting in
+the browser and `/stream` in the terminal choose Gateway default, On, or Off.
+The live text is a preview; the recorded reply replaces it when the model call
+completes. See [`web.md`](web.md#stream-replies) and the terminal
+[reference](../tui/docs/api.md#streamed-replies-stream).
+
+## Where are the files the agent writes?
+
+On the gateway host, in the run's workspace. The browser's **Files** tab and the
+terminal's `/files` command show its absolute path, the host it is on, and a
+preview of each file.
 
 ## Where are my settings stored?
 
@@ -699,9 +824,9 @@ what the gateway has installed. See [`workflows.md`](workflows.md).
   `abstractcode login`
 - `~/.abstractcode/prefs.json` — theme, model, workflow, last session
 
-`ABSTRACTCODE_PREFS_FILE` relocates the second. A build older than the rename
-wrote `~/.abstractcode-tui/prefs.json`; that file is read once and saved
-forward.
+`ABSTRACTCODE_PREFS_FILE` relocates the second. An existing
+`~/.abstractcode-tui/prefs.json` is read once and saved forward to the current
+path.
 
 ## Can I run it without an interface?
 
@@ -803,7 +928,45 @@ abstractcode --resume
 
 **The workflow is not found.**
 The bundle is not installed on that gateway. `doctor` lists what is available.
-The default is `coding-agent:coder`, which ships with the gateway.
+Pick one that is, or use the gateway default (`--workflow default`, or
+**Gateway default** at the top of the workflow list). A headless `exec` whose
+saved workflow is gone exits with code 2 rather than running another agent.
+
+**"no default agent workflow".**
+You have not picked a workflow and the gateway has no usable default for
+`abstractcode.agent.v1`; the message quotes the gateway's reason when it gives
+one. Pick a workflow from the list (or `--workflow bundle:flow`), or ask the
+gateway's operator to set its default agent workflow. The browser shows "gateway
+does not report a default agent workflow" when the gateway's workflow list
+carries no default at all; update AbstractGateway to get the **Gateway
+default** entry.
+
+**Replies appear only when they are complete.**
+Streaming is off for this run, or the gateway does not support live replies.
+Check the **Stream replies** setting (browser) or `/stream` (terminal). When the
+gateway does not advertise live replies, the setting is shown disabled with the
+reason, and a saved On adds one note to the conversation. A one-line
+"unavailable" note on a single model call means the gateway ran that call
+without streaming (for example, a call that must return structured output); the
+reply still arrives when the call completes. See [`web.md`](web.md#stream-replies).
+
+## Workspace files
+
+**The Files tab or `/files` reports HTTP 404.**
+The gateway does not offer workspace browsing. Update AbstractGateway; the run
+itself is unaffected.
+
+**There is no Open folder button, or `o` does nothing.**
+Opening the folder happens on the gateway's machine, so it is offered only when
+the gateway says you are on that machine and allows it (the open action is
+admin-only). Otherwise the client shows the absolute path with "on the gateway
+host <name>" and a copy action.
+
+**The browser client answers HTTP 400 "Cannot determine the client address of
+this connection".**
+The app server could not read the address of the incoming connection, which it
+must forward to the gateway. Connect to the app server directly or through a
+reverse proxy that opens a normal TCP connection to it.
 
 ## Terminal
 
@@ -847,9 +1010,9 @@ config points at another checkout instead of the published package.
 
 **Your theme or model choice did not persist.**
 Preferences live in `~/.abstractcode/prefs.json`. Set
-`ABSTRACTCODE_PREFS_FILE` to relocate it. If you used an earlier build that
-wrote `~/.abstractcode-tui/prefs.json`, that file is read once and saved
-forward to the current path.
+`ABSTRACTCODE_PREFS_FILE` to relocate it. An existing
+`~/.abstractcode-tui/prefs.json` is read once and saved forward to the current
+path.
 
 
 ==============================================================================
@@ -867,9 +1030,9 @@ shape first.
 | Page | What it covers |
 |---|---|
 | [`getting-started.md`](getting-started.md) | Running a gateway, installing either client, credentials, your first run |
-| [`architecture.md`](architecture.md) | The two clients, the gateway, and the thin-client contract that binds them |
+| [`architecture.md`](architecture.md) | The two clients, the browser app server, the gateway, the run stream with live replies, and the thin-client contract |
 | [`api.md`](api.md) | The gateway surface both clients speak, and the integration points |
-| [`workflows.md`](workflows.md) | Agent workflow bundles and how a run selects one |
+| [`workflows.md`](workflows.md) | Agent workflow bundles, the gateway default, and how a run selects one |
 | [`ui_events.md`](ui_events.md) | The workflow-driven interface event contract |
 | [`faq.md`](faq.md) | Recurring questions and known limitations |
 | [`troubleshooting.md`](troubleshooting.md) | Symptom-oriented diagnosis and fixes |
@@ -878,8 +1041,8 @@ shape first.
 
 | Page | What it covers |
 |---|---|
-| [`web.md`](web.md) | Workflow chat, inputs, approvals, workspaces, reusable components, and optional voice |
-| [`deployment-web.md`](deployment-web.md) | Hosting it, and the gateway-first deployment model |
+| [`web.md`](web.md) | Workflow selection, conversation files, Stream replies, settings, approvals, workspaces, reusable components, and optional voice |
+| [`deployment-web.md`](deployment-web.md) | Hosting it, reverse proxies, forwarded addresses, and the gateway-first deployment model |
 | [`deployment-iphone.md`](deployment-iphone.md) | Safari and progressive web app notes |
 
 ## The terminal client
@@ -890,10 +1053,11 @@ The terminal client keeps its reference documentation beside its source:
 |---|---|
 | [`../tui/README.md`](../tui/README.md) | Features, interface tour, keys, themes |
 | [`../tui/docs/getting-started.md`](../tui/docs/getting-started.md) | Terminal-specific setup |
-| [`../tui/docs/api.md`](../tui/docs/api.md) | Command-line surface and library entry points |
-| [`../tui/docs/architecture.md`](../tui/docs/architecture.md) | How the client is built on AbstractTUI |
+| [`../tui/docs/api.md`](../tui/docs/api.md) | Command-line options, slash commands, keys, streamed replies, and exit codes |
+| [`../tui/docs/architecture.md`](../tui/docs/architecture.md) | How the client is built on AbstractTUI: threads, the ledger fold, live replies |
 | [`../tui/docs/troubleshooting.md`](../tui/docs/troubleshooting.md) | Terminal, rendering, and connection problems |
 | [`../tui/docs/faq.md`](../tui/docs/faq.md) | Terminal client questions |
+| [`../tui/docs/orchestration-cards.md`](../tui/docs/orchestration-cards.md) | The coding workflows you can pass to `--workflow`, and when to choose each |
 
 ## Machine-readable indexes
 
@@ -915,7 +1079,7 @@ Start with [getting started](getting-started.md). For hosting and authentication
 ## Working in the interface
 
 - **Conversations** restores gateway sessions and history. Search by conversation text or session ID; load more to browse older runs.
-- **Workflow** chooses what runs your next turn. The first entry, **Gateway default → name @version**, follows the default coding agent your gateway's operator set; if they change it, your next new turn uses the new one. Below it are the coding agents published on your gateway; tick **Show all workflows** to list schema-driven workflows too. Your choice is remembered in this browser for your account. After you send, the toolbar shows which workflow the gateway actually started (for example "running Coder @0.1.0 (gateway default)"). A conversation whose last run came from the gateway default keeps following it on every turn, on any device (so a change on the gateway applies to its next turn); a conversation started with a specific workflow keeps that workflow. If the list says "gateway does not report a default agent workflow", your gateway is older than this feature: pick a workflow from the list.
+- **Workflow** chooses what runs your next turn. The first entry, **Gateway default → name @version**, follows the default coding agent your gateway's operator set; if they change it, your next new turn uses the new one. Below it are the coding agents published on your gateway; tick **Show all workflows** to list schema-driven workflows too. Your choice is remembered in this browser for your account. After you send, the toolbar shows which workflow the gateway actually started (for example "running Coder @0.1.0 (gateway default)"). A conversation whose last run came from the gateway default keeps following it on every turn, on any device (so a change on the gateway applies to its next turn); a conversation started with a specific workflow keeps that workflow. If the list says "gateway does not report a default agent workflow", the gateway does not provide a default: pick a workflow from the list, or update AbstractGateway. When the gateway's default does not declare the coding-agent interface, the list says so instead of using it. See [workflows](workflows.md#the-gateway-default).
 - **Inputs** presents the registered input schema. Use JSON input mode for nested or custom input objects. The gateway validates submitted values.
 - **Settings** contains model, reasoning, MTP depth, tool policy, workspace requests, and gateway skills for agent workflows. Unset options preserve workflow defaults. When the gateway offers no skills, the Skills tab shows the gateway's own explanation and where its skill shelf is.
 - **Files** shows this conversation's workspace: the folder on the gateway where the agent reads and writes. The header gives its full path with a copy button; when your browser is not on the gateway's machine it adds "on the gateway host <name>", and when it is, **Open folder** opens the folder there. Browse folders with sizes and dates, refresh after a turn, and select a file to preview it: Markdown, JSON, images, other text, and HTML as source; other files offer a download. Text previews show at most the first 1 MiB and say so. Markdown previews show only images stored in the workspace; other images appear as links. A note says when the gateway listed only part of a large folder. **Attach to conversation** adds the selected file to your next message. Gateway admins also get **Shared workspace (admin)**, the operator's shared folder, where clicking a file attaches it. Agents accept attachment references; generic workflows must declare an `attachments` array input.
@@ -994,9 +1158,9 @@ The app shell lives in `web/src/workspace/`. The reusable conversation view, wai
 
 The terminal and browser share the gateway contract, not identical interfaces. Terminal slash commands, specialized memory/operator panels, and headless workflows remain terminal-specific. Voice depends on the gateway and browser. There is no offline execution mode.
 
-## Current parity limits
+## Differences from the terminal client
 
-The redesigned web client is not a complete port of every Rust control. It does not yet expose review/verifier rounds, gating or prompt-cache settings, dedicated goal/entity-memory views, or GPU/resource/cache administration. Registered workflows can still implement those behaviors, but their generic input and activity surfaces are not substitutes for the specialized terminal controls.
+The browser client does not offer every terminal control. It does not expose review/verifier rounds, gating or prompt-cache settings, dedicated goal/entity-memory views, or GPU/resource/cache administration. Registered workflows can still implement those behaviors, but their generic input and activity surfaces are not substitutes for the specialized terminal controls.
 
 Project instructions are not automatically read from the browser's local filesystem. Agent workflows can receive additional instructions manually; any automatic workspace discovery must happen through authorized gateway execution. Transcript export is Markdown, not the terminal's detailed/SFT JSONL export. Attachments support upload, removal, and download, but not the terminal's local-path browser. Tool permissions offer explicit per-tool choices rather than tier shortcuts. The prompt queue is not durable across reloads.
 
@@ -1040,7 +1204,7 @@ ABSTRACTCODE_GATEWAY_URL=http://127.0.0.1:8080 HOST=127.0.0.1 npm start
 
 Put the packaged server behind your HTTPS reverse proxy. Forward the whole application, including `/api/connection/gateway` and `/api/gateway/*`; a static file host or direct gateway API proxy alone does not implement the session exchange. Allow long-lived streaming responses and disable buffering for ledger SSE.
 
-Set `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` only when the proxy strips untrusted forwarded headers and sets `X-Forwarded-Host` and `X-Forwarded-Proto` itself. These determine browser-origin validation and secure-cookie behavior. The server always sets `X-Forwarded-For` to the address of the connection it received (it never forwards a browser- or proxy-supplied value), so the gateway can tell whether a browser sits on its own machine before offering **Open folder**. Pin `ABSTRACTCODE_GATEWAY_URL` on the server. Browser-to-gateway CORS access is not needed.
+Set `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` only when the proxy strips untrusted forwarded headers and sets `X-Forwarded-Host` and `X-Forwarded-Proto` itself. These determine browser-origin validation and secure-cookie behavior. The server always sets `X-Forwarded-For` to the address of the connection it received (it never forwards a browser- or proxy-supplied `X-Forwarded-For`, `Forwarded` or `X-Real-IP` value) and marks each gateway request with `X-AbstractFramework-App-Proxy: code`, so the gateway can tell whether a browser sits on its own machine before offering **Open folder**. Behind a reverse proxy, that address is the proxy's own: when the reverse proxy runs on the gateway's machine, every browser reaching it looks local to the gateway. A connection whose address cannot be determined is refused with HTTP 400. Pin `ABSTRACTCODE_GATEWAY_URL` on the server. Browser-to-gateway CORS access is not needed.
 
 Browser-supplied destination changes are limited to loopback peers using a loopback hostname, unless `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` explicitly enables remote configuration. With trusted proxy headers enabled, the server destination remains authoritative unless that opt-in is set. Do not enable remote reconfiguration on a publicly accessible app without your own access controls. Cross-origin mutation attempts are rejected before gateway egress.
 
@@ -1065,25 +1229,27 @@ Related:
 
 ## Prerequisites
 
-- A reachable HTTPS endpoint for AbstractGateway (recommended: reverse proxy + TLS).
-- The AbstractCode Web static site hosted over HTTPS.
-- Gateway configured with:
-  - Gateway user auth for hosted access
-  - `ABSTRACTGATEWAY_ALLOWED_ORIGINS` including your web host origin (exact host recommended for prod).
+- The AbstractCode Web application server (`npx @abstractframework/code` or
+  `npm start`) reachable over HTTPS, typically behind a reverse proxy with TLS.
+  Serve the whole application, not only its static files: the session
+  exchange runs in that server. See [web deployment](deployment-web.md).
+- An AbstractGateway the application server can reach, with gateway user
+  authentication and a user/token for you. The browser talks only to the
+  application server, so the gateway needs no CORS entry for it.
 
 ## Steps
 
 1) Open the AbstractCode Web URL in Safari.
-2) Go to `Settings`:
-   - set `Gateway URL` to your gateway URL (e.g. `https://gateway.example.com`)
-   - set `Gateway user` and that user's `Gateway token`
+2) Sign in with your `Gateway user` and that user's `Gateway token`. The
+   Gateway URL is the one configured on the application server
+   (`ABSTRACTCODE_GATEWAY_URL`).
 3) (Optional) Add to Home Screen:
    - Safari → Share → Add to Home Screen
 
 ## Notes / constraints
 
 - iOS aggressively suspends background tabs; long-running workflows should be designed to be resumable (ledger replay).
-- File access is always remote (via gateway); the phone does not run local tools in v1.
+- File access is always remote (through the gateway); the phone does not run local tools. The **Files** tab shows the conversation's workspace on the gateway host.
 - The Gateway token is exchanged for an app-scoped browser session and is not
   persisted in browser settings.
 - On non-local hosted UI hostnames, the server-configured Gateway URL is
@@ -1105,15 +1271,8 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.5.1** (adds native-MTP request controls — `/mtp` and
-`--mtp` — to 0.5.0, the attachments + host-resources wave: file
-attachments with preview and drag & drop, the quit gate with durable
-pause/cancel delivery, `/conclude`, bloc history replay + `/history`,
-the reasoning dial, a launch animation, and `/resources` — the gateway
-host's memory, resident models and session caches, with model
-unload/lock and context-estimate actions and a footer `mem` meter — on
-top of 0.4.0's conclusion + presence wave: declared context meter,
-`/gpu`, `Ctrl+L`/`/redraw` screen recovery).
+Status: **0.5.1**, pre-alpha. Release history is in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## What it looks like
 
@@ -1326,6 +1485,7 @@ and does not print it a second time at the end.
 --stream <on|off|default>         stream replies (default: your /stream choice,
                                   else the gateway's setting; exec: the flag only)
 --workspace <PATH>                requested workspace root (see note)
+--mtp <DEPTH|off|inherit>         multi-token prediction request (default: /mtp)
 --theme <ID>                      start theme (ABSTRACTTUI_THEME works too)
 --animation <on|off>              launch animation (default: on) — SAVED, so
                                   `--animation off` once disables it for good
@@ -1335,8 +1495,10 @@ and does not print it a second time at the end.
 **Workspace note**: the gateway's server-managed workspace policy (the default
 posture) clamps client-provided paths — tools then execute in the gateway's
 workspace root or a managed per-session folder, and the app tells you so at
-startup. Set `ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1` on the gateway
-to honor client workspace roots (trusted/local setups).
+startup. To honor client workspace roots (trusted/local setups), the gateway's
+operator allows client workspace scope in the gateway console's workspace
+settings. A gateway on another machine is not sent your current folder
+(`/workspace send always` overrides this for a shared mount).
 
 ## How it relates to the browser client
 
@@ -1353,49 +1515,10 @@ can be approved there, and the reverse.
   fold, gateway contract
 - [docs/api.md](docs/api.md) — CLI options, slash commands, key bindings
 - [docs/faq.md](docs/faq.md) and [docs/troubleshooting.md](docs/troubleshooting.md)
+- [docs/orchestration-cards.md](docs/orchestration-cards.md) — the coding
+  workflows you can pass to `--workflow`
+- [CHANGELOG.md](CHANGELOG.md) — release history
 - Agent-oriented: [llms.txt](llms.txt)
-
-## Benchmark smoke mode
-
-`scripts/zelda_headless_bench.py` includes a smoke mode for checking the real
-selected benchmark client without running the full Zelda prompt. Set
-`ZELDA_BENCH_SMOKE` to an exact-answer prompt:
-
-```sh
-ZELDA_BENCH_SMOKE='Reply with exactly: smoke-ok' \
-ZELDA_BENCH_TIMEOUT_S=120 ZELDA_BENCH_MAX_ITER=3 \
-python3 scripts/zelda_headless_bench.py code-1
-```
-
-On success, stdout is exactly:
-
-```text
-smoke-ok
-```
-
-The smoke path still launches the selected child (`abstractcode` for `code-1`
-or the release `abstractcode` binary for `code-tui-1`). It exits 0 and
-prints the requested answer only when every selected run exits successfully
-and its captured final answer contains that value; otherwise it exits nonzero
-without printing a success value. As in full benchmark mode, run logs and
-reports are written under `untracked/zelda-bench/`.
-
-Controls:
-
-- Select lanes with `code-1`, `code-tui-1`, `code-2`, or `code-tui-2`; omit
-  lane arguments to run the four-step matrix.
-- `ZELDA_BENCH_CODE_LOOP` and `ZELDA_BENCH_CODE_AGENT` select the local
-  `abstractcode` loop and agent.
-- `ZELDA_BENCH_TUI_LOOP` selects a built-in TUI workflow mapping (`basic`,
-  `react`, `codeact`, `memact`, or `multi-coder`), while
-  `ZELDA_BENCH_TUI_WORKFLOW` overrides it with an explicit workflow reference.
-- `ZELDA_BENCH_PROVIDER`, `ZELDA_BENCH_MODEL`, `ZELDA_BENCH_BASE_URL`,
-  `ZELDA_BENCH_REASONING`, `ZELDA_BENCH_MAX_ITER`, and
-  `ZELDA_BENCH_TIMEOUT_S` configure the child run.
-- TUI benchmark lanes require `target/release/abstractcode`; build it with
-  `cargo build --release`. Gateway credentials come from
-  `~/.abstractcode/gateway.json`, falling back to `ABSTRACTGATEWAY_URL` and
-  `ABSTRACTGATEWAY_AUTH_TOKEN`.
 
 ## Repository structure
 
@@ -1403,9 +1526,10 @@ Controls:
   and TUI modules.
 - `tests/` — integration, replay, policy, and headless UI coverage.
 - `scripts/` — live checks and benchmark drivers, including
-  `zelda_headless_bench.py`.
+  `zelda_headless_bench.py` (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 - `docs/` — getting started, command/key reference, architecture,
-  troubleshooting, design notes, and reports.
+  troubleshooting, FAQ, orchestration cards; plus design notes, reports
+  and backlog for contributors.
 - `untracked/` — generated benchmark artifacts and logs; not application
   source.
 
@@ -1493,7 +1617,7 @@ rendered as markdown. When the agent wants to run a mutating tool
 arguments — press `a` to approve, `d` to deny. The run waits durably on the
 gateway until you answer.
 
-## The five things worth knowing on day one
+## What to know on day one
 
 1. **Type while it works to steer.** Anything you submit during a run is
    folded into the agent's next reasoning cycle as guidance. `Esc Esc`
@@ -1527,9 +1651,9 @@ gateway until you answer.
 4. **Where files land.** Under the gateway's default (server-managed)
    workspace policy, tools execute in the gateway's workspace root or a
    managed per-session folder — the app tells you this at startup. To make
-   the gateway honor client workspace paths (`--workspace`), set
-   `ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1` on the gateway
-   (trusted/local setups). `/files` shows the run's workspace — the full path,
+   the gateway honor client workspace paths (`--workspace`), its operator
+   allows client workspace scope in the gateway console's workspace
+   settings (trusted/local setups). `/files` shows the run's workspace — the full path,
    the machine it is on, and a preview of any file. When the gateway runs on
    another machine, the app does not send your local folder (it would name a
    path on the gateway host); the agent works in a gateway-side session
@@ -1592,7 +1716,10 @@ abstractcode exec "List the files in the workspace and summarize them" \
 ```
 
 Events print as they fold; the final answer prints under an `answer` rule.
-Exit codes: 0 completed, 1 failed, 124 timeout, 130 cancelled. Without a
+Exit codes: 0 completed, 1 failed, 2 usage/config error (including a saved
+workflow that is no longer on the gateway), 124 timeout, 130 cancelled.
+`--stream on` prints the reply as the model writes it, on lines starting `✎`,
+and does not print it again under the `answer` rule. Without a
 raised `--permissions` level, mutating tools are denied with an explanation
 the agent sees (it will finish as best it can without them);
 `--require-approval <names>` gates specific tools even at `all`. Ask-user
@@ -1678,14 +1805,14 @@ abstractcode --help | --version
 
 | Option | Meaning | Default |
 | --- | --- | --- |
-| `--gateway <URL>` | Gateway base URL | flag > env > login store > `http://127.0.0.1:8080` |
+| `--gateway <URL>` | Gateway base URL (`--gateway-url` too) | flag > env > login store > `http://127.0.0.1:8080` |
 | `--token <TOKEN>` | Bearer token | flag > env > login store |
 | `--session <ID>` | Durable session id | a fresh mint (`acode-<hex>`); `--resume`/`--continue` reopens the last one |
 | `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
 | `--reasoning <LEVEL>` | Reasoning effort: `none\|minimal\|low\|medium\|high\|xhigh\|auto` (also `--thinking`; validated at launch; works on `exec` too) | gateway default |
 | `--mtp <DEPTH\|off\|inherit>` | Native-MTP request override; an explicit depth must be honored by the execution host. Works on `exec` too | saved TUI choice, otherwise inherit; `exec` inherits unless the flag is supplied |
 | `--stream <on\|off\|default>` | Stream replies as the model writes them (`--streaming` too). Interactive: this launch only (`/stream` saves). `exec`: the flag alone decides, and `on` prints the reply to stdout live | saved `/stream` choice, else **gateway default**; `exec`: gateway default unless the flag is given |
-| `--workflow <bundle[:flow]\|default>` | Agent workflow; `default` = the gateway's default (the gateway resolves it at every run start) | your `/workflow` choice, else the gateway default; with neither, the app asks you to pick (`exec` exits 2 and lists the workflows) |
+| `--workflow <bundle[:flow]\|default>` | Agent workflow (`--agent` too); `default` = the gateway's default (the gateway resolves it at every run start) | your `/workflow` choice, else the gateway default; with neither, the app asks you to pick (`exec` exits 2 and lists the workflows) |
 | `--provider <NAME>` | Provider override | gateway defaults |
 | `--model <NAME>` | Model override | gateway defaults |
 | `--workspace <PATH>` | Requested workspace root (always sent when given) | current directory when the gateway is on this machine — the gateway's own verdict once a run has started, a loopback URL before that; none for a gateway on another machine (the agent works in a gateway-side session folder). `/workspace send auto\|always\|never` overrides (saved as `send_local_workspace`) |
@@ -1694,11 +1821,17 @@ abstractcode --help | --version
 | `--theme <ID>` | Start theme | `ABSTRACTTUI_THEME`, else saved pick |
 | `--animation <on\|off>` | Launch animation; **persisted** to `prefs.json` (`animation`). Also skipped when stdout is not a tty, `NO_COLOR`/`TERM=dumb` is set, or `ABSTRACTTUI_NO_SPLASH` is set | on |
 | `--max-iterations <N>` | Ask the server for a specific iteration budget | none — **this client sets no budget**. Absent the flag the server's own default applies (the same one every client gets); the hard ceiling is the runtime's, enforced at run start |
-| `--replay-turns <N>` | Prior turns replayed in full detail at boot (0 disables) | 20 |
+| `--replay-turns <N>` | Prior turns replayed in full detail at boot (0 disables; at most 100) | 5 |
 | `--permissions <level>` | tool permissions for the invocation: `read` \| `write` \| `all` | prefs level |
 | `--require-approval <t>` | gate these tools regardless of level (comma list, repeatable); exec denies them | — |
+| `--review` / `--no-review` | Verifier before conclude: before a tool-call-free response is accepted as final, a verifier re-reads the transcript and can send the agent back for more work (`/review` toggles in the app) | on |
+| `--review-rounds <N>` | Verifier round budget | 3 |
+| `--no-project-context` | Do not add the workspace `AGENTS.md` to the agent's system prompt | added |
+| `--max-tokens <N>` | Declare the model's context window for this session (`262144`, `262k`; `--context`, `--context-window` too) — see `/context` | undeclared |
+| `--attach <PATH>` | exec: upload a file before the run starts and attach it to the prompt (repeatable; exits 1 on failure) | — |
+| `--param <K=V>` | exec: extra `input_data` key for a workflow input pin (repeatable; numbers and booleans parse, else a string; client-owned keys such as `prompt` are refused) | — |
 | `--no-prompt-cache` | exec: opt the run out of the runtime prompt cache (`_runtime.prompt_cache=false`) | server truth (on) |
-| `--timeout <SECS>` | exec: overall deadline | 900 |
+| `--timeout <SECS>` | exec: wall-clock safeguard (`0` = none) | 7200 (2 h) |
 
 ### Environment
 
@@ -1723,13 +1856,15 @@ abstractcode --help | --version
 | `/help` | Command + key reference modal |
 | `/new` | Fresh session (new durable id, cleared view) |
 | `/theme [id]` | Live-preview theme picker, or set directly |
-| `/workflow` | Pick the agent workflow. First row: **Gateway default → name @version** — saved as "the gateway default", so the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran |
+| `/workflow` | Pick the agent workflow (`/agent` too). First row: **Gateway default → name @version** — saved as "the gateway default", so the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran |
 | `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` shows the workspace folder itself (never a sub-folder; never a folder that would be launched, such as `.app`) in your file manager, only when the gateway is on this machine and allows it; `r` refreshes |
 | `/workspace send [auto\|always\|never]` | Whether your folder is sent as the workspace: `auto` (default) = only when the gateway is on this machine; `always` = also to a gateway on another machine that sees the same path (a shared mount); `never`. Bare reports what is in force. Saved in `prefs.json` |
 | `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
-| `/model` | Pick provider + model from gateway discovery |
+| `/model` | Pick provider, then model, from gateway discovery, then the reasoning effort, then MTP (see below). `Esc` at a step keeps the current value |
 | `/mtp [depth\|off\|inherit]` | Native-MTP request policy (`/speculation` alias). Bare command opens a provider/model capability-driven picker; explicit values persist locally and ride `_runtime.speculation`. Inherit omits the override; Off sends `false`; a depth sends `native_mtp` with `require_acceleration=true` |
 | `/stream [on\|off\|default]` | "Stream replies" (`/streaming` alias). Bare opens the picker: **Gateway default** (names the gateway's current setting), **On**, **Off**. Saved in `prefs.json` as `stream_replies`; see "Streamed replies" below |
+| `/review [on\|off\|rounds N]` | The verifier the agent must pass before it may conclude (`/verify` too); same as `--review` / `--review-rounds` |
+| `/iterations [n\|off]` | Iteration budget requested for new runs (`_limits.max_iterations`; `/iters` too). Bare reports what is in force and where it came from; `off` takes the server's own. Applies to the next run; persisted |
 | `/tools` | Enable/disable gateway tools (`Space` toggles; checked set = the run's exact allowlist; untouched = workflow defaults). In-modal: `p` cycles a per-tool approval pin, `t` cycles the tier — see the modal keys below |
 | `/permissions [read\|write\|all]` | THE tool-permission surface (bare = report): batches classifying at-or-below the level auto-approve. `read` = proven read-only tools only; `write` adds workspace file mutations; `all` auto-approves everything, **including arbitrary shell and network egress** — deliberate use only. Per-tool `ask` pins and gateway-disabled tools still gate. Sticky per session (`/tools tier` remains a spelling alias) |
 | `/workspace` | Inspect + edit the filesystem scope tools may touch: root (from `--workspace`/cwd), access mode, allowed paths. Mode + paths persist and ride every run |
@@ -1745,8 +1880,8 @@ abstractcode --help | --version
 | `/gating [auto\|wait]` | Approval gating for gating-capable workflows (the multi-agent coder): `auto` runs unattended (skips the workflow's human-approval pauses), `wait` re-gates (the default). Selecting the coder also opens a gated/unattended choice. Rides `input_data.gating_mode`; tool approval is a SEPARATE axis (`/permissions`) |
 | `/reasoning [level]` | Reasoning effort for the current route (`none\|minimal\|low\|medium\|high\|xhigh\|auto`; `default` clears). Bare `/reasoning` opens the dial — also stage 3 of `/model`: pick provider, then model, then effort. Non-reasoning models show a locked `none` (set-anyway override available while capability provenance is unserved); the choice is pair-coupled — changing provider or model resets it. Rides the run as `_runtime.thinking` (absent = gateway default) |
 | `/export [md\|jsonl] [--details] [path]` | Export the agent transcript to a file: `md` (default) = archival markdown; `jsonl` = SFT training lines. `--details` adds reasoning + full tool cards. Bare `/export` auto-names in the cwd; never overwrites — see "Transcript export" below |
-| `/attach [path\|preview\|clear]` | Stage a file for your NEXT message (chips above the composer; uploaded at send as `context.attachments`; **session uploads are permanent** server-side). Accepts `~`, quotes, escaped spaces, `file://`, relative paths. Bare `/attach` opens the file browser (nothing staged) or the pending manager (chips staged); `preview [n\|path]` opens the file itself (text or PNG/JPEG — staged or not); `clear` discards. Dropping a file onto the terminal attaches directly — `Ctrl+O` undoes (chips out, path text back). Agent-lane only (v1) — see "Attachments" below |
-| `/auto` | Removed (the session blanket had latent holes) — opens the `/permissions` report teaching the replacement |
+| `/attach [path\|preview\|clear]` | Stage a file for your NEXT message (chips above the composer; uploaded at send as `context.attachments`; **session uploads are permanent** server-side). Accepts `~`, quotes, escaped spaces, `file://`, relative paths. Bare `/attach` opens the file browser (nothing staged) or the pending manager (chips staged); `preview [n\|path]` opens the file itself (text or PNG/JPEG — staged or not); `clear` discards. Dropping a file onto the terminal attaches directly — `Ctrl+O` undoes (chips out, path text back). Agent lane only — see "Attachments" below |
+| `/auto` | Opens the `/permissions` report; use `/permissions` to set the auto-approval level |
 | `/pause` | Pause the run tree durably on the gateway (stops at the next step boundary; survives quitting the client) |
 | `/resume` | Resume a paused run tree |
 | `/cancel` | Cancel the active run |
@@ -1755,6 +1890,8 @@ abstractcode --help | --version
 | `/queue [text]` | Queue a prompt (FIFO): auto-runs after the current run **succeeds**; halts on failure/cancel (explicit resume). Persists per session and restores **paused** — a restore never auto-starts. Bare `/queue` opens the manager (keys under "Modal keys" below). Agent-lane only: under entity focus the visit's held-draft lane is the queue |
 | `/goal [text\|stop]` | Start a goal run on a goal workflow (`abstractcode.goal.v1`): loops until verified done or `max_cycles` (prefs `goal_max_cycles`, default 8). Bare `/goal` shows status; `/goal stop` cancels durably. Ships dark until a goal bundle is published on the gateway |
 | `/context [n\|off]` | Declare the model's context window in tokens (`262144`, `262k`, `1m`) — the footer meter becomes `ctx used/window tk (%, declared)`, warn ≥75% / error ≥90%, and the declaration rides runs as `_limits.max_tokens`. Bare `/context` reports; `off` clears. Persisted (`context_window`); `--max-tokens` declares for one session. Source-labeled "declared" — never a client capability table |
+| `/gpu` | Toggle the gateway-host GPU meter in the footer |
+| `/stance [line\|figure\|off]` | How the turn is going, from mechanical facts (effort, calls, verify-shaped share of calls); floats bottom-right over the transcript, `Ctrl+G` folds it (`/conduct` too) |
 | `/redraw` | Force a full-screen repaint (`Ctrl+L`) — recovery from an external terminal clear (Cmd+K), which damage-tracked rendering cannot detect |
 | `@name [text]` | Talk with a summoned entity: bare `@name` opens (or focuses) a durable visit; `@name <text>` opens and sends the first turn. An unknown name never becomes an agent prompt — the draft is preserved with a roster hint. A partial `@na` opens a completion dropdown (cached roster); accepting inserts the name and the NEXT Enter submits |
 | `/entities [name]` | Entity roster + identity cards (opens instantly on the cached roster, refreshes async — the live fetch can be slow behind the gateway's drives fold). `[name]` deep-links to that card |
@@ -1817,7 +1954,7 @@ The setting: **Gateway default** sends nothing, so the gateway's own
 `agents.streaming_default` applies. **Off** always sends
 `input_data._runtime.stream: false` — your "off" is never left to the
 gateway's default. **On** sends `true` only to a gateway that advertises
-`streaming.deltas`: an older gateway would accept it but stream the provider
+`streaming.deltas`: a gateway without live replies would accept it but stream the provider
 call internally with nothing to show for it, so the app sends nothing, the
 header says "stream on (gateway has no live replies)", and the transcript
 says "this gateway does not support streaming" once per session.
@@ -1837,7 +1974,7 @@ Bare `/export` writes markdown, auto-named
 directory. The format word wins over the path's extension; a conflict
 (`/export md out.jsonl`) refuses. A known extension alone infers the
 format. `--details` is the export's own flag — the `Ctrl+D` view toggle
-never changes the output. v1 exports the **agent-lane** transcript
+never changes the output. `/export` writes the **agent-lane** transcript
 (entity visits are separate conversations).
 
 - **Markdown** (archival): a header (session, workflow, timestamp, item
@@ -1924,7 +2061,7 @@ need a vision-capable route, other binaries are listable-not-readable
 - **Boundaries**: session uploads are PERMANENT server-side (the
   session's attachment index has no delete surface). `/new` and session
   switches discard pending chips with a notice. Chips never ride
-  steers, `/queue` drains, or `/goal` runs; entity lanes refuse (v1).
+  steers, `/queue` drains, or `/goal` runs; entity lanes refuse.
 - **Headless**: `exec --attach <path>` (repeatable) uploads before the
   run starts and exits 1 on any failure — nothing spent.
 
@@ -1941,9 +2078,8 @@ relaunch continues it), **cancel it, then quit** (`c`). `Esc` stays.
 Honesty mechanics: pause/cancel quit only after the gateway ACCEPTS the
 durable command (up to 8s) — a failure shows an honest state offering
 quit-anyway/stay instead of pretending delivery. Repeat quit gestures
-always resolve to the safe verb (leave), so hammering `Ctrl+C`×3 /
-`Ctrl+Q`×2 exits at worst one press slower than before — and cancel is
-never reachable by repetition. A run concluding while the modal is open
+always resolve to the safe verb (leave): `Ctrl+C`×3 or `Ctrl+Q`×2 leaves
+the run going and quits, and cancel is never reachable by repetition. A run concluding while the modal is open
 auto-quits (queued prompts are held back and restore paused next
 launch). Entity visits never gate — visits park on quit by design;
 reopening resumes them. Honest limit: closing the terminal window
@@ -1967,6 +2103,7 @@ recovers it.
 | `Ctrl+D` | anywhere | Toggle detail view (thinking + tool results vs answers only) |
 | `Alt+E` | anywhere | Cycle conversation focus: agent → entity visit 1 → … → agent. Cycle order is the order conversations were opened — it never changes with how the header paints chips. Option+E on macOS with "Option as Meta/Esc+"; `/focus <name\|agent>` needs no modifier setting. (`Ctrl+E` is move-to-line-end in the composer) |
 | `Ctrl+T` | anywhere | Cycle theme |
+| `Ctrl+G` | anywhere | Fold / unfold the `/stance` panel |
 | `Ctrl+L` | anywhere | Force a full-screen repaint (`/redraw`) — recovers from a terminal clear |
 | `Ctrl+O` | while a drop's chips are still pending | Undo the newest file drop: chips out, the pasted path text back in the composer. Expires once the chips ride a run or are removed |
 | `?` + Enter | empty composer | Open the keys + commands reference (the footer's `? keys + commands`) |
@@ -1986,6 +2123,8 @@ recovers it.
 | --- | --- |
 | approval | `a` approve · `A` approve all (sets permissions: `all`, sticky per session) · `d` deny · `f` toggle full JSON of the calls · `Esc` defer (the run keeps waiting; Enter on the empty composer reopens) |
 | ask (agent question) | `Enter` send the answer · `Esc` keeps the run waiting |
+| `/review [on\|off\|rounds N]` | The verifier the agent must pass before it may conclude (`/verify` too); same as `--review` / `--review-rounds` |
+| `/iterations [n\|off]` | Iteration budget requested for new runs (`_limits.max_iterations`; `/iters` too). Bare reports what is in force and where it came from; `off` takes the server's own. Applies to the next run; persisted |
 | `/tools` | `Space` toggle · `a` all on · `n` all off · `p` cycle the per-tool pin (none → auto → ask → none; a pin beats the tier both ways) · `t` cycle the approval tier (read → write → all, persisted) · `Enter`/`Esc` close |
 | `/queue` | `↑↓` select · `x` remove · `u`/`d` move up/down · `c` clear all · `r` resume a paused queue · `e` pop the prompt into the composer for editing · `Enter`/`Esc` close |
 | chips row | click a staged file's name to preview it · click its `×` to unstage it |
@@ -2028,7 +2167,7 @@ and thinking gists; full shows args, result bodies, and the labeled
 reasoning channel. Thinking and every called tool stay visible in BOTH
 states.
 
-**`/details full` truncates nothing** (2026-08-20). *Every* body renders
+**`/details full` truncates nothing.** *Every* body renders
 whole: your own prompts and steers, tool arguments, result bodies, tool
 errors, thinking and its reasoning channel, error and info notices,
 memory-probe digests, and an image's fetch error. No row cap, no
@@ -2058,11 +2197,8 @@ entries, tools ran); the full memory digests sit behind the details toggle
 AbstractCode's TUI is a **thin host**. The gateway is the single place run
 semantics live, because the same session is meant to be watched from
 AbstractObserver, a web client, or a chat bridge, and all of them must show the
-same answer to "did it finish, and what do I do about it?" A host that derives
-that answer locally has to be kept in sync with every other host by hand — and
-this one already got it wrong once, reading `outcome: "iteration_budget"` alone
-while the additive `conclusion_forced` sat beside it, telling operators to
-raise a budget that still had 38 of its 50 iterations unspent.
+same answer to "did it finish, and what do I do about it?" A verdict derived
+locally by each host would drift between hosts.
 
 So the loop's terminal node authors the verdict and this client renders it:
 
@@ -2075,11 +2211,11 @@ So the loop's terminal node authors the verdict and this client renders it:
 | `stop_reason.budget_exhausted` | agent loop | whether the iterations were actually SPENT — false for a stuck-loop stop; carried so no host re-derives the cause |
 | `notices[].{code,severity,text}` | agent loop | `text` printed verbatim; `severity` picks the ink (`error` renders as an error line, anything else as info); `code` is the stable key |
 
-**Legacy engines** (before this contract) send no `stop_reason`. The host then
+**Engines without this contract** send no `stop_reason`. The host then
 reports the bare fact — "the agent STOPPED, it did not finish" — and says
 explicitly that the engine reported no reason. It does not guess one: an
 exhausted budget and a stuck-loop stop both arrive as
-`outcome: "iteration_budget"`, and inventing the difference is the bug above.
+`outcome: "iteration_budget"`, and only the engine can tell them apart.
 
 ## Status surfaces
 
@@ -2176,7 +2312,7 @@ those.
 
 - **It is `exec`-only.** The interactive client always takes the server default.
 - **It does not reach flow-graph bundles.** `coding-agent`, `basic-agent` and
-  `multiagent-coding` — including the default workflow — run their agent loop in
+  `multiagent-coding` — `basic-agent` is the gateway's shipped default — run their agent loop in
   an Agent-node child run. The visual-flow compiler builds that child's
   `_runtime` namespace from an explicit inheritance list: provider, model,
   thinking, audio policy, transcription language, skills block and
@@ -2238,7 +2374,7 @@ flowchart LR
   subgraph terminal [abstractcode process]
     UI[UI thread<br/>AbstractTUI app<br/>signals + views]
     W[gateway-runner thread<br/>owns all HTTP]
-    S1[ledger stream thread<br/>root run SSE]
+    S1[ledger stream thread<br/>root run SSE<br/>+ live reply deltas]
     S2[ledger stream threads<br/>subruns SSE]
   end
   subgraph gw [AbstractGateway]
@@ -2250,8 +2386,8 @@ flowchart LR
   W -- "WakeHandle::post closures" --> UI
   S1 -- "record batches (post)" --> UI
   S2 -- "record batches (post)" --> UI
-  W -- "runs/start · commands · discovery" --> API
-  S1 -- "GET ledger/stream (SSE)" --> API
+  W -- "runs/start · commands · discovery<br/>workspace files · about" --> API
+  S1 -- "GET ledger/stream (SSE)<br/>step + llm.delta frames" --> API
   S2 -- "GET ledger/stream (SSE)" --> API
   API --- RUNS
   RUNS --- AGENT
@@ -2322,8 +2458,44 @@ Properties that carry the correctness weight:
 4. on `done` (root only), reads the final status and reports the terminal
    state.
 
-The `exec` subcommand uses the polling path exclusively, so both transports
-stay exercised.
+The `exec` subcommand reads the transcript through the polling path, so both
+transports stay exercised. With `exec --stream on` it also opens the root
+run's SSE stream, for live reply frames only.
+
+## Live replies
+
+When the gateway advertises `streaming: {"deltas": true}` in
+`GET /discovery/capabilities` and the run asked to stream
+(`input_data._runtime.stream`), the root run's SSE stream also carries
+`llm.delta` and `llm.delta_end` frames. They have no `id:` line: they are not
+ledger records and never move the resume cursor.
+
+```mermaid
+flowchart TD
+  F["SSE frame on the root stream"] --> K{"event"}
+  K -- "step (id: cursor)" --> FOLD["ledger fold"]
+  K -- "llm.delta" --> LIVE["live reply state<br/>src/live.rs"]
+  K -- "llm.delta_end" --> LIVE
+  LIVE --> B["live bubble under the transcript<br/>reply · node / sub-agent · node"]
+  FOLD -- "llm_call step recorded<br/>(step_id = call_id)" --> X["bubble removed,<br/>recorded reply shown"]
+  FOLD -- "final answer" --> Y["every bubble removed"]
+  R["reconnect"] --> D["drop every bubble, then<br/>gateway snapshot frames rebuild open calls"]
+```
+
+- The client takes live frames from the turn's ROOT run stream only; the
+  gateway also sends a child run's frames there, and the bubble is captioned
+  "sub-agent · <node>".
+- `content` text grows in the bubble; `reasoning` text appears only as one
+  collapsed "∴ thinking" line and never joins the reply.
+- A call whose recorded step the fold already holds never gets a bubble, and
+  nothing streams back after the final answer.
+- A malformed frame is reported once per stream and skipped; the stream keeps
+  going.
+
+The **Stream replies** preference (`src/streaming.rs`) decides what the run
+asks for: nothing for Gateway default, `false` for Off, and `true` for On only
+when the gateway advertises live replies. See
+[api.md](api.md#streamed-replies-stream).
 
 ## Sessions and steering
 
@@ -2352,6 +2524,13 @@ stay exercised.
 | `src/gateway/` | Blocking HTTP client (ureq), SSE parser, stream loop. |
 | `src/protocol.rs` | Pure extraction over ledger records (waits, tools, usage, output). |
 | `src/transcript.rs` | The fold: records → items, stats, pending waits; dedup sets; bounds. |
+| `src/live.rs` | Live reply state from `llm.delta` / `llm.delta_end` frames, and the `exec` printer. |
+| `src/streaming.rs` | The Stream replies preference and what it sends. |
+| `src/discovery.rs` | Pure readers of catalog and discovery payloads, including the gateway default workflow. |
+| `src/run_input.rs` | Builds a run's `input_data`. |
+| `src/workspace_files.rs` | A run's workspace on the gateway host: location, listing, same-machine rules. |
+| `src/preview.rs` | File previews (text, images) for attachments and `/files`. |
+| `src/identity.rs` | The About screen's facts, from the vendored AbstractFramework descriptor. |
 | `src/runner.rs` | Worker thread: commands, per-run stream threads, terminal detection. |
 | `src/store.rs` | The signal store (UI-thread owned). |
 | `src/ui/` | AbstractTUI views: chrome, transcript pane, modals. |
@@ -2371,21 +2550,17 @@ stay exercised.
   controlling pty against a live gateway: boot → prompt → approval modal →
   `a` → answer → clean Ctrl+C exit, with filesystem proof of the tool write.
 
-## Honest limits
+## Known limits
 
-- Attachments (`@file`) are not implemented in this client yet.
 - Right after a drag-selection, a leading `c` or a bare Enter is consumed
-  by the engine's selection layer as a copy key (the region stays visible
-  after the release-copy); any other keystroke clears it. Engine-side fix
-  filed (abstracttui backlog 0290).
+  as a copy key while the selected region is still visible; any other
+  keystroke clears it.
 - The `/` completion dropdown can land on the status-bar row when it has
   only 1–2 candidates and the composer sits at the bottom of a short
-  terminal (engine placement policy; filed as abstracttui backlog 0294).
-  It is transient and clears as you type.
-- Markdown tables render as plain text lines (an AbstractTUI MarkdownView
-  limit today).
-- Images render as unicode mosaic through the transcript (pixel-protocol
-  placement for kitty/iTerm2 is an engine capability not yet wired here).
+  terminal. It is transient and clears as you type.
+- Markdown tables render as plain text lines.
+- Images render as unicode mosaic in the transcript; pixel-protocol
+  placement (kitty, iTerm2) is not used.
 - Windows is unverified for this crate end-to-end.
 
 
@@ -2452,8 +2627,31 @@ agent runs is the gateway's setting or your choice.
 
 ## `/files` says "the gateway refused — HTTP 404"
 
-The gateway predates workspace browsing. Update AbstractGateway; nothing is
-wrong with the run.
+The gateway does not offer workspace browsing. Update AbstractGateway; nothing
+is wrong with the run.
+
+## `o` in `/files` does not open the folder
+
+Opening happens on the gateway's machine, so `o` works only when the gateway
+says this terminal is on its machine and allows it (the open action is
+admin-only). It opens the workspace folder itself, never a browsed sub-folder.
+Otherwise use `c` to copy the path, which is shown with the gateway host's name.
+
+## The agent does not work in my current folder
+
+With a gateway on another machine, the app does not send your local folder as
+the workspace: that path would name a folder on the gateway host. The agent
+works in a gateway-side session folder, and a notice says so once. Whether the
+gateway is on this machine is the gateway's own verdict after your first run
+(before that, a loopback URL counts as this machine). If the gateway sees the
+same path through a shared mount, run `/workspace send always`; to name a
+folder on the gateway host, pass `--workspace <path>`.
+
+## `exec` exits 2 naming a saved workflow
+
+The workflow saved by `/workflow` is no longer on the gateway, and `exec`
+refuses to run a different agent in its place. Pass `--workflow default` for
+the gateway default, or `--workflow bundle:flow` for another one.
 
 ## The run starts, then an error names an LLM provider failure
 
@@ -2466,7 +2664,7 @@ switch models and start over.
 
 Server-managed workspace policy (the startup notice says so): the gateway
 clamps client paths and tools execute in its managed workspace. See the
-workspace note in [getting-started.md](getting-started.md#the-five-things-worth-knowing-on-day-one).
+workspace note in [getting-started.md](getting-started.md#what-to-know-on-day-one).
 
 ## Red "Path escapes workspace_root: '…'" errors in the transcript
 
@@ -2480,7 +2678,8 @@ the task genuinely needs a directory the run was not granted.
 To inspect or extend the scope, use `/workspace`:
 
 - **root** — where relative paths anchor (`--workspace <PATH>` at launch;
-  defaults to the directory you launched from).
+  defaults to the directory you launched from when the gateway is on this
+  machine; see `/workspace send`).
 - **access mode** — `workspace_only` (root only), `workspace_or_allowed`
   (root + your allowed paths), `all_except_ignored` (any absolute path —
   the gateway only honors it when it trusts client scope). Default:
@@ -2492,9 +2691,9 @@ Mode + allowed paths persist in `~/.abstractcode/prefs.json`
 (`workspace_mode`, `workspace_allowed`), which headless `exec` reads too
 — configure once, applies everywhere.
 
-Honesty note: the GATEWAY enforces the policy server-side. Unless the
-operator enabled client scope overrides
-(`ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1`, or local tool mode),
+The GATEWAY enforces the policy server-side. Unless the operator allowed
+client workspace scope (the gateway console's workspace settings, or local
+tool mode),
 client-sent paths are clamped to operator-controlled roots — adding a
 path in `/workspace` widens what the CLIENT asks for, and the server may
 still refuse it.
@@ -2515,8 +2714,8 @@ level. `/permissions <read|write|all>` sets it (sticky per session):
 Per-tool pins live in prefs.json under `tool_approval.overrides`
 (`{"fetch_url": "auto", "read_file": "ask"}`). The approval modal's
 second line shows both sides ("permissions: write — this batch needs:
-all"), so a prompt always names why it exists. The old `/auto` session
-blanket is removed — its spellings open the `/permissions` report.
+all"), so a prompt always names why it exists. `/auto` opens the
+`/permissions` report.
 
 ## An approval modal answered elsewhere is stuck on screen
 
@@ -2559,7 +2758,7 @@ terminal/font configured for narrow ambiguous width (the norm), and check
 The header says "stream on (gateway has no live replies)" and the transcript
 says "this gateway does not support streaming" (once per session): the
 gateway does not advertise `streaming.deltas` in `GET /discovery/capabilities`
-(an older gateway, or one without the feature). The app then does not ask it
+(it does not offer live replies). The app then does not ask it
 to stream — answers appear when each call completes. "(gateway not checked yet)" means the
 capabilities have not loaded; they load at startup, so a reconnect usually
 settles it.
@@ -2580,15 +2779,6 @@ The run outlived `--timeout`. The run itself stays durable on the gateway —
 the timeout message names the run id; reattach in the TUI with the same
 session or inspect it through the gateway's own surfaces.
 
-## Live smoke for a full-stack check
-
-```sh
-ACODE_GATEWAY_TOKEN=<token> python3 scripts/pty_live_smoke.py
-```
-
-Boots the real binary under a pty against your gateway, drives a prompt →
-approval → answer round trip, and verifies a clean exit.
-
 
 ==============================================================================
 # FILE: tui/docs/faq.md
@@ -2608,9 +2798,10 @@ come back to the state you left: prior turns replay IN FULL DETAIL from
 their run ledgers (prompts, reasoning cycles, tool cards, answers — through
 the same fold as live streaming, so the details toggle applies), a live run
 reattaches with its original prompt and full activity, and pending
-approvals re-surface. Replay depth defaults to the last 20 turns
-(`--replay-turns N` raises it, `0` disables) because each turn costs one
-history-bundle fetch carrying its complete run-tree ledgers.
+approvals re-surface. Boot replays the last 5 turns (`--replay-turns N`
+changes it, `0` disables) because each turn costs one history-bundle fetch
+carrying its complete run-tree ledgers; `/history`, or scrolling to the top of
+the transcript, loads earlier turns.
 
 **Can I pause a run?**
 Yes — `/pause` pauses the whole run tree durably on the gateway (it stops
@@ -2622,8 +2813,11 @@ including after a restart.
 On the gateway host, under its workspace policy. The default posture is
 server-managed: client-supplied paths are clamped to the gateway's workspace
 root or a managed per-session folder, and the app says so at startup. For
-trusted local setups, start the gateway with
-`ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1` and pass `--workspace`.
+trusted local setups, the gateway's operator allows client workspace scope in
+the gateway console's workspace settings, and you pass `--workspace`.
+`/files` shows the run's workspace: its absolute path, the host it is on, and
+a preview of each file. A gateway on another machine is not sent your local
+folder unless you run `/workspace send always`.
 
 **How does conversation memory work?**
 Two layers. Live, the client carries the visible conversation (completed
@@ -2657,8 +2851,8 @@ and the derived split still tells you what a cache could save.
 `exec --no-prompt-cache` opts a headless run out, which is enough to A/B one
 gateway against itself. It is `exec`-only, and it reaches the model calls of the
 run it starts — so pair it with `--workflow react-agent:react`. Flow-graph
-bundles (`coding-agent`, `basic-agent`, `multiagent-coding`, and the default
-workflow) run their agent loop in a child run that does not inherit the posture,
+bundles (`coding-agent`, `basic-agent` — the gateway's shipped default — and
+`multiagent-coding`) run their agent loop in a child run that does not inherit the posture,
 so they cannot be A/B'd from the client. Confirm the lane you actually got from
 the run ledger, not from the flag. See
 [Caching and context](api.md#caching-and-context) for the full scope and what to
@@ -2699,8 +2893,14 @@ terminal offers with `abstractcode --caps`.
 
 **Where are my settings?**
 Connection: `~/.abstractcode/gateway.json`.
-Preferences (theme, workflow, route, session, tool/skill selections, recent
-sessions): `~/.abstractcode/prefs.json`.
+Preferences (theme, workflow, route, reasoning, MTP, Stream replies,
+`send_local_workspace`, session, tool/skill selections, recent sessions):
+`~/.abstractcode/prefs.json`.
+
+**Why does the workflow in the header end with "(gateway default)"?**
+You have not pinned a workflow, so each new turn runs the gateway's default
+agent workflow, which its operator can change; the transcript names what ran.
+Pick a named workflow in `/workflow` to pin one.
 
 **Why did my queued prompt not start?**
 The queue only advances after the current run **succeeds** — a failure or a
@@ -2777,7 +2977,9 @@ Choose a workflow in the toolbar: **Gateway default** (the coding agent your
 gateway's operator set, resolved by the gateway when the turn starts), a
 published coding agent, or, with **Show all workflows**, any registered
 workflow. The **Files** tab shows the conversation's workspace on the gateway
-with previews. Agent tasks use the composer; structured workflows use
+with previews, **Settings → Stream replies** shows replies as the model writes
+them (on gateways that support it), and **About** lists the app's and the
+gateway's versions. Agent tasks use the composer; structured workflows use
 **Inputs**. Questions, tool approvals, and
 event waits appear in the conversation. Runs and history remain on the gateway
 when you close the browser. Unsent drafts and queued turns do not survive reload.
@@ -2852,6 +3054,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web: an empty Skills tab explains itself.** It shows the gateway's
   reasons in full, the skill shelf location and its source, instead of
   "This gateway has no skills available."
+- **Terminal: streamed replies.** `/stream` (Gateway default / On / Off),
+  `--stream on|off|default`, and `exec --stream on`, which prints the reply
+  live on lines starting `✎` and does not print it again at the end. Off is
+  always sent; On is sent only to a gateway that advertises live replies.
+- **Terminal: `/files`** browses and previews the run's workspace on the
+  gateway host, with its absolute path and host; `c` copies a path, `r`
+  refreshes, and `o` shows the workspace folder in your file manager when the
+  gateway is on this machine and allows it.
+- **Terminal: `/about`** (also `/version`), `/skills` explanations for an
+  empty shelf, and MTP as the last step of `/model`.
+
+See [`tui/CHANGELOG.md`](tui/CHANGELOG.md) for the terminal client's full
+entries.
 
 ### Changed
 
@@ -2859,7 +3074,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connection it received on every call it makes to the gateway (API,
   live streams, status check, sign-in, sign-out), overwriting any incoming
   value and dropping `Forwarded` / `X-Real-IP`; a connection without a
-  known address is refused.
+  known address is refused. Each of those requests also carries
+  `X-AbstractFramework-App-Proxy: code` (a browser-supplied value is
+  dropped).
+- **Web: dependency floors** `@abstractframework/ui-kit` ^0.1.12 and
+  `@abstractframework/panel-chat` ^0.1.17.
+- **Terminal: the default workflow is the gateway's.** `/workflow` starts
+  with **Gateway default → name @version** and `--workflow default` selects
+  it; the client no longer falls back to a workflow of its own. When the
+  gateway has no default and you have picked none, the client asks you to
+  pick. `exec` with a saved workflow that is gone exits 2.
+- **Terminal: a remote gateway is not sent your local folder** as the
+  workspace. `/workspace send auto|always|never` (saved as
+  `send_local_workspace`) overrides this, for example for a shared mount.
 
 ## [terminal 0.5.1 / web 0.4.2] - 2026-09-23
 

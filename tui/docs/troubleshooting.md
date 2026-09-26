@@ -57,8 +57,31 @@ agent runs is the gateway's setting or your choice.
 
 ## `/files` says "the gateway refused — HTTP 404"
 
-The gateway predates workspace browsing. Update AbstractGateway; nothing is
-wrong with the run.
+The gateway does not offer workspace browsing. Update AbstractGateway; nothing
+is wrong with the run.
+
+## `o` in `/files` does not open the folder
+
+Opening happens on the gateway's machine, so `o` works only when the gateway
+says this terminal is on its machine and allows it (the open action is
+admin-only). It opens the workspace folder itself, never a browsed sub-folder.
+Otherwise use `c` to copy the path, which is shown with the gateway host's name.
+
+## The agent does not work in my current folder
+
+With a gateway on another machine, the app does not send your local folder as
+the workspace: that path would name a folder on the gateway host. The agent
+works in a gateway-side session folder, and a notice says so once. Whether the
+gateway is on this machine is the gateway's own verdict after your first run
+(before that, a loopback URL counts as this machine). If the gateway sees the
+same path through a shared mount, run `/workspace send always`; to name a
+folder on the gateway host, pass `--workspace <path>`.
+
+## `exec` exits 2 naming a saved workflow
+
+The workflow saved by `/workflow` is no longer on the gateway, and `exec`
+refuses to run a different agent in its place. Pass `--workflow default` for
+the gateway default, or `--workflow bundle:flow` for another one.
 
 ## The run starts, then an error names an LLM provider failure
 
@@ -71,7 +94,7 @@ switch models and start over.
 
 Server-managed workspace policy (the startup notice says so): the gateway
 clamps client paths and tools execute in its managed workspace. See the
-workspace note in [getting-started.md](getting-started.md#the-five-things-worth-knowing-on-day-one).
+workspace note in [getting-started.md](getting-started.md#what-to-know-on-day-one).
 
 ## Red "Path escapes workspace_root: '…'" errors in the transcript
 
@@ -85,7 +108,8 @@ the task genuinely needs a directory the run was not granted.
 To inspect or extend the scope, use `/workspace`:
 
 - **root** — where relative paths anchor (`--workspace <PATH>` at launch;
-  defaults to the directory you launched from).
+  defaults to the directory you launched from when the gateway is on this
+  machine; see `/workspace send`).
 - **access mode** — `workspace_only` (root only), `workspace_or_allowed`
   (root + your allowed paths), `all_except_ignored` (any absolute path —
   the gateway only honors it when it trusts client scope). Default:
@@ -97,9 +121,9 @@ Mode + allowed paths persist in `~/.abstractcode/prefs.json`
 (`workspace_mode`, `workspace_allowed`), which headless `exec` reads too
 — configure once, applies everywhere.
 
-Honesty note: the GATEWAY enforces the policy server-side. Unless the
-operator enabled client scope overrides
-(`ABSTRACTGATEWAY_ALLOW_CLIENT_WORKSPACE_SCOPE=1`, or local tool mode),
+The GATEWAY enforces the policy server-side. Unless the operator allowed
+client workspace scope (the gateway console's workspace settings, or local
+tool mode),
 client-sent paths are clamped to operator-controlled roots — adding a
 path in `/workspace` widens what the CLIENT asks for, and the server may
 still refuse it.
@@ -120,8 +144,8 @@ level. `/permissions <read|write|all>` sets it (sticky per session):
 Per-tool pins live in prefs.json under `tool_approval.overrides`
 (`{"fetch_url": "auto", "read_file": "ask"}`). The approval modal's
 second line shows both sides ("permissions: write — this batch needs:
-all"), so a prompt always names why it exists. The old `/auto` session
-blanket is removed — its spellings open the `/permissions` report.
+all"), so a prompt always names why it exists. `/auto` opens the
+`/permissions` report.
 
 ## An approval modal answered elsewhere is stuck on screen
 
@@ -164,7 +188,7 @@ terminal/font configured for narrow ambiguous width (the norm), and check
 The header says "stream on (gateway has no live replies)" and the transcript
 says "this gateway does not support streaming" (once per session): the
 gateway does not advertise `streaming.deltas` in `GET /discovery/capabilities`
-(an older gateway, or one without the feature). The app then does not ask it
+(it does not offer live replies). The app then does not ask it
 to stream — answers appear when each call completes. "(gateway not checked yet)" means the
 capabilities have not loaded; they load at startup, so a reconnect usually
 settles it.
@@ -184,12 +208,3 @@ ended without completing; the run's record shows what happened.
 The run outlived `--timeout`. The run itself stays durable on the gateway —
 the timeout message names the run id; reattach in the TUI with the same
 session or inspect it through the gateway's own surfaces.
-
-## Live smoke for a full-stack check
-
-```sh
-ACODE_GATEWAY_TOKEN=<token> python3 scripts/pty_live_smoke.py
-```
-
-Boots the real binary under a pty against your gateway, drives a prompt →
-approval → answer round trip, and verifies a clean exit.

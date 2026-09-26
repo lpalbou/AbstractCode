@@ -56,11 +56,16 @@ for credentials, remote gateways, and first-run configuration.
 - **Approval-gated tools** — tools stop and wait for you by default; approve or
   reject from either client.
 - **Steering** — inject guidance into a run without restarting it.
-- **Workflows** — run a named agent bundle, `coding-agent:coder` by default.
+- **Workflows** — run the gateway's default agent workflow, or pick a named
+  agent bundle; the gateway resolves its default at every new turn.
 - **Review mode** — before a tool-call-free answer is accepted as final, a
   verifier re-reads the transcript and can force more work.
 - **Live activity** — reasoning cycles, tool cards that update in place, token
   counts, and context metering, streamed from the run ledger.
+- **Streamed replies** — watch the answer as the model writes it, when the
+  gateway supports live replies (**Stream replies** setting, `/stream`).
+- **Workspace files** — browse and preview the files a run works on, with their
+  absolute path on the gateway host (the **Files** tab, `/files`).
 
 ## Documentation
 

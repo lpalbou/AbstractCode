@@ -54,6 +54,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web: an empty Skills tab explains itself.** It shows the gateway's
   reasons in full, the skill shelf location and its source, instead of
   "This gateway has no skills available."
+- **Terminal: streamed replies.** `/stream` (Gateway default / On / Off),
+  `--stream on|off|default`, and `exec --stream on`, which prints the reply
+  live on lines starting `✎` and does not print it again at the end. Off is
+  always sent; On is sent only to a gateway that advertises live replies.
+- **Terminal: `/files`** browses and previews the run's workspace on the
+  gateway host, with its absolute path and host; `c` copies a path, `r`
+  refreshes, and `o` shows the workspace folder in your file manager when the
+  gateway is on this machine and allows it.
+- **Terminal: `/about`** (also `/version`), `/skills` explanations for an
+  empty shelf, and MTP as the last step of `/model`.
+
+See [`tui/CHANGELOG.md`](tui/CHANGELOG.md) for the terminal client's full
+entries.
 
 ### Changed
 
@@ -61,7 +74,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connection it received on every call it makes to the gateway (API,
   live streams, status check, sign-in, sign-out), overwriting any incoming
   value and dropping `Forwarded` / `X-Real-IP`; a connection without a
-  known address is refused.
+  known address is refused. Each of those requests also carries
+  `X-AbstractFramework-App-Proxy: code` (a browser-supplied value is
+  dropped).
+- **Web: dependency floors** `@abstractframework/ui-kit` ^0.1.12 and
+  `@abstractframework/panel-chat` ^0.1.17.
+- **Terminal: the default workflow is the gateway's.** `/workflow` starts
+  with **Gateway default → name @version** and `--workflow default` selects
+  it; the client no longer falls back to a workflow of its own. When the
+  gateway has no default and you have picked none, the client asks you to
+  pick. `exec` with a saved workflow that is gone exits 2.
+- **Terminal: a remote gateway is not sent your local folder** as the
+  workspace. `/workspace send auto|always|never` (saved as
+  `send_local_workspace`) overrides this, for example for a shared mount.
 
 ## [terminal 0.5.1 / web 0.4.2] - 2026-09-23
 

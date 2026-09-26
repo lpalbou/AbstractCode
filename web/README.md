@@ -44,7 +44,9 @@ Choose a workflow in the toolbar: **Gateway default** (the coding agent your
 gateway's operator set, resolved by the gateway when the turn starts), a
 published coding agent, or, with **Show all workflows**, any registered
 workflow. The **Files** tab shows the conversation's workspace on the gateway
-with previews. Agent tasks use the composer; structured workflows use
+with previews, **Settings → Stream replies** shows replies as the model writes
+them (on gateways that support it), and **About** lists the app's and the
+gateway's versions. Agent tasks use the composer; structured workflows use
 **Inputs**. Questions, tool approvals, and
 event waits appear in the conversation. Runs and history remain on the gateway
 when you close the browser. Unsent drafts and queued turns do not survive reload.

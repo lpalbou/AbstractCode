@@ -8,19 +8,40 @@ Related:
 - API and CLI surface: [`docs/api.md`](api.md)
 - Interface events a workflow can drive: [`ui_events.md`](ui_events.md)
 
+## The gateway default
+
+Each gateway has a default agent workflow for the `abstractcode.agent.v1`
+interface, set by its operator (gateway setting
+`agents.default_workflow`). Out of the box it is the shipped `basic-agent`
+bundle. Both clients list it first as **Gateway default → name @version**.
+
+Choosing it is saved as "the gateway default", not as a copy of the workflow
+id. The client then starts each run with `flow_id: "@default"` and
+`interface: "abstractcode.agent.v1"`, and the gateway resolves the default at
+that moment, so a change on the gateway applies to your next turn. The run's
+start response names the workflow the gateway actually started, and both
+clients show it (for example "running Basic agent @0.0.3 (gateway default)").
+
+When the gateway has no usable default and you have not picked a workflow, the
+clients say so and ask you to pick one; they never substitute a workflow of
+their own.
+
 ## Selecting a workflow
 
 ```bash
+abstractcode --workflow default
 abstractcode --workflow coding-agent:coder
 abstractcode --workflow <bundle_id>[@version][:<flow_id>]
 ```
 
-`--agent` is accepted as an alias. Without either flag the client uses your
-saved choice, falling back to `coding-agent:coder` — the verified coding loop,
-which ships with the gateway.
+`--agent` is accepted as an alias. Without either flag the terminal client uses
+your saved choice, and otherwise the gateway default. `default` selects the
+gateway default explicitly. In headless `exec`, a saved workflow that is no
+longer on the gateway stops the run with exit code 2 instead of running a
+different agent; `--workflow default` runs the gateway default.
 
-Inside a session, `/agent` changes the workflow, and your selection persists to
-`~/.abstractcode/prefs.json`.
+Inside a session, `/workflow` (alias `/agent`) changes the workflow, and your
+selection persists to `~/.abstractcode/prefs.json`.
 
 To see what a given gateway actually has installed:
 
@@ -28,17 +49,24 @@ To see what a given gateway actually has installed:
 abstractcode doctor
 ```
 
-Installing and managing bundles is a gateway operation, not a client one — see
-the [AbstractGateway](https://github.com/lpalbou/abstractgateway) documentation.
+Installing and managing bundles, and setting the default, are gateway
+operations, not client ones — see the
+[AbstractGateway](https://github.com/lpalbou/abstractgateway) documentation.
 
 ### In the browser
 
-Use Workflow to choose an authorized private entrypoint or shared catalog
-workflow. The browser is not restricted to `abstractcode.agent.v1`: ordinary
-AbstractFlow workflows run from their registered schema using **Inputs** and
-**Run workflow**. Generic workflows receive the configured input object;
-agent-only model/tool/runtime settings are not injected. Questions, messages,
-event waits, and structured results use the shared workflow chat. See [web](web.md).
+The **Workflow** list in the toolbar starts with the gateway default, then the
+coding agents published on your gateway. Tick **Show all workflows** to list
+every authorized workflow, including shared catalog workflows. The browser is
+not restricted to `abstractcode.agent.v1`: ordinary AbstractFlow workflows run
+from their registered schema using **Inputs** and **Run workflow**. Generic
+workflows receive the configured input object; agent-only model/tool/runtime
+settings are not injected. Questions, messages, event waits, and structured
+results use the shared workflow chat.
+
+A restored conversation follows how its last run was started: if the gateway
+recorded it as started from its default, the next turn follows the gateway
+default again; otherwise it keeps its specific workflow. See [web](web.md).
 
 ## The `abstractcode.agent.v1` interface
 
@@ -69,7 +97,7 @@ A run is given:
 | `vars.context.messages` | conversation history |
 | `vars.context.attachments` | attachment references, when files were attached |
 | `vars._limits` | host limits such as maximum iterations and tokens |
-| `vars._runtime` | run directives — reasoning effort, review mode, tool policy, prompt caching |
+| `vars._runtime` | run directives — reasoning effort, MTP (`speculation`), live reply streaming (`stream`), review mode, tool policy, prompt caching |
 
 Absence is meaningful here: an omitted `provider` means "use server truth", not
 "use nothing". A workflow that reads these should treat a missing key as

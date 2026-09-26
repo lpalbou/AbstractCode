@@ -13,7 +13,7 @@ flowchart LR
   subgraph terminal [abstractcode process]
     UI[UI thread<br/>AbstractTUI app<br/>signals + views]
     W[gateway-runner thread<br/>owns all HTTP]
-    S1[ledger stream thread<br/>root run SSE]
+    S1[ledger stream thread<br/>root run SSE<br/>+ live reply deltas]
     S2[ledger stream threads<br/>subruns SSE]
   end
   subgraph gw [AbstractGateway]
@@ -25,8 +25,8 @@ flowchart LR
   W -- "WakeHandle::post closures" --> UI
   S1 -- "record batches (post)" --> UI
   S2 -- "record batches (post)" --> UI
-  W -- "runs/start · commands · discovery" --> API
-  S1 -- "GET ledger/stream (SSE)" --> API
+  W -- "runs/start · commands · discovery<br/>workspace files · about" --> API
+  S1 -- "GET ledger/stream (SSE)<br/>step + llm.delta frames" --> API
   S2 -- "GET ledger/stream (SSE)" --> API
   API --- RUNS
   RUNS --- AGENT
@@ -97,8 +97,44 @@ Properties that carry the correctness weight:
 4. on `done` (root only), reads the final status and reports the terminal
    state.
 
-The `exec` subcommand uses the polling path exclusively, so both transports
-stay exercised.
+The `exec` subcommand reads the transcript through the polling path, so both
+transports stay exercised. With `exec --stream on` it also opens the root
+run's SSE stream, for live reply frames only.
+
+## Live replies
+
+When the gateway advertises `streaming: {"deltas": true}` in
+`GET /discovery/capabilities` and the run asked to stream
+(`input_data._runtime.stream`), the root run's SSE stream also carries
+`llm.delta` and `llm.delta_end` frames. They have no `id:` line: they are not
+ledger records and never move the resume cursor.
+
+```mermaid
+flowchart TD
+  F["SSE frame on the root stream"] --> K{"event"}
+  K -- "step (id: cursor)" --> FOLD["ledger fold"]
+  K -- "llm.delta" --> LIVE["live reply state<br/>src/live.rs"]
+  K -- "llm.delta_end" --> LIVE
+  LIVE --> B["live bubble under the transcript<br/>reply · node / sub-agent · node"]
+  FOLD -- "llm_call step recorded<br/>(step_id = call_id)" --> X["bubble removed,<br/>recorded reply shown"]
+  FOLD -- "final answer" --> Y["every bubble removed"]
+  R["reconnect"] --> D["drop every bubble, then<br/>gateway snapshot frames rebuild open calls"]
+```
+
+- The client takes live frames from the turn's ROOT run stream only; the
+  gateway also sends a child run's frames there, and the bubble is captioned
+  "sub-agent · <node>".
+- `content` text grows in the bubble; `reasoning` text appears only as one
+  collapsed "∴ thinking" line and never joins the reply.
+- A call whose recorded step the fold already holds never gets a bubble, and
+  nothing streams back after the final answer.
+- A malformed frame is reported once per stream and skipped; the stream keeps
+  going.
+
+The **Stream replies** preference (`src/streaming.rs`) decides what the run
+asks for: nothing for Gateway default, `false` for Off, and `true` for On only
+when the gateway advertises live replies. See
+[api.md](api.md#streamed-replies-stream).
 
 ## Sessions and steering
 
@@ -127,6 +163,13 @@ stay exercised.
 | `src/gateway/` | Blocking HTTP client (ureq), SSE parser, stream loop. |
 | `src/protocol.rs` | Pure extraction over ledger records (waits, tools, usage, output). |
 | `src/transcript.rs` | The fold: records → items, stats, pending waits; dedup sets; bounds. |
+| `src/live.rs` | Live reply state from `llm.delta` / `llm.delta_end` frames, and the `exec` printer. |
+| `src/streaming.rs` | The Stream replies preference and what it sends. |
+| `src/discovery.rs` | Pure readers of catalog and discovery payloads, including the gateway default workflow. |
+| `src/run_input.rs` | Builds a run's `input_data`. |
+| `src/workspace_files.rs` | A run's workspace on the gateway host: location, listing, same-machine rules. |
+| `src/preview.rs` | File previews (text, images) for attachments and `/files`. |
+| `src/identity.rs` | The About screen's facts, from the vendored AbstractFramework descriptor. |
 | `src/runner.rs` | Worker thread: commands, per-run stream threads, terminal detection. |
 | `src/store.rs` | The signal store (UI-thread owned). |
 | `src/ui/` | AbstractTUI views: chrome, transcript pane, modals. |
@@ -146,19 +189,15 @@ stay exercised.
   controlling pty against a live gateway: boot → prompt → approval modal →
   `a` → answer → clean Ctrl+C exit, with filesystem proof of the tool write.
 
-## Honest limits
+## Known limits
 
-- Attachments (`@file`) are not implemented in this client yet.
 - Right after a drag-selection, a leading `c` or a bare Enter is consumed
-  by the engine's selection layer as a copy key (the region stays visible
-  after the release-copy); any other keystroke clears it. Engine-side fix
-  filed (abstracttui backlog 0290).
+  as a copy key while the selected region is still visible; any other
+  keystroke clears it.
 - The `/` completion dropdown can land on the status-bar row when it has
   only 1–2 candidates and the composer sits at the bottom of a short
-  terminal (engine placement policy; filed as abstracttui backlog 0294).
-  It is transient and clears as you type.
-- Markdown tables render as plain text lines (an AbstractTUI MarkdownView
-  limit today).
-- Images render as unicode mosaic through the transcript (pixel-protocol
-  placement for kitty/iTerm2 is an engine capability not yet wired here).
+  terminal. It is transient and clears as you type.
+- Markdown tables render as plain text lines.
+- Images render as unicode mosaic in the transcript; pixel-protocol
+  placement (kitty, iTerm2) is not used.
 - Windows is unverified for this crate end-to-end.

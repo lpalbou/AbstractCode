@@ -9,9 +9,9 @@ shape first.
 | Page | What it covers |
 |---|---|
 | [`getting-started.md`](getting-started.md) | Running a gateway, installing either client, credentials, your first run |
-| [`architecture.md`](architecture.md) | The two clients, the gateway, and the thin-client contract that binds them |
+| [`architecture.md`](architecture.md) | The two clients, the browser app server, the gateway, the run stream with live replies, and the thin-client contract |
 | [`api.md`](api.md) | The gateway surface both clients speak, and the integration points |
-| [`workflows.md`](workflows.md) | Agent workflow bundles and how a run selects one |
+| [`workflows.md`](workflows.md) | Agent workflow bundles, the gateway default, and how a run selects one |
 | [`ui_events.md`](ui_events.md) | The workflow-driven interface event contract |
 | [`faq.md`](faq.md) | Recurring questions and known limitations |
 | [`troubleshooting.md`](troubleshooting.md) | Symptom-oriented diagnosis and fixes |
@@ -20,8 +20,8 @@ shape first.
 
 | Page | What it covers |
 |---|---|
-| [`web.md`](web.md) | Workflow chat, inputs, approvals, workspaces, reusable components, and optional voice |
-| [`deployment-web.md`](deployment-web.md) | Hosting it, and the gateway-first deployment model |
+| [`web.md`](web.md) | Workflow selection, conversation files, Stream replies, settings, approvals, workspaces, reusable components, and optional voice |
+| [`deployment-web.md`](deployment-web.md) | Hosting it, reverse proxies, forwarded addresses, and the gateway-first deployment model |
 | [`deployment-iphone.md`](deployment-iphone.md) | Safari and progressive web app notes |
 
 ## The terminal client
@@ -32,10 +32,11 @@ The terminal client keeps its reference documentation beside its source:
 |---|---|
 | [`../tui/README.md`](../tui/README.md) | Features, interface tour, keys, themes |
 | [`../tui/docs/getting-started.md`](../tui/docs/getting-started.md) | Terminal-specific setup |
-| [`../tui/docs/api.md`](../tui/docs/api.md) | Command-line surface and library entry points |
-| [`../tui/docs/architecture.md`](../tui/docs/architecture.md) | How the client is built on AbstractTUI |
+| [`../tui/docs/api.md`](../tui/docs/api.md) | Command-line options, slash commands, keys, streamed replies, and exit codes |
+| [`../tui/docs/architecture.md`](../tui/docs/architecture.md) | How the client is built on AbstractTUI: threads, the ledger fold, live replies |
 | [`../tui/docs/troubleshooting.md`](../tui/docs/troubleshooting.md) | Terminal, rendering, and connection problems |
 | [`../tui/docs/faq.md`](../tui/docs/faq.md) | Terminal client questions |
+| [`../tui/docs/orchestration-cards.md`](../tui/docs/orchestration-cards.md) | The coding workflows you can pass to `--workflow`, and when to choose each |
 
 ## Machine-readable indexes
 
