@@ -177,6 +177,33 @@ describe("live replies through the app's transport", () => {
     controller.dispose();
   });
 
+  it("a reinvoked model call shows the restart note, then the new call streams", async () => {
+    const gw = fakeGateway();
+    const controller = new WorkflowSessionController(workflowTransport, { clientId: "code-web-test" });
+    await controller.load(ROOT);
+    await settle();
+    const stream = gw.streams[0];
+    stream.push(llmStarted(1));
+    stream.push(frame("llm.delta", delta(0, "first try", { snapshot: true })));
+    await settle();
+    expect(live(controller.getSnapshot().messages)).toHaveLength(1);
+    stream.push(
+      frame("llm.delta_end", { ...delta(1, ""), kind: "llm.delta_end", reason: "cancelled", detail: "reinvoked" }),
+    );
+    stream.push(frame("llm.delta", delta(0, "second try", { call_id: `${CALL}:reinvoke`, snapshot: true })));
+    await settle();
+    const messages = controller.getSnapshot().messages;
+    const notes = messages.filter((m) => String(m.content).startsWith("Reply restarted"));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ role: "system", level: "info" });
+    expect(messages.some((m) => /stopped because the model call was cancelled/.test(String(m.content)))).toBe(false);
+    expect(live(messages).map((m) => m.content)).toEqual(["second try"]);
+    expect(render(messages)).toContain("Reply restarted");
+    expect(gw.streams).toHaveLength(1);
+    expect(deltaErrors).toHaveLength(0);
+    controller.dispose();
+  });
+
   it("a malformed delta frame is reported and skipped; the run keeps streaming", async () => {
     const gw = fakeGateway();
     const controller = new WorkflowSessionController(workflowTransport, { clientId: "code-web-test" });
