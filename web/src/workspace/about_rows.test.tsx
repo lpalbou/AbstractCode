@@ -89,7 +89,7 @@ describe("gateway version rows", () => {
     expect(aboutExtraRows({ ok: false, status: 404, message: "Not Found" })).toEqual([
       ["Gateway", "unavailable (HTTP 404)"],
     ]);
-    expect(vi.mocked(gatewayVersionRows)).toHaveBeenCalledWith({ error: "HTTP 404" });
+    expect(vi.mocked(gatewayVersionRows)).toHaveBeenCalledWith(null, "HTTP 404");
     expect(aboutExtraRows({ ok: false, message: "network down" })).toEqual([
       ["Gateway", "unavailable (network down)"],
     ]);

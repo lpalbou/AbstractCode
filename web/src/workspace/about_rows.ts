@@ -17,8 +17,6 @@ export const GATEWAY_ABOUT_CHECKING: AboutRow[] = [["Gateway", "checking…"]];
 export function aboutExtraRows(about: FetchOutcome | undefined): AboutRow[] {
   if (!about) return GATEWAY_ABOUT_CHECKING;
   if (!about.ok)
-    return gatewayVersionRows({
-      error: about.status ? `HTTP ${about.status}` : about.message,
-    });
+    return gatewayVersionRows(null, about.status ? `HTTP ${about.status}` : about.message);
   return gatewayVersionRows(about.value as GatewayAboutPayload);
 }
