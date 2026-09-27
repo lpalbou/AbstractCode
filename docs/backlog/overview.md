@@ -14,7 +14,7 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 | State | Items | IDs |
 |---|---|---|
-| Planned | 1 | 0001 |
+| Planned | 2 | 0001 |
 | Proposed | 0 | |
 | Completed | 0 | |
 | Deprecated | 0 | |
@@ -23,6 +23,7 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 ## Next Recommended Work
 
 1. [0001](planned/0001_automations_wui_section_and_tui_commands.md) — Automations in the WUI and TUI. Phase after v1:
+| 0002 | [TUI session fold defects](planned/0002_tui_session_fold_defects.md) | planned | child runs counted as turns; id-less runs; string timestamp ordering; first run by page order — align with the web fold |
    starts only after the gateway API (G), ui-kit panel and fixtures (U), and the Observer and Assistant integrations
    have shipped. Root parent: `abstractframework backlog 0928`.
 
