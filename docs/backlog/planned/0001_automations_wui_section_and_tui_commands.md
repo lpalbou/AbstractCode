@@ -217,3 +217,28 @@ Final contracts: untracked/design/automations-CONTRACTS.md (root repo; rev 2 wit
 
 - Same client rules as the Assistant: no `changed_since` (full paginated polling), attention via `GET …/attention`, `session_kind` filter spelled `session_kind=chat,discussion` on `/runs`, errors from `detail.reason_code`, fixed-interval cadence labels, Discuss = read-only workspace.
 - Fixture set adds `attention.json`; vendored copies are byte-identical and belong in the root sync script's groups.
+
+## Status note (2026-09-27, after Automations v1 was built)
+
+Still **planned**. Automations v1 is built, tested and unreleased (framework root backlog 0928, completed; release 0941).
+It needed no change in this repo:
+- **Automation sessions already appear in Code's lists as chats.** `GET /runs?root_only=true` now returns turn roots:
+  parent-less runs plus `role:"occurrence"` runs, with a retried occurrence counted once. The rows carry `session_kind`
+  (`chat|automation|occurrence|discussion`), `role`, `automation_id` and `occurrence_index`. The existing session folds
+  therefore show:
+  - a growing automation as ONE session (`automation:<id>`), one turn per occurrence;
+  - each independent occurrence as its own one-turn session;
+  - a discussion as a normal session (`discussion-session:<uuid>`).
+
+  Controllers never appear. The framework E2E verified this on the web fold's query (root
+  `untracked/missions-2026-09-27/E2E/REPORT.md`, item 2).
+- **The cost until this item lands** (review 46 G3). An every-5-minutes independent automation adds 288 one-turn
+  sessions a day to Code's session lists. The pinned queries send no kind filter: TUI `tui/src/gateway/mod.rs:886` and
+  web `web/src/workspace/use_workspace_catalog.ts`. The gateway advertises the filter in
+  `contracts.common.runs.list.filters` and accepts `session_kind=chat,discussion`, which is what the Assistant sends.
+  A legacy `scheduled:*` wrapper also still lists as a one-turn session in the TUI (pre-existing).
+
+This item's scope is the rest: the kind filter or toggle on the session lists (send `session_kind=chat,discussion` by
+default, with a way to show automation sessions), plus the WUI Automations section and the TUI `/automations` and
+`/schedule` commands. Build against the regenerated kit fixtures (abstractuic `a9b73ab`) and the gateway's
+`docs/automations.md`. See also [0002](0002_tui_session_fold_defects.md): the TUI fold counts child rows as turns.

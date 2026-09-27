@@ -31,7 +31,7 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 | ID | Item | Area | Depends on |
 |---|---|---|---|
-| 0001 | [Automations: WUI section and TUI `/automations` + `/schedule`](planned/0001_automations_wui_section_and_tui_commands.md) | web, tui | gateway G, abstractuic U, Observer/Assistant integrations; contracts pass 2026-09-27 |
+| 0001 | [Automations: WUI section and TUI `/automations` + `/schedule`](planned/0001_automations_wui_section_and_tui_commands.md) | web, tui | Its dependencies are built but unreleased (framework 0928, 2026-09-27). Automation sessions already list as chats through `root_only` turn roots; this item adds the kind filter/toggle, the WUI section and the TUI commands. |
 
 ## Proposed
 
