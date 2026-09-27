@@ -210,3 +210,10 @@ and use it as the occurrence `session_prefix` when `share_context` is false (abs
 ## Related
 - `abstractframework backlog 0928` (root Automations item; release sequence).
 - PLAN §4 mission C; §3 contracts F and G; rulings 4, 6, 7.
+
+## Contracts pass (2026-09-27)
+
+Final contracts: untracked/design/automations-CONTRACTS.md (root repo; rev 2 with Astra turn-6 amendments 1–11). They supersede the contract text copied above; earlier text is kept as history. Concrete changes for this item:
+
+- Same client rules as the Assistant: no `changed_since` (full paginated polling), attention via `GET …/attention`, `session_kind` filter spelled `session_kind=chat,discussion` on `/runs`, errors from `detail.reason_code`, fixed-interval cadence labels, Discuss = read-only workspace.
+- Fixture set adds `attention.json`; vendored copies are byte-identical and belong in the root sync script's groups.

@@ -30,7 +30,7 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 | ID | Item | Area | Depends on |
 |---|---|---|---|
-| 0001 | [Automations: WUI section and TUI `/automations` + `/schedule`](planned/0001_automations_wui_section_and_tui_commands.md) | web, tui | gateway G, abstractuic U, Observer/Assistant integrations |
+| 0001 | [Automations: WUI section and TUI `/automations` + `/schedule`](planned/0001_automations_wui_section_and_tui_commands.md) | web, tui | gateway G, abstractuic U, Observer/Assistant integrations; contracts pass 2026-09-27 |
 
 ## Proposed
 
