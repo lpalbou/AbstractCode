@@ -49,7 +49,10 @@ export function derive_prompt_cache_key(args: {
   return `${ns}:${_hash_hex24(raw)}`;
 }
 
-function _to_chat_messages(repl_messages: ReplMessage[], keep: number): Array<{ role: string; content: string }> {
+/** Every user/assistant/system turn of the transcript, whole (ADR-0026: no
+ * client-side message cap; the gateway's history window bounds what a model
+ * receives, by tokens, and records it). */
+function _to_chat_messages(repl_messages: ReplMessage[]): Array<{ role: string; content: string }> {
   const msgs = Array.isArray(repl_messages) ? repl_messages : [];
   const out: Array<{ role: string; content: string }> = [];
   for (const m of msgs) {
@@ -59,8 +62,7 @@ function _to_chat_messages(repl_messages: ReplMessage[], keep: number): Array<{ 
     if (!content.trim()) continue;
     out.push({ role, content });
   }
-  if (keep <= 0) return out;
-  return out.slice(-keep);
+  return out;
 }
 
 export function build_run_input_data(args: {
@@ -91,8 +93,7 @@ export function build_run_input_data(args: {
   }
 
   const use_context = Boolean((s as any)?.use_context);
-  const max_history = 200; // local transcript is already bounded in UI
-  const messages = use_context ? _to_chat_messages(args.repl_messages || [], max_history) : [];
+  const messages = use_context ? _to_chat_messages(args.repl_messages || []) : [];
 
   const ctx: any = { task: prompt, messages };
   if (attachments.length) {

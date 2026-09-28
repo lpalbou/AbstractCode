@@ -2567,7 +2567,7 @@ function ConsolePage(props: {
   function append_message(m: ReplMessage): void {
     update_repl((prev) => ({
       ...prev,
-      messages: [...(prev.messages || []), m].slice(-200),
+      messages: [...(prev.messages || []), m],
       updated_at: now_iso(),
     }));
   }
@@ -2917,7 +2917,7 @@ function ConsolePage(props: {
           msgs[i] = { ...m, run_id: String(m.run_id || "").trim() ? m.run_id : rid, meta: merged_meta };
           break;
         }
-        return { ...prev, messages: msgs.slice(-200), updated_at: now_iso() };
+        return { ...prev, messages: msgs, updated_at: now_iso() };
       });
     } else {
       append_message({ role: "assistant", content: resp_text || String(resp.response || ""), ts: now_iso(), meta: meta_obj, run_id: rid });
