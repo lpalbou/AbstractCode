@@ -18,7 +18,7 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.7.0**, pre-alpha. Release history is in
+Status: **0.7.1**, pre-alpha. Release history is in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## What it looks like
@@ -2030,7 +2030,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.7.1] - 2026-09-28
 
 ### Added
 
@@ -2040,6 +2040,25 @@ All notable changes to this project are documented here. The format follows
   same. The text is AbstractUIC's shared control hint, vendored as
   `assets/automation_controls.json` (a byte-identical copy of the kit's file,
   shipped in the crate).
+
+### Fixed
+
+- **A refused credential is reported as "not signed in".** At launch
+  the client asks the gateway first. On a 401 or 403 it exits (code 1) before
+  opening the screen and prints the gateway, the HTTP status, whether a token
+  was sent, and how to sign in: on the gateway's computer
+  `abstractgateway apps tui-command code` (a one-use line that opens the client
+  signed in, with no token to handle), or `abstractcode login --token <value>`.
+  A gateway that does not answer within 3 seconds does not hold up the launch.
+  While the app runs, a refused credential (for example after a gateway restart
+  ends a sign-in handed over by the gateway) shows "not signed in" in the
+  header, the status strip and the status card; the client stops reloading the
+  workflow catalog and the history, and reloads them once the gateway accepts
+  it again.
+- **The login store is private from creation.** `abstractcode login`
+  writes `~/.abstractcode/gateway.json` as a new 0600 file in the same folder,
+  fsyncs it and renames it over the store: it is never readable by others, and
+  a symlink at that path is replaced, never written through.
 
 ## [0.7.0] - 2026-09-28
 

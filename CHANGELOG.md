@@ -5,7 +5,7 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [terminal 0.7.1] - 2026-09-28
 
 ### Added
 - **Terminal: Run now says what it does.** `/automations` (the list and one automation) shows "g run now:
@@ -15,24 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Assistant and the browser panel.
 
 ### Fixed
-- **Terminal: not signed in is said plainly.** A gateway that answers 401 or
-  403 is reachable but refuses this client's credential (none was sent, or it
-  was refused or has expired). At launch, the terminal client now asks the
-  gateway first and, when it refuses, exits (code 1) before opening, with the
-  gateway, the HTTP status, and the exact way to sign in: on the gateway's
-  computer `abstractgateway apps tui-command code` (a one-use line that opens
-  it signed in, no token handled), or `abstractcode login --token <value>`.
-  It used to open anyway and show "no workflow yet" and "session history not
-  restored (HTTP 401) — retrying", while re-sending the refused catalog loads
-  on every probe. A credential lost while the app runs (a gateway restart ends
-  a sign-in handed over by the gateway) shows "not signed in" in the header,
-  the status strip and the status card, stops those retries, and reloads the
-  catalog and the history once the gateway accepts the client again.
+- **Terminal: a refused credential is reported as "not signed in".** At launch
+  the client asks the gateway first. On a 401 or 403 it exits (code 1) before
+  opening the screen and prints the gateway, the HTTP status, whether a token
+  was sent, and how to sign in: on the gateway's computer
+  `abstractgateway apps tui-command code` (a one-use line that opens the client
+  signed in, with no token to handle), or `abstractcode login --token <value>`.
+  A gateway that does not answer within 3 seconds does not hold up the launch.
+  While the app runs, a refused credential (for example after a gateway restart
+  ends a sign-in handed over by the gateway) shows "not signed in" in the
+  header, the status strip and the status card; the client stops reloading the
+  workflow catalog and the history, and reloads them once the gateway accepts
+  it again.
 - **Terminal: the login store is private from creation.** `abstractcode login`
-  wrote `~/.abstractcode/gateway.json` under the umask and only then set it
-  to 0600, and followed a symlink at that path. It now writes a new 0600 file
-  (`O_CREAT|O_EXCL`) in the same folder, fsyncs it and renames it over the
-  store: never readable by others, never written through a link.
+  writes `~/.abstractcode/gateway.json` as a new 0600 file in the same folder,
+  fsyncs it and renames it over the store: it is never readable by others, and
+  a symlink at that path is replaced, never written through.
 
 ## [terminal 0.7.0 / web 0.6.0] - 2026-09-28
 
