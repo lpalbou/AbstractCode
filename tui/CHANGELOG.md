@@ -24,6 +24,15 @@ All notable changes to this project are documented here. The format follows
   context (independent or growing), tools (run without asking, or ask each
   time).
 
+- **The local gateway pointer.** Without `--gateway-url`, the environment or
+  a saved login, the client connects to the gateway named by
+  `~/.abstractframework/gateway.json` (written by `abstractgateway serve` and
+  the installer): believed only for a loopback URL with schema 1 in a regular
+  file you own, otherwise ignored with one notice (`doctor` prints it). A saved
+  `http://127.0.0.1:8080`, the old built-in default, gives way to the pointer.
+- **Discuss is refused while a run is in progress in this session** (switching
+  to the discussion would cancel it); the message says so.
+
 ### Changed
 
 - **`--gateway-url` is the documented flag** for the gateway address, as in

@@ -42,7 +42,7 @@ cargo install abstractcode
 abstractcode                     # or: abstractcode doctor, to check the connection
 
 # Browser
-npx @abstractframework/code      # binds 0.0.0.0:3002; open http://127.0.0.1:3002
+npx @abstractframework/code      # binds 127.0.0.1:3002; open http://127.0.0.1:3002
 ```
 
 `abstractcode doctor` diagnoses the gateway connection and prints which

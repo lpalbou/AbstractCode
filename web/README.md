@@ -32,7 +32,7 @@ npm run dev
 
 In the UI:
 - set `Gateway URL` (e.g. `http://127.0.0.1:8080`), or configure it on the
-  server with `ABSTRACTCODE_GATEWAY_URL`
+  server with `--gateway-url` (the packaged server; `npm start -- --gateway-url …`)
 - set `Gateway user` and that user's `Gateway token`
 
 When a Gateway user is provided, the web server exchanges the token for a
@@ -51,10 +51,11 @@ gateway's versions. Agent tasks use the composer; structured workflows use
 event waits appear in the conversation. Runs and history remain on the gateway
 when you close the browser. Unsent drafts and queued turns do not survive reload.
 
-Whether a browser may change the Gateway URL is decided by the **connection
-peer**, not by any request header: only a request arriving from loopback may
-reconfigure it, and the server-configured Gateway URL is authoritative for
-everyone else. Set `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` to allow
+Whether a browser may change the Gateway URL is decided by the browser's
+address: only a browser on this machine may reconfigure it (forwarded headers
+count only from a loopback peer such as the gateway's `/apps/code/` relay),
+and a sign-in over a loopback connection must name a loopback host. The
+server-configured Gateway URL is authoritative for everyone else. Set `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` to allow
 it from anywhere, behind your own access control. Behind a reverse proxy every
 peer is the proxy, so loopback carries no meaning there — set
 `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` to refuse browser-supplied changes

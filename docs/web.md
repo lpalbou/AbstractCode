@@ -77,14 +77,14 @@ Recording and playback happen in the browser; transcription and synthesis use th
 ```bash
 cd web
 npm ci
-ABSTRACTCODE_GATEWAY_URL=http://127.0.0.1:8080 npm run dev
+npm run dev   # set the Gateway URL in the interface, or ABSTRACTCODE_GATEWAY_URL
 ```
 
 Open `http://127.0.0.1:3002`. Vite and the packaged server provide the same connection and authenticated proxy routes.
 
 ```bash
 npm run build
-HOST=127.0.0.1 npm start
+npm start -- --gateway-url http://127.0.0.1:8080
 ```
 
 The build writes `web/dist/`. Serve it with the packaged server, not as a bare static site: connection/session middleware is part of the application.

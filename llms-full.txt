@@ -54,7 +54,7 @@ cargo install abstractcode
 abstractcode                     # or: abstractcode doctor, to check the connection
 
 # Browser
-npx @abstractframework/code      # binds 0.0.0.0:3002; open http://127.0.0.1:3002
+npx @abstractframework/code      # binds 127.0.0.1:3002; open http://127.0.0.1:3002
 ```
 
 `abstractcode doctor` diagnoses the gateway connection and prints which
@@ -153,14 +153,18 @@ abstractcode --gateway-url https://gateway.example.com
 ### Browser
 
 ```bash
-npx @abstractframework/code      # binds 0.0.0.0:3002; open http://127.0.0.1:3002
+npx @abstractframework/code      # binds 127.0.0.1:3002; open http://127.0.0.1:3002
 ```
 
-Set the Gateway URL in the interface, or start the server with
-`ABSTRACTCODE_GATEWAY_URL` already pointing at it.
+The web server finds a local gateway by itself (the pointer
+`~/.abstractframework/gateway.json` that `abstractgateway serve` writes), or
+start it with `--gateway-url <url>`. The gateway can also serve it for you at
+`/apps/code/` (its console's **Apps** page); see
+[Web deployment](deployment-web.md).
 
-Both servers listen on every interface by default. Set `HOST=127.0.0.1` (web)
-or `abstractgateway serve --host 127.0.0.1` to keep them on loopback.
+The web server listens on `127.0.0.1` by default (`--host 0.0.0.0` accepts
+other machines); the gateway listens on every interface unless you pass
+`abstractgateway serve --host 127.0.0.1`.
 
 ## 3. Check the connection
 
@@ -520,7 +524,7 @@ served application:
 
 ```bash
 npx @abstractframework/code            # http://127.0.0.1:3002
-ABSTRACTCODE_GATEWAY_URL=... npx @abstractframework/code
+npx @abstractframework/code --gateway-url http://127.0.0.1:8080
 ```
 
 See [`web.md`](web.md) for its configuration surface and
@@ -1022,8 +1026,11 @@ abstractcode doctor
 ```
 
 Resolution order is `--gateway-url` (alias `--gateway`), then the environment, then the login store at
-`~/.abstractcode/gateway.json`, then `http://127.0.0.1:8080`. `doctor` prints
-which one it used, which is usually the answer when a saved value is shadowing
+`~/.abstractcode/gateway.json` (a saved `http://127.0.0.1:8080` gives way to
+the next step), then the local gateway pointer `~/.abstractframework/gateway.json`
+that `abstractgateway serve` and the installer write, then
+`http://127.0.0.1:8080`. `doctor` prints which one it used, and why a pointer
+file was ignored, which is usually the answer when a saved value is shadowing
 the one you expect.
 
 **401 or 403 from a remote gateway.**
@@ -1288,14 +1295,14 @@ Recording and playback happen in the browser; transcription and synthesis use th
 ```bash
 cd web
 npm ci
-ABSTRACTCODE_GATEWAY_URL=http://127.0.0.1:8080 npm run dev
+npm run dev   # set the Gateway URL in the interface, or ABSTRACTCODE_GATEWAY_URL
 ```
 
 Open `http://127.0.0.1:3002`. Vite and the packaged server provide the same connection and authenticated proxy routes.
 
 ```bash
 npm run build
-HOST=127.0.0.1 npm start
+npm start -- --gateway-url http://127.0.0.1:8080
 ```
 
 The build writes `web/dist/`. Serve it with the packaged server, not as a bare static site: connection/session middleware is part of the application.
@@ -1321,7 +1328,13 @@ Project instructions are not automatically read from the browser's local filesys
 
 The browser uses a same-origin application server, which authenticates to AbstractGateway and proxies its API. There are no models or tools in the web server. See [web features](web.md) and [architecture](architecture.md).
 
-## Run the gateway and web server
+## Served by the gateway at `/apps/code/`
+
+AbstractGateway can install, start and serve AbstractCode itself: the console's **Apps** page opens it at `http(s)://<gateway>/apps/code/`, one port and one address for the console, the API and every app. The gateway starts the web server on `127.0.0.1` and relays to it; **Open** signs the browser in to AbstractCode as the signed-in gateway user, so there is no second sign-in. This is the simplest deployment, and the only address you need to expose (or tunnel) for a remote machine.
+
+Under the mount, AbstractCode follows the shared app-server contract: every response carries `X-AbstractFramework-App: code; mount=1`, the page is served with `<base href="/apps/code/">`, every asset and API call is relative to that base, the session cookies are scoped to `Path=/apps/code/`, and the browser's real address (forwarded by the gateway) is what the gateway sees for AbstractCode's calls.
+
+## Run the web server yourself
 
 Configure gateway user authentication and provision a user/token through your gateway's administration process. Then:
 
@@ -1332,10 +1345,19 @@ abstractgateway serve --host 127.0.0.1 --port 8080
 In another terminal:
 
 ```bash
-ABSTRACTCODE_GATEWAY_URL=http://127.0.0.1:8080 HOST=127.0.0.1 npx @abstractframework/code
+npx @abstractframework/code --gateway-url http://127.0.0.1:8080
 ```
 
 Open `http://127.0.0.1:3002` and sign in with the gateway user and token. The server exchanges these for an app-scoped browser session. The raw token is not saved in local storage. API writes require the session's CSRF token.
+
+| Flag | Default |
+|---|---|
+| `--gateway-url <url>` (also `--gateway`, `--url`) | the local gateway pointer `~/.abstractframework/gateway.json` written by `abstractgateway serve` and the installer, else `http://127.0.0.1:8080` |
+| `--port <n>` | `3002` |
+| `--host <addr>` | `127.0.0.1` (use `--host 0.0.0.0` to accept other machines directly) |
+| `--help` | prints the flags |
+
+`PORT`, `HOST` and `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` still work as legacy aliases, below the flags. Without a flag or environment variable, the server follows the gateway pointer, also when the gateway later moves to another port.
 
 For a source checkout:
 
@@ -1343,18 +1365,20 @@ For a source checkout:
 cd web
 npm ci
 npm run build
-ABSTRACTCODE_GATEWAY_URL=http://127.0.0.1:8080 HOST=127.0.0.1 npm start
+npm start -- --gateway-url http://127.0.0.1:8080
 ```
 
-`PORT` changes the web listener port. The CLI binds every interface by default; use `HOST=127.0.0.1` for local-only access. Development uses `npm run dev` with the same gateway setting and session flow.
+Development uses `npm run dev` with the same session flow.
 
 ## Reverse proxies and HTTPS
 
 Put the packaged server behind your HTTPS reverse proxy. Forward the whole application, including `/api/connection/gateway` and `/api/gateway/*`; a static file host or direct gateway API proxy alone does not implement the session exchange. Allow long-lived streaming responses and disable buffering for ledger SSE.
 
-Set `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` only when the proxy strips untrusted forwarded headers and sets `X-Forwarded-Host` and `X-Forwarded-Proto` itself. These determine browser-origin validation and secure-cookie behavior. The server always sets `X-Forwarded-For` to the address of the connection it received (it never forwards a browser- or proxy-supplied `X-Forwarded-For`, `Forwarded` or `X-Real-IP` value) and marks each gateway request with `X-AbstractFramework-App-Proxy: code`, so the gateway can tell whether a browser sits on its own machine before offering **Open folder**. Behind a reverse proxy, that address is the proxy's own: when the reverse proxy runs on the gateway's machine, every browser reaching it looks local to the gateway. A connection whose address cannot be determined is refused with HTTP 400. Pin `ABSTRACTCODE_GATEWAY_URL` on the server. Browser-to-gateway CORS access is not needed.
+Forwarded headers (`X-Forwarded-For`, `-Host`, `-Proto`, `-Prefix`) are believed only from a loopback peer, such as the gateway's `/apps/code/` relay or a reverse proxy on the same machine; from any other peer they are ignored. The server sets `X-Forwarded-For` on every gateway request to the browser's address (overwriting any browser-supplied value) and marks each gateway request with `X-AbstractFramework-App-Proxy: abstractcode`, so the gateway can tell whether a browser sits on its own machine before offering **Open folder**. A connection whose address cannot be determined is refused with HTTP 400. Pin the gateway with `--gateway-url` on the server. Browser-to-gateway CORS access is not needed.
 
-Browser-supplied destination changes are limited to loopback peers using a loopback hostname, unless `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` explicitly enables remote configuration. With trusted proxy headers enabled, the server destination remains authoritative unless that opt-in is set. Do not enable remote reconfiguration on a publicly accessible app without your own access controls. Cross-origin mutation attempts are rejected before gateway egress.
+Set `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` when your own reverse proxy sits directly in front of AbstractCode (not in front of the gateway): browser-supplied gateway URL changes are then refused, and a sign-in may arrive under the proxy's public host name.
+
+Browser-supplied destination changes are limited to browsers on this machine (a loopback address), and a sign-in that arrives over a loopback connection must name a loopback host (`127.0.0.1`, `localhost`), unless `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` explicitly enables remote configuration. With trusted proxy headers enabled, the server destination remains authoritative unless that opt-in is set. Do not enable remote reconfiguration on a publicly accessible app without your own access controls. Cross-origin mutation attempts are rejected before gateway egress.
 
 ## Gateway capabilities and storage
 
@@ -1964,7 +1988,7 @@ abstractcode --help | --version
 
 | Option | Meaning | Default |
 | --- | --- | --- |
-| `--gateway-url <URL>` | Gateway base URL (`--gateway` is an alias) | flag > env > login store > `http://127.0.0.1:8080` |
+| `--gateway-url <URL>` | Gateway base URL (`--gateway` is an alias) | flag > env > login store (a saved `http://127.0.0.1:8080` gives way to the pointer) > the local gateway pointer `~/.abstractframework/gateway.json` (loopback URL, schema 1, a regular file you own; anything else is ignored with one notice) > `http://127.0.0.1:8080` |
 | `--token <TOKEN>` | Bearer token | flag > env > login store |
 | `--session <ID>` | Durable session id | a fresh mint (`acode-<hex>`); `--resume`/`--continue` reopens the last one |
 | `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
@@ -1996,7 +2020,7 @@ abstractcode --help | --version
 
 | Variable | Meaning |
 | --- | --- |
-| `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTFLOW_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` | Gateway URL (first set wins; beats the login store) |
+| `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTFLOW_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` | Gateway URL, legacy aliases below `--gateway-url` (first set wins; beats the login store) |
 | `ABSTRACTCODE_GATEWAY_TOKEN` / `ABSTRACTGATEWAY_AUTH_TOKEN` / `ABSTRACTFLOW_GATEWAY_AUTH_TOKEN` | Bearer token |
 | `ABSTRACTCODE_GATEWAY_CONNECTION_FILE` | Login store path (default `~/.abstractcode/gateway.json`) |
 | `ABSTRACTCODE_PREFS_FILE` | Preferences path (default `~/.abstractcode/prefs.json`) |
@@ -3136,7 +3160,7 @@ npm run dev
 
 In the UI:
 - set `Gateway URL` (e.g. `http://127.0.0.1:8080`), or configure it on the
-  server with `ABSTRACTCODE_GATEWAY_URL`
+  server with `--gateway-url` (the packaged server; `npm start -- --gateway-url …`)
 - set `Gateway user` and that user's `Gateway token`
 
 When a Gateway user is provided, the web server exchanges the token for a
@@ -3155,10 +3179,11 @@ gateway's versions. Agent tasks use the composer; structured workflows use
 event waits appear in the conversation. Runs and history remain on the gateway
 when you close the browser. Unsent drafts and queued turns do not survive reload.
 
-Whether a browser may change the Gateway URL is decided by the **connection
-peer**, not by any request header: only a request arriving from loopback may
-reconfigure it, and the server-configured Gateway URL is authoritative for
-everyone else. Set `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` to allow
+Whether a browser may change the Gateway URL is decided by the browser's
+address: only a browser on this machine may reconfigure it (forwarded headers
+count only from a loopback peer such as the gateway's `/apps/code/` relay),
+and a sign-in over a loopback connection must name a loopback host. The
+server-configured Gateway URL is authoritative for everyone else. Set `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` to allow
 it from anywhere, behind your own access control. Behind a reverse proxy every
 peer is the proxy, so loopback carries no meaning there — set
 `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` to refuse browser-supplied changes
@@ -3179,6 +3204,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Web: served by the gateway at `/apps/code/`.** The web server follows the
+  shared app-server contract (`@abstractframework/app-server`): the identity
+  header `X-AbstractFramework-App: code; mount=1`, `<base href>` and the base
+  path in the page, every asset and API call relative to it, session cookies
+  at `Path=/apps/code/`, and the browser's real address for the gateway. The
+  gateway's console **Apps** page opens it with one sign-in. See
+  [docs/deployment-web.md](docs/deployment-web.md).
+- **Web: launch flags.** `--gateway-url` (aliases `--gateway`, `--url`),
+  `--port`, `--host`, `--help`. Without a gateway URL the server follows the
+  local gateway pointer `~/.abstractframework/gateway.json`. `PORT`, `HOST`
+  and `ABSTRACTCODE_GATEWAY_URL` remain as legacy aliases.
+- **Terminal: the local gateway pointer.** Without `--gateway-url`, the
+  environment or a saved login, the terminal client connects to the gateway
+  named by `~/.abstractframework/gateway.json` (a loopback URL, schema 1, a
+  regular file owned by you; anything else is ignored with one notice). A
+  saved `http://127.0.0.1:8080` gives way to the pointer.
 
 - **Automations in both clients.** Create, manage and answer gateway
   automations (AbstractGateway 0.6.0 and later) from AbstractCode, with the
@@ -3208,8 +3249,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web: the whole local transcript is sent as context** when a workflow uses
   it (the legacy REPL view kept only the last 200 messages); the gateway's
   history window bounds what the model receives.
-- **Web:** requires `@abstractframework/ui-kit` 0.1.13 and
-  `@abstractframework/panel-chat` 0.1.18.
+- **Web: the web server listens on `127.0.0.1` by default** (it was every
+  interface). Use `--host 0.0.0.0` to accept other machines directly, or let
+  the gateway serve it at `/apps/code/`.
+- **Web: shared components.** Automation state labels (word + icon), the
+  automation folder and the conversation's Files list (the shared workspace
+  browser; files open in a new tab as text or download, never as active
+  content), tool approvals and questions (the shared interaction cards), and
+  automation ledger/artifact links (opened through the app's own proxy) come
+  from the shared kit.
+- **Web:** requires the next `@abstractframework/ui-kit` and
+  `@abstractframework/panel-chat` releases (after 0.1.13 / 0.1.18) and adds one
+  runtime dependency, `@abstractframework/app-server`.
 
 ## [terminal 0.6.0 / web 0.5.0] - 2026-09-26
 

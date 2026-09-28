@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Web: served by the gateway at `/apps/code/`.** The web server follows the
+  shared app-server contract (`@abstractframework/app-server`): the identity
+  header `X-AbstractFramework-App: code; mount=1`, `<base href>` and the base
+  path in the page, every asset and API call relative to it, session cookies
+  at `Path=/apps/code/`, and the browser's real address for the gateway. The
+  gateway's console **Apps** page opens it with one sign-in. See
+  [docs/deployment-web.md](docs/deployment-web.md).
+- **Web: launch flags.** `--gateway-url` (aliases `--gateway`, `--url`),
+  `--port`, `--host`, `--help`. Without a gateway URL the server follows the
+  local gateway pointer `~/.abstractframework/gateway.json`. `PORT`, `HOST`
+  and `ABSTRACTCODE_GATEWAY_URL` remain as legacy aliases.
+- **Terminal: the local gateway pointer.** Without `--gateway-url`, the
+  environment or a saved login, the terminal client connects to the gateway
+  named by `~/.abstractframework/gateway.json` (a loopback URL, schema 1, a
+  regular file owned by you; anything else is ignored with one notice). A
+  saved `http://127.0.0.1:8080` gives way to the pointer.
 
 - **Automations in both clients.** Create, manage and answer gateway
   automations (AbstractGateway 0.6.0 and later) from AbstractCode, with the
@@ -37,8 +53,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web: the whole local transcript is sent as context** when a workflow uses
   it (the legacy REPL view kept only the last 200 messages); the gateway's
   history window bounds what the model receives.
-- **Web:** requires `@abstractframework/ui-kit` 0.1.13 and
-  `@abstractframework/panel-chat` 0.1.18.
+- **Web: the web server listens on `127.0.0.1` by default** (it was every
+  interface). Use `--host 0.0.0.0` to accept other machines directly, or let
+  the gateway serve it at `/apps/code/`.
+- **Web: shared components.** Automation state labels (word + icon), the
+  automation folder and the conversation's Files list (the shared workspace
+  browser; files open in a new tab as text or download, never as active
+  content), tool approvals and questions (the shared interaction cards), and
+  automation ledger/artifact links (opened through the app's own proxy) come
+  from the shared kit.
+- **Web:** requires the next `@abstractframework/ui-kit` and
+  `@abstractframework/panel-chat` releases (after 0.1.13 / 0.1.18) and adds one
+  runtime dependency, `@abstractframework/app-server`.
 
 ## [terminal 0.6.0 / web 0.5.0] - 2026-09-26
 

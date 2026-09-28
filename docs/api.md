@@ -93,7 +93,7 @@ served application:
 
 ```bash
 npx @abstractframework/code            # http://127.0.0.1:3002
-ABSTRACTCODE_GATEWAY_URL=... npx @abstractframework/code
+npx @abstractframework/code --gateway-url http://127.0.0.1:8080
 ```
 
 See [`web.md`](web.md) for its configuration surface and
