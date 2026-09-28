@@ -3253,6 +3253,14 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [web 0.6.1] - 2026-09-28
+
+### Changed
+- **Web: requires `@abstractframework/ui-kit` 0.1.16 or later.** The automation panel then shows AbstractUIC's
+  shared control hints: every control carries a tooltip and an accessible description, and Run now's says it
+  runs once now, that the next scheduled run keeps its time, that it does not count toward a run limit and that
+  it works while paused, with the next scheduled time.
+
 ## [terminal 0.7.1] - 2026-09-28
 
 ### Added
