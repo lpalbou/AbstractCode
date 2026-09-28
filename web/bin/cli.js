@@ -2,7 +2,7 @@
 
 import { createGatewayUrlResolver, parseAppFlagsOrExit } from "@abstractframework/app-server";
 
-import { createCodeServer } from "./server.js";
+import { bindExposureWarning, createCodeServer } from "./server.js";
 
 // The shared launch flags: --gateway-url (aliases --gateway, --url), --port,
 // --host (default 127.0.0.1: the gateway serves this app at /apps/code/),
@@ -20,6 +20,10 @@ const flags = parseAppFlagsOrExit(process.argv.slice(2), {
 // app follows the gateway onto a new port).
 const fixed = flags.gatewayUrlSource === "flag" || flags.gatewayUrlSource.startsWith("env:");
 const server = createCodeServer({ defaultGatewayUrl: fixed ? flags.gatewayUrl : createGatewayUrlResolver() });
+
+// Said before listening, so it shows even when the bind then fails.
+const exposure = bindExposureWarning(flags.host, flags.port);
+if (exposure) console.warn(exposure);
 
 server.listen(flags.port, flags.host, () => {
   console.log(`AbstractCode Web on http://${flags.host}:${flags.port}/ (gateway ${flags.gatewayUrl}, from ${flags.gatewayUrlSource})`);

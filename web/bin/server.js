@@ -87,6 +87,22 @@ function isLoopbackHostname(host) {
   return isIP(h) === 4 && h.startsWith("127.");
 }
 
+/**
+ * The warning printed at start when `--host` is not a loopback address
+ * (`0.0.0.0`, `::`, a LAN address or name): the app is then reachable from
+ * other machines, and the gateway already serves it at `/apps/code/`.
+ * `null` for a loopback host.
+ */
+export function bindExposureWarning(host, port) {
+  if (isLoopbackHostname(host)) return null;
+  const where = host === "0.0.0.0" || host === "::" || host === "[::]" ? "every network interface" : String(host);
+  return (
+    `WARNING: --host ${host} exposes AbstractCode Web beyond this machine: it listens on ${where}, ` +
+    `so anyone who can reach this computer on port ${port} can open it. ` +
+    `The gateway already serves it at /apps/code/; keep the default --host 127.0.0.1 unless you mean this.`
+  );
+}
+
 /** A browser mutation must come from the origin the browser sees this app at. */
 function browserMutationAllowed(req, ctx) {
   const origin = firstHeader(req.headers.origin);

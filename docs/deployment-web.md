@@ -28,7 +28,7 @@ Open `http://127.0.0.1:3002` and sign in with the gateway user and token. The se
 |---|---|
 | `--gateway-url <url>` (also `--gateway`, `--url`) | the local gateway pointer `~/.abstractframework/gateway.json` written by `abstractgateway serve` and the installer, else `http://127.0.0.1:8080` |
 | `--port <n>` | `3002` |
-| `--host <addr>` | `127.0.0.1` (use `--host 0.0.0.0` to accept other machines directly) |
+| `--host <addr>` | `127.0.0.1` (use `--host 0.0.0.0` to accept other machines directly; the server then prints a warning that it is exposed beyond this machine) |
 | `--help` | prints the flags |
 
 `PORT`, `HOST` and `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` still work as legacy aliases, below the flags. Without a flag or environment variable, the server follows the gateway pointer, also when the gateway later moves to another port.
