@@ -400,6 +400,9 @@ pub fn run(args: &Args) -> i32 {
         }
     };
     let conn = config::resolve_connection(args.gateway.as_deref(), args.token.as_deref());
+    if let Some(w) = &conn.warning {
+        eprintln!("abstractcode: {w}");
+    }
     let client = GatewayClient::new(&conn.base_url, conn.token.as_deref());
 
     // Resolve the workflow: flag > saved pick > the GATEWAY's default (§D).

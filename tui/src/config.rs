@@ -17,12 +17,16 @@ pub const DEFAULT_GATEWAY_URL: &str = "http://127.0.0.1:8080";
 pub struct Resolved {
     pub value: String,
     pub source: String,
+    /// A visible warning to show once (an ignored gateway pointer).
+    pub warning: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Connection {
     pub base_url: String,
     pub token: Option<String>,
+    /// Shown once at launch (an ignored gateway pointer).
+    pub warning: Option<String>,
 }
 
 fn trimmed_env(name: &str) -> Option<String> {
@@ -112,15 +116,27 @@ fn store_string(store: &Option<Value>, key: &str) -> Option<String> {
     }
 }
 
-/// Resolve the gateway base URL -> (url, source label).
+/// Resolve the gateway base URL -> (url, source label, warning).
+///
+/// One precedence for every AbstractFramework client: the launch flag, the
+/// legacy environment, the saved login (except a saved
+/// `http://127.0.0.1:8080`, the old built-in default, which the local gateway
+/// pointer replaces), the pointer `~/.abstractframework/gateway.json`, then
+/// `http://127.0.0.1:8080` (see `gateway_pointer`).
 pub fn resolve_gateway_url(explicit: Option<&str>) -> Resolved {
+    resolve_gateway_url_in(explicit, &home_dir())
+}
+
+/// `resolve_gateway_url` with an explicit home (tests).
+pub fn resolve_gateway_url_in(explicit: Option<&str>, home: &std::path::Path) -> Resolved {
+    let done = |value: &str, source: String| Resolved {
+        value: value.trim().trim_end_matches('/').to_string(),
+        source,
+        warning: None,
+    };
     if let Some(e) = explicit {
-        let t = e.trim().trim_end_matches('/');
-        if !t.is_empty() {
-            return Resolved {
-                value: t.to_string(),
-                source: "flag".into(),
-            };
+        if !e.trim().trim_end_matches('/').is_empty() {
+            return done(e, "flag".into());
         }
     }
     for name in [
@@ -129,23 +145,28 @@ pub fn resolve_gateway_url(explicit: Option<&str>) -> Resolved {
         "ABSTRACTGATEWAY_URL",
     ] {
         if let Some(v) = trimmed_env(name) {
-            return Resolved {
-                value: v.trim_end_matches('/').to_string(),
-                source: format!("env {name}"),
-            };
+            return done(&v, format!("env {name}"));
         }
     }
     let store = read_json_file(&login_store_path());
-    if let Some(v) = store_string(&store, "base_url") {
-        return Resolved {
-            value: v.trim_end_matches('/').to_string(),
-            source: format!("login ({})", login_store_path().display()),
-        };
+    let saved = store_string(&store, "base_url").map(|v| v.trim_end_matches('/').to_string());
+    if let Some(v) = saved.as_deref().filter(|v| *v != DEFAULT_GATEWAY_URL) {
+        return done(v, format!("login ({})", login_store_path().display()));
     }
-    Resolved {
-        value: DEFAULT_GATEWAY_URL.into(),
-        source: "default".into(),
-    }
+    let path = crate::gateway_pointer::pointer_path(home);
+    let warning = match crate::gateway_pointer::read_pointer(&path) {
+        crate::gateway_pointer::Pointer::Found { url } => {
+            return done(&url, format!("gateway pointer ({})", path.display()));
+        }
+        crate::gateway_pointer::Pointer::Missing => None,
+        crate::gateway_pointer::Pointer::Refused { warning } => Some(warning),
+    };
+    let mut r = match saved {
+        Some(v) => done(&v, format!("login ({})", login_store_path().display())),
+        None => done(DEFAULT_GATEWAY_URL, "default".into()),
+    };
+    r.warning = warning;
+    r
 }
 
 /// Resolve the gateway auth token -> (token or None, source label).
@@ -178,6 +199,7 @@ pub fn resolve_connection(url_flag: Option<&str>, token_flag: Option<&str>) -> C
     Connection {
         base_url: url.value,
         token,
+        warning: url.warning,
     }
 }
 
