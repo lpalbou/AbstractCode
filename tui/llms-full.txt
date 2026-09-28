@@ -686,12 +686,12 @@ when the gateway advertises live replies. See
 
 - **Sessions**: the client mints a durable session id and passes
   `use_session_history: true` in run input; the gateway seeds prior turns
-  server-side (the durable-sessions contract) — that covers restarts. LIVE
-  turns additionally ride `context.messages` built from the fold's completed
-  user/answer pairs (client messages win by contract): wrapper bundles can
-  leave prior ROOT runs non-completed for a while (helper poller subflows),
-  which starves a completed-roots-only seed — carrying the visible
-  conversation makes follow-ups immune to that. `/new` rotates the id.
+  server-side (the durable-sessions contract), through the runtime's one
+  history window (AbstractGateway 0.7.0: the newest whole turns up to 50,000
+  tokens, recorded in `_runtime.session_history`; ADR-0026). The client never
+  sends `context.messages`: a client copy would bypass that window, and the
+  gateway refuses it in discussion and automation sessions. `/new` rotates
+  the id.
 - **Steering**: submitting text while a run is active sends an
   `inject_guidance` command to the run currently cycling (the fold tracks
   which subrun that is); the runtime folds it into the next reasoning
@@ -769,8 +769,8 @@ abstractcode --help | --version
 
 | Option | Meaning | Default |
 | --- | --- | --- |
-| `--gateway-url <URL>` | Gateway base URL (`--gateway` is an alias) | flag > env > login store (a saved `http://127.0.0.1:8080` gives way to the pointer) > the local gateway pointer `~/.abstractframework/gateway.json` (loopback URL, schema 1, a regular file you own; anything else is ignored with one notice) > `http://127.0.0.1:8080` |
-| `--token <TOKEN>` | Bearer token | flag > env > login store |
+| `--gateway-url <URL>` | Gateway base URL (`--gateway` is an alias) | flag > env > login store (a saved `http://127.0.0.1:8080` gives way to the pointer) > the local gateway pointer `~/.abstractframework/gateway.json` (loopback URL, schema 1, a regular file you own that no other user can write, at most 64 KiB, checked on the opened file; anything else is ignored with one notice) > `http://127.0.0.1:8080` |
+| `--token <TOKEN>` | Bearer token | flag > env (legacy alias) > login store |
 | `--session <ID>` | Durable session id | a fresh mint (`acode-<hex>`); `--resume`/`--continue` reopens the last one |
 | `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
 | `--reasoning <LEVEL>` | Reasoning effort: `none\|minimal\|low\|medium\|high\|xhigh\|auto` (also `--thinking`; validated at launch; works on `exec` too) | gateway default |
@@ -801,8 +801,8 @@ abstractcode --help | --version
 
 | Variable | Meaning |
 | --- | --- |
-| `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTFLOW_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` | Gateway URL, legacy aliases below `--gateway-url` (first set wins; beats the login store) |
-| `ABSTRACTCODE_GATEWAY_TOKEN` / `ABSTRACTGATEWAY_AUTH_TOKEN` / `ABSTRACTFLOW_GATEWAY_AUTH_TOKEN` | Bearer token |
+| `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTFLOW_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` | Legacy aliases of `--gateway-url` (the flag wins; first set wins; beats the login store) |
+| `ABSTRACTCODE_GATEWAY_TOKEN` / `ABSTRACTGATEWAY_AUTH_TOKEN` / `ABSTRACTFLOW_GATEWAY_AUTH_TOKEN` | Legacy aliases of `--token` (the flag wins; first set wins) |
 | `ABSTRACTCODE_GATEWAY_CONNECTION_FILE` | Login store path (default `~/.abstractcode/gateway.json`) |
 | `ABSTRACTCODE_PREFS_FILE` | Preferences path (default `~/.abstractcode/prefs.json`) |
 | `ABSTRACTTUI_THEME` | Start theme id |
@@ -2052,9 +2052,12 @@ All notable changes to this project are documented here. The format follows
 
 - **The local gateway pointer.** Without `--gateway-url`, the environment or
   a saved login, the client connects to the gateway named by
-  `~/.abstractframework/gateway.json` (written by `abstractgateway serve` and
-  the installer): believed only for a loopback URL with schema 1 in a regular
-  file you own, otherwise ignored with one notice (`doctor` prints it). A saved
+  `~/.abstractframework/gateway.json` (written by the installer and by
+  `abstractgateway serve` from AbstractGateway 0.7.0): believed only for a
+  loopback URL with schema 1 in a regular file you own that no other user can
+  write, otherwise ignored with one notice (`doctor` prints it). The file is
+  checked on the opened handle and read from it (a symbolic link is refused,
+  a FIFO cannot hang the client), and a file over 64 KiB is refused. A saved
   `http://127.0.0.1:8080`, the old built-in default, gives way to the pointer.
 - **Discuss is refused while a run is in progress in this session** (switching
   to the discussion would cancel it); the message says so.
@@ -2062,7 +2065,29 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - **`--gateway-url` is the documented flag** for the gateway address, as in
-  every AbstractFramework app; `--gateway` keeps working as an alias.
+  every AbstractFramework app; `--gateway` keeps working as an alias. The
+  environment variables are labelled as legacy aliases of `--gateway-url` and
+  `--token` in `--help` and docs/api.md.
+- **The conversation history comes from the gateway only.** The client no
+  longer sends its own copy of the conversation (`context.messages`) with a
+  turn; it asks the gateway to replay the session (`use_session_history`).
+  The copy was capped at 40 messages / 24,000 characters and dropped the
+  oldest turns without saying so. With AbstractGateway 0.7.0 the replay is
+  the newest whole turns up to 50,000 tokens, recorded in the run's
+  `_runtime.session_history` (ADR-0026); AbstractGateway 0.6.0 replays with
+  its own older limits.
+- **`abstractcode login` saves a gateway URL only when you give one**
+  (`--gateway-url`, its legacy environment alias, or the login already saved).
+  A URL found through the local gateway pointer is no longer saved: a saved
+  login beats the pointer, so the client stopped following the gateway to a
+  new port.
+
+### Fixed
+
+- **Every turn after the first in a Discuss chat failed** with HTTP 400 ("an
+  automation or discussion session is seeded by the gateway; do not send
+  context.messages"). The client no longer sends `context.messages` (above),
+  so discussion turns work on AbstractGateway 0.6.0 and later.
 
 ## [0.6.0] - 2026-09-26
 

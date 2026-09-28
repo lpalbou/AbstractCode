@@ -21,9 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `ABSTRACTCODE_GATEWAY_URL` remain as legacy aliases.
 - **Terminal: the local gateway pointer.** Without `--gateway-url`, the
   environment or a saved login, the terminal client connects to the gateway
-  named by `~/.abstractframework/gateway.json` (a loopback URL, schema 1, a
-  regular file owned by you; anything else is ignored with one notice). A
-  saved `http://127.0.0.1:8080` gives way to the pointer.
+  named by `~/.abstractframework/gateway.json`, written by the installer and
+  by `abstractgateway serve` from AbstractGateway 0.7.0 (a loopback URL,
+  schema 1, a regular file owned by you that no other user can write, at
+  most 64 KiB, checked on the opened file; anything else is ignored with one
+  notice). A saved `http://127.0.0.1:8080` gives way to the pointer.
 
 - **Automations in both clients.** Create, manage and answer gateway
   automations (AbstractGateway 0.6.0 and later) from AbstractCode, with the
@@ -50,11 +52,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Terminal: `--gateway-url` is the documented flag** for the gateway address,
   as in every AbstractFramework app; `--gateway` keeps working as an alias.
-- **Web: the whole local transcript is sent as context** when a workflow uses
-  it (the legacy REPL view kept only the last 200 messages); the gateway's
-  history window bounds what the model receives.
+  `--help` and the docs label the environment variables as legacy aliases of
+  `--gateway-url` and `--token`.
+- **Terminal: the conversation history comes from the gateway only.** The
+  client no longer sends its own copy (`context.messages`), which was capped
+  at 40 messages / 24,000 characters and dropped the oldest turns without
+  saying so. With AbstractGateway 0.7.0 the gateway replays the newest whole
+  turns up to 50,000 tokens and records it in the run (ADR-0026);
+  AbstractGateway 0.6.0 replays with its own older limits.
+- **Terminal: `abstractcode login` saves a gateway URL only when you give
+  one** (`--gateway-url`, its legacy environment alias, or the login already
+  saved), so a login no longer stops the client following the local gateway
+  pointer to a new port.
+- **Web: the legacy REPL view sends the whole local transcript as context**
+  when its "use context" setting is on (it kept only the last 200 messages).
 - **Web: the web server listens on `127.0.0.1` by default** (it was every
-  interface). Use `--host 0.0.0.0` to accept other machines directly, or let
+  interface). Use `--host 0.0.0.0` to accept other machines directly (the
+  server then prints a warning that it is exposed beyond this machine), or let
   the gateway serve it at `/apps/code/`.
 - **Web: shared components.** Automation state labels (word + icon), the
   automation folder and the conversation's Files list (the shared workspace

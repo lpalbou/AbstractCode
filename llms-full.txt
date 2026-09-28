@@ -457,9 +457,12 @@ integration:
 - `doctor` is the supported way to assert an environment is wired correctly
   before running anything else.
 
-Configuration resolves in a fixed order — explicit flag, then environment, then
-the login store at `~/.abstractcode/gateway.json`, then the default
-`http://127.0.0.1:8080`. `doctor` prints which source won.
+Configuration resolves in a fixed order — explicit flag, then its legacy
+environment alias, then the login store at `~/.abstractcode/gateway.json`, then
+the local gateway pointer `~/.abstractframework/gateway.json`, then the default
+`http://127.0.0.1:8080`. `doctor` prints which source won. `login` saves a
+gateway URL only when you give one (flag or environment), so a login never
+stops the client following the pointer.
 
 ## Library surface
 
@@ -1031,7 +1034,9 @@ the next step), then the local gateway pointer `~/.abstractframework/gateway.jso
 that `abstractgateway serve` and the installer write, then
 `http://127.0.0.1:8080`. `doctor` prints which one it used, and why a pointer
 file was ignored, which is usually the answer when a saved value is shadowing
-the one you expect.
+the one you expect. `abstractcode login` saves a URL only when you give one
+(`--gateway-url` or the environment); a login taken from the pointer saves the
+token alone, so the client keeps following the gateway to a new port.
 
 **401 or 403 from a remote gateway.**
 The token is missing, expired, or belongs to a different gateway. Re-verify and
@@ -1354,7 +1359,7 @@ Open `http://127.0.0.1:3002` and sign in with the gateway user and token. The se
 |---|---|
 | `--gateway-url <url>` (also `--gateway`, `--url`) | the local gateway pointer `~/.abstractframework/gateway.json` written by `abstractgateway serve` and the installer, else `http://127.0.0.1:8080` |
 | `--port <n>` | `3002` |
-| `--host <addr>` | `127.0.0.1` (use `--host 0.0.0.0` to accept other machines directly) |
+| `--host <addr>` | `127.0.0.1` (use `--host 0.0.0.0` to accept other machines directly; the server then prints a warning that it is exposed beyond this machine) |
 | `--help` | prints the flags |
 
 `PORT`, `HOST` and `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` still work as legacy aliases, below the flags. Without a flag or environment variable, the server follows the gateway pointer, also when the gateway later moves to another port.
@@ -1988,8 +1993,8 @@ abstractcode --help | --version
 
 | Option | Meaning | Default |
 | --- | --- | --- |
-| `--gateway-url <URL>` | Gateway base URL (`--gateway` is an alias) | flag > env > login store (a saved `http://127.0.0.1:8080` gives way to the pointer) > the local gateway pointer `~/.abstractframework/gateway.json` (loopback URL, schema 1, a regular file you own; anything else is ignored with one notice) > `http://127.0.0.1:8080` |
-| `--token <TOKEN>` | Bearer token | flag > env > login store |
+| `--gateway-url <URL>` | Gateway base URL (`--gateway` is an alias) | flag > env > login store (a saved `http://127.0.0.1:8080` gives way to the pointer) > the local gateway pointer `~/.abstractframework/gateway.json` (loopback URL, schema 1, a regular file you own that no other user can write, at most 64 KiB, checked on the opened file; anything else is ignored with one notice) > `http://127.0.0.1:8080` |
+| `--token <TOKEN>` | Bearer token | flag > env (legacy alias) > login store |
 | `--session <ID>` | Durable session id | a fresh mint (`acode-<hex>`); `--resume`/`--continue` reopens the last one |
 | `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
 | `--reasoning <LEVEL>` | Reasoning effort: `none\|minimal\|low\|medium\|high\|xhigh\|auto` (also `--thinking`; validated at launch; works on `exec` too) | gateway default |
@@ -2020,8 +2025,8 @@ abstractcode --help | --version
 
 | Variable | Meaning |
 | --- | --- |
-| `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTFLOW_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` | Gateway URL, legacy aliases below `--gateway-url` (first set wins; beats the login store) |
-| `ABSTRACTCODE_GATEWAY_TOKEN` / `ABSTRACTGATEWAY_AUTH_TOKEN` / `ABSTRACTFLOW_GATEWAY_AUTH_TOKEN` | Bearer token |
+| `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTFLOW_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` | Legacy aliases of `--gateway-url` (the flag wins; first set wins; beats the login store) |
+| `ABSTRACTCODE_GATEWAY_TOKEN` / `ABSTRACTGATEWAY_AUTH_TOKEN` / `ABSTRACTFLOW_GATEWAY_AUTH_TOKEN` | Legacy aliases of `--token` (the flag wins; first set wins) |
 | `ABSTRACTCODE_GATEWAY_CONNECTION_FILE` | Login store path (default `~/.abstractcode/gateway.json`) |
 | `ABSTRACTCODE_PREFS_FILE` | Preferences path (default `~/.abstractcode/prefs.json`) |
 | `ABSTRACTTUI_THEME` | Start theme id |
@@ -2696,12 +2701,12 @@ when the gateway advertises live replies. See
 
 - **Sessions**: the client mints a durable session id and passes
   `use_session_history: true` in run input; the gateway seeds prior turns
-  server-side (the durable-sessions contract) — that covers restarts. LIVE
-  turns additionally ride `context.messages` built from the fold's completed
-  user/answer pairs (client messages win by contract): wrapper bundles can
-  leave prior ROOT runs non-completed for a while (helper poller subflows),
-  which starves a completed-roots-only seed — carrying the visible
-  conversation makes follow-ups immune to that. `/new` rotates the id.
+  server-side (the durable-sessions contract), through the runtime's one
+  history window (AbstractGateway 0.7.0: the newest whole turns up to 50,000
+  tokens, recorded in `_runtime.session_history`; ADR-0026). The client never
+  sends `context.messages`: a client copy would bypass that window, and the
+  gateway refuses it in discussion and automation sessions. `/new` rotates
+  the id.
 - **Steering**: submitting text while a run is active sends an
   `inject_guidance` command to the run currently cycling (the fold tracks
   which subrun that is); the runtime folds it into the next reasoning
@@ -3142,7 +3147,8 @@ npx @abstractframework/code      # serves on http://127.0.0.1:3002
 ```
 
 The server listens on `127.0.0.1` by default; pass `--host 0.0.0.0` to accept
-other machines directly. AbstractGateway (0.7.0 or later) can also start it
+other machines directly (it then prints a warning that it is exposed beyond
+this machine). AbstractGateway (0.7.0 or later) can also start it
 and serve it at `/apps/code/` on the gateway's own address, which is the one
 address to expose or tunnel for a remote machine. Launch flags:
 `--gateway-url <url>`, `--port <n>`, `--host <addr>`, `--help`; without
@@ -3225,9 +3231,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `ABSTRACTCODE_GATEWAY_URL` remain as legacy aliases.
 - **Terminal: the local gateway pointer.** Without `--gateway-url`, the
   environment or a saved login, the terminal client connects to the gateway
-  named by `~/.abstractframework/gateway.json` (a loopback URL, schema 1, a
-  regular file owned by you; anything else is ignored with one notice). A
-  saved `http://127.0.0.1:8080` gives way to the pointer.
+  named by `~/.abstractframework/gateway.json`, written by the installer and
+  by `abstractgateway serve` from AbstractGateway 0.7.0 (a loopback URL,
+  schema 1, a regular file owned by you that no other user can write, at
+  most 64 KiB, checked on the opened file; anything else is ignored with one
+  notice). A saved `http://127.0.0.1:8080` gives way to the pointer.
 
 - **Automations in both clients.** Create, manage and answer gateway
   automations (AbstractGateway 0.6.0 and later) from AbstractCode, with the
@@ -3254,11 +3262,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Terminal: `--gateway-url` is the documented flag** for the gateway address,
   as in every AbstractFramework app; `--gateway` keeps working as an alias.
-- **Web: the whole local transcript is sent as context** when a workflow uses
-  it (the legacy REPL view kept only the last 200 messages); the gateway's
-  history window bounds what the model receives.
+  `--help` and the docs label the environment variables as legacy aliases of
+  `--gateway-url` and `--token`.
+- **Terminal: the conversation history comes from the gateway only.** The
+  client no longer sends its own copy (`context.messages`), which was capped
+  at 40 messages / 24,000 characters and dropped the oldest turns without
+  saying so. With AbstractGateway 0.7.0 the gateway replays the newest whole
+  turns up to 50,000 tokens and records it in the run (ADR-0026);
+  AbstractGateway 0.6.0 replays with its own older limits.
+- **Terminal: `abstractcode login` saves a gateway URL only when you give
+  one** (`--gateway-url`, its legacy environment alias, or the login already
+  saved), so a login no longer stops the client following the local gateway
+  pointer to a new port.
+- **Web: the legacy REPL view sends the whole local transcript as context**
+  when its "use context" setting is on (it kept only the last 200 messages).
 - **Web: the web server listens on `127.0.0.1` by default** (it was every
-  interface). Use `--host 0.0.0.0` to accept other machines directly, or let
+  interface). Use `--host 0.0.0.0` to accept other machines directly (the
+  server then prints a warning that it is exposed beyond this machine), or let
   the gateway serve it at `/apps/code/`.
 - **Web: shared components.** Automation state labels (word + icon), the
   automation folder and the conversation's Files list (the shared workspace

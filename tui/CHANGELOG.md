@@ -26,9 +26,12 @@ All notable changes to this project are documented here. The format follows
 
 - **The local gateway pointer.** Without `--gateway-url`, the environment or
   a saved login, the client connects to the gateway named by
-  `~/.abstractframework/gateway.json` (written by `abstractgateway serve` and
-  the installer): believed only for a loopback URL with schema 1 in a regular
-  file you own, otherwise ignored with one notice (`doctor` prints it). A saved
+  `~/.abstractframework/gateway.json` (written by the installer and by
+  `abstractgateway serve` from AbstractGateway 0.7.0): believed only for a
+  loopback URL with schema 1 in a regular file you own that no other user can
+  write, otherwise ignored with one notice (`doctor` prints it). The file is
+  checked on the opened handle and read from it (a symbolic link is refused,
+  a FIFO cannot hang the client), and a file over 64 KiB is refused. A saved
   `http://127.0.0.1:8080`, the old built-in default, gives way to the pointer.
 - **Discuss is refused while a run is in progress in this session** (switching
   to the discussion would cancel it); the message says so.
@@ -36,7 +39,29 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - **`--gateway-url` is the documented flag** for the gateway address, as in
-  every AbstractFramework app; `--gateway` keeps working as an alias.
+  every AbstractFramework app; `--gateway` keeps working as an alias. The
+  environment variables are labelled as legacy aliases of `--gateway-url` and
+  `--token` in `--help` and docs/api.md.
+- **The conversation history comes from the gateway only.** The client no
+  longer sends its own copy of the conversation (`context.messages`) with a
+  turn; it asks the gateway to replay the session (`use_session_history`).
+  The copy was capped at 40 messages / 24,000 characters and dropped the
+  oldest turns without saying so. With AbstractGateway 0.7.0 the replay is
+  the newest whole turns up to 50,000 tokens, recorded in the run's
+  `_runtime.session_history` (ADR-0026); AbstractGateway 0.6.0 replays with
+  its own older limits.
+- **`abstractcode login` saves a gateway URL only when you give one**
+  (`--gateway-url`, its legacy environment alias, or the login already saved).
+  A URL found through the local gateway pointer is no longer saved: a saved
+  login beats the pointer, so the client stopped following the gateway to a
+  new port.
+
+### Fixed
+
+- **Every turn after the first in a Discuss chat failed** with HTTP 400 ("an
+  automation or discussion session is seeded by the gateway; do not send
+  context.messages"). The client no longer sends `context.messages` (above),
+  so discussion turns work on AbstractGateway 0.6.0 and later.
 
 ## [0.6.0] - 2026-09-26
 
