@@ -234,8 +234,8 @@ describe("legacy VisualFlow requirements", () => {
     const schema = await fetchWorkflowSchema(workflow);
     expect(validateWorkflowInputs(schema, {})).toEqual([]);
     expect(vi.mocked(gatewayRequest).mock.calls.map(([path]) => path)).toEqual([
-      "/api/gateway/bundles/basic-agent/flows/root/input_schema?bundle_version=0.0.4",
-      "/api/gateway/bundles/basic-agent/flows/root?bundle_version=0.0.4",
+      "api/gateway/bundles/basic-agent/flows/root/input_schema?bundle_version=0.0.4",
+      "api/gateway/bundles/basic-agent/flows/root?bundle_version=0.0.4",
     ]);
   });
 
@@ -251,8 +251,8 @@ describe("legacy VisualFlow requirements", () => {
       });
     await fetchWorkflowSchema({ ...workflow, registryScope: "tenant_catalog" });
     expect(vi.mocked(gatewayRequest).mock.calls.map(([path]) => path)).toEqual([
-      "/api/gateway/workflow-catalog/basic-agent/versions/0.0.4/flows/root/input_schema?scope=tenant",
-      "/api/gateway/workflow-catalog/basic-agent/versions/0.0.4/flows/root?scope=tenant",
+      "api/gateway/workflow-catalog/basic-agent/versions/0.0.4/flows/root/input_schema?scope=tenant",
+      "api/gateway/workflow-catalog/basic-agent/versions/0.0.4/flows/root?scope=tenant",
     ]);
   });
 

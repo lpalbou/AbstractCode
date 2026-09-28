@@ -1,3 +1,4 @@
+import { gatewayApiPath } from "@abstractframework/ui-kit";
 import React, { useEffect, useMemo, useState } from "react";
 
 import { formatError, gatewayRequest } from "./transport";
@@ -137,7 +138,7 @@ export function SkillsPicker({
     const abort = new AbortController();
     setLoading(true);
     setError("");
-    void gatewayRequest("/api/gateway/skills", { signal: abort.signal })
+    void gatewayRequest(gatewayApiPath("skills"), { signal: abort.signal })
       .then((response) => {
         if (!abort.signal.aborted)
           setInventory(normalizeSkillsInventory(response));

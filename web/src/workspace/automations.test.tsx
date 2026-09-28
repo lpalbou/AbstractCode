@@ -15,7 +15,7 @@ import {
   waitAnswerPayload,
   waitResumeCommand,
 } from "./automations";
-import { AutomationsSection, automationPanelProps, folderTitle } from "./automations_view";
+import { AutomationsSection, automationPanelProps, folderRefreshKey, folderTitle } from "./automations_view";
 
 // The ui-kit's canonical wire fixtures, vendored byte-identical (checksums
 // verified by the terminal client's contract test in this repo).
@@ -38,6 +38,15 @@ describe("automation rows", () => {
     expect(paused.next).toBe("none while paused");
     const legacy = list().find((s) => s.legacy)!;
     expect(automationRowView(legacy, NOW).legacy).toBe(true);
+  });
+
+  it("re-list the folder when a run finishes, not only when one starts", () => {
+    const running = { occurrence_count: 1, current_occurrence: { index: 1, run_id: "r1", attempt: 1, status: "running" as const } };
+    const done = { occurrence_count: 1, current_occurrence: null, last_occurrence: { run_id: "r1", index: 1, status: "completed", attempts: 1, fired_at: "t", finished_at: "t2", excerpt: "", notify: null } };
+    expect(folderRefreshKey(running)).not.toBe(folderRefreshKey(done));
+    // The run finished between two reads that both show nothing in flight.
+    const seenRunning = { ...done, last_occurrence: { ...done.last_occurrence, status: "running", finished_at: undefined } };
+    expect(folderRefreshKey(seenRunning)).not.toBe(folderRefreshKey(done));
   });
 
   it("name the folder pane after the automation or the run it shows", () => {
@@ -100,7 +109,7 @@ describe("the client over the app proxy", () => {
       }),
     );
     await codeAutomationsClient().sendAutomationCommand(INBOX, { type: "automation.pause", command_id: "c1" });
-    expect(calls[0].url).toBe(`/api/gateway/automations/${INBOX}/commands`);
+    expect(calls[0].url).toBe(`api/gateway/automations/${INBOX}/commands`);
     expect(calls[0].init.credentials).toBe("same-origin");
     expect((calls[0].init.headers as Record<string, string>)["X-AbstractCode-CSRF"]).toBe("tok+1");
     expect(JSON.parse(String(calls[0].init.body))).toEqual({ command_id: "c1", type: "automation.pause" });

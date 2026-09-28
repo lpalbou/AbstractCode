@@ -2,7 +2,7 @@
  * Automations in AbstractCode (web) — the rules and the page controller.
  *
  * AbstractCode executes nothing: every action is a gateway route
- * (`/api/gateway/automations…`), reached through the ui-kit client
+ * (`api/gateway/automations…`), reached through the ui-kit client
  * (`createAutomationsClient`) over the app's authenticated proxy. The
  * presentation rules the other clients share (cadence labels, controls,
  * occurrence chat pairs, error text, the create body) come from the kit;
@@ -17,6 +17,7 @@
  *
  * Structure only: nothing here reads model prose.
  */
+import { gatewayApiPath } from "@abstractframework/ui-kit";
 import {
   attentionLabel,
   automationControls,
@@ -199,7 +200,7 @@ export type AnswerWait = (runId: string, waitKey: string, payload: Record<string
 
 export function proxyAnswerWait(mint: () => string): AnswerWait {
   return async (runId, waitKey, payload) => {
-    await gatewayRequest("/api/gateway/commands", {
+    await gatewayRequest(gatewayApiPath("commands"), {
       method: "POST",
       body: JSON.stringify(waitResumeCommand(mint(), runId, waitKey, payload)),
     });

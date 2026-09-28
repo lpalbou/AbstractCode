@@ -1,7 +1,8 @@
+import { gatewayApiPath } from "@abstractframework/ui-kit";
 import type { WorkflowTransport } from "@abstractframework/panel-chat";
 import { gateway, gatewayRequest } from "./transport";
 
-const runPath = (id: string) => `/api/gateway/runs/${encodeURIComponent(id)}`;
+const runPath = (id: string) => gatewayApiPath(`runs/${encodeURIComponent(id)}`);
 
 /** A live-reply frame the gateway sent malformed: reported, then skipped. */
 export type DeltaFrameError = {
@@ -42,7 +43,7 @@ export function createWorkflowTransport(options: {
           options.onDeltaError({ runId: id, error, frame }),
       }),
     submitCommand: (command, signal) =>
-      gatewayRequest("/api/gateway/commands", {
+      gatewayRequest(gatewayApiPath("commands"), {
         method: "POST",
         body: JSON.stringify(command),
         signal,

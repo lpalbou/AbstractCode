@@ -1,3 +1,4 @@
+import { gatewayApiPath } from "@abstractframework/ui-kit";
 import React, { useCallback, useEffect, useState } from "react";
 import { Icon } from "@abstractframework/ui-kit";
 import {
@@ -10,7 +11,7 @@ import {
   type RunWorkspace,
   type WorkspaceEntry,
 } from "@abstractframework/panel-chat";
-import { formatError, gatewayRequest } from "./transport";
+import { appUrl, formatError, gatewayRequest } from "./transport";
 import { copy_text } from "../lib/clipboard";
 import { uploadRefusal, type PendingUpload } from "./attachment_uploads";
 
@@ -26,7 +27,7 @@ export const PREVIEW_TEXT_LIMIT = 1024 * 1024;
 export const PREVIEW_LIMIT_LABEL = "1 MiB";
 
 const runPath = (runId: string) =>
-  `/api/gateway/runs/${encodeURIComponent(runId)}/workspace`;
+  gatewayApiPath(`runs/${encodeURIComponent(runId)}/workspace`);
 
 /** The app proxy as the shared browser's gateway fetch (session cookie). */
 export const proxyGatewayFetch: GatewayFetch = (path, init) =>
@@ -179,7 +180,7 @@ export function partialPreviewNote(total: number | undefined): string {
  * path is resolved against the Markdown file's folder); any other image
  * becomes a plain link. Fenced code is left untouched. */
 export function safeMarkdownImages(text: string, runId: string, markdownPath: string): string {
-  const contentPrefix = `/api/gateway/runs/${encodeURIComponent(runId)}/workspace/content?`;
+  const contentPrefix = gatewayApiPath(`runs/${encodeURIComponent(runId)}/workspace/content?`);
   const folder = markdownPath.split("/").slice(0, -1);
   const resolveRelative = (src: string): string | null => {
     if (/^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith("/") || src.startsWith("#")) return null;
@@ -204,8 +205,11 @@ export function safeMarkdownImages(text: string, runId: string, markdownPath: st
           if (hrefEnd !== -1) {
             const alt = line.slice(i + 2, labelEnd);
             const src = line.slice(labelEnd + 2, hrefEnd).trim();
-            const local = src.startsWith(contentPrefix) ? src : resolveRelative(src);
-            out += local ? `![${alt}](${local})` : `[image: ${alt || src}](${src})`;
+            const local = src.startsWith(contentPrefix) || src.startsWith(appUrl(contentPrefix)) ? src.replace(appUrl(""), "") : resolveRelative(src);
+            // Absolute on THIS page's origin and base (the app may be served
+            // under the gateway's /apps/code/): the chat renderer shows
+            // same-origin images inline.
+            out += local ? `![${alt}](${appUrl(local)})` : `[image: ${alt || src}](${src})`;
             i = hrefEnd + 1;
             continue;
           }

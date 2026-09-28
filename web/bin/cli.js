@@ -1,30 +1,31 @@
 #!/usr/bin/env node
 
+import { createGatewayUrlResolver, parseAppFlagsOrExit } from "@abstractframework/app-server";
+
 import { createCodeServer } from "./server.js";
 
-const port = process.env.PORT || 3002;
-const host = process.env.HOST || "0.0.0.0";
-const server = createCodeServer();
+// The shared launch flags: --gateway-url (aliases --gateway, --url), --port,
+// --host (default 127.0.0.1: the gateway serves this app at /apps/code/),
+// --help. Environment variables are legacy aliases only (PORT, HOST,
+// ABSTRACTCODE_GATEWAY_URL, ABSTRACTGATEWAY_URL).
+const flags = parseAppFlagsOrExit(process.argv.slice(2), {
+  appName: "AbstractCode Web",
+  command: "abstractcode-web",
+  envPrefix: "ABSTRACTCODE",
+  defaultPort: 3002,
+});
 
-server.listen(port, host, () => {
-  console.log(`
-╔════════════════════════════════════════════════════╗
-║      AbstractCode Web UI is running!               ║
-╚════════════════════════════════════════════════════╝
+// A flag or environment choice is fixed; otherwise the local gateway pointer
+// is followed (re-read when the gateway refuses a connection, so a running
+// app follows the gateway onto a new port).
+const fixed = flags.gatewayUrlSource === "flag" || flags.gatewayUrlSource.startsWith("env:");
+const server = createCodeServer({ defaultGatewayUrl: fixed ? flags.gatewayUrl : createGatewayUrlResolver() });
 
-  🌐 Local:   http://localhost:${port}
-  🌐 Network: http://${host}:${port}
-
-  💻 Browser-based coding assistant
-  🔗 Connect to AbstractGateway in settings
-  🚀 Start coding with durable agent sessions
-
-  Press Ctrl+C to stop
-`);
+server.listen(flags.port, flags.host, () => {
+  console.log(`AbstractCode Web on http://${flags.host}:${flags.port}/ (gateway ${flags.gatewayUrl}, from ${flags.gatewayUrlSource})`);
 });
 
 function shutdown() {
-  console.log("\n\n👋 Shutting down AbstractCode Web...\n");
   server.close(() => process.exit(0));
 }
 

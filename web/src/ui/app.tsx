@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { GATEWAY_CONNECTION_PATH } from "@abstractframework/ui-kit";
 import { GatewayClient, GatewayHttpError } from "../lib/gateway_client";
 import { random_id } from "../lib/ids";
 import { extract_llm_phase_event, format_llm_phase } from "../lib/llm_phase";
@@ -1254,7 +1255,7 @@ function SettingsPage(props: {
       throw new Error("Gateway user is required for hosted sign-in.");
     }
     if (!gateway_token) {
-      const response = await fetch("/api/connection/gateway", { headers: { Accept: "application/json" } });
+      const response = await fetch(GATEWAY_CONNECTION_PATH, { headers: { Accept: "application/json" } });
       const payload = await response.json().catch(async () => ({ detail: await response.text().catch(() => "") }));
       const principal = payload?.gateway?.principal || payload?.principal || {};
       const existing_user = String(principal?.user_id || "").trim();
@@ -1263,7 +1264,7 @@ function SettingsPage(props: {
       }
       throw new Error("Gateway token is required to create a browser session.");
     }
-    const response = await fetch("/api/connection/gateway", {
+    const response = await fetch(GATEWAY_CONNECTION_PATH, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
@@ -1384,7 +1385,7 @@ function SettingsPage(props: {
     set_error_models("");
     set_error_tools("");
     // Clear auto-reconnect flag
-    void fetch("/api/connection/gateway", { method: "DELETE" }).catch(() => undefined);
+    void fetch(GATEWAY_CONNECTION_PATH, { method: "DELETE" }).catch(() => undefined);
     props.on_change({ ...settings_ref.current, auth_token: "", gateway_was_connected: false });
   }
 

@@ -37,7 +37,7 @@ describe("model discovery routing", () => {
       { name: "music-engine" },
     ]);
     expect(request).toHaveBeenCalledWith(
-      "/api/gateway/audio/music/providers?task=text_to_music",
+      "api/gateway/audio/music/providers?task=text_to_music",
     );
   });
   it("discovers image editing by task and chosen provider", async () => {
@@ -48,7 +48,7 @@ describe("model discovery routing", () => {
       ),
     ).toEqual(["edit-model"]);
     expect(request).toHaveBeenCalledWith(
-      "/api/gateway/vision/provider_models?task=image_to_image&provider=image%20engine",
+      "api/gateway/vision/provider_models?task=image_to_image&provider=image%20engine",
     );
   });
   it("does not swallow catalog errors", async () => {

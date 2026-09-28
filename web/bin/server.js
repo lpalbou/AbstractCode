@@ -1,28 +1,46 @@
+/**
+ * The AbstractCode web server: the built app (`dist/`) and the app-origin
+ * gateway session proxy, on the shared app-server kit
+ * (`@abstractframework/app-server`).
+ *
+ * - Serves under the gateway's `/apps/code/` as well as at its own port
+ *   (`createMountedHandler`: base path from `X-Forwarded-Prefix`, the
+ *   browser's address from a loopback peer's `X-Forwarded-For`, the identity
+ *   header `X-AbstractFramework-App: code; mount=1` on every response). The
+ *   shell gets `<base href>` and `base_path` (`injectShell`), so every asset
+ *   and API call resolves under the base.
+ * - `/api/connection/gateway` and `/api/gateway/*` go through the kit's
+ *   session proxy (HttpOnly session cookie + CSRF twin at `Path=<base>/`,
+ *   browser `Authorization` and cookies stripped, `X-Forwarded-For` = the
+ *   browser, server-pinned gateway URL).
+ * - What this app adds in front of the proxy: a browser mutation must come
+ *   from this app's own origin, a sign-in must be JSON, and a sign-in over a
+ *   loopback socket must name a loopback host (DNS-rebinding guard).
+ */
 import * as http from "node:http";
-import * as https from "node:https";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { isIP } from "node:net";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  createGatewaySessionProxy,
+  createMountedHandler,
+  injectShell,
+  requestContext,
+  socketPeerAddress,
+} from "@abstractframework/app-server";
+
+export { socketPeerAddress };
+
 const BIN_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DIST_DIR = resolve(BIN_DIR, "..", "dist");
-const FALLBACK_GATEWAY_URL = "http://127.0.0.1:8080";
-const URL_COOKIE = "abstractcode_gateway_url";
-const SESSION_COOKIE = "abstractcode_gateway_session";
-const CSRF_COOKIE = "abstractcode_gateway_csrf";
-const TRUE_VALUES = new Set(["1", "true", "yes", "y", "on"]);
-const HOP_HEADERS = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "trailers",
-  "transfer-encoding",
-  "upgrade",
-]);
+/** The gateway's catalog id: `/apps/code/` and the identity header. */
+export const APP_ID = "code";
+/** Cookie / CSRF-header prefix (`abstractcode_gateway_*`, `x-abstractcode-csrf`). */
+export const COOKIE_APP_ID = "abstractcode";
+const CONNECTION_PATH = "/api/connection/gateway";
+const GATEWAY_PREFIX = "/api/gateway/";
 const MIME_TYPES = {
   ".html": "text/html",
   ".js": "application/javascript",
@@ -37,269 +55,6 @@ const MIME_TYPES = {
   ".webmanifest": "application/manifest+json",
 };
 
-function normalizeGatewayUrl(value) {
-  return String(value || "")
-    .trim()
-    .replace(/\/+$/, "");
-}
-
-function serverConfig(options = {}) {
-  const env = options.env || process.env;
-  const defaultGatewayUrl =
-    normalizeGatewayUrl(
-      options.defaultGatewayUrl ||
-        env.ABSTRACTCODE_GATEWAY_URL ||
-        env.ABSTRACTGATEWAY_URL ||
-        FALLBACK_GATEWAY_URL,
-    ) || FALLBACK_GATEWAY_URL;
-  return { env, defaultGatewayUrl };
-}
-
-function envBool(env, name) {
-  const raw = env[name];
-  return typeof raw === "string" && TRUE_VALUES.has(raw.trim().toLowerCase());
-}
-
-function requestHostname(req, config) {
-  const trusted =
-    envBool(config.env, "ABSTRACTCODE_TRUST_PROXY_HEADERS") ||
-    envBool(config.env, "ABSTRACTGATEWAY_TRUST_PROXY_HEADERS");
-  const value = trusted
-    ? req.headers["x-forwarded-host"] || req.headers.host
-    : req.headers.host;
-  const raw = String(value || "")
-    .split(",", 1)[0]
-    .trim();
-  if (!raw) return "";
-  if (raw.startsWith("["))
-    return raw.slice(1).split("]", 1)[0].trim().toLowerCase();
-  if ((raw.match(/:/g) || []).length === 1)
-    return raw.split(":")[0].trim().toLowerCase();
-  return raw.toLowerCase();
-}
-
-function isLoopbackHostname(hostname) {
-  const value = String(hostname || "")
-    .trim()
-    .toLowerCase();
-  if (value === "localhost" || value.endsWith(".localhost") || value === "::1") return true;
-  return isIP(value) === 4 && Number(value.split(".", 1)[0]) === 127;
-}
-
-function isLoopbackPeer(req) {
-  let address = String(req.socket?.remoteAddress || "")
-    .trim()
-    .toLowerCase();
-  if (address.startsWith("::ffff:")) address = address.slice("::ffff:".length);
-  return (
-    address === "::1" || address === "127.0.0.1" || address.startsWith("127.")
-  );
-}
-
-/**
- * The browser connection's real transport peer (req.socket.remoteAddress),
- * IPv4-mapped IPv6 unwrapped, or "" when unknown. Headers are never read.
- * Every request this server sends to the gateway on a browser's behalf
- * carries it as `X-Forwarded-For`, OVERWRITING any client value (contract
- * A-2; same rule as abstractuic's app-server). An unknown peer is refused.
- */
-export function socketPeerAddress(req) {
-  let address = String(req?.socket?.remoteAddress || "").trim().toLowerCase();
-  if (address.startsWith("::ffff:") && address.includes(".")) address = address.slice(7);
-  return address;
-}
-
-const UNKNOWN_PEER = { detail: "Cannot determine the client address of this connection" };
-/** Marks every request this server sends to the gateway as coming through
- * the Code app proxy (the gateway's same-machine fail-safe keys on it). A
- * browser-supplied value is always dropped and replaced. */
-const APP_PROXY_HEADER = "X-AbstractFramework-App-Proxy";
-const APP_PROXY_NAME = "code";
-const FORWARDING_HEADERS = new Set([
-  "x-abstractframework-app-proxy",
-  "x-forwarded-for",
-  "x-forwarded-host",
-  "x-forwarded-proto",
-  "x-real-ip",
-  "forwarded",
-]);
-
-function connectionConfigAllowed(req, config) {
-  if (envBool(config.env, "ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG"))
-    return true;
-  if (
-    envBool(config.env, "ABSTRACTGATEWAY_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG")
-  )
-    return true;
-  const trusted =
-    envBool(config.env, "ABSTRACTCODE_TRUST_PROXY_HEADERS") ||
-    envBool(config.env, "ABSTRACTGATEWAY_TRUST_PROXY_HEADERS");
-  // A trusted proxy makes its own socket address meaningless. Hosted
-  // deployments must explicitly opt in before a browser can choose an SSRF
-  // destination; direct loopback development remains convenient.
-  return (
-    !trusted &&
-    isLoopbackPeer(req) &&
-    isLoopbackHostname(requestHostname(req, config))
-  );
-}
-
-function connectionConfigDenial(req, config) {
-  const host = requestHostname(req, config) || "unknown host";
-  return (
-    `Browser-supplied Gateway URL changes are disabled for this non-local Code host (${host}). ` +
-    "Use the server-configured Gateway URL, or set ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1 behind your own access control."
-  );
-}
-
-function parseCookies(req) {
-  const out = {};
-  for (const part of String(req.headers.cookie || "").split(";")) {
-    const index = part.indexOf("=");
-    if (index < 0) continue;
-    const key = part.slice(0, index).trim();
-    const value = part.slice(index + 1).trim();
-    if (!key) continue;
-    try {
-      out[key] = decodeURIComponent(value);
-    } catch {
-      out[key] = value;
-    }
-  }
-  return out;
-}
-
-function cookieSecure(req, config) {
-  if (req.socket?.encrypted) return "; Secure";
-  const trusted =
-    envBool(config.env, "ABSTRACTCODE_TRUST_PROXY_HEADERS") ||
-    envBool(config.env, "ABSTRACTGATEWAY_TRUST_PROXY_HEADERS");
-  return trusted && firstHeader(req.headers["x-forwarded-proto"]).toLowerCase() === "https"
-    ? "; Secure"
-    : "";
-}
-
-function setSessionCookies(
-  res,
-  req,
-  gatewayUrl,
-  sessionId,
-  csrfToken,
-  persist,
-  config,
-) {
-  const secure = cookieSecure(req, config);
-  const maxAge = persist ? "; Max-Age=2592000" : "";
-  const privateAttrs = `; Path=/; HttpOnly; SameSite=Lax${secure}${maxAge}`;
-  const csrfAttrs = `; Path=/; SameSite=Lax${secure}${maxAge}`;
-  res.setHeader("Set-Cookie", [
-    `${URL_COOKIE}=${encodeURIComponent(gatewayUrl)}${privateAttrs}`,
-    `${SESSION_COOKIE}=${encodeURIComponent(sessionId)}${privateAttrs}`,
-    `${CSRF_COOKIE}=${encodeURIComponent(csrfToken)}${csrfAttrs}`,
-  ]);
-}
-
-function clearSessionCookies(res, req, config) {
-  const secure = cookieSecure(req, config);
-  res.setHeader("Set-Cookie", [
-    `${URL_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`,
-    `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`,
-    `${CSRF_COOKIE}=; Path=/; SameSite=Lax; Max-Age=0${secure}`,
-  ]);
-}
-
-function browserSession(req, config) {
-  const cookies = parseCookies(req);
-  const cookieUrl = normalizeGatewayUrl(cookies[URL_COOKIE]);
-  const allowCookieUrl =
-    envBool(config.env, "ABSTRACTCODE_ALLOW_BROWSER_GATEWAY_URL_COOKIE") ||
-    envBool(config.env, "ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG") ||
-    envBool(
-      config.env,
-      "ABSTRACTGATEWAY_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG",
-    ) ||
-    connectionConfigAllowed(req, config);
-  return {
-    gatewayUrl:
-      cookieUrl && (allowCookieUrl || cookieUrl === config.defaultGatewayUrl)
-        ? cookieUrl
-        : config.defaultGatewayUrl,
-    sessionId: String(cookies[SESSION_COOKIE] || "").trim(),
-    csrfToken: String(cookies[CSRF_COOKIE] || "").trim(),
-  };
-}
-
-function resolveBackend(gatewayUrl, config) {
-  const url = new URL(
-    normalizeGatewayUrl(gatewayUrl) || config.defaultGatewayUrl,
-  );
-  if (url.protocol !== "http:" && url.protocol !== "https:")
-    throw new Error("Gateway URL must use http or https");
-  if (!url.port) url.port = url.protocol === "https:" ? "443" : "80";
-  return {
-    url,
-    origin: `${url.protocol}//${url.host}`,
-    client: url.protocol === "https:" ? https : http,
-  };
-}
-
-function mutatingMethod(method) {
-  return ["POST", "PUT", "PATCH", "DELETE"].includes(
-    String(method || "GET").toUpperCase(),
-  );
-}
-
-function firstHeader(value) {
-  return String(Array.isArray(value) ? value[0] : value || "")
-    .split(",", 1)[0]
-    .trim();
-}
-
-function requestOrigin(req, config) {
-  const trusted =
-    envBool(config.env, "ABSTRACTCODE_TRUST_PROXY_HEADERS") ||
-    envBool(config.env, "ABSTRACTGATEWAY_TRUST_PROXY_HEADERS");
-  const host = firstHeader(
-    trusted
-      ? req.headers["x-forwarded-host"] || req.headers.host
-      : req.headers.host,
-  );
-  const protocol =
-    firstHeader(trusted ? req.headers["x-forwarded-proto"] : "") ||
-    (req.socket?.encrypted ? "https" : "http");
-  if (!host || !["http", "https"].includes(protocol.toLowerCase())) return "";
-  try {
-    return new URL(`${protocol.toLowerCase()}://${host}`).origin;
-  } catch {
-    return "";
-  }
-}
-
-function browserMutationAllowed(req, config) {
-  const origin = firstHeader(req.headers.origin);
-  if (origin) {
-    let normalized;
-    try {
-      normalized = new URL(origin).origin;
-    } catch {
-      return false;
-    }
-    return normalized === requestOrigin(req, config);
-  }
-  return (
-    firstHeader(req.headers["sec-fetch-site"]).toLowerCase() !== "cross-site"
-  );
-}
-
-function jsonRequest(req) {
-  return (
-    firstHeader(req.headers["content-type"])
-      .split(";", 1)[0]
-      .trim()
-      .toLowerCase() === "application/json"
-  );
-}
-
 function sendJson(res, status, payload) {
   if (res.headersSent) {
     res.destroy();
@@ -309,384 +64,126 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
-function readRequestJson(req) {
-  return new Promise((resolveValue) => {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      try {
-        const raw = Buffer.concat(chunks).toString("utf8");
-        resolveValue(raw ? JSON.parse(raw) : {});
-      } catch {
-        resolveValue({});
-      }
-    });
-    req.on("error", () => resolveValue({}));
-  });
+function firstHeader(value) {
+  return String(Array.isArray(value) ? value[0] : value || "")
+    .split(",", 1)[0]
+    .trim();
 }
 
-function gatewayRequest(gatewayUrl, options, body, config) {
-  return new Promise((resolveValue) => {
-    let backend;
+function mutatingMethod(method) {
+  return ["POST", "PUT", "PATCH", "DELETE"].includes(String(method || "GET").toUpperCase());
+}
+
+function hostnameOf(host) {
+  const raw = String(host || "").trim().toLowerCase();
+  if (raw.startsWith("[")) return raw.slice(1).split("]", 1)[0];
+  return (raw.match(/:/g) || []).length === 1 ? raw.split(":")[0] : raw;
+}
+
+/** `localhost`, `*.localhost`, `::1` or a 127.x IP LITERAL (never a DNS name starting "127."). */
+function isLoopbackHostname(host) {
+  const h = hostnameOf(host);
+  if (h === "localhost" || h.endsWith(".localhost") || h === "::1") return true;
+  return isIP(h) === 4 && h.startsWith("127.");
+}
+
+/** A browser mutation must come from the origin the browser sees this app at. */
+function browserMutationAllowed(req, ctx) {
+  const origin = firstHeader(req.headers.origin);
+  if (origin) {
     try {
-      backend = resolveBackend(gatewayUrl, config);
-    } catch (error) {
-      resolveValue({
-        ok: false,
-        status: 0,
-        payload: {
-          detail: `Invalid gateway URL: ${String(error?.message || error)}`,
-        },
-      });
-      return;
-    }
-    const request = backend.client.request(
-      {
-        protocol: backend.url.protocol,
-        hostname: backend.url.hostname,
-        port: backend.url.port,
-        timeout: options.timeout || 4000,
-        ...options,
-      },
-      (response) => {
-        const chunks = [];
-        response.on("data", (chunk) => chunks.push(chunk));
-        response.on("end", () => {
-          const raw = Buffer.concat(chunks).toString("utf8");
-          let payload;
-          try {
-            payload = raw ? JSON.parse(raw) : {};
-          } catch {
-            payload = { detail: raw };
-          }
-          const status = response.statusCode || 0;
-          resolveValue({
-            ok: status >= 200 && status < 300,
-            status,
-            payload,
-            headers: response.headers,
-            origin: backend.origin,
-          });
-        });
-      },
-    );
-    request.on("timeout", () => {
-      request.destroy();
-      resolveValue({
-        ok: false,
-        status: 0,
-        payload: { detail: "Gateway request timed out" },
-        origin: backend.origin,
-      });
-    });
-    request.on("error", (error) =>
-      resolveValue({
-        ok: false,
-        status: 0,
-        payload: { detail: String(error?.message || error) },
-        origin: backend.origin,
-      }),
-    );
-    if (body) request.write(body);
-    request.end();
-  });
-}
-
-function cookieValueFromSetCookie(rawHeaders, name) {
-  const headers = Array.isArray(rawHeaders)
-    ? rawHeaders
-    : rawHeaders
-      ? [rawHeaders]
-      : [];
-  for (const header of headers) {
-    for (const candidate of String(header || "").split(/,(?=\s*[^;,=]+=)/)) {
-      const first = candidate.split(";", 1)[0];
-      const index = first.indexOf("=");
-      if (index < 0 || first.slice(0, index).trim() !== name) continue;
-      const raw = first.slice(index + 1).trim();
-      try {
-        return decodeURIComponent(raw);
-      } catch {
-        return raw;
-      }
+      return new URL(origin).origin === new URL(`${ctx.proto}://${ctx.host}`).origin;
+    } catch {
+      return false;
     }
   }
-  return "";
+  return firstHeader(req.headers["sec-fetch-site"]).toLowerCase() !== "cross-site";
 }
 
-async function handleConnectionApi(req, res, config) {
+function jsonRequest(req) {
+  return firstHeader(req.headers["content-type"]).split(";", 1)[0].trim().toLowerCase() === "application/json";
+}
+
+function isLoopbackPeerSocket(req) {
   const peer = socketPeerAddress(req);
-  if (!peer) {
-    sendJson(res, 400, UNKNOWN_PEER);
-    return;
-  }
-  if (req.method === "GET") {
-    const session = browserSession(req, config);
-    if (!session.sessionId) {
-      sendJson(res, 200, {
-        ok: false,
-        gateway_url: session.gatewayUrl,
-        has_session: false,
-        gateway: { ok: false, error: "Gateway sign-in required" },
-      });
-      return;
-    }
-    const checked = await gatewayRequest(
-      session.gatewayUrl,
-      {
-        method: "GET",
-        path: "/api/gateway/me",
-        headers: {
-          Accept: "application/json",
-          "X-AbstractGateway-Session": session.sessionId,
-          "X-Forwarded-For": peer,
-          [APP_PROXY_HEADER]: APP_PROXY_NAME,
-        },
-      },
-      undefined,
-      config,
-    );
-    sendJson(res, 200, {
-      ok: checked.ok,
-      gateway_url: session.gatewayUrl,
-      has_session: true,
-      gateway: checked.payload,
-    });
-    return;
-  }
-  if (req.method === "POST") {
-    if (!jsonRequest(req)) {
-      sendJson(res, 415, {
-        detail:
-          "Gateway connection requests require Content-Type: application/json",
-      });
-      return;
-    }
-    const payload = await readRequestJson(req);
-    const gatewayUrl =
-      normalizeGatewayUrl(payload.gateway_url || config.defaultGatewayUrl) ||
-      config.defaultGatewayUrl;
-    if (
-      !connectionConfigAllowed(req, config) &&
-      gatewayUrl !== config.defaultGatewayUrl
-    ) {
-      sendJson(res, 403, { detail: connectionConfigDenial(req, config) });
-      return;
-    }
-    const body = Buffer.from(
-      JSON.stringify({
-        user_id: String(payload.gateway_user_id || "").trim(),
-        token: String(payload.gateway_token || "").trim(),
-        remember: payload.persist === true,
-      }),
-    );
-    const login = await gatewayRequest(
-      gatewayUrl,
-      {
-        method: "POST",
-        path: "/api/gateway/session/login",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          "Content-Length": String(body.length),
-          "X-Forwarded-For": peer,
-          [APP_PROXY_HEADER]: APP_PROXY_NAME,
-        },
-      },
-      body,
-      config,
-    );
-    const session =
-      login.payload && typeof login.payload.session === "object"
-        ? login.payload.session
-        : {};
-    const setCookie = login.headers?.["set-cookie"];
-    const sessionId =
-      cookieValueFromSetCookie(setCookie, "abstractgateway_session") ||
-      String(session.session_id || "").trim();
-    const csrfToken =
-      cookieValueFromSetCookie(setCookie, "abstractgateway_csrf") ||
-      String(session.csrf_token || "").trim();
-    if (!login.ok || !sessionId || !csrfToken) {
-      sendJson(res, login.status || 401, {
-        ok: false,
-        detail: login.payload?.detail || "Gateway browser session failed",
-        gateway: login.payload,
-      });
-      return;
-    }
-    setSessionCookies(
-      res,
-      req,
-      gatewayUrl,
-      sessionId,
-      csrfToken,
-      payload.persist === true,
-      config,
-    );
-    sendJson(res, 200, {
-      ok: true,
-      gateway_url: gatewayUrl,
-      has_session: true,
-      gateway: login.payload,
-    });
-    return;
-  }
-  if (req.method === "DELETE") {
-    const session = browserSession(req, config);
-    if (session.sessionId) {
-      const body = Buffer.from("{}");
-      await gatewayRequest(
-        session.gatewayUrl,
-        {
-          method: "POST",
-          path: "/api/gateway/session/logout",
-          timeout: 2000,
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            "Content-Length": String(body.length),
-            "X-AbstractGateway-Session": session.sessionId,
-            "X-AbstractGateway-CSRF": session.csrfToken,
-            "X-Forwarded-For": peer,
-          [APP_PROXY_HEADER]: APP_PROXY_NAME,
-          },
-        },
-        body,
-        config,
-      );
-    }
-    clearSessionCookies(res, req, config);
-    sendJson(res, 200, { ok: true });
-    return;
-  }
-  sendJson(res, 405, { detail: "Method not allowed" });
+  return peer === "::1" || peer.startsWith("127.");
 }
 
-function proxyHeaders(headers) {
-  const out = {};
-  for (const [key, value] of Object.entries(headers || {})) {
-    const normalized = String(key).toLowerCase();
-    if (HOP_HEADERS.has(normalized) || normalized === "content-length")
-      continue;
-    out[key] = value;
-  }
-  return out;
-}
-
-function proxyGatewayRequest(req, res, config) {
-  const session = browserSession(req, config);
-  if (!session.sessionId) {
-    sendJson(res, 401, { detail: "Gateway sign-in required" });
-    return;
-  }
-  const peer = socketPeerAddress(req);
-  if (!peer) {
-    sendJson(res, 400, UNKNOWN_PEER);
-    return;
-  }
-  if (mutatingMethod(req.method)) {
-    const presented = String(req.headers["x-abstractcode-csrf"] || "").trim();
-    if (!session.csrfToken || presented !== session.csrfToken) {
-      sendJson(res, 403, {
-        detail: "Gateway browser session CSRF token missing or invalid",
-        reason_code: "csrf_required",
-      });
-      return;
-    }
-  }
-  let backend;
-  try {
-    backend = resolveBackend(session.gatewayUrl, config);
-  } catch (error) {
-    sendJson(res, 500, {
-      detail: `Invalid gateway URL: ${String(error?.message || error)}`,
-    });
-    return;
-  }
-  const headers = { ...req.headers, host: backend.url.host };
-  delete headers.cookie;
-  delete headers.authorization;
-  // Forwarding headers: drop every client-supplied spelling (any case, plus
-  // RFC 7239 `Forwarded` and `X-Real-IP`), then X-Forwarded-For = the socket
-  // peer, so the gateway can tell whether the browser is on its machine.
-  for (const key of Object.keys(headers))
-    if (FORWARDING_HEADERS.has(key.toLowerCase())) delete headers[key];
-  headers["x-forwarded-for"] = peer;
-  headers["x-abstractframework-app-proxy"] = APP_PROXY_NAME;
-  delete headers["x-abstractcode-csrf"];
-  headers["x-abstractgateway-session"] = session.sessionId;
-  if (mutatingMethod(req.method))
-    headers["x-abstractgateway-csrf"] = session.csrfToken;
-  const proxyRequest = backend.client.request(
-    {
-      protocol: backend.url.protocol,
-      hostname: backend.url.hostname,
-      port: backend.url.port,
-      method: req.method,
-      path: req.url,
-      headers,
-    },
-    (proxyResponse) => {
-      res.writeHead(
-        proxyResponse.statusCode || 502,
-        proxyHeaders(proxyResponse.headers),
-      );
-      proxyResponse.pipe(res);
-    },
+/** The operator declared a reverse proxy in front of this app (legacy env switches, read by the kit too). */
+function trustProxyDeclared() {
+  return ["ABSTRACTCODE_TRUST_PROXY_HEADERS", "ABSTRACTGATEWAY_TRUST_PROXY_HEADERS"].some((name) =>
+    ["1", "true", "yes", "y", "on"].includes(String(process.env[name] || "").trim().toLowerCase()),
   );
-  proxyRequest.on("error", (error) =>
-    sendJson(res, 502, {
-      detail: `Backend not reachable at ${backend.origin} (${String(error?.message || error)})`,
-    }),
-  );
-  req.pipe(proxyRequest);
 }
 
-function requestPathname(req) {
+function pathnameOf(req) {
   return new URL(req.url || "/", "http://abstractcode.local").pathname;
 }
 
-/** Connect-compatible middleware shared by Vite and the packaged server. */
+/**
+ * The gateway half: connection API + `/api/gateway/*`, with this app's
+ * guards in front of the kit proxy. Connect-compatible (`next` for every
+ * other path), so the Vite dev server mounts the SAME code.
+ */
 export function createGatewayMiddleware(options = {}) {
-  const config = serverConfig(options);
-  return function codeGatewayMiddleware(req, res, next) {
+  const proxy = createGatewaySessionProxy({
+    appId: COOKIE_APP_ID,
+    ...(options.defaultGatewayUrl ? { defaultGatewayUrl: options.defaultGatewayUrl } : {}),
+    connectionPath: CONNECTION_PATH,
+    proxyPrefix: GATEWAY_PREFIX,
+  });
+  function middleware(req, res, next) {
     let pathname;
     try {
-      pathname = requestPathname(req);
+      pathname = pathnameOf(req);
     } catch {
       sendJson(res, 400, { detail: "Invalid request URL" });
       return;
     }
-    if (pathname === "/api/connection/gateway") {
-      if (mutatingMethod(req.method) && !browserMutationAllowed(req, config)) {
-        sendJson(res, 403, {
-          detail: "Cross-origin browser requests are not allowed",
-          reason_code: "origin_required",
-        });
-        return;
-      }
-      void handleConnectionApi(req, res, config).catch((error) => {
-        sendJson(res, 500, {
-          detail: `Gateway connection request failed (${String(error?.message || error)})`,
-        });
+    const owned = pathname === CONNECTION_PATH || pathname.startsWith(GATEWAY_PREFIX);
+    if (!owned) {
+      if (typeof next === "function") next();
+      else sendJson(res, 404, { detail: "Not found" });
+      return;
+    }
+    let ctx;
+    try {
+      ctx = requestContext(req);
+    } catch (error) {
+      sendJson(res, Number(error?.status) || 400, { detail: String(error?.message || error) });
+      return;
+    }
+    // DNS rebinding: a page at a hostile name resolving to 127.0.0.1 reaches
+    // this loopback server with its own Host; as a same-origin script it can
+    // also add X-Forwarded-* headers, which a loopback peer is believed for.
+    // So a sign-in over a loopback socket must name a loopback host (the
+    // gateway's /apps/code/ proxy and a local browser both do), unless the
+    // operator declared a reverse proxy in front of this app.
+    if (
+      pathname === CONNECTION_PATH &&
+      mutatingMethod(req.method) &&
+      isLoopbackPeerSocket(req) &&
+      !isLoopbackHostname(req.headers.host) &&
+      !trustProxyDeclared()
+    ) {
+      sendJson(res, 403, {
+        detail: `Sign-in refused: this local app was reached under the host name ${hostnameOf(req.headers.host) || "(none)"}, not a loopback address. Browser-supplied Gateway URL changes are disabled for it.`,
+        reason_code: "host_not_allowed",
       });
       return;
     }
-    if (pathname === "/api/gateway" || pathname.startsWith("/api/gateway/")) {
-      if (mutatingMethod(req.method) && !browserMutationAllowed(req, config)) {
-        sendJson(res, 403, {
-          detail: "Cross-origin browser requests are not allowed",
-          reason_code: "origin_required",
-        });
-        return;
-      }
-      proxyGatewayRequest(req, res, config);
+    if (mutatingMethod(req.method) && !browserMutationAllowed(req, ctx)) {
+      sendJson(res, 403, { detail: "Cross-origin browser requests are not allowed", reason_code: "origin_required" });
       return;
     }
-    if (typeof next === "function") next();
-    else sendJson(res, 404, { detail: "Not found" });
-  };
+    if (pathname === CONNECTION_PATH && req.method === "POST" && !jsonRequest(req)) {
+      sendJson(res, 415, { detail: "Gateway connection requests require Content-Type: application/json" });
+      return;
+    }
+    proxy.handle(req, res, pathname);
+  }
+  middleware.proxy = proxy;
+  return middleware;
 }
 
 function unsafeStaticPath(req) {
@@ -700,47 +197,59 @@ function unsafeStaticPath(req) {
   return decoded.includes("\0") || decoded.split(/[\\/]+/).includes("..");
 }
 
-function serveFile(res, filePath) {
+function isFile(filePath) {
   try {
-    if (!existsSync(filePath) || !statSync(filePath).isFile()) return false;
-    res.writeHead(200, {
-      "Content-Type":
-        MIME_TYPES[extname(filePath).toLowerCase()] ||
-        "application/octet-stream",
-      "Cache-Control": "no-cache",
-    });
-    res.end(readFileSync(filePath));
-    return true;
+    return existsSync(filePath) && statSync(filePath).isFile();
   } catch {
     return false;
   }
 }
 
+function serveFile(res, filePath) {
+  if (!isFile(filePath)) return false;
+  res.writeHead(200, {
+    "Content-Type": MIME_TYPES[extname(filePath).toLowerCase()] || "application/octet-stream",
+    "Cache-Control": "no-cache",
+  });
+  res.end(readFileSync(filePath));
+  return true;
+}
+
+/** The app shell with `<base href="<basePath>/">` and `base_path`. */
+function serveShell(res, distDir, basePath, gatewayUrl) {
+  const index = join(distDir, "index.html");
+  if (!isFile(index)) return false;
+  const html = injectShell(readFileSync(index, "utf8"), { basePath, config: { gateway_url: gatewayUrl } });
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
+  res.end(html);
+  return true;
+}
+
 export function createCodeRequestHandler(options = {}) {
   const distDir = resolve(options.distDir || DEFAULT_DIST_DIR);
   const gatewayMiddleware = createGatewayMiddleware(options);
-  return function codeRequestHandler(req, res) {
+  return createMountedHandler({ appId: APP_ID }, (req, res, ctx) => {
     gatewayMiddleware(req, res, () => {
       let pathname;
       try {
-        pathname = decodeURIComponent(requestPathname(req));
+        pathname = decodeURIComponent(pathnameOf(req));
       } catch {
         res.writeHead(400);
         res.end("Bad Request");
         return;
       }
-      if (
-        pathname === "/api" ||
-        pathname.startsWith("/api/") ||
-        unsafeStaticPath(req)
-      ) {
-        if (pathname === "/api" || pathname.startsWith("/api/"))
-          sendJson(res, 404, { detail: "Not found" });
-        else {
-          res.writeHead(400);
-          res.end("Bad Request");
-        }
+      if (pathname === "/api" || pathname.startsWith("/api/")) {
+        sendJson(res, 404, { detail: "Not found" });
         return;
+      }
+      if (unsafeStaticPath(req)) {
+        res.writeHead(400);
+        res.end("Bad Request");
+        return;
+      }
+      const gatewayUrl = gatewayMiddleware.proxy.defaultGatewayUrl;
+      if (pathname === "/" || pathname === "/index.html") {
+        if (serveShell(res, distDir, ctx.basePath, gatewayUrl)) return;
       }
       const filePath = resolve(distDir, pathname.replace(/^\/+/, ""));
       if (filePath !== distDir && !filePath.startsWith(`${distDir}${sep}`)) {
@@ -750,12 +259,12 @@ export function createCodeRequestHandler(options = {}) {
       }
       if (serveFile(res, filePath)) return;
       if (serveFile(res, `${filePath}.html`)) return;
-      if (serveFile(res, join(filePath, "index.html"))) return;
-      if (serveFile(res, join(distDir, "index.html"))) return;
+      // Single-page app: any other path is the shell.
+      if (serveShell(res, distDir, ctx.basePath, gatewayUrl)) return;
       res.writeHead(404);
       res.end("Not Found");
     });
-  };
+  });
 }
 
 export function createCodeServer(options = {}) {

@@ -193,6 +193,13 @@ export function automationPanelProps(ctl: AutomationsController, host: Automatio
   };
 }
 
+/** Re-list the folder whenever a run starts, moves or finishes (its files change then). */
+export function folderRefreshKey(s: { occurrence_count: number; last_occurrence?: { index: number; status: string; finished_at?: string }; current_occurrence?: { index: number; status: string } | null }): string {
+  const last = s.last_occurrence;
+  const cur = s.current_occurrence;
+  return [s.occurrence_count, last ? `${last.index}:${last.status}:${last.finished_at ?? ""}` : "", cur ? `${cur.index}:${cur.status}` : ""].join("|");
+}
+
 /** The folder pane's title: the automation's own folder, or one run's. */
 export function folderTitle(automationId: string, runId: string, occurrences: Array<{ run_id: string; index: number }>): string {
   if (runId === automationId) return "Automation folder";
@@ -247,7 +254,7 @@ export function AutomationMain(props: {
               fetchGateway={proxyGatewayFetch}
               runId={folderRun}
               title={folderTitle(d.automationId, folderRun, d.occurrences)}
-              refreshKey={String(d.summary.occurrence_count)}
+              refreshKey={folderRefreshKey(d.summary)}
               onClose={folderRun !== d.automationId ? () => setFolder({ automationId, runId: "" }) : undefined}
             />
           ) : null}

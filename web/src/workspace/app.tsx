@@ -1,3 +1,4 @@
+import { gatewayApiPath } from "@abstractframework/ui-kit";
 import React, {
   useCallback,
   useEffect,
@@ -150,7 +151,7 @@ export function CodeWorkspace() {
   const [gatewayAbout, setGatewayAbout] = useState<FetchOutcome>();
   const refreshGatewayAbout = useCallback(() => {
     setGatewayAbout(undefined);
-    void gatewayRequest("/api/gateway/about")
+    void gatewayRequest(gatewayApiPath("about"))
       .then((value) => setGatewayAbout({ ok: true, value }))
       .catch((reason) =>
         setGatewayAbout({
@@ -398,7 +399,7 @@ export function CodeWorkspace() {
     },
     openRun: (runId) => {
       void gatewayRequest<{ session_id?: string | null }>(
-        `/api/gateway/runs/${encodeURIComponent(runId)}`,
+        gatewayApiPath(`runs/${encodeURIComponent(runId)}`),
       )
         .then((run) => {
           if (!run?.session_id)
@@ -501,7 +502,7 @@ export function CodeWorkspace() {
     if (!identity || !session.runId) return;
     const abort = new AbortController();
     void gatewayRequest(
-      `/api/gateway/runs/${encodeURIComponent(session.runId)}/input_data`,
+      gatewayApiPath(`runs/${encodeURIComponent(session.runId)}/input_data`),
       { signal: abort.signal },
     )
       .then((data) => {
@@ -721,7 +722,7 @@ export function CodeWorkspace() {
         sessionId: startedSession,
         input,
       });
-      const result = await gatewayRequest("/api/gateway/runs/start", {
+      const result = await gatewayRequest(gatewayApiPath("runs/start"), {
         method: "POST",
         body: JSON.stringify(body),
       });
@@ -1693,7 +1694,7 @@ export function CodeWorkspace() {
             }}
             fetchCatalog={(provider, model) =>
               gatewayRequest(
-                `/api/gateway/voice/voices?compact=true${provider ? `&provider=${encodeURIComponent(provider)}` : ""}${model ? `&model=${encodeURIComponent(model)}` : ""}`,
+                gatewayApiPath(`voice/voices?compact=true${provider ? `&provider=${encodeURIComponent(provider)}` : ""}${model ? `&model=${encodeURIComponent(model)}` : ""}`),
               )
             }
           />
