@@ -181,7 +181,7 @@ pub enum Cmd {
         flow_id: String,
         bundle_id: String,
         session_id: String,
-        /// Boxed: StartOpts carries vectors (messages/tools/skills) and
+        /// Boxed: StartOpts carries vectors (tools/skills/attachments) and
         /// would dominate the enum's size (clippy large-variant).
         opts: Box<StartOpts>,
         /// Pending attachments snapshotted at submit (paths + any refs

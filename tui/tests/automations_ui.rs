@@ -447,6 +447,46 @@ fn discuss_forks_a_finished_run_and_switches_this_terminal_to_it() {
         .get_untracked()
         .iter()
         .any(|n| n.contains("its own workspace /gw/workspaces/discussion-abc")));
+
+    // The discussion's first turn answered; the operator's SECOND turn in
+    // that session must not carry context.messages: the gateway seeds a
+    // discussion itself and refuses a start that sends them (HTTP 400
+    // "seeded by the gateway") — the tag-gate B1 regression.
+    h.store.phase.set(abstractcode::store::Phase::Idle);
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode::transcript::Item::User {
+            text: "what changed since #5?".into(),
+        });
+        f.push_item(abstractcode::transcript::Item::Assistant {
+            text: "the inbox rule changed".into(),
+            final_answer: true,
+        });
+    });
+    h.turn();
+    h.term.push_input(b"and then?");
+    h.turn();
+    h.keys(b"\r");
+    let mut start = None;
+    while let Ok(cmd) = h.rx.try_recv() {
+        if let Cmd::Start {
+            prompt,
+            session_id,
+            opts,
+            ..
+        } = cmd
+        {
+            start = Some((prompt, session_id, opts));
+        }
+    }
+    let (prompt, session_id, opts) = start.expect("the second discussion turn starts a run");
+    assert_eq!(prompt, "and then?");
+    assert_eq!(session_id, "discussion-session:abc");
+    let input = abstractcode::run_input::build_input_data(&prompt, &opts);
+    assert!(
+        input["context"].get("messages").is_none(),
+        "a discussion turn never sends context.messages: {input}"
+    );
+    assert_eq!(input["use_session_history"], json!(true));
 }
 
 #[test]

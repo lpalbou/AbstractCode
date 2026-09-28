@@ -216,7 +216,7 @@ behaviour and is the operator's call, not a refactor:**
 | 5 | What a `degraded` moment count means for the reader ("the reply may be partial") | `src/convo.rs:582` | entity flow should author `notices[]`, same contract as the agent loop |
 | 6 | The approval gradient, incl. a `write_file`/`edit_file` exception applied on the SERVER-TRUTH path | `src/tool_policy.rs:194` | gateway should serve `auto_approve_at` directly |
 | 7 | Run-health words from client thresholds ("possibly stuck" at 900s, "tools failing" at 3-of-5) | `src/ui/chrome.rs:1046`, `src/ui/animation/mod.rs:476` | runtime/gateway `health: {state, since_ms, reason}` |
-| 8 | Conversation seed caps (40 messages / 24k chars), unlabelled and silent | `src/ui/mod.rs:709` | server seed bounds, or delete the client half once wrapper roots conclude |
+| 8 | ~~Conversation seed caps (40 messages / 24k chars), unlabelled and silent~~ — **removed 2026-09-28**: the client half is deleted; the gateway's seed (runtime history window, 50k tokens, recorded) is the only history (ADR-0026) | — | — |
 
 ### New client state introduced 2026-08-21 (classified per rule 1)
 

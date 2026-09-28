@@ -49,10 +49,9 @@ fn start_goal_run(store: Store, ctx: &UiCtx, text: &str) {
         return;
     };
     // Goal contract input: {goal, max_cycles, use_session_history} — the
-    // prompt mirrors the goal text (ledger/user-card readability). No
-    // client transcript messages: continuity is the server seed's job
-    // for a bundle whose input contract we don't own.
-    let mut opts = agent_start_opts(store, ctx, Vec::new());
+    // prompt mirrors the goal text (ledger/user-card readability).
+    // Continuity is the server seed's job, as for every run.
+    let mut opts = agent_start_opts(store, ctx);
     let max_cycles = ctx.prefs.borrow().goal_cycles();
     opts.goal = Some((text.to_string(), max_cycles));
     // The goal bundle needs an EXPLICIT tool list. `goal-agent@0.0.1`'s

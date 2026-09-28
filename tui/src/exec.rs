@@ -725,9 +725,6 @@ pub fn run(args: &Args) -> i32 {
         review_mode: Some(args.review.unwrap_or(crate::cli::DEFAULT_REVIEW_MODE)),
         review_capable: crate::discovery::workflow_is_review_capable(&workflow.bundle_id),
         review_max_rounds: args.review_rounds,
-        // One-shot runs have no prior client transcript; cross-invocation
-        // continuity rides the server-side session seed.
-        messages: Vec::new(),
         // Headless runs take the workflow's own tool defaults; the /tools
         // and /skills selections are interactive-session preferences.
         tools: None,

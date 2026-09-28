@@ -785,13 +785,9 @@ fn start_run_inner(
             .update(|f| f.push_item(Item::Error { text: msg }));
         return;
     }
-    // Conversation context BEFORE this turn's user card lands (whole
-    // completed turns only; caps mirror the server seed defaults). Client
-    // messages win over the server seed — needed live because wrapper
-    // bundles can leave prior roots non-completed (helper pollers),
-    // starving the server-side session replay.
-    let messages = store.fold.with_untracked(|f| f.chat_messages(40, 24_000));
-    let opts = agent_start_opts(store, ctx, messages);
+    // No client conversation context: the gateway replays the session's
+    // prior turns through the runtime's one history window (run_input.rs).
+    let opts = agent_start_opts(store, ctx);
     send_start(store, ctx, workflow, prompt, opts, attachments);
 }
 
@@ -872,11 +868,7 @@ fn stream_run_value(store: Store) -> Option<bool> {
 /// The run infrastructure every start shares (provider/model, workspace
 /// scope, tool selection + policy, skills) — used by plain prompts and
 /// `/goal` runs (which add goal params on top).
-pub(crate) fn agent_start_opts(
-    store: Store,
-    ctx: &UiCtx,
-    messages: Vec<(String, String)>,
-) -> StartOpts {
+pub(crate) fn agent_start_opts(store: Store, ctx: &UiCtx) -> StartOpts {
     // Tool selection: untouched = the workflow's own defaults (send
     // nothing); customized = the checked set is the run's exact allowlist.
     // Only disabled names that EXIST in the inventory count — a stale name
@@ -982,7 +974,6 @@ pub(crate) fn agent_start_opts(
             |line| store.notify(line),
             |sources, chars| store.notify(format!("project context: {sources} ({chars} chars)")),
         ),
-        messages,
         tools,
         skills: store.selected_skills.get_untracked(),
         goal: None,

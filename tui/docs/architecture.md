@@ -140,12 +140,12 @@ when the gateway advertises live replies. See
 
 - **Sessions**: the client mints a durable session id and passes
   `use_session_history: true` in run input; the gateway seeds prior turns
-  server-side (the durable-sessions contract) — that covers restarts. LIVE
-  turns additionally ride `context.messages` built from the fold's completed
-  user/answer pairs (client messages win by contract): wrapper bundles can
-  leave prior ROOT runs non-completed for a while (helper poller subflows),
-  which starves a completed-roots-only seed — carrying the visible
-  conversation makes follow-ups immune to that. `/new` rotates the id.
+  server-side (the durable-sessions contract), through the runtime's one
+  history window (AbstractGateway 0.7.0: the newest whole turns up to 50,000
+  tokens, recorded in `_runtime.session_history`; ADR-0026). The client never
+  sends `context.messages`: a client copy would bypass that window, and the
+  gateway refuses it in discussion and automation sessions. `/new` rotates
+  the id.
 - **Steering**: submitting text while a run is active sends an
   `inject_guidance` command to the run currently cycling (the fold tracks
   which subrun that is); the runtime folds it into the next reasoning

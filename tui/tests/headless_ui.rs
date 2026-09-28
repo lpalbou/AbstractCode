@@ -1065,7 +1065,7 @@ fn theme_picker_previews_on_arrows_and_reverts_on_escape() {
 }
 
 #[test]
-fn details_toggle_keeps_thinking_visible_and_start_carries_context() {
+fn details_toggle_keeps_thinking_visible_and_start_carries_no_client_history() {
     let mut h = harness();
     h.turn();
     let store = h.store;
@@ -1125,21 +1125,22 @@ fn details_toggle_keeps_thinking_visible_and_start_carries_context() {
     h.term.push_input(&[0x04]); // Ctrl+D
     h.turn();
 
-    // The next run carries the completed turn as client context.
+    // The next run carries NO client copy of the conversation: the gateway
+    // replays the session through the runtime's one history window
+    // (ADR-0026) — a client copy would bypass it (and was capped at 40
+    // messages / 24,000 chars, dropping the oldest turns unmarked).
     h.type_text("second question");
     h.turn();
     h.press_enter();
     h.turn();
     match h.rx.try_recv() {
-        Ok(Cmd::Start { opts, .. }) => {
-            assert_eq!(
-                opts.messages,
-                vec![
-                    ("user".to_string(), "first question".to_string()),
-                    ("assistant".to_string(), "first answer".to_string())
-                ],
-                "conversation context rides the start"
+        Ok(Cmd::Start { prompt, opts, .. }) => {
+            let input = abstractcode::run_input::build_input_data(&prompt, &opts);
+            assert!(
+                input["context"].get("messages").is_none() && input.get("use_context").is_none(),
+                "no client conversation context rides the start: {input}"
             );
+            assert_eq!(input["use_session_history"], serde_json::json!(true));
         }
         other => panic!("expected Cmd::Start, got {:?}", other.map(|_| "cmd")),
     }
@@ -4602,7 +4603,7 @@ fn buffered_steer_disposes_visibly_when_the_run_ends_without_a_cycle() {
 }
 
 #[test]
-fn queue_drains_next_as_a_new_run_with_the_prior_answer_in_context() {
+fn queue_drains_next_as_a_new_run_in_the_same_session() {
     let mut h = harness();
     h.turn();
     let store = h.store;
@@ -4632,19 +4633,17 @@ fn queue_drains_next_as_a_new_run_with_the_prior_answer_in_context() {
     simulate_terminal(store, abstractcode::store::RunOutcome::Success);
     h.turn();
     h.turn();
-    // The drain started B as a NEW run whose context carries A's turn
-    // (StartOpts built at drain time — chat_messages reads the fold).
+    // The drain started B as a NEW run in the same session; A's answer
+    // reaches it through the gateway's session replay, never a client copy.
     match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
         Some(Cmd::Start { prompt, opts, .. }) => {
             assert_eq!(prompt, "second task");
-            assert_eq!(
-                opts.messages,
-                vec![
-                    ("user".to_string(), "first task".to_string()),
-                    ("assistant".to_string(), "first answer".to_string())
-                ],
-                "drain-time context carries the just-finished answer"
+            let input = abstractcode::run_input::build_input_data(&prompt, &opts);
+            assert!(
+                input["context"].get("messages").is_none(),
+                "the drained run carries no client context.messages: {input}"
             );
+            assert_eq!(input["use_session_history"], serde_json::json!(true));
         }
         other => panic!("expected Cmd::Start, got {:?}", other.map(|_| "cmd")),
     }
@@ -5806,8 +5805,9 @@ fn goal_runs_carry_the_current_tier_policy_and_shared_start_opts() {
             assert_eq!(opts.workspace_mode.as_deref(), Some("workspace_or_allowed"));
             assert_eq!(opts.workspace_allowed, vec!["/srv/data".to_string()]);
             assert_eq!(opts.skills, vec!["coredoc".to_string()]);
+            let input = abstractcode::run_input::build_input_data("ship it", &opts);
             assert!(
-                opts.messages.is_empty(),
+                input["context"].get("messages").is_none(),
                 "goal runs carry no client transcript (server seed owns continuity)"
             );
         }

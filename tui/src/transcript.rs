@@ -921,59 +921,6 @@ impl Fold {
         self.followed.contains(run_id)
     }
 
-    /// The conversation as chat messages for the NEXT run's context —
-    /// user prompts + final answers only (thinking/tools/steers are
-    /// intra-turn detail). Server-side session replay seeds from COMPLETED
-    /// root runs only, and wrapper bundles can leave roots waiting on
-    /// helper pollers long after the answer landed (live-verified:
-    /// basic-agent@0.0.2 roots still waiting hours later) — so the client
-    /// carries its own transcript context; client messages win by the
-    /// durable-sessions contract, and the server seed still covers
-    /// restarts (empty fold sends nothing).
-    ///
-    /// Budget discipline mirrors the server seed: whole turns drop from
-    /// the oldest side under both caps; the newest turn always survives.
-    pub fn chat_messages(&self, max_messages: usize, max_chars: usize) -> Vec<(String, String)> {
-        let mut turns: Vec<(String, Option<String>)> = Vec::new();
-        for item in &self.items {
-            match item {
-                Item::User { text } => turns.push((text.clone(), None)),
-                Item::Assistant {
-                    text,
-                    final_answer: true,
-                } => {
-                    if let Some(last) = turns.last_mut() {
-                        if last.1.is_none() {
-                            last.1 = Some(text.clone());
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        // Complete turns only: a dangling user message is provider-hostile.
-        let mut complete: Vec<(String, String)> = turns
-            .into_iter()
-            .filter_map(|(u, a)| a.map(|a| (u, a)))
-            .collect();
-        // Drop oldest whole turns under the caps (2 messages per turn).
-        loop {
-            let msgs = complete.len() * 2;
-            let chars: usize = complete.iter().map(|(u, a)| u.len() + a.len()).sum();
-            if complete.len() > 1 && (msgs > max_messages || chars > max_chars) {
-                complete.remove(0);
-            } else {
-                break;
-            }
-        }
-        let mut out = Vec::with_capacity(complete.len() * 2);
-        for (u, a) in complete {
-            out.push(("user".to_string(), u));
-            out.push(("assistant".to_string(), a));
-        }
-        out
-    }
-
     /// What the activity strip may honestly say about the model's words
     /// beside "thinking (cycle N)".
     ///
@@ -3643,53 +3590,6 @@ mod tests {
         assert_eq!(
             fold.activity, "build cycle 2 of 6",
             "a non-progress message does not hijack the strip"
-        );
-    }
-
-    #[test]
-    fn chat_messages_carry_completed_turns_under_caps() {
-        let mut fold = Fold::new();
-        fold.begin_run("r1");
-        fold.push_item(Item::User { text: "q1".into() });
-        fold.push_item(Item::Thinking {
-            iteration: 1,
-            content: "…".into(),
-            reasoning: String::new(),
-            call: CallCost::default(),
-        });
-        fold.push_item(Item::Assistant {
-            text: "a1".into(),
-            final_answer: true,
-        });
-        fold.push_item(Item::User {
-            text: "q2 (no answer yet)".into(),
-        });
-        let msgs = fold.chat_messages(40, 24_000);
-        assert_eq!(
-            msgs,
-            vec![
-                ("user".to_string(), "q1".to_string()),
-                ("assistant".to_string(), "a1".to_string())
-            ],
-            "only complete turns travel; thinking never does"
-        );
-        // Cap discipline: oldest whole turns drop, newest survives.
-        let mut fold2 = Fold::new();
-        for i in 0..30 {
-            fold2.push_item(Item::User {
-                text: format!("q{i}"),
-            });
-            fold2.push_item(Item::Assistant {
-                text: format!("a{i}"),
-                final_answer: true,
-            });
-        }
-        let msgs2 = fold2.chat_messages(10, 24_000);
-        assert_eq!(msgs2.len(), 10);
-        assert_eq!(
-            msgs2.last().unwrap().1,
-            "a29",
-            "newest turn always survives"
         );
     }
 

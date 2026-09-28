@@ -2,8 +2,12 @@
 //!
 //! Session continuity is SERVER-SIDE: `use_session_history: true` asks the
 //! gateway to seed `context.messages` from the session's prior completed
-//! runs (the durable-sessions contract) — this client never carries the
-//! transcript authority.
+//! runs (the durable-sessions contract). The runtime's ONE history window
+//! bounds that replay (the newest whole turns up to 50k tokens, recorded in
+//! the run's `_runtime.session_history`; ADR-0026). This client never sends
+//! `context.messages`: a client copy would bypass that window, and the
+//! gateway refuses it outright in discussion and automation sessions
+//! (HTTP 400 "seeded by the gateway").
 
 use serde_json::{json, Value};
 
@@ -92,11 +96,6 @@ pub struct StartOpts {
     /// composition site). Defaults to false so `StartOpts::default()` states
     /// no posture; both real call sites compute it from the workflow.
     pub review_capable: bool,
-    /// Prior conversation turns (role, content) carried by the client.
-    /// Client-provided messages WIN over the server-side session seed —
-    /// needed live because wrapper bundles can leave prior roots
-    /// non-completed (helper pollers), starving the seed.
-    pub messages: Vec<(String, String)>,
     /// Explicit tool allowlist (`input_data.tools`). `None` = the workflow's
     /// own defaults; `Some(list)` overrides the flow's tools pin — this is
     /// how the `/tools` on/off selection reaches the agent.
@@ -162,16 +161,6 @@ pub fn build_input_data(prompt: &str, opts: &StartOpts) -> Value {
         // read it, newer ones seed `_limits` from it (0029 #6), and the
         // `_limits` entry below is authoritative on both.
         input["max_iterations"] = json!(opts.max_iterations);
-    }
-    if !opts.messages.is_empty() {
-        input["context"]["messages"] = Value::Array(
-            opts.messages
-                .iter()
-                .map(|(role, content)| json!({"role": role, "content": content}))
-                .collect(),
-        );
-        // The agent lane reads use_context to fold explicit messages in.
-        input["use_context"] = json!(true);
     }
     if !opts.attachments.is_empty() {
         input["context"]["attachments"] = Value::Array(opts.attachments.clone());
@@ -612,10 +601,6 @@ mod tests {
             review_mode: Some(true),
             review_capable: true,
             review_max_rounds: 3,
-            messages: vec![
-                ("user".into(), "hi".into()),
-                ("assistant".into(), "yo".into()),
-            ],
             tools: Some(vec!["read_file".into(), "write_file".into()]),
             skills: vec!["coredoc".into()],
             goal: Some(("make the suite green".into(), 8)),
@@ -646,13 +631,10 @@ mod tests {
             json!("workspace_or_allowed")
         );
         assert_eq!(input["workspace_allowed_paths"], json!(["/srv/data"]));
-        // Client conversation context + the fold-in flag.
-        assert_eq!(input["use_context"], json!(true));
-        assert_eq!(
-            input["context"]["messages"],
-            json!([{"role": "user", "content": "hi"},
-                   {"role": "assistant", "content": "yo"}])
-        );
+        // No client conversation context: the gateway seeds it (one
+        // window, server-side), and refuses it in seeded sessions.
+        assert!(input["context"].get("messages").is_none());
+        assert!(input.get("use_context").is_none());
         assert_eq!(input["context"]["task"], json!("make the suite green"));
         // Attachments ride context.attachments as WHOLE refs, beside
         // messages/task without clobbering either.

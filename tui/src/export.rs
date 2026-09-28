@@ -53,9 +53,8 @@
 //! cross-line stitching); the last line is the whole session, so
 //! whole-session/CPT consumers take just the final line while SFT
 //! consumers take every line (the standard multi-turn expansion). Pairing
-//! semantics REUSE [`Fold::chat_messages`]' rule (pinned by a parity
-//! test): a `final_answer: true` assistant item answers the newest open
-//! user item; unanswered (failed/cancelled) turns are EXCLUDED — a
+//! rule (pinned by tests): a `final_answer: true` assistant item answers
+//! the newest open user item; unanswered (failed/cancelled) turns are EXCLUDED — a
 //! dangling user prompt is provider-hostile — and counted in the caller's
 //! notice, never written to the file. Default lines carry ONLY the
 //! `messages` key (drop-in trainable; strict validators reject unknown
@@ -554,8 +553,7 @@ struct SftTurn {
     steers: Vec<String>,
 }
 
-/// Segment items into turns with `Fold::chat_messages` pairing semantics
-/// (parity-pinned by a test): a User opens a turn; the FIRST
+/// Segment items into turns (pairing pinned by tests): a User opens a turn; the FIRST
 /// `final_answer: true` assistant closes the NEWEST open turn; intra-turn
 /// tools/cycles/steers attach to the open turn; everything with no open
 /// turn is dropped.
@@ -700,7 +698,6 @@ pub fn to_sft_jsonl(items: &[Item], details: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcript::Fold;
 
     fn user(text: &str) -> Item {
         Item::User { text: text.into() }
@@ -1108,7 +1105,7 @@ mod tests {
     }
 
     #[test]
-    fn jsonl_skips_incomplete_turns_and_matches_chat_messages_pairing() {
+    fn jsonl_skips_incomplete_turns() {
         // Turn 1 has no final answer (failed run) — excluded from the file
         // AND from later prefixes; turn 2 completes.
         let items = vec![
@@ -1118,7 +1115,7 @@ mod tests {
             },
             user("q2"),
             answer("a2"),
-            // A trailing final answer with NO open turn is ignored (parity).
+            // A trailing final answer with NO open turn is ignored.
             answer("stray"),
         ];
         let (lines, skipped) = sft_lines(&items, false);
@@ -1129,34 +1126,14 @@ mod tests {
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0]["content"], "q2");
         assert_eq!(msgs[1]["content"], "a2");
-        // Parity with Fold::chat_messages on the same items (the reuse
-        // contract this module documents).
-        let mut fold = Fold::new();
-        for item in items.clone() {
-            fold.push_item(item);
-        }
-        let pairs = fold.chat_messages(usize::MAX, usize::MAX);
-        let flat: Vec<(String, String)> = msgs
-            .iter()
-            .map(|m| {
-                (
-                    m["role"].as_str().unwrap().to_string(),
-                    m["content"].as_str().unwrap().to_string(),
-                )
-            })
-            .collect();
-        assert_eq!(pairs, flat, "same pairing semantics as chat_messages");
     }
 
     #[test]
-    fn jsonl_parity_holds_on_stacked_users_and_double_finals() {
+    fn jsonl_pairs_stacked_users_and_double_finals() {
         // The divergence-prone shapes (round-2 P2-3): (a) STACKED open
         // users — the answer closes the NEWEST turn (`turns.last_mut()`),
         // the older stays dangling; (b) a SECOND final answer in the same
-        // turn — first wins (the `is_none()` guard). If a future edit
-        // flips chat_messages to close the OLDEST open turn, this parity
-        // pin fails instead of exports silently diverging from the
-        // run-context seeding semantics.
+        // turn — first wins (the `is_none()` guard).
         let items = vec![
             user("q-old"),
             user("q-new"),
@@ -1171,21 +1148,6 @@ mod tests {
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0]["content"], "q-new", "answer closes the NEWEST turn");
         assert_eq!(msgs[1]["content"], "a", "first final wins; dup ignored");
-        let mut fold = Fold::new();
-        for item in items {
-            fold.push_item(item);
-        }
-        let pairs = fold.chat_messages(usize::MAX, usize::MAX);
-        let flat: Vec<(String, String)> = msgs
-            .iter()
-            .map(|m| {
-                (
-                    m["role"].as_str().unwrap().to_string(),
-                    m["content"].as_str().unwrap().to_string(),
-                )
-            })
-            .collect();
-        assert_eq!(pairs, flat, "parity on the divergence-prone shapes");
     }
 
     #[test]
