@@ -660,6 +660,14 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
                     store.automations.update(|v| v.error = format!("discuss: {why}"));
                     return;
                 }
+                // Discuss switches THIS terminal to the new chat; a switch
+                // cancels a run in progress here, so it is refused instead.
+                if store.phase.get_untracked() != crate::store::Phase::Idle {
+                    store.automations.update(|v| {
+                        v.error = "discuss: a run is in progress in this session — Discuss switches this terminal to a new chat; wait for it or /cancel it first".into()
+                    });
+                    return;
+                }
                 let run = match at() {
                     Some(Target::Run(i)) => i,
                     _ => {

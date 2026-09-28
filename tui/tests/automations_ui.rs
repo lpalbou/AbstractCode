@@ -644,3 +644,21 @@ fn revise_sends_only_what_changed_and_empty_keeps_the_current_value() {
         other => panic!("expected a revise, got {other:?} in {cmds:?}"),
     }
 }
+
+#[test]
+fn discuss_never_cancels_a_run_in_progress_here() {
+    let mut h = harness();
+    open_inbox(&mut h);
+    h.auto_cmds();
+    h.store.phase.set(abstractcode::store::Phase::Running);
+    for _ in 0..12 {
+        h.keys(b"\x1b[B");
+    }
+    h.keys(b"\x1b[A"); // run #6 (finished)
+    let screen = h.keys(b"d");
+    assert!(
+        screen.contains("a run is in progress in this session"),
+        "{screen}"
+    );
+    assert!(!screen.contains("discuss run #6"), "{screen}");
+}
