@@ -73,6 +73,15 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   await main.getByRole("button", { name: "Approve" }).first().click();
   await expect(main.locator('.af-auto-occ[data-index="1"] .af-auto-turn__status')).toHaveText("completed", { timeout: 30_000 });
 
+  // The run's ledger opens through this app's proxy, never as a raw gateway link.
+  const occ1 = main.locator('.af-auto-occ[data-index="1"]');
+  await occ1.getByText("Run details").click();
+  const [ledgerTab] = await Promise.all([page.waitForEvent("popup"), occ1.locator('[data-action="open-ledger-json"]').click()]);
+  await ledgerTab.waitForLoadState();
+  expect(await ledgerTab.evaluate(() => document.contentType)).toBe("application/json");
+  expect(await ledgerTab.evaluate(() => location.protocol)).toBe("blob:");
+  await ledgerTab.close();
+
   // Run now works again (a second run, again waiting for approval) — then deny it.
   await main.getByRole("button", { name: "Run now", exact: true }).click();
   await expect(main.locator('.af-auto-occ[data-index="2"]')).toBeVisible({ timeout: 30_000 });

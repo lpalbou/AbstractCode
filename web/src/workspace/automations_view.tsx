@@ -247,7 +247,8 @@ export function AutomationMain(props: {
         )
       ) : (
         <div className="code-auto-main-body">
-          {p ? <AutomationPanelWithMarkdown {...p} /> : null}
+          {/* Ledger and artifact links open through this app's proxy (safe tab-open rule). */}
+          {p ? <AutomationPanelWithMarkdown {...p} fetchGateway={proxyGatewayFetch} /> : null}
           {props.enabled ? (
             <WorkspaceBrowser
               className="code-auto-folder"
