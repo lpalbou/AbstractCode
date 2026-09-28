@@ -191,13 +191,13 @@ describe("markdown preview images", () => {
       "```",
     ].join("\n");
     const safe = safeMarkdownImages(md, "r1", "docs/README.md");
-    expect(safe).toContain("![plot](http://code.test/apps/code/api/gateway/runs/r1/workspace/content?path=docs%2Ffigs%2Fplot.png)");
+    expect(safe).toContain("![plot](api/gateway/runs/r1/workspace/content?path=docs%2Ffigs%2Fplot.png)");
     expect(safe).toContain("[image: beacon](https://evil.example/t.gif?d=secret)");
     expect(safe).toContain("[image: pix](//evil.example/p.png)");
     expect(safe).toContain("[image: up](../../escape.png)");
     expect(safe).toContain("![code](https://example.com/in-code.png)");
     const html = renderToStaticMarkup(<Markdown text={safe.split("```")[0]} />);
-    expect(html).toContain('src="http://code.test/apps/code/api/gateway/runs/r1/workspace/content?path=docs%2Ffigs%2Fplot.png"');
+    expect(html).toContain('src="api/gateway/runs/r1/workspace/content?path=docs%2Ffigs%2Fplot.png"');
     vi.unstubAllGlobals();
     expect(html).not.toMatch(/<img[^>]+src="(https?:)?\/\/evil/);
   });

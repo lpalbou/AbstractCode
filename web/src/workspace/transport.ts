@@ -16,12 +16,6 @@ export function csrfHeaders(): Record<string, string> {
     : {};
 }
 
-/** A relative app path ("api/…") as an absolute URL under this page's base
- * (`<base href>`: the app may be served under the gateway's /apps/code/). */
-export function appUrl(relativePath: string): string {
-  return new URL(relativePath, document.baseURI).href;
-}
-
 /** App-origin only. The server exchanges its HttpOnly session for gateway auth. */
 export async function gatewayRequest<T = any>(
   path: string,

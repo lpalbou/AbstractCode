@@ -11,7 +11,7 @@ import {
   type RunWorkspace,
   type WorkspaceEntry,
 } from "@abstractframework/panel-chat";
-import { appUrl, formatError, gatewayRequest } from "./transport";
+import { formatError, gatewayRequest } from "./transport";
 import { copy_text } from "../lib/clipboard";
 import { uploadRefusal, type PendingUpload } from "./attachment_uploads";
 
@@ -205,11 +205,11 @@ export function safeMarkdownImages(text: string, runId: string, markdownPath: st
           if (hrefEnd !== -1) {
             const alt = line.slice(i + 2, labelEnd);
             const src = line.slice(labelEnd + 2, hrefEnd).trim();
-            const local = src.startsWith(contentPrefix) || src.startsWith(appUrl(contentPrefix)) ? src.replace(appUrl(""), "") : resolveRelative(src);
-            // Absolute on THIS page's origin and base (the app may be served
-            // under the gateway's /apps/code/): the chat renderer shows
-            // same-origin images inline.
-            out += local ? `![${alt}](${appUrl(local)})` : `[image: ${alt || src}](${src})`;
+            // Relative to the page's base (the app may be served under the
+            // gateway's /apps/code/); the chat renderer shows relative images
+            // inline because they resolve on this page's origin.
+            const local = src.startsWith(contentPrefix) ? src : resolveRelative(src);
+            out += local ? `![${alt}](${local})` : `[image: ${alt || src}](${src})`;
             i = hrefEnd + 1;
             continue;
           }
