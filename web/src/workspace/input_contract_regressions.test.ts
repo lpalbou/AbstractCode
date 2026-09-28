@@ -188,21 +188,6 @@ describe("Gateway workflow input contract regressions", () => {
     ]);
   });
 
-  it("accepts intentionally supplied client context without reviving old messages", () => {
-    const payload = buildWorkflowInput({
-      workflow: workflow(["abstractassistant.agent.v1"]),
-      prompt: "now",
-      messages: [{ role: "assistant", content: "explicit" }],
-    });
-    expect(payload).toMatchObject({
-      use_context: true,
-      context: {
-        task: "now",
-        messages: [{ role: "assistant", content: "explicit" }],
-      },
-    });
-  });
-
   it("does not inject agent controls into an arbitrary workflow", () => {
     const source = {
       topic: "release",

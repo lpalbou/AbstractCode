@@ -129,7 +129,6 @@ export interface WorkflowInputOptions {
   /** Presence is significant: an explicit empty array means no tools. */
   tools?: string[];
   skills?: string[];
-  messages?: Array<{ role: string; content: string }>;
   attachments?: JsonObject[];
   limits?: WorkflowLimits;
   reasoning?: string;
@@ -808,16 +807,10 @@ export function buildWorkflowInput(options: WorkflowInputOptions): JsonObject {
     const context = cloneObject(record(output.context));
     context.task = prompt;
     // Prior input_data may contain gateway-seeded context. Never replay it as
-    // client authority on a fresh turn; the gateway reconstructs history.
+    // client authority on a fresh turn; the gateway reconstructs history
+    // (one window, server-side; ADR-0026). There is no client history input.
     delete context.messages;
     output.use_context = false;
-    if (options.messages?.length) {
-      context.messages = options.messages.map((message) => ({
-        role: message.role,
-        content: message.content,
-      }));
-      output.use_context = true;
-    }
     if (options.attachments?.length)
       context.attachments = options.attachments.map((attachment) => ({
         ...attachment,

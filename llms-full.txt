@@ -3274,8 +3274,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one** (`--gateway-url`, its legacy environment alias, or the login already
   saved), so a login no longer stops the client following the local gateway
   pointer to a new port.
-- **Web: the legacy REPL view sends the whole local transcript as context**
-  when its "use context" setting is on (it kept only the last 200 messages).
+- **Web: the conversation history comes from the gateway only.** The legacy
+  REPL view no longer sends the local transcript as `context.messages` (it
+  sent the last 200 messages when "Use context" was on); it asks the gateway
+  to replay the session (`use_session_history`), as the workspace view and
+  the terminal client do. The "Use context" setting is removed (the gateway's
+  replay is the one history control) and dropped from saved settings. A
+  follow-up in a Discuss session no longer gets HTTP 400 there. The
+  workspace view's input builder no longer accepts a client history at all.
 - **Web: the web server listens on `127.0.0.1` by default** (it was every
   interface). Use `--host 0.0.0.0` to accept other machines directly (the
   server then prints a warning that it is exposed beyond this machine), or let

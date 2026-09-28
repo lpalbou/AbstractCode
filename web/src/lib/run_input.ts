@@ -1,5 +1,5 @@
 import type { AttachmentRef } from "./types";
-import type { ReplMessage, ReplTemplate, Settings } from "./storage";
+import type { ReplTemplate, Settings } from "./storage";
 
 type AttachedFile = {
   path: string;
@@ -49,26 +49,9 @@ export function derive_prompt_cache_key(args: {
   return `${ns}:${_hash_hex24(raw)}`;
 }
 
-/** Every user/assistant/system turn of the transcript, whole (ADR-0026: no
- * client-side message cap; the gateway's history window bounds what a model
- * receives, by tokens, and records it). */
-function _to_chat_messages(repl_messages: ReplMessage[]): Array<{ role: string; content: string }> {
-  const msgs = Array.isArray(repl_messages) ? repl_messages : [];
-  const out: Array<{ role: string; content: string }> = [];
-  for (const m of msgs) {
-    const role = String((m as any)?.role || "").trim();
-    if (role !== "user" && role !== "assistant" && role !== "system") continue;
-    const content = String((m as any)?.content || "");
-    if (!content.trim()) continue;
-    out.push({ role, content });
-  }
-  return out;
-}
-
 export function build_run_input_data(args: {
   prompt: string;
   settings: Settings;
-  repl_messages: ReplMessage[];
   session_id: string;
   attached_files: AttachedFile[];
   template: ReplTemplate | null;
@@ -92,10 +75,13 @@ export function build_run_input_data(args: {
     attachments.push({ ...(a as any) });
   }
 
-  const use_context = Boolean((s as any)?.use_context);
-  const messages = use_context ? _to_chat_messages(args.repl_messages || []) : [];
-
-  const ctx: any = { task: prompt, messages };
+  // No client copy of the conversation (`context.messages`): the gateway
+  // replays the session's earlier turns through the runtime's one history
+  // window (`use_session_history`; the newest whole turns up to 50,000
+  // tokens, recorded in `_runtime.session_history`; ADR-0026). A client copy
+  // would bypass that window, and the gateway refuses it in discussion and
+  // automation sessions (HTTP 400 "seeded by the gateway").
+  const ctx: any = { task: prompt };
   if (attachments.length) {
     ctx.attachments = attachments;
     ctx.media = attachments;
@@ -122,7 +108,7 @@ export function build_run_input_data(args: {
   const out: Record<string, any> = {
     prompt,
     context: ctx,
-    use_context,
+    use_session_history: true,
     provider,
     model,
     system,

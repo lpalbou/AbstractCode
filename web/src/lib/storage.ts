@@ -23,7 +23,6 @@ export type Settings = {
   max_in_tokens: number;
   temperature: number;
   seed: number;
-  use_context: boolean;
   prompt_cache: boolean;
 
   system: string;
@@ -142,7 +141,6 @@ function _default_settings(): Settings {
     max_in_tokens: 0,
     temperature: 0.7,
     seed: -1,
-    use_context: true,
     prompt_cache: false,
 
     system: "",
@@ -179,7 +177,10 @@ export function load_settings(): Settings {
   out.max_in_tokens = Number.isFinite(Number(out.max_in_tokens)) ? Math.max(0, Math.trunc(Number(out.max_in_tokens))) : base.max_in_tokens;
   out.temperature = Number.isFinite(Number(out.temperature)) ? Number(out.temperature) : base.temperature;
   out.seed = Number.isFinite(Number(out.seed)) ? Math.trunc(Number(out.seed)) : base.seed;
-  out.use_context = Boolean((out as any).use_context);
+  // Retired: "Use context" sent the local transcript as context.messages;
+  // the gateway's session replay is the only history now. Dropped from
+  // older saved settings so it is not written back.
+  delete (out as any).use_context;
   out.prompt_cache = Boolean((out as any).prompt_cache);
   out.system = String(out.system || "");
   out.resp_schema = String(out.resp_schema || "");

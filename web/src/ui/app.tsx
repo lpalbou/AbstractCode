@@ -1769,18 +1769,6 @@ function SettingsPage(props: {
             <label className="checkbox_row">
               <input
                 type="checkbox"
-                checked={Boolean(s.use_context)}
-                onChange={(e) => props.on_change({ ...s, use_context: Boolean(e.target.checked) })}
-              />
-              <span>Use context</span>
-            </label>
-            <div className="field_hint">When enabled, workflows can include context.messages as history (Agent/LLM Call use_context).</div>
-          </div>
-
-          <div className="field">
-            <label className="checkbox_row">
-              <input
-                type="checkbox"
                 checked={Boolean(s.prompt_cache)}
                 onChange={(e) => props.on_change({ ...s, prompt_cache: Boolean(e.target.checked) })}
               />
@@ -2823,9 +2811,6 @@ function ConsolePage(props: {
       const input_data = build_run_input_data({
         prompt: t,
         settings: props.settings,
-        // Important: include the user message we just appended so context reconstruction
-        // (context.messages) matches what the user sees in the chat UI.
-        repl_messages: [...(props.repl.messages || []), user_message],
         session_id: props.session_id,
         attached_files,
         template: props.repl.template,

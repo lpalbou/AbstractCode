@@ -314,7 +314,6 @@ describe("buildWorkflowInput", () => {
     const output = buildWorkflowInput({
       workflow: agentWorkflow,
       prompt: "fix the tests",
-      messages: [{ role: "user", content: "context" }],
       attachments: [{ $artifact: "a1" }],
       tools: [],
       model: { provider: "openai", model: "gpt" },
@@ -339,10 +338,9 @@ describe("buildWorkflowInput", () => {
       prompt: "fix the tests",
       context: {
         task: "fix the tests",
-        messages: [{ role: "user", content: "context" }],
         attachments: [{ $artifact: "a1" }],
       },
-      use_context: true,
+      use_context: false,
       use_session_history: true,
       provider: "openai",
       model: "gpt",
