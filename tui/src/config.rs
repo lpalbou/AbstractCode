@@ -257,6 +257,17 @@ pub fn resolve_connection(url_flag: Option<&str>, token_flag: Option<&str>) -> C
 /// keeps following the gateway pointer.
 pub fn write_login(base_url: Option<&str>, token: Option<&str>) -> std::io::Result<PathBuf> {
     let path = login_store_path();
+    write_login_to(&path, base_url, token)?;
+    Ok(path)
+}
+
+/// [`write_login`] at an explicit path (tests).
+pub(crate) fn write_login_to(
+    path: &std::path::Path,
+    base_url: Option<&str>,
+    token: Option<&str>,
+) -> std::io::Result<()> {
+    let path = path.to_path_buf();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -267,19 +278,59 @@ pub fn write_login(base_url: Option<&str>, token: Option<&str>) -> std::io::Resu
     if let Some(url) = base_url {
         payload["base_url"] = json!(url.trim().trim_end_matches('/'));
     }
-    fs::write(
-        &path,
-        format!(
-            "{}\n",
-            serde_json::to_string_pretty(&payload).unwrap_or_default()
-        ),
-    )?;
+    // The token is a credential at rest: created 0600 from the start, never
+    // through a symlink (`write_private_atomically`).
+    let text = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&payload).unwrap_or_default()
+    );
+    write_private_atomically(&path, text.as_bytes())
+}
+
+/// Create a NEW file readable by its owner only: `O_CREAT|O_EXCL` at mode
+/// 0600 (on Unix; `create_new` elsewhere). Never opens an existing path, so
+/// never follows a symlink planted there.
+pub(crate) fn create_private_new(path: &std::path::Path) -> std::io::Result<fs::File> {
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
     }
-    Ok(path)
+    opts.open(path)
+}
+
+/// Replace `path` with `bytes` as a private file: a fresh 0600 temporary
+/// file in the same folder ([`create_private_new`]), written and fsynced,
+/// then renamed over `path`. The rename replaces whatever is at `path` — a
+/// symlink included — and never writes through it; readers see the old
+/// file or the new one, never a partial one.
+pub(crate) fn write_private_atomically(
+    path: &std::path::Path,
+    bytes: &[u8],
+) -> std::io::Result<()> {
+    use std::io::Write;
+    let dir = path
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".to_string());
+    let tmp = dir.join(format!(".{name}.{}.tmp", mint_session_id()));
+    let result = (|| {
+        let mut f = create_private_new(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
 }
 
 pub fn now_iso_utc() -> String {
@@ -1035,6 +1086,83 @@ pub fn mint_session_id() -> String {
 
 #[cfg(test)]
 mod tests {
+    /// The login store holds a bearer token: it is created 0600 from the
+    /// start (never written under the umask and chmodded after), and a
+    /// symlink at its path is replaced, never followed — a planted link
+    /// must not redirect the token into another file.
+    #[cfg(unix)]
+    #[test]
+    fn the_login_store_is_private_from_creation_and_never_follows_a_symlink() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("acode-login-store-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let store = dir.join("gateway.json");
+
+        // A symlink at the target, pointing at a file someone else reads.
+        let elsewhere = dir.join("elsewhere.txt");
+        fs::write(&elsewhere, "untouched\n").unwrap();
+        fs::set_permissions(&elsewhere, fs::Permissions::from_mode(0o644)).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &store).unwrap();
+        write_login_to(&store, None, Some("agw_secret")).unwrap();
+        assert_eq!(
+            fs::read_to_string(&elsewhere).unwrap(),
+            "untouched\n",
+            "the link was followed"
+        );
+        assert_eq!(
+            fs::metadata(&elsewhere).unwrap().permissions().mode() & 0o777,
+            0o644,
+            "the link target's mode was changed"
+        );
+        let meta = fs::symlink_metadata(&store).unwrap();
+        assert!(
+            meta.file_type().is_file(),
+            "the store is a regular file, not the link"
+        );
+        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+        assert!(fs::read_to_string(&store).unwrap().contains("agw_secret"));
+
+        // Rewriting keeps it private and leaves no temporary file behind.
+        write_login_to(&store, Some("http://127.0.0.1:8080"), Some("agw_other")).unwrap();
+        assert_eq!(
+            fs::metadata(&store).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let names: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(sorted, vec!["elsewhere.txt", "gateway.json"], "{names:?}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Created private: the file never exists with the umask's mode. The
+    /// helper that creates it is observed directly (a chmod-after writer
+    /// has a window where another user can open it).
+    #[cfg(unix)]
+    #[test]
+    fn the_private_file_is_created_0600_before_any_byte_is_written() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("acode-private-create-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("t.json");
+        let f = create_private_new(&p).unwrap();
+        assert_eq!(f.metadata().unwrap().len(), 0);
+        assert_eq!(
+            fs::metadata(&p).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert!(
+            create_private_new(&p).is_err(),
+            "O_EXCL: an existing path is refused"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     #[test]

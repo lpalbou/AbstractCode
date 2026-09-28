@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a sign-in handed over by the gateway) shows "not signed in" in the header,
   the status strip and the status card, stops those retries, and reloads the
   catalog and the history once the gateway accepts the client again.
+- **Terminal: the login store is private from creation.** `abstractcode login`
+  wrote `~/.abstractcode/gateway.json` under the umask and only then set it
+  to 0600, and followed a symlink at that path. It now writes a new 0600 file
+  (`O_CREAT|O_EXCL`) in the same folder, fsyncs it and renames it over the
+  store: never readable by others, never written through a link.
 
 ## [terminal 0.7.0 / web 0.6.0] - 2026-09-28
 
