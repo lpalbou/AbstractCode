@@ -1,3 +1,4 @@
+import { gatewayApiPath, joinBaseUrl } from "@abstractframework/ui-kit";
 import { LedgerStreamEvent, type AttachmentRef } from "./types";
 import { SseParser } from "./sse_parser";
 import { llmDeltaFromSse, type LlmDeltaEvent } from "@abstractframework/panel-chat";
@@ -7,11 +8,6 @@ export type GatewayClientConfig = {
   auth_token?: string;
 };
 
-function _join(base_url: string, path: string): string {
-  const base = (base_url || "").trim().replace(/\/+$/, "");
-  if (!base) return path;
-  return `${base}${path}`;
-}
 
 function _auth_headers(token?: string): Record<string, string> {
   const t = (token || "").trim();
@@ -101,7 +97,7 @@ export class GatewayClient {
     if (bundle_id) req_body.bundle_id = bundle_id;
     if (fid) req_body.flow_id = fid;
     if (session_id) req_body.session_id = session_id;
-    const r = await fetch(_join(this._cfg.base_url, "/api/gateway/runs/start"), {
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath("runs/start")), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -119,7 +115,7 @@ export class GatewayClient {
   async get_run(run_id: string): Promise<any> {
     const rid = String(run_id || "").trim();
     if (!rid) throw new Error("get_run: run_id is required");
-    const r = await fetch(_join(this._cfg.base_url, `/api/gateway/runs/${encodeURIComponent(rid)}`), {
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`runs/${encodeURIComponent(rid)}`)), {
       headers: { ..._auth_headers(this._cfg.auth_token) },
     });
     if (!r.ok) return await _throw_http(r, "get_run failed");
@@ -144,7 +140,7 @@ export class GatewayClient {
     if (typeof opts?.session_turn_limit === "number" && Number.isFinite(opts.session_turn_limit)) qs.set("session_turn_limit", String(Math.max(1, Math.trunc(opts.session_turn_limit))));
     if (opts?.ledger_mode) qs.set("ledger_mode", String(opts.ledger_mode));
     if (typeof opts?.ledger_max_items === "number" && Number.isFinite(opts.ledger_max_items)) qs.set("ledger_max_items", String(Math.max(0, Math.trunc(opts.ledger_max_items))));
-    const url = _join(this._cfg.base_url, `/api/gateway/runs/${encodeURIComponent(rid)}/history_bundle?${qs.toString()}`);
+    const url = joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`runs/${encodeURIComponent(rid)}/history_bundle?${qs.toString()}`));
     const r = await fetch(url, { headers: { ..._auth_headers(this._cfg.auth_token) } });
     if (!r.ok) return await _throw_http(r, "get_run_history_bundle failed");
     return await r.json();
@@ -171,7 +167,7 @@ export class GatewayClient {
     if (opts?.root_only === true) qs.set("root_only", "true");
     if (opts?.include_ledger_len === false) qs.set("include_ledger_len", "false");
     if (opts?.include_metrics === true) qs.set("include_metrics", "true");
-    const url = _join(this._cfg.base_url, `/api/gateway/runs?${qs.toString()}`);
+    const url = joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`runs?${qs.toString()}`));
     const r = await fetch(url, { headers: { ..._auth_headers(this._cfg.auth_token) } });
     if (!r.ok) return await _throw_http(r, "list_runs failed");
     return await r.json();
@@ -182,9 +178,9 @@ export class GatewayClient {
     if (!rid) throw new Error("get_ledger: run_id is required");
     const after = Number(opts?.after || 0);
     const limit = Number(opts?.limit || 0);
-    const url = _join(
-      this._cfg.base_url,
-      `/api/gateway/runs/${encodeURIComponent(rid)}/ledger?after=${encodeURIComponent(String(after))}&limit=${encodeURIComponent(String(limit))}`
+    const url = joinBaseUrl(
+      this._cfg.base_url.trim(),
+      gatewayApiPath(`runs/${encodeURIComponent(rid)}/ledger?after=${encodeURIComponent(String(after))}&limit=${encodeURIComponent(String(limit))}`)
     );
     const r = await fetch(url, { headers: { ..._auth_headers(this._cfg.auth_token) } });
     if (!r.ok) return await _throw_http(r, "get_ledger failed");
@@ -212,7 +208,7 @@ export class GatewayClient {
     const after = Number(opts?.after || 0);
     const on_step = opts.on_step;
     const signal = opts.signal;
-    const url = _join(this._cfg.base_url, `/api/gateway/runs/${encodeURIComponent(rid)}/ledger/stream?after=${encodeURIComponent(String(after))}`);
+    const url = joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`runs/${encodeURIComponent(rid)}/ledger/stream?after=${encodeURIComponent(String(after))}`));
     const r = await fetch(url, {
       headers: { Accept: "text/event-stream", ..._auth_headers(this._cfg.auth_token) },
       signal,
@@ -262,13 +258,13 @@ export class GatewayClient {
   }
 
   async list_bundles(): Promise<any> {
-    const r = await fetch(_join(this._cfg.base_url, "/api/gateway/bundles"), { headers: { ..._auth_headers(this._cfg.auth_token) } });
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath("bundles")), { headers: { ..._auth_headers(this._cfg.auth_token) } });
     if (!r.ok) return await _throw_http(r, "list_bundles failed");
     return await r.json();
   }
 
   async reload_bundles(): Promise<any> {
-    const r = await fetch(_join(this._cfg.base_url, "/api/gateway/bundles/reload"), { method: "POST", headers: { ..._auth_headers(this._cfg.auth_token) } });
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath("bundles/reload")), { method: "POST", headers: { ..._auth_headers(this._cfg.auth_token) } });
     if (!r.ok) return await _throw_http(r, "reload_bundles failed");
     return await r.json();
   }
@@ -280,20 +276,20 @@ export class GatewayClient {
     fd.set("overwrite", overwrite ? "true" : "false");
     fd.set("reload", reload ? "true" : "false");
     fd.set("file", file, file.name || "upload.flow");
-    const r = await fetch(_join(this._cfg.base_url, "/api/gateway/bundles/upload"), { method: "POST", headers: { ..._auth_headers(this._cfg.auth_token) }, body: fd });
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath("bundles/upload")), { method: "POST", headers: { ..._auth_headers(this._cfg.auth_token) }, body: fd });
     if (!r.ok) return await _throw_http(r, "upload_bundle failed");
     return await r.json();
   }
 
   async discovery_tools(): Promise<any> {
-    const r = await fetch(_join(this._cfg.base_url, "/api/gateway/discovery/tools"), { headers: { ..._auth_headers(this._cfg.auth_token) } });
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath("discovery/tools")), { headers: { ..._auth_headers(this._cfg.auth_token) } });
     if (!r.ok) return await _throw_http(r, "discovery_tools failed");
     return await r.json();
   }
 
   async discovery_providers(opts?: { include_models?: boolean }): Promise<any> {
     const include_models = opts?.include_models === true;
-    const url = _join(this._cfg.base_url, `/api/gateway/discovery/providers?include_models=${encodeURIComponent(String(include_models))}`);
+    const url = joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`discovery/providers?include_models=${encodeURIComponent(String(include_models))}`));
     const r = await fetch(url, { headers: { ..._auth_headers(this._cfg.auth_token) } });
     if (!r.ok) return await _throw_http(r, "discovery_providers failed");
     return await r.json();
@@ -302,7 +298,7 @@ export class GatewayClient {
   async discovery_provider_models(provider_name: string): Promise<any> {
     const prov = String(provider_name || "").trim();
     if (!prov) throw new Error("discovery_provider_models: provider_name is required");
-    const r = await fetch(_join(this._cfg.base_url, `/api/gateway/discovery/providers/${encodeURIComponent(prov)}/models`), {
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`discovery/providers/${encodeURIComponent(prov)}/models`)), {
       headers: { ..._auth_headers(this._cfg.auth_token) },
     });
     if (!r.ok) return await _throw_http(r, "discovery_provider_models failed");
@@ -314,14 +310,14 @@ export class GatewayClient {
     if (!name) throw new Error("discovery_model_capabilities: model_name is required");
     const query = new URLSearchParams({ model_name: name });
     if (provider.trim()) query.set("provider", provider.trim());
-    const url = _join(this._cfg.base_url, `/api/gateway/discovery/models/capabilities?${query}`);
+    const url = joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`discovery/models/capabilities?${query}`));
     const r = await fetch(url, { headers: { ..._auth_headers(this._cfg.auth_token) } });
     if (!r.ok) return await _throw_http(r, "discovery_model_capabilities failed");
     return await r.json();
   }
 
   async workspace_policy(): Promise<any> {
-    const r = await fetch(_join(this._cfg.base_url, "/api/gateway/workspace/policy"), { headers: { ..._auth_headers(this._cfg.auth_token) } });
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath("workspace/policy")), { headers: { ..._auth_headers(this._cfg.auth_token) } });
     if (!r.ok) return await _throw_http(r, "workspace_policy failed");
     return await r.json();
   }
@@ -350,7 +346,7 @@ export class GatewayClient {
       if (wa) qs.set("workspace_allowed_paths", wa);
       if (wi) qs.set("workspace_ignored_paths", wi);
     }
-    const url = _join(this._cfg.base_url, `/api/gateway/files/search?${qs.toString()}`);
+    const url = joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`files/search?${qs.toString()}`));
     const r = await fetch(url, { headers: { ..._auth_headers(this._cfg.auth_token) }, signal: opts?.signal });
     if (!r.ok) return await _throw_http(r, "files_search failed");
     return await r.json();
@@ -360,7 +356,7 @@ export class GatewayClient {
     const rid = String(run_id || "").trim();
     if (!rid) throw new Error("list_run_artifacts: run_id is required");
     const limit = typeof opts?.limit === "number" ? opts.limit : 200;
-    const url = _join(this._cfg.base_url, `/api/gateway/runs/${encodeURIComponent(rid)}/artifacts?limit=${encodeURIComponent(String(limit))}`);
+    const url = joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`runs/${encodeURIComponent(rid)}/artifacts?limit=${encodeURIComponent(String(limit))}`));
     const r = await fetch(url, { headers: { ..._auth_headers(this._cfg.auth_token) } });
     if (!r.ok) return await _throw_http(r, "list_run_artifacts failed");
     return await r.json();
@@ -371,7 +367,7 @@ export class GatewayClient {
     const aid = String(artifact_id || "").trim();
     if (!rid) throw new Error("get_run_artifact_blob: run_id is required");
     if (!aid) throw new Error("get_run_artifact_blob: artifact_id is required");
-    const url = _join(this._cfg.base_url, `/api/gateway/runs/${encodeURIComponent(rid)}/artifacts/${encodeURIComponent(aid)}/content`);
+    const url = joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`runs/${encodeURIComponent(rid)}/artifacts/${encodeURIComponent(aid)}/content`));
     const r = await fetch(url, { headers: { ..._auth_headers(this._cfg.auth_token) } });
     if (!r.ok) return await _throw_http(r, "get_run_artifact_blob failed");
     const blob = await r.blob();
@@ -407,7 +403,7 @@ export class GatewayClient {
       if (wa) body.workspace_allowed_paths = wa;
       if (wi) body.workspace_ignored_paths = wi;
     }
-    const r = await fetch(_join(this._cfg.base_url, "/api/gateway/attachments/ingest"), {
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath("attachments/ingest")), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._auth_headers(this._cfg.auth_token) },
       body: JSON.stringify(body),
@@ -434,7 +430,7 @@ export class GatewayClient {
     if (filename) form.append("filename", filename);
     if (content_type) form.append("content_type", content_type);
 
-    const r = await fetch(_join(this._cfg.base_url, "/api/gateway/attachments/upload"), { method: "POST", headers: { ..._auth_headers(this._cfg.auth_token) }, body: form });
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath("attachments/upload")), { method: "POST", headers: { ..._auth_headers(this._cfg.auth_token) }, body: form });
     if (!r.ok) return await _throw_http(r, "attachments_upload failed");
     const out = await r.json();
     const attachment = out?.attachment;
@@ -450,7 +446,7 @@ export class GatewayClient {
     const body: any = { audio_artifact: req?.audio_artifact, request_id: req?.request_id || undefined };
     const lang = req?.language === null || req?.language === undefined ? "" : String(req.language || "").trim();
     if (lang) body.language = lang;
-    const r = await fetch(_join(this._cfg.base_url, `/api/gateway/runs/${encodeURIComponent(rid)}/audio/transcribe`), {
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`runs/${encodeURIComponent(rid)}/audio/transcribe`)), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._auth_headers(this._cfg.auth_token) },
       body: JSON.stringify(body),
@@ -469,7 +465,7 @@ export class GatewayClient {
     if (voice) body.voice = voice;
     if (format) body.format = format;
     if (request_id) body.request_id = request_id;
-    const r = await fetch(_join(this._cfg.base_url, `/api/gateway/runs/${encodeURIComponent(rid)}/voice/tts`), {
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`runs/${encodeURIComponent(rid)}/voice/tts`)), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._auth_headers(this._cfg.auth_token) },
       body: JSON.stringify(body),
@@ -489,7 +485,7 @@ export class GatewayClient {
     if (ts) body.ts = ts;
     const client_id = String(command?.client_id || "").trim();
     if (client_id) body.client_id = client_id;
-    const r = await fetch(_join(this._cfg.base_url, "/api/gateway/commands"), {
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath("commands")), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._auth_headers(this._cfg.auth_token) },
       body: JSON.stringify(body),
@@ -534,7 +530,7 @@ export class GatewayClient {
     const context = req?.context;
     if (context && typeof context === "object") body.context = context;
 
-    const r = await fetch(_join(this._cfg.base_url, "/api/gateway/bugs/report"), {
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath("bugs/report")), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._auth_headers(this._cfg.auth_token) },
       body: JSON.stringify(body),
@@ -579,7 +575,7 @@ export class GatewayClient {
     const context = req?.context;
     if (context && typeof context === "object") body.context = context;
 
-    const r = await fetch(_join(this._cfg.base_url, "/api/gateway/features/report"), {
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath("features/report")), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._auth_headers(this._cfg.auth_token) },
       body: JSON.stringify(body),
@@ -592,7 +588,7 @@ export class GatewayClient {
     const prov = String(provider || "").trim();
     const mod = String(model || "").trim();
     if (!prov || !mod) throw new Error("prompt_cache_stats: provider and model are required");
-    const url = _join(this._cfg.base_url, `/api/gateway/prompt_cache/stats?provider=${encodeURIComponent(prov)}&model=${encodeURIComponent(mod)}`);
+    const url = joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`prompt_cache/stats?provider=${encodeURIComponent(prov)}&model=${encodeURIComponent(mod)}`));
     const r = await fetch(url, { headers: { ..._auth_headers(this._cfg.auth_token) } });
     if (!r.ok) return await _throw_http(r, "prompt_cache_stats failed");
     return await r.json();
@@ -602,7 +598,7 @@ export class GatewayClient {
     const prov = String(provider || "").trim();
     const mod = String(model || "").trim();
     if (!prov || !mod) throw new Error("prompt_cache_capabilities: provider and model are required");
-    const url = _join(this._cfg.base_url, `/api/gateway/prompt_cache/capabilities?provider=${encodeURIComponent(prov)}&model=${encodeURIComponent(mod)}`);
+    const url = joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`prompt_cache/capabilities?provider=${encodeURIComponent(prov)}&model=${encodeURIComponent(mod)}`));
     const r = await fetch(url, { headers: { ..._auth_headers(this._cfg.auth_token) } });
     if (!r.ok) return await _throw_http(r, "prompt_cache_capabilities failed");
     return await r.json();
@@ -612,7 +608,7 @@ export class GatewayClient {
     const prov = String(provider || "").trim();
     const mod = String(model || "").trim();
     if (!prov || !mod) throw new Error("prompt_cache_saved: provider and model are required");
-    const url = _join(this._cfg.base_url, `/api/gateway/prompt_cache/saved?provider=${encodeURIComponent(prov)}&model=${encodeURIComponent(mod)}`);
+    const url = joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`prompt_cache/saved?provider=${encodeURIComponent(prov)}&model=${encodeURIComponent(mod)}`));
     const r = await fetch(url, { headers: { ..._auth_headers(this._cfg.auth_token) } });
     if (!r.ok) return await _throw_http(r, "prompt_cache_saved failed");
     return await r.json();
@@ -622,7 +618,7 @@ export class GatewayClient {
     const body: any = { provider: String(req?.provider || "").trim(), model: String(req?.model || "").trim() };
     const key = req?.key === null || req?.key === undefined ? "" : String(req.key || "").trim();
     if (key) body.key = key;
-    const r = await fetch(_join(this._cfg.base_url, "/api/gateway/prompt_cache/clear"), {
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath("prompt_cache/clear")), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._auth_headers(this._cfg.auth_token) },
       body: JSON.stringify(body),
@@ -633,7 +629,7 @@ export class GatewayClient {
 
   async prompt_cache_save(req: { provider: string; model: string; name: string; key: string; q8?: boolean }): Promise<any> {
     const body: any = { provider: String(req?.provider || "").trim(), model: String(req?.model || "").trim(), name: String(req?.name || "").trim(), key: String(req?.key || "").trim(), q8: Boolean(req?.q8) };
-    const r = await fetch(_join(this._cfg.base_url, "/api/gateway/prompt_cache/save"), {
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath("prompt_cache/save")), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._auth_headers(this._cfg.auth_token) },
       body: JSON.stringify(body),
@@ -644,7 +640,7 @@ export class GatewayClient {
 
   async prompt_cache_load(req: { provider: string; model: string; name: string; key: string; clear_existing?: boolean }): Promise<any> {
     const body: any = { provider: String(req?.provider || "").trim(), model: String(req?.model || "").trim(), name: String(req?.name || "").trim(), key: String(req?.key || "").trim(), clear_existing: Boolean(req?.clear_existing) };
-    const r = await fetch(_join(this._cfg.base_url, "/api/gateway/prompt_cache/load"), {
+    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath("prompt_cache/load")), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._auth_headers(this._cfg.auth_token) },
       body: JSON.stringify(body),

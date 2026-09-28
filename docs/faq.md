@@ -77,6 +77,14 @@ On the gateway host, in the run's workspace. The browser's **Files** tab and the
 terminal's `/files` command show its absolute path, the host it is on, and a
 preview of each file.
 
+## Can AbstractCode run something on a schedule?
+
+Yes, through gateway automations. In the terminal, `/schedule [task]` creates
+one from the current workflow and `/automations` manages them; in the browser,
+use the **Automations** section of the sidebar. The gateway runs them whether
+or not a client is open, and every client (Assistant, Observer, AbstractCode)
+sees the same automations. See [Automations](automations.md).
+
 ## Where are my settings stored?
 
 - `~/.abstractcode/gateway.json` — gateway URL and token, written by

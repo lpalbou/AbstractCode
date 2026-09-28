@@ -31,18 +31,21 @@
   ],
   "scripts": {
     "dev": "vite --host --port 3002",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && node scripts/check_relative_urls.mjs --dist",
     "preview": "vite preview",
     "start": "node ./bin/cli.js",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "prepublishOnly": "npm run build"
   },
+  "dependencies": {
+    "@abstractframework/app-server": "^0.1.11"
+  },
   "devDependencies": {
     "@abstractframework/monitor-flow": "^0.1.9",
     "@abstractframework/monitor-gpu": "^0.1.9",
-    "@abstractframework/panel-chat": "^0.1.17",
-    "@abstractframework/ui-kit": "^0.1.12",
+    "@abstractframework/panel-chat": "^0.1.18",
+    "@abstractframework/ui-kit": "^0.1.13",
     "@monaco-editor/react": "^4.6.0",
     "@playwright/test": "^1.63.0",
     "@types/react": "^18.2.48",

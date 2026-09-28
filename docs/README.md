@@ -11,6 +11,7 @@ shape first.
 | [`getting-started.md`](getting-started.md) | Running a gateway, installing either client, credentials, your first run |
 | [`architecture.md`](architecture.md) | The two clients, the browser app server, the gateway, the run stream with live replies, and the thin-client contract |
 | [`api.md`](api.md) | The gateway surface both clients speak, and the integration points |
+| [`automations.md`](automations.md) | Creating, managing, answering and discussing gateway automations from both clients |
 | [`workflows.md`](workflows.md) | Agent workflow bundles, the gateway default, and how a run selects one |
 | [`ui_events.md`](ui_events.md) | The workflow-driven interface event contract |
 | [`faq.md`](faq.md) | Recurring questions and known limitations |

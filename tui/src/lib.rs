@@ -19,6 +19,7 @@
 //! - [`cli`], [`exec`]: argument parsing, doctor/login, headless one-shots.
 //! - [`export`]: `/export` renderers (archival markdown + SFT JSONL).
 
+pub mod automations;
 pub mod cli;
 pub mod commands;
 pub mod config;
@@ -28,6 +29,7 @@ pub mod entities;
 pub mod exec;
 pub mod export;
 pub mod gateway;
+pub mod gateway_pointer;
 pub mod identity;
 pub mod live;
 pub mod mention;
@@ -278,9 +280,13 @@ fn run_tui(args: &cli::Args) -> i32 {
     let quit_echo: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let quit_echo_ui = quit_echo.clone();
 
+    let pointer_warning = conn.warning.clone();
     let mount_result = app.mount(move |cx| {
         let store = store::Store::create(cx);
         cx.provide_context(store);
+        if let Some(w) = pointer_warning.clone() {
+            store.notify(w);
+        }
         cx.effect(move || {
             let texts: Vec<String> = store
                 .queue

@@ -7,6 +7,7 @@
 //!
 //! This client lives on the worker thread; the UI never blocks on HTTP.
 
+pub mod automations;
 pub mod entities;
 pub mod gpu;
 pub mod sse;

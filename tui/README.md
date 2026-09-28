@@ -83,6 +83,11 @@ Status: **0.6.0**, pre-alpha. Release history is in
   preview of any text, Markdown, JSON or image file (`Enter`). `c` copies a
   path; `o` shows the workspace folder in your file manager when the gateway
   is on this machine.
+- **Automations**: `/automations` lists the gateway's automations (the same
+  ones the Assistant and the Observer show) with their state, what runs now and
+  the next run; open one to read its runs, approve its tool calls, pause, run
+  now, stop, revise, archive, browse its folder, or discuss a run as a new
+  chat in place. `/schedule [task]` creates one that runs the current workflow.
 - **Sessions and memory**: one durable session id per conversation, and a
   `/sessions` picker over your recent ones (named by their first prompt).
   The client carries the live conversation into each run; the gateway
@@ -165,7 +170,7 @@ You need a running AbstractGateway (the control plane that hosts the agent):
 
 ```sh
 abstractgateway serve                                  # or use an existing one
-abstractcode login --gateway http://127.0.0.1:8080 --token <token>
+abstractcode login --gateway-url http://127.0.0.1:8080 --token <token>
 abstractcode doctor                                # reachability · auth · catalog
 abstractcode                                       # launch the TUI
 ```
@@ -212,7 +217,7 @@ and does not print it a second time at the end.
 ## Options
 
 ```
---gateway <URL> --token <TOK>     connection (flag > env > login store)
+--gateway-url <URL> --token <TOK> connection (flag > env > login store; --gateway is an alias)
 --session <ID>                    durable session id (default: fresh session)
 --resume                          reopen the last session (`--continue` alias)
 --workflow <bundle[:flow]|default>  agent workflow (default: your /workflow

@@ -100,14 +100,15 @@ describe("web builds from its own directory", () => {
     }
   });
 
-  it("ships no runtime dependencies", () => {
-    // The published package is `bin/cli.js` (node builtins only) plus a bundled
-    // `dist/`. A runtime dependency here would make every `npx` invocation
-    // download something the program never loads — and would put anything
-    // vulnerable in it on every user's install rather than only in this repo's
-    // build.
+  it("ships exactly one runtime dependency: the shared app-server kit", () => {
+    // The published package is `bin/` plus a bundled `dist/`. The server side
+    // (serving under the gateway's /apps/code/, launch flags, the gateway
+    // pointer, the session proxy) is the framework's shared
+    // `@abstractframework/app-server` (node builtins only, no dependencies of
+    // its own); anything else a runtime dependency would put on every user's
+    // install belongs in the bundle.
     const manifest = JSON.parse(read("package.json"));
-    expect(Object.keys(manifest.dependencies || {})).toEqual([]);
+    expect(Object.keys(manifest.dependencies || {})).toEqual(["@abstractframework/app-server"]);
   });
 
   it("resolves every imported kit specifier from node_modules", async () => {

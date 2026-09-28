@@ -148,7 +148,10 @@ USAGE:
   abstractcode --caps                       print the terminal capability report
 
 OPTIONS:
-  --gateway <URL>         gateway base url (default: login store or http://127.0.0.1:8080)
+  --gateway-url <URL>     gateway base url; --gateway is an alias (default:
+                          the saved login, else the local gateway pointer
+                          ~/.abstractframework/gateway.json, else
+                          http://127.0.0.1:8080)
   --token <TOKEN>         bearer token (default: env or login store)
   --session <ID>          durable session id (default: a fresh session)
   --resume                reopen the last session (also: --continue)
@@ -470,6 +473,9 @@ pub fn split_workflow_ref(raw: &str) -> (String, Option<String>) {
 
 pub fn login(args: &Args) -> i32 {
     let url = config::resolve_gateway_url(args.gateway.as_deref());
+    if let Some(w) = &url.warning {
+        eprintln!("note: {w}");
+    }
     let (token, token_source) = config::resolve_gateway_token(args.token.as_deref());
     let client = crate::gateway::GatewayClient::new(&url.value, token.as_deref());
     match client.ping() {
@@ -504,6 +510,9 @@ pub fn doctor(args: &Args) -> i32 {
     let (token, token_source) = config::resolve_gateway_token(args.token.as_deref());
     println!("abstractcode ⇄ gateway doctor");
     println!("  URL:   {}   (source: {})", url.value, url.source);
+    if let Some(w) = &url.warning {
+        println!("  note:  {w}");
+    }
     println!(
         "  Token: {}   (source: {})",
         if token.is_some() { "present" } else { "none" },
@@ -631,6 +640,24 @@ mod tests {
             .contains("--stream takes on | off | default"));
         assert_eq!(parse(&[]).unwrap().stream, None);
         assert!(usage().contains("--stream <on|off|default>"));
+    }
+
+    /// One flag name for "where is the gateway" across every app and TUI
+    /// (wave-2 decision): `--gateway-url` is the documented flag, `--gateway`
+    /// the kept alias.
+    #[test]
+    fn gateway_url_is_the_primary_flag_and_gateway_its_alias() {
+        let help = usage();
+        assert!(
+            help.contains("--gateway-url <URL>     gateway base url"),
+            "{help}"
+        );
+        assert!(help.contains("--gateway is an alias"), "{help}");
+        assert!(help.contains("~/.abstractframework/gateway.json"), "{help}");
+        for flag in ["--gateway-url", "--gateway"] {
+            let args = parse(&[flag.to_string(), "http://gw:18894".to_string()]).unwrap();
+            assert_eq!(args.gateway.as_deref(), Some("http://gw:18894"), "{flag}");
+        }
     }
 
     #[test]

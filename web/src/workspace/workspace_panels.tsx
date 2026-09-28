@@ -1,3 +1,4 @@
+import { gatewayApiPath } from "@abstractframework/ui-kit";
 import React, { useEffect, useMemo, useState } from "react";
 import { Icon, type IconName } from "@abstractframework/ui-kit";
 import { JsonViewer, type WorkflowRecord } from "@abstractframework/panel-chat";
@@ -185,7 +186,7 @@ function SharedWorkspaceBrowser({
         if (query.trim()) params.set("query", query.trim());
         else if (directory) params.set("path", directory);
         void gatewayRequest(
-          `/api/gateway/files/${query.trim() ? "search" : "list"}?${params}`,
+          gatewayApiPath(`files/${query.trim() ? "search" : "list"}?${params}`),
           { signal: abort.signal },
         )
           .then((data) => {
@@ -415,7 +416,7 @@ function Artifacts({ runId, enabled }: { runId: string; enabled: boolean }) {
     if (!runId || !enabled) return;
     const abort = new AbortController();
     void gatewayRequest(
-      `/api/gateway/runs/${encodeURIComponent(runId)}/artifacts?limit=200`,
+      gatewayApiPath(`runs/${encodeURIComponent(runId)}/artifacts?limit=200`),
       { signal: abort.signal },
     )
       .then((data) =>

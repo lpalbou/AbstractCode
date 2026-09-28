@@ -243,7 +243,7 @@ pub fn resolve_approval(
 /// What `exec` says when the gateway rejects its credentials: the sign-in
 /// command and the flag, never an environment variable.
 pub const TOKEN_HINT: &str =
-    "token rejected — sign in with `abstractcode login --gateway <url> --token <token>`, or pass --token <token>";
+    "token rejected — sign in with `abstractcode login --gateway-url <url> --token <token>`, or pass --token <token>";
 
 /// `exec` without `--workflow` whose SAVED pick (`bundle[:flow]`) no longer
 /// resolves: `choose_workflow` degrades it to the gateway default for the
@@ -400,6 +400,9 @@ pub fn run(args: &Args) -> i32 {
         }
     };
     let conn = config::resolve_connection(args.gateway.as_deref(), args.token.as_deref());
+    if let Some(w) = &conn.warning {
+        eprintln!("abstractcode: {w}");
+    }
     let client = GatewayClient::new(&conn.base_url, conn.token.as_deref());
 
     // Resolve the workflow: flag > saved pick > the GATEWAY's default (§D).

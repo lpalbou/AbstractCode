@@ -15,7 +15,7 @@ abstractcode --help | --version
 
 | Option | Meaning | Default |
 | --- | --- | --- |
-| `--gateway <URL>` | Gateway base URL (`--gateway-url` too) | flag > env > login store > `http://127.0.0.1:8080` |
+| `--gateway-url <URL>` | Gateway base URL (`--gateway` is an alias) | flag > env > login store (a saved `http://127.0.0.1:8080` gives way to the pointer) > the local gateway pointer `~/.abstractframework/gateway.json` (loopback URL, schema 1, a regular file you own; anything else is ignored with one notice) > `http://127.0.0.1:8080` |
 | `--token <TOKEN>` | Bearer token | flag > env > login store |
 | `--session <ID>` | Durable session id | a fresh mint (`acode-<hex>`); `--resume`/`--continue` reopens the last one |
 | `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
@@ -47,7 +47,7 @@ abstractcode --help | --version
 
 | Variable | Meaning |
 | --- | --- |
-| `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTFLOW_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` | Gateway URL (first set wins; beats the login store) |
+| `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTFLOW_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` | Gateway URL, legacy aliases below `--gateway-url` (first set wins; beats the login store) |
 | `ABSTRACTCODE_GATEWAY_TOKEN` / `ABSTRACTGATEWAY_AUTH_TOKEN` / `ABSTRACTFLOW_GATEWAY_AUTH_TOKEN` | Bearer token |
 | `ABSTRACTCODE_GATEWAY_CONNECTION_FILE` | Login store path (default `~/.abstractcode/gateway.json`) |
 | `ABSTRACTCODE_PREFS_FILE` | Preferences path (default `~/.abstractcode/prefs.json`) |
@@ -68,6 +68,8 @@ abstractcode --help | --version
 | `/theme [id]` | Live-preview theme picker, or set directly |
 | `/workflow` | Pick the agent workflow (`/agent` too). First row: **Gateway default → name @version** — saved as "the gateway default", so the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran |
 | `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` shows the workspace folder itself (never a sub-folder; never a folder that would be launched, such as `.app`) in your file manager, only when the gateway is on this machine and allows it; `r` refreshes |
+| `/automations [id]` | The gateway's automations (`/automation`, `/autos` too), shared with every client: state as text + icon ("Active ▶", "Paused ⏸"), attention, cadence, **now** (only the gateway's `current_occurrence`), **next** (only `next_fire_at`); archived rows hidden until `h`. Keys: `Enter` opens · `n` new · `p` pause/resume · `g` run now · `x` stop current · `a` archive (press twice; hides and stops, history kept) · `r` refresh. In one automation: its header and folder, the waits that need you first (`y`/`n` approve/deny a tool call, `Enter` answers a question or an event), its runs as chat pairs, `d` discuss the selected run (a new chat; this session switches to it), `e` revise (title, interval, context; empty keeps a value), `w` browse its folder, `Esc` back. Re-read every 15 s while open. See [Automations](../../docs/automations.md) |
+| `/schedule [task]` | Create an automation that runs the current workflow (the gateway default is sent as `@default`): the task (default: your last prompt), when (UTC presets, every N m/h/d, or once at `YYYY-MM-DD HH:MM`), context (independent or growing), tools (run without asking, or ask before each tool call). Opens it once the gateway answers |
 | `/workspace send [auto\|always\|never]` | Whether your folder is sent as the workspace: `auto` (default) = only when the gateway is on this machine; `always` = also to a gateway on another machine that sees the same path (a shared mount); `never`. Bare reports what is in force. Saved in `prefs.json` |
 | `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
 | `/model` | Pick provider, then model, from gateway discovery, then the reasoning effort, then MTP (see below). `Esc` at a step keeps the current value |

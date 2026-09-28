@@ -569,31 +569,19 @@ select option {
   font-size: var(--font-size-xs);
   font-weight: 500;
 }
-.code-approval-summary {
-  min-width: 0;
-}
-.code-approval-summary section {
+/* The shared approval card (panel-chat presentInteraction): app typography. */
+.code-conversation .pc-approval-summary section {
   margin: 0;
 }
-.code-approval-summary small {
+.code-conversation .pc-approval-summary small {
   display: block;
   color: var(--text-secondary);
   margin-top: 8px;
   text-transform: capitalize;
 }
-.code-approval-summary pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 180px;
-  overflow-y: auto;
+.code-conversation .pc-approval-summary pre {
   margin: 5px 0 12px;
   font: var(--font-size-sm) / 1.7 var(--font-mono);
-}
-.code-approval-summary > details > summary {
-  cursor: pointer;
-  color: var(--text-secondary);
-  margin: 10px 0;
-  font-size: var(--font-size-sm);
 }
 .code-conversation .pc-btn:disabled {
   opacity: 0.4;
@@ -927,11 +915,6 @@ select option {
 }
 .code-file-list button.is-selected {
   background: var(--ui-surface-2);
-}
-.code-file-meta {
-  color: var(--text-secondary);
-  font-size: var(--font-size-xxs);
-  white-space: nowrap;
 }
 .code-files-mode {
   display: flex;
@@ -1831,4 +1814,74 @@ select option {
 }
 .code-skills-empty p {
   margin: 0 0 6px;
+}
+
+/* Automations: the sidebar section (above the conversations) and the main
+   view for the selected automation (the kit panel + its folder). */
+.code-automations {
+  display: flex;
+  flex-direction: column;
+  max-height: 38%;
+  min-height: 0;
+}
+.code-auto-rows {
+  overflow-y: auto;
+  min-height: 0;
+  padding: 0 10px 10px;
+}
+.code-auto-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+.code-auto-badge {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--warning-subtle, var(--accent-subtle));
+  color: var(--warning, var(--accent));
+  letter-spacing: 0;
+}
+.code-auto-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.code-auto-attention {
+  color: var(--warning);
+}
+.code-auto-archived {
+  display: block;
+  padding: 6px 12px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xxs);
+}
+.code-automation-main {
+  overflow: hidden;
+}
+.code-auto-main-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px 0;
+  flex-wrap: wrap;
+}
+.code-auto-main-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 16px;
+  padding: 12px 18px 24px;
+  align-items: start;
+}
+.code-auto-folder {
+  border: 1px solid var(--ui-border, transparent);
+  border-radius: 8px;
+  padding: 10px;
+}
+@media (max-width: 900px) {
+  .code-auto-main-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

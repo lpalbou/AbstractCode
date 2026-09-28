@@ -94,6 +94,11 @@ Status: **0.6.0**, pre-alpha. Release history is in
   preview of any text, Markdown, JSON or image file (`Enter`). `c` copies a
   path; `o` shows the workspace folder in your file manager when the gateway
   is on this machine.
+- **Automations**: `/automations` lists the gateway's automations (the same
+  ones the Assistant and the Observer show) with their state, what runs now and
+  the next run; open one to read its runs, approve its tool calls, pause, run
+  now, stop, revise, archive, browse its folder, or discuss a run as a new
+  chat in place. `/schedule [task]` creates one that runs the current workflow.
 - **Sessions and memory**: one durable session id per conversation, and a
   `/sessions` picker over your recent ones (named by their first prompt).
   The client carries the live conversation into each run; the gateway
@@ -176,7 +181,7 @@ You need a running AbstractGateway (the control plane that hosts the agent):
 
 ```sh
 abstractgateway serve                                  # or use an existing one
-abstractcode login --gateway http://127.0.0.1:8080 --token <token>
+abstractcode login --gateway-url http://127.0.0.1:8080 --token <token>
 abstractcode doctor                                # reachability · auth · catalog
 abstractcode                                       # launch the TUI
 ```
@@ -223,7 +228,7 @@ and does not print it a second time at the end.
 ## Options
 
 ```
---gateway <URL> --token <TOK>     connection (flag > env > login store)
+--gateway-url <URL> --token <TOK> connection (flag > env > login store; --gateway is an alias)
 --session <ID>                    durable session id (default: fresh session)
 --resume                          reopen the last session (`--continue` alias)
 --workflow <bundle[:flow]|default>  agent workflow (default: your /workflow
@@ -322,7 +327,7 @@ cargo install abstractcode
 ## Connect once
 
 ```sh
-abstractcode login --gateway http://127.0.0.1:8080 --token <your-token>
+abstractcode login --gateway-url http://127.0.0.1:8080 --token <your-token>
 ```
 
 `login` takes the URL and token from flags or environment (it never prompts),
@@ -764,7 +769,7 @@ abstractcode --help | --version
 
 | Option | Meaning | Default |
 | --- | --- | --- |
-| `--gateway <URL>` | Gateway base URL (`--gateway-url` too) | flag > env > login store > `http://127.0.0.1:8080` |
+| `--gateway-url <URL>` | Gateway base URL (`--gateway` is an alias) | flag > env > login store (a saved `http://127.0.0.1:8080` gives way to the pointer) > the local gateway pointer `~/.abstractframework/gateway.json` (loopback URL, schema 1, a regular file you own; anything else is ignored with one notice) > `http://127.0.0.1:8080` |
 | `--token <TOKEN>` | Bearer token | flag > env > login store |
 | `--session <ID>` | Durable session id | a fresh mint (`acode-<hex>`); `--resume`/`--continue` reopens the last one |
 | `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
@@ -796,7 +801,7 @@ abstractcode --help | --version
 
 | Variable | Meaning |
 | --- | --- |
-| `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTFLOW_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` | Gateway URL (first set wins; beats the login store) |
+| `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTFLOW_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` | Gateway URL, legacy aliases below `--gateway-url` (first set wins; beats the login store) |
 | `ABSTRACTCODE_GATEWAY_TOKEN` / `ABSTRACTGATEWAY_AUTH_TOKEN` / `ABSTRACTFLOW_GATEWAY_AUTH_TOKEN` | Bearer token |
 | `ABSTRACTCODE_GATEWAY_CONNECTION_FILE` | Login store path (default `~/.abstractcode/gateway.json`) |
 | `ABSTRACTCODE_PREFS_FILE` | Preferences path (default `~/.abstractcode/prefs.json`) |
@@ -817,6 +822,8 @@ abstractcode --help | --version
 | `/theme [id]` | Live-preview theme picker, or set directly |
 | `/workflow` | Pick the agent workflow (`/agent` too). First row: **Gateway default → name @version** — saved as "the gateway default", so the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran |
 | `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` shows the workspace folder itself (never a sub-folder; never a folder that would be launched, such as `.app`) in your file manager, only when the gateway is on this machine and allows it; `r` refreshes |
+| `/automations [id]` | The gateway's automations (`/automation`, `/autos` too), shared with every client: state as text + icon ("Active ▶", "Paused ⏸"), attention, cadence, **now** (only the gateway's `current_occurrence`), **next** (only `next_fire_at`); archived rows hidden until `h`. Keys: `Enter` opens · `n` new · `p` pause/resume · `g` run now · `x` stop current · `a` archive (press twice; hides and stops, history kept) · `r` refresh. In one automation: its header and folder, the waits that need you first (`y`/`n` approve/deny a tool call, `Enter` answers a question or an event), its runs as chat pairs, `d` discuss the selected run (a new chat; this session switches to it), `e` revise (title, interval, context; empty keeps a value), `w` browse its folder, `Esc` back. Re-read every 15 s while open. See [Automations](../../docs/automations.md) |
+| `/schedule [task]` | Create an automation that runs the current workflow (the gateway default is sent as `@default`): the task (default: your last prompt), when (UTC presets, every N m/h/d, or once at `YYYY-MM-DD HH:MM`), context (independent or growing), tools (run without asking, or ask before each tool call). Opens it once the gateway answers |
 | `/workspace send [auto\|always\|never]` | Whether your folder is sent as the workspace: `auto` (default) = only when the gateway is on this machine; `always` = also to a gateway on another machine that sees the same path (a shared mount); `never`. Bare reports what is in force. Saved in `prefs.json` |
 | `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
 | `/model` | Pick provider, then model, from gateway discovery, then the reasoning effort, then MTP (see below). `Esc` at a step keeps the current value |
@@ -2024,6 +2031,38 @@ All notable changes to this project are documented here. The format follows
 [SemVer](https://semver.org/).
 
 ## [Unreleased]
+
+### Added
+
+- **`/automations [id]` and `/schedule [task]`** — create, manage and answer
+  gateway automations (AbstractGateway 0.6.0 and later), with the same
+  behaviour as the Assistant, the Observer and the web client. The list shows
+  each automation's state as text + icon ("Active ▶", "Paused ⏸"), attention,
+  cadence, what runs now (only the gateway's `current_occurrence`) and the next
+  run (only `next_fire_at`); archived ones are hidden until `h`. One automation
+  shows its folder (`w` browses it on the gateway), the waits that need you
+  (`y`/`n` approve or deny a tool call, Enter answers a question or an event),
+  its runs as chat pairs, and its controls: `p` pause/resume, `g` run now, `x`
+  stop current, `e` revise (an empty field keeps its value), `a` archive
+  (press twice; hides and stops, history kept) and `d` Discuss, which forks the
+  selected run and switches this session to the new chat. `/schedule` creates
+  one from the current workflow: task (default: your last prompt), when (UTC),
+  context (independent or growing), tools (run without asking, or ask each
+  time).
+
+- **The local gateway pointer.** Without `--gateway-url`, the environment or
+  a saved login, the client connects to the gateway named by
+  `~/.abstractframework/gateway.json` (written by `abstractgateway serve` and
+  the installer): believed only for a loopback URL with schema 1 in a regular
+  file you own, otherwise ignored with one notice (`doctor` prints it). A saved
+  `http://127.0.0.1:8080`, the old built-in default, gives way to the pointer.
+- **Discuss is refused while a run is in progress in this session** (switching
+  to the discussion would cancel it); the message says so.
+
+### Changed
+
+- **`--gateway-url` is the documented flag** for the gateway address, as in
+  every AbstractFramework app; `--gateway` keeps working as an alias.
 
 ## [0.6.0] - 2026-09-26
 

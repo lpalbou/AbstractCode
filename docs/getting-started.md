@@ -26,20 +26,24 @@ Requires Rust 1.87 or newer. Then:
 
 ```bash
 abstractcode                     # launch against http://127.0.0.1:8080
-abstractcode --gateway https://gateway.example.com
+abstractcode --gateway-url https://gateway.example.com
 ```
 
 ### Browser
 
 ```bash
-npx @abstractframework/code      # binds 0.0.0.0:3002; open http://127.0.0.1:3002
+npx @abstractframework/code      # binds 127.0.0.1:3002; open http://127.0.0.1:3002
 ```
 
-Set the Gateway URL in the interface, or start the server with
-`ABSTRACTCODE_GATEWAY_URL` already pointing at it.
+The web server finds a local gateway by itself (the pointer
+`~/.abstractframework/gateway.json` that `abstractgateway serve` writes), or
+start it with `--gateway-url <url>`. The gateway can also serve it for you at
+`/apps/code/` (its console's **Apps** page); see
+[Web deployment](deployment-web.md).
 
-Both servers listen on every interface by default. Set `HOST=127.0.0.1` (web)
-or `abstractgateway serve --host 127.0.0.1` to keep them on loopback.
+The web server listens on `127.0.0.1` by default (`--host 0.0.0.0` accepts
+other machines); the gateway listens on every interface unless you pass
+`abstractgateway serve --host 127.0.0.1`.
 
 ## 3. Check the connection
 
@@ -57,11 +61,11 @@ from "the workflow you asked for is not installed".
 A remote gateway usually requires a token. Persist one so you do not repeat it:
 
 ```bash
-abstractcode login --gateway https://gateway.example.com --token <TOKEN>
+abstractcode login --gateway-url https://gateway.example.com --token <TOKEN>
 ```
 
 This verifies the credentials before writing them to
-`~/.abstractcode/gateway.json`. Both `--gateway` and `--token` can also come
+`~/.abstractcode/gateway.json`. Both `--gateway-url` and `--token` can also come
 from the environment, and a token passed on the command line always wins over
 the stored one.
 

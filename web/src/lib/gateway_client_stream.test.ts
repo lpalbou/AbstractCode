@@ -105,7 +105,7 @@ describe("ledger stream: live reply frames", () => {
   it("requests the stream from the caller's cursor", async () => {
     const { fetchMock } = await run(wire);
     expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toBe(
-      `/api/gateway/runs/${RUN}/ledger/stream?after=3`,
+      `api/gateway/runs/${RUN}/ledger/stream?after=3`,
     );
   });
 

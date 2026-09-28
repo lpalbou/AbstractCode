@@ -15,9 +15,12 @@ curl -sS http://127.0.0.1:8080/api/health
 abstractcode doctor
 ```
 
-Resolution order is `--gateway`, then the environment, then the login store at
-`~/.abstractcode/gateway.json`, then `http://127.0.0.1:8080`. `doctor` prints
-which one it used, which is usually the answer when a saved value is shadowing
+Resolution order is `--gateway-url` (alias `--gateway`), then the environment, then the login store at
+`~/.abstractcode/gateway.json` (a saved `http://127.0.0.1:8080` gives way to
+the next step), then the local gateway pointer `~/.abstractframework/gateway.json`
+that `abstractgateway serve` and the installer write, then
+`http://127.0.0.1:8080`. `doctor` prints which one it used, and why a pointer
+file was ignored, which is usually the answer when a saved value is shadowing
 the one you expect.
 
 **401 or 403 from a remote gateway.**
@@ -25,7 +28,7 @@ The token is missing, expired, or belongs to a different gateway. Re-verify and
 re-persist it:
 
 ```bash
-abstractcode login --gateway https://gateway.example.com --token <TOKEN>
+abstractcode login --gateway-url https://gateway.example.com --token <TOKEN>
 ```
 
 `login` checks the credentials before writing them, so a failure here is about

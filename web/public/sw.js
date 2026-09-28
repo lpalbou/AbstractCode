@@ -17,7 +17,8 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
       const keys = await caches.keys();
-      await Promise.all(keys.map((k) => (k === CACHE_NAME ? Promise.resolve() : caches.delete(k))));
+      // Only this app's own older caches: other apps share the gateway's origin.
+      await Promise.all(keys.map((k) => (k.startsWith("abstractcode-web-") && k !== CACHE_NAME ? caches.delete(k) : Promise.resolve())));
       self.clients.claim();
     })()
   );
@@ -27,8 +28,8 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Never cache API calls.
-  if (url.pathname.startsWith("/api/")) return;
+  // Never cache API calls (under this app's own base: the gateway serves it at /apps/code/).
+  if (url.pathname.startsWith(new URL("api/", self.registration.scope).pathname)) return;
 
   event.respondWith(
     (async () => {

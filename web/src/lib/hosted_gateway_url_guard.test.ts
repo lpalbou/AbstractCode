@@ -115,7 +115,10 @@ describe("hosted Gateway URL guard", () => {
 
     const response = await post_gateway_url_change(port);
 
+    // A same-origin script can add X-Forwarded-Host itself (DNS rebinding),
+    // so the raw Host of a loopback socket decides.
     expect(response.status).toBe(403);
+    expect(response.body.reason_code).toBe("host_not_allowed");
     expect(String(response.body.detail || "")).toContain(DENIAL);
   });
 

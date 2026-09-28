@@ -1,3 +1,4 @@
+import { gatewayApiPath } from "@abstractframework/ui-kit";
 import { gateway, gatewayRequest } from "./transport";
 export const modelDiscovery = {
   fetchProviders: async () => {
@@ -39,7 +40,7 @@ export function defaultTextRoute(
   return undefined;
 }
 export const fetchDefaultModel = () =>
-  gatewayRequest("/api/gateway/config/capability-defaults").then(
+  gatewayRequest(gatewayApiPath("config/capability-defaults")).then(
     defaultTextRoute,
   );
 
@@ -65,15 +66,15 @@ export function discoveryForInput(providerPin: string, semanticType?: string) {
     return modelDiscovery;
   const voice = providerPin === "voice_provider";
   const path = task
-    ? `/api/gateway/vision/provider_models?task=${task}`
+    ? gatewayApiPath(`vision/provider_models?task=${task}`)
     : voice
-      ? "/api/gateway/audio/speech/models?compact=true"
-      : "/api/gateway/audio/music/models?task=text_to_music";
+      ? gatewayApiPath("audio/speech/models?compact=true")
+      : gatewayApiPath("audio/music/models?task=text_to_music");
   const providersPath = task
     ? `${path}&providers_only=true`
     : voice
-      ? "/api/gateway/voice/voices?providers_only=true&compact=true"
-      : "/api/gateway/audio/music/providers?task=text_to_music";
+      ? gatewayApiPath("voice/voices?providers_only=true&compact=true")
+      : gatewayApiPath("audio/music/providers?task=text_to_music");
   const names = (items: any) =>
     Array.isArray(items)
       ? items

@@ -3,6 +3,7 @@
 pub mod animation;
 pub mod approval_view;
 pub mod attachments;
+pub mod automations_view;
 pub mod chrome;
 pub mod entity_actions;
 pub mod entity_modals;
@@ -273,6 +274,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     wire_queue_persistence(cx, store, ctx.clone());
     wire_pending_steer(cx, store, ctx.clone());
     goal::wire_goal(cx, store, ctx.clone());
+    automations_view::wire_automations(cx, store, ctx.clone());
     quit::wire_quit(cx, store, &ctx);
     transcript_view::wire_feed(
         cx,
@@ -1362,6 +1364,9 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
         Command::Permissions(arg) => set_permissions(store, ctx, arg),
         Command::Workspace => modals::open_workspace(cx, store, ctx),
         Command::Files => modals::open_files(cx, store, ctx),
+        Command::Automations(None) => automations_view::open_automations(cx, store, ctx),
+        Command::Automations(Some(id)) => automations_view::open_automation(cx, store, ctx, &id),
+        Command::Schedule(task) => automations_view::open_schedule(cx, store, ctx, task),
         Command::WorkspaceSend(arg) => workspace_send(store, ctx, arg.as_deref()),
         Command::Steer(text) => {
             if text.is_empty() {

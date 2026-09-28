@@ -242,3 +242,20 @@ This item's scope is the rest: the kind filter or toggle on the session lists (s
 default, with a way to show automation sessions), plus the WUI Automations section and the TUI `/automations` and
 `/schedule` commands. Build against the regenerated kit fixtures (abstractuic `a9b73ab`) and the gateway's
 `docs/automations.md`. See also [0002](0002_tui_session_fold_defects.md): the TUI fold counts child rows as turns.
+
+## Status note (2026-09-28, wave 2: surfaces built on branch `wave2/automations`)
+
+Built, tested and unreleased:
+- **TUI** `/automations [id]` (list, open, pause/resume, run now, stop current, revise, archive, discuss, approvals and
+  answers, folder browse through `GET /runs/{automation_id}/workspace*`) and `/schedule [task]` (a four-step form
+  instead of the `<when> | <prompt>` one-liner: task, when, context, tools). `stop_current` and `revise` are included,
+  so both clients expose the same controls. Tests: `tui/tests/automation_contracts.rs` (vendored fixtures,
+  checksum-verified) and `tui/tests/automations_ui.rs` (headless screens).
+- **WUI** Automations sidebar section, the kit `AutomationPanel` page with the automation's folder, New automation
+  (`AfScheduleDialog`, toolbar workflow), Discuss opening the fork as the app's conversation. Tests:
+  `web/src/workspace/automations.test.tsx`, `web/e2e/automations.spec.ts` (fixture gateway).
+- Docs: `docs/automations.md`.
+
+Still open in this item: the session-kind filter/toggle on both session lists (send `session_kind=chat,discussion`
+only when the gateway advertises it in `contracts.common.runs.list.filters`, with a way to show automation
+sessions). Until then automation sessions keep listing among conversations, as documented in the root guide.

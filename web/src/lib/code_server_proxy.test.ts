@@ -1,5 +1,5 @@
 import http, { type IncomingHttpHeaders, type Server } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCodeRequestHandler, createCodeServer, createGatewayMiddleware } from "../../bin/server.js";
 
@@ -51,6 +51,7 @@ function cookieHeader(setCookie: string[] | undefined): string {
 }
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
 });
 
@@ -114,10 +115,10 @@ describe("shared Code Gateway middleware", () => {
       });
       res.end(JSON.stringify({ session: {} }));
     }));
-    const codePort = await listen(createCodeServer({
-      defaultGatewayUrl: `http://127.0.0.1:${gatewayPort}`,
-      env: { ABSTRACTCODE_TRUST_PROXY_HEADERS: "1" },
-    }));
+    // The operator declares the reverse proxy (legacy env switch, read by the
+    // app-server kit and by this app's sign-in host guard).
+    vi.stubEnv("ABSTRACTCODE_TRUST_PROXY_HEADERS", "1");
+    const codePort = await listen(createCodeServer({ defaultGatewayUrl: `http://127.0.0.1:${gatewayPort}` }));
 
     const login = await request(codePort, "POST", "/api/connection/gateway", {
       headers: {
@@ -156,12 +157,13 @@ describe("shared Code Gateway middleware", () => {
     const codePort = await listen(createCodeServer({ defaultGatewayUrl: `http://127.0.0.1:${gatewayPort}` }));
 
     const login = await request(codePort, "POST", "/api/connection/gateway", {
-      headers: { "X-Forwarded-Proto": "https" },
       body: { gateway_user_id: "alice", gateway_token: "secret" },
     });
     expect(login.status).toBe(200);
     expect(login.headers["set-cookie"]).toHaveLength(3);
-    expect(login.headers["set-cookie"]?.every((cookie) => !cookie.includes("; Secure"))).toBe(true);
+    // Served at its own port (no base path): the cookies live at Path=/.
+    expect(login.headers["set-cookie"]?.every((cookie) => cookie.includes("Path=/;") && !cookie.includes("; Secure"))).toBe(true);
+    expect(login.headers["x-abstractframework-app"]).toBe("code; mount=1");
     const cookies = cookieHeader(login.headers["set-cookie"]);
     expect(cookies).toContain("abstractcode_gateway_session=gateway-session");
     expect(cookies).toContain("abstractcode_gateway_csrf=gateway-csrf");
@@ -185,7 +187,6 @@ describe("shared Code Gateway middleware", () => {
     expect(mutation.status).toBe(200);
     expect(received[1]["x-abstractgateway-session"]).toBe("gateway-session");
     expect(received[1]["x-abstractgateway-csrf"]).toBe("gateway-csrf");
-    expect(received[1]["x-abstractcode-csrf"]).toBeUndefined();
     expect(received[1].authorization).toBeUndefined();
 
     expect((await request(codePort, "GET", "/api/unrelated")).status).toBe(404);
@@ -193,7 +194,7 @@ describe("shared Code Gateway middleware", () => {
     expect((await request(codePort, "GET", "/%2e%2e/secret")).status).toBe(400);
   });
 
-  it("sets X-Forwarded-For to the socket peer on every gateway-bound path (contract A-2)", async () => {
+  it("sets X-Forwarded-For to the browser on every gateway-bound path (contract A-2, mount contract)", async () => {
     // What the stub gateway saw, per path.
     const saw: Record<string, IncomingHttpHeaders> = {};
     const gatewayPort = await listen(http.createServer((req, res) => {
@@ -236,15 +237,19 @@ describe("shared Code Gateway middleware", () => {
     expect(saw["/api/gateway/session/login"]["x-forwarded-for"]).toBe("192.168.1.51");
     const cookies = cookieHeader(login.headers["set-cookie"]);
 
+    // A loopback peer (the gateway's /apps/code/ proxy) forwards the browser's
+    // address, and that address is what the gateway sees.
     const probe = await request(codePort, "GET", "/api/connection/gateway", {
       headers: { Cookie: cookies, "X-Forwarded-For": "203.0.113.9" },
     });
     expect(probe.status).toBe(200);
-    expect(saw["/api/gateway/me"]["x-forwarded-for"]).toBe("127.0.0.1");
+    expect(saw["/api/gateway/me"]["x-forwarded-for"]).toBe("203.0.113.9");
 
+    // From a LAN peer every client-supplied forwarding header is ignored.
     await request(codePort, "GET", "/api/gateway/runs/r1/workspace", {
       headers: {
         Cookie: cookies,
+        "x-test-peer": "192.168.1.60",
         "X-Forwarded-For": "203.0.113.9, 198.51.100.4",
         Forwarded: "for=203.0.113.9",
         "X-Real-IP": "203.0.113.9",
@@ -252,7 +257,7 @@ describe("shared Code Gateway middleware", () => {
       },
     });
     const proxied = saw["/api/gateway/runs/r1/workspace"];
-    expect(proxied["x-forwarded-for"]).toBe("127.0.0.1");
+    expect(proxied["x-forwarded-for"]).toBe("192.168.1.60");
     expect(proxied["x-forwarded-for-count"]).toBe("1");
     expect(proxied.forwarded).toBeUndefined();
     expect(proxied["x-real-ip"]).toBeUndefined();
@@ -284,7 +289,7 @@ describe("shared Code Gateway middleware", () => {
       "/api/gateway/v6",
       "/api/gateway/session/logout",
     ])
-      expect([path, saw[path]["x-abstractframework-app-proxy"]]).toEqual([path, "code"]);
+      expect([path, saw[path]["x-abstractframework-app-proxy"]]).toEqual([path, "abstractcode"]);
   });
 
   it("refuses (400) a request whose socket peer is unknown, on the proxy and the connection API", async () => {

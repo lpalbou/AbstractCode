@@ -1,25 +1,42 @@
+import { GATEWAY_API_PATH } from "@abstractframework/ui-kit";
 import { GatewayClient, GatewayHttpError } from "../lib/gateway_client";
+
+/** The app proxy's CSRF header (from the session cookie), for mutations. */
+export function csrfHeaders(): Record<string, string> {
+  const csrf = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("abstractcode_gateway_csrf="));
+  return csrf
+    ? {
+        "X-AbstractCode-CSRF": decodeURIComponent(
+          csrf.slice("abstractcode_gateway_csrf=".length),
+        ),
+      }
+    : {};
+}
+
+/** A relative app path ("api/…") as an absolute URL under this page's base
+ * (`<base href>`: the app may be served under the gateway's /apps/code/). */
+export function appUrl(relativePath: string): string {
+  return new URL(relativePath, document.baseURI).href;
+}
 
 /** App-origin only. The server exchanges its HttpOnly session for gateway auth. */
 export async function gatewayRequest<T = any>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  if (!path.startsWith("/api/gateway/"))
-    throw new Error("Gateway requests must use the app's authenticated proxy.");
+  // Relative ("api/gateway/…", ui-kit gatewayApiPath): it resolves under the
+  // page's base, where this app's server proxies it to the gateway.
+  if (!path.startsWith(`${GATEWAY_API_PATH}/`))
+    throw new Error("Gateway requests must use the app's authenticated proxy (a relative api/gateway/… path).");
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body && !(init.body instanceof FormData))
     headers.set("Content-Type", "application/json");
-  const csrf = document.cookie
-    .split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith("abstractcode_gateway_csrf="));
-  if (csrf)
-    headers.set(
-      "X-AbstractCode-CSRF",
-      decodeURIComponent(csrf.slice("abstractcode_gateway_csrf=".length)),
-    );
+  for (const [name, value] of Object.entries(csrfHeaders()))
+    headers.set(name, value);
   const response = await fetch(path, {
     ...init,
     headers,

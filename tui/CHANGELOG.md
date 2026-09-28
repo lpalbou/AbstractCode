@@ -6,6 +6,38 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`/automations [id]` and `/schedule [task]`** — create, manage and answer
+  gateway automations (AbstractGateway 0.6.0 and later), with the same
+  behaviour as the Assistant, the Observer and the web client. The list shows
+  each automation's state as text + icon ("Active ▶", "Paused ⏸"), attention,
+  cadence, what runs now (only the gateway's `current_occurrence`) and the next
+  run (only `next_fire_at`); archived ones are hidden until `h`. One automation
+  shows its folder (`w` browses it on the gateway), the waits that need you
+  (`y`/`n` approve or deny a tool call, Enter answers a question or an event),
+  its runs as chat pairs, and its controls: `p` pause/resume, `g` run now, `x`
+  stop current, `e` revise (an empty field keeps its value), `a` archive
+  (press twice; hides and stops, history kept) and `d` Discuss, which forks the
+  selected run and switches this session to the new chat. `/schedule` creates
+  one from the current workflow: task (default: your last prompt), when (UTC),
+  context (independent or growing), tools (run without asking, or ask each
+  time).
+
+- **The local gateway pointer.** Without `--gateway-url`, the environment or
+  a saved login, the client connects to the gateway named by
+  `~/.abstractframework/gateway.json` (written by `abstractgateway serve` and
+  the installer): believed only for a loopback URL with schema 1 in a regular
+  file you own, otherwise ignored with one notice (`doctor` prints it). A saved
+  `http://127.0.0.1:8080`, the old built-in default, gives way to the pointer.
+- **Discuss is refused while a run is in progress in this session** (switching
+  to the discussion would cancel it); the message says so.
+
+### Changed
+
+- **`--gateway-url` is the documented flag** for the gateway address, as in
+  every AbstractFramework app; `--gateway` keeps working as an alias.
+
 ## [0.6.0] - 2026-09-26
 
 ### Changed

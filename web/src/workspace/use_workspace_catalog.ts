@@ -1,3 +1,4 @@
+import { gatewayApiPath } from "@abstractframework/ui-kit";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   normalizeWorkflowCatalog,
@@ -95,7 +96,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
     ];
     const result = await Promise.allSettled(
       paths.map((path) =>
-        gatewayRequest(`/api/gateway/${path}`, { signal: abort.signal }),
+        gatewayRequest(gatewayApiPath(`${path}`), { signal: abort.signal }),
       ),
     );
     if (generation.current !== gen) return;
@@ -145,7 +146,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
         missing.slice(index, index + 4).map(async (item) => {
           try {
             const input = await gatewayRequest(
-              `/api/gateway/runs/${encodeURIComponent(item.firstRunId)}/input_data`,
+              gatewayApiPath(`runs/${encodeURIComponent(item.firstRunId)}/input_data`),
               { signal: abort.signal },
             );
             if (generation.current === gen && !abort.signal.aborted)
@@ -189,8 +190,8 @@ export async function fetchWorkflowSchema(
   const flow = encodeURIComponent(workflow.flowId);
   const path =
     workflow.registryScope === "tenant_catalog" && workflow.bundleVersion
-      ? `/api/gateway/workflow-catalog/${bundle}/versions/${encodeURIComponent(workflow.bundleVersion)}/flows/${flow}/input_schema?scope=tenant`
-      : `/api/gateway/bundles/${bundle}/flows/${flow}/input_schema${workflow.bundleVersion ? `?bundle_version=${encodeURIComponent(workflow.bundleVersion)}` : ""}`;
+      ? gatewayApiPath(`workflow-catalog/${bundle}/versions/${encodeURIComponent(workflow.bundleVersion)}/flows/${flow}/input_schema?scope=tenant`)
+      : gatewayApiPath(`bundles/${bundle}/flows/${flow}/input_schema${workflow.bundleVersion ? `?bundle_version=${encodeURIComponent(workflow.bundleVersion)}` : ""}`);
   const data = await gatewayRequest(path);
   const schema = normalizeInputSchema(data);
   if (
@@ -234,8 +235,8 @@ export async function fetchWorkflowSchema(
   assertSelection(data);
   const sourcePath =
     workflow.registryScope === "tenant_catalog"
-      ? `/api/gateway/workflow-catalog/${bundle}/versions/${encodeURIComponent(version)}/flows/${flow}?scope=tenant`
-      : `/api/gateway/bundles/${bundle}/flows/${flow}?bundle_version=${encodeURIComponent(version)}`;
+      ? gatewayApiPath(`workflow-catalog/${bundle}/versions/${encodeURIComponent(version)}/flows/${flow}?scope=tenant`)
+      : gatewayApiPath(`bundles/${bundle}/flows/${flow}?bundle_version=${encodeURIComponent(version)}`);
   const source = await gatewayRequest(sourcePath);
   assertSelection(source);
   return reconcileVisualFlowSchema(schema, source.flow);

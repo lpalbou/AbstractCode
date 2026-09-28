@@ -54,7 +54,7 @@ cargo install abstractcode
 abstractcode                     # or: abstractcode doctor, to check the connection
 
 # Browser
-npx @abstractframework/code      # binds 0.0.0.0:3002; open http://127.0.0.1:3002
+npx @abstractframework/code      # binds 127.0.0.1:3002; open http://127.0.0.1:3002
 ```
 
 `abstractcode doctor` diagnoses the gateway connection and prints which
@@ -78,6 +78,10 @@ for credentials, remote gateways, and first-run configuration.
   gateway supports live replies (**Stream replies** setting, `/stream`).
 - **Workspace files** — browse and preview the files a run works on, with their
   absolute path on the gateway host (the **Files** tab, `/files`).
+- **Automations** — run a workflow on a schedule, then pause, run now, revise,
+  archive, answer its approvals, browse its folder, and discuss any run as a new
+  conversation (the **Automations** sidebar section, `/automations`,
+  `/schedule`).
 
 ## Documentation
 
@@ -85,6 +89,7 @@ for credentials, remote gateways, and first-run configuration.
 - [`docs/architecture.md`](docs/architecture.md) — how the clients and gateway fit together
 - [`docs/api.md`](docs/api.md) — the gateway surface both clients speak
 - [`docs/web.md`](docs/web.md) — the browser client in depth
+- [`docs/automations.md`](docs/automations.md) — automations in both clients
 - [`docs/faq.md`](docs/faq.md) — recurring questions and known limits
 - [`docs/troubleshooting.md`](docs/troubleshooting.md) — symptoms and fixes
 - [`tui/docs/`](tui/docs/) — terminal client reference, keys, and design notes
@@ -142,20 +147,24 @@ Requires Rust 1.87 or newer. Then:
 
 ```bash
 abstractcode                     # launch against http://127.0.0.1:8080
-abstractcode --gateway https://gateway.example.com
+abstractcode --gateway-url https://gateway.example.com
 ```
 
 ### Browser
 
 ```bash
-npx @abstractframework/code      # binds 0.0.0.0:3002; open http://127.0.0.1:3002
+npx @abstractframework/code      # binds 127.0.0.1:3002; open http://127.0.0.1:3002
 ```
 
-Set the Gateway URL in the interface, or start the server with
-`ABSTRACTCODE_GATEWAY_URL` already pointing at it.
+The web server finds a local gateway by itself (the pointer
+`~/.abstractframework/gateway.json` that `abstractgateway serve` writes), or
+start it with `--gateway-url <url>`. The gateway can also serve it for you at
+`/apps/code/` (its console's **Apps** page); see
+[Web deployment](deployment-web.md).
 
-Both servers listen on every interface by default. Set `HOST=127.0.0.1` (web)
-or `abstractgateway serve --host 127.0.0.1` to keep them on loopback.
+The web server listens on `127.0.0.1` by default (`--host 0.0.0.0` accepts
+other machines); the gateway listens on every interface unless you pass
+`abstractgateway serve --host 127.0.0.1`.
 
 ## 3. Check the connection
 
@@ -173,11 +182,11 @@ from "the workflow you asked for is not installed".
 A remote gateway usually requires a token. Persist one so you do not repeat it:
 
 ```bash
-abstractcode login --gateway https://gateway.example.com --token <TOKEN>
+abstractcode login --gateway-url https://gateway.example.com --token <TOKEN>
 ```
 
 This verifies the credentials before writing them to
-`~/.abstractcode/gateway.json`. Both `--gateway` and `--token` can also come
+`~/.abstractcode/gateway.json`. Both `--gateway-url` and `--token` can also come
 from the environment, and a token passed on the command line always wins over
 the stored one.
 
@@ -515,7 +524,7 @@ served application:
 
 ```bash
 npx @abstractframework/code            # http://127.0.0.1:3002
-ABSTRACTCODE_GATEWAY_URL=... npx @abstractframework/code
+npx @abstractframework/code --gateway-url http://127.0.0.1:8080
 ```
 
 See [`web.md`](web.md) for its configuration surface and
@@ -651,6 +660,131 @@ A workflow can drive what the client shows — status lines, messages, and
 tool-execution cards — by emitting the events described in
 [`ui_events.md`](ui_events.md). These are advisory rendering hints layered over
 ledger truth, never a substitute for it.
+
+
+==============================================================================
+# FILE: docs/automations.md
+==============================================================================
+
+# Automations
+
+An **automation** runs a workflow again and again on a schedule: "check the
+memory of this computer every 2 minutes", "summarise the open issues every 8
+hours". AbstractGateway runs it, keeps every run as a readable conversation,
+and asks for you only when something needs you. You can create, manage and
+answer automations from both AbstractCode clients — the terminal (`/automations`,
+`/schedule`) and the browser (the **Automations** section of the sidebar) — and
+from the Assistant and the Observer: they all show the same automations, from
+the same gateway.
+
+This page covers what the two AbstractCode clients do. For the automation
+model itself (controller runs, occurrences, triggers, crash safety, the HTTP
+API), see the framework guide:
+[AbstractFramework: Automations](https://github.com/lpalbou/AbstractFramework/blob/main/docs/automations.md).
+
+## Requirements
+
+A gateway that advertises the Automations API
+(`capabilities.contracts.common.automations`), which AbstractGateway 0.6.0 and
+later do. On an older gateway both clients say so and offer no automation
+controls.
+
+## What every client shows the same way
+
+| Fact | Where it comes from |
+|---|---|
+| State, as a word then an icon: **Active ▶**, **Paused ⏸**, **Completed ✓**, **Failed ✕**, **Archived ▪** | the automation's `status` |
+| **Now:** "Run #7 running", "Run #7 starting", "Run #7 waiting to retry" | only the gateway's `current_occurrence` |
+| **Next:** "2026-09-27 07:00 UTC (in 25 min)", "none while paused" | only the gateway's `next_fire_at` |
+| The automation's folder | the gateway's `workspace_root`, browsed through the gateway's workspace routes |
+| Attention: "2 unseen · 1 waiting for you" | the gateway's attention items and pending waits |
+
+Schedules are fixed UTC intervals (every N minutes, hours or days) or a single
+run at a UTC date and time. Controls that do not apply are disabled, with the
+reason.
+
+## Creating an automation
+
+Both clients create the same definition (`POST /api/gateway/automations`):
+the task (sent as the prompt of every run), when it runs, its context and its
+tool approval. The workflow is the one you already selected:
+
+- the **gateway default** agent is sent as `@default` and resolved by the
+  gateway when the automation is created;
+- a published workflow is sent as its `bundle@version` and entrypoint.
+
+| Choice | Options |
+|---|---|
+| When (UTC) | every 5 or 30 minutes, every hour, 8 hours, 24 hours or 7 days, every N minutes/hours/days, or once at a date and time. The first run starts at once. |
+| Context | **Independent** — each run starts fresh. **Growing** — each run is the next turn of one conversation and sees the previous runs, within the gateway's history window. |
+| Tools | **Run without asking** — tools run without asking (you approve them now by creating this automation). **Ask me before each tool call** — every tool call waits for your approval. Questions a workflow asks always wait for you. |
+
+**Terminal.** `/schedule [task]` opens four steps: the task (default: your
+last prompt, or the text after `/schedule`), when, context, tools. Enter on
+the last step creates it and opens it.
+
+**Browser.** Select **+** in the **Automations** section of the sidebar. The
+dialog names the workflow it runs (the toolbar's workflow); **Advanced** holds
+the title, the first run time, "stop after this many runs" and "stop at".
+
+## Managing an automation
+
+| Control | Terminal key | What happens |
+|---|---|---|
+| Pause / Resume | `p` | No scheduled run while paused; resume continues from the next tick. |
+| Run now | `g` | One run at once, also while paused (it stays paused). Refused while a run is in progress. |
+| Stop current | `x` | Cancels the run in progress. |
+| Revise | `e` | Title, interval (schedules) and context; applies from the next run. In the terminal, a field left empty keeps its current value. |
+| Archive | `a`, then `a` again | The automation stops and is hidden from the list; its history stays readable (**Show archived**, or `h` in the terminal). Archiving never deletes anything. |
+
+In the browser the same controls are buttons on the automation's page.
+
+## Runs, approvals and answers
+
+Open an automation (Enter in `/automations`, or select it in the sidebar) to
+read its runs as chat pairs, oldest first: the trigger turn and the answer,
+with failures, notifications and artifacts.
+
+Runs that wait for you are listed first, by kind:
+
+- **Approval needed** — the tool calls with their arguments. Terminal: `y`
+  approves, `n` denies. Browser: **Approve** / **Deny**.
+- **Question for you** — the question and its choices. Terminal: Enter opens
+  an answer field. Browser: a choice button or a free-text answer.
+- **Waiting for an event** — a JSON payload field.
+
+The answer follows the wait's kind and is sent through the gateway's resume
+command. Showing an automation's attention items marks them as seen for your
+account.
+
+## Discuss a run
+
+**Discuss** forks the automation at a finished run: a new conversation whose
+context is the automation's whole history up to that run. It works in its own
+writable workspace; the automation's folder is mounted read-only for the file
+tools (shell commands are not sandboxed), and nothing is written back into the
+automation.
+
+The fork opens **in place, as an ordinary conversation** of the client you are
+using: in the terminal, `d` on a run asks for your first message and switches
+the session to the discussion; in the browser, **Discuss** opens it in the
+conversation view. Continue it like any chat, approve its tools like any chat,
+and find it later with the other conversations — every client shares one pool
+of gateway sessions.
+
+## The automation's folder
+
+The folder every run of the automation works in is shown with its full path
+on the gateway host. Terminal: `w` opens the file browser on it (the same one
+as `/files`: folders, previews, copy path). Browser: the **Automation folder**
+pane beside the runs lists and previews its files.
+
+## Related
+
+- [Getting started](getting-started.md) — connecting a client to a gateway.
+- [Terminal reference](../tui/docs/api.md) — `/automations`, `/schedule` and
+  their keys.
+- [Browser client](web.md) — the sidebar and the conversation view.
 
 
 ==============================================================================
@@ -818,6 +952,14 @@ On the gateway host, in the run's workspace. The browser's **Files** tab and the
 terminal's `/files` command show its absolute path, the host it is on, and a
 preview of each file.
 
+## Can AbstractCode run something on a schedule?
+
+Yes, through gateway automations. In the terminal, `/schedule [task]` creates
+one from the current workflow and `/automations` manages them; in the browser,
+use the **Automations** section of the sidebar. The gateway runs them whether
+or not a client is open, and every client (Assistant, Observer, AbstractCode)
+sees the same automations. See [Automations](automations.md).
+
 ## Where are my settings stored?
 
 - `~/.abstractcode/gateway.json` — gateway URL and token, written by
@@ -883,9 +1025,12 @@ curl -sS http://127.0.0.1:8080/api/health
 abstractcode doctor
 ```
 
-Resolution order is `--gateway`, then the environment, then the login store at
-`~/.abstractcode/gateway.json`, then `http://127.0.0.1:8080`. `doctor` prints
-which one it used, which is usually the answer when a saved value is shadowing
+Resolution order is `--gateway-url` (alias `--gateway`), then the environment, then the login store at
+`~/.abstractcode/gateway.json` (a saved `http://127.0.0.1:8080` gives way to
+the next step), then the local gateway pointer `~/.abstractframework/gateway.json`
+that `abstractgateway serve` and the installer write, then
+`http://127.0.0.1:8080`. `doctor` prints which one it used, and why a pointer
+file was ignored, which is usually the answer when a saved value is shadowing
 the one you expect.
 
 **401 or 403 from a remote gateway.**
@@ -893,7 +1038,7 @@ The token is missing, expired, or belongs to a different gateway. Re-verify and
 re-persist it:
 
 ```bash
-abstractcode login --gateway https://gateway.example.com --token <TOKEN>
+abstractcode login --gateway-url https://gateway.example.com --token <TOKEN>
 ```
 
 `login` checks the credentials before writing them, so a failure here is about
@@ -1032,6 +1177,7 @@ shape first.
 | [`getting-started.md`](getting-started.md) | Running a gateway, installing either client, credentials, your first run |
 | [`architecture.md`](architecture.md) | The two clients, the browser app server, the gateway, the run stream with live replies, and the thin-client contract |
 | [`api.md`](api.md) | The gateway surface both clients speak, and the integration points |
+| [`automations.md`](automations.md) | Creating, managing, answering and discussing gateway automations from both clients |
 | [`workflows.md`](workflows.md) | Agent workflow bundles, the gateway default, and how a run selects one |
 | [`ui_events.md`](ui_events.md) | The workflow-driven interface event contract |
 | [`faq.md`](faq.md) | Recurring questions and known limitations |
@@ -1121,6 +1267,15 @@ An event-driven workflow stays attached while waiting for its trigger. Its wait 
 
 Use **Pause**, **Resume**, **Conclude**, or **Stop** to supervise an active run. Commands are requests, not optimistic lifecycle changes: the display follows confirmed gateway state. Guidance is consumed at supported workflow boundaries. **Queue next turn** keeps a local queue for this conversation; a failure or cancellation pauses it for explicit review. Switching conversations or signing out clears it. Unsent drafts and queued turns do not survive reload.
 
+## Automations
+
+The **Automations** section of the sidebar lists the gateway's automations —
+the same ones the Assistant, the Observer and the terminal show — with their
+state ("Active ▶", "Paused ⏸"), what runs now and the next run. **+** creates
+one that runs the toolbar's workflow. Selecting one opens its page: controls,
+runs as chat pairs, approvals and questions, and its folder. **Discuss** on a
+run opens the fork as a conversation here. See [Automations](automations.md).
+
 ## Workspaces and authorization
 
 The gateway owns workspace roots, mount visibility, access modes, tool availability, and approval enforcement. Workspace controls are editable only when it permits client scope requests. Continuing an agent conversation restores its gateway-returned workspace instead of silently creating a different one.
@@ -1140,14 +1295,14 @@ Recording and playback happen in the browser; transcription and synthesis use th
 ```bash
 cd web
 npm ci
-ABSTRACTCODE_GATEWAY_URL=http://127.0.0.1:8080 npm run dev
+npm run dev   # set the Gateway URL in the interface, or ABSTRACTCODE_GATEWAY_URL
 ```
 
 Open `http://127.0.0.1:3002`. Vite and the packaged server provide the same connection and authenticated proxy routes.
 
 ```bash
 npm run build
-HOST=127.0.0.1 npm start
+npm start -- --gateway-url http://127.0.0.1:8080
 ```
 
 The build writes `web/dist/`. Serve it with the packaged server, not as a bare static site: connection/session middleware is part of the application.
@@ -1173,7 +1328,13 @@ Project instructions are not automatically read from the browser's local filesys
 
 The browser uses a same-origin application server, which authenticates to AbstractGateway and proxies its API. There are no models or tools in the web server. See [web features](web.md) and [architecture](architecture.md).
 
-## Run the gateway and web server
+## Served by the gateway at `/apps/code/`
+
+AbstractGateway can install, start and serve AbstractCode itself: the console's **Apps** page opens it at `http(s)://<gateway>/apps/code/`, one port and one address for the console, the API and every app. The gateway starts the web server on `127.0.0.1` and relays to it; **Open** signs the browser in to AbstractCode as the signed-in gateway user, so there is no second sign-in. This is the simplest deployment, and the only address you need to expose (or tunnel) for a remote machine.
+
+Under the mount, AbstractCode follows the shared app-server contract: every response carries `X-AbstractFramework-App: code; mount=1`, the page is served with `<base href="/apps/code/">`, every asset and API call is relative to that base, the session cookies are scoped to `Path=/apps/code/`, and the browser's real address (forwarded by the gateway) is what the gateway sees for AbstractCode's calls.
+
+## Run the web server yourself
 
 Configure gateway user authentication and provision a user/token through your gateway's administration process. Then:
 
@@ -1184,10 +1345,19 @@ abstractgateway serve --host 127.0.0.1 --port 8080
 In another terminal:
 
 ```bash
-ABSTRACTCODE_GATEWAY_URL=http://127.0.0.1:8080 HOST=127.0.0.1 npx @abstractframework/code
+npx @abstractframework/code --gateway-url http://127.0.0.1:8080
 ```
 
 Open `http://127.0.0.1:3002` and sign in with the gateway user and token. The server exchanges these for an app-scoped browser session. The raw token is not saved in local storage. API writes require the session's CSRF token.
+
+| Flag | Default |
+|---|---|
+| `--gateway-url <url>` (also `--gateway`, `--url`) | the local gateway pointer `~/.abstractframework/gateway.json` written by `abstractgateway serve` and the installer, else `http://127.0.0.1:8080` |
+| `--port <n>` | `3002` |
+| `--host <addr>` | `127.0.0.1` (use `--host 0.0.0.0` to accept other machines directly) |
+| `--help` | prints the flags |
+
+`PORT`, `HOST` and `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` still work as legacy aliases, below the flags. Without a flag or environment variable, the server follows the gateway pointer, also when the gateway later moves to another port.
 
 For a source checkout:
 
@@ -1195,18 +1365,20 @@ For a source checkout:
 cd web
 npm ci
 npm run build
-ABSTRACTCODE_GATEWAY_URL=http://127.0.0.1:8080 HOST=127.0.0.1 npm start
+npm start -- --gateway-url http://127.0.0.1:8080
 ```
 
-`PORT` changes the web listener port. The CLI binds every interface by default; use `HOST=127.0.0.1` for local-only access. Development uses `npm run dev` with the same gateway setting and session flow.
+Development uses `npm run dev` with the same session flow.
 
 ## Reverse proxies and HTTPS
 
 Put the packaged server behind your HTTPS reverse proxy. Forward the whole application, including `/api/connection/gateway` and `/api/gateway/*`; a static file host or direct gateway API proxy alone does not implement the session exchange. Allow long-lived streaming responses and disable buffering for ledger SSE.
 
-Set `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` only when the proxy strips untrusted forwarded headers and sets `X-Forwarded-Host` and `X-Forwarded-Proto` itself. These determine browser-origin validation and secure-cookie behavior. The server always sets `X-Forwarded-For` to the address of the connection it received (it never forwards a browser- or proxy-supplied `X-Forwarded-For`, `Forwarded` or `X-Real-IP` value) and marks each gateway request with `X-AbstractFramework-App-Proxy: code`, so the gateway can tell whether a browser sits on its own machine before offering **Open folder**. Behind a reverse proxy, that address is the proxy's own: when the reverse proxy runs on the gateway's machine, every browser reaching it looks local to the gateway. A connection whose address cannot be determined is refused with HTTP 400. Pin `ABSTRACTCODE_GATEWAY_URL` on the server. Browser-to-gateway CORS access is not needed.
+Forwarded headers (`X-Forwarded-For`, `-Host`, `-Proto`, `-Prefix`) are believed only from a loopback peer, such as the gateway's `/apps/code/` relay or a reverse proxy on the same machine; from any other peer they are ignored. The server sets `X-Forwarded-For` on every gateway request to the browser's address (overwriting any browser-supplied value) and marks each gateway request with `X-AbstractFramework-App-Proxy: abstractcode`, so the gateway can tell whether a browser sits on its own machine before offering **Open folder**. A connection whose address cannot be determined is refused with HTTP 400. Pin the gateway with `--gateway-url` on the server. Browser-to-gateway CORS access is not needed.
 
-Browser-supplied destination changes are limited to loopback peers using a loopback hostname, unless `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` explicitly enables remote configuration. With trusted proxy headers enabled, the server destination remains authoritative unless that opt-in is set. Do not enable remote reconfiguration on a publicly accessible app without your own access controls. Cross-origin mutation attempts are rejected before gateway egress.
+Set `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` when your own reverse proxy sits directly in front of AbstractCode (not in front of the gateway): browser-supplied gateway URL changes are then refused, and a sign-in may arrive under the proxy's public host name.
+
+Browser-supplied destination changes are limited to browsers on this machine (a loopback address), and a sign-in that arrives over a loopback connection must name a loopback host (`127.0.0.1`, `localhost`), unless `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` explicitly enables remote configuration. With trusted proxy headers enabled, the server destination remains authoritative unless that opt-in is set. Do not enable remote reconfiguration on a publicly accessible app without your own access controls. Cross-origin mutation attempts are rejected before gateway egress.
 
 ## Gateway capabilities and storage
 
@@ -1347,6 +1519,11 @@ Status: **0.6.0**, pre-alpha. Release history is in
   preview of any text, Markdown, JSON or image file (`Enter`). `c` copies a
   path; `o` shows the workspace folder in your file manager when the gateway
   is on this machine.
+- **Automations**: `/automations` lists the gateway's automations (the same
+  ones the Assistant and the Observer show) with their state, what runs now and
+  the next run; open one to read its runs, approve its tool calls, pause, run
+  now, stop, revise, archive, browse its folder, or discuss a run as a new
+  chat in place. `/schedule [task]` creates one that runs the current workflow.
 - **Sessions and memory**: one durable session id per conversation, and a
   `/sessions` picker over your recent ones (named by their first prompt).
   The client carries the live conversation into each run; the gateway
@@ -1429,7 +1606,7 @@ You need a running AbstractGateway (the control plane that hosts the agent):
 
 ```sh
 abstractgateway serve                                  # or use an existing one
-abstractcode login --gateway http://127.0.0.1:8080 --token <token>
+abstractcode login --gateway-url http://127.0.0.1:8080 --token <token>
 abstractcode doctor                                # reachability · auth · catalog
 abstractcode                                       # launch the TUI
 ```
@@ -1476,7 +1653,7 @@ and does not print it a second time at the end.
 ## Options
 
 ```
---gateway <URL> --token <TOK>     connection (flag > env > login store)
+--gateway-url <URL> --token <TOK> connection (flag > env > login store; --gateway is an alias)
 --session <ID>                    durable session id (default: fresh session)
 --resume                          reopen the last session (`--continue` alias)
 --workflow <bundle[:flow]|default>  agent workflow (default: your /workflow
@@ -1576,7 +1753,7 @@ cargo install abstractcode
 ## Connect once
 
 ```sh
-abstractcode login --gateway http://127.0.0.1:8080 --token <your-token>
+abstractcode login --gateway-url http://127.0.0.1:8080 --token <your-token>
 ```
 
 `login` takes the URL and token from flags or environment (it never prompts),
@@ -1637,11 +1814,12 @@ gateway until you answer.
    default)"). If the gateway has no default and you have not picked one, the
    app says so and asks you to pick. `/model` lists providers and models
    (leave it on "gateway default" to use the server's routing), then the
-   reasoning effort, then **MTP** (multi-token prediction): Inherit, Off, or a
-   native draft depth when the gateway reports the model supports it — a model
-   that cannot use MTP says so on the row. The current choice is pre-selected;
-   `Esc` keeps it. The last row of the provider list jumps straight to the MTP
-   step, and `/mtp` still works on its own. All these choices persist across
+   reasoning effort, then — only when the gateway reports the chosen model can
+   use it — **MTP** (multi-token prediction): Inherit, Off, or a native draft
+   depth. For any other model the picker ends after the reasoning step and the
+   transcript says why ("<model> cannot use MTP", or "MTP support unknown:
+   <error>"). The current choice is pre-selected; `Esc` keeps it. `/mtp` opens
+   the MTP step for the current route either way. All these choices persist across
    launches.
    **Streamed replies:** when the gateway streams, the reply appears under the
    transcript as the model writes it and the recorded reply replaces it when
@@ -1810,7 +1988,7 @@ abstractcode --help | --version
 
 | Option | Meaning | Default |
 | --- | --- | --- |
-| `--gateway <URL>` | Gateway base URL (`--gateway-url` too) | flag > env > login store > `http://127.0.0.1:8080` |
+| `--gateway-url <URL>` | Gateway base URL (`--gateway` is an alias) | flag > env > login store (a saved `http://127.0.0.1:8080` gives way to the pointer) > the local gateway pointer `~/.abstractframework/gateway.json` (loopback URL, schema 1, a regular file you own; anything else is ignored with one notice) > `http://127.0.0.1:8080` |
 | `--token <TOKEN>` | Bearer token | flag > env > login store |
 | `--session <ID>` | Durable session id | a fresh mint (`acode-<hex>`); `--resume`/`--continue` reopens the last one |
 | `--ungated` | Run a gating-capable workflow unattended (`gating_mode=auto`, skips its approval pauses); also `--no-gate`/`--auto`. REFUSED unless `--permissions` is set on the same command line | gated |
@@ -1842,7 +2020,7 @@ abstractcode --help | --version
 
 | Variable | Meaning |
 | --- | --- |
-| `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTFLOW_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` | Gateway URL (first set wins; beats the login store) |
+| `ABSTRACTCODE_GATEWAY_URL` / `ABSTRACTFLOW_GATEWAY_URL` / `ABSTRACTGATEWAY_URL` | Gateway URL, legacy aliases below `--gateway-url` (first set wins; beats the login store) |
 | `ABSTRACTCODE_GATEWAY_TOKEN` / `ABSTRACTGATEWAY_AUTH_TOKEN` / `ABSTRACTFLOW_GATEWAY_AUTH_TOKEN` | Bearer token |
 | `ABSTRACTCODE_GATEWAY_CONNECTION_FILE` | Login store path (default `~/.abstractcode/gateway.json`) |
 | `ABSTRACTCODE_PREFS_FILE` | Preferences path (default `~/.abstractcode/prefs.json`) |
@@ -1863,6 +2041,8 @@ abstractcode --help | --version
 | `/theme [id]` | Live-preview theme picker, or set directly |
 | `/workflow` | Pick the agent workflow (`/agent` too). First row: **Gateway default → name @version** — saved as "the gateway default", so the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran |
 | `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` shows the workspace folder itself (never a sub-folder; never a folder that would be launched, such as `.app`) in your file manager, only when the gateway is on this machine and allows it; `r` refreshes |
+| `/automations [id]` | The gateway's automations (`/automation`, `/autos` too), shared with every client: state as text + icon ("Active ▶", "Paused ⏸"), attention, cadence, **now** (only the gateway's `current_occurrence`), **next** (only `next_fire_at`); archived rows hidden until `h`. Keys: `Enter` opens · `n` new · `p` pause/resume · `g` run now · `x` stop current · `a` archive (press twice; hides and stops, history kept) · `r` refresh. In one automation: its header and folder, the waits that need you first (`y`/`n` approve/deny a tool call, `Enter` answers a question or an event), its runs as chat pairs, `d` discuss the selected run (a new chat; this session switches to it), `e` revise (title, interval, context; empty keeps a value), `w` browse its folder, `Esc` back. Re-read every 15 s while open. See [Automations](../../docs/automations.md) |
+| `/schedule [task]` | Create an automation that runs the current workflow (the gateway default is sent as `@default`): the task (default: your last prompt), when (UTC presets, every N m/h/d, or once at `YYYY-MM-DD HH:MM`), context (independent or growing), tools (run without asking, or ask before each tool call). Opens it once the gateway answers |
 | `/workspace send [auto\|always\|never]` | Whether your folder is sent as the workspace: `auto` (default) = only when the gateway is on this machine; `always` = also to a gateway on another machine that sees the same path (a shared mount); `never`. Bare reports what is in force. Saved in `prefs.json` |
 | `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
 | `/model` | Pick provider, then model, from gateway discovery, then the reasoning effort, then MTP (see below). `Esc` at a step keeps the current value |
@@ -1912,8 +2092,13 @@ visit's next turn — or the held draft while a turn runs (later text
 replaces the hold; it auto-sends when the turn parks).
 
 MTP is separate from reasoning. It is the last step of `/model` (after the reasoning
-dial; `Esc` at either step moves on / keeps the current value) and the last row of the
-provider list, and `/mtp` opens the same step. The picker only offers depths the execution host advertises;
+dial; `Esc` at either step moves on / keeps the current value) — but only for a model the
+gateway's capability answer reports MTP-capable (`execution.speculation.supported: true`).
+Otherwise `/model` ends after the reasoning step with one transcript line: "<model> cannot
+use MTP — /mtp still lets you set it", or "MTP support unknown: <error> — …" when the check
+failed or reported nothing. `/mtp` opens the step for the current route regardless. The
+provider list itself shows providers only — MTP is a feature of a provider's inference
+engine, not a provider. The picker only offers depths the execution host advertises;
 unknown capabilities and head-not-ready/reload reasons remain visible. A saved unavailable
 depth is retained, not silently replaced. Typed depths are explicit requests, not a claim
 that the current backend can execute them: the host validates them and refuses unsupported
@@ -2975,7 +3160,7 @@ npm run dev
 
 In the UI:
 - set `Gateway URL` (e.g. `http://127.0.0.1:8080`), or configure it on the
-  server with `ABSTRACTCODE_GATEWAY_URL`
+  server with `--gateway-url` (the packaged server; `npm start -- --gateway-url …`)
 - set `Gateway user` and that user's `Gateway token`
 
 When a Gateway user is provided, the web server exchanges the token for a
@@ -2994,10 +3179,11 @@ gateway's versions. Agent tasks use the composer; structured workflows use
 event waits appear in the conversation. Runs and history remain on the gateway
 when you close the browser. Unsent drafts and queued turns do not survive reload.
 
-Whether a browser may change the Gateway URL is decided by the **connection
-peer**, not by any request header: only a request arriving from loopback may
-reconfigure it, and the server-configured Gateway URL is authoritative for
-everyone else. Set `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` to allow
+Whether a browser may change the Gateway URL is decided by the browser's
+address: only a browser on this machine may reconfigure it (forwarded headers
+count only from a loopback peer such as the gateway's `/apps/code/` relay),
+and a sign-in over a loopback connection must name a loopback host. The
+server-configured Gateway URL is authoritative for everyone else. Set `ABSTRACTCODE_ALLOW_REMOTE_BROWSER_GATEWAY_CONFIG=1` to allow
 it from anywhere, behind your own access control. Behind a reverse proxy every
 peer is the proxy, so loopback carries no meaning there — set
 `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` to refuse browser-supplied changes
@@ -3016,6 +3202,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Added
+- **Web: served by the gateway at `/apps/code/`.** The web server follows the
+  shared app-server contract (`@abstractframework/app-server`): the identity
+  header `X-AbstractFramework-App: code; mount=1`, `<base href>` and the base
+  path in the page, every asset and API call relative to it, session cookies
+  at `Path=/apps/code/`, and the browser's real address for the gateway. The
+  gateway's console **Apps** page opens it with one sign-in. See
+  [docs/deployment-web.md](docs/deployment-web.md).
+- **Web: launch flags.** `--gateway-url` (aliases `--gateway`, `--url`),
+  `--port`, `--host`, `--help`. Without a gateway URL the server follows the
+  local gateway pointer `~/.abstractframework/gateway.json`. `PORT`, `HOST`
+  and `ABSTRACTCODE_GATEWAY_URL` remain as legacy aliases.
+- **Terminal: the local gateway pointer.** Without `--gateway-url`, the
+  environment or a saved login, the terminal client connects to the gateway
+  named by `~/.abstractframework/gateway.json` (a loopback URL, schema 1, a
+  regular file owned by you; anything else is ignored with one notice). A
+  saved `http://127.0.0.1:8080` gives way to the pointer.
+
+- **Automations in both clients.** Create, manage and answer gateway
+  automations (AbstractGateway 0.6.0 and later) from AbstractCode, with the
+  same behaviour as the Assistant and the Observer. See
+  [docs/automations.md](docs/automations.md).
+  - **Terminal:** `/automations [id]` lists them (state as text + icon —
+    "Active ▶", "Paused ⏸" —, what runs now, the next run, attention; archived
+    ones hidden until `h`) and opens one: its folder (`w` browses it), the waits
+    that need you (`y`/`n` for tool approvals, Enter for questions and events),
+    its runs as chat pairs, pause/resume (`p`), run now (`g`), stop current
+    (`x`), revise (`e`), archive (`a`, twice) and Discuss (`d`), which switches
+    the session to the new discussion. `/schedule [task]` creates one from the
+    current workflow in four steps (task, when, context, tools).
+  - **Web:** an **Automations** section in the sidebar (state, now, next,
+    attention, **Show archived**), **+** to create one with the toolbar's
+    workflow (the shared schedule dialog), and a page per automation with the
+    shared automation panel and its **Automation folder**. **Discuss** opens the
+    fork as a conversation in the app.
+  - What runs now comes only from the gateway's `current_occurrence` and the
+    next run only from `next_fire_at`; archiving hides and stops an automation
+    and keeps its history.
+
+### Changed
+
+- **Terminal: `--gateway-url` is the documented flag** for the gateway address,
+  as in every AbstractFramework app; `--gateway` keeps working as an alias.
+- **Web: the whole local transcript is sent as context** when a workflow uses
+  it (the legacy REPL view kept only the last 200 messages); the gateway's
+  history window bounds what the model receives.
+- **Web: the web server listens on `127.0.0.1` by default** (it was every
+  interface). Use `--host 0.0.0.0` to accept other machines directly, or let
+  the gateway serve it at `/apps/code/`.
+- **Web: shared components.** Automation state labels (word + icon), the
+  automation folder and the conversation's Files list (the shared workspace
+  browser; files open in a new tab as text or download, never as active
+  content), tool approvals and questions (the shared interaction cards), and
+  automation ledger/artifact links (opened through the app's own proxy) come
+  from the shared kit.
+- **Web:** requires the next `@abstractframework/ui-kit` and
+  `@abstractframework/panel-chat` releases (after 0.1.13 / 0.1.18) and adds one
+  runtime dependency, `@abstractframework/app-server`.
 
 ## [terminal 0.6.0 / web 0.5.0] - 2026-09-26
 
@@ -3082,6 +3327,7 @@ entries.
 
 ### Changed
 
+- Terminal: `/model` asks about MTP only for a model that can use it; otherwise the picker ends after the reasoning step and the transcript says why (`/mtp` still sets it).
 - **Web app server** sets `X-Forwarded-For` to the address of the
   connection it received on every call it makes to the gateway (API,
   live streams, status check, sign-in, sign-out), overwriting any incoming

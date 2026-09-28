@@ -1,3 +1,4 @@
+import { gatewayApiPath } from "@abstractframework/ui-kit";
 import React, { useEffect, useRef } from "react";
 import { Icon, useGatewayVoice } from "@abstractframework/ui-kit";
 import { gateway, gatewayRequest, newId } from "./transport";
@@ -40,7 +41,7 @@ export function useWorkspaceVoice({
         ? async (text) => {
             assertCurrent();
             const response = await gatewayRequest(
-              `/api/gateway/runs/${encodeURIComponent(runId)}/voice/tts`,
+              gatewayApiPath(`runs/${encodeURIComponent(runId)}/voice/tts`),
               {
                 method: "POST",
                 body: JSON.stringify({
