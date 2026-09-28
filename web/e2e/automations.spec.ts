@@ -60,7 +60,9 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   // The row states the gateway's truth: text + icon, next run from next_fire_at.
   const row = page.locator(".code-auto-row", { hasText: title });
   await expect(row).toBeVisible();
-  await expect(row.locator('[data-field="state"]')).toHaveText("Active ▶");
+  // The kit's state label: the word, then its icon.
+  await expect(row.locator('[data-field="state"] [data-state="active"]')).toHaveText("Active");
+  await expect(row.locator('[data-field="state"] [data-state="active"] svg')).toHaveCount(1);
   await expect(row.locator('[data-field="next"]')).toContainText("UTC");
 
   // The first run starts now and parks on a typed tool approval.
@@ -78,10 +80,22 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   await main.locator('.af-auto-occ[data-index="2"]').getByRole("button", { name: "Deny" }).click();
   await expect(main.locator('.af-auto-occ[data-index="2"] .af-auto-turn__status')).not.toHaveText(/waiting|running/, { timeout: 30_000 });
 
-  // The folder is the automation's workspace_root, browsed through the gateway.
-  const folder = main.locator(".code-auto-folder");
-  await expect(folder.getByText("Automation folder")).toBeVisible();
-  await expect(folder.getByText("fixture-tool-approval.txt")).toBeVisible({ timeout: 15_000 });
+  // The folder is the automation's workspace_root, browsed through the gateway
+  // with the shared WorkspaceBrowser.
+  const folder = main.getByRole("region", { name: "Automation folder" });
+  await expect(folder).toBeVisible();
+  await expect(folder.locator('[data-path="fixture-tool-approval.txt"]')).toBeVisible({ timeout: 15_000 });
+  // A text file opens in a new tab as plain text (never with a type that could run in the app origin).
+  const [tab] = await Promise.all([
+    page.waitForEvent("popup"),
+    folder.locator('[data-path="fixture-tool-approval.txt"] [data-action="open-file"]').click(),
+  ]);
+  await tab.waitForLoadState();
+  expect(await tab.evaluate(() => document.contentType)).toBe("text/plain");
+  await tab.close();
+  // The panel's workspace fact opens the same folder pane.
+  await main.locator('[data-fact="workspace"] button').first().click();
+  await expect(main.getByRole("region", { name: "Automation folder" })).toBeVisible();
 
   // Discuss run #1: the fork opens as THIS app's conversation, in place.
   await main.locator('.af-auto-occ[data-index="1"] [data-action="discuss"]').click();
@@ -101,7 +115,7 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   await main.locator('[data-action="archive-confirm"]').click();
   await expect(row).toHaveCount(0, { timeout: 15_000 });
   await page.locator('[data-action="show-archived"]').check();
-  await expect(row.locator('[data-field="state"]')).toHaveText("Archived ▪");
+  await expect(row.locator('[data-field="state"] [data-state="archived"]')).toHaveText("Archived");
   await row.click();
   await expect(main.locator('.af-auto-occ[data-index="1"]')).toBeVisible();
   expect(errors).toEqual([]);

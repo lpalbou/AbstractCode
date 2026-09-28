@@ -569,31 +569,19 @@ select option {
   font-size: var(--font-size-xs);
   font-weight: 500;
 }
-.code-approval-summary {
-  min-width: 0;
-}
-.code-approval-summary section {
+/* The shared approval card (panel-chat presentInteraction): app typography. */
+.code-conversation .pc-approval-summary section {
   margin: 0;
 }
-.code-approval-summary small {
+.code-conversation .pc-approval-summary small {
   display: block;
   color: var(--text-secondary);
   margin-top: 8px;
   text-transform: capitalize;
 }
-.code-approval-summary pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 180px;
-  overflow-y: auto;
+.code-conversation .pc-approval-summary pre {
   margin: 5px 0 12px;
   font: var(--font-size-sm) / 1.7 var(--font-mono);
-}
-.code-approval-summary > details > summary {
-  cursor: pointer;
-  color: var(--text-secondary);
-  margin: 10px 0;
-  font-size: var(--font-size-sm);
 }
 .code-conversation .pc-btn:disabled {
   opacity: 0.4;
@@ -927,11 +915,6 @@ select option {
 }
 .code-file-list button.is-selected {
   background: var(--ui-surface-2);
-}
-.code-file-meta {
-  color: var(--text-secondary);
-  font-size: var(--font-size-xxs);
-  white-space: nowrap;
 }
 .code-files-mode {
   display: flex;
@@ -1862,18 +1845,6 @@ select option {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.code-auto-state {
-  font-weight: 600;
-}
-.code-auto-state.is-active {
-  color: var(--success);
-}
-.code-auto-state.is-paused {
-  color: var(--warning);
-}
-.code-auto-state.is-failed {
-  color: var(--error);
 }
 .code-auto-attention {
   color: var(--warning);

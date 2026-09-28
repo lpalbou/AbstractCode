@@ -10,8 +10,17 @@
  * any state; `useAutomations` only subscribes to the controller and polls.
  */
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { AfScheduleDialog, Icon, apiErrorText, type ApiError, type AutomationTarget, type AutomationCommandType, type DiscussResponse } from "@abstractframework/ui-kit";
-import { AutomationPanelWithMarkdown, type AutomationPanelWithMarkdownProps } from "@abstractframework/panel-chat";
+import {
+  AfScheduleDialog,
+  AutomationStateLabel,
+  Icon,
+  apiErrorText,
+  type ApiError,
+  type AutomationTarget,
+  type AutomationCommandType,
+  type DiscussResponse,
+} from "@abstractframework/ui-kit";
+import { AutomationPanelWithMarkdown, WorkspaceBrowser, type AutomationPanelWithMarkdownProps } from "@abstractframework/panel-chat";
 
 import {
   AUTOMATIONS_POLL_MS,
@@ -24,8 +33,7 @@ import {
   visibleAutomations,
   type AutomationsState,
 } from "./automations";
-import { SessionFiles } from "./session_files";
-import type { PendingUpload } from "./attachment_uploads";
+import { proxyGatewayFetch } from "./session_files";
 import { newId } from "./transport";
 
 /** One controller per signed-in identity; polls while visible and available. */
@@ -117,9 +125,9 @@ export function AutomationsSection(props: {
               <span>
                 <strong>{v.title}</strong>
                 <small>
-                  <b className={`code-auto-state is-${s.status}`} data-field="state">
-                    {v.state}
-                  </b>{" "}
+                  <span data-field="state">
+                    <AutomationStateLabel status={s.status} />
+                  </span>{" "}
                   {v.cadence}
                   {v.legacy ? " · legacy schedule" : ""}
                 </small>
@@ -147,6 +155,8 @@ export function AutomationsSection(props: {
 }
 
 export type AutomationHost = {
+  /** Show a run's folder in the automation's folder pane (the automation id = its own folder). */
+  openWorkspace(runId: string): void;
   /** Open a gateway session as this app's conversation (a started discussion, a run). */
   openConversation(sessionId: string, runId: string, notice?: string): void;
   /** Open an occurrence run as a conversation (its session is read from the gateway). */
@@ -178,21 +188,36 @@ export function automationPanelProps(ctl: AutomationsController, host: Automatio
     onSeen: (cursor) => ctl.seen(id, cursor),
     onLoadMore: () => void ctl.loadMore(),
     onOpenRun: (runId) => host.openRun(runId),
+    onOpenWorkspace: (runId) => host.openWorkspace(runId),
     onAnswerWait: (runId, waitKey, payload) => ctl.answerWait(runId, waitKey, payload as Record<string, any>),
   };
+}
+
+/** The folder pane's title: the automation's own folder, or one run's. */
+export function folderTitle(automationId: string, runId: string, occurrences: Array<{ run_id: string; index: number }>): string {
+  if (runId === automationId) return "Automation folder";
+  const row = occurrences.find((o) => o.run_id === runId);
+  return row ? `Run #${row.index} folder` : "Run folder";
 }
 
 /** The main area for the selected automation: the kit panel + its folder. */
 export function AutomationMain(props: {
   ctl: AutomationsController;
-  host: AutomationHost;
+  host: Omit<AutomationHost, "openWorkspace">;
   enabled: boolean;
-  onAttachFiles(files: File[]): PendingUpload[];
   onClose(): void;
 }): React.ReactElement {
   const st = props.ctl.state;
   const d = st.detail;
-  const p = automationPanelProps(props.ctl, props.host);
+  // The folder pane shows the automation's folder, or the run the panel's
+  // "Browse" asked for; it resets when another automation opens.
+  const [folder, setFolder] = useState({ automationId: "", runId: "" });
+  const automationId = d?.automationId ?? "";
+  const folderRun = folder.automationId === automationId && folder.runId ? folder.runId : automationId;
+  const p = automationPanelProps(props.ctl, {
+    ...props.host,
+    openWorkspace: (runId) => setFolder({ automationId, runId }),
+  });
   return (
     <main className="code-conversation code-automation-main" id="code-conversation" tabIndex={-1} aria-label="Automation">
       <div className="code-auto-main-head">
@@ -216,16 +241,16 @@ export function AutomationMain(props: {
       ) : (
         <div className="code-auto-main-body">
           {p ? <AutomationPanelWithMarkdown {...p} /> : null}
-          <section className="code-auto-folder" aria-label="Automation folder">
-            <SessionFiles
-              runId={d.automationId}
-              heading="Automation folder"
-              emptyText="This automation's folder appears here."
-              enabled={props.enabled}
+          {props.enabled ? (
+            <WorkspaceBrowser
+              className="code-auto-folder"
+              fetchGateway={proxyGatewayFetch}
+              runId={folderRun}
+              title={folderTitle(d.automationId, folderRun, d.occurrences)}
               refreshKey={String(d.summary.occurrence_count)}
-              onAttachFiles={props.onAttachFiles}
+              onClose={folderRun !== d.automationId ? () => setFolder({ automationId, runId: "" }) : undefined}
             />
-          </section>
+          ) : null}
         </div>
       )}
     </main>

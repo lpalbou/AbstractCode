@@ -1,33 +1,23 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Icon } from "@abstractframework/ui-kit";
-import { JsonViewer, Markdown } from "@abstractframework/panel-chat";
+import {
+  JsonViewer,
+  Markdown,
+  WorkspaceBrowser,
+  formatBytes,
+  workspaceContentUrl,
+  type GatewayFetch,
+  type RunWorkspace,
+  type WorkspaceEntry,
+} from "@abstractframework/panel-chat";
 import { formatError, gatewayRequest } from "./transport";
 import { copy_text } from "../lib/clipboard";
 import { uploadRefusal, type PendingUpload } from "./attachment_uploads";
 
-/** `GET /runs/{run_id}/workspace` (CONTRACTS §W). */
-export type RunWorkspace = {
-  workspace_root: string;
-  kind?: string;
-  session_id?: string;
-  exists: boolean;
-  host?: { hostname?: string; caller_is_this_machine?: boolean };
-  open_supported?: boolean;
-};
-
-export type WorkspaceEntry = {
-  name: string;
-  path: string;
-  type: "file" | "dir";
-  size_bytes?: number;
-  mtime?: string | number;
-};
-
-export type WorkspaceListing = {
-  path: string;
-  entries: WorkspaceEntry[];
-  truncated: boolean;
-};
+// The folder listing, its types, URL builders and validation are the shared
+// panel-chat `WorkspaceBrowser` (one browser for every client); this module
+// keeps what is AbstractCode's own: the path header (copy / open folder), the
+// preview and "attach to conversation".
 
 export type PreviewKind = "markdown" | "json" | "image" | "html" | "text" | "binary";
 
@@ -38,14 +28,9 @@ export const PREVIEW_LIMIT_LABEL = "1 MiB";
 const runPath = (runId: string) =>
   `/api/gateway/runs/${encodeURIComponent(runId)}/workspace`;
 
-export function workspaceFilesUrl(runId: string, path: string): string {
-  const params = new URLSearchParams({ path, recursive: "false" });
-  return `${runPath(runId)}/files?${params}`;
-}
-
-export function workspaceContentUrl(runId: string, path: string): string {
-  return `${runPath(runId)}/content?${new URLSearchParams({ path })}`;
-}
+/** The app proxy as the shared browser's gateway fetch (session cookie). */
+export const proxyGatewayFetch: GatewayFetch = (path, init) =>
+  fetch(path, { ...init, credentials: "same-origin" });
 
 const TEXT_EXTENSIONS = new Set(
   (
@@ -76,27 +61,6 @@ export function previewKind(name: string, contentType = ""): PreviewKind {
   if (["application/javascript", "application/xml", "application/x-yaml", "application/toml"].includes(type))
     return "text";
   return "binary";
-}
-
-export function formatBytes(value: number | undefined): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "";
-  if (value < 1024) return `${value} B`;
-  const units = ["KiB", "MiB", "GiB", "TiB"];
-  let size = value / 1024;
-  let unit = 0;
-  while (size >= 1024 && unit < units.length - 1) {
-    size /= 1024;
-    unit += 1;
-  }
-  return `${size < 10 ? size.toFixed(1) : Math.round(size)} ${units[unit]}`;
-}
-
-export function formatMtime(value: string | number | undefined): string {
-  if (value === undefined || value === null || value === "") return "";
-  const date = new Date(typeof value === "number" && value < 1e12 ? value * 1000 : value);
-  return Number.isFinite(date.getTime())
-    ? date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-    : String(value);
 }
 
 /** "Open folder" acts on the gateway machine, so it is offered only to a
@@ -148,78 +112,6 @@ export function WorkspaceHeader({
       ) : null}
     </div>
   );
-}
-
-export function WorkspaceFileList({
-  listing,
-  selected,
-  onOpenDir,
-  onSelectFile,
-}: {
-  listing: WorkspaceListing;
-  selected?: string;
-  onOpenDir: (path: string) => void;
-  onSelectFile: (entry: WorkspaceEntry) => void;
-}): React.ReactElement {
-  const entries = [...listing.entries].sort(
-    (a, b) =>
-      Number(b.type === "dir") - Number(a.type === "dir") || a.name.localeCompare(b.name),
-  );
-  return (
-    <>
-      <ul className="code-file-list code-session-files">
-        {entries.map((entry) => (
-          <li key={entry.path}>
-            <button
-              className={selected === entry.path ? "is-selected" : undefined}
-              title={entry.type === "dir" ? `Open ${entry.path}` : `Preview ${entry.path}`}
-              onClick={() =>
-                entry.type === "dir" ? onOpenDir(entry.path) : onSelectFile(entry)
-              }
-            >
-              <Icon name={entry.type === "dir" ? "chevronRight" : "edit"} size={14} />
-              <span>{entry.type === "dir" ? `${entry.name}/` : entry.name}</span>
-              <small className="code-file-meta">
-                {entry.type === "file" ? formatBytes(entry.size_bytes) : ""}
-                {entry.mtime !== undefined ? ` · ${formatMtime(entry.mtime)}` : ""}
-              </small>
-            </button>
-          </li>
-        ))}
-      </ul>
-      {listing.truncated ? (
-        <p className="code-field-help" role="status">
-          The gateway listed only part of this folder ({listing.entries.length} entries shown).
-        </p>
-      ) : null}
-      {!listing.entries.length ? (
-        <p className="code-pane-empty">This folder is empty.</p>
-      ) : null}
-    </>
-  );
-}
-
-/** Validate a `/workspace/files` answer. A malformed or older response is
- * an error, never an empty folder. */
-export function parseListing(data: unknown, directory: string): WorkspaceListing {
-  const body = data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : null;
-  const fail = (why: string): never => {
-    throw new Error(`Unexpected /workspace/files response from the gateway: ${why}.`);
-  };
-  if (!body) fail("not an object");
-  if (!Array.isArray(body!.entries)) fail("no `entries` list");
-  if (typeof body!.truncated !== "boolean") fail("no `truncated` flag");
-  const entries = (body!.entries as unknown[]).map((raw, index) => {
-    const row = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-    if (typeof row.name !== "string" || typeof row.path !== "string" || (row.type !== "file" && row.type !== "dir"))
-      fail(`entry ${index + 1} lacks a name, path or file/dir type`);
-    return row as unknown as WorkspaceEntry;
-  });
-  return {
-    path: typeof body!.path === "string" ? (body!.path as string) : directory,
-    entries,
-    truncated: body!.truncated as boolean,
-  };
 }
 
 /** Why a workspace file cannot be attached, decided BEFORE downloading it
@@ -424,14 +316,11 @@ export function SessionFiles({
   maxAttachmentBytes,
   onAttachFiles,
   heading = "Conversation workspace",
-  emptyText = "This conversation's files appear here.",
 }: {
   runId: string;
   enabled: boolean;
   /** The pane's title (the run's own workspace, or an automation's folder). */
   heading?: string;
-  /** Shown before there is a run. */
-  emptyText?: string;
   refreshKey?: string;
   /** The gateway's attachment size limit, checked before any download. */
   maxAttachmentBytes?: number;
@@ -440,22 +329,19 @@ export function SessionFiles({
 }): React.ReactElement {
   const [info, setInfo] = useState<RunWorkspace | null>(null);
   const [infoError, setInfoError] = useState("");
-  const [directory, setDirectory] = useState("");
-  const [listing, setListing] = useState<WorkspaceListing | null>(null);
-  const [listError, setListError] = useState("");
-  const [loading, setLoading] = useState(false);
   const [revision, setRevision] = useState(0);
   const [notice, setNotice] = useState("");
   const [opening, setOpening] = useState(false);
   const [selected, setSelected] = useState<WorkspaceEntry | null>(null);
   const [preview, setPreview] = useState<PreviewState>({ status: "idle" });
   const [attaching, setAttaching] = useState(false);
+  const onSelectFile = useCallback((entry: WorkspaceEntry) => setSelected(entry), []);
 
   useEffect(() => {
-    setDirectory("");
     setSelected(null);
   }, [runId]);
 
+  // The path header's facts (copy, open folder on this machine).
   useEffect(() => {
     setInfo(null);
     setInfoError("");
@@ -468,25 +354,6 @@ export function SessionFiles({
       });
     return () => abort.abort();
   }, [enabled, runId, revision]);
-
-  useEffect(() => {
-    setListing(null);
-    setListError("");
-    if (!enabled || !runId || !info?.exists) return;
-    const abort = new AbortController();
-    setLoading(true);
-    void gatewayRequest<WorkspaceListing>(workspaceFilesUrl(runId, directory), {
-      signal: abort.signal,
-    })
-      .then((data) => setListing(parseListing(data, directory)))
-      .catch((e) => {
-        if (!abort.signal.aborted) setListError(formatError(e));
-      })
-      .finally(() => {
-        if (!abort.signal.aborted) setLoading(false);
-      });
-    return () => abort.abort();
-  }, [enabled, runId, info, directory, refreshKey]);
 
   useEffect(() => {
     if (!selected || !runId) {
@@ -537,7 +404,7 @@ export function SessionFiles({
     return (
       <div className="code-pane-empty">
         <Icon name="terminal" size={28} />
-        <p>{emptyText}</p>
+        <p>This conversation's files appear here.</p>
         <small>Start a conversation; the files its workflow creates and edits are listed and previewed here.</small>
       </div>
     );
@@ -579,21 +446,6 @@ export function SessionFiles({
 
   return (
     <>
-      <div className="code-pane-intro">
-        <Icon name="terminal" size={17} />
-        <div>
-          <strong>{heading}</strong>
-          <span>{directory ? `/${directory}` : "Top folder"}</span>
-        </div>
-        <button
-          className="code-icon-button"
-          aria-label="Refresh files"
-          onClick={() => setRevision((n) => n + 1)}
-          disabled={!enabled}
-        >
-          <Icon name="refresh" size={14} />
-        </button>
-      </div>
       {infoError ? (
         <div className="code-inline-error" role="alert">
           Workspace unavailable: {infoError}
@@ -620,33 +472,16 @@ export function SessionFiles({
         />
       ) : null}
       {notice ? <p className="code-field-help" role="status">{notice}</p> : null}
-      {directory ? (
-        <button
-          className="code-back"
-          onClick={() => {
-            setDirectory(directory.split("/").slice(0, -1).join("/"));
-            setSelected(null);
-          }}
-        >
-          ← Parent folder
-        </button>
-      ) : null}
-      {loading ? <p className="code-muted" role="status">Loading files…</p> : null}
-      {listError ? (
-        <div className="code-inline-error" role="alert">
-          {listError}
-          <button onClick={() => setRevision((n) => n + 1)}>Retry</button>
-        </div>
-      ) : null}
-      {listing ? (
-        <WorkspaceFileList
-          listing={listing}
-          selected={selected?.path}
-          onOpenDir={(path) => {
-            setDirectory(path);
-            setSelected(null);
-          }}
-          onSelectFile={setSelected}
+      {enabled ? (
+        <WorkspaceBrowser
+          key={runId}
+          fetchGateway={proxyGatewayFetch}
+          runId={runId}
+          title={heading}
+          onSelectFile={onSelectFile}
+          selectedPath={selected?.path}
+          refreshKey={`${refreshKey ?? ""}:${revision}`}
+          className="code-workspace-browser"
         />
       ) : null}
       {selected ? (

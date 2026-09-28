@@ -20,6 +20,7 @@ import {
 import {
   WorkflowChat,
   chatToMarkdown,
+  presentInteraction,
   downloadTextFile,
   useWorkflowSession,
   workflowPendingInteraction,
@@ -39,7 +40,6 @@ import {
 } from "./use_workspace_catalog";
 import { gateway, gatewayRequest, formatError, newId } from "./transport";
 import { createWorkflowTransport } from "./session_transport";
-import { presentInteraction } from "./interaction";
 import {
   SettingsPanel,
   DEFAULT_PREFERENCES,
@@ -345,13 +345,13 @@ export function CodeWorkspace() {
   const pendingInteraction = workflowPendingInteraction(snapshot);
   const interaction = useMemo(
     () =>
-      presentInteraction(
-        pendingInteraction,
-        controller,
-        snapshot.records,
-        snapshot.run,
-        async () => { setPreferences(previous => ({ ...previous, permissions: "all" })); },
-      ),
+      presentInteraction(pendingInteraction, controller, {
+        records: snapshot.records,
+        currentRun: snapshot.run,
+        onPermissionsAll: async () => {
+          setPreferences((previous) => ({ ...previous, permissions: "all" }));
+        },
+      }),
     [pendingInteraction, snapshot.records, snapshot.run, controller],
   );
   const interactionBlocksSteer =
@@ -391,7 +391,7 @@ export function CodeWorkspace() {
     "New conversation";
   // Automations open gateway sessions here: a Discuss fork becomes THIS
   // app's conversation (one session pool for every client).
-  const automationHost: AutomationHost = {
+  const automationHost: Omit<AutomationHost, "openWorkspace"> = {
     openConversation: (sessionId, runId, text) => {
       switchNotice.current = text || "";
       openConversation(sessionId, runId);
@@ -1286,7 +1286,6 @@ export function CodeWorkspace() {
               ctl={automations}
               host={automationHost}
               enabled={connection.connected}
-              onAttachFiles={attachUploads}
               onClose={() => setAutomationView(false)}
             />
           ) : (

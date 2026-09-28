@@ -8,7 +8,6 @@ import type { AutomationSummary, AutomationsClient, OccurrenceRow } from "@abstr
 import {
   AutomationsController,
   automationRowView,
-  automationStateLabel,
   automationTarget,
   automationsAvailability,
   codeAutomationsClient,
@@ -16,7 +15,7 @@ import {
   waitAnswerPayload,
   waitResumeCommand,
 } from "./automations";
-import { AutomationsSection, automationPanelProps } from "./automations_view";
+import { AutomationsSection, automationPanelProps, folderTitle } from "./automations_view";
 
 // The ui-kit's canonical wire fixtures, vendored byte-identical (checksums
 // verified by the terminal client's contract test in this repo).
@@ -31,26 +30,20 @@ const NOW = Date.parse("2026-09-27T06:35:00Z");
 describe("automation rows", () => {
   it("read what runs now from current_occurrence and the next run from next_fire_at", () => {
     const inbox = automationRowView(byTitle("Inbox triage"), NOW);
-    expect(inbox.state).toBe("Active ▶");
     expect(inbox.current).toBe("Run #7 running");
     expect(inbox.next).toBe("2026-09-27 07:00 UTC (in 25 min)");
     expect(inbox.attention).toBe("2 unseen · 2 waiting for you");
     const paused = automationRowView(byTitle("Weekly journal monitor"), NOW);
-    expect(paused.state).toBe("Paused ⏸");
     expect(paused.current).toBeNull();
     expect(paused.next).toBe("none while paused");
     const legacy = list().find((s) => s.legacy)!;
     expect(automationRowView(legacy, NOW).legacy).toBe(true);
   });
 
-  it("label every state as text then icon", () => {
-    expect(["active", "paused", "completed", "failed", "archived"].map(automationStateLabel)).toEqual([
-      "Active ▶",
-      "Paused ⏸",
-      "Completed ✓",
-      "Failed ✕",
-      "Archived ▪",
-    ]);
+  it("name the folder pane after the automation or the run it shows", () => {
+    const occ = occurrences();
+    expect(folderTitle(INBOX, INBOX, occ)).toBe("Automation folder");
+    expect(folderTitle(INBOX, occ[0].run_id, occ)).toBe(`Run #${occ[0].index} folder`);
   });
 
   it("hide archived automations until asked", () => {
@@ -198,7 +191,7 @@ describe("the controller", () => {
     const ctl = new AutomationsController(client, vi.fn(), []);
     await ctl.refresh();
     await ctl.select(INBOX);
-    const host = { openConversation: vi.fn(), openRun: vi.fn() };
+    const host = { openConversation: vi.fn(), openRun: vi.fn(), openWorkspace: vi.fn() };
     const props = automationPanelProps(ctl, host)!;
     await props.onDiscuss(6, "what changed?", { request_id: "req-6" });
     expect(client.calls).toContain(`discuss ${INBOX} 6 req-6`);
@@ -209,6 +202,8 @@ describe("the controller", () => {
     expect(client.calls).toContain(`seen ${INBOX} att1:2`);
     props.onOpenRun("run-7");
     expect(host.openRun).toHaveBeenCalledWith("run-7");
+    props.onOpenWorkspace?.(INBOX);
+    expect(host.openWorkspace).toHaveBeenCalledWith(INBOX);
   });
 });
 
@@ -224,10 +219,12 @@ describe("the sidebar section", () => {
   };
   const state = (items: AutomationSummary[], showArchived = false) => ({ ...new AutomationsController(stubClient(), vi.fn()).state, items, loaded: true, showArchived });
 
-  it("lists state, now and next as the gateway says", () => {
+  it("lists state (the kit's word + icon), now and next as the gateway says", () => {
     const html = renderToStaticMarkup(<AutomationsSection {...base} state={state(list())} />);
-    expect(html).toContain("Active ▶");
-    expect(html).toContain("Paused ⏸");
+    const label = (status: string, word: string) =>
+      new RegExp(`data-state="${status}"><span class="af-auto__status-word">${word}</span><svg`);
+    expect(html).toMatch(label("active", "Active"));
+    expect(html).toMatch(label("paused", "Paused"));
     expect(html).toContain("now: Run #7 running");
     expect(html).toContain("next: none while paused");
     expect(html).toContain("legacy schedule");
@@ -239,7 +236,7 @@ describe("the sidebar section", () => {
     expect(hidden).not.toContain(`data-automation-id="${items[1].automation_id}"`);
     expect(hidden).toContain("Show archived (1)");
     const shown = renderToStaticMarkup(<AutomationsSection {...base} state={state(items, true)} />);
-    expect(shown).toContain("Archived ▪");
+    expect(shown).toContain('data-state="archived"');
   });
 
   it("says why when the gateway lacks the API", () => {

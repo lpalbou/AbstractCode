@@ -30,7 +30,6 @@ import {
   type AutomationChanges,
   type AutomationCommandType,
   type AutomationDefinition,
-  type AutomationStatus,
   type AutomationSummary,
   type AutomationTarget,
   type AutomationsClient,
@@ -73,22 +72,6 @@ export function automationsAvailability(contracts: Record<string, any> | undefin
 }
 
 /**
- * The state as TEXT then ICON — the same label in every client ("Active ▶",
- * "Paused ⏸"): the word carries the meaning, the icon is a cue.
- */
-export const AUTOMATION_STATE_LABELS: Record<AutomationStatus, string> = {
-  active: "Active ▶",
-  paused: "Paused ⏸",
-  completed: "Completed ✓",
-  failed: "Failed ✕",
-  archived: "Archived ▪",
-};
-
-export function automationStateLabel(status: string): string {
-  return AUTOMATION_STATE_LABELS[status as AutomationStatus] ?? status;
-}
-
-/**
  * The create target for the toolbar's choice: the gateway default agent as
  * `{flow_id: "@default", interface}` (resolved by the gateway), else the
  * published workflow as `{bundle_ref, flow_id}`.
@@ -103,7 +86,6 @@ export function automationTarget(selection: string, workflow: WorkflowDefinition
 export type AutomationRowView = {
   id: string;
   title: string;
-  state: string;
   cadence: string;
   /** "Run #7 running" — from `current_occurrence` only; null when nothing is in flight. */
   current: string | null;
@@ -118,7 +100,6 @@ export function automationRowView(s: AutomationSummary, nowMs: number = Date.now
   return {
     id: s.automation_id,
     title: s.title,
-    state: automationStateLabel(s.status),
     cadence: triggerSummary(s.trigger),
     current: currentOccurrenceLabel(s),
     next: s.next_fire_at ? `${formatUtc(s.next_fire_at)} (${relativeIn(s.next_fire_at, nowMs)})` : s.status === "paused" ? "none while paused" : "none scheduled",
