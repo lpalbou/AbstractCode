@@ -541,7 +541,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     (
         "/automations [id]",
-        "the gateway's automations (shared with the Assistant and the Observer): state, what runs now, the next run; Enter opens one — its runs as chat pairs, approvals (y/n), answers, p pause/resume · g run now · x stop current · e revise · a archive (hides and stops, history kept) · d discuss a run (a new chat, in place) · w its folder",
+        "the gateway's automations (shared with the Assistant and the Observer): state, what runs now, the next run; Enter opens one — its runs as chat pairs, approvals (y/n), answers, p pause/resume · g run now · x stop current · e revise · a archive (hides and stops, history kept) · d discuss a run (a new chat, in place) · w its folder. g run now: Run it once now, without waiting for the schedule; the next scheduled run keeps its time.",
     ),
     (
         "/schedule [task]",

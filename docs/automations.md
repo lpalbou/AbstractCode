@@ -64,12 +64,17 @@ the title, the first run time, "stop after this many runs" and "stop at".
 | Control | Terminal key | What happens |
 |---|---|---|
 | Pause / Resume | `p` | No scheduled run while paused; resume continues from the next tick. |
-| Run now | `g` | One run at once, also while paused (it stays paused). Refused while a run is in progress. |
+| Run now | `g` | One run at once, instead of waiting for the schedule. The schedule does not move: the next scheduled run keeps its time, and if that time comes while this run is still going, the scheduled run starts right after it. It does not count toward a run limit ("stop after this many runs"). Also works while paused (it stays paused). In a Growing automation, later runs see it in their history. Refused while a run is in progress. |
 | Stop current | `x` | Cancels the run in progress. |
 | Revise | `e` | Title, interval (schedules) and context; applies from the next run. In the terminal, a field left empty keeps its current value. |
 | Archive | `a`, then `a` again | The automation stops and is hidden from the list; its history stays readable (**Show archived**, or `h` in the terminal). Archiving never deletes anything. |
 
-In the browser the same controls are buttons on the automation's page.
+In the browser the same controls are buttons on the automation's page; hovering
+one shows what it does (Run now's tooltip adds the next scheduled time). The
+terminal shows Run now's effect in one line under the key hints: "g run now:
+Run it once now, without waiting for the schedule; the next scheduled run keeps
+its time." Every AbstractFramework client uses the same wording and the same
+play-in-a-circle icon for Run now.
 
 ## Runs, approvals and answers
 

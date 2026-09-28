@@ -258,6 +258,7 @@ pub fn open_automations(cx: Scope, store: Store, ctx: &UiCtx) {
                 &t,
                 "↑↓ · Enter opens · n new (/schedule) · p pause/resume · g run now · x stop current · a archive · h archived · r refresh · Esc closes".into(),
             ))
+            .child(hint_row(&t, auto::run_now_key_line()))
             .build()
     });
 }
@@ -858,6 +859,7 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
                 &t,
                 "↑↓ · y/n approve/deny · Enter answers · d discuss run · p pause/resume · g run now · x stop · e revise · a archive · w folder · r refresh · Esc back".into(),
             ))
+            .child(hint_row(&t, auto::run_now_key_line()))
             .build()
     });
 }

@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Run now says what it does.** `/automations` (the list and one automation)
+  shows "g run now: Run it once now, without waiting for the schedule; the
+  next scheduled run keeps its time." under the key hints, and `/help` says the
+  same. The text is AbstractUIC's shared control hint, vendored as
+  `assets/automation_controls.json` (a byte-identical copy of the kit's file,
+  shipped in the crate).
+
 ## [0.7.0] - 2026-09-28
 
 ### Added
