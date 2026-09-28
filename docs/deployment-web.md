@@ -4,7 +4,7 @@ The browser uses a same-origin application server, which authenticates to Abstra
 
 ## Served by the gateway at `/apps/code/`
 
-AbstractGateway can install, start and serve AbstractCode itself: the console's **Apps** page opens it at `http(s)://<gateway>/apps/code/`, one port and one address for the console, the API and every app. The gateway starts the web server on `127.0.0.1` and relays to it; **Open** signs the browser in to AbstractCode as the signed-in gateway user, so there is no second sign-in. This is the simplest deployment, and the only address you need to expose (or tunnel) for a remote machine.
+AbstractGateway (0.7.0 or later) can install, start and serve AbstractCode itself: the console's **Apps** page opens it at `http(s)://<gateway>/apps/code/`, one port and one address for the console, the API and every app. The gateway starts the web server on `127.0.0.1` and relays to it; **Open** signs the browser in to AbstractCode as the signed-in gateway user, so there is no second sign-in. This is the simplest deployment, and the only address you need to expose (or tunnel) for a remote machine.
 
 Under the mount, AbstractCode follows the shared app-server contract: every response carries `X-AbstractFramework-App: code; mount=1`, the page is served with `<base href="/apps/code/">`, every asset and API call is relative to that base, the session cookies are scoped to `Path=/apps/code/`, and the browser's real address (forwarded by the gateway) is what the gateway sees for AbstractCode's calls.
 

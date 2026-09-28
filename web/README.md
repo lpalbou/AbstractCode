@@ -13,6 +13,14 @@ Run it without installing anything:
 npx @abstractframework/code      # serves on http://127.0.0.1:3002
 ```
 
+The server listens on `127.0.0.1` by default; pass `--host 0.0.0.0` to accept
+other machines directly. AbstractGateway (0.7.0 or later) can also start it
+and serve it at `/apps/code/` on the gateway's own address, which is the one
+address to expose or tunnel for a remote machine. Launch flags:
+`--gateway-url <url>`, `--port <n>`, `--host <addr>`, `--help`; without
+`--gateway-url` the server uses the gateway installed on this computer
+(`~/.abstractframework/gateway.json`), else `http://127.0.0.1:8080`.
+
 The interface uses AbstractUIC themes, authentication, settings, and reusable
 workflow chat. It builds without a sibling checkout: the shared
 `@abstractframework/*` components install from npm like any other dependency,

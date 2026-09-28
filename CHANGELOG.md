@@ -5,10 +5,10 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [terminal 0.7.0 / web 0.6.0] - 2026-09-28
 
 ### Added
-- **Web: served by the gateway at `/apps/code/`.** The web server follows the
+- **Web: served by the gateway at `/apps/code/`** (AbstractGateway 0.7.0 or later). The web server follows the
   shared app-server contract (`@abstractframework/app-server`): the identity
   header `X-AbstractFramework-App: code; mount=1`, `<base href>` and the base
   path in the page, every asset and API call relative to it, session cookies
@@ -62,9 +62,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   content), tool approvals and questions (the shared interaction cards), and
   automation ledger/artifact links (opened through the app's own proxy) come
   from the shared kit.
-- **Web:** requires the next `@abstractframework/ui-kit` and
-  `@abstractframework/panel-chat` releases (after 0.1.13 / 0.1.18) and adds one
-  runtime dependency, `@abstractframework/app-server`.
+- **Web:** requires `@abstractframework/ui-kit` 0.1.14 and
+  `@abstractframework/panel-chat` 0.1.19, and adds one runtime dependency,
+  `@abstractframework/app-server` 0.1.11.
+
+### Security
+
+- **Web:** with `@abstractframework/app-server` 0.1.11, the sign-in proxy
+  accepts a browser-supplied Gateway URL only from a browser on this machine:
+  a loopback address **and** a loopback host name, so a page from another site
+  whose name resolves to `127.0.0.1` (DNS rebinding) is refused.
 
 ## [terminal 0.6.0 / web 0.5.0] - 2026-09-26
 
