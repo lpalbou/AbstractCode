@@ -39,6 +39,7 @@ pub mod project_context;
 pub mod protocol;
 pub mod run_input;
 pub mod runner;
+pub mod signin;
 pub mod speculation;
 pub mod store;
 pub mod streaming;
@@ -117,7 +118,57 @@ fn resolve_animation(prefs: &mut config::Prefs, flag: Option<bool>) -> bool {
     prefs.animation.unwrap_or(true)
 }
 
+/// How long the launch preflight may hold the start while the gateway
+/// answers its ping.
+// #[WARNING:TIMEOUT] Not a correctness bound: it only caps how long an
+// unanswered preflight delays the start (a wedged gateway would otherwise
+// hold a blank terminal for the client's 60 s read timeout). Past it the
+// app starts as before, and the running app's own not-signed-in lane
+// (`store.signed_out`) still catches a 401. A loopback gateway answers
+// `/ping` in milliseconds.
+const SIGNIN_PREFLIGHT_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The launch preflight's verdict over one `/ping` answer: `Some(report)`
+/// when the gateway refuses this client's credential (not signed in), else
+/// `None` (signed in, or unreachable — the app starts and shows the orb).
+pub(crate) fn signin_preflight_verdict(
+    conn: &config::Connection,
+    answer: &gateway::GwResult<serde_json::Value>,
+) -> Option<String> {
+    let e = answer.as_ref().err()?;
+    if !signin::refuses_credential(e) {
+        return None;
+    }
+    Some(signin::not_signed_in_report(
+        &conn.base_url,
+        e.status.unwrap_or_default(),
+        conn.token.is_some(),
+        conn.url_to_save.as_deref(),
+        workspace_files::is_loopback_url(&conn.base_url),
+        &config::login_store_path().display().to_string(),
+    ))
+}
+
+/// Ask the gateway whether this client is signed in BEFORE the full-screen
+/// app opens: a refused credential ends the launch with the exact way to
+/// sign in, printed where it stays readable (a phone over SSH included),
+/// instead of an app that says "no workflow yet" and retries a 401.
+fn signin_preflight(conn: &config::Connection) -> Option<String> {
+    let client = gateway::GatewayClient::new(&conn.base_url, conn.token.as_deref());
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(client.ping());
+    });
+    let answer = rx.recv_timeout(SIGNIN_PREFLIGHT_WAIT).ok()?;
+    signin_preflight_verdict(conn, &answer)
+}
+
 fn run_tui(args: &cli::Args) -> i32 {
+    let conn = config::resolve_connection(args.gateway.as_deref(), args.token.as_deref());
+    if let Some(report) = signin_preflight(&conn) {
+        eprintln!("{report}");
+        return 1;
+    }
     if !abstracttui::term::have_tty() {
         eprintln!("abstractcode: needs an interactive terminal (use `exec` for headless runs)");
         return 2;
@@ -140,7 +191,6 @@ fn run_tui(args: &cli::Args) -> i32 {
     // write below, which is the save that carries it to disk.
     let animation = resolve_animation(&mut prefs, args.animation);
 
-    let conn = config::resolve_connection(args.gateway.as_deref(), args.token.as_deref());
     let gateway_label = conn
         .base_url
         .trim_start_matches("http://")

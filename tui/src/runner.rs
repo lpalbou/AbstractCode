@@ -804,6 +804,12 @@ pub(crate) fn fold_session_rows(items: &[Value]) -> Vec<crate::store::SessionRow
 /// would catch it (measured: that sabotage survived a green suite).
 pub(crate) fn apply_restore_failure(store: &Store, e: &crate::gateway::GwError) {
     store.restore_failed.set(Some(e.compact_reason()));
+    // A refused credential is not a transient fault: the strip says "not
+    // signed in" (signed_out wins over this notice), and the restore is
+    // retried by the self-heal edge once a probe is accepted again.
+    if crate::signin::refuses_credential(e) {
+        store.signed_out.set_if_changed(Some(e.compact_reason()));
+    }
 }
 
 /// Best-effort extraction of a panic payload's message.
@@ -1063,8 +1069,20 @@ impl Runner {
                 self.soft_failures = 0;
                 self.post(move || {
                     store.conn.set_if_changed(Conn::Ok);
+                    store.signed_out.set_if_changed(None);
                 });
                 self.heal_catalog_if_missing();
+            }
+            // Reachable, but the credential is refused: NOT SIGNED IN.
+            // No catalog heal — re-sending loads a 401 already refused
+            // is a retry loop no retry can fix (`signin` module doc).
+            Err(e) if crate::signin::refuses_credential(&e) => {
+                self.soft_failures = 0;
+                let reason = e.compact_reason();
+                self.post(move || {
+                    store.conn.set_if_changed(Conn::Ok);
+                    store.signed_out.set_if_changed(Some(reason));
+                });
             }
             // An HTTP answer — any code — proves the gateway is REACHABLE
             // (the doctor's own rule): the orb claims connectivity, never
@@ -1258,9 +1276,17 @@ impl Runner {
                 // brand the whole app "unreachable".
                 let gone = e.is_gone();
                 let msg = e.to_string();
+                let refused = crate::signin::refuses_credential(&e).then(|| e.compact_reason());
                 self.post(move || {
                     if gone {
                         store.conn.set_if_changed(Conn::Down(msg.clone(), true));
+                    }
+                    // Not signed in: the status strip says so, with the
+                    // way to sign in; a "catalog load failed" toast would
+                    // only repeat it less usefully.
+                    if let Some(reason) = refused {
+                        store.signed_out.set_if_changed(Some(reason));
+                        return;
                     }
                     store.notify(format!("catalog load failed: {msg}"));
                 });
@@ -5386,6 +5412,106 @@ mod tests {
         // An HTTP answer of any code is reachability proof: never Down,
         // however long the error streak.
         assert!(!marks_gateway_down(&http, 99, STREAM_DOWN_AFTER));
+    }
+
+    /// A gateway answering every request with `status_line` (e.g.
+    /// `401 Unauthorized`): a gateway that is up but refuses the credential.
+    fn fake_gateway_refusing(status_line: &'static str) -> String {
+        use std::io::{BufRead, BufReader, Write};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let url = format!("http://{}", l.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for sock in l.incoming() {
+                let Ok(mut sock) = sock else { continue };
+                let mut reader = BufReader::new(sock.try_clone().unwrap());
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                }
+                let body = r#"{"detail":"Unauthorized"}"#;
+                let _ = write!(
+                    sock,
+                    "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        url
+    }
+
+    /// Not signed in (operator, fresh install run by full path, 2026-09-28):
+    /// a gateway that answers 401 is reachable but refuses the credential.
+    /// The catalog load and the probe must say "not signed in" — never a
+    /// "catalog load failed" toast — and the probe must NOT re-issue the
+    /// catalog loads: re-sending a request a 401 already refused is a
+    /// retry loop no retry can fix. (Deleting the probe's refusal arm, or
+    /// the catalog lane's, turns this red.)
+    #[test]
+    fn a_refused_credential_is_not_signed_in_and_the_probe_stops_reloading() {
+        for status_line in ["401 Unauthorized", "403 Forbidden"] {
+            let url = fake_gateway_refusing(status_line);
+            let (root, ()) = abstracttui::reactive::create_root(|cx| {
+                let store = Store::create(cx);
+                let (tx, rx) = std::sync::mpsc::channel::<Cmd>();
+                let mut runner = runner_for(&url, store);
+                runner.tx = tx;
+                runner.load_catalog(None, None);
+                abstracttui::reactive::drain_posted();
+                let code = &status_line[..3];
+                assert_eq!(
+                    store.signed_out.get_untracked().as_deref(),
+                    Some(format!("HTTP {code}").as_str()),
+                    "the catalog lane marks the client not signed in"
+                );
+                assert!(
+                    !store
+                        .notices
+                        .get_untracked()
+                        .iter()
+                        .any(|n| n.contains("catalog load failed")),
+                    "no catalog-failure toast for a sign-in problem: {:?}",
+                    store.notices.get_untracked()
+                );
+                store.signed_out.set(None);
+                runner.probe();
+                abstracttui::reactive::drain_posted();
+                assert_eq!(store.conn.get_untracked(), Conn::Ok, "reachable");
+                assert_eq!(
+                    store.signed_out.get_untracked().as_deref(),
+                    Some(format!("HTTP {code}").as_str()),
+                    "the probe marks the client not signed in"
+                );
+                let resent: Vec<Cmd> = rx.try_iter().collect();
+                assert!(
+                    resent.is_empty(),
+                    "the probe re-issued loads against a refused credential: {resent:?}"
+                );
+            });
+            root.dispose();
+        }
+    }
+
+    /// The restore lane: a 401 on the session history is "not signed in",
+    /// not only "session history not restored".
+    #[test]
+    fn a_refused_restore_marks_the_client_not_signed_in() {
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = Store::create(cx);
+            apply_restore_failure(&store, &crate::gateway::GwError::unreachable("down"));
+            assert_eq!(
+                store.signed_out.get_untracked(),
+                None,
+                "an outage is not a sign-in problem"
+            );
+            apply_restore_failure(&store, &crate::gateway::GwError::http(401, "Unauthorized"));
+            assert_eq!(
+                store.signed_out.get_untracked().as_deref(),
+                Some("HTTP 401")
+            );
+        });
+        root.dispose();
     }
 
     /// F1 under the evidence-based Down policy: a boot whose catalog load

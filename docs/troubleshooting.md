@@ -25,6 +25,16 @@ the one you expect. `abstractcode login` saves a URL only when you give one
 (`--gateway-url` or the environment); a login taken from the pointer saves the
 token alone, so the client keeps following the gateway to a new port.
 
+**`not signed in to <gateway>` at launch, or "not signed in" in the app.**
+The gateway is running and reachable but refuses this client's credential:
+none is saved, it was rotated, or it was a one-use sign-in from the gateway
+that ended when the gateway restarted. On the gateway's computer, run
+`abstractgateway apps tui-command code` and then the line it prints (opens
+the app signed in, no token handled), or save a token once with
+`abstractcode login --token <value>`
+(`abstractgateway-config bootstrap-admin --print-token` prints the admin
+token there). Retrying does not help, so the app does not retry.
+
 **401 or 403 from a remote gateway.**
 The token is missing, expired, or belongs to a different gateway. Re-verify and
 re-persist it:

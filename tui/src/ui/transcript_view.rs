@@ -1920,8 +1920,11 @@ pub fn status_card_rows(
     gateway_label: &str,
     workspace_root: &str,
 ) -> Vec<(&'static str, String)> {
+    let signed_out = store.signed_out.get();
     let workflow = store.workflow.with(|w| {
-        if w.flow_id.is_empty() {
+        if w.flow_id.is_empty() && signed_out.is_some() {
+            "unknown — not signed in to the gateway".to_string()
+        } else if w.flow_id.is_empty() {
             "none yet — /workflow picks one".to_string()
         } else {
             w.display_label()
@@ -1938,6 +1941,7 @@ pub fn status_card_rows(
     };
     let session = store.session_id.get();
     let conn_word = match store.conn.get() {
+        crate::store::Conn::Ok if signed_out.is_some() => "reachable · not signed in",
         crate::store::Conn::Ok => "connected",
         crate::store::Conn::Unknown => "probing…",
         // Evidence-based words (HOLE A): "unreachable" only on connect-level

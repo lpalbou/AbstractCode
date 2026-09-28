@@ -2505,9 +2505,12 @@ fn wire_conn_self_heal(
     let was_down = Rc::new(Cell::new(false));
     cx.effect(move || {
         let conn = store.conn.get();
-        let now_down = matches!(conn, Conn::Down(..));
+        // Not signed in counts as down here: the edge back to an accepted
+        // probe reloads what the refused credential could not.
+        let signed_out = store.signed_out.with(|s| s.is_some());
+        let now_down = matches!(conn, Conn::Down(..)) || signed_out;
         let before = was_down.replace(now_down);
-        if before && conn == Conn::Ok {
+        if before && !now_down && conn == Conn::Ok {
             // The restore is retried too, not just the catalog. A
             // failed rehydration is exactly the thing a reconnection
             // fixes, and telling the operator to `/sessions` and

@@ -58,6 +58,9 @@ pub struct Connection {
     pub token: Option<String>,
     /// Shown once at launch (an ignored gateway pointer).
     pub warning: Option<String>,
+    /// The URL `abstractcode login` would save ([`Resolved::url_to_save`]):
+    /// the sign-in instructions repeat it only when the user chose it.
+    pub url_to_save: Option<String>,
 }
 
 fn trimmed_env(name: &str) -> Option<String> {
@@ -241,6 +244,7 @@ pub fn resolve_connection(url_flag: Option<&str>, token_flag: Option<&str>) -> C
     let url = resolve_gateway_url(url_flag);
     let (token, _token_source) = resolve_gateway_token(token_flag);
     Connection {
+        url_to_save: url.url_to_save().map(str::to_string),
         base_url: url.value,
         token,
         warning: url.warning,

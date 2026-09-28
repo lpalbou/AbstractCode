@@ -5,6 +5,23 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Terminal: not signed in is said plainly.** A gateway that answers 401 or
+  403 is reachable but refuses this client's credential (none was sent, or it
+  was refused or has expired). At launch, the terminal client now asks the
+  gateway first and, when it refuses, exits (code 1) before opening, with the
+  gateway, the HTTP status, and the exact way to sign in: on the gateway's
+  computer `abstractgateway apps tui-command code` (a one-use line that opens
+  it signed in, no token handled), or `abstractcode login --token <value>`.
+  It used to open anyway and show "no workflow yet" and "session history not
+  restored (HTTP 401) — retrying", while re-sending the refused catalog loads
+  on every probe. A credential lost while the app runs (a gateway restart ends
+  a sign-in handed over by the gateway) shows "not signed in" in the header,
+  the status strip and the status card, stops those retries, and reloads the
+  catalog and the history once the gateway accepts the client again.
+
 ## [terminal 0.7.0 / web 0.6.0] - 2026-09-28
 
 ### Added

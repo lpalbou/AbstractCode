@@ -122,8 +122,11 @@ pub fn header(t: &TokenSet, store: Store, spin: Signal<u64>, cwd_base: String) -
     let tokens = *t;
     dyn_view(LayoutStyle::line(1), move || {
         let t = tokens;
+        let signed_out = store.signed_out.with(|s| s.is_some());
         let workflow = store.workflow.with(|w| {
-            if w.flow_id.is_empty() {
+            if w.flow_id.is_empty() && signed_out {
+                "not signed in".to_string()
+            } else if w.flow_id.is_empty() {
                 "no workflow yet".to_string()
             } else if w.gateway_default {
                 format!("{} (default)", w.label())
@@ -441,6 +444,25 @@ pub fn activity_strip(t: &TokenSet, store: Store, spin: Signal<u64>, follow: Sig
             // The reconnect retries it, so the words promise the
             // recovery this client actually performs rather than
             // asking the operator to re-select by hand.
+            // Not signed in outranks every other idle notice: nothing
+            // else on this gateway works until it is fixed, and a retry
+            // cannot fix it (`signin`).
+            if let Some(reason) = store.signed_out.get() {
+                let summary = crate::signin::signed_out_line(&reason);
+                return Element::new()
+                    .style(LayoutStyle::line(1))
+                    .draw(move |canvas, rect| {
+                        let fitted =
+                            abstracttui::text::truncate_ellipsis(&summary, (rect.w - 2).max(4));
+                        canvas.print(
+                            Point::new(rect.x + 1, rect.y),
+                            &fitted,
+                            t.error,
+                            Rgba::TRANSPARENT,
+                        );
+                    })
+                    .build();
+            }
             if let Some(reason) = store.restore_failed.get() {
                 let summary = format!(
                     "session history not restored ({reason}) — retrying when the gateway answers"

@@ -179,7 +179,30 @@ from "the workflow you asked for is not installed".
 
 ## Credentials
 
-A remote gateway usually requires a token. Persist one so you do not repeat it:
+A gateway asks every client to sign in. When it refuses this one, the
+terminal client says so before it opens (`not signed in to <gateway>`) and
+prints the way to sign in; it exits without starting.
+
+On the gateway's own computer (including over SSH to it), open it signed in
+without handling a token:
+
+```bash
+abstractgateway apps tui-command code
+```
+
+It prints a one-use line (valid 2 minutes); run it and AbstractCode opens
+signed in. That sign-in lives in the gateway's memory and ends when the
+gateway restarts; the app then shows "not signed in".
+
+To sign in once for good, save a token with `login` (on the gateway's
+computer, `abstractgateway-config bootstrap-admin --print-token` prints the
+admin token):
+
+```bash
+abstractcode login --token <value>
+```
+
+A remote gateway usually requires a token too. Persist one so you do not repeat it:
 
 ```bash
 abstractcode login --gateway-url https://gateway.example.com --token <TOKEN>
@@ -1037,6 +1060,16 @@ file was ignored, which is usually the answer when a saved value is shadowing
 the one you expect. `abstractcode login` saves a URL only when you give one
 (`--gateway-url` or the environment); a login taken from the pointer saves the
 token alone, so the client keeps following the gateway to a new port.
+
+**`not signed in to <gateway>` at launch, or "not signed in" in the app.**
+The gateway is running and reachable but refuses this client's credential:
+none is saved, it was rotated, or it was a one-use sign-in from the gateway
+that ended when the gateway restarted. On the gateway's computer, run
+`abstractgateway apps tui-command code` and then the line it prints (opens
+the app signed in, no token handled), or save a token once with
+`abstractcode login --token <value>`
+(`abstractgateway-config bootstrap-admin --print-token` prints the admin
+token there). Retrying does not help, so the app does not retry.
 
 **401 or 403 from a remote gateway.**
 The token is missing, expired, or belongs to a different gateway. Re-verify and
@@ -3214,6 +3247,23 @@ All notable changes to AbstractCode will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Fixed
+- **Terminal: not signed in is said plainly.** A gateway that answers 401 or
+  403 is reachable but refuses this client's credential (none was sent, or it
+  was refused or has expired). At launch, the terminal client now asks the
+  gateway first and, when it refuses, exits (code 1) before opening, with the
+  gateway, the HTTP status, and the exact way to sign in: on the gateway's
+  computer `abstractgateway apps tui-command code` (a one-use line that opens
+  it signed in, no token handled), or `abstractcode login --token <value>`.
+  It used to open anyway and show "no workflow yet" and "session history not
+  restored (HTTP 401) — retrying", while re-sending the refused catalog loads
+  on every probe. A credential lost while the app runs (a gateway restart ends
+  a sign-in handed over by the gateway) shows "not signed in" in the header,
+  the status strip and the status card, stops those retries, and reloads the
+  catalog and the history once the gateway accepts the client again.
 
 ## [terminal 0.7.0 / web 0.6.0] - 2026-09-28
 

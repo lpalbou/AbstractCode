@@ -1138,6 +1138,15 @@ pub struct Store {
     /// Cleared by: a successful restore, the Down→Ok reconnect (which
     /// also RETRIES it), a session switch, and `/new`.
     pub restore_failed: Signal<Option<String>>,
+    /// Not signed in: the gateway answers, but refuses this client's
+    /// credential (401/403 — `signin::refuses_credential`). Holds the
+    /// URL-free reason (`HTTP 401`). While set, the status strip says so
+    /// with the way to sign in (`signin::signed_out_line`), the header
+    /// says "not signed in" instead of "no workflow yet", and the probe
+    /// stops re-issuing catalog loads a retry cannot fix. Cleared when a
+    /// probe is accepted again (which the self-heal edge treats like a
+    /// reconnection: catalog and history are reloaded).
+    pub signed_out: Signal<Option<String>>,
     /// The loading screen's counters: `(fetched, total)` prior-turn
     /// bundles of the current ProbeAttach window, posted by the worker
     /// as each bundle lands. `None` while the run list itself is in
@@ -1301,6 +1310,7 @@ impl Store {
             older_turns: cx.signal(0),
             restoring: cx.signal(false),
             restore_failed: cx.signal(None),
+            signed_out: cx.signal(None),
             restore_progress: cx.signal(None),
             pending_attachments: cx.signal(Vec::new()),
             max_attachment_bytes: cx.signal(0),

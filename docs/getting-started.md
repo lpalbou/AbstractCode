@@ -58,7 +58,30 @@ from "the workflow you asked for is not installed".
 
 ## Credentials
 
-A remote gateway usually requires a token. Persist one so you do not repeat it:
+A gateway asks every client to sign in. When it refuses this one, the
+terminal client says so before it opens (`not signed in to <gateway>`) and
+prints the way to sign in; it exits without starting.
+
+On the gateway's own computer (including over SSH to it), open it signed in
+without handling a token:
+
+```bash
+abstractgateway apps tui-command code
+```
+
+It prints a one-use line (valid 2 minutes); run it and AbstractCode opens
+signed in. That sign-in lives in the gateway's memory and ends when the
+gateway restarts; the app then shows "not signed in".
+
+To sign in once for good, save a token with `login` (on the gateway's
+computer, `abstractgateway-config bootstrap-admin --print-token` prints the
+admin token):
+
+```bash
+abstractcode login --token <value>
+```
+
+A remote gateway usually requires a token too. Persist one so you do not repeat it:
 
 ```bash
 abstractcode login --gateway-url https://gateway.example.com --token <TOKEN>

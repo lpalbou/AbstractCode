@@ -2936,6 +2936,53 @@ fn a_failed_restore_is_transient_and_retried_on_reconnect() {
     );
 }
 
+/// Not signed in (operator, 2026-09-28: a TUI started by full path, with no
+/// credential, said "no workflow yet" and "session history not restored
+/// (HTTP 401) — retrying when …"). A refused credential is ONE fact with one
+/// fix: the header says "not signed in", the strip names the way to sign in,
+/// and nothing promises a retry. An accepted probe later reloads the
+/// catalog and the history. (Deleting the chrome's signed_out branches, or
+/// the self-heal edge's, turns this red.)
+#[test]
+fn not_signed_in_is_said_plainly_instead_of_no_workflow_and_retrying() {
+    let mut h = harness_sized(Size::new(220, 30));
+    h.store.workflow.set(Workflow::default());
+    h.turn();
+    h.leave_splash();
+    // Reachable (the orb is Ok) but the credential is refused.
+    h.store.conn.set(abstractcode::store::Conn::Ok);
+    h.turn();
+    h.store.restore_failed.set(Some("HTTP 401".into()));
+    h.store.signed_out.set(Some("HTTP 401".into()));
+    let screen = h.turn();
+    let header = screen.lines().next().unwrap_or_default().to_string();
+    assert!(
+        header.contains("not signed in") && !header.contains("no workflow yet"),
+        "the header names the real condition:\n{header}"
+    );
+    assert!(
+        screen.contains(&abstractcode::signin::signed_out_line("HTTP 401")),
+        "the strip says how to sign in:\n{screen}"
+    );
+    assert!(
+        !screen.contains("retrying when the gateway answers"),
+        "a retry cannot sign the client in; nothing may promise one:\n{screen}"
+    );
+    assert!(!screen.contains("http://"), "URL-free:\n{screen}");
+    while h.rx.try_recv().is_ok() {}
+    h.store.signed_out.set(None);
+    h.turn();
+    let sent: Vec<Cmd> = h.rx.try_iter().collect();
+    assert!(
+        sent.iter().any(|c| matches!(c, Cmd::LoadCatalog { .. })),
+        "an accepted probe reloads the catalog: {sent:?}"
+    );
+    assert!(
+        sent.iter().any(|c| matches!(c, Cmd::ProbeAttach { .. })),
+        "…and retries the history restore: {sent:?}"
+    );
+}
+
 /// Enter on the WAITING board does nothing — it must not switch
 /// sessions, and it must not cancel the live run.
 ///
