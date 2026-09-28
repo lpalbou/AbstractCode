@@ -17,8 +17,39 @@ pub const DEFAULT_GATEWAY_URL: &str = "http://127.0.0.1:8080";
 pub struct Resolved {
     pub value: String,
     pub source: String,
+    /// Which rung of the precedence provided the value.
+    pub origin: UrlOrigin,
     /// A visible warning to show once (an ignored gateway pointer).
     pub warning: Option<String>,
+}
+
+/// Where a resolved gateway URL came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UrlOrigin {
+    /// `--gateway-url` (or its alias `--gateway`).
+    Flag,
+    /// A legacy environment alias of the flag.
+    Env,
+    /// The saved login.
+    Login,
+    /// The local gateway pointer.
+    Pointer,
+    /// The built-in `http://127.0.0.1:8080`.
+    Default,
+}
+
+impl Resolved {
+    /// The URL `abstractcode login` may save: only one the user chose (the
+    /// flag, its legacy environment alias, or the login already saved).
+    /// A URL found through the pointer or the default is never saved: a
+    /// saved login beats the pointer, so saving it would stop this client
+    /// following the gateway to a new port.
+    pub fn url_to_save(&self) -> Option<&str> {
+        match self.origin {
+            UrlOrigin::Flag | UrlOrigin::Env | UrlOrigin::Login => Some(&self.value),
+            UrlOrigin::Pointer | UrlOrigin::Default => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -129,14 +160,15 @@ pub fn resolve_gateway_url(explicit: Option<&str>) -> Resolved {
 
 /// `resolve_gateway_url` with an explicit home (tests).
 pub fn resolve_gateway_url_in(explicit: Option<&str>, home: &std::path::Path) -> Resolved {
-    let done = |value: &str, source: String| Resolved {
+    let done = |value: &str, source: String, origin: UrlOrigin| Resolved {
         value: value.trim().trim_end_matches('/').to_string(),
         source,
+        origin,
         warning: None,
     };
     if let Some(e) = explicit {
         if !e.trim().trim_end_matches('/').is_empty() {
-            return done(e, "flag".into());
+            return done(e, "flag".into(), UrlOrigin::Flag);
         }
     }
     for name in [
@@ -145,25 +177,37 @@ pub fn resolve_gateway_url_in(explicit: Option<&str>, home: &std::path::Path) ->
         "ABSTRACTGATEWAY_URL",
     ] {
         if let Some(v) = trimmed_env(name) {
-            return done(&v, format!("env {name}"));
+            return done(&v, format!("env {name}"), UrlOrigin::Env);
         }
     }
     let store = read_json_file(&login_store_path());
     let saved = store_string(&store, "base_url").map(|v| v.trim_end_matches('/').to_string());
     if let Some(v) = saved.as_deref().filter(|v| *v != DEFAULT_GATEWAY_URL) {
-        return done(v, format!("login ({})", login_store_path().display()));
+        return done(
+            v,
+            format!("login ({})", login_store_path().display()),
+            UrlOrigin::Login,
+        );
     }
     let path = crate::gateway_pointer::pointer_path(home);
     let warning = match crate::gateway_pointer::read_pointer(&path) {
         crate::gateway_pointer::Pointer::Found { url } => {
-            return done(&url, format!("gateway pointer ({})", path.display()));
+            return done(
+                &url,
+                format!("gateway pointer ({})", path.display()),
+                UrlOrigin::Pointer,
+            );
         }
         crate::gateway_pointer::Pointer::Missing => None,
         crate::gateway_pointer::Pointer::Refused { warning } => Some(warning),
     };
     let mut r = match saved {
-        Some(v) => done(&v, format!("login ({})", login_store_path().display())),
-        None => done(DEFAULT_GATEWAY_URL, "default".into()),
+        Some(v) => done(
+            &v,
+            format!("login ({})", login_store_path().display()),
+            UrlOrigin::Login,
+        ),
+        None => done(DEFAULT_GATEWAY_URL, "default".into(), UrlOrigin::Default),
     };
     r.warning = warning;
     r
@@ -204,17 +248,21 @@ pub fn resolve_connection(url_flag: Option<&str>, token_flag: Option<&str>) -> C
 }
 
 /// Persist a verified login to the shared store (0600: the token is a
-/// credential at rest).
-pub fn write_login(base_url: &str, token: Option<&str>) -> std::io::Result<PathBuf> {
+/// credential at rest). `base_url` is `None` when the user gave no URL
+/// ([`Resolved::url_to_save`]): the store then keeps no URL and the client
+/// keeps following the gateway pointer.
+pub fn write_login(base_url: Option<&str>, token: Option<&str>) -> std::io::Result<PathBuf> {
     let path = login_store_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let payload = json!({
-        "base_url": base_url.trim().trim_end_matches('/'),
+    let mut payload = json!({
         "token": token.map(|t| t.trim()).filter(|t| !t.is_empty()),
         "verified_at": now_iso_utc(),
     });
+    if let Some(url) = base_url {
+        payload["base_url"] = json!(url.trim().trim_end_matches('/'));
+    }
     fs::write(
         &path,
         format!(

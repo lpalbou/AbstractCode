@@ -152,7 +152,8 @@ OPTIONS:
                           the saved login, else the local gateway pointer
                           ~/.abstractframework/gateway.json, else
                           http://127.0.0.1:8080)
-  --token <TOKEN>         bearer token (default: env or login store)
+  --token <TOKEN>         bearer token (default: the legacy env alias, else the
+                          login store)
   --session <ID>          durable session id (default: a fresh session)
   --resume                reopen the last session (also: --continue)
   --reasoning <LEVEL>     reasoning effort: none|minimal|low|medium|high|xhigh|auto
@@ -242,15 +243,18 @@ CONFIG (prefs.json — the TUI writes it; headless `exec` reads the SAME file):
 
 ENVIRONMENT:
   ABSTRACTCODE_GATEWAY_URL / ABSTRACTFLOW_GATEWAY_URL / ABSTRACTGATEWAY_URL
-      gateway url (first set wins; beats the login store)
+      legacy aliases of --gateway-url (the flag wins; first set wins; beats
+      the login store)
   ABSTRACTCODE_GATEWAY_TOKEN / ABSTRACTGATEWAY_AUTH_TOKEN / ABSTRACTFLOW_GATEWAY_AUTH_TOKEN
-      bearer token
+      legacy aliases of --token (the flag wins; first set wins)
   ABSTRACTCODE_GATEWAY_CONNECTION_FILE   login store path (default ~/.abstractcode/gateway.json)
   ABSTRACTCODE_PREFS_FILE            preferences path (default ~/.abstractcode/prefs.json)
   ABSTRACTTUI_THEME                      start theme
 
 `login` takes credentials from flags/env (it never prompts) and persists them
-to the login store: ~/.abstractcode/gateway.json.
+to the login store: ~/.abstractcode/gateway.json. It saves a gateway URL only
+when you give one (flag or env): a URL found through the gateway pointer is
+not saved, so the client keeps following the pointer.
 "#
     )
 }
@@ -479,10 +483,21 @@ pub fn login(args: &Args) -> i32 {
     let (token, token_source) = config::resolve_gateway_token(args.token.as_deref());
     let client = crate::gateway::GatewayClient::new(&url.value, token.as_deref());
     match client.ping() {
-        Ok(_) => match config::write_login(&url.value, token.as_deref()) {
+        Ok(_) => match config::write_login(url.url_to_save(), token.as_deref()) {
             Ok(path) => {
                 println!("✓ authenticated against {} (ping ok)", url.value);
                 println!("✓ saved to {} (0600)", path.display());
+                if url.url_to_save().is_none() {
+                    println!(
+                        "  the URL is not saved: it came from the {}, which keeps being followed \
+                         (pass --gateway-url to pin one)",
+                        if url.origin == config::UrlOrigin::Pointer {
+                            "local gateway pointer"
+                        } else {
+                            "built-in default"
+                        }
+                    );
+                }
                 if url.source.starts_with("env") || token_source.starts_with("env") {
                     println!("  note: env vars override the saved login when set (doctor shows which source wins).");
                 }
@@ -658,6 +673,15 @@ mod tests {
             let args = parse(&[flag.to_string(), "http://gw:18894".to_string()]).unwrap();
             assert_eq!(args.gateway.as_deref(), Some("http://gw:18894"), "{flag}");
         }
+    }
+
+    /// New switches are launch flags; the environment variables are only
+    /// documented legacy aliases of them, and the help says so.
+    #[test]
+    fn help_labels_the_environment_as_legacy_aliases_of_the_flags() {
+        let help = usage();
+        assert!(help.contains("legacy aliases of --gateway-url"), "{help}");
+        assert!(help.contains("legacy aliases of --token"), "{help}");
     }
 
     #[test]

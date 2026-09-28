@@ -7,6 +7,7 @@ name = "abstractcode"
 version = "0.7.0"
 dependencies = [
  "abstracttui",
+ "libc",
  "serde_json",
  "ureq",
 ]

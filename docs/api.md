@@ -26,9 +26,12 @@ integration:
 - `doctor` is the supported way to assert an environment is wired correctly
   before running anything else.
 
-Configuration resolves in a fixed order — explicit flag, then environment, then
-the login store at `~/.abstractcode/gateway.json`, then the default
-`http://127.0.0.1:8080`. `doctor` prints which source won.
+Configuration resolves in a fixed order — explicit flag, then its legacy
+environment alias, then the login store at `~/.abstractcode/gateway.json`, then
+the local gateway pointer `~/.abstractframework/gateway.json`, then the default
+`http://127.0.0.1:8080`. `doctor` prints which source won. `login` saves a
+gateway URL only when you give one (flag or environment), so a login never
+stops the client following the pointer.
 
 ## Library surface
 

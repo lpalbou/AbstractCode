@@ -21,7 +21,9 @@ the next step), then the local gateway pointer `~/.abstractframework/gateway.jso
 that `abstractgateway serve` and the installer write, then
 `http://127.0.0.1:8080`. `doctor` prints which one it used, and why a pointer
 file was ignored, which is usually the answer when a saved value is shadowing
-the one you expect.
+the one you expect. `abstractcode login` saves a URL only when you give one
+(`--gateway-url` or the environment); a login taken from the pointer saves the
+token alone, so the client keeps following the gateway to a new port.
 
 **401 or 403 from a remote gateway.**
 The token is missing, expired, or belongs to a different gateway. Re-verify and

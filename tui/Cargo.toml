@@ -108,3 +108,11 @@ abstracttui = "0.6.0"
 ureq = { version = "2.12", default-features = false, features = ["tls", "gzip"] }
 # JSON: gateway payloads carry arbitrary user text; battle-tested parsing.
 serde_json = "1"
+
+# POSIX open flags and ids for the gateway pointer reader
+# (`gateway_pointer.rs`: O_NOFOLLOW | O_NONBLOCK, then fstat on the open
+# handle). The flag values differ per OS and architecture, so they come
+# from libc rather than hand-copied constants. Already in the tree through
+# abstracttui and ureq's rustls stack (no new crate is downloaded).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
