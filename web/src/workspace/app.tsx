@@ -48,6 +48,14 @@ import {
 } from "./settings_panel";
 import { WorkspaceInspector, type InspectorTab } from "./workspace_panels";
 import { aboutExtraRows, type FetchOutcome } from "./about_rows";
+import { automationTarget, automationsAvailability } from "./automations";
+import {
+  AutomationMain,
+  AutomationsSection,
+  NewAutomationDialog,
+  useAutomations,
+  type AutomationHost,
+} from "./automations_view";
 import {
   readPreferences,
   writePreferences,
@@ -244,6 +252,15 @@ export function CodeWorkspace() {
   );
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("files");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Automations: the sidebar section and, for the selected one, the main view.
+  const automationsAvailable = automationsAvailability(catalog.capabilities);
+  const { ctl: automations, state: automationsState } = useAutomations(
+    identity,
+    connection.connected && automationsAvailable.available,
+  );
+  const [automationView, setAutomationView] = useState(false);
+  const [newAutomationOpen, setNewAutomationOpen] = useState(false);
+  const switchNotice = useRef("");
   const [search, setSearch] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
   const [composeMode, setComposeMode] = useState<"steer" | "queue">("steer");
@@ -372,6 +389,27 @@ export function CodeWorkspace() {
     currentSession?.prompt ||
     messages.find((m) => m.role === "user")?.content ||
     "New conversation";
+  // Automations open gateway sessions here: a Discuss fork becomes THIS
+  // app's conversation (one session pool for every client).
+  const automationHost: AutomationHost = {
+    openConversation: (sessionId, runId, text) => {
+      switchNotice.current = text || "";
+      openConversation(sessionId, runId);
+    },
+    openRun: (runId) => {
+      void gatewayRequest<{ session_id?: string | null }>(
+        `/api/gateway/runs/${encodeURIComponent(runId)}`,
+      )
+        .then((run) => {
+          if (!run?.session_id)
+            throw new Error(`The gateway reported no session for run ${runId}.`);
+          openConversation(run.session_id, runId);
+        })
+        .catch((e) => automations.reportError(e));
+    },
+  };
+  const automationTitle =
+    automationsState.detail?.summary.title || "Automation";
   const principalRef = useRef("");
   const identityRef = useRef(identity);
   const authEpoch = useRef(0);
@@ -489,7 +527,9 @@ export function CodeWorkspace() {
     setUploads([]);
     setAttachments([]);
     setOptimistic([]);
-    setNotice("");
+    // A notice raised by the switch itself (a Discuss fork) survives it.
+    setNotice(switchNotice.current);
+    switchNotice.current = "";
     setError("");
     setQueue([]);
     setQueueRunning(false);
@@ -528,6 +568,20 @@ export function CodeWorkspace() {
     setQueue([]);
     setQueueRunning(false);
     setSidebarOpen(false);
+    setAutomationView(false);
+  }, []);
+  /** Open a gateway session as the conversation (sidebar, a discussion fork, a run). */
+  const openConversation = useCallback((sessionId: string, runId: string) => {
+    sendLock.current = false;
+    setSending(false);
+    setUploads([]);
+    setSession({ sessionId, runId });
+    writeRoute(sessionId, runId);
+    setSidebarOpen(false);
+    setQueue([]);
+    setQueueRunning(false);
+    setDraft("");
+    setAutomationView(false);
   }, []);
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
@@ -979,6 +1033,19 @@ export function CodeWorkspace() {
           />
           <kbd>⌘K</kbd>
         </div>
+        <AutomationsSection
+          state={automationsState}
+          available={automationsAvailable}
+          selectedId={automationView ? automationsState.selectedId : ""}
+          onSelect={(id) => {
+            setAutomationView(true);
+            setSidebarOpen(false);
+            void automations.select(id);
+          }}
+          onNew={() => setNewAutomationOpen(true)}
+          onRefresh={() => void automations.refresh()}
+          onShowArchived={(show) => automations.setShowArchived(show)}
+        />
         <div className="code-section-label">
           <span>CONVERSATIONS</span>
           <button
@@ -1008,20 +1075,9 @@ export function CodeWorkspace() {
               key={item.sessionId}
               item={item}
               selected={item.sessionId === session.sessionId}
-              onClick={() => {
-                sendLock.current = false;
-                setSending(false);
-                setUploads([]);
-                setSession({
-                  sessionId: item.sessionId,
-                  runId: item.latestRunId,
-                });
-                writeRoute(item.sessionId, item.latestRunId);
-                setSidebarOpen(false);
-                setQueue([]);
-                setQueueRunning(false);
-                setDraft("");
-              }}
+              onClick={() =>
+                openConversation(item.sessionId, item.latestRunId)
+              }
             />
           ))}
           {!catalog.loading && !filteredSessions.length ? (
@@ -1086,9 +1142,11 @@ export function CodeWorkspace() {
             <Icon name="list" size={19} />
           </button>
           <div className="code-breadcrumb">
-            <span>Conversations</span>
+            <span>{automationView ? "Automations" : "Conversations"}</span>
             <span aria-hidden="true">/</span>
-            <strong title={title}>{title}</strong>
+            <strong title={automationView ? automationTitle : title}>
+              {automationView ? automationTitle : title}
+            </strong>
           </div>
           <AfTopBarActions
             appearance={{ onOpen: () => setAppearanceOpen(true) }}
@@ -1223,6 +1281,15 @@ export function CodeWorkspace() {
           ) : null}
         </div>
         <div className="code-content">
+          {automationView ? (
+            <AutomationMain
+              ctl={automations}
+              host={automationHost}
+              enabled={connection.connected}
+              onAttachFiles={attachUploads}
+              onClose={() => setAutomationView(false)}
+            />
+          ) : (
           <main
             className="code-conversation"
             id="code-conversation"
@@ -1524,6 +1591,7 @@ export function CodeWorkspace() {
               </div>
             ) : null}
           </main>
+          )}
           {inspectorOpen ? (
             <WorkspaceInspector
               tab={inspectorTab}
@@ -1585,6 +1653,26 @@ export function CodeWorkspace() {
         onChange={(e) => {
           void attachUploads(Array.from(e.target.files || []));
           e.target.value = "";
+        }}
+      />
+      <NewAutomationDialog
+        open={newAutomationOpen}
+        onClose={() => setNewAutomationOpen(false)}
+        target={automationTarget(selection, workflow)}
+        workflowLabel={
+          selection === GATEWAY_DEFAULT
+            ? gatewayDefaultOptionLabel(catalog.gatewayDefault)
+            : workflow?.name || "the selected workflow"
+        }
+        initialPrompt={
+          draft ||
+          [...messages].reverse().find((m) => m.role === "user")?.content ||
+          ""
+        }
+        ctl={automations}
+        onCreated={() => {
+          setAutomationView(true);
+          setSidebarOpen(false);
         }}
       />
       <GatewayConnectModal {...connection.modalProps} />

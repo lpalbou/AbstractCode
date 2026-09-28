@@ -1,5 +1,20 @@
 import { GatewayClient, GatewayHttpError } from "../lib/gateway_client";
 
+/** The app proxy's CSRF header (from the session cookie), for mutations. */
+export function csrfHeaders(): Record<string, string> {
+  const csrf = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("abstractcode_gateway_csrf="));
+  return csrf
+    ? {
+        "X-AbstractCode-CSRF": decodeURIComponent(
+          csrf.slice("abstractcode_gateway_csrf=".length),
+        ),
+      }
+    : {};
+}
+
 /** App-origin only. The server exchanges its HttpOnly session for gateway auth. */
 export async function gatewayRequest<T = any>(
   path: string,
@@ -11,15 +26,8 @@ export async function gatewayRequest<T = any>(
   headers.set("Accept", "application/json");
   if (init.body && !(init.body instanceof FormData))
     headers.set("Content-Type", "application/json");
-  const csrf = document.cookie
-    .split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith("abstractcode_gateway_csrf="));
-  if (csrf)
-    headers.set(
-      "X-AbstractCode-CSRF",
-      decodeURIComponent(csrf.slice("abstractcode_gateway_csrf=".length)),
-    );
+  for (const [name, value] of Object.entries(csrfHeaders()))
+    headers.set(name, value);
   const response = await fetch(path, {
     ...init,
     headers,

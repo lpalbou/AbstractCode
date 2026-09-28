@@ -423,9 +423,15 @@ export function SessionFiles({
   refreshKey,
   maxAttachmentBytes,
   onAttachFiles,
+  heading = "Conversation workspace",
+  emptyText = "This conversation's files appear here.",
 }: {
   runId: string;
   enabled: boolean;
+  /** The pane's title (the run's own workspace, or an automation's folder). */
+  heading?: string;
+  /** Shown before there is a run. */
+  emptyText?: string;
   refreshKey?: string;
   /** The gateway's attachment size limit, checked before any download. */
   maxAttachmentBytes?: number;
@@ -531,7 +537,7 @@ export function SessionFiles({
     return (
       <div className="code-pane-empty">
         <Icon name="terminal" size={28} />
-        <p>This conversation's files appear here.</p>
+        <p>{emptyText}</p>
         <small>Start a conversation; the files its workflow creates and edits are listed and previewed here.</small>
       </div>
     );
@@ -576,7 +582,7 @@ export function SessionFiles({
       <div className="code-pane-intro">
         <Icon name="terminal" size={17} />
         <div>
-          <strong>Conversation workspace</strong>
+          <strong>{heading}</strong>
           <span>{directory ? `/${directory}` : "Top folder"}</span>
         </div>
         <button
