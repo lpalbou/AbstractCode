@@ -59,6 +59,11 @@ async function signIn(page: Page, captureLogin = false): Promise<void> {
 async function selectWorkflow(page: Page, name: string): Promise<void> {
   const select = page.getByLabel("Workflow", { exact: true });
   await expect(select).toBeEnabled();
+  // The picker lists coding-agent workflows by default; the fixture's other
+  // flows (prompt, events, tool approval) appear with "Show all workflows".
+  const listed = await select.locator("option").allTextContents();
+  if (!listed.map((label) => label.trim()).includes(name))
+    await page.getByLabel("Show all workflows").check();
   await select.selectOption({ label: name });
   await expect(select).toHaveValue(/.+/);
 }
@@ -843,7 +848,17 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       await expectPersistedCompletion(page);
       await expect(drawer).toBeHidden();
       await expect(composer).toHaveValue("");
+      // The reloaded page refuses a send until the workflow's inputs load
+      // ("Wait for workflow inputs to load."). With this legacy descriptor the
+      // load ends with the flow source read (author intent), so the next turn
+      // waits for that response.
+      const inputsLoaded = page.waitForResponse(
+        (response) =>
+          /\/flows\/basic-agent-contract\?bundle_version=/.test(response.url()) &&
+          response.ok(),
+      );
       await page.reload();
+      await inputsLoaded;
       await expect(page.locator(".pc-chat-item--assistant")).toHaveCount(
         index + 1,
       );
@@ -911,6 +926,8 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       if (request.method() === "POST" && request.url().endsWith("/api/gateway/runs/start")) submissions.push(request.postDataJSON());
     });
     await signIn(page);
+    // Every workflow, not only coding agents: the fixture's published copy is a coding contract.
+    await page.getByLabel("Show all workflows").check();
     const selector = page.getByLabel("Workflow", { exact: true });
     await expect(selector.locator("option").filter({ hasText: "Published coding" })).toHaveCount(1);
     expect(await selector.locator("option").allTextContents()).not.toEqual(expect.arrayContaining([expect.stringContaining(" · shared")]));
@@ -1421,6 +1438,12 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     page,
   }) => {
     await signIn(page);
+    // The Files tab opens on this conversation's own files; the fixture file
+    // lives in the operator's shared workspace.
+    await page
+      .getByRole("group", { name: "Files source" })
+      .getByRole("button", { name: "Shared workspace (admin)", exact: true })
+      .click();
     const fileSearch = page.getByLabel("Search workspace files");
     await fileSearch.fill("welcome.md");
     const sharedFile = page.getByRole("button", { name: /welcome\.md/ });
