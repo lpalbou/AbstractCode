@@ -478,7 +478,7 @@ pub(crate) fn detail_rows(d: &auto::Detail, width: i32) -> (Vec<RowSpec>, Vec<(u
             );
         }
         if !o.artifacts.is_empty() {
-            wrap_into(&mut rows, "  files:  ", &o.artifacts.join(", "), true);
+            wrap_into(&mut rows, "  artifacts: ", &o.artifacts.join(", "), true);
         }
     }
     (rows, targets)
@@ -503,7 +503,9 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
     send(ctx, AutoCmd::Open { id: id.clone() });
     let ctx2 = ctx.clone();
     let size = modal_size(160, 40);
-    let width = size.w - 6;
+    // Rows are drawn indented inside the panel padding: wrap narrower than
+    // the panel so no line is cut by the row ellipsis.
+    let width = size.w - 12;
     ctx.open_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
         // Cursor over the targets; `usize::MAX` = the newest run (at rest).
@@ -873,7 +875,9 @@ fn open_text(
         .filter(|l| !l.is_empty())
         .flat_map(|l| wrap_lines(l, text_w, None))
         .collect();
-    let size = modal_size(100, 8 + lines.len() as i32);
+    // panel padding 2 + content padding 2 + title 1 + input 1 + hint 1 +
+    // gaps 3 = 10 fixed rows, plus the info lines.
+    let size = modal_size(100, 10 + lines.len() as i32);
     ctx.open_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
         let value = mcx.signal(initial.clone());
@@ -992,7 +996,7 @@ fn revise_context(
             labels,
             live: None,
             start,
-            size: modal_size(80, 9),
+            size: modal_size(80, 2 + 9),
             hint: Some("Enter sends the revision · Esc goes back".into()),
             live_hint: None,
             keys: Vec::new(),
@@ -1125,7 +1129,7 @@ fn schedule_when(
             labels,
             live: None,
             start: 4,
-            size: modal_size(80, 14),
+            size: modal_size(80, 8 + 9),
             hint: Some("Enter chooses · Esc cancels".into()),
             live_hint: None,
             keys: Vec::new(),
@@ -1213,7 +1217,7 @@ fn schedule_context(
             ],
             live: None,
             start: 0,
-            size: modal_size(90, 9),
+            size: modal_size(90, 2 + 9),
             hint: Some("Growing replays the previous runs as history, within the gateway's context window · Esc cancels".into()),
             live_hint: None,
             keys: Vec::new(),
@@ -1253,7 +1257,7 @@ fn schedule_tools(
             ],
             live: None,
             start: 0,
-            size: modal_size(110, 9),
+            size: modal_size(110, 2 + 9),
             hint: Some("Questions the workflow asks always wait for you · Esc cancels".into()),
             live_hint: None,
             keys: Vec::new(),

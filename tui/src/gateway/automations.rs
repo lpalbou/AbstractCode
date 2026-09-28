@@ -382,7 +382,8 @@ fn run(client: &AutomationClient, wake: &WakeHandle, store: Store, cmd: AutoCmd)
                 settle(wake, store, Ok(format!("automation created: {title}")));
                 let created = id.clone();
                 wake.post(move || store.automations.update(|v| v.created = Some(created)));
-                refresh(client, wake, store, Some(id));
+                // The first occurrence is admitted moments after the answer.
+                follow_up(client, wake, store, Some(id));
             }
             Err(e) => settle(wake, store, Err(e)),
         },

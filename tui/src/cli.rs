@@ -640,7 +640,10 @@ mod tests {
     #[test]
     fn gateway_url_is_the_primary_flag_and_gateway_its_alias() {
         let help = usage();
-        assert!(help.contains("--gateway-url <URL>     gateway base url"), "{help}");
+        assert!(
+            help.contains("--gateway-url <URL>     gateway base url"),
+            "{help}"
+        );
         assert!(help.contains("--gateway is an alias"), "{help}");
         for flag in ["--gateway-url", "--gateway"] {
             let args = parse(&[flag.to_string(), "http://gw:18894".to_string()]).unwrap();

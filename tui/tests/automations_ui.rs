@@ -477,8 +477,18 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     let mut h = harness();
     let screen = h.command("/schedule");
     assert!(screen.contains("new automation — 1/4 the task"), "{screen}");
+    assert!(
+        screen.contains("The task below is sent as the prompt of every run."),
+        "every info line fits:\n{screen}"
+    );
     // The task defaults to the conversation's last prompt.
-    h.keys(b"\r");
+    let screen = h.keys(b"\r");
+    // Every When row is visible (the panel fits its rows).
+    assert!(
+        screen.contains("every 5 minutes (UTC)")
+            && screen.contains("once, at a date and time (UTC)"),
+        "{screen}"
+    );
     // When: presets start at "every 24 hours"; go up to "every 5 minutes".
     for _ in 0..4 {
         h.keys(b"\x1b[A");
@@ -488,6 +498,14 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     h.keys(b"\x1b[B");
     let screen = h.keys(b"\r");
     assert!(screen.contains("4/4 tools"), "{screen}");
+    assert!(
+        screen.contains("Run without asking — tools run without asking"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("Ask me before each tool call"),
+        "both tool choices are visible:\n{screen}"
+    );
     // Tools: ask each time.
     h.keys(b"\x1b[B");
     h.keys(b"\r");
@@ -549,4 +567,20 @@ fn schedule_with_the_gateway_default_targets_at_default() {
     assert_eq!(body["trigger"]["config"], json!({"every": "24h"}));
     assert_eq!(body["context"], json!({"mode": "independent"}));
     assert_eq!(body["policy"], json!({"tool_approval": "auto"}));
+}
+
+#[test]
+fn archive_from_one_automation_also_asks_first() {
+    let mut h = harness();
+    open_inbox(&mut h);
+    h.auto_cmds();
+    let screen = h.keys(b"a");
+    assert!(h.auto_cmds().is_empty(), "one press only asks");
+    assert!(screen.contains("its history stays readable"), "{screen}");
+    h.keys(b"a");
+    let cmds = h.auto_cmds();
+    assert!(
+        matches!(cmds.as_slice(), [AutoCmd::Command { id, command_type, .. }] if id == INBOX && command_type == "automation.archive"),
+        "{cmds:?}"
+    );
 }
