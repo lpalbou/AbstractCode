@@ -66,6 +66,10 @@ for credentials, remote gateways, and first-run configuration.
   gateway supports live replies (**Stream replies** setting, `/stream`).
 - **Workspace files** — browse and preview the files a run works on, with their
   absolute path on the gateway host (the **Files** tab, `/files`).
+- **Automations** — run a workflow on a schedule, then pause, run now, revise,
+  archive, answer its approvals, browse its folder, and discuss any run as a new
+  conversation (the **Automations** sidebar section, `/automations`,
+  `/schedule`).
 
 ## Documentation
 
@@ -73,6 +77,7 @@ for credentials, remote gateways, and first-run configuration.
 - [`docs/architecture.md`](docs/architecture.md) — how the clients and gateway fit together
 - [`docs/api.md`](docs/api.md) — the gateway surface both clients speak
 - [`docs/web.md`](docs/web.md) — the browser client in depth
+- [`docs/automations.md`](docs/automations.md) — automations in both clients
 - [`docs/faq.md`](docs/faq.md) — recurring questions and known limits
 - [`docs/troubleshooting.md`](docs/troubleshooting.md) — symptoms and fixes
 - [`tui/docs/`](tui/docs/) — terminal client reference, keys, and design notes

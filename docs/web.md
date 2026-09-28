@@ -49,6 +49,15 @@ An event-driven workflow stays attached while waiting for its trigger. Its wait 
 
 Use **Pause**, **Resume**, **Conclude**, or **Stop** to supervise an active run. Commands are requests, not optimistic lifecycle changes: the display follows confirmed gateway state. Guidance is consumed at supported workflow boundaries. **Queue next turn** keeps a local queue for this conversation; a failure or cancellation pauses it for explicit review. Switching conversations or signing out clears it. Unsent drafts and queued turns do not survive reload.
 
+## Automations
+
+The **Automations** section of the sidebar lists the gateway's automations —
+the same ones the Assistant, the Observer and the terminal show — with their
+state ("Active ▶", "Paused ⏸"), what runs now and the next run. **+** creates
+one that runs the toolbar's workflow. Selecting one opens its page: controls,
+runs as chat pairs, approvals and questions, and its folder. **Discuss** on a
+run opens the fork as a conversation here. See [Automations](automations.md).
+
 ## Workspaces and authorization
 
 The gateway owns workspace roots, mount visibility, access modes, tool availability, and approval enforcement. Workspace controls are editable only when it permits client scope requests. Continuing an agent conversation restores its gateway-returned workspace instead of silently creating a different one.

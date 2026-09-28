@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Automations in both clients.** Create, manage and answer gateway
+  automations (AbstractGateway 0.6.0 and later) from AbstractCode, with the
+  same behaviour as the Assistant and the Observer. See
+  [docs/automations.md](docs/automations.md).
+  - **Terminal:** `/automations [id]` lists them (state as text + icon —
+    "Active ▶", "Paused ⏸" —, what runs now, the next run, attention; archived
+    ones hidden until `h`) and opens one: its folder (`w` browses it), the waits
+    that need you (`y`/`n` for tool approvals, Enter for questions and events),
+    its runs as chat pairs, pause/resume (`p`), run now (`g`), stop current
+    (`x`), revise (`e`), archive (`a`, twice) and Discuss (`d`), which switches
+    the session to the new discussion. `/schedule [task]` creates one from the
+    current workflow in four steps (task, when, context, tools).
+  - **Web:** an **Automations** section in the sidebar (state, now, next,
+    attention, **Show archived**), **+** to create one with the toolbar's
+    workflow (the shared schedule dialog), and a page per automation with the
+    shared automation panel and its **Automation folder**. **Discuss** opens the
+    fork as a conversation in the app.
+  - What runs now comes only from the gateway's `current_occurrence` and the
+    next run only from `next_fire_at`; archiving hides and stops an automation
+    and keeps its history.
+
+### Changed
+
+- **Terminal: `--gateway-url` is the documented flag** for the gateway address,
+  as in every AbstractFramework app; `--gateway` keeps working as an alias.
+- **Web: the whole local transcript is sent as context** when a workflow uses
+  it (the legacy REPL view kept only the last 200 messages); the gateway's
+  history window bounds what the model receives.
+- **Web:** requires `@abstractframework/ui-kit` 0.1.13 and
+  `@abstractframework/panel-chat` 0.1.18.
+
 ## [terminal 0.6.0 / web 0.5.0] - 2026-09-26
 
 ### Added

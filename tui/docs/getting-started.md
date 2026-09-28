@@ -23,7 +23,7 @@ cargo install abstractcode
 ## Connect once
 
 ```sh
-abstractcode login --gateway http://127.0.0.1:8080 --token <your-token>
+abstractcode login --gateway-url http://127.0.0.1:8080 --token <your-token>
 ```
 
 `login` takes the URL and token from flags or environment (it never prompts),

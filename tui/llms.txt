@@ -11,7 +11,8 @@
 > persisted read/write/all auto-approval tier plus per-tool pins); steers
 > the agent mid-run, queues follow-up prompts, attaches files to prompts
 > (`/attach`, a file browser, or drag & drop), browses and previews the
-> run's workspace on the gateway host (`/files`), and keeps a durable
+> run's workspace on the gateway host (`/files`), creates and manages
+> gateway automations (`/schedule`, `/automations`), and keeps a durable
 > session whose history the gateway replays server-side. It also talks
 > with gateway-hosted summoned entities (`@name`). One crate, three
 > dependencies (abstracttui, ureq, serde_json). MIT licensed.
@@ -32,7 +33,7 @@
   resolution, module map, testing model, known limits.
 - [Reference](docs/api.md): Every CLI option and env var (including
   `--workflow default`, `--stream`, `--mtp`), slash commands
-  (including `/workflow`, `/files`, `/stream`, `/about`, `/model`, `/mtp`,
+  (including `/workflow`, `/files`, `/automations`, `/schedule`, `/stream`, `/about`, `/model`, `/mtp`,
   `/workspace send`, `@name`, `/entities`, `/task`, `/end`, `/queue`, `/goal`,
   `/permissions`, `/workspace`, `/attach`, `/export`, `/context`, `/gpu`,
   `/resources`, `/redraw`), key bindings (incl. `Ctrl+L` repaint, `Ctrl+J` newline,

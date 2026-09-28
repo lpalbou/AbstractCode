@@ -26,6 +26,7 @@ DOCUMENTS = [
     "docs/architecture.md",
     "docs/api.md",
     "docs/workflows.md",
+    "docs/automations.md",
     "docs/ui_events.md",
     "docs/faq.md",
     "docs/troubleshooting.md",

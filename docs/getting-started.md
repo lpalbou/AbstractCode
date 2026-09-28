@@ -26,7 +26,7 @@ Requires Rust 1.87 or newer. Then:
 
 ```bash
 abstractcode                     # launch against http://127.0.0.1:8080
-abstractcode --gateway https://gateway.example.com
+abstractcode --gateway-url https://gateway.example.com
 ```
 
 ### Browser
@@ -57,11 +57,11 @@ from "the workflow you asked for is not installed".
 A remote gateway usually requires a token. Persist one so you do not repeat it:
 
 ```bash
-abstractcode login --gateway https://gateway.example.com --token <TOKEN>
+abstractcode login --gateway-url https://gateway.example.com --token <TOKEN>
 ```
 
 This verifies the credentials before writing them to
-`~/.abstractcode/gateway.json`. Both `--gateway` and `--token` can also come
+`~/.abstractcode/gateway.json`. Both `--gateway-url` and `--token` can also come
 from the environment, and a token passed on the command line always wins over
 the stored one.
 
