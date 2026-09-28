@@ -977,6 +977,9 @@ pub struct Store {
     pub skills_shelf: Signal<Option<SkillShelf>>,
     /// `/files` browser state (§W).
     pub files: Signal<FilesView>,
+    /// `/automations` + `/schedule`: the list, the open automation, the
+    /// in-flight action (`crate::automations::View`).
+    pub automations: Signal<crate::automations::View>,
     /// The GATEWAY's verdict on whether this terminal is on its machine
     /// (`host.caller_is_this_machine` from `GET /runs/{rid}/workspace`);
     /// `None` until a run's workspace has been read.
@@ -1262,6 +1265,7 @@ impl Store {
             skills_error: cx.signal(String::new()),
             skills_shelf: cx.signal(None),
             files: cx.signal(FilesView::default()),
+            automations: cx.signal(crate::automations::View::default()),
             gateway_same_machine: cx.signal(None),
             send_local_workspace: cx.signal(Default::default()),
             workspace_explicit: cx.signal(false),

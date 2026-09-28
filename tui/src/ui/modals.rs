@@ -28,14 +28,14 @@ fn gate_suffix(enable_gate: &str) -> String {
     }
 }
 
-fn modal_size(w: i32, h: i32) -> Size {
+pub(crate) fn modal_size(w: i32, h: i32) -> Size {
     let vp = current_viewport();
     // Clamp above the composer + status rows so modal bottoms never
     // interleave with the chrome at small sizes (live finding at 80x24).
     Size::new(w.min(vp.w - 4).max(20), h.min(vp.h - 6).max(6))
 }
 
-fn title_row(t: &TokenSet, title: String) -> View {
+pub(crate) fn title_row(t: &TokenSet, title: String) -> View {
     let accent = t.accent;
     Element::new()
         .style(LayoutStyle::line(1).shrink(0.0))
@@ -51,7 +51,7 @@ fn title_row(t: &TokenSet, title: String) -> View {
         .build()
 }
 
-fn hint_row(t: &TokenSet, hint: String) -> View {
+pub(crate) fn hint_row(t: &TokenSet, hint: String) -> View {
     let faint = t.text_faint;
     Element::new()
         .style(LayoutStyle::line(1).shrink(0.0))
@@ -74,7 +74,7 @@ fn hint_row(t: &TokenSet, hint: String) -> View {
 /// source lines are KEPT as paragraph breaks: the ask prompt is real
 /// prose and `text::wrap("")` yields nothing, which glued paragraphs
 /// together in the old fold.
-fn wrap_lines(source: &str, width: i32, cap: Option<usize>) -> Vec<String> {
+pub(crate) fn wrap_lines(source: &str, width: i32, cap: Option<usize>) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     for raw in source.lines() {
         if raw.trim().is_empty() {
@@ -713,9 +713,9 @@ pub fn open_ask(cx: Scope, store: Store, ctx: &UiCtx, wait: PendingWait) {
 /// it to revert its live preview. `on_selection` observes selection
 /// MOVEMENT through a tracked effect (the live-preview seam) — never
 /// wire commitment to it (the 0250 movement-vs-activation split).
-struct Picker {
-    title: String,
-    labels: Vec<String>,
+pub(crate) struct Picker {
+    pub(crate) title: String,
+    pub(crate) labels: Vec<String>,
     /// LIVE row source (reactive-picker follow-up, flow's c5483 thread):
     /// when set, the rows rebuild from the signals this closure reads —
     /// a catalog refresh landing while the picker is OPEN renders
@@ -725,32 +725,32 @@ struct Picker {
     /// arithmetic at open. Choose-side contract: `on_choose` must
     /// RE-READ its source at activation — an index into rebuilt rows
     /// applied to an open-time snapshot would desync.
-    live: Option<Rc<dyn Fn() -> Vec<String>>>,
-    start: usize,
+    pub(crate) live: Option<Rc<dyn Fn() -> Vec<String>>>,
+    pub(crate) start: usize,
     /// Caller-computed (each picker's height arithmetic differs).
-    size: Size,
-    hint: Option<String>,
+    pub(crate) size: Size,
+    pub(crate) hint: Option<String>,
     /// LIVE hint, same contract as `live` rows: re-rendered from the
     /// signals it reads. A static `hint` beside an async fetch would
     /// freeze on "asking the gateway…" and never correct itself —
     /// a stale line about a finished request, which is the class ADR
     /// 0001 exists to prevent. Outranks `hint` when set.
-    live_hint: Option<Rc<dyn Fn() -> String>>,
+    pub(crate) live_hint: Option<Rc<dyn Fn() -> String>>,
     /// Extra keys this picker binds while it is open, with the label
     /// already promised in its title. Empty for every picker that
     /// promises none — a key advertised and unbound is worse than one
     /// never offered.
-    keys: Vec<(KeyChord, Rc<dyn Fn()>)>,
+    pub(crate) keys: Vec<(KeyChord, Rc<dyn Fn()>)>,
     /// Called once with the MODAL's scope. Lets a picker own effects
     /// and tickers that must die with it — the sessions board arms its
     /// waiting animation here, so nothing ticks once the modal closes.
-    on_mount: Option<Box<dyn Fn(Scope)>>,
-    on_selection: Option<Box<dyn Fn(usize)>>,
-    on_choose: Box<dyn Fn(usize)>,
-    on_cancel: Option<Box<dyn Fn()>>,
+    pub(crate) on_mount: Option<Box<dyn Fn(Scope)>>,
+    pub(crate) on_selection: Option<Box<dyn Fn(usize)>>,
+    pub(crate) on_choose: Box<dyn Fn(usize)>,
+    pub(crate) on_cancel: Option<Box<dyn Fn()>>,
 }
 
-fn open_picker(cx: Scope, ctx: &UiCtx, picker: Picker) {
+pub(crate) fn open_picker(cx: Scope, ctx: &UiCtx, picker: Picker) {
     let ctx2 = ctx.clone();
     ctx.open_modal(cx, picker.size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
@@ -1841,14 +1841,14 @@ fn open_model_stage(cx: Scope, store: Store, ctx: &UiCtx, provider: crate::store
 
 /// One rendered row: `header` rows are group labels (not selectable).
 #[derive(Clone)]
-struct RowSpec {
-    text: String,
-    header: bool,
-    checked: Option<bool>,
-    dim: bool,
+pub(crate) struct RowSpec {
+    pub(crate) text: String,
+    pub(crate) header: bool,
+    pub(crate) checked: Option<bool>,
+    pub(crate) dim: bool,
 }
 
-fn draw_rows(rows: Vec<RowSpec>, cursor: usize, selectable: Vec<usize>) -> View {
+pub(crate) fn draw_rows(rows: Vec<RowSpec>, cursor: usize, selectable: Vec<usize>) -> View {
     draw_rows_pinned(rows, cursor, selectable, 0)
 }
 
@@ -2367,6 +2367,28 @@ pub fn open_files(cx: Scope, store: Store, ctx: &UiCtx) {
         );
         return;
     }
+    open_run_files(
+        cx,
+        store,
+        ctx,
+        run_id,
+        "session files — the run's workspace on the gateway".into(),
+        None,
+    );
+}
+
+/// The workspace browser for ANY run the caller may read — the session's
+/// run (`/files`) or an automation (its controller run id IS the automation
+/// id; `GET /runs/{id}/workspace` serves the automation's folder). `back`
+/// replaces the plain close on Esc (the automation view returns to itself).
+pub fn open_run_files(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    run_id: String,
+    title: String,
+    back: Option<Rc<dyn Fn()>>,
+) {
     // Same run: keep the folder the user was in; new run: start at the root.
     let (dir, with_info) = store.files.with_untracked(|f| {
         if f.run_id == run_id {
@@ -2560,7 +2582,11 @@ pub fn open_files(cx: Scope, store: Store, ctx: &UiCtx) {
             .autofocus()
             .shortcut(KeyChord::plain(Key::Escape), {
                 let ctx = ctx2.clone();
-                move |_| ctx.close_modal()
+                let back = back.clone();
+                move |_| match &back {
+                    Some(back) => back(),
+                    None => ctx.close_modal(),
+                }
             })
             .shortcut(KeyChord::plain(Key::Up), move |_| move_cursor(-1))
             .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
@@ -2577,7 +2603,7 @@ pub fn open_files(cx: Scope, store: Store, ctx: &UiCtx) {
             .shortcut(KeyChord::plain(Key::Char('c')), move |_| copy())
             .shortcut(KeyChord::plain(Key::Char('o')), move |_| open_folder())
             .shortcut(KeyChord::plain(Key::Char('r')), move |_| refresh())
-            .child(title_row(&t, "session files — the run's workspace on the gateway".into()))
+            .child(title_row(&t, title.clone()))
             .child(dyn_view(LayoutStyle::column().shrink(0.0), move || {
                 let t2 = abstracttui::app::current_theme().tokens;
                 let lines = store

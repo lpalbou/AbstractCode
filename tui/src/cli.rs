@@ -148,7 +148,8 @@ USAGE:
   abstractcode --caps                       print the terminal capability report
 
 OPTIONS:
-  --gateway <URL>         gateway base url (default: login store or http://127.0.0.1:8080)
+  --gateway-url <URL>     gateway base url (default: login store or
+                          http://127.0.0.1:8080); --gateway is an alias
   --token <TOKEN>         bearer token (default: env or login store)
   --session <ID>          durable session id (default: a fresh session)
   --resume                reopen the last session (also: --continue)
@@ -631,6 +632,20 @@ mod tests {
             .contains("--stream takes on | off | default"));
         assert_eq!(parse(&[]).unwrap().stream, None);
         assert!(usage().contains("--stream <on|off|default>"));
+    }
+
+    /// One flag name for "where is the gateway" across every app and TUI
+    /// (wave-2 decision): `--gateway-url` is the documented flag, `--gateway`
+    /// the kept alias.
+    #[test]
+    fn gateway_url_is_the_primary_flag_and_gateway_its_alias() {
+        let help = usage();
+        assert!(help.contains("--gateway-url <URL>     gateway base url"), "{help}");
+        assert!(help.contains("--gateway is an alias"), "{help}");
+        for flag in ["--gateway-url", "--gateway"] {
+            let args = parse(&[flag.to_string(), "http://gw:18894".to_string()]).unwrap();
+            assert_eq!(args.gateway.as_deref(), Some("http://gw:18894"), "{flag}");
+        }
     }
 
     #[test]

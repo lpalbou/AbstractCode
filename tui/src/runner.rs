@@ -393,6 +393,9 @@ pub enum Cmd {
     },
     /// Ensure the ONE conversation poller thread is running.
     PollConvos,
+    /// `/automations` lane: every action runs on its own thread
+    /// (`gateway::automations`), results land in `store.automations`.
+    Automations(crate::gateway::automations::AutoCmd),
     Shutdown,
 }
 
@@ -948,6 +951,14 @@ impl Runner {
             // Entity lane: every handler spawns its own thread inside
             // gateway::entities (a 30-600s entity read must never starve
             // Probe/Start behind it on this loop).
+            Cmd::Automations(cmd) => {
+                crate::gateway::automations::spawn(
+                    &self.client,
+                    self.wake.clone(),
+                    self.store,
+                    cmd,
+                );
+            }
             Cmd::LoadEntities => {
                 let client = crate::gateway::entities::client_for(&self.client);
                 crate::gateway::entities::spawn_load_entities(

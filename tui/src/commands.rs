@@ -25,6 +25,13 @@ pub enum Command {
     /// (ask-pin bypass, served-disabled-clamp bypass, empty-batch
     /// auto-approve) die with it.
     Permissions(Option<String>),
+    /// `/automations [id]` — the gateway's automations (every client's):
+    /// list, open one, its runs, waits and controls. An id opens it.
+    Automations(Option<String>),
+    /// `/schedule [task]` — create an automation that runs the current
+    /// workflow (task → when → context → tools); the task defaults to the
+    /// conversation's last prompt.
+    Schedule(Option<String>),
     /// `/workspace` — root / access mode / allowed paths modal.
     Workspace,
     Skills,
@@ -179,6 +186,10 @@ pub fn parse(text: &str) -> Option<Command> {
         }
         "/workspace" | "/ws" => Command::Workspace,
         "/files" | "/file" => Command::Files,
+        "/automations" | "/automation" | "/autos" => {
+            Command::Automations(if rest.is_empty() { None } else { Some(rest) })
+        }
+        "/schedule" => Command::Schedule(if rest.is_empty() { None } else { Some(rest) }),
         "/skills" | "/skill" => Command::Skills,
         "/mcp" => Command::Mcp,
         "/cache" | "/caching" => Command::Cache,
@@ -290,6 +301,14 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
     (
         "files",
         "browse + preview the run's workspace files on the gateway",
+    ),
+    (
+        "automations",
+        "the gateway's automations: runs, approvals, pause/run now/stop/revise/archive, discuss",
+    ),
+    (
+        "schedule",
+        "create an automation that runs this workflow on a schedule",
     ),
     ("skills", "attach gateway skills"),
     ("mcp", "MCP server registry"),
@@ -519,6 +538,14 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     (
         "/files",
         "the run's workspace on the gateway host: browse, preview (Enter), copy path (c)",
+    ),
+    (
+        "/automations [id]",
+        "the gateway's automations (shared with the Assistant and the Observer): state, what runs now, the next run; Enter opens one — its runs as chat pairs, approvals (y/n), answers, p pause/resume · g run now · x stop current · e revise · a archive (hides and stops, history kept) · d discuss a run (a new chat, in place) · w its folder",
+    ),
+    (
+        "/schedule [task]",
+        "create an automation that runs the current workflow: the task (default: your last prompt), when (every N minutes/hours/days or once, UTC), context (independent or growing), tools (run without asking, or ask each time)",
     ),
     ("/about", "version, author, licence, links, gateway versions"),
     ("/quit", "leave (Ctrl+Q too; Ctrl+C clears the prompt — twice in a row quits)"),
