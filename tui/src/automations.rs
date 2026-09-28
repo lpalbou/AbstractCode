@@ -691,6 +691,52 @@ impl Control {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Control hints (the shared "Run now" text)
+// ---------------------------------------------------------------------------
+
+/// The automation controls' names, hints and run-now glyph: a BYTE-IDENTICAL
+/// copy of AbstractUIC's canonical `ui-kit/src/automations/automation_controls.json`
+/// (the web panel's `CONTROL_HINTS`, the Observer's rows and the Assistant read
+/// the same file). The AbstractFramework root `scripts/check_identity_sync.py`
+/// fails when this copy drifts.
+pub const AUTOMATION_CONTROLS_JSON: &str = include_str!("../assets/automation_controls.json");
+
+fn controls_spec() -> &'static Value {
+    static SPEC: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    SPEC.get_or_init(|| {
+        serde_json::from_str(AUTOMATION_CONTROLS_JSON)
+            .expect("assets/automation_controls.json is the kit's canonical JSON")
+    })
+}
+
+fn spec_str(path: &[&str]) -> &'static str {
+    let mut v = controls_spec();
+    for key in path {
+        v = &v[*key];
+    }
+    v.as_str()
+        .unwrap_or_else(|| panic!("automation_controls.json has no string at {path:?}"))
+}
+
+/// Run now in one line: "Run it once now, without waiting for the schedule;
+/// the next scheduled run keeps its time." (the kit's `RUN_NOW_ONE_LINE`).
+pub fn run_now_one_line() -> &'static str {
+    spec_str(&["run_now_one_line"])
+}
+
+/// A control's full hint (the kit's `CONTROL_HINTS[id]`, lines joined by "\n").
+pub fn control_hint(control: Control) -> &'static str {
+    spec_str(&["hints", control.capability()])
+}
+
+/// The terminal's Run now line under the key hints (list and one
+/// automation): `g run now: <the kit's one line>`. The screen's facts line
+/// already shows the next scheduled time.
+pub fn run_now_key_line() -> String {
+    format!("g run now: {}", run_now_one_line())
+}
+
 /// `Ok(())` when the control applies now, `Err(reason)` otherwise — the kit's
 /// `automationControls` rule. The server decides what the principal may do
 /// (`capabilities`); the status decides what applies at this moment. Run now
@@ -1613,6 +1659,56 @@ mod tests {
         "archive",
         "discuss",
     ];
+
+    #[test]
+    fn run_now_hint_is_the_kits_shared_text() {
+        // Operator 2026-09-28: one shared "Run now" tooltip in every client. The
+        // terminal's key line and /automations help say the kit's one line.
+        assert_eq!(
+            run_now_one_line(),
+            "Run it once now, without waiting for the schedule; the next scheduled run keeps its time."
+        );
+        assert_eq!(
+            run_now_key_line(),
+            format!("g run now: {}", run_now_one_line())
+        );
+        let full = control_hint(Control::RunNow);
+        assert!(
+            full.starts_with("Run it once now, without waiting for the schedule.\n"),
+            "{full}"
+        );
+        assert!(full.contains("the next scheduled run keeps its time, or starts right after this run if its time comes first"), "{full}");
+        assert!(
+            full.contains(
+                "Does not count toward a run limit. Works while paused; it stays paused."
+            ),
+            "{full}"
+        );
+        let spec: Value = serde_json::from_str(AUTOMATION_CONTROLS_JSON).unwrap();
+        for c in [
+            Control::Pause,
+            Control::Resume,
+            Control::RunNow,
+            Control::StopCurrent,
+            Control::Revise,
+            Control::Archive,
+            Control::Discuss,
+        ] {
+            assert_eq!(
+                control_hint(c),
+                spec["hints"][c.capability()].as_str().unwrap()
+            );
+        }
+        let help = crate::commands::HELP_LINES
+            .iter()
+            .find(|(k, _)| k.starts_with("/automations"))
+            .map(|(_, v)| *v)
+            .unwrap();
+        assert!(
+            help.contains(&format!("g run now: {}", run_now_one_line())),
+            "{help}"
+        );
+    }
 
     #[test]
     fn run_now_follows_current_occurrence_only() {

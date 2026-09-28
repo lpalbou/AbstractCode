@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Terminal: Run now says what it does.** `/automations` (the list and one automation) shows "g run now:
+  Run it once now, without waiting for the schedule; the next scheduled run keeps its time." under the key
+  hints, and `/help` says the same. The text is AbstractUIC's shared control hint (vendored as
+  `tui/assets/automation_controls.json`, a byte-identical copy of the kit's file), the same as the Observer,
+  the Assistant and the browser panel.
+
 ### Fixed
 - **Terminal: not signed in is said plainly.** A gateway that answers 401 or
   403 is reachable but refuses this client's credential (none was sent, or it

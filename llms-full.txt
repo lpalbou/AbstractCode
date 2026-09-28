@@ -758,12 +758,17 @@ the title, the first run time, "stop after this many runs" and "stop at".
 | Control | Terminal key | What happens |
 |---|---|---|
 | Pause / Resume | `p` | No scheduled run while paused; resume continues from the next tick. |
-| Run now | `g` | One run at once, also while paused (it stays paused). Refused while a run is in progress. |
+| Run now | `g` | One run at once, instead of waiting for the schedule. The schedule does not move: the next scheduled run keeps its time, and if that time comes while this run is still going, the scheduled run starts right after it. It does not count toward a run limit ("stop after this many runs"). Also works while paused (it stays paused). In a Growing automation, later runs see it in their history. Refused while a run is in progress. |
 | Stop current | `x` | Cancels the run in progress. |
 | Revise | `e` | Title, interval (schedules) and context; applies from the next run. In the terminal, a field left empty keeps its current value. |
 | Archive | `a`, then `a` again | The automation stops and is hidden from the list; its history stays readable (**Show archived**, or `h` in the terminal). Archiving never deletes anything. |
 
-In the browser the same controls are buttons on the automation's page.
+In the browser the same controls are buttons on the automation's page; hovering
+one shows what it does (Run now's tooltip adds the next scheduled time). The
+terminal shows Run now's effect in one line under the key hints: "g run now:
+Run it once now, without waiting for the schedule; the next scheduled run keeps
+its time." Every AbstractFramework client uses the same wording and the same
+play-in-a-circle icon for Run now.
 
 ## Runs, approvals and answers
 
@@ -2079,7 +2084,7 @@ abstractcode --help | --version
 | `/theme [id]` | Live-preview theme picker, or set directly |
 | `/workflow` | Pick the agent workflow (`/agent` too). First row: **Gateway default → name @version** — saved as "the gateway default", so the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran |
 | `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` shows the workspace folder itself (never a sub-folder; never a folder that would be launched, such as `.app`) in your file manager, only when the gateway is on this machine and allows it; `r` refreshes |
-| `/automations [id]` | The gateway's automations (`/automation`, `/autos` too), shared with every client: state as text + icon ("Active ▶", "Paused ⏸"), attention, cadence, **now** (only the gateway's `current_occurrence`), **next** (only `next_fire_at`); archived rows hidden until `h`. Keys: `Enter` opens · `n` new · `p` pause/resume · `g` run now · `x` stop current · `a` archive (press twice; hides and stops, history kept) · `r` refresh. In one automation: its header and folder, the waits that need you first (`y`/`n` approve/deny a tool call, `Enter` answers a question or an event), its runs as chat pairs, `d` discuss the selected run (a new chat; this session switches to it), `e` revise (title, interval, context; empty keeps a value), `w` browse its folder, `Esc` back. Re-read every 15 s while open. See [Automations](../../docs/automations.md) |
+| `/automations [id]` | The gateway's automations (`/automation`, `/autos` too), shared with every client: state as text + icon ("Active ▶", "Paused ⏸"), attention, cadence, **now** (only the gateway's `current_occurrence`), **next** (only `next_fire_at`); archived rows hidden until `h`. Keys: `Enter` opens · `n` new · `p` pause/resume · `g` run now (once now; the next scheduled run keeps its time) · `x` stop current · `a` archive (press twice; hides and stops, history kept) · `r` refresh. In one automation: its header and folder, the waits that need you first (`y`/`n` approve/deny a tool call, `Enter` answers a question or an event), its runs as chat pairs, `d` discuss the selected run (a new chat; this session switches to it), `e` revise (title, interval, context; empty keeps a value), `w` browse its folder, `Esc` back. Re-read every 15 s while open. See [Automations](../../docs/automations.md) |
 | `/schedule [task]` | Create an automation that runs the current workflow (the gateway default is sent as `@default`): the task (default: your last prompt), when (UTC presets, every N m/h/d, or once at `YYYY-MM-DD HH:MM`), context (independent or growing), tools (run without asking, or ask before each tool call). Opens it once the gateway answers |
 | `/workspace send [auto\|always\|never]` | Whether your folder is sent as the workspace: `auto` (default) = only when the gateway is on this machine; `always` = also to a gateway on another machine that sees the same path (a shared mount); `never`. Bare reports what is in force. Saved in `prefs.json` |
 | `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
@@ -3249,6 +3254,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Added
+- **Terminal: Run now says what it does.** `/automations` (the list and one automation) shows "g run now:
+  Run it once now, without waiting for the schedule; the next scheduled run keeps its time." under the key
+  hints, and `/help` says the same. The text is AbstractUIC's shared control hint (vendored as
+  `tui/assets/automation_controls.json`, a byte-identical copy of the kit's file), the same as the Observer,
+  the Assistant and the browser panel.
 
 ### Fixed
 - **Terminal: not signed in is said plainly.** A gateway that answers 401 or

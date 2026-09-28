@@ -702,3 +702,19 @@ fn discuss_never_cancels_a_run_in_progress_here() {
     );
     assert!(!screen.contains("discuss run #6"), "{screen}");
 }
+
+#[test]
+fn run_now_says_the_shared_one_line_on_both_screens() {
+    // Operator 2026-09-28: the same "Run now" explanation in every client; the
+    // terminal shows the kit's one line under the key hints.
+    let line = "g run now: Run it once now, without waiting for the schedule; the next scheduled run keeps its time.";
+    assert_eq!(auto::run_now_key_line(), line);
+    let mut h = harness();
+    h.command("/automations");
+    h.answer_list();
+    let screen = h.turn();
+    assert!(screen.contains(line), "list: {screen}");
+    let mut h = harness();
+    let screen = open_inbox(&mut h);
+    assert!(screen.contains(line), "one automation: {screen}");
+}

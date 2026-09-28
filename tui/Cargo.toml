@@ -28,6 +28,8 @@ include = [
     "/tests/fixtures/**",
     # `identity.rs` include_str!s the vendored framework descriptor.
     "/assets/abstractframework_identity.json",
+    # `automations.rs` include_str!s the vendored automation controls (the kit's hints).
+    "/assets/automation_controls.json",
     "/examples/*.rs",
     "/Cargo.toml",
     "/README.md",
