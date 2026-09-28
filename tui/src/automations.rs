@@ -1512,9 +1512,12 @@ impl View {
                 summary,
                 ..Detail::default()
             });
+            // A different automation: the previous one's messages go. Coming
+            // back from one of its own forms keeps them (a refused revision
+            // must stay readable).
+            self.notice.clear();
+            self.error.clear();
         }
-        self.notice.clear();
-        self.error.clear();
     }
 
     /// The cursor to acknowledge for the open automation, if it has shown

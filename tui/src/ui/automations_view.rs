@@ -908,7 +908,10 @@ fn open_text(
                 .autofocus()
                 .build(),
         )
-        .child(hint_row(&t, "Enter sends · Esc goes back".into()))
+        .child(hint_row(
+            &t,
+            "Enter sends · Home/End move to the start/end · Esc goes back".into(),
+        ))
         .build()
     });
 }
@@ -932,13 +935,19 @@ fn open_revise(cx: Scope, store: Store, ctx: &UiCtx, s: Summary) {
         ctx,
         format!("revise “{}” — 1/3 title", s.title),
         vec![
+            format!(
+                "Now: {} — leave empty and press Enter to keep it.",
+                form.title
+            ),
             "The change applies from the next run; a run in progress keeps what it started with."
                 .into(),
         ],
-        form.title.clone(),
+        String::new(),
         Rc::new(move |title: String| {
             let mut form = form.clone();
-            form.title = title;
+            if !title.trim().is_empty() {
+                form.title = title;
+            }
             revise_interval(cx, store, &ctx2, s2.clone(), form, back2.clone());
         }),
         back,
@@ -962,11 +971,16 @@ fn revise_interval(
         cx,
         ctx,
         format!("revise “{}” — 2/3 interval (UTC)", s.title),
-        vec!["A whole number of minutes, hours or days: 30m, 8h, 7d. The rest of the schedule is kept.".into()],
-        every,
-        Rc::new(move |every: String| {
+        vec![
+            format!("Now: {every} — leave empty and press Enter to keep it."),
+            "A whole number of minutes, hours or days: 30m, 8h, 7d. The rest of the schedule is kept.".into(),
+        ],
+        String::new(),
+        Rc::new(move |text: String| {
             let mut form = form.clone();
-            form.every = Some(every.trim().to_string());
+            if !text.trim().is_empty() {
+                form.every = Some(text.trim().to_string());
+            }
             revise_context(cx, store, &ctx2, s.clone(), form, back2.clone());
         }),
         back,

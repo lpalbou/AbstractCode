@@ -584,3 +584,63 @@ fn archive_from_one_automation_also_asks_first() {
         "{cmds:?}"
     );
 }
+
+#[test]
+fn a_refused_revision_stays_readable_on_the_automation() {
+    let mut h = harness();
+    open_inbox(&mut h);
+    h.auto_cmds();
+    h.keys(b"e"); // 1/3 title
+    h.keys(b"\r");
+    // 2/3 interval (empty keeps "30m"): an invalid one.
+    h.term.push_input(b"6 hours");
+    h.turn();
+    h.keys(b"\r");
+    let screen = h.keys(b"\r"); // 3/3 context → back to the automation
+    assert!(
+        h.auto_cmds()
+            .iter()
+            .all(|c| !matches!(c, AutoCmd::Revise { .. })),
+        "nothing is sent"
+    );
+    assert!(screen.contains("automation — Inbox triage"), "{screen}");
+    assert!(
+        screen.contains("Interval must be a whole number of minutes, hours or days"),
+        "{screen}"
+    );
+}
+
+#[test]
+fn revise_sends_only_what_changed_and_empty_keeps_the_current_value() {
+    let mut h = harness();
+    open_inbox(&mut h);
+    h.auto_cmds();
+    let screen = h.keys(b"e");
+    assert!(
+        screen.contains("Now: Inbox triage — leave empty and press Enter to keep it."),
+        "{screen}"
+    );
+    h.keys(b"\r"); // title kept
+    h.term.push_input(b"6h");
+    h.turn();
+    h.keys(b"\r"); // interval 6h
+    h.keys(b"\r"); // context kept (growing is preselected)
+    let cmds = h.auto_cmds();
+    match cmds.iter().find(|c| matches!(c, AutoCmd::Revise { .. })) {
+        Some(AutoCmd::Revise {
+            id,
+            changes,
+            expected_revision,
+            ..
+        }) => {
+            assert_eq!(id, INBOX);
+            assert_eq!(*expected_revision, Some(1));
+            assert_eq!(changes["trigger"]["config"]["every"], "6h");
+            assert!(
+                changes.get("title").is_none() && changes.get("context").is_none(),
+                "{changes}"
+            );
+        }
+        other => panic!("expected a revise, got {other:?} in {cmds:?}"),
+    }
+}
