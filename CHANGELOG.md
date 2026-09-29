@@ -5,6 +5,22 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [web 0.6.2] - 2026-09-29
+
+### Fixed
+- **Web: the approval gate is the same in every client.** A conversation whose run was parked on the
+  agent loop's tool approval (the root run waits on `subworkflow:<child>`, the child asks) showed the gate
+  only in the client that started the turn; a browser opening the same conversation afterwards showed
+  "Running a tool write_file", a Steer composer and no Allow/Deny while the run waited. Requires
+  `@abstractframework/panel-chat` 0.1.20, which rebuilds the gate from durable state (the child's waiting
+  record and its `GET /runs/{child}` wait) and never lets the root's delegation wait displace it; the
+  transcript's tool row for a parked batch now reads "Approval needed" instead of "Running" (the ledger's
+  `$slim` pointer on the waiting record).
+- **e2e: two devices, one gate.** `e2e/approval_sync.spec.ts` starts the fixture's new "Delegated tool
+  approval" flow (root → subflow → write_file) in one browser context and opens the conversation in a second
+  one: both show the card, "Approval needed" and a waiting composer; a Deny in the second settles the run in
+  the first. Red before panel-chat 0.1.20.
+
 ## [web 0.6.1] - 2026-09-28
 
 ### Changed

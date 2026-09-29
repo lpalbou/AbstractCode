@@ -169,6 +169,32 @@ def _tool_approval_flow() -> dict[str, Any]:
     }
 
 
+def _delegated_approval_flow() -> dict[str, Any]:
+    """The root run parked on `subworkflow:<child>` while the CHILD asks for the approval.
+
+    This is the shape of a basic-agent turn (root → agent-loop child → write_file): the
+    gate lives on the child run and the root's own durable wait is a delegation, never a
+    question. Every client — the one that started the turn and one that opens the
+    conversation later — must rebuild the same gate from durable state (2026-09-29
+    operator report: a fresh client showed "Running a tool" for a turn waiting on
+    write_file). The child is the bundle's own `tool-approval` flow.
+    """
+
+    return {
+        "id": "delegated-approval",
+        "name": "Delegated tool approval",
+        "description": "A subflow requests the harmless workspace write while the root waits on it.",
+        "interfaces": ["tools"],
+        "nodes": [
+            _node("start", "on_flow_start"),
+            _node("delegate", "subflow", extra_data={"subflowId": "tool-approval"}),
+            _node("end", "on_flow_end"),
+        ],
+        "edges": [_edge("start", "exec-out", "delegate", "exec-in", "e1"), _edge("delegate", "exec-out", "end", "exec-in", "e2")],
+        "entryNode": "start",
+    }
+
+
 def _assistant_contract_flow(*, authored: bool = False, generic: bool = False) -> dict[str, Any]:
     # Use the real managed orchestrator's start pins/defaults but replace its
     # model graph with a deterministic Code node. No provider is invoked.
@@ -237,7 +263,7 @@ def _coding_contract_flow() -> dict[str, Any]:
 
 
 def _write_bundle(bundles: Path) -> Path:
-    flows = {flow["id"]: flow for flow in (_prompt_flow(), _event_listener_flow(), _event_emitter_flow(), _tool_approval_flow(), _tool_supervision_flow(), _assistant_contract_flow(), _assistant_contract_flow(authored=True), _assistant_contract_flow(authored=True, generic=True), _basic_agent_contract_flow(), _coding_contract_flow())}
+    flows = {flow["id"]: flow for flow in (_prompt_flow(), _event_listener_flow(), _event_emitter_flow(), _tool_approval_flow(), _delegated_approval_flow(), _tool_supervision_flow(), _assistant_contract_flow(), _assistant_contract_flow(authored=True), _assistant_contract_flow(authored=True, generic=True), _basic_agent_contract_flow(), _coding_contract_flow())}
     manifest = {
         "bundle_format_version": "1", "bundle_id": BUNDLE_ID, "bundle_version": BUNDLE_VERSION,
         "created_at": "2026-09-20T00:00:00+00:00", "default_entrypoint": "prompt-structured",
@@ -246,6 +272,7 @@ def _write_bundle(bundles: Path) -> Path:
             {"flow_id": "event-listener", "name": "Event listener", "description": "on_event fixture.ping", "interfaces": ["event"]},
             {"flow_id": "event-emitter", "name": "Event emitter", "description": "emit_event fixture.ping", "interfaces": ["event"]},
             {"flow_id": "tool-approval", "name": "Native tool approval", "description": "harmless write_file Tool Calls request", "interfaces": ["tools"]},
+            {"flow_id": "delegated-approval", "name": "Delegated tool approval", "description": "root parked on a subflow that requests the write_file approval", "interfaces": ["tools"]},
             {"flow_id": "tool-supervision", "name": "Tool supervision", "description": "Multiple approval batches, failures, and a real question", "interfaces": ["tools"]},
             {"flow_id": "assistant-contract", "name": "Assistant contract", "description": "Real Assistant inputs; deterministic no-model execution", "interfaces": ["abstractassistant.agent.v1"]},
             {"flow_id": "authored-contract", "name": "Authored model contract", "description": "Workflow provider/model defaults override Gateway routing", "interfaces": ["abstractassistant.agent.v1"]},
@@ -335,7 +362,7 @@ def main() -> int:
     fixture = {
         "url": f"http://{HOST}:{args.port}", "user_id": USER_ID, "token": TOKEN,
         "bundle_id": BUNDLE_ID, "bundle_version": BUNDLE_VERSION,
-        "flows": {"prompt": "prompt-structured", "listener": "event-listener", "emitter": "event-emitter", "tool_approval": "tool-approval"},
+        "flows": {"prompt": "prompt-structured", "listener": "event-listener", "emitter": "event-emitter", "tool_approval": "tool-approval", "delegated_approval": "delegated-approval"},
         "root": str(root), "workspace": str(paths["workspace"]),
     }
     print(json.dumps(fixture, sort_keys=True), flush=True)
