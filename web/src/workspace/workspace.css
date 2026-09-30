@@ -365,7 +365,8 @@ button {
   color: var(--accent);
 }
 .code-workflow-select select {
-  background: transparent;
+  /* background-color only: a shorthand would erase the kit's touch chevron (ui-kit >= 0.3.2). */
+  background-color: transparent;
   border: 0;
   font-size: var(--font-size-md);
   font-weight: 550;
@@ -639,7 +640,7 @@ select option {
   padding: 4px;
   border: 1px solid var(--ui-border-1);
   border-radius: 5px;
-  background: var(--bg-primary);
+  background-color: var(--bg-primary);
 }
 .code-conversation .pc-workflow-chat__footer {
   display: flex;
@@ -1506,7 +1507,7 @@ select option {
   padding: 10px;
   border: 1px solid var(--ui-border-2);
   border-radius: 6px;
-  background: var(--bg-primary);
+  background-color: var(--bg-primary);
   font-size: var(--font-size-sm);
 }
 .code-field textarea {
@@ -2171,18 +2172,15 @@ select option {
   }
 }
 @media (pointer: coarse) {
-  /* WebKit (iOS) sizes a native-appearance <select> to its text (21-23 px) whatever min-height
-     says: draw the chevron ourselves so the 44 px box holds. */
+  /* Touch selects take the kit's single-select rule (ui-kit >= 0.3.2: appearance none, 44 px,
+     16 px, its own chevron). The app keeps only colours; its desktop paddings must leave room
+     for the kit chevron. */
   .code-workflow-select select,
-  .code-conversation .pc-composer__actions select {
-    -webkit-appearance: none;
-    appearance: none;
-    padding-right: 24px;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239aa0aa' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 8px center;
-    background-size: 10px 6px;
+  .code-conversation .pc-composer__actions select,
+  .code-field > select {
+    padding-right: 32px;
   }
+  /* The label is the 44 px row (WebKit keeps a native-size checkbox). */
   .code-auto-archived {
     display: flex;
     align-items: center;
