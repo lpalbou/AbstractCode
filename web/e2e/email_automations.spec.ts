@@ -82,7 +82,7 @@ test("without a usable account the email options say so and stay off", async ({ 
   await expect(dialog.getByText("Email isn't set up —").first()).toBeVisible();
   await expect(dialog.getByRole("button", { name: "open My email" }).first()).toBeVisible();
   await expect(dialog.getByRole("radio", { name: "When an email arrives" })).toBeDisabled();
-  await expect(dialog.getByRole("checkbox", { name: "Email me the result" })).toBeDisabled();
+  await expect(dialog.getByRole("switch", { name: "Email me the result" })).toBeDisabled();
   await capture(page, "email-not-set-up");
 });
 
@@ -125,7 +125,7 @@ test("Email me the result is stored as notify.channels email", async ({ page, re
   const title = `E2E email notify ${Date.now()}`;
   const dialog = await openDialog(page);
   await dialog.getByLabel("Task").fill("Check the build and tell me");
-  await dialog.getByRole("checkbox", { name: "Email me the result" }).check();
+  await dialog.getByRole("switch", { name: "Email me the result" }).check();
   await dialog.getByText("Advanced").click();
   await dialog.getByLabel("Title").fill(title);
   await dialog.getByRole("button", { name: "Create automation" }).click();

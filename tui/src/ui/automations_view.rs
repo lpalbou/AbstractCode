@@ -29,7 +29,7 @@ use crate::runner::Cmd;
 use crate::store::Store;
 use crate::transcript::Item;
 use crate::ui::modals::{
-    draw_rows, hint_row, modal_size, open_picker, title_row, wrap_lines, Picker, RowSpec,
+    draw_rows, hint_row, modal_size, open_picker, title_row, wrap_lines, Mark, Picker, RowSpec,
 };
 use crate::ui::UiCtx;
 
@@ -85,7 +85,11 @@ fn command(store: Store, ctx: &UiCtx, s: &Summary, control: Control) {
         command_id = v.ids.id_for(&key, crate::config::mint_session_id);
         v.busy = true;
         v.error.clear();
-        v.notice = format!("{} “{}”…", control.label(), s.title);
+        v.notice = match control {
+            Control::Pause => format!("switching Active off for “{}”…", s.title),
+            Control::Resume => format!("switching Active on for “{}”…", s.title),
+            other => format!("{} “{}”…", other.label(), s.title),
+        };
     });
     send(
         ctx,
@@ -95,6 +99,40 @@ fn command(store: Store, ctx: &UiCtx, s: &Summary, control: Control) {
             command_type: command_type.to_string(),
         },
     );
+}
+
+/// Space on an automation: flip its Active switch (pause when active,
+/// resume when paused), or say why it cannot change now.
+fn switch_active(store: Store, ctx: &UiCtx, s: &Summary) {
+    let busy = store.automations.with_untracked(|v| v.busy);
+    match auto::active_switch(s, busy) {
+        Ok(_) => command(store, ctx, s, auto::active_command(s)),
+        Err(why) => store
+            .automations
+            .update(|v| v.error = format!("Active: {why}")),
+    }
+}
+
+/// The Active switch row of one automation (`[x] Active — …`).
+pub(crate) fn active_row(s: &Summary, busy: bool) -> RowSpec {
+    let mark = match auto::active_switch(s, busy) {
+        Ok(on) => Mark::switch(on),
+        // In flight: keep showing the current state, not "unavailable".
+        Err(_) if busy && !s.legacy && (s.status == "active" || s.status == "paused") => {
+            Mark::switch(s.status == "active")
+        }
+        Err(_) => Mark::Unavailable,
+    };
+    RowSpec {
+        text: format!(
+            "{} — {}",
+            auto::active_label(),
+            auto::active_detail(s, busy)
+        ),
+        header: false,
+        checked: Some(mark),
+        dim: false,
+    }
 }
 
 /// The status lines under a title: notice, error, availability.
@@ -151,11 +189,16 @@ pub fn open_automations(cx: Scope, store: Store, ctx: &UiCtx) {
             move |control: Control| {
                 confirm_archive.set(None);
                 if let Some(s) = selected() {
-                    let control = match control {
-                        Control::Pause if s.status == "paused" => Control::Resume,
-                        other => other,
-                    };
                     command(store, &ctx, &s, control);
+                }
+            }
+        };
+        let switch = {
+            let ctx = ctx2.clone();
+            move || {
+                confirm_archive.set(None);
+                if let Some(s) = selected() {
+                    switch_active(store, &ctx, &s);
                 }
             }
         };
@@ -211,10 +254,12 @@ pub fn open_automations(cx: Scope, store: Store, ctx: &UiCtx) {
             })
             .shortcut(KeyChord::plain(Key::Enter), move |_| open_selected())
             .shortcut(key('n'), move |_| new())
-            .shortcut(key('p'), {
-                let act = act.clone();
-                move |_| act(Control::Pause)
+            .shortcut(KeyChord::plain(Key::Char(' ')), {
+                let switch = switch.clone();
+                move |_| switch()
             })
+            // `p` (the old pause/resume key) switches Active too.
+            .shortcut(key('p'), move |_| switch())
             .shortcut(key('g'), {
                 let act = act.clone();
                 move |_| act(Control::RunNow)
@@ -256,7 +301,7 @@ pub fn open_automations(cx: Scope, store: Store, ctx: &UiCtx) {
             ))
             .child(hint_row(
                 &t,
-                "↑↓ · Enter opens · n new (/schedule) · p pause/resume · g run now · x stop current · a archive · h archived · r refresh · Esc closes".into(),
+                "↑↓ · Enter opens · space switch Active · n new (/schedule) · g run now · x stop current · a archive · h archived · r refresh · Esc closes".into(),
             ))
             .child(hint_row(&t, auto::run_now_key_line()))
             .build()
@@ -280,7 +325,10 @@ pub(crate) fn list_rows(v: &auto::View, now: i64) -> (Vec<RowSpec>, Vec<usize>) 
             let shown = auto::visible(items, v.show_archived);
             for s in &shown {
                 selectable.push(rows.len());
-                rows.push(text(&auto::row_line(s, now), s.status == "archived"));
+                // The leading marker is the automation's Active switch.
+                let mut row = text(&auto::row_line(s, now), s.status == "archived");
+                row.checked = active_row(s, v.busy).checked;
+                rows.push(row);
             }
             if items.is_empty() {
                 rows.push(text(
@@ -359,9 +407,6 @@ pub fn header_lines(s: &Summary, def: Option<&auto::Definition>, now: i64) -> Ve
     }
     if s.attention.unseen_count > 0 || s.attention.pending_waits > 0 {
         out.push(format!("attention: {}", auto::attention_label(s)));
-    }
-    if s.status == "paused" {
-        out.push("Paused: scheduled runs are skipped. Run now works and keeps it paused.".into());
     }
     if s.status == "archived" {
         out.push(
@@ -554,11 +599,16 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
             move |control: Control| {
                 confirm_archive.set(false);
                 if let Some(s) = summary() {
-                    let control = match control {
-                        Control::Pause if s.status == "paused" => Control::Resume,
-                        other => other,
-                    };
                     command(store, &ctx, &s, control);
+                }
+            }
+        };
+        let switch = {
+            let ctx = ctx2.clone();
+            move || {
+                confirm_archive.set(false);
+                if let Some(s) = summary() {
+                    switch_active(store, &ctx, &s);
                 }
             }
         };
@@ -789,10 +839,12 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
                 move |_| approve("approve")
             })
             .shortcut(key('n'), move |_| approve("deny"))
-            .shortcut(key('p'), {
-                let act = act.clone();
-                move |_| act(Control::Pause)
+            .shortcut(KeyChord::plain(Key::Char(' ')), {
+                let switch = switch.clone();
+                move |_| switch()
             })
+            // `p` (the old pause/resume key) switches Active too.
+            .shortcut(key('p'), move |_| switch())
             .shortcut(key('g'), {
                 let act = act.clone();
                 move |_| act(Control::RunNow)
@@ -819,6 +871,15 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
                         .unwrap_or_else(|| "automation — asking the gateway…".into())
                 });
                 title_row(&t2, title)
+            }))
+            .child(dyn_view(LayoutStyle::line(1).shrink(0.0), move || {
+                let row = store.automations.with(|v| {
+                    v.detail
+                        .as_ref()
+                        .and_then(|d| d.summary.as_ref())
+                        .map(|s| active_row(s, v.busy))
+                });
+                draw_rows(row.into_iter().collect(), 0, Vec::new())
             }))
             .child(dyn_view(LayoutStyle::column().shrink(0.0), move || {
                 let t2 = abstracttui::app::current_theme().tokens;
@@ -857,7 +918,7 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
             ))
             .child(hint_row(
                 &t,
-                "↑↓ · y/n approve/deny · Enter answers · d discuss run · p pause/resume · g run now · x stop · e revise · a archive · w folder · r refresh · Esc back".into(),
+                "↑↓ · space switch Active · y/n approve/deny · Enter answers · d discuss run · g run now · x stop · e revise · a archive · w folder · r refresh · Esc back".into(),
             ))
             .child(hint_row(&t, auto::run_now_key_line()))
             .build()

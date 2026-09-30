@@ -455,15 +455,14 @@ select option {
   border-radius: 4px;
   color: var(--text-secondary);
 }
-.code-workflow-all {
-  display: inline-flex;
+/* "Show all workflows" is a kit switch (AfSwitch sm); the short "All" label shows on phones only. */
+.code-workflow-all.af-switch {
   flex: none;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--font-size-xxs);
-  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
   white-space: nowrap;
-  cursor: pointer;
+}
+.code-workflow-all__short {
+  display: none;
 }
 .code-workflow-resolved {
   font-size: var(--font-size-xxs);
@@ -1469,7 +1468,7 @@ select option {
     animation: none;
   }
 }
-.code-queue button {
+.code-queue button:not(.af-switch) {
   display: inline-flex;
   padding: 3px;
   border: 0;
@@ -1899,17 +1898,11 @@ select option {
   .code-workflow-select {
     flex: 1 1 8rem;
   }
-  .code-workflow-all > span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
+  .code-workflow-all__long {
+    display: none;
   }
-  .code-workflow-all::after {
-    content: "All";
-    content: "All" / "";
+  .code-workflow-all__short {
+    display: inline;
   }
   /* The model is one tap away in Run settings (the Tools button opens it). */
   .code-model-button,
@@ -2123,7 +2116,7 @@ select option {
   .code-mobile-close,
   .code-conversation .pc-workflow-chat__icon-button,
   .code-attachment__action,
-  .code-queue button {
+  .code-queue button:not(.af-switch) {
     min-width: var(--tap-min, 44px);
     min-height: var(--tap-min, 44px);
     justify-content: center;
@@ -2311,13 +2304,6 @@ select option {
   .code-field > select {
     padding-right: 32px;
   }
-  /* The label is the 44 px row (WebKit keeps a native-size checkbox). */
-  .code-auto-archived {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: var(--tap-min, 44px);
-  }
 }
 /* No hover: never hide an action behind it. */
 @media (hover: none) {
@@ -2384,11 +2370,20 @@ select option {
 .code-auto-attention {
   color: var(--warning);
 }
-.code-auto-archived {
+.code-auto-archived.af-switch {
+  margin: 4px 8px;
+  font-size: var(--font-size-xs);
+}
+/* A skill is a settings-row switch: name, then its description and trust as helper text. */
+.code-skill-row .af-switch--row {
+  width: 100%;
+}
+.code-skill-row__desc,
+.code-skill-row__trust {
   display: block;
-  padding: 6px 12px;
-  color: var(--text-secondary);
-  font-size: var(--font-size-xxs);
+}
+.code-skill-row__trust {
+  margin-top: 2px;
 }
 .code-automation-main {
   overflow: hidden;

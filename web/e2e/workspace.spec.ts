@@ -989,7 +989,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await settings.getByRole("button", { name: "Select all", exact: true }).click();
     await settings.getByPlaceholder("Filter tools...").fill("write_file");
     const row = settings.locator(".af-tool-row").filter({ hasText: "write_file" });
-    await row.getByRole("checkbox").uncheck();
+    await row.getByRole("switch").uncheck();
     await capture(page, "permissions-all-enabled-tools");
     await settings.getByRole("button", { name: "Close panel", exact: true }).click();
     await page.getByRole("button", { name: "Run workflow", exact: true }).click();
@@ -1003,7 +1003,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     // enablement for the next run in the same conversation.
     await page.getByRole("button", { name: "Tools", exact: true }).click();
     await settings.getByPlaceholder("Filter tools...").fill("write_file");
-    await settings.getByRole("checkbox", { name: "Enable write_file", exact: true }).check();
+    await settings.getByRole("switch", { name: "write_file", exact: true }).check();
     await settings.getByRole("button", { name: "Close panel", exact: true }).click();
     await page.getByRole("button", { name: "Inputs", exact: true }).click();
     await page.getByRole("complementary", { name: "Workflow inputs" }).getByRole("button", { name: "Run workflow", exact: true }).click();
