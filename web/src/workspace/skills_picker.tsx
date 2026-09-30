@@ -149,6 +149,9 @@ export function SkillSwitch({
         }
         checked={checked}
         unavailableReason={reason}
+        // The panel's own banner already says why settings are locked; only a
+        // skill-specific reason (blocked by the gateway) is repeated per row.
+        reasonVisible={skill.blocked}
         onChange={onChange}
       />
     </div>

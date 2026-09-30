@@ -67,6 +67,8 @@ describe("Run settings → Skills: one switch per skill", () => {
   it("while settings are locked the switch says so instead of going silent", () => {
     const el = switchOf(SkillSwitch({ skill: skill(), checked: true, disabled: true, onChange: () => {} }));
     expect(el.props.unavailableReason).toMatch(/no run is in progress/);
+    // The panel banner already says it: hover/assistive text only, not repeated per row.
+    expect(el.props.reasonVisible).toBe(false);
   });
 });
 
