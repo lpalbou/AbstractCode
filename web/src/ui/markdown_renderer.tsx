@@ -3,6 +3,7 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { useMonaco } from "@monaco-editor/react";
 import { copy_text } from "../lib/clipboard";
+import { COPY_FAILED } from "../lib/secure-context";
 
 export interface MarkdownRendererProps {
   markdown: string;
@@ -106,7 +107,7 @@ export function MarkdownRenderer({ markdown, className }: MarkdownRendererProps)
     if (!text) return;
 
     const ok = await copy_text(text);
-    btn.textContent = ok ? "Copied" : "Copy failed";
+    btn.textContent = ok ? "Copied" : COPY_FAILED;
     window.setTimeout(() => {
       if (btn) btn.textContent = "Copy";
     }, 900);

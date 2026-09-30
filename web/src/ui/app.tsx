@@ -29,6 +29,7 @@ import { registerMonitorGpuWidget } from "@abstractframework/monitor-gpu";
 import { MarkdownRenderer } from "./markdown_renderer";
 import { ToolPicker } from "./tool_picker";
 import { copy_text } from "../lib/clipboard";
+import { MEDIA_NEEDS_HTTPS, mediaAvailable } from "../lib/secure-context";
 import { build_run_input_data, derive_prompt_cache_key } from "../lib/run_input";
 import { compute_settings_on_gateway_connect } from "../lib/settings_defaults";
 import { seed_repl_messages_from_history_bundle } from "../lib/history_bundle_seed";
@@ -4685,7 +4686,7 @@ function ConsolePage(props: {
   async function start_voice_ptt_recording(): Promise<void> {
     set_error("");
     if (!can_voice_ptt) {
-      set_error("Voice recording is not supported in this browser (MediaRecorder/getUserMedia unavailable).");
+      set_error(mediaAvailable() ? "Voice recording is not supported in this browser (MediaRecorder unavailable)." : MEDIA_NEEDS_HTTPS);
       return;
     }
     if (voice_ptt_busy) return;

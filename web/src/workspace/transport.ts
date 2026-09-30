@@ -1,4 +1,4 @@
-import { GATEWAY_API_PATH } from "@abstractframework/ui-kit";
+import { GATEWAY_API_PATH, randomId } from "@abstractframework/ui-kit";
 import { GatewayClient, GatewayHttpError } from "../lib/gateway_client";
 
 /** The app proxy's CSRF header (from the session cookie), for mutations. */
@@ -63,8 +63,9 @@ export function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** A v4 UUID; the kit's randomId() also works over plain http (no crypto.randomUUID there). */
 export function newId(): string {
-  return crypto.randomUUID();
+  return randomId();
 }
 
 export async function downloadArtifact(
