@@ -1,4 +1,4 @@
-import { gatewayApiPath } from "@abstractframework/ui-kit";
+import { AfSwitch, gatewayApiPath } from "@abstractframework/ui-kit";
 import React, { useEffect, useMemo, useState } from "react";
 
 import { formatError, gatewayRequest } from "./transport";
@@ -116,6 +116,48 @@ function trustLabel(skill: GatewaySkill): string {
   return `Trust: ${trust}. ${adoption}${skill.requiresReview ? ". Review required" : ""}.`;
 }
 
+/** One skill: a switch labelled by the skill (on = attached to your next turns).
+ * A skill the gateway blocks stays visible, unavailable, with the gateway's reason. */
+export function SkillSwitch({
+  skill,
+  checked,
+  disabled,
+  onChange,
+}: {
+  skill: GatewaySkill;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (next: boolean) => void;
+}): React.ReactElement {
+  const blockedReason = skill.reasons.join(" ") || "Blocked by gateway policy.";
+  const reason = skill.blocked
+    ? `Blocked by the gateway: ${blockedReason}`
+    : disabled
+      ? "Available when a gateway is connected and no run is in progress."
+      : null;
+  return (
+    <div className="code-field code-skill-row">
+      <AfSwitch
+        variant="row"
+        action="skill"
+        label={skill.name}
+        description={
+          <>
+            {skill.description ? <span className="code-skill-row__desc">{skill.description}</span> : null}
+            <span className="code-skill-row__trust">{trustLabel(skill)}</span>
+          </>
+        }
+        checked={checked}
+        unavailableReason={reason}
+        // The panel's own banner already says why settings are locked; only a
+        // skill-specific reason (blocked by the gateway) is repeated per row.
+        reasonVisible={skill.blocked}
+        onChange={onChange}
+      />
+    </div>
+  );
+}
+
 export function SkillsPicker({
   value,
   onChange,
@@ -228,34 +270,15 @@ export function SkillsPicker({
       {!loading && !error && inventory.skills.length && !filtered.length ? (
         <p className="code-muted">No skills match your search.</p>
       ) : null}
-      {filtered.map((skill) => {
-        const blockedReason =
-          skill.reasons.join(" ") || "Blocked by gateway policy.";
-        const checked = selected.has(skill.name);
-        const unavailable = disabled || skill.blocked;
-        return (
-          <label className="code-field" key={skill.name}>
-            <span>
-              <input
-                type="checkbox"
-                checked={checked}
-                disabled={unavailable}
-                onChange={(event) => toggle(skill.name, event.target.checked)}
-              />{" "}
-              <strong>{skill.name}</strong>
-            </span>
-            {skill.description ? (
-              <span className="code-field-help">{skill.description}</span>
-            ) : null}
-            <span className="code-field-help">{trustLabel(skill)}</span>
-            {skill.blocked ? (
-              <span className="code-error-text">
-                Blocked by the gateway: {blockedReason}
-              </span>
-            ) : null}
-          </label>
-        );
-      })}
+      {filtered.map((skill) => (
+        <SkillSwitch
+          key={skill.name}
+          skill={skill}
+          checked={selected.has(skill.name)}
+          disabled={disabled}
+          onChange={(next) => toggle(skill.name, next)}
+        />
+      ))}
     </section>
   );
 }

@@ -109,7 +109,7 @@ export function RunStatusBar({
       {active ? (
         <>
           <button onClick={() => onCommand(paused ? "resume" : "pause")}>
-            {paused ? "Resume" : "Pause"}
+            {paused ? "Resume" : "Pause"} {/* state-toggle-lint: allow one-shot command on the running run (pause/resume the run tree), not a setting */}
           </button>
           <button onClick={() => onCommand("conclude")}>Conclude</button>
         </>

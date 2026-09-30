@@ -89,7 +89,7 @@ them like any other).
 
 | Control | Terminal key | What happens |
 |---|---|---|
-| Pause / Resume | `p` | No scheduled run while paused; resume continues from the next tick. |
+| **Active** switch | `Space` (or `p`) | On: the automation runs on its schedule. Off: paused, no scheduled run; switching it on again continues from the next tick. The switch shows why it cannot change once the automation ended, is archived or is a legacy schedule. |
 | Run now | `g` | One run at once, instead of waiting for the schedule. The schedule does not move: the next scheduled run keeps its time, and if that time comes while this run is still going, the scheduled run starts right after it. It does not count toward a run limit ("stop after this many runs"). Also works while paused (it stays paused). In a Growing automation, later runs see it in their history. Refused while a run is in progress. |
 | Stop current | `x` | Cancels the run in progress. |
 | Revise | `e` | Title, interval (schedules) and context; applies from the next run. In the terminal, a field left empty keeps its current value. |

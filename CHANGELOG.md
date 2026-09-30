@@ -25,6 +25,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web: larger text.** On touch screens (phones and tablets) reading, helper and toolbar text is 14 px and body
   text 15 px; dates, counts and badges stay at 12 px. On desktops nothing is smaller than 12 px, and helper text
   and labels are 13 px. Your font size setting still scales everything.
+- **Web: on/off settings are switches labelled by what they control.** Every setting that is either on or
+  off uses the kit's switch (ui-kit 0.3.3): highlighted with a check mark and bold label when on, plain when
+  off, and dimmed with the reason when it cannot change right now. It applies at once; there is nothing to
+  save.
+  - Toolbar: "Show all workflows" (shown as "All" on phones). While no gateway is connected or a run is in
+    progress, the switch says why it cannot change.
+  - Composer queue: "Run queued turns" replaces the "Pause queue" / "Resume queue" button.
+  - Automations: each automation's "Active" switch replaces the Pause / Resume buttons (on = runs on its
+    schedule, off = paused). Once the automation ended, is archived or is a legacy schedule, the switch shows
+    why it cannot change. The sidebar's "Show archived" filter is a switch too.
+  - Run settings: each skill is a switch named after the skill. A skill the gateway blocks stays listed, with
+    the gateway's reason. Tools and "Email me the result" in Schedule a task follow the kit's switches.
+  - One-shot actions stay buttons: pausing or resuming the running run, Conclude, Revoke, and the spoken-reply
+    playback control.
+- **Tests:** `src/ui/state_toggles.test.ts` runs the kit's `findVerbToggleLabels` check over every source
+  file, and `src/workspace/state_switches.test.tsx` checks each switch in both states.
+  `e2e/state_toggles.shots.mjs` captures the switch surfaces at desktop, tablet and phone widths, in light
+  and dark, and records any label above 15 px or heavier than 600.
 
 ### Added
 - **Web: folding lists in the automation detail.** "Occurrences" and the folder ("Automation folder", or "Run #N

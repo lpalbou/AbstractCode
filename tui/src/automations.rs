@@ -803,6 +803,76 @@ pub fn control_state(s: &Summary, control: Control, busy: bool) -> Result<(), St
 }
 
 // ---------------------------------------------------------------------------
+// The "Active" switch (state-toggles contract §4)
+// ---------------------------------------------------------------------------
+//
+// An automation's schedule is a persistent on/off state, so it is ONE switch
+// labelled by the feature ("Active": on = runs on its schedule, off =
+// paused), never a Pause/Resume verb pair. Switching sends automation.pause
+// or automation.resume (the kit's `activeToggleCommand`); it is unavailable,
+// with the reason, once the automation ended, is archived or legacy, while a
+// command is in flight, or without the transition's capability.
+
+/// The switch's feature name, from the kit's shared spec (`labels.active`).
+pub fn active_label() -> &'static str {
+    spec_str(&["labels", "active"])
+}
+
+/// The command the Active switch sends from this state: pause when active,
+/// resume otherwise (the kit's `activeToggleCommand`).
+pub fn active_command(s: &Summary) -> Control {
+    if s.status == "active" {
+        Control::Pause
+    } else {
+        Control::Resume
+    }
+}
+
+/// `Ok(on)` when the Active switch can change now, else `Err(reason)`.
+pub fn active_switch(s: &Summary, busy: bool) -> Result<bool, String> {
+    if s.legacy {
+        return Err("Legacy schedule: managed with its existing controls.".into());
+    }
+    if s.status == "archived" {
+        return Err("Archived: history is kept, nothing runs.".into());
+    }
+    if s.status != "active" && s.status != "paused" {
+        return Err("The automation has ended.".into());
+    }
+    if busy {
+        return Err("Working…".into());
+    }
+    let cap = active_command(s).capability();
+    if !s.capabilities.iter().any(|c| c == cap) {
+        return Err("Not permitted for this automation.".into());
+    }
+    Ok(s.status == "active")
+}
+
+/// What the Active switch row says after the feature name.
+pub fn active_detail(s: &Summary, busy: bool) -> String {
+    match active_switch(s, busy) {
+        Ok(true) => "runs on its schedule".into(),
+        Ok(false) => "paused: scheduled runs are skipped (Run now still works)".into(),
+        Err(why) => why,
+    }
+}
+
+/// The state sentence after a switch was applied (describes the NEW state).
+pub fn active_notice(command_type: &str, duplicate: bool) -> Option<String> {
+    let state = match command_type {
+        "automation.pause" => "Active is off: scheduled runs are skipped.",
+        "automation.resume" => "Active is on: it runs on its schedule.",
+        _ => return None,
+    };
+    Some(if duplicate {
+        format!("{state} (the gateway answered the retry as a duplicate)")
+    } else {
+        state.to_string()
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Occurrences as chat pairs
 // ---------------------------------------------------------------------------
 
@@ -1729,6 +1799,48 @@ mod tests {
             Err("Already paused.".into())
         );
         assert_eq!(control_state(&paused, Control::Resume, false), Ok(()));
+    }
+
+    #[test]
+    fn active_switch_is_the_schedule_state_and_says_why_it_cannot_change() {
+        let active = summary("active", false, ALL);
+        let paused = summary("paused", false, ALL);
+        assert_eq!(active_switch(&active, false), Ok(true));
+        assert_eq!(active_switch(&paused, false), Ok(false));
+        assert_eq!(active_command(&active), Control::Pause);
+        assert_eq!(active_command(&paused), Control::Resume);
+        assert_eq!(active_switch(&active, true), Err("Working…".into()));
+        let archived = summary("archived", false, ALL);
+        assert_eq!(
+            active_switch(&archived, false),
+            Err("Archived: history is kept, nothing runs.".into())
+        );
+        let ended = summary("completed", false, ALL);
+        assert_eq!(
+            active_switch(&ended, false),
+            Err("The automation has ended.".into())
+        );
+        let mut legacy = summary("active", false, ALL);
+        legacy.legacy = true;
+        assert!(active_switch(&legacy, false)
+            .unwrap_err()
+            .starts_with("Legacy schedule"));
+        // The transition's own capability decides (resume for a paused one).
+        let no_resume = summary("paused", false, &["pause", "run_now"]);
+        assert_eq!(
+            active_switch(&no_resume, false),
+            Err("Not permitted for this automation.".into())
+        );
+        assert_eq!(
+            active_notice("automation.pause", false).as_deref(),
+            Some("Active is off: scheduled runs are skipped.")
+        );
+        assert_eq!(
+            active_notice("automation.resume", false).as_deref(),
+            Some("Active is on: it runs on its schedule.")
+        );
+        assert_eq!(active_notice("automation.run_now", false), None);
+        assert_eq!(active_label(), "Active");
     }
 
     #[test]

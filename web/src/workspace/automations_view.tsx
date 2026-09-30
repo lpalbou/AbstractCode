@@ -15,6 +15,7 @@ import { PanelHeader, panelIds } from "./sidebar_panels";
 import { DetailDisclosure, detailPanelIds, useDetailPanels, useTimelineSlot, type DetailPanelsState } from "./detail_panels";
 import {
   AfScheduleDialog,
+  AfSwitch,
   AutomationStateLabel,
   Icon,
   apiErrorText,
@@ -160,9 +161,14 @@ export function AutomationsSection(props: {
           );
         })}
         {archived > 0 ? (
-          <label className="code-auto-archived">
-            <input type="checkbox" data-action="show-archived" checked={st.showArchived} onChange={(e) => props.onShowArchived(e.target.checked)} /> Show archived ({archived})
-          </label>
+          <AfSwitch
+            className="code-auto-archived"
+            variant="sm"
+            action="show-archived"
+            label={`Show archived (${archived})`}
+            checked={st.showArchived}
+            onChange={props.onShowArchived}
+          />
         ) : null}
       </div>
     </section>
