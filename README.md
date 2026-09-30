@@ -66,7 +66,8 @@ for credentials, remote gateways, and first-run configuration.
   gateway supports live replies (**Stream replies** setting, `/stream`).
 - **Workspace files** — browse and preview the files a run works on, with their
   absolute path on the gateway host (the **Files** tab, `/files`).
-- **Automations** — run a workflow on a schedule, then pause, run now, revise,
+- **Automations** — run a workflow on a schedule (or, in the browser, when an
+  email arrives, with the result emailed to you), then pause, run now, revise,
   archive, answer its approvals, browse its folder, and discuss any run as a new
   conversation (the **Automations** sidebar section, `/automations`,
   `/schedule`).

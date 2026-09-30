@@ -5,7 +5,7 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [web 0.7.0] - Unreleased
+## [web 0.7.0] - 2026-09-30
 
 ### Added
 - **Web: email automations** (framework backlog 0992 WP6). The New automation dialog (the kit's
@@ -20,11 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **e2e: `e2e/email_automations.spec.ts`** against the fixture gateway run with the email branches: the
   not-set-up state, and an email-triggered automation created from the dialog whose stored definition carries
   the filters and allowed recipients (a fixture account stored with `test: false`, pointing at a refused
-  loopback port; `example.test` addresses only). Its third test (Email me the result) needs AbstractGateway to
-  accept `notify` in `POST /api/gateway/automations`.
+  loopback port; `example.test` addresses only). Its third test (Email me the result) needs AbstractGateway 0.8.0,
+  which accepts `notify` in `POST /api/gateway/automations`.
 
 ### Changed
-- **Web: requires `@abstractframework/ui-kit` 0.2.0 and `@abstractframework/panel-chat` 0.1.21.**
+- **Web: requires `@abstractframework/ui-kit` 0.2.0 and `@abstractframework/panel-chat` 0.1.21.** The email
+  options need AbstractGateway 0.8.0 or later (per-user email).
 - **TUI assets:** `tui/assets/automation_controls.json` is again byte-identical to the kit's (it gained the
   `email` wording section; the terminal client does not use it yet).
 
