@@ -44,8 +44,8 @@
   "devDependencies": {
     "@abstractframework/monitor-flow": "^0.1.9",
     "@abstractframework/monitor-gpu": "^0.1.10",
-    "@abstractframework/panel-chat": "file:vendor/abstractframework-panel-chat-0.2.0.tgz",
-    "@abstractframework/ui-kit": "file:vendor/abstractframework-ui-kit-0.3.0.tgz",
+    "@abstractframework/panel-chat": "file:vendor/abstractframework-panel-chat-0.2.1.tgz",
+    "@abstractframework/ui-kit": "file:vendor/abstractframework-ui-kit-0.3.1.tgz",
     "@monaco-editor/react": "^4.6.0",
     "@playwright/test": "^1.63.0",
     "@types/react": "^18.2.48",
