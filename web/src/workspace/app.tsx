@@ -1743,6 +1743,9 @@ export function CodeWorkspace() {
         className="code-settings-drawer"
       >
         <div className="code-settings">
+          {/* The drawer keeps its content mounted: without a session the voice catalog
+              request can only answer 401 (it was the console error on the sign-in screen). */}
+          {connection.connected ? (
           <VoiceSettings
             value={voicePreferences}
             onChange={(next) => {
@@ -1755,6 +1758,7 @@ export function CodeWorkspace() {
               )
             }
           />
+          ) : null}
         </div>
       </AfDrawer>
       <AfAppearanceDialog

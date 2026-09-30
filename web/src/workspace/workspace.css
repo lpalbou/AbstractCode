@@ -2004,7 +2004,7 @@ select option {
     padding: 6px 12px 4px;
   }
   .code-conversation .pc-composer__textarea {
-    min-height: 0;
+    min-height: var(--tap-min, 32px);
     padding-bottom: 4px;
   }
   .code-run-strip {
@@ -2166,6 +2166,7 @@ select option {
   }
   /* "Review full tool arguments" is the only way into the call's JSON: a full-height row. */
   .code-conversation .pc-approval-summary summary {
+    min-height: var(--tap-min, 44px);
     padding-block: 13px;
   }
 }
