@@ -2141,6 +2141,10 @@ select option {
   .code-conversation .pc-workflow-chat__stop {
     min-height: var(--tap-min, 44px);
   }
+  /* The app's 14 px composer field must not undo the kit's 16 px touch rule (iOS focus zoom). */
+  .code-conversation .pc-composer__textarea {
+    font-size: var(--font-size-input, 16px);
+  }
   /* "Review full tool arguments" is the only way into the call's JSON: a full-height row. */
   .code-conversation .pc-approval-summary summary {
     padding-block: 13px;
