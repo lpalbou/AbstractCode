@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Narrow composers (phones, narrow panes) put their icons on one row and the destination select, Stop and
     Send on the next; the keyboard-hint footer is hidden on phones.
   - The automation detail adapts to its own pane width (container query), not to the viewport.
+  - One Escape closes one layer: with Run settings or a dialog open over the navigation drawer, the drawer
+    stays open. Below 1440 px at most two panes dock: the workspace inspector opens as an overlay from 1024 to
+    1439 px, folds when the window leaves 1440+ and returns there as the user left it.
+  - While the on-screen keyboard is up (`--keyboard-inset` > 0) the top bar, toolbar, run strip and status bar
+    step aside and the composer field is capped at 30 % of the visible height; at 320 px the composer keeps two
+    control rows. Kit drawers open under the measured app chrome (`topOffset`).
   - Touch devices: 44 px targets and 16 px inputs (no iOS focus zoom), shortcut hints hidden, file actions
     visible without hover; the toolbar and composer selects draw their own chevron on touch so iOS Safari keeps
     the 44 px box.
@@ -32,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The shell sizes to the visible viewport (`installViewportVars()` from the kit, iOS keyboard aware) and pads
     the safe areas; the viewport meta no longer blocks pinch zoom (`maximum-scale=1, user-scalable=no` removed).
   - Very wide windows: the side panes grow (`clamp()`), the chat column stays capped for line length.
-- **Web: requires `@abstractframework/ui-kit` 0.3.1 and `@abstractframework/panel-chat` 0.2.1** (responsive
+- **Web: requires `@abstractframework/ui-kit` 0.3.2 and `@abstractframework/panel-chat` 0.2.1** (responsive
   kit), consumed from `web/vendor/*.tgz` on this branch until they are published (relock to the registry
   before release).
 
