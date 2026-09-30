@@ -5,54 +5,43 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [web 0.8.0] - Unreleased
-
-### Changed
-- **Web: responsive layout** (responsive workstream 2026-09-30; shared design `untracked/responsive/DESIGN.md`).
-  The app adapts to phones (portrait and landscape), tablets, narrow and very wide windows, and re-flows both
-  ways on a live resize. Desktop windows (1440 px and wider) keep the three docked panes and today's look.
-  - Breakpoints are the framework's named ones (480 / 768 / 1024 / 1440 px, plus a 500 px height for phone
-    landscape) instead of 1500 / 1200 / 1020 / 900 / 760 / 480.
-  - Below 1024 px the conversation sidebar and the workspace inspector are overlay drawers (scrim, Escape,
-    close button, focus moves in and back; a closed drawer is `inert`). From 1024 to 1439 px the inspector is a
-    toggle that starts closed (two docked panes at most); it opens by default only from 1440 px.
-  - The toolbar's controls no longer draw over each other on tablets and narrow windows: every item shrinks
-    with an ellipsis and the toolbar wraps below 1024 px. Model / Inputs / Tools keep their accessible names
-    when their labels are hidden.
-  - Phone landscape: one row of chrome (menu, workflow toolbar, app actions), no status bar, compact composer:
-    the transcript goes from 56 px to about 200 px at 852x393.
-  - Narrow composers (phones, narrow panes) put their icons on one row and the destination select, Stop and
-    Send on the next; the keyboard-hint footer is hidden on phones.
-  - The automation detail adapts to its own pane width (container query), not to the viewport.
-  - One Escape closes one layer: with Run settings or a dialog open over the navigation drawer, the drawer
-    stays open. Below 1440 px at most two panes dock: the workspace inspector opens as an overlay from 1024 to
-    1439 px, folds when the window leaves 1440+ and returns there as the user left it.
-  - While the on-screen keyboard is up (`--keyboard-inset` > 0) the top bar, toolbar, run strip and status bar
-    step aside and the composer field is capped at 30 % of the visible height; at 320 px the composer keeps two
-    control rows. Kit drawers open under the measured app chrome (`topOffset`).
-  - Touch devices: 44 px targets and 16 px inputs (no iOS focus zoom), shortcut hints hidden, file actions
-    visible without hover; the toolbar and composer selects draw their own chevron on touch so iOS Safari keeps
-    the 44 px box.
-  - No voice-catalog request before sign-in (the always-mounted voice drawer produced two 401 console errors
-    on the sign-in screen).
-  - The shell sizes to the visible viewport (`installViewportVars()` from the kit, iOS keyboard aware) and pads
-    the safe areas; the viewport meta no longer blocks pinch zoom (`maximum-scale=1, user-scalable=no` removed).
-  - Very wide windows: the side panes grow (`clamp()`), the chat column stays capped for line length.
-- **Web: requires `@abstractframework/ui-kit` 0.3.2 and `@abstractframework/panel-chat` 0.2.1** (responsive
-  kit), consumed from `web/vendor/*.tgz` on this branch until they are published (relock to the registry
-  before release).
+## [web 0.8.0] - 2026-09-30
 
 ### Added
-- **Web: collapsible sidebar panels.** "Automations" and "Conversations" in the left navigation (docked
-  sidebar, tablet overlay and phone drawer alike) are disclosure panels: the header is a toggle button
-  (`aria-expanded` / `aria-controls`, chevron), the "+" and refresh actions stay separate buttons; open panels
-  share the height and scroll on their own, a collapsed panel folds to its header and the other takes the freed
-  height. Both open by default; remembered per viewer in `localStorage` (`abstractcode.sidebar.panels`), blocked
-  or invalid storage falls back to both open. 32 px toggles on desktop, 44 px on touch.
-- **e2e: `e2e/responsive.screens.mjs`**, the screens module for the shared responsive capture harness (sign-in,
-  conversation, approval, automations, automation form, automation detail, workspace, settings, about, collapsed
-  sidebar) against
-  the fixture gateway.
+- **Web: responsive layout.** AbstractCode Web adapts to phones (portrait and landscape), tablets, laptop
+  windows of any width and very wide screens, and re-flows as you resize the window. Windows 1440 px and wider
+  keep three docked panes (conversations, conversation, workspace) and the familiar desktop look.
+  - Below 1024 px the conversation sidebar and the workspace inspector open as drawers from the header
+    (close them with Escape, the backdrop or their close button). From 1024 to 1439 px the sidebar stays docked
+    and the workspace inspector opens as an overlay; back at 1440 px and wider it returns docked if you left it
+    open. One Escape closes one layer.
+  - The toolbar wraps on narrow windows and becomes a single row on phones; icon-only buttons keep their
+    names for assistive technologies.
+  - Dialogs (sign-in, Schedule a task, appearance, About) become bottom sheets on phones and in phone
+    landscape, with their actions always visible.
+  - Phone landscape uses one thin row of chrome and a compact composer so the conversation keeps the height.
+  - The composer adapts to its width: on phones its icons sit on one row and the destination, Stop and Send on
+    the next. While the on-screen keyboard is up, the header, toolbar, run strip and status bar step aside and
+    the message field is limited to 30 % of the visible height.
+  - Touch devices get 44 px targets and 16 px text fields (iOS does not zoom when you focus a field); keyboard
+    shortcut hints are hidden and file actions show without hover.
+  - The layout fits the visible viewport and the safe areas of notched phones, and pinch zoom is allowed.
+  - The automation detail switches between one and two columns according to the room it has.
+- **Web: collapsible sidebar panels.** "Automations" and "Conversations" in the left navigation (docked sidebar,
+  tablet overlay and phone drawer) are collapsible. Click a section header to fold or unfold it; its "+" and
+  refresh buttons keep their own action. Open panels share the height and scroll independently; a folded panel
+  gives its space to the other. Both start open, and your choice is remembered in this browser
+  (`localStorage` key `abstractcode.sidebar.panels`).
+- **e2e: `e2e/responsive.screens.mjs`**, a screens module that drives sign-in, conversation, approval,
+  automations, the Schedule a task dialog, automation detail, workspace, settings, About and the collapsed
+  sidebar against the fixture gateway, for screenshot and layout checks at several screen sizes.
+
+### Changed
+- **Web: requires `@abstractframework/ui-kit` 0.3.2 and `@abstractframework/panel-chat` 0.2.1**, which provide
+  the responsive tokens, sheets, drawers and touch sizes the app builds on.
+
+### Fixed
+- **Web:** the sign-in screen makes no voice-catalog request before you are signed in.
 
 ## [web 0.7.0] - 2026-09-30
 
@@ -92,7 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **e2e: two devices, one gate.** `e2e/approval_sync.spec.ts` starts the fixture's new "Delegated tool
   approval" flow (root → subflow → write_file) in one browser context and opens the conversation in a second
   one: both show the card, "Approval needed" and a waiting composer; a Deny in the second settles the run in
-  the first. Red before panel-chat 0.1.20.
+  the first.
 
 ## [web 0.6.1] - 2026-09-28
 

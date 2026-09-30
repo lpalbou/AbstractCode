@@ -27,6 +27,11 @@ workflow chat. It builds without a sibling checkout: the shared
 `@abstractframework/*` components install from npm like any other dependency,
 at the ranges declared in `package.json`.
 
+The interface adapts to phones, tablets, laptop windows and wide screens: side
+panes become drawers below 1024 px, dialogs become bottom sheets on phones,
+and touch devices get 44 px targets. See
+[responsive layout](../docs/web.md#responsive-layout).
+
 Docs:
 - Web overview: [`../docs/web.md`](../docs/web.md)
 - Deployment: [`../docs/deployment-web.md`](../docs/deployment-web.md)

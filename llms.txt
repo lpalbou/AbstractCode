@@ -51,9 +51,9 @@ Ground rules for reading this repository:
 ## Browser client
 
 - [Browser client README](web/README.md): running it, configuration, credential handling
-- [Web overview](docs/web.md): workflow selection with the gateway default, the conversation Files tab, Stream replies, MTP and other settings, the About dialog, approvals, workspace policy, and optional voice
+- [Web overview](docs/web.md): workflow selection with the gateway default, the conversation Files tab, the responsive layout (drawers below 1024 px, bottom sheets and 44 px touch targets on phones, keyboard-aware composer) and collapsible Automations / Conversations sections, Stream replies, MTP and other settings, the About dialog, approvals, workspace policy, and optional voice
 - [Web deployment](docs/deployment-web.md): hosting it behind HTTPS, reverse proxies, forwarded client addresses
-- [iPhone notes](docs/deployment-iphone.md): Safari and progressive web app behavior
+- [iPhone notes](docs/deployment-iphone.md): Safari and progressive web app behavior, and how the interface adapts to the phone
 
 ## Policies
 

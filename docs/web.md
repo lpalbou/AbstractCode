@@ -14,7 +14,7 @@ Start with [getting started](getting-started.md). For hosting and authentication
 - **Activity** shows durable workflow steps and tool arguments/results.
 - **Artifacts** downloads files stored with the selected run.
 
-Use the appearance control in the header to choose an AbstractUIC theme. The **About** button next to it shows this app's version, the AbstractFramework links (website, source, documentation, issues, feedback), and the versions your gateway reports; when the gateway cannot answer, it shows "Gateway: unavailable" with the HTTP status. On narrow screens, conversation navigation and the inspector open on demand.
+Use the appearance control in the header to choose an AbstractUIC theme. The **About** button next to it shows this app's version, the AbstractFramework links (website, source, documentation, issues, feedback), and the versions your gateway reports; when the gateway cannot answer, it shows "Gateway: unavailable" with the HTTP status. The layout adapts to the screen you use; see [Responsive layout](#responsive-layout).
 
 MTP depth is independent of reasoning. Leave it on **Inherit** to follow workflow and
 execution-host defaults, choose **Off** to send an explicit `false`, or request an advertised
@@ -23,6 +23,27 @@ and saved unavailable choices stay visible. An explicit depth sets `require_acce
 so the host must honor it or report an error. The browser saves this preference locally and
 sends it as `_runtime.speculation`; it does not load models, download heads, or change the
 shared Core default. Fresh Core configurations use depth 2 only for compatible models.
+
+## Responsive layout
+
+AbstractCode Web works on phones, tablets, laptop windows and wide screens, and re-flows as you resize the window.
+
+| Width | Layout |
+|---|---|
+| 1440 px and wider (laptops, external displays) | Three docked panes: conversations and automations on the left, the conversation, the workspace inspector on the right. |
+| 1024 to 1439 px (smaller laptop windows, iPad landscape) | The left sidebar stays docked; the workspace inspector opens as an overlay from its header button. If you had it open at 1440 px or wider, it returns docked when the window is wide again. |
+| Below 1024 px (tablets in portrait, narrow windows, phones) | The conversation uses the full width. The menu button opens conversations and automations as a drawer; the workspace button opens the inspector as a drawer. Close a drawer with Escape, a tap on the dimmed backdrop, or its close button. |
+
+- **Phones.** The toolbar fits one row (the model is chosen in **Settings**), dialogs such as sign-in, **Schedule a task**, appearance and **About** open as bottom sheets with their buttons always visible, and the composer shows its icons on one row and the destination, **Stop** and **Send** on the next.
+- **Phone landscape.** The header and toolbar share one thin row and the status bar is hidden, so the conversation keeps most of the height.
+- **On-screen keyboard.** While you type, the header, toolbar, run strip and status bar step aside and the message field is limited to about 30 % of the visible height; they return when the keyboard closes.
+- **Touch.** Buttons and list rows are at least 44 px tall and text fields use 16 px text, so iOS does not zoom when you focus one. Keyboard shortcut hints are hidden on touch-only devices, and file actions show without hover.
+- **Zoom and notches.** Pinch zoom is allowed, and the layout respects the safe areas of notched phones.
+- **Escape.** One press closes the topmost layer only: with **Settings** or a dialog open over the navigation drawer, the drawer stays open.
+
+### Collapsible sidebar sections
+
+The **Automations** and **Conversations** sections of the left navigation (docked sidebar, overlay or phone drawer) fold and unfold when you click their header. The **+** and refresh buttons next to a header keep their own action. Open sections share the height and scroll independently; a folded section gives its space to the other. Both start open, and your choice is remembered in this browser (`localStorage`, key `abstractcode.sidebar.panels`); if the browser blocks storage, both sections simply start open.
 
 ## Stream replies
 
