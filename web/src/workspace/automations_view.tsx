@@ -161,6 +161,8 @@ export type AutomationHost = {
   openConversation(sessionId: string, runId: string, notice?: string): void;
   /** Open an occurrence run as a conversation (its session is read from the gateway). */
   openRun(runId: string): void;
+  /** Open the gateway console's My email (absent when the gateway URL is unknown). */
+  openMyEmail?(): void;
 };
 
 /** The kit panel's props for the selected automation (null when nothing is open). */
@@ -190,6 +192,9 @@ export function automationPanelProps(ctl: AutomationsController, host: Automatio
     onOpenRun: (runId) => host.openRun(runId),
     onOpenWorkspace: (runId) => host.openWorkspace(runId),
     onAnswerWait: (runId, waitKey, payload) => ctl.answerWait(runId, waitKey, payload as Record<string, any>),
+    // The Edit form offers the email options only with a usable account.
+    emailStatus: ctl.state.emailStatus,
+    ...(host.openMyEmail ? { onOpenMyEmail: () => host.openMyEmail?.() } : {}),
   };
 }
 
@@ -274,10 +279,15 @@ export function NewAutomationDialog(props: {
   initialPrompt: string;
   ctl: AutomationsController;
   onCreated(id: string): void;
+  /** Opens the gateway console's My email ("Email isn't set up — open My email"). */
+  onOpenMyEmail?: () => void;
 }): React.ReactElement | null {
   const [error, setError] = useState<ApiError | undefined>();
   useEffect(() => {
-    if (props.open) setError(undefined);
+    if (!props.open) return;
+    setError(undefined);
+    // Fresh email status each time the dialog opens (the user may have just connected their mailbox).
+    void props.ctl.loadEmailStatus();
   }, [props.open]);
   return (
     <AfScheduleDialog
@@ -290,6 +300,8 @@ export function NewAutomationDialog(props: {
         </p>
       }
       initialPrompt={props.initialPrompt}
+      emailStatus={props.ctl.state.emailStatus}
+      onOpenMyEmail={props.onOpenMyEmail}
       busy={props.ctl.state.busy}
       error={error}
       onSubmit={(body) =>

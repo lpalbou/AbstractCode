@@ -5,6 +5,29 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [web 0.7.0] - Unreleased
+
+### Added
+- **Web: email automations** (framework backlog 0992 WP6). The New automation dialog (the kit's
+  `AfScheduleDialog`, `@abstractframework/ui-kit` 0.2.0) offers **When an email arrives** (typed filters:
+  from these addresses / domains, sent to these addresses, subject contains, attachments; the check interval,
+  hourly by default for a model, never under 60 s, with the rule shown; at most N emails per run), **Email me
+  the result** (`notify.channels`) and **May send email without asking to: Only me / Me and these addresses**
+  (`policy.email_allowed_recipients`). The app reads `GET /api/gateway/me/email` with every list refresh and
+  when the dialog opens; without a usable account the options are off and the dialog says "Email isn't set up
+  — open My email", which opens the gateway console's Users tab (`<gateway>/console#users`) in a new tab. The
+  automation panel's Edit form and Definition card show the same fields.
+- **e2e: `e2e/email_automations.spec.ts`** against the fixture gateway run with the email branches: the
+  not-set-up state, and an email-triggered automation created from the dialog whose stored definition carries
+  the filters and allowed recipients (a fixture account stored with `test: false`, pointing at a refused
+  loopback port; `example.test` addresses only). Its third test (Email me the result) needs AbstractGateway to
+  accept `notify` in `POST /api/gateway/automations`.
+
+### Changed
+- **Web: requires `@abstractframework/ui-kit` 0.2.0 and `@abstractframework/panel-chat` 0.1.21.**
+- **TUI assets:** `tui/assets/automation_controls.json` is again byte-identical to the kit's (it gained the
+  `email` wording section; the terminal client does not use it yet).
+
 ## [web 0.6.2] - 2026-09-29
 
 ### Fixed

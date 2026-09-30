@@ -50,6 +50,7 @@ tool approval. The workflow is the one you already selected:
 | When (UTC) | every 5 or 30 minutes, every hour, 8 hours, 24 hours or 7 days, every N minutes/hours/days, or once at a date and time. The first run starts at once. |
 | Context | **Independent** — each run starts fresh. **Growing** — each run is the next turn of one conversation and sees the previous runs, within the gateway's history window. |
 | Tools | **Run without asking** — tools run without asking (you approve them now by creating this automation). **Ask me before each tool call** — every tool call waits for your approval. Questions a workflow asks always wait for you. |
+| Email (browser) | **When an email arrives** (a When choice), **Email me the result** and **May send email without asking to** — see [Email automations](#email-automations-browser). |
 
 **Terminal.** `/schedule [task]` opens four steps: the task (default: your
 last prompt, or the text after `/schedule`), when, context, tools. Enter on
@@ -58,6 +59,31 @@ the last step creates it and opens it.
 **Browser.** Select **+** in the **Automations** section of the sidebar. The
 dialog names the workflow it runs (the toolbar's workflow); **Advanced** holds
 the title, the first run time, "stop after this many runs" and "stop at".
+
+### Email automations (browser)
+
+When your gateway account has a working mailbox (the gateway console's
+**My email**, in its Users tab), the browser dialog also offers:
+
+- **When an email arrives** — the automation runs on new mail in your inbox
+  instead of on a schedule. Optional filters: from these addresses, from these
+  domains, sent to these addresses, subject contains, attachments. It checks for
+  new mail once an hour by default (an automation that runs a model), never more
+  often than every 60 seconds, and handles at most 100 emails per run by
+  default (the rest wait for the next run). Each email is read once; mail that
+  arrived before the automation existed, or while it was paused, is skipped.
+  Incoming mail is data, never instructions: link-opening tools always ask.
+- **Email me the result** — a run that notifies you, or fails for good, is also
+  emailed to you.
+- **May send email without asking to** — **Only me** (the default) or **Me and
+  these addresses**. Mail to anyone else waits for your approval.
+
+Without a usable mailbox these options are off and the dialog says **"Email
+isn't set up — open My email"**; the link opens the gateway console in a new
+tab. The automation's **Edit** form changes the check interval, Email me the
+result and the allowed addresses; its **Definition** card lists them. The
+terminal client does not create email automations yet (it lists and manages
+them like any other).
 
 ## Managing an automation
 

@@ -7,6 +7,7 @@ import type { AutomationSummary, AutomationsClient, OccurrenceRow } from "@abstr
 
 import {
   AutomationsController,
+  myEmailConsoleUrl,
   automationRowView,
   automationTarget,
   automationsAvailability,
@@ -15,7 +16,7 @@ import {
   waitAnswerPayload,
   waitResumeCommand,
 } from "./automations";
-import { AutomationsSection, automationPanelProps, folderRefreshKey, folderTitle } from "./automations_view";
+import { AutomationsSection, NewAutomationDialog, automationPanelProps, folderRefreshKey, folderTitle } from "./automations_view";
 
 // The ui-kit's canonical wire fixtures, vendored byte-identical (checksums
 // verified by the terminal client's contract test in this repo).
@@ -152,6 +153,10 @@ function stubClient(overrides: Partial<AutomationsClient> = {}): AutomationsClie
       return { attention_cursor: c };
     }),
     listAttention: vi.fn(async () => ({ items: [], next_cursor: null })),
+    getMyEmail: vi.fn(async () => {
+      calls.push("me/email");
+      return { configured: true, enabled: true, admin_enabled: true, effective_enabled: true };
+    }),
     ...overrides,
   };
   return Object.assign(client, { calls });
@@ -254,5 +259,73 @@ describe("the sidebar section", () => {
     );
     expect(html).toContain('data-unavailable="true"');
     expect(html).toContain("does not advertise the Automations API");
+  });
+});
+
+describe("email automations (framework backlog 0992 WP6)", () => {
+  it("reads GET /me/email with the list, and an unreadable answer counts as not set up", async () => {
+    const client = stubClient();
+    const ctl = new AutomationsController(client, vi.fn(), []);
+    await ctl.refresh();
+    expect(client.calls).toContain("me/email");
+    expect(ctl.state.emailStatus?.effective_enabled).toBe(true);
+    const failing = stubClient({ getMyEmail: vi.fn(async () => Promise.reject({ status: 403, code: "email_principal_refused", message: "no" })) });
+    const ctl2 = new AutomationsController(failing, vi.fn(), []);
+    await ctl2.refresh();
+    expect(ctl2.state.emailStatus).toBeNull();
+    expect(ctl2.state.listError).toBeNull();
+  });
+
+  it("opens My email in the gateway console's Users tab", () => {
+    expect(myEmailConsoleUrl("http://127.0.0.1:18850")).toBe("http://127.0.0.1:18850/console#users");
+    expect(myEmailConsoleUrl("https://gw.example.test/prefix/")).toBe("https://gw.example.test/prefix/console#users");
+    expect(myEmailConsoleUrl("")).toBeNull();
+    expect(myEmailConsoleUrl("not a url")).toBeNull();
+  });
+
+  const dialog = (ctl: AutomationsController, onOpenMyEmail?: () => void) =>
+    renderToStaticMarkup(
+      <NewAutomationDialog open onClose={() => {}} target={{ flow_id: "@default", interface: "abstractcode.agent.v1" }} workflowLabel="the agent" initialPrompt="Summarise new mail" ctl={ctl} onCreated={() => {}} onOpenMyEmail={onOpenMyEmail} />,
+    );
+
+  it("the New automation dialog offers When an email arrives only with a usable account", async () => {
+    const ctl = new AutomationsController(stubClient(), vi.fn(), []);
+    await ctl.refresh();
+    const ok = dialog(ctl, () => {});
+    expect(ok).toMatch(/<input type="radio" name="[^"]+" value="email"\/> When an email arrives/);
+    expect(ok).toContain('name="notify_email"');
+    expect(ok).not.toContain('data-email-setup="missing"');
+    const none = new AutomationsController(stubClient({ getMyEmail: vi.fn(async () => ({ configured: false, effective_enabled: false })) }), vi.fn(), []);
+    await none.refresh();
+    const html = dialog(none, () => {});
+    expect(html).toMatch(/disabled="" value="email"\/> When an email arrives/);
+    expect(html).toContain("Email isn&#x27;t set up — ");
+    expect(html).toContain('data-action="open-my-email"');
+  });
+
+  it("hands the email status and My email to the panel's Edit form", async () => {
+    const ctl = new AutomationsController(stubClient(), vi.fn(), []);
+    await ctl.refresh();
+    await ctl.select(INBOX);
+    const openMyEmail = vi.fn();
+    const props = automationPanelProps(ctl, { openConversation: vi.fn(), openRun: vi.fn(), openWorkspace: vi.fn(), openMyEmail })!;
+    expect(props.emailStatus?.effective_enabled).toBe(true);
+    props.onOpenMyEmail?.();
+    expect(openMyEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the dialog's email body unchanged", async () => {
+    const client = stubClient();
+    const ctl = new AutomationsController(client, vi.fn(), []);
+    const body = {
+      request_id: "rid-e",
+      title: "Invoices",
+      target: { flow_id: "@default" as const, interface: "abstractcode.agent.v1", input_data: { prompt: "Summarise invoices" } },
+      trigger: { source_id: "email.received", source_version: 1, config: { uses_model: true, every: "1h", max_batch: 100, filter: { from_domain_in: ["example.test"] } } },
+      policy: { tool_approval: "auto" as const, email_allowed_recipients: ["self", "boss@example.test"] },
+      notify: { channels: ["console" as const, "email" as const] },
+    };
+    await ctl.create(body);
+    expect(client.createAutomation).toHaveBeenCalledWith(body);
   });
 });

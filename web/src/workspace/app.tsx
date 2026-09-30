@@ -49,7 +49,7 @@ import {
 } from "./settings_panel";
 import { WorkspaceInspector, type InspectorTab } from "./workspace_panels";
 import { aboutExtraRows, type FetchOutcome } from "./about_rows";
-import { automationTarget, automationsAvailability } from "./automations";
+import { automationTarget, automationsAvailability, myEmailConsoleUrl } from "./automations";
 import {
   AutomationMain,
   AutomationsSection,
@@ -390,9 +390,18 @@ export function CodeWorkspace() {
     currentSession?.prompt ||
     messages.find((m) => m.role === "user")?.content ||
     "New conversation";
+  // "Email isn't set up — open My email": the gateway console's Users tab,
+  // in a new tab (the console has its own sign-in).
+  const myEmailUrl = myEmailConsoleUrl(connection.status?.gateway_url);
+  const openMyEmail = myEmailUrl
+    ? () => {
+        window.open(myEmailUrl, "_blank", "noopener,noreferrer");
+      }
+    : undefined;
   // Automations open gateway sessions here: a Discuss fork becomes THIS
   // app's conversation (one session pool for every client).
   const automationHost: Omit<AutomationHost, "openWorkspace"> = {
+    ...(openMyEmail ? { openMyEmail } : {}),
     openConversation: (sessionId, runId, text) => {
       switchNotice.current = text || "";
       openConversation(sessionId, runId);
@@ -1670,6 +1679,7 @@ export function CodeWorkspace() {
           ""
         }
         ctl={automations}
+        onOpenMyEmail={openMyEmail}
         onCreated={() => {
           setAutomationView(true);
           setSidebarOpen(false);

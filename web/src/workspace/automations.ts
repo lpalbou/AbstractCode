@@ -40,6 +40,7 @@ import {
   type DiscussResponse,
   type OccurrenceRow,
   type TriggerSourceEntry,
+  type MyEmailStatus,
 } from "@abstractframework/ui-kit";
 
 import { csrfHeaders, gatewayRequest } from "./transport";
@@ -58,6 +59,23 @@ export function codeAutomationsClient(): AutomationsClient {
     baseUrl: "",
     headers: csrfHeaders,
   });
+}
+
+/**
+ * The gateway console's My email (its Users tab), where a user connects their
+ * mailbox (framework backlog 0992). Null when the gateway URL is unknown or
+ * not a URL: the form then shows "open My email" as plain text.
+ */
+export function myEmailConsoleUrl(gatewayUrl: string | null | undefined): string | null {
+  const raw = String(gatewayUrl || "").trim();
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return `${u.origin}${u.pathname.replace(/\/+$/, "")}/console#users`;
+  } catch {
+    return null;
+  }
 }
 
 /** `capabilities.contracts.common.automations` (discovery contracts). */
@@ -179,6 +197,12 @@ export type AutomationsState = {
   triggerSources: TriggerSourceEntry[];
   busy: boolean;
   notice: string;
+  /**
+   * `GET /me/email`, re-read with every list refresh. `null` = unknown (not
+   * read yet, or the gateway refused/failed): the kit form then says "Email
+   * isn't set up — open My email" and offers no email option.
+   */
+  emailStatus: MyEmailStatus | null;
 };
 
 export const INITIAL_AUTOMATIONS_STATE: AutomationsState = {
@@ -193,6 +217,7 @@ export const INITIAL_AUTOMATIONS_STATE: AutomationsState = {
   triggerSources: [],
   busy: false,
   notice: "",
+  emailStatus: null,
 };
 
 /** How a wait is answered: the gateway's resume command on the waiting run. */
@@ -250,11 +275,22 @@ export class AutomationsController {
     throw new Error("GET /api/gateway/automations kept returning next_cursor after 200 pages.");
   }
 
+  /** `GET /me/email` → `state.emailStatus` (null when it cannot be read; never an automations error). */
+  async loadEmailStatus(): Promise<void> {
+    try {
+      const status = await this.client.getMyEmail();
+      this.set({ emailStatus: status && typeof status === "object" ? status : null });
+    } catch {
+      this.set({ emailStatus: null });
+    }
+  }
+
   async refresh(): Promise<void> {
     const seq = ++this.listSeq;
     this.set({ loading: true });
     try {
       const items = await this.listAll();
+      void this.loadEmailStatus();
       if (seq !== this.listSeq) return;
       const detail = this.state.detail;
       const fresh = detail ? items.find((s) => s.automation_id === detail.automationId) : undefined;
