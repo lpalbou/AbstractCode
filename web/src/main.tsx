@@ -2,21 +2,11 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 
 import "@abstractframework/ui-kit/theme.css";
+import { installViewportVars } from "@abstractframework/ui-kit";
 
 import "@abstractframework/panel-chat/panel_chat.css";
 import { CodeWorkspace, WorkspaceErrorBoundary } from "./workspace/app";
 import "./workspace/workspace.css";
-
-function applyViewportHeightVar(): void {
-  try {
-    const vv = window.visualViewport;
-    const h = typeof vv?.height === "number" && Number.isFinite(vv.height) ? vv.height : window.innerHeight;
-    // Use a `vh`-like px unit that matches the *current* usable viewport height.
-    document.documentElement.style.setProperty("--vh", `${Math.max(1, h) * 0.01}px`);
-  } catch {
-    // ignore
-  }
-}
 
 // Dev DX: avoid "hard refresh" loops caused by a previously-installed service worker caching assets.
 if (import.meta.env.DEV && "serviceWorker" in navigator) {
@@ -36,15 +26,10 @@ if (import.meta.env.DEV && "serviceWorker" in navigator) {
   }
 }
 
-// Avoid stacking listeners during dev/HMR.
-const VH_LISTENER_KEY = "__abstractcode_web_vh_listener_v1";
-if (!(globalThis as any)[VH_LISTENER_KEY]) {
-  (globalThis as any)[VH_LISTENER_KEY] = true;
-  applyViewportHeightVar();
-  window.addEventListener("resize", applyViewportHeightVar);
-  window.visualViewport?.addEventListener("resize", applyViewportHeightVar);
-  window.visualViewport?.addEventListener("scroll", applyViewportHeightVar);
-}
+// The visible-viewport height (--vv-height, shrinks under the iOS keyboard) and
+// --keyboard-inset, from the kit (idempotent across HMR). The shell sizes to
+// var(--vv-height, var(--vh-full)) — see workspace.css.
+installViewportVars();
 
 // Prod: register the PWA shell service worker.
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
