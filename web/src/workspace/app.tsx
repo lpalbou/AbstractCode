@@ -9,6 +9,7 @@ import React, {
 import {
   AfAppearanceDialog,
   AfDrawer,
+  AfSwitch,
   AfTopBarActions,
   GatewayConnectModal,
   Icon,
@@ -1300,20 +1301,34 @@ export function CodeWorkspace() {
             <span className="code-workflow-kind">
               {isAgent ? "AGENT" : "WORKFLOW"}
             </span>
-            <label className="code-workflow-all" title="List workflows that are not coding agents too">
-              <input
-                type="checkbox"
-                checked={preferences.showAllWorkflows}
-                disabled={locked || !connection.connected}
-                onChange={(e) =>
-                  setPreferences((previous) => ({
-                    ...previous,
-                    showAllWorkflows: e.target.checked,
-                  }))
-                }
-              />
-              <span>Show all workflows</span>
-            </label>
+            <AfSwitch
+              className="code-workflow-all"
+              variant="sm"
+              action="show-all-workflows"
+              ariaLabel="Show all workflows"
+              label={
+                <>
+                  <span className="code-workflow-all__long">Show all workflows</span>
+                  <span className="code-workflow-all__short" aria-hidden="true">All</span>
+                </>
+              }
+              hint="List workflows that are not coding agents too"
+              checked={preferences.showAllWorkflows}
+              unavailableReason={
+                !connection.connected
+                  ? "Connect to a gateway first."
+                  : locked
+                    ? "A run is in progress."
+                    : null
+              }
+              reasonVisible={false}
+              onChange={(next) =>
+                setPreferences((previous) => ({
+                  ...previous,
+                  showAllWorkflows: next,
+                }))
+              }
+            />
             {selection === GATEWAY_DEFAULT && defaultInterfaceMismatch(defaultWorkflow) ? (
               <span className="code-workflow-resolved is-missing" role="alert" title={defaultInterfaceMismatch(defaultWorkflow)}>
                 {defaultInterfaceMismatch(defaultWorkflow)}
@@ -1662,9 +1677,15 @@ export function CodeWorkspace() {
                     {queue.length} queued{" "}
                     {queue.length === 1 ? "turn" : "turns"}
                   </strong>
-                  <button onClick={() => setQueueRunning((v) => !v)}>
-                    {queueRunning ? "Pause queue" : "Resume queue"}
-                  </button>
+                  <AfSwitch
+                    className="code-queue__switch"
+                    variant="sm"
+                    action="queue-running"
+                    label="Run queued turns"
+                    hint="On: each queued turn starts when the current run ends. Off: they wait here."
+                    checked={queueRunning}
+                    onChange={setQueueRunning}
+                  />
                 </div>
                 {queue.map((item) => (
                   <div key={item.id}>
@@ -1693,9 +1714,11 @@ export function CodeWorkspace() {
           </main>
           )}
           {inspectorOpen ? (
+            // A pointer-only backdrop: hidden from assistive tech so the drawer's own
+            // "Close workspace inspector" button is the one control with that name.
             <button
               className="code-inspector-scrim"
-              aria-label="Close workspace inspector"
+              aria-hidden="true"
               tabIndex={-1}
               onClick={() => setInspectorOpen(false)}
             />

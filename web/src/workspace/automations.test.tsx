@@ -253,6 +253,16 @@ describe("the sidebar section", () => {
     expect(shown).toContain('data-state="archived"');
   });
 
+  it("Show archived is a switch labelled by the feature, not a checkbox (state toggles)", () => {
+    const items = list().map((s, i) => (i === 1 ? { ...s, status: "archived" as const } : s));
+    const onShowArchived = vi.fn();
+    const off = renderToStaticMarkup(<AutomationsSection {...base} onShowArchived={onShowArchived} state={state(items)} />);
+    expect(off).toMatch(/<button type="button" role="switch" class="af-switch af-switch--sm code-auto-archived" data-action="show-archived" aria-checked="false"[^>]*>[\s\S]*?<span class="af-switch__label">Show archived \(1\)<\/span>/);
+    expect(off).not.toContain('type="checkbox"');
+    const on = renderToStaticMarkup(<AutomationsSection {...base} state={state(items, true)} />);
+    expect(on).toMatch(/data-action="show-archived" aria-checked="true"/);
+  });
+
   it("says why when the gateway lacks the API", () => {
     const html = renderToStaticMarkup(
       <AutomationsSection {...base} available={automationsAvailability({})} state={state([])} />,
@@ -293,7 +303,9 @@ describe("email automations (framework backlog 0992 WP6)", () => {
     await ctl.refresh();
     const ok = dialog(ctl, () => {});
     expect(ok).toMatch(/<input type="radio" name="[^"]+" value="email"\/> When an email arrives/);
-    expect(ok).toContain('name="notify_email"');
+    // "Email me the result" is the kit's switch (ui-kit 0.3.3), labelled by the feature.
+    expect(ok).toMatch(/role="switch"[^>]*data-action="notify-email"/);
+    expect(ok).not.toContain('type="checkbox"');
     expect(ok).not.toContain('data-email-setup="missing"');
     const none = new AutomationsController(stubClient({ getMyEmail: vi.fn(async () => ({ configured: false, effective_enabled: false })) }), vi.fn(), []);
     await none.refresh();

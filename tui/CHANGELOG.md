@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **On/off rows use one marker.** `/tools` and `/skills` show `[x] name` in
+  the accent colour and bold when on, `[ ] name` in plain text when off, and
+  `[-] name — reason` dimmed when the row cannot change (a tool disabled on
+  this gateway, a skill the gateway blocks). Space switches the selected row.
+  The key hints say "space switch". The workspace access mode, which is a
+  choice of one, shows `(•)` / `( )`.
+- **Automations: an "Active" switch replaces pause/resume.** In `/automations`
+  each row starts with its Active marker, and one automation shows
+  `[x] Active — runs on its schedule` or
+  `[ ] Active — paused: scheduled runs are skipped (Run now still works)`.
+  Space switches it (`p` still works). The switch sends `automation.pause` or
+  `automation.resume`. When it cannot change, it says why: legacy schedule,
+  archived, ended, a command in flight, or the change not permitted. The
+  confirmation describes the new state: "Active is off: scheduled runs are
+  skipped." / "Active is on: it runs on its schedule."
+- `assets/automation_controls.json` re-synced with AbstractUIC ui-kit 0.3.3
+  (adds the `active` label and hint).
+
 ## [0.7.1] - 2026-09-28
 
 ### Added

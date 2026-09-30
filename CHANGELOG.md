@@ -5,6 +5,55 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Web: phones and tablets use the whole screen.** On a phone the automation detail, the approval card, the
+  workspace panel and the conversation list now reach the edges of the screen (16 px margins or less) instead of
+  sitting in boxes inside boxes:
+  - The automation detail is one flat page: each fact sits on one line with its label ("When  every 24 hours"),
+    paths and identifiers take a full line as plain text, and the definition, each occurrence, its transcript and
+    the folder are separated by thin lines rather than drawn as cards.
+  - The approval card is part of the conversation (no frame around it); a long tool argument such as a file path
+    wraps instead of scrolling inside its own box.
+  - The workspace panel shows the conversation's folder path once, at reading size.
+  - The navigation drawer takes the full width on phones and scrolls as one list (Automations, then
+    Conversations), rather than one small scrolling area per list. Tablets keep the narrower drawer, also as one
+    list.
+  - On tablets the automation detail shows two columns only when both are at least about 360 px wide; otherwise it
+    uses the phone layout.
+- **Web: larger text.** On touch screens (phones and tablets) reading, helper and toolbar text is 14 px and body
+  text 15 px; dates, counts and badges stay at 12 px. On desktops nothing is smaller than 12 px, and helper text
+  and labels are 13 px. Your font size setting still scales everything.
+- **Web: on/off settings are switches labelled by what they control.** Every setting that is either on or
+  off uses the kit's switch (ui-kit 0.3.3): highlighted with a check mark and bold label when on, plain when
+  off, and dimmed with the reason when it cannot change right now. It applies at once; there is nothing to
+  save.
+  - Toolbar: "Show all workflows" (shown as "All" on phones). While no gateway is connected or a run is in
+    progress, the switch says why it cannot change.
+  - Composer queue: "Run queued turns" replaces the "Pause queue" / "Resume queue" button.
+  - Automations: each automation's "Active" switch replaces the Pause / Resume buttons (on = runs on its
+    schedule, off = paused). Once the automation ended, is archived or is a legacy schedule, the switch shows
+    why it cannot change. The sidebar's "Show archived" filter is a switch too.
+  - Run settings: each skill is a switch named after the skill. A skill the gateway blocks stays listed, with
+    the gateway's reason. Tools and "Email me the result" in Schedule a task follow the kit's switches.
+  - One-shot actions stay buttons: pausing or resuming the running run, Conclude, Revoke, and the spoken-reply
+    playback control.
+- **Tests:** `src/ui/state_toggles.test.ts` runs the kit's `findVerbToggleLabels` check over every source
+  file, and `src/workspace/state_switches.test.tsx` checks each switch in both states.
+  `e2e/state_toggles.shots.mjs` captures the switch surfaces at desktop, tablet and phone widths, in light
+  and dark, and records any label above 15 px or heavier than 600.
+
+### Added
+- **Web: folding lists in the automation detail.** "Occurrences" and the folder ("Automation folder", or "Run #N
+  folder") have a header you can click or tap to fold the list away and give the rest of the detail the room.
+  Both start open and your choice is remembered in this browser (`localStorage` key
+  `abstractcode.automation.panels`).
+
+### Fixed
+- **Web:** the backdrop behind the workspace panel on narrow windows is no longer a second "Close workspace
+  inspector" button for screen readers; the panel's own close button is the one control with that name.
+
 ## [web 0.8.0] - 2026-09-30
 
 ### Added

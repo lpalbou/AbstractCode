@@ -317,6 +317,9 @@ fn run(client: &AutomationClient, wake: &WakeHandle, store: Store, cmd: AutoCmd)
                 .send(&auto::command_request(&id, &command_id, &command_type))
                 .map(|r| {
                     let dup = r.get("duplicate").and_then(Value::as_bool).unwrap_or(false);
+                    if let Some(state) = auto::active_notice(&command_type, dup) {
+                        return state;
+                    }
                     let verb = command_type
                         .trim_start_matches("automation.")
                         .replace('_', " ");

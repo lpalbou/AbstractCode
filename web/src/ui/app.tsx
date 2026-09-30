@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { GATEWAY_CONNECTION_PATH } from "@abstractframework/ui-kit";
+import { AfSwitch, GATEWAY_CONNECTION_PATH } from "@abstractframework/ui-kit";
 import { GatewayClient, GatewayHttpError } from "../lib/gateway_client";
 import { random_id } from "../lib/ids";
 import { extract_llm_phase_event, format_llm_phase } from "../lib/llm_phase";
@@ -1766,14 +1766,11 @@ function SettingsPage(props: {
           </div>
 
           <div className="field">
-            <label className="checkbox_row">
-              <input
-                type="checkbox"
-                checked={Boolean(s.prompt_cache)}
-                onChange={(e) => props.on_change({ ...s, prompt_cache: Boolean(e.target.checked) })}
-              />
-              <span>Prompt caching</span>
-            </label>
+            <AfSwitch
+              label="Prompt caching"
+              checked={Boolean(s.prompt_cache)}
+              onChange={(next) => props.on_change({ ...s, prompt_cache: next })}
+            />
             <div className="field_hint">
               Session-scoped prefix/KV caching (provider-dependent). First request after enabling “warms” the cache; later turns can reuse it. Manual control: use `/cache` in chat (list/save/load/clear).
             </div>
@@ -4936,14 +4933,15 @@ function ConsolePage(props: {
                     </div>
                     <div className="muted" style={{ marginTop: 8, lineHeight: 1.4 }}>
                       {approve_all_tools_for_session ? (
-                        <>
-                          Session tool approval is enabled.{" "}
-                          <button className="btn mini" type="button" onClick={() => set_session_tool_approve_all(false)} disabled={resuming}>
-                            Turn off
-                          </button>
-                        </>
+                        <AfSwitch
+                          variant="sm"
+                          label="Approve all tools this session"
+                          checked
+                          busy={resuming}
+                          onChange={(next) => set_session_tool_approve_all(next)}
+                        />
                       ) : (
-                        "Approve All enables auto-approval for this session."
+                        "Approve All approves every tool request for the rest of this session."
                       )}
                     </div>
                   </>
@@ -5562,9 +5560,9 @@ function ChatMessageCard(props: {
     tts_status === "loading"
       ? "Generating audio…"
       : tts_status === "playing"
-        ? "Pause"
+        ? "Pause" // state-toggle-lint: allow one-shot playback control of this message's audio
         : tts_status === "paused"
-          ? "Resume"
+          ? "Resume" // state-toggle-lint: allow one-shot playback control of this message's audio
           : "Speak (TTS)";
   
   return (

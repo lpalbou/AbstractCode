@@ -1839,12 +1839,47 @@ fn open_model_stage(cx: Scope, store: Store, ctx: &UiCtx, provider: crate::store
 // Here the modal ROOT owns focus + keys; rows are pure draws windowed by
 // a cursor signal.
 
+/// The state marker in front of a row.
+///
+/// On/off rows follow the shared terminal rule (state-toggles contract §3):
+/// `[x] Feature` highlighted (accent + bold) when on, `[ ] Feature` plain
+/// when off, `[-] Feature — reason` dimmed when it cannot change now. A
+/// one-of-many choice (a mode) is a radio, not a switch: `(•)` / `( )`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Mark {
+    On,
+    Off,
+    Unavailable,
+    Chosen,
+    NotChosen,
+}
+
+impl Mark {
+    pub(crate) fn switch(on: bool) -> Self {
+        if on {
+            Mark::On
+        } else {
+            Mark::Off
+        }
+    }
+
+    pub(crate) fn marker(self) -> &'static str {
+        match self {
+            Mark::On => "[x] ",
+            Mark::Off => "[ ] ",
+            Mark::Unavailable => "[-] ",
+            Mark::Chosen => "(•) ",
+            Mark::NotChosen => "( ) ",
+        }
+    }
+}
+
 /// One rendered row: `header` rows are group labels (not selectable).
 #[derive(Clone)]
 pub(crate) struct RowSpec {
     pub(crate) text: String,
     pub(crate) header: bool,
-    pub(crate) checked: Option<bool>,
+    pub(crate) checked: Option<Mark>,
     pub(crate) dim: bool,
 }
 
@@ -1961,28 +1996,31 @@ fn draw_rows_pinned(
                 if is_cursor {
                     canvas.fill(Rect::new(rect.x, y, rect.w, 1), ' ', t.selection_fg, bg);
                 }
+                // ON is highlighted (accent + bold, bold kept under the
+                // cursor); OFF is plain; UNAVAILABLE is dimmed.
+                let on = row.checked == Some(Mark::On);
                 let ink = if is_cursor {
                     t.selection_fg
                 } else if row.header {
                     t.accent
-                } else if row.dim {
+                } else if row.dim || row.checked == Some(Mark::Unavailable) {
                     t.text_faint
-                } else if row.checked == Some(false) {
-                    t.text_muted
+                } else if on {
+                    t.accent
                 } else {
                     t.text
                 };
-                let marker = match row.checked {
-                    Some(true) => "[✓] ",
-                    Some(false) => "[ ] ",
-                    None => "",
-                };
+                let marker = row.checked.map(Mark::marker).unwrap_or("");
                 let prefix = if row.header { "" } else { "  " };
                 let fitted = text::truncate_ellipsis(
                     &format!("{prefix}{marker}{}", row.text),
                     (rect.w - 1).max(4),
                 );
-                canvas.print(Point::new(rect.x, y), &fitted, ink, bg);
+                let mut style = abstracttui::render::Style::new().fg(ink).bg(bg);
+                if on {
+                    style = style.attrs(abstracttui::render::Attrs::BOLD);
+                }
+                canvas.print_styled(Point::new(rect.x, y), &fitted, &style);
             }
         })
         .build()
@@ -2298,11 +2336,11 @@ pub fn open_tools(cx: Scope, store: Store, ctx: &UiCtx) {
                             selectable.push(rows.len());
                             rows.push(RowSpec {
                                 text: format!(
-                                    "{}  [disabled on this gateway{gate}]",
+                                    "{} — disabled on this gateway{gate}",
                                     tool.name
                                 ),
                                 header: false,
-                                checked: None,
+                                checked: Some(Mark::Unavailable),
                                 dim: true,
                             });
                             continue;
@@ -2323,8 +2361,8 @@ pub fn open_tools(cx: Scope, store: Store, ctx: &UiCtx) {
                         rows.push(RowSpec {
                             text: format!("{}{pin}  {}", tool.name, tool.description),
                             header: false,
-                            checked: Some(on),
-                            dim: !on,
+                            checked: Some(Mark::switch(on)),
+                            dim: false,
                         });
                     }
                     if rows.is_empty() {
@@ -2342,7 +2380,7 @@ pub fn open_tools(cx: Scope, store: Store, ctx: &UiCtx) {
             ))
             .child(hint_row(
                 &t,
-                "↑↓ move · Space toggles · c toggles category · a all on · n all off · p pins auto/ask · t cycles permissions · Enter/Esc closes"
+                "↑↓ move · space switch · c switches the category · a all on · n all off · p pins auto/ask · t cycles permissions · Enter/Esc closes"
                     .into(),
             ))
             .child(hint_row(
@@ -2888,17 +2926,22 @@ pub fn open_skills(cx: Scope, store: Store, ctx: &UiCtx) {
                     let mut selectable = Vec::new();
                     for skill in &catalog {
                         let on = selected.contains(&skill.name);
-                        let trust = if skill.blocked {
-                            "BLOCKED".to_string()
-                        } else {
-                            skill.trust.clone()
-                        };
+                        let trust = skill.trust.clone();
                         selectable.push(rows.len());
-                        rows.push(RowSpec {
-                            text: format!("{} ({trust})  {}", skill.name, skill.description),
-                            header: false,
-                            checked: Some(on),
-                            dim: skill.blocked || !on,
+                        rows.push(if skill.blocked {
+                            RowSpec {
+                                text: format!("{} — blocked by the gateway", skill.name),
+                                header: false,
+                                checked: Some(Mark::Unavailable),
+                                dim: true,
+                            }
+                        } else {
+                            RowSpec {
+                                text: format!("{} ({trust})  {}", skill.name, skill.description),
+                                header: false,
+                                checked: Some(Mark::switch(on)),
+                                dim: false,
+                            }
                         });
                     }
                     if rows.is_empty() {
@@ -2925,7 +2968,7 @@ pub fn open_skills(cx: Scope, store: Store, ctx: &UiCtx) {
             ))
             .child(hint_row(
                 &t,
-                "↑↓ move · Space attach/detach · Enter/Esc closes".into(),
+                "↑↓ move · space switch (attached to your runs) · Enter/Esc closes".into(),
             ))
             .child(hint_row(
                 &t,
@@ -5641,7 +5684,11 @@ pub fn open_workspace(cx: Scope, store: Store, ctx: &UiCtx) {
                         rows.push(RowSpec {
                             text: label,
                             header: false,
-                            checked: Some(mode.as_str() == *id),
+                            checked: Some(if mode.as_str() == *id {
+                                Mark::Chosen
+                            } else {
+                                Mark::NotChosen
+                            }),
                             dim: false,
                         });
                     }

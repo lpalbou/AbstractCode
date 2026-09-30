@@ -1178,7 +1178,7 @@ fn tools_selector_toggles_and_start_carries_allowlist() {
         screen.contains("gateway tools — 3 available · untouched"),
         "tools modal title:\n{screen}"
     );
-    assert!(screen.contains("[✓] read_file"), "checked rows:\n{screen}");
+    assert!(screen.contains("[x] read_file"), "checked rows:\n{screen}");
 
     // Space toggles the first tool OFF; title flips to explicit-allowlist.
     h.type_text(" ");
@@ -1391,8 +1391,9 @@ fn served_disabled_tools_render_with_gate_and_are_never_grantable() {
         "gated count in the title:\n{screen}"
     );
     assert!(
-        screen
-            .contains("send_email  [disabled on this gateway — gate: ABSTRACT_ENABLE_COMMS_TOOLS]"),
+        screen.contains(
+            "[-] send_email — disabled on this gateway — gate: ABSTRACT_ENABLE_COMMS_TOOLS"
+        ),
         "disabled row renders its gate:\n{screen}"
     );
     // Cursor row 0 is send_email (comms sorts before files): Space
