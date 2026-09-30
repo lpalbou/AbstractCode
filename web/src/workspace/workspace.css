@@ -2172,8 +2172,10 @@ select option {
     clip-path: inset(50%);
     white-space: nowrap;
   }
+  /* 5em basis: too wide to squeeze in after the five icons, narrow enough to share the last
+     row with Stop and Send at 320 px. */
   .code-conversation .pc-composer__row select {
-    flex: 1 1 3em;
+    flex: 1 1 5em;
   }
   .code-conversation .pc-composer__row > .pc-btn {
     min-width: 0;
