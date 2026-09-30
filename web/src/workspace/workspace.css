@@ -465,6 +465,21 @@ select option {
 .code-workflow-all__short {
   display: none;
 }
+/* Unavailable: the reason sits next to the switch as text (a tap must say why). With a fine
+   pointer and hover, the tooltip carries it and the text is kept for assistive tech only. */
+#code-workflow-all-reason {
+  white-space: normal;
+}
+@media (hover: hover) and (pointer: fine) {
+  #code-workflow-all-reason {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
 .code-workflow-resolved {
   font-size: var(--font-size-xxs);
   color: var(--text-secondary);

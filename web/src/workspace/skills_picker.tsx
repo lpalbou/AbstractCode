@@ -123,11 +123,14 @@ export function SkillSwitch({
   checked,
   disabled,
   onChange,
+  lockedReasonId,
 }: {
   skill: GatewaySkill;
   checked: boolean;
   disabled: boolean;
   onChange: (next: boolean) => void;
+  /** The id of the visible banner that says why settings are locked (the switch points at it). */
+  lockedReasonId?: string;
 }): React.ReactElement {
   const blockedReason = skill.reasons.join(" ") || "Blocked by gateway policy.";
   const reason = skill.blocked
@@ -149,9 +152,10 @@ export function SkillSwitch({
         }
         checked={checked}
         unavailableReason={reason}
-        // The panel's own banner already says why settings are locked; only a
-        // skill-specific reason (blocked by the gateway) is repeated per row.
-        reasonVisible={skill.blocked}
+        // A blocked skill shows its own reason under the row. A locked panel
+        // already shows why in its banner: the switch points at that visible
+        // text (aria-describedby) instead of repeating it under every row.
+        describedBy={!skill.blocked && disabled ? lockedReasonId : undefined}
         onChange={onChange}
       />
     </div>
@@ -162,10 +166,12 @@ export function SkillsPicker({
   value,
   onChange,
   disabled,
+  lockedReasonId,
 }: {
   value: string[];
   onChange: (next: string[]) => void;
   disabled: boolean;
+  lockedReasonId?: string;
 }): React.ReactElement {
   const [inventory, setInventory] = useState<SkillsInventory>({
     skills: [],
@@ -276,6 +282,7 @@ export function SkillsPicker({
           skill={skill}
           checked={selected.has(skill.name)}
           disabled={disabled}
+          lockedReasonId={lockedReasonId}
           onChange={(next) => toggle(skill.name, next)}
         />
       ))}

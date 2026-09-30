@@ -30,13 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   off, and dimmed with the reason when it cannot change right now. It applies at once; there is nothing to
   save.
   - Toolbar: "Show all workflows" (shown as "All" on phones). While no gateway is connected or a run is in
-    progress, the switch says why it cannot change.
+    progress, the reason ("Connect to a gateway first." / "A run is in progress.") shows next to the switch on
+    touch screens; with a mouse it is the switch's tooltip.
   - Composer queue: "Run queued turns" replaces the "Pause queue" / "Resume queue" button.
   - Automations: each automation's "Active" switch replaces the Pause / Resume buttons (on = runs on its
     schedule, off = paused). Once the automation ended, is archived or is a legacy schedule, the switch shows
     why it cannot change. The sidebar's "Show archived" filter is a switch too.
   - Run settings: each skill is a switch named after the skill. A skill the gateway blocks stays listed, with
-    the gateway's reason. Tools and "Email me the result" in Schedule a task follow the kit's switches.
+    the gateway's reason. While Run settings are locked, the skill switches point at the panel's notice
+    instead of repeating it under every row. Tools and "Email me the result" in Schedule a task follow the kit's switches.
   - One-shot actions stay buttons: pausing or resuming the running run, Conclude, Revoke, and the spoken-reply
     playback control.
 - **Tests:** `src/ui/state_toggles.test.ts` runs the kit's `findVerbToggleLabels` check over every source
