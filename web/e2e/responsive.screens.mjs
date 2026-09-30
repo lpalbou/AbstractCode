@@ -240,7 +240,13 @@ export default {
         await closeOverlays(page);
         const toggle = page.getByRole("button", { name: "Toggle workspace inspector" });
         if ((await toggle.getAttribute("aria-pressed").catch(() => null)) === "true" && info_isNarrow(page)) await toggle.click();
-        await press(page, page.locator(".code-model-button"), "model button");
+        const model = page.locator(".code-model-button");
+        if (await model.isVisible().catch(() => false)) await press(page, model, "model button");
+        else {
+          // Phones hide the model shortcut: Run settings opens from Tools, Model is its first tab.
+          await press(page, page.getByRole("button", { name: "Tools", exact: true }), "Tools");
+          await page.getByRole("tab", { name: /Model/ }).click();
+        }
         await page.getByRole("complementary", { name: "Run settings" }).waitFor({ state: "visible", timeout: 10000 });
       },
     },

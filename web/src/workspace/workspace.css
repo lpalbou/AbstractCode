@@ -1824,6 +1824,28 @@ select option {
   :root {
     --code-topbar-h: 52px;
   }
+  /* One toolbar row on a phone: the workflow select takes the room; "Show all workflows" shows
+     as "All" (its full words stay the accessible name). */
+  .code-workflow-select {
+    flex: 1 1 8rem;
+  }
+  .code-workflow-all > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .code-workflow-all::after {
+    content: "All";
+    content: "All" / "";
+  }
+  /* The model is one tap away in Run settings (the Tools button opens it). */
+  .code-model-button,
+  .code-workflow-select > svg {
+    display: none;
+  }
   /* The run strip stays one row: its actions scroll sideways instead of wrapping. */
   .code-run-strip {
     flex-wrap: nowrap;
@@ -1839,9 +1861,6 @@ select option {
   }
   .code-workflow-select select {
     font-size: var(--font-size-sm);
-  }
-  .code-model-button span {
-    max-width: 120px;
   }
   .code-welcome h1 {
     font-size: calc(29px * var(--font-scale));
