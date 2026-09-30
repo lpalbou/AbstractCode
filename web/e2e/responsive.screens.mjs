@@ -48,6 +48,8 @@ async function signIn(page) {
     if (await select.isEnabled().catch(() => false)) return;
     // A conversation with a live run locks the workflow select; the status bar still says Connected.
     if (await page.locator(".code-statusbar").getByText("Connected", { exact: true }).isVisible().catch(() => false)) return;
+    // Phone landscape hides the status bar: the top bar's connection pill says the same.
+    if (await page.locator(".af-topbar__pill--connected").isVisible().catch(() => false)) return;
     if (Date.now() > end) throw new Error("neither the sign-in dialog nor a connected workspace appeared");
     await page.waitForTimeout(150);
   }
