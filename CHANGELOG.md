@@ -43,8 +43,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before release).
 
 ### Added
+- **Web: collapsible sidebar panels.** "Automations" and "Conversations" in the left navigation (docked
+  sidebar, tablet overlay and phone drawer alike) are disclosure panels: the header is a toggle button
+  (`aria-expanded` / `aria-controls`, chevron), the "+" and refresh actions stay separate buttons; open panels
+  share the height and scroll on their own, a collapsed panel folds to its header and the other takes the freed
+  height. Both open by default; remembered per viewer in `localStorage` (`abstractcode.sidebar.panels`), blocked
+  or invalid storage falls back to both open. 32 px toggles on desktop, 44 px on touch.
 - **e2e: `e2e/responsive.screens.mjs`**, the screens module for the shared responsive capture harness (sign-in,
-  conversation, approval, automations, automation form, automation detail, workspace, settings, about) against
+  conversation, approval, automations, automation form, automation detail, workspace, settings, about, collapsed
+  sidebar) against
   the fixture gateway.
 
 ## [web 0.7.0] - 2026-09-30

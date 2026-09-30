@@ -34,6 +34,7 @@ import {
   type PaneMode,
 } from "./layout";
 import { SidebarDrawer } from "./sidebar_drawer";
+import { ConversationsPanel, useSidebarPanels } from "./sidebar_panels";
 import {
   WorkflowChat,
   chatToMarkdown,
@@ -284,6 +285,8 @@ export function CodeWorkspace() {
   );
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("files");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Collapsible Automations / Conversations panels, remembered per viewer.
+  const [panels, togglePanelOpen] = useSidebarPanels();
   // Automations: the sidebar section and, for the selected one, the main view.
   const automationsAvailable = automationsAvailability(catalog.capabilities);
   const { ctl: automations, state: automationsState } = useAutomations(
@@ -1136,10 +1139,15 @@ export function CodeWorkspace() {
           onNew={() => setNewAutomationOpen(true)}
           onRefresh={() => void automations.refresh()}
           onShowArchived={(show) => automations.setShowArchived(show)}
+          open={panels.automations}
+          fill={!panels.conversations}
+          onToggle={() => togglePanelOpen("automations")}
         />
-        <div className="code-section-label">
-          <span>CONVERSATIONS</span>
-          <button
+        <ConversationsPanel
+          open={panels.conversations}
+          onToggle={() => togglePanelOpen("conversations")}
+          actions={
+            <button
             className="code-icon-button"
             aria-label="Refresh conversations"
             disabled={!connection.connected || catalog.loading}
@@ -1147,8 +1155,8 @@ export function CodeWorkspace() {
           >
             <Icon name="refresh" size={13} />
           </button>
-        </div>
-        <nav className="code-sessions" aria-label="Conversation history">
+          }
+        >
           {!currentSession ? (
             <button
               className="code-session is-selected"
@@ -1188,7 +1196,7 @@ export function CodeWorkspace() {
               Load more conversations
             </button>
           ) : null}
-        </nav>
+        </ConversationsPanel>
         <div className="code-sidebar-bottom">
           <button onClick={() => openSettings("workspace")}>
             <Icon name="terminal" size={17} />

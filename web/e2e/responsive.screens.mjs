@@ -3,7 +3,8 @@
 // Drives every main screen against the isolated fixture gateway (e2e/gateway_fixture.py, no model):
 //   signin → conversation (prompt-structured: answer_user + durable ask_user) → approval (tool-approval card)
 //   → automations (sidebar list) → automation-form (Schedule a task, Advanced open) → automation-detail
-//   (occurrences + folder) → workspace (inspector Files pane) → settings (drawer) → about (dialog).
+//   (occurrences + folder) → workspace (inspector Files pane) → settings (drawer) → about (dialog)
+//   → sidebar-collapsed (Automations panel collapsed, Conversations filling the sidebar).
 //
 //   node harness/capture.mjs --app code --url http://127.0.0.1:18782 --screens web/e2e/responsive.screens.mjs --out <dir> --sweep
 //
@@ -256,6 +257,19 @@ export default {
         await closeOverlays(page);
         await press(page, page.locator(".af-topbar__btn--about"), "About");
         await page.getByRole("dialog").last().waitFor({ state: "visible", timeout: 10000 });
+      },
+    },
+    {
+      // Automations collapsed, Conversations filling the sidebar (inside the open drawer on phones).
+      name: "sidebar-collapsed",
+      async run(page) {
+        await closeOverlays(page);
+        await openNav(page);
+        const auto = page.locator("#code-panel-automations-toggle");
+        const conv = page.locator("#code-panel-conversations-toggle");
+        if ((await auto.getAttribute("aria-expanded")) === "true") await press(page, auto, "Automations toggle");
+        if ((await conv.getAttribute("aria-expanded")) === "false") await press(page, conv, "Conversations toggle");
+        await page.locator("#code-panel-automations").waitFor({ state: "hidden", timeout: 5000 });
       },
     },
   ],

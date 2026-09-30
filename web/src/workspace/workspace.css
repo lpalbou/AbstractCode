@@ -173,17 +173,83 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 19px 10px 23px;
+  /* The disclosure chevron (11 px + 6 px gap) sits where the padding was: the label text keeps
+     its x; the 32 px toggle row replaces the old 23 px row + 10 px gap. */
+  padding: 0 19px 1px 6px;
   color: var(--text-secondary);
   font-size: calc(9px * var(--font-scale));
   font-weight: 650;
   letter-spacing: 1.2px;
 }
 .code-sessions {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   padding: 0 10px 16px;
+}
+/* Collapsible panels (sidebar_panels.tsx). Open: the panel takes its share of the sidebar and
+   its list scrolls on its own; collapsed: header only, the other panel takes the freed height. */
+.code-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.code-panel[data-open="true"] {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.code-panel[data-open="false"] {
+  flex: 0 0 auto;
+}
+.code-panel > nav,
+.code-panel > [role="region"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.code-panel > [hidden] {
+  display: none;
+}
+/* Both open: Automations keeps today's share (its content, at most 38 %); alone, it fills. */
+.code-automations[data-open="true"] {
+  flex: 0 1 auto;
+  max-height: 38%;
+}
+.code-automations[data-fill="true"] {
+  flex: 1 1 0;
+  max-height: none;
+}
+.code-panel-toggle {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.code-panel-toggle > svg {
+  opacity: 0.75;
+  transition: transform 0.15s;
+}
+.code-panel-toggle[aria-expanded="false"] > svg {
+  transform: rotate(-90deg);
+}
+.code-panel-toggle:hover {
+  color: var(--text-primary);
+}
+.code-panel-actions {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
 }
 .code-session {
   display: flex;
@@ -2031,19 +2097,19 @@ select option {
     padding-top: 4px;
   }
 }
-/* Phones (narrow or short): the navigation drawer scrolls as one list instead of three
-   squeezed regions (automations, conversations, settings footer). */
-@media (max-width: 767.98px), (max-height: 500px) {
+/* Phone landscape (short): too little height for two scrolling panels — the navigation drawer
+   scrolls as one list (collapsed panels still fold to their header). */
+@media (max-height: 500px) {
   .code-sidebar {
     overflow-y: auto;
     overscroll-behavior: contain;
   }
-  .code-automations {
-    max-height: none;
+  .code-sidebar .code-panel[data-open] {
     flex: none;
+    max-height: none;
   }
-  .code-auto-rows,
-  .code-sessions {
+  .code-sidebar .code-panel > nav,
+  .code-sidebar .code-panel > [role="region"] {
     flex: none;
     overflow: visible;
   }
@@ -2098,6 +2164,9 @@ select option {
     gap: 4px 6px;
   }
   .code-session {
+    min-height: var(--tap-min, 44px);
+  }
+  .code-panel-toggle {
     min-height: var(--tap-min, 44px);
   }
   .code-session strong,
@@ -2288,7 +2357,6 @@ select option {
 .code-automations {
   display: flex;
   flex-direction: column;
-  max-height: 38%;
   min-height: 0;
 }
 .code-auto-rows {

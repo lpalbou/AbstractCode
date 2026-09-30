@@ -10,6 +10,7 @@
  * any state; `useAutomations` only subscribes to the controller and polls.
  */
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { PanelHeader, panelIds } from "./sidebar_panels";
 import {
   AfScheduleDialog,
   AutomationStateLabel,
@@ -78,27 +79,39 @@ export function AutomationsSection(props: {
   onRefresh(): void;
   onShowArchived(show: boolean): void;
   nowMs?: number;
+  /** Collapsible panel (sidebar_panels.tsx): open by default; `fill` = the other panel is collapsed. */
+  open?: boolean;
+  fill?: boolean;
+  onToggle?(): void;
 }): React.ReactElement {
+  const open = props.open ?? true;
+  const ids = panelIds("automations");
   const st = props.state;
   const rows = visibleAutomations(st.items, st.showArchived);
   const archived = st.items.filter((s) => s.status === "archived").length;
   const waiting = st.items.reduce((n, s) => n + s.attention.pending_waits + s.attention.unseen_count, 0);
   return (
-    <section className="code-automations" aria-label="Automations">
-      <div className="code-section-label">
-        <span>
-          AUTOMATIONS{waiting ? <span className="code-auto-badge" data-field="attention-total">{waiting}</span> : null}
-        </span>
-        <span className="code-auto-actions">
+    <section
+      className="code-panel code-automations"
+      aria-label="Automations"
+      data-open={open ? "true" : "false"}
+      data-fill={open && props.fill ? "true" : undefined}
+    >
+      <PanelHeader
+        panel="automations"
+        open={open}
+        onToggle={() => props.onToggle?.()}
+        label={<>AUTOMATIONS{waiting ? <span className="code-auto-badge" data-field="attention-total">{waiting}</span> : null}</>}
+        actions={<span className="code-auto-actions">
           <button className="code-icon-button" aria-label="New automation" title="New automation (runs the toolbar's workflow on a schedule)" disabled={!props.available.available} onClick={props.onNew}>
             <Icon name="plus" size={13} />
           </button>
           <button className="code-icon-button" aria-label="Refresh automations" disabled={!props.available.available || st.loading} onClick={props.onRefresh}>
             <Icon name="refresh" size={13} />
           </button>
-        </span>
-      </div>
-      <div className="code-auto-rows">
+        </span>}
+      />
+      <div className="code-auto-rows" id={ids.region} role="region" aria-labelledby={ids.toggle} hidden={!open}>
         {!props.available.available ? (
           <p className="code-history-empty" role="note" data-unavailable="true">
             {props.available.reason}
