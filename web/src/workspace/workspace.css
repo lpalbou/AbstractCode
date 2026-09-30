@@ -1,4 +1,13 @@
-/* AbstractCode's shell. All palette, type, and density values come from AbstractUIC. */
+/* AbstractCode's shell. All palette, type, and density values come from AbstractUIC.
+ *
+ * Responsive contract (DESIGN.md, ui-kit 0.3.0 tokens): breakpoints 480 / 768 / 1024 / 1440
+ * (max-width, .98 suffix) plus max-height 500px for phone landscape; below 1024 px the
+ * conversation sidebar and the workspace inspector are overlay drawers; from 1024 to 1439 px
+ * the inspector is a toggle (closed by default); from 1440 px all three panes dock. */
+:root {
+  /* The top bar's height (header density scales it); drawers open below it. */
+  --code-topbar-h: max(52px, calc(60px * var(--header-density, 1)));
+}
 * {
   box-sizing: border-box;
 }
@@ -10,6 +19,7 @@ body,
   height: 100%;
 }
 body {
+  overscroll-behavior-y: none;
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: var(--font-sans);
@@ -56,9 +66,13 @@ button {
   color: inherit;
 }
 .code-app {
-  display: flex;
-  height: 100dvh;
-  height: calc(var(--vh, 1vh) * 100);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: "nav main";
+  /* The visible viewport (iOS keyboard aware, set by installViewportVars), else dvh. */
+  height: 100vh;
+  height: var(--vv-height, var(--vh-full, 100dvh));
+  min-width: 0;
   overflow: hidden;
   background: var(--bg-primary);
 }
@@ -66,7 +80,9 @@ button {
   flex-shrink: 0;
 }
 .code-sidebar {
+  grid-area: nav;
   width: 248px;
+  min-height: 0;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -285,15 +301,16 @@ button {
   font-size: var(--font-size-xxs);
 }
 .code-main-shell {
+  grid-area: main;
   min-width: 0;
+  min-height: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
 }
 .code-topbar {
-  height: calc(60px * var(--header-density));
-  min-height: 52px;
-  padding: 0 22px;
+  height: calc(var(--code-topbar-h) + var(--safe-top, 0px));
+  padding: var(--safe-top, 0px) 22px 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -336,11 +353,13 @@ button {
   border-bottom: 1px solid var(--ui-border-1);
   flex-shrink: 0;
 }
+/* Every toolbar child shrinks (ellipsis) instead of drawing over its neighbour. */
 .code-workflow-select {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex: 0 1 auto;
 }
 .code-workflow-select > svg {
   color: var(--accent);
@@ -351,6 +370,9 @@ button {
   font-size: var(--font-size-md);
   font-weight: 550;
   max-width: 320px;
+  min-width: 4em;
+  flex: 0 1 auto;
+  text-overflow: ellipsis;
   padding: 5px 4px;
   cursor: pointer;
 }
@@ -368,6 +390,7 @@ select option {
 }
 .code-workflow-all {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 4px;
   font-size: var(--font-size-xxs);
@@ -382,6 +405,7 @@ select option {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  flex: 0 1 auto;
 }
 .code-workflow-resolved.is-missing {
   color: var(--error);
@@ -410,7 +434,12 @@ select option {
 .code-subtle-button:hover {
   color: var(--text-primary);
 }
+.code-model-button {
+  flex: 0 1 auto;
+  min-width: 0;
+}
 .code-model-button span {
+  min-width: 0;
   max-width: 190px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -436,6 +465,7 @@ select option {
 }
 .code-conversation {
   min-width: 0;
+  min-height: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -551,6 +581,7 @@ select option {
   color: var(--text-secondary);
 }
 .code-conversation .pc-btn {
+  white-space: nowrap;
   background: color-mix(in srgb, var(--accent) 22%, var(--bg-secondary));
   color: var(--text-primary);
   border: 1px solid var(--accent-border);
@@ -778,9 +809,13 @@ select option {
   font-size: var(--font-size-xs);
   border-radius: 6px;
 }
+.code-inspector-scrim {
+  display: none;
+}
 .code-inspector {
   width: 290px;
   min-width: 245px;
+  min-height: 0;
   flex-shrink: 0;
   border-left: 1px solid var(--ui-border-1);
   display: flex;
@@ -1112,8 +1147,8 @@ select option {
   color: var(--text-secondary);
 }
 .code-statusbar {
-  min-height: 28px;
-  padding: 0 18px;
+  min-height: calc(28px + var(--safe-bottom, 0px));
+  padding: 0 18px var(--safe-bottom, 0px);
   border-top: 1px solid var(--ui-border-1);
   display: flex;
   align-items: center;
@@ -1189,6 +1224,7 @@ select option {
   font-size: var(--font-size-xs);
 }
 .code-run-strip strong {
+  white-space: nowrap;
   font-weight: 600;
   color: var(--run-tone);
 }
@@ -1196,7 +1232,7 @@ select option {
 .code-run-strip--waiting { --run-tone: var(--warning); }
 .code-run-strip--success { --run-tone: var(--success); }
 .code-run-strip--error { --run-tone: var(--error); }
-.code-run-strip__activity { display: flex; min-width: 100px; flex: 1; align-items: center; gap: 8px; }
+.code-run-strip__activity { display: flex; min-width: 0; flex: 1; align-items: center; gap: 8px; }
 .code-run-strip__icon { display: inline-flex; color: var(--run-tone); }
 .code-run-strip--working .code-run-strip__icon { animation: code-progress-spin 1.5s linear infinite; }
 .code-run-strip__detail { flex: 1; min-width: 0; max-width: 420px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
@@ -1577,15 +1613,19 @@ select option {
 .code-nav-scrim {
   display: none;
 }
-@media (min-width: 1500px) {
+/* ---- Responsive layout (DESIGN.md §1, §5). Desktop-first, named breakpoints only. ---- */
+
+/* xl (>= 1440): three docked panes; side panes use the width they are given. */
+@media (min-width: 1440px) {
   .code-sidebar {
-    width: 265px;
+    width: clamp(265px, 13vw, 320px);
   }
   .code-inspector {
-    width: 320px;
+    width: clamp(320px, 17vw, 440px);
   }
 }
-@media (max-width: 1200px) {
+/* lg and below (< 1440): tighter panes (the inspector starts closed, see layout.ts). */
+@media (max-width: 1439.98px) {
   .code-sidebar {
     width: 224px;
   }
@@ -1607,33 +1647,38 @@ select option {
     font-size: var(--font-size-xxs);
   }
 }
-@media (max-width: 1020px) {
-  .code-inspector {
-    position: fixed;
-    top: 60px;
-    right: 0;
-    bottom: 28px;
-    width: 310px;
-    background: var(--bg-secondary);
-    z-index: 50;
-    box-shadow: var(--ui-shadow-1);
+/* md and below (< 1024): the sidebar and the inspector leave the grid and become overlay
+   drawers (backdrop, Escape, close button, focus moves in and back: app.tsx + layout.ts). */
+@media (max-width: 1023.98px) {
+  .code-app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "main";
   }
-  .code-welcome {
-    max-width: 600px;
+  .code-main-shell {
+    padding-left: var(--safe-left, 0px);
+    padding-right: var(--safe-right, 0px);
   }
-}
-@media (max-width: 760px) {
   .code-sidebar {
     position: fixed;
     inset: 0 auto 0 0;
     z-index: 120;
-    width: 270px;
+    width: min(320px, 88vw);
+    padding: var(--safe-top, 0px) 0 var(--safe-bottom, 0px) var(--safe-left, 0px);
     background: var(--bg-primary);
+    box-shadow: var(--ui-shadow-1);
     transform: translateX(-100%);
-    transition: transform 0.2s;
+    visibility: hidden;
+    transition:
+      transform 0.2s,
+      visibility 0s linear 0.2s;
   }
   .code-app--nav-open .code-sidebar {
-    transform: translateX(0);
+    transform: none;
+    visibility: visible;
+    transition: transform 0.2s;
+  }
+  .code-brand {
+    height: 68px;
   }
   .code-mobile-nav,
   .code-mobile-close {
@@ -1642,57 +1687,102 @@ select option {
   .code-mobile-close {
     margin-left: auto;
   }
-  .code-nav-scrim {
+  .code-nav-scrim,
+  .code-inspector-scrim {
     display: block;
     position: fixed;
     inset: 0;
     z-index: 110;
     background: color-mix(in srgb, var(--bg-primary) 60%, transparent);
     border: 0;
+    padding: 0;
+  }
+  .code-inspector-scrim {
+    z-index: 125;
+  }
+  .code-inspector {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 130;
+    width: min(360px, 100%);
+    min-width: 0;
+    padding: var(--safe-top, 0px) var(--safe-right, 0px) var(--safe-bottom, 0px) 0;
+    background: var(--bg-secondary);
+    box-shadow: var(--ui-shadow-1);
+    overscroll-behavior: contain;
+  }
+  .code-inspector-content,
+  .code-sessions,
+  .code-auto-rows {
+    overscroll-behavior: contain;
   }
   .code-topbar {
-    padding: 0 12px;
+    padding-inline: 12px;
     gap: 8px;
   }
   .code-breadcrumb {
     flex: 1;
     gap: 7px;
   }
+  /* The toolbar wraps: the workflow group keeps a usable basis and takes the first row on
+     phones; the model button, the Inputs/Tools/export actions follow. */
+  .code-toolbar {
+    flex-wrap: wrap;
+    row-gap: 2px;
+    padding-inline: 16px;
+    gap: 10px;
+  }
+  .code-workflow-select {
+    flex: 1 1 18rem;
+  }
+  .code-workflow-select select {
+    max-width: none;
+  }
+  .code-welcome {
+    max-width: 600px;
+  }
+}
+/* sm and below (< 768): phone-sized content paddings, icon-only secondary actions. */
+@media (max-width: 767.98px) {
   .code-breadcrumb > span {
     display: none;
   }
   .code-toolbar {
-    padding: 6px 16px;
-    gap: 10px;
-  }
-  .code-workflow-select select {
-    max-width: 185px;
+    padding: 4px var(--gutter, 12px);
+    gap: 8px;
   }
   .code-toolbar-divider {
     display: none;
   }
-  .code-model-button {
-    margin-left: auto;
-  }
   .code-model-button span {
-    max-width: 130px;
+    max-width: 150px;
   }
-  .code-toolbar-spacer {
+  .code-toolbar .code-subtle-button span {
     display: none;
   }
-  .code-subtle-button span {
+  .code-workflow-resolved {
     display: none;
   }
   .code-conversation .pc-chat-thread {
-    padding: 18px 20px;
+    padding: 14px var(--gutter, 16px);
+  }
+  .code-conversation .pc-chat-item {
+    padding: 16px 0;
   }
   .code-conversation .pc-workflow-chat__composer {
-    padding: 12px 16px 0;
+    padding: 8px var(--gutter, 16px) max(8px, var(--safe-bottom, 0px));
   }
+  .code-conversation .pc-composer {
+    padding: 10px 12px 8px;
+  }
+  .code-conversation .pc-composer__textarea {
+    min-height: 44px;
+    padding-bottom: 6px;
+  }
+  /* Keyboard hints mean nothing on a phone; the policy note moves to Settings. */
   .code-conversation .pc-workflow-chat__footer {
-    padding: 9px 18px 13px;
-  }
-  .code-conversation .pc-workflow-chat__footer > span:last-child {
     display: none;
   }
   .code-welcome {
@@ -1705,36 +1795,53 @@ select option {
     margin-top: 25px;
   }
   .code-statusbar {
-    padding: 0 12px;
+    padding-inline: 12px;
     gap: 10px;
   }
   .code-statusbar > span:nth-child(2) {
     display: none;
   }
   .code-run-strip {
-    padding: 7px 16px;
+    padding: 6px var(--gutter, 16px);
     gap: 6px;
-    flex-wrap: wrap;
   }
   .code-run-strip__detail {
     display: none;
+  }
+  /* The status keeps its words on one line; the actions wrap to a second row if needed. */
+  .code-run-strip__activity {
+    min-width: max-content;
+  }
+  .code-queue {
+    margin-inline: var(--gutter, 16px);
   }
   .code-skip-link {
     left: 15px;
   }
 }
-@media (max-width: 480px) {
+/* xs (< 480): phone portrait. */
+@media (max-width: 479.98px) {
+  :root {
+    --code-topbar-h: 52px;
+  }
+  /* The run strip stays one row: its actions scroll sideways instead of wrapping. */
+  .code-run-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+  }
+  .code-run-strip > * {
+    flex-shrink: 0;
+  }
+  .code-run-strip:has(.code-run-strip__consent) {
+    flex-wrap: wrap;
+  }
   .code-workflow-select select {
-    max-width: 145px;
     font-size: var(--font-size-sm);
   }
   .code-model-button span {
-    max-width: 95px;
-    font-size: var(--font-size-xxs);
-  }
-  .code-toolbar {
-    gap: 8px;
-    padding: 6px 12px;
+    max-width: 120px;
   }
   .code-welcome h1 {
     font-size: calc(29px * var(--font-scale));
@@ -1794,6 +1901,262 @@ select option {
   .code-field-pair {
     grid-template-columns: 1fr;
     gap: 0;
+  }
+}
+/* short (<= 500 px tall: phone landscape): one thin row of chrome, no status bar, a compact
+   composer — the transcript gets the height. */
+@media (max-height: 500px) {
+  :root {
+    --code-topbar-h: 44px;
+  }
+  /* One row of chrome: [nav] [workflow toolbar ...] [app actions]. The header's children join
+     the shell grid (display: contents); the breadcrumb title yields its space. */
+  .code-main-shell {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "nav tool actions"
+      "content content content"
+      "foot foot foot";
+  }
+  .code-topbar {
+    display: contents;
+  }
+  .code-topbar > .code-mobile-nav {
+    grid-area: nav;
+    align-self: center;
+    margin-left: max(8px, var(--safe-left, 0px));
+  }
+  .code-topbar > .code-breadcrumb {
+    display: none;
+  }
+  .code-topbar > .af-topbar {
+    grid-area: actions;
+    align-self: center;
+    padding-right: max(10px, var(--safe-right, 0px));
+  }
+  .code-toolbar {
+    grid-area: tool;
+    border-bottom: 0;
+    flex-wrap: nowrap;
+    padding-top: var(--safe-top, 0px);
+  }
+  .code-toolbar .code-subtle-button span,
+  .code-workflow-resolved,
+  .code-composer-workspace span,
+  .code-conversation .pc-workflow-chat__icon-button > span {
+    display: none;
+  }
+  .code-composer-workspace {
+    border-left: 0;
+  }
+  .code-model-button span {
+    display: none;
+  }
+  .code-content {
+    grid-area: content;
+    border-top: 1px solid var(--ui-border-1);
+  }
+  .code-statusbar {
+    grid-area: foot;
+  }
+  .code-toolbar {
+    min-height: 40px;
+    padding-block: 2px;
+  }
+  .code-statusbar {
+    display: none;
+  }
+  .code-conversation .pc-workflow-chat__footer {
+    display: none;
+  }
+  .code-conversation .pc-chat-thread {
+    padding-block: 10px;
+  }
+  .code-conversation .pc-chat-item {
+    padding: 12px 0;
+  }
+  .code-conversation .pc-workflow-chat__composer {
+    padding-top: 4px;
+    padding-bottom: max(6px, var(--safe-bottom, 0px));
+  }
+  .code-conversation .pc-composer {
+    padding: 6px 12px 4px;
+  }
+  .code-conversation .pc-composer__textarea {
+    min-height: 0;
+    padding-bottom: 4px;
+  }
+  .code-run-strip {
+    min-height: 34px;
+    padding-block: 3px;
+  }
+  .code-run-strip__detail {
+    display: none;
+  }
+  .code-brand {
+    height: 52px;
+  }
+  .code-brand > div > span {
+    display: none;
+  }
+  .code-inspector-heading {
+    height: 40px;
+  }
+  .code-auto-main-head {
+    padding-top: 4px;
+  }
+}
+/* Phones (narrow or short): the navigation drawer scrolls as one list instead of three
+   squeezed regions (automations, conversations, settings footer). */
+@media (max-width: 767.98px), (max-height: 500px) {
+  .code-sidebar {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .code-automations {
+    max-height: none;
+    flex: none;
+  }
+  .code-auto-rows,
+  .code-sessions {
+    flex: none;
+    overflow: visible;
+  }
+}
+/* Drawers (Run settings, workflow inputs, voice) open under the top bar, whatever its height. */
+.code-settings-drawer {
+  top: calc(var(--code-topbar-h) + var(--safe-top, 0px)) !important;
+}
+/* Touch (coarse pointer): 44 px targets, 16 px inputs (no iOS focus zoom), comfortable rows. */
+@media (pointer: coarse) {
+  .code-icon-button,
+  .code-mobile-nav,
+  .code-mobile-close,
+  .code-conversation .pc-workflow-chat__icon-button,
+  .code-attachment__action,
+  .code-queue button {
+    min-width: var(--tap-min, 44px);
+    min-height: var(--tap-min, 44px);
+    justify-content: center;
+  }
+  .code-new-chat,
+  .code-sidebar-bottom > button,
+  .code-load-more,
+  .code-model-button,
+  .code-subtle-button,
+  .code-workflow-all,
+  .code-workflow-select select,
+  .code-inspector-tabs button,
+  .code-files-mode button,
+  .code-file-list button,
+  .code-settings-tabs button,
+  .code-run-strip button,
+  .code-statusbar button,
+  .code-text-button,
+  .code-back,
+  .code-artifact,
+  .code-activity-row summary,
+  .code-composer-workspace,
+  .code-conversation .pc-composer__actions select,
+  .code-alert button,
+  .code-notice button,
+  .code-discovery-errors button,
+  .code-inline-error button,
+  .code-workflow-welcome button,
+  .code-primary-button {
+    min-height: var(--tap-min, 44px);
+  }
+  .code-subtle-button,
+  .code-toolbar .code-icon-button {
+    min-width: var(--tap-min, 44px);
+    justify-content: center;
+  }
+  .code-toolbar {
+    gap: 4px 6px;
+  }
+  .code-session {
+    min-height: var(--tap-min, 44px);
+  }
+  .code-session strong,
+  .code-sidebar-bottom > button,
+  .code-file-list button,
+  .code-activity-row {
+    font-size: var(--font-size-body, 14px);
+  }
+  .code-session-search {
+    padding-block: 0 10px;
+  }
+  .code-session-search input,
+  .code-search,
+  .code-field > input,
+  .code-field > select,
+  .code-field > textarea,
+  .code-field > label + textarea,
+  .code-workflow-select select,
+  .code-conversation .pc-composer__actions select {
+    min-height: var(--tap-min, 44px);
+    font-size: var(--font-size-input, 16px);
+  }
+  .code-statusbar,
+  .code-inspector-foot,
+  .code-section-label,
+  .code-conversation .pc-workflow-chat__footer,
+  .code-auto-archived {
+    font-size: var(--font-size-xs);
+  }
+  .code-statusbar {
+    min-height: calc(32px + var(--safe-bottom, 0px));
+  }
+}
+/* Narrow composer (its own width < 420 px: phones, narrow panes): icons on the first row,
+   the destination select + Stop + Send on the last one — every control stays >= 44 px on
+   touch without the composer taking a third of the screen. */
+@container pc-composer (max-width: 419.98px) {
+  .code-conversation .pc-composer__actions {
+    display: contents;
+  }
+  .code-conversation .pc-composer__row {
+    gap: 6px 8px;
+  }
+  .code-composer-workspace {
+    border-left: 0;
+    justify-content: center;
+    min-width: var(--tap-min, 32px);
+  }
+  .code-composer-workspace span {
+    display: none;
+  }
+  .code-conversation .pc-composer__row select {
+    flex: 1 1 6em;
+    min-width: 0;
+    text-overflow: ellipsis;
+  }
+}
+@media (pointer: coarse) {
+  /* The app's compact .pc-btn sizes (32 / 28 px) must not undo the kit's touch minimum. */
+  .code-conversation .pc-btn,
+  .code-conversation .pc-json-viewer__toolbar .pc-btn,
+  .code-conversation .pc-workflow-chat__stop {
+    min-height: var(--tap-min, 44px);
+  }
+  /* "Review full tool arguments" is the only way into the call's JSON: a full-height row. */
+  .code-conversation .pc-approval-summary summary {
+    padding-block: 13px;
+  }
+}
+/* No hover: never hide an action behind it. */
+@media (hover: none) {
+  .code-file-action {
+    opacity: 1;
+  }
+}
+/* Touch-only devices: keyboard shortcut hints (⇧⌘N, ⌘K) only take room. */
+@media (hover: none) and (pointer: coarse) {
+  .code-new-chat kbd,
+  .code-session-search kbd {
+    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1857,6 +2220,8 @@ select option {
 }
 .code-automation-main {
   overflow: hidden;
+  /* The detail adapts to its pane, not the viewport (sidebar/inspector may be docked). */
+  container: code-auto-main / inline-size;
 }
 .code-auto-main-head {
   display: flex;
@@ -1880,8 +2245,16 @@ select option {
   border-radius: 8px;
   padding: 10px;
 }
-@media (max-width: 900px) {
+@container code-auto-main (max-width: 759.98px) {
   .code-auto-main-body {
     grid-template-columns: minmax(0, 1fr);
+    padding-inline: var(--gutter, 16px);
   }
+  .code-auto-main-head {
+    padding-inline: var(--gutter, 16px);
+  }
+}
+/* "Back to the conversation" keeps its words at every width (it is the only way back). */
+.code-auto-main-head .code-subtle-button span {
+  display: inline;
 }
