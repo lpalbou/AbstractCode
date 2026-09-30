@@ -16,8 +16,11 @@ import {
   useGatewayConnection,
   VoiceSettings,
   appIdentity,
+  AF_MEDIA,
+  useAfMedia,
   type VoicePreferences,
 } from "@abstractframework/ui-kit";
+import { inspectorOpenByDefault, useDrawerFocus } from "./layout";
 import {
   WorkflowChat,
   chatToMarkdown,
@@ -248,9 +251,9 @@ export function CodeWorkspace() {
   const [inputsOpen, setInputsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("model");
-  const [inspectorOpen, setInspectorOpen] = useState(
-    () => window.innerWidth > 1120,
-  );
+  // Three panes dock only on xl (>= 1440 px); below md (1024 px) the side panes are drawers.
+  const [inspectorOpen, setInspectorOpen] = useState(() => inspectorOpenByDefault());
+  const panesAreDrawers = useAfMedia(AF_MEDIA.md);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("files");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Automations: the sidebar section and, for the selected one, the main view.
@@ -593,11 +596,33 @@ export function CodeWorkspace() {
     setDraft("");
     setAutomationView(false);
   }, []);
+  // Leaving drawer mode (a window resized past md) closes the navigation drawer.
+  useEffect(() => {
+    if (!panesAreDrawers) setSidebarOpen(false);
+  }, [panesAreDrawers]);
+  useDrawerFocus(
+    sidebarOpen,
+    panesAreDrawers,
+    () => document.querySelector<HTMLElement>(".code-sidebar"),
+    () => document.querySelector<HTMLElement>(".code-mobile-close"),
+  );
+  useDrawerFocus(
+    inspectorOpen,
+    panesAreDrawers,
+    () => document.querySelector<HTMLElement>(".code-inspector"),
+    () => document.querySelector<HTMLElement>(".code-inspector-heading .code-icon-button"),
+  );
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && sidebarOpen) {
         setSidebarOpen(false);
         document.querySelector<HTMLButtonElement>(".code-mobile-nav")?.focus();
+        return;
+      }
+      // The inspector is an overlay drawer below md: Escape closes it (unless a
+      // dialog or kit drawer already consumed the key).
+      if (event.key === "Escape" && inspectorOpen && panesAreDrawers && !event.defaultPrevented) {
+        setInspectorOpen(false);
         return;
       }
       if (!(event.metaKey || event.ctrlKey)) return;
@@ -613,7 +638,7 @@ export function CodeWorkspace() {
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [newConversation, sidebarOpen]);
+  }, [newConversation, sidebarOpen, inspectorOpen, panesAreDrawers]);
 
   async function startTurn(text: string): Promise<string> {
     if (sendLock.current) throw new Error("A turn is already being submitted.");
@@ -1003,6 +1028,10 @@ export function CodeWorkspace() {
     }
   })();
 
+  const modelLabel =
+    preferences.model ||
+    (inputs.provider && inputs.model ? `Workflow · ${inputs.model}` : "Gateway default");
+
   return (
     <div
       className={`code-app${sidebarOpen ? " code-app--nav-open" : ""}${inspectorOpen ? " code-app--inspector" : ""}`}
@@ -1010,7 +1039,12 @@ export function CodeWorkspace() {
       <a className="code-skip-link" href="#code-conversation">
         Skip to conversation
       </a>
-      <aside className="code-sidebar" aria-label="Conversations">
+      <aside
+        className="code-sidebar"
+        aria-label="Conversations"
+        // A closed off-canvas drawer is out of the tab order and the accessibility tree.
+        {...(panesAreDrawers && !sidebarOpen ? { inert: "" } : {})}
+      >
         <div className="code-brand">
           <span className="code-brand-mark" aria-hidden="true">
             a<span>c</span>
@@ -1248,14 +1282,12 @@ export function CodeWorkspace() {
           <button
             className="code-model-button"
             onClick={() => openSettings("model")}
+            // The label is visually hidden on narrow toolbars: the name stays.
+            aria-label={`Model: ${modelLabel}`}
+            title={`Model: ${modelLabel}`}
           >
             <Icon name="sparkle" size={14} />
-            <span>
-              {preferences.model ||
-                  (inputs.provider && inputs.model
-                    ? `Workflow · ${inputs.model}`
-                    : "Gateway default")}
-            </span>
+            <span aria-hidden="true">{modelLabel}</span>
             <Icon name="chevronDown" size={12} />
           </button>
           <div className="code-toolbar-spacer" />
@@ -1263,6 +1295,8 @@ export function CodeWorkspace() {
             className="code-subtle-button"
             onClick={() => setInputsOpen(true)}
             disabled={!workflow}
+            aria-label="Inputs"
+            title="Workflow inputs"
           >
             <Icon name="settings" size={14} />
             <span>Inputs</span>
@@ -1270,6 +1304,8 @@ export function CodeWorkspace() {
           <button
             className="code-subtle-button"
             onClick={() => openSettings("tools")}
+            aria-label="Tools"
+            title="Tools"
           >
             <Icon name="terminal" size={14} />
             <span>Tools</span>
@@ -1601,6 +1637,14 @@ export function CodeWorkspace() {
             ) : null}
           </main>
           )}
+          {inspectorOpen ? (
+            <button
+              className="code-inspector-scrim"
+              aria-label="Close workspace inspector"
+              tabIndex={-1}
+              onClick={() => setInspectorOpen(false)}
+            />
+          ) : null}
           {inspectorOpen ? (
             <WorkspaceInspector
               tab={inspectorTab}
