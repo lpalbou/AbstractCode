@@ -20,7 +20,20 @@ import {
   useAfMedia,
   type VoicePreferences,
 } from "@abstractframework/ui-kit";
-import { inspectorOpenByDefault, useDrawerFocus } from "./layout";
+import {
+  escapeTarget,
+  initialInspector,
+  inspectorOnModeChange,
+  inspectorOnToggle,
+  kitDialogOpen,
+  paneModeFrom,
+  sidebarOnModeChange,
+  useChromeBottom,
+  useDrawerFocus,
+  type InspectorState,
+  type PaneMode,
+} from "./layout";
+import { SidebarDrawer } from "./sidebar_drawer";
 import {
   WorkflowChat,
   chatToMarkdown,
@@ -251,9 +264,24 @@ export function CodeWorkspace() {
   const [inputsOpen, setInputsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("model");
-  // Three panes dock only on xl (>= 1440 px); below md (1024 px) the side panes are drawers.
-  const [inspectorOpen, setInspectorOpen] = useState(() => inspectorOpenByDefault());
+  // Pane modes (layout.ts): xl docks three panes; 1024-1439 docks the sidebar and makes the
+  // inspector an overlay; below 1024 both side panes are drawers.
   const panesAreDrawers = useAfMedia(AF_MEDIA.md);
+  const belowLg = useAfMedia(AF_MEDIA.lg);
+  const paneMode: PaneMode = paneModeFrom(belowLg, panesAreDrawers);
+  const paneModeRef = useRef<PaneMode>(paneMode);
+  // Kit drawers open under the measured chrome (top bar, or the one-row landscape chrome).
+  const drawerTop = useChromeBottom(60);
+  const [inspector, setInspector] = useState<InspectorState>(() => initialInspector(paneMode));
+  const inspectorOpen = inspector.open;
+  const inspectorIsOverlay = paneMode !== "docked";
+  const setInspectorOpen = useCallback(
+    (next: boolean | ((open: boolean) => boolean)) =>
+      setInspector((state) =>
+        inspectorOnToggle(state, paneModeRef.current, typeof next === "function" ? next(state.open) : next),
+      ),
+    [],
+  );
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("files");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Automations: the sidebar section and, for the selected one, the main view.
@@ -596,13 +624,15 @@ export function CodeWorkspace() {
     setDraft("");
     setAutomationView(false);
   }, []);
-  // Leaving drawer mode (a window resized past md) closes the navigation drawer.
-  // Entering it (resized below md) folds the inspector away instead of covering the
-  // conversation with an overlay nobody asked for.
+  // A resize that changes the pane mode: leaving xl folds the inspector (remembering the
+  // user's docked choice, restored back at xl); leaving drawer mode closes the navigation drawer.
   useEffect(() => {
-    if (!panesAreDrawers) setSidebarOpen(false);
-    else setInspectorOpen(false);
-  }, [panesAreDrawers]);
+    const from = paneModeRef.current;
+    paneModeRef.current = paneMode;
+    if (from === paneMode) return;
+    setInspector((state) => inspectorOnModeChange(state, from, paneMode));
+    setSidebarOpen((open) => sidebarOnModeChange(open, paneMode));
+  }, [paneMode]);
   useDrawerFocus(
     sidebarOpen,
     panesAreDrawers,
@@ -611,20 +641,28 @@ export function CodeWorkspace() {
   );
   useDrawerFocus(
     inspectorOpen,
-    panesAreDrawers,
+    inspectorIsOverlay,
     () => document.querySelector<HTMLElement>(".code-inspector"),
     () => document.querySelector<HTMLElement>(".code-inspector-heading .code-icon-button"),
   );
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && sidebarOpen) {
+      // One Escape closes one layer: a dialog or kit drawer above the panes owns it.
+      const target = escapeTarget({
+        key: event.key,
+        defaultPrevented: event.defaultPrevented,
+        overlayOpen:
+          settingsOpen || inputsOpen || voiceOpen || newAutomationOpen || appearanceOpen || kitDialogOpen(),
+        sidebarOpen,
+        inspectorOpen,
+        inspectorIsOverlay,
+      });
+      if (target === "sidebar") {
         setSidebarOpen(false);
         document.querySelector<HTMLButtonElement>(".code-mobile-nav")?.focus();
         return;
       }
-      // The inspector is an overlay drawer below md: Escape closes it (unless a
-      // dialog or kit drawer already consumed the key).
-      if (event.key === "Escape" && inspectorOpen && panesAreDrawers && !event.defaultPrevented) {
+      if (target === "inspector") {
         setInspectorOpen(false);
         return;
       }
@@ -641,7 +679,18 @@ export function CodeWorkspace() {
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [newConversation, sidebarOpen, inspectorOpen, panesAreDrawers]);
+  }, [
+    newConversation,
+    sidebarOpen,
+    inspectorOpen,
+    inspectorIsOverlay,
+    settingsOpen,
+    inputsOpen,
+    voiceOpen,
+    newAutomationOpen,
+    appearanceOpen,
+    setInspectorOpen,
+  ]);
 
   async function startTurn(text: string): Promise<string> {
     if (sendLock.current) throw new Error("A turn is already being submitted.");
@@ -1042,12 +1091,7 @@ export function CodeWorkspace() {
       <a className="code-skip-link" href="#code-conversation">
         Skip to conversation
       </a>
-      <aside
-        className="code-sidebar"
-        aria-label="Conversations"
-        // A closed off-canvas drawer is out of the tab order and the accessibility tree.
-        {...(panesAreDrawers && !sidebarOpen ? { inert: "" } : {})}
-      >
+      <SidebarDrawer isDrawer={panesAreDrawers} open={sidebarOpen}>
         <div className="code-brand">
           <span className="code-brand-mark" aria-hidden="true">
             a<span>c</span>
@@ -1171,7 +1215,7 @@ export function CodeWorkspace() {
             </small>
           </div>
         </div>
-      </aside>
+      </SidebarDrawer>
       {sidebarOpen ? (
         <button
           className="code-nav-scrim"
@@ -1739,7 +1783,7 @@ export function CodeWorkspace() {
         label="Voice settings"
         title="AI voice"
         width={480}
-        topOffset={60}
+        topOffset={drawerTop}
         className="code-settings-drawer"
       >
         <div className="code-settings">
@@ -1770,6 +1814,7 @@ export function CodeWorkspace() {
       <SettingsPanel
           key={identity}
           open={settingsOpen}
+          topOffset={drawerTop}
           onClose={() => setSettingsOpen(false)}
           tab={settingsTab}
           onTab={setSettingsTab}
@@ -1811,7 +1856,7 @@ export function CodeWorkspace() {
         label="Workflow inputs"
         title={workflow?.name || "Workflow inputs"}
         width={480}
-        topOffset={60}
+        topOffset={drawerTop}
         className="code-settings-drawer"
       >
         <div className="code-settings">

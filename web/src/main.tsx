@@ -6,6 +6,7 @@ import { installViewportVars } from "@abstractframework/ui-kit";
 
 import "@abstractframework/panel-chat/panel_chat.css";
 import { CodeWorkspace, WorkspaceErrorBoundary } from "./workspace/app";
+import { installKeyboardFlag } from "./workspace/layout";
 import "./workspace/workspace.css";
 
 // Dev DX: avoid "hard refresh" loops caused by a previously-installed service worker caching assets.
@@ -30,6 +31,8 @@ if (import.meta.env.DEV && "serviceWorker" in navigator) {
 // --keyboard-inset, from the kit (idempotent across HMR). The shell sizes to
 // var(--vv-height, var(--vh-full)) — see workspace.css.
 installViewportVars();
+// <html data-keyboard="open"> while --keyboard-inset > 0: CSS compacts the chrome while typing.
+installKeyboardFlag();
 
 // Prod: register the PWA shell service worker.
 if (import.meta.env.PROD && "serviceWorker" in navigator) {

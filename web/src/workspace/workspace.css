@@ -1625,14 +1625,34 @@ select option {
     width: clamp(320px, 17vw, 440px);
   }
 }
-/* lg and below (< 1440): tighter panes (the inspector starts closed, see layout.ts). */
+/* lg and below (< 1440): at most two docked panes (DESIGN §5.3) — the sidebar stays docked, the
+   workspace inspector is an overlay drawer (scrim, Escape, close button, focus; layout.ts folds it
+   when the window leaves xl and restores the user's choice back at xl). */
 @media (max-width: 1439.98px) {
   .code-sidebar {
     width: 224px;
   }
+  .code-inspector-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 125;
+    background: color-mix(in srgb, var(--bg-primary) 60%, transparent);
+    border: 0;
+    padding: 0;
+  }
   .code-inspector {
-    width: 265px;
-    min-width: 230px;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 130;
+    width: min(360px, 100%);
+    min-width: 0;
+    padding: var(--safe-top, 0px) var(--safe-right, 0px) var(--safe-bottom, 0px) 0;
+    background: var(--bg-secondary);
+    box-shadow: var(--ui-shadow-1);
+    overscroll-behavior: contain;
   }
   .code-model-button span {
     max-width: 130px;
@@ -1688,8 +1708,7 @@ select option {
   .code-mobile-close {
     margin-left: auto;
   }
-  .code-nav-scrim,
-  .code-inspector-scrim {
+  .code-nav-scrim {
     display: block;
     position: fixed;
     inset: 0;
@@ -1697,22 +1716,6 @@ select option {
     background: color-mix(in srgb, var(--bg-primary) 60%, transparent);
     border: 0;
     padding: 0;
-  }
-  .code-inspector-scrim {
-    z-index: 125;
-  }
-  .code-inspector {
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 130;
-    width: min(360px, 100%);
-    min-width: 0;
-    padding: var(--safe-top, 0px) var(--safe-right, 0px) var(--safe-bottom, 0px) 0;
-    background: var(--bg-secondary);
-    box-shadow: var(--ui-shadow-1);
-    overscroll-behavior: contain;
   }
   .code-inspector-content,
   .code-sessions,
@@ -2045,10 +2048,8 @@ select option {
     overflow: visible;
   }
 }
-/* Drawers (Run settings, workflow inputs, voice) open under the top bar, whatever its height. */
-.code-settings-drawer {
-  top: calc(var(--code-topbar-h) + var(--safe-top, 0px)) !important;
-}
+/* Drawers (Run settings, workflow inputs, voice) open under the measured chrome: app.tsx passes
+   AfDrawer's topOffset from useChromeBottom() (layout.ts); no CSS override of the inline top. */
 /* Touch (coarse pointer): 44 px targets, 16 px inputs (no iOS focus zoom), comfortable rows. */
 @media (pointer: coarse) {
   .code-icon-button,
@@ -2153,6 +2154,65 @@ select option {
     min-width: 0;
     text-overflow: ellipsis;
   }
+}
+/* Very narrow composer (< 360 px: 320-wide phones): the last row still holds select + Stop +
+   Send — Stop shows its icon only (its word stays the accessible name), the select and the
+   send label shrink with an ellipsis instead of pushing Send onto a third row. */
+@container pc-composer (max-width: 359.98px) {
+  .code-conversation .pc-workflow-chat__stop {
+    min-width: var(--tap-min, 32px);
+    padding-inline: 8px;
+    justify-content: center;
+  }
+  .code-conversation .pc-workflow-chat__stop > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .code-conversation .pc-composer__row select {
+    flex: 1 1 3em;
+  }
+  .code-conversation .pc-composer__row > .pc-btn {
+    min-width: 0;
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-inline: 10px;
+  }
+}
+/* On-screen keyboard up (<html data-keyboard="open">, from --keyboard-inset via layout.ts): the
+   visible height is small, so the chrome steps aside while typing — no top bar, toolbar, run
+   strip or status bar; the composer keeps its field (1-2 lines, at most 30 % of the visible
+   height) and its last row (select, Stop, Send); everything returns with the keyboard down. */
+:root[data-keyboard="open"] .code-topbar,
+:root[data-keyboard="open"] .code-toolbar,
+:root[data-keyboard="open"] .code-run-strip,
+:root[data-keyboard="open"] .code-statusbar,
+:root[data-keyboard="open"] .code-conversation .pc-workflow-chat__footer {
+  display: none;
+}
+:root[data-keyboard="open"] .code-conversation .pc-composer__textarea {
+  min-height: 0;
+  max-height: calc(var(--vv-height, var(--vh-full, 100vh)) * 0.3);
+  padding-bottom: 2px;
+}
+:root[data-keyboard="open"] .code-conversation .pc-composer {
+  padding: 6px 10px 4px;
+}
+:root[data-keyboard="open"] .code-conversation .pc-composer__actions > button {
+  display: none;
+}
+:root[data-keyboard="open"] .code-conversation .pc-composer__actions > .pc-workflow-chat__stop {
+  display: inline-flex;
+}
+:root[data-keyboard="open"] .code-conversation .pc-chat-thread {
+  padding-block: 8px;
+}
+:root[data-keyboard="open"] .code-conversation .pc-workflow-chat__composer {
+  padding-block: 4px;
 }
 @media (pointer: coarse) {
   /* The app's compact .pc-btn sizes (32 / 28 px) must not undo the kit's touch minimum. */

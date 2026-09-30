@@ -75,6 +75,7 @@ export function SettingsPanel({
   defaultModel,
   workflowDefault,
   streaming = STREAMING_LOADING,
+  topOffset,
 }: {
   open: boolean;
   onClose: () => void;
@@ -89,6 +90,8 @@ export function SettingsPanel({
   workflowDefault?: boolean;
   /** The gateway's live-reply support (`/discovery/capabilities`). */
   streaming?: StreamingCapability;
+  /** Where the drawer starts (px): under the app's chrome. Default 60 (the desktop top bar). */
+  topOffset?: number;
 }) {
   const update = (patch: Partial<RunPreferences>) =>
     onChange({ ...value, ...patch });
@@ -99,7 +102,7 @@ export function SettingsPanel({
       label="Run settings"
       title="Run settings"
       width={480}
-      topOffset={60}
+      topOffset={topOffset ?? 60}
       className="code-settings-drawer"
     >
       <div className="code-settings">
