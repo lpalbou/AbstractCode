@@ -25,11 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Send on the next; the keyboard-hint footer is hidden on phones.
   - The automation detail adapts to its own pane width (container query), not to the viewport.
   - Touch devices: 44 px targets and 16 px inputs (no iOS focus zoom), shortcut hints hidden, file actions
-    visible without hover.
+    visible without hover; the toolbar and composer selects draw their own chevron on touch so iOS Safari keeps
+    the 44 px box.
+  - No voice-catalog request before sign-in (the always-mounted voice drawer produced two 401 console errors
+    on the sign-in screen).
   - The shell sizes to the visible viewport (`installViewportVars()` from the kit, iOS keyboard aware) and pads
     the safe areas; the viewport meta no longer blocks pinch zoom (`maximum-scale=1, user-scalable=no` removed).
   - Very wide windows: the side panes grow (`clamp()`), the chat column stays capped for line length.
-- **Web: requires `@abstractframework/ui-kit` 0.3.0 and `@abstractframework/panel-chat` 0.2.0** (responsive
+- **Web: requires `@abstractframework/ui-kit` 0.3.1 and `@abstractframework/panel-chat` 0.2.1** (responsive
   kit), consumed from `web/vendor/*.tgz` on this branch until they are published (relock to the registry
   before release).
 
