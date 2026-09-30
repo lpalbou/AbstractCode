@@ -5,6 +5,39 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [web 0.8.0] - Unreleased
+
+### Changed
+- **Web: responsive layout** (responsive workstream 2026-09-30; shared design `untracked/responsive/DESIGN.md`).
+  The app adapts to phones (portrait and landscape), tablets, narrow and very wide windows, and re-flows both
+  ways on a live resize. Desktop windows (1440 px and wider) keep the three docked panes and today's look.
+  - Breakpoints are the framework's named ones (480 / 768 / 1024 / 1440 px, plus a 500 px height for phone
+    landscape) instead of 1500 / 1200 / 1020 / 900 / 760 / 480.
+  - Below 1024 px the conversation sidebar and the workspace inspector are overlay drawers (scrim, Escape,
+    close button, focus moves in and back; a closed drawer is `inert`). From 1024 to 1439 px the inspector is a
+    toggle that starts closed (two docked panes at most); it opens by default only from 1440 px.
+  - The toolbar's controls no longer draw over each other on tablets and narrow windows: every item shrinks
+    with an ellipsis and the toolbar wraps below 1024 px. Model / Inputs / Tools keep their accessible names
+    when their labels are hidden.
+  - Phone landscape: one row of chrome (menu, workflow toolbar, app actions), no status bar, compact composer:
+    the transcript goes from 56 px to about 200 px at 852x393.
+  - Narrow composers (phones, narrow panes) put their icons on one row and the destination select, Stop and
+    Send on the next; the keyboard-hint footer is hidden on phones.
+  - The automation detail adapts to its own pane width (container query), not to the viewport.
+  - Touch devices: 44 px targets and 16 px inputs (no iOS focus zoom), shortcut hints hidden, file actions
+    visible without hover.
+  - The shell sizes to the visible viewport (`installViewportVars()` from the kit, iOS keyboard aware) and pads
+    the safe areas; the viewport meta no longer blocks pinch zoom (`maximum-scale=1, user-scalable=no` removed).
+  - Very wide windows: the side panes grow (`clamp()`), the chat column stays capped for line length.
+- **Web: requires `@abstractframework/ui-kit` 0.3.0 and `@abstractframework/panel-chat` 0.2.0** (responsive
+  kit), consumed from `web/vendor/*.tgz` on this branch until they are published (relock to the registry
+  before release).
+
+### Added
+- **e2e: `e2e/responsive.screens.mjs`**, the screens module for the shared responsive capture harness (sign-in,
+  conversation, approval, automations, automation form, automation detail, workspace, settings, about) against
+  the fixture gateway.
+
 ## [web 0.7.0] - 2026-09-30
 
 ### Added
