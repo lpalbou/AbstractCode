@@ -597,8 +597,11 @@ export function CodeWorkspace() {
     setAutomationView(false);
   }, []);
   // Leaving drawer mode (a window resized past md) closes the navigation drawer.
+  // Entering it (resized below md) folds the inspector away instead of covering the
+  // conversation with an overlay nobody asked for.
   useEffect(() => {
     if (!panesAreDrawers) setSidebarOpen(false);
+    else setInspectorOpen(false);
   }, [panesAreDrawers]);
   useDrawerFocus(
     sidebarOpen,
@@ -1034,7 +1037,7 @@ export function CodeWorkspace() {
 
   return (
     <div
-      className={`code-app${sidebarOpen ? " code-app--nav-open" : ""}${inspectorOpen ? " code-app--inspector" : ""}`}
+      className={`code-app${sidebarOpen ? " code-app--nav-open" : ""}${inspectorOpen ? " code-app--workspace-open" : ""}`}
     >
       <a className="code-skip-link" href="#code-conversation">
         Skip to conversation
