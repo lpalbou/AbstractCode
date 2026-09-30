@@ -1,7 +1,6 @@
-export function random_id(): string {
-  if (typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function") {
-    return (crypto as any).randomUUID();
-  }
-  return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
+import { randomId } from "@abstractframework/ui-kit";
 
+/** A v4 UUID; works over plain http too (the kit falls back to crypto.getRandomValues). */
+export function random_id(): string {
+  return randomId();
+}

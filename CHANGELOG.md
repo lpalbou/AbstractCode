@@ -5,6 +5,17 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Web: works over plain http from another machine.** Opening AbstractCode at `http://<host>:8080/apps/code/` from a
+  laptop (LAN or Tailscale) stopped at "crypto.randomUUID is not a function": browsers offer that function only on
+  https or localhost. Ids now come from the kit's `randomId()` (needs `@abstractframework/ui-kit` 0.3.3). Copy
+  buttons fall back to the browser's copy command and say "Copied" or "Copy failed — select and copy". Where the
+  browser withholds the microphone, the dictation button stays off and says: "Voice and camera need an https
+  address (Network → HTTPS in the gateway console)." The web manifest is requested with the app's session cookie
+  (`crossorigin="use-credentials"`), so the gateway no longer answers it with 401.
+
 ## [web 0.8.0] - 2026-09-30
 
 ### Added

@@ -2,6 +2,7 @@ import { gatewayApiPath } from "@abstractframework/ui-kit";
 import React, { useEffect, useRef } from "react";
 import { Icon, useGatewayVoice } from "@abstractframework/ui-kit";
 import { gateway, gatewayRequest, newId } from "./transport";
+import { MEDIA_NEEDS_HTTPS, mediaAvailable } from "../lib/secure-context";
 import type { VoicePreferences } from "@abstractframework/ui-kit";
 
 /** Optional media stays in the gateway; the browser only records and plays audio. */
@@ -162,9 +163,28 @@ export function VoiceTools({
     };
   }, [voice.stop_voice_ptt_recording]);
   if (!capability.tts?.available && !capability.stt?.available) return null;
+  // Over plain http from another machine the browser withholds the microphone:
+  // say why on the control instead of a silently disabled button.
+  const micBlocked = !mediaAvailable();
   return (
     <>
-      {capability.stt?.available ? (
+      {capability.stt?.available && micBlocked ? (
+        <>
+          <button
+            className="code-icon-button"
+            aria-label="Dictation unavailable"
+            aria-describedby="code-voice-https-note"
+            title={MEDIA_NEEDS_HTTPS}
+            disabled
+          >
+            <Icon name="mic" size={15} />
+          </button>
+          <span id="code-voice-https-note" className="code-voice-note" role="note">
+            {MEDIA_NEEDS_HTTPS}
+          </span>
+        </>
+      ) : null}
+      {capability.stt?.available && !micBlocked ? (
         <button
           className="code-icon-button"
           aria-label={

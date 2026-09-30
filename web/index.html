@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     
     <!-- PWA Manifest -->
-    <link rel="manifest" href="./manifest.webmanifest" />
+    <!-- The gateway app proxy needs the session cookie; browsers fetch the manifest without it unless use-credentials. -->
+    <link rel="manifest" href="./manifest.webmanifest" crossorigin="use-credentials" />
     
     <!-- Theme & Status Bar -->
     <meta name="theme-color" content="#1a1a2e" />

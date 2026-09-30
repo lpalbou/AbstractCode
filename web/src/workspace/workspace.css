@@ -2430,3 +2430,10 @@ select option {
 .code-auto-main-head .code-subtle-button span {
   display: inline;
 }
+/* Plain-http note beside the dictation control (the browser withholds the microphone there). */
+.code-voice-note {
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--text-secondary);
+  max-width: 34ch;
+}
