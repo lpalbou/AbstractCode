@@ -65,6 +65,7 @@ import {
   type RunPreferences,
   type SettingsTab,
 } from "./settings_panel";
+import { ShowAllWorkflowsSwitch } from "./workflow_all_switch";
 import { WorkspaceInspector, type InspectorTab } from "./workspace_panels";
 import { aboutExtraRows, type FetchOutcome } from "./about_rows";
 import { automationTarget, automationsAvailability, myEmailConsoleUrl } from "./automations";
@@ -1301,27 +1302,10 @@ export function CodeWorkspace() {
             <span className="code-workflow-kind">
               {isAgent ? "AGENT" : "WORKFLOW"}
             </span>
-            <AfSwitch
-              className="code-workflow-all"
-              variant="sm"
-              action="show-all-workflows"
-              ariaLabel="Show all workflows"
-              label={
-                <>
-                  <span className="code-workflow-all__long">Show all workflows</span>
-                  <span className="code-workflow-all__short" aria-hidden="true">All</span>
-                </>
-              }
-              hint="List workflows that are not coding agents too"
+            <ShowAllWorkflowsSwitch
               checked={preferences.showAllWorkflows}
-              unavailableReason={
-                !connection.connected
-                  ? "Connect to a gateway first."
-                  : locked
-                    ? "A run is in progress."
-                    : null
-              }
-              reasonVisible={false}
+              connected={connection.connected}
+              locked={locked}
               onChange={(next) =>
                 setPreferences((previous) => ({
                   ...previous,

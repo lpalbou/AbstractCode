@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AfSwitch } from "@abstractframework/ui-kit";
 
 import { SkillSwitch, type GatewaySkill } from "./skills_picker";
+import { ShowAllWorkflowsSwitch } from "./workflow_all_switch";
 
 const appSource = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("./workspace.css", import.meta.url), "utf8");
@@ -64,23 +65,62 @@ describe("Run settings → Skills: one switch per skill", () => {
     expect(html).toContain("Blocked by the gateway: Not trusted.");
   });
 
-  it("while settings are locked the switch says so instead of going silent", () => {
-    const el = switchOf(SkillSwitch({ skill: skill(), checked: true, disabled: true, onChange: () => {} }));
-    expect(el.props.unavailableReason).toMatch(/no run is in progress/);
-    // The panel banner already says it: hover/assistive text only, not repeated per row.
-    expect(el.props.reasonVisible).toBe(false);
+  it("while settings are locked the switch points at the panel's visible banner", () => {
+    const html = renderToStaticMarkup(
+      <SkillSwitch skill={skill()} checked disabled onChange={() => {}} lockedReasonId="code-settings-locked" />,
+    );
+    expect(html).toMatch(/role="switch"[^>]*aria-disabled="true" aria-describedby="code-settings-locked"/);
+    // Without a banner to point at, the reason renders as visible text under the row.
+    const alone = renderToStaticMarkup(<SkillSwitch skill={skill()} checked disabled onChange={() => {}} />);
+    expect(alone).toMatch(/<span id="[^"]+" class="af-switch__reason">Available when a gateway is connected and no run is in progress\.<\/span>/);
+  });
+
+  it("the Run settings banner carries the id the skill switches point at", () => {
+    const panel = readFileSync(new URL("./settings_panel.tsx", import.meta.url), "utf8");
+    expect(panel).toMatch(/<p className="code-notice" id=\{SETTINGS_LOCKED_ID\}>/);
+    expect(panel).toContain('export const SETTINGS_LOCKED_ID = "code-settings-locked"');
+    expect(panel).toContain("lockedReasonId={SETTINGS_LOCKED_ID}");
   });
 });
 
 describe("workspace toolbar and queue", () => {
-  it('"Show all workflows" is a kit switch named by the feature (no checkbox in the toolbar)', () => {
-    const block = /<AfSwitch\s+className="code-workflow-all"[\s\S]*?\n\s*\/>/.exec(appSource)?.[0] ?? "";
-    expect(block).toContain('ariaLabel="Show all workflows"');
-    expect(block).toContain("checked={preferences.showAllWorkflows}");
-    expect(block).toContain("unavailableReason=");
+  const allSwitch = (p: { checked?: boolean; connected?: boolean; locked?: boolean }) =>
+    renderToStaticMarkup(
+      <ShowAllWorkflowsSwitch checked={p.checked ?? false} connected={p.connected ?? true} locked={p.locked ?? false} onChange={() => {}} />,
+    );
+
+  it('"Show all workflows" is a kit switch named by the feature, ON and OFF', () => {
+    const on = allSwitch({ checked: true });
+    expect(on).toMatch(/role="switch" id="code-workflow-all" class="af-switch af-switch--sm code-workflow-all" data-action="show-all-workflows" aria-checked="true"/);
+    expect(on).toContain('aria-label="Show all workflows"');
+    expect(on).not.toContain("aria-disabled");
+    expect(allSwitch({ checked: false })).toMatch(/aria-checked="false"/);
+    expect(appSource).toContain("<ShowAllWorkflowsSwitch");
     expect(appSource).not.toMatch(/type="checkbox"/);
-    // The phone's short label is the switch's own text, not a pseudo-element over a hidden checkbox.
     expect(css).not.toMatch(/\.code-workflow-all::after/);
+  });
+
+  it("unavailable: aria-disabled, and the reason is VISIBLE text it points at (a tap must say why)", () => {
+    for (const [p, reason] of [
+      [{ connected: false }, "Connect to a gateway first."],
+      [{ locked: true }, "A run is in progress."],
+    ] as const) {
+      const html = allSwitch(p);
+      expect(html).toMatch(/role="switch"[^>]*aria-disabled="true" aria-describedby="code-workflow-all-reason"/);
+      // Rendered as the kit's visible reason node (not the --hidden variant).
+      expect(html).toContain(`<span id="code-workflow-all-reason" class="af-switch__reason">${reason}</span>`);
+    }
+    // Only a hover-capable fine pointer hides the text (the tooltip carries it there).
+    const rule = /@media \(hover: hover\) and \(pointer: fine\) \{\s*#code-workflow-all-reason \{/;
+    expect(css).toMatch(rule);
+    expect(css.replace(rule, "")).not.toMatch(/#code-workflow-all-reason \{[^}]*clip-path/);
+  });
+
+  it("switching calls back with the new state", () => {
+    const onChange = vi.fn();
+    const el = switchOf(ShowAllWorkflowsSwitch({ checked: false, connected: true, locked: false, onChange }));
+    el.props.onChange?.(true);
+    expect(onChange).toHaveBeenCalledWith(true);
   });
 
   it('the queue is a "Run queued turns" switch, not a Pause/Resume queue verb pair', () => {

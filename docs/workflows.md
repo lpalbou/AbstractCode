@@ -56,7 +56,7 @@ operations, not client ones — see the
 ### In the browser
 
 The **Workflow** list in the toolbar starts with the gateway default, then the
-coding agents published on your gateway. Tick **Show all workflows** to list
+coding agents published on your gateway. Switch on **Show all workflows** to list
 every authorized workflow, including shared catalog workflows. The browser is
 not restricted to `abstractcode.agent.v1`: ordinary AbstractFlow workflows run
 from their registered schema using **Inputs** and **Run workflow**. Generic

@@ -19,6 +19,9 @@ import {
   type StreamingCapability,
 } from "./stream_replies";
 
+/** The Run settings banner saying why settings are locked (switches point their reason at it). */
+export const SETTINGS_LOCKED_ID = "code-settings-locked";
+
 export type RunPreferences = {
   provider: string;
   model: string;
@@ -135,7 +138,7 @@ export function SettingsPanel({
           ))}
         </div>
         {disabled ? (
-          <p className="code-notice">
+          <p className="code-notice" id={SETTINGS_LOCKED_ID}>
             Settings are unavailable while disconnected or while a run is
             active. Reconnect, or finish or stop the run, then try again.
           </p>
@@ -366,6 +369,7 @@ export function SettingsPanel({
             value={value.skills}
             onChange={(skills) => update({ skills })}
             disabled={disabled}
+            lockedReasonId={SETTINGS_LOCKED_ID}
           />
         )}
       </div>
