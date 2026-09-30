@@ -9,8 +9,10 @@
  * The list/rows and the panel wiring are hook-free so tests render them in
  * any state; `useAutomations` only subscribes to the controller and polls.
  */
-import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { PanelHeader, panelIds } from "./sidebar_panels";
+import { DetailDisclosure, detailPanelIds, useDetailPanels, useTimelineSlot, type DetailPanelsState } from "./detail_panels";
 import {
   AfScheduleDialog,
   AutomationStateLabel,
@@ -225,6 +227,34 @@ export function folderTitle(automationId: string, runId: string, occurrences: Ar
   return row ? `Run #${row.index} folder` : "Run folder";
 }
 
+/** The folder pane under a disclosure header; `own` = the automation's folder (its path is
+ * already in the panel's Workspace fact), otherwise one run's. Collapsed = header only. */
+export function AutomationFolderSection(props: {
+  panels: DetailPanelsState;
+  onToggle(): void;
+  title: string;
+  own: boolean;
+  children: React.ReactNode;
+}): React.ReactElement {
+  const open = props.panels.folder;
+  const ids = detailPanelIds("folder");
+  return (
+    <div
+      className="code-auto-folder-section"
+      data-open={open ? "true" : "false"}
+      data-folder={props.own ? "automation" : "run"}
+    >
+      <div className="code-detail-head">
+        <DetailDisclosure panel="folder" label={props.title} open={open} onToggle={props.onToggle} />
+      </div>
+      {/* The kit browser inside is the named region ("Automation folder"); this wrapper is not. */}
+      <div className="code-detail-region" id={ids.region} hidden={!open}>
+        {props.children}
+      </div>
+    </div>
+  );
+}
+
 /** The main area for the selected automation: the kit panel + its folder. */
 export function AutomationMain(props: {
   ctl: AutomationsController;
@@ -243,6 +273,10 @@ export function AutomationMain(props: {
     ...props.host,
     openWorkspace: (runId) => setFolder({ automationId, runId }),
   });
+  // The detail's own lists (occurrences, folder) collapse like the sidebar panels.
+  const [panels, togglePanel] = useDetailPanels();
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const timelineSlot = useTimelineSlot(bodyRef, Boolean(d && d.occurrences.length));
   return (
     <main className="code-conversation code-automation-main" id="code-conversation" tabIndex={-1} aria-label="Automation">
       <div className="code-auto-main-head">
@@ -264,18 +298,37 @@ export function AutomationMain(props: {
           </p>
         )
       ) : (
-        <div className="code-auto-main-body">
+        <div className="code-auto-main-body" ref={bodyRef} data-occurrences={panels.occurrences ? "open" : "closed"}>
           {/* Ledger and artifact links open through this app's proxy (safe tab-open rule). */}
           {p ? <AutomationPanelWithMarkdown {...p} fetchGateway={proxyGatewayFetch} /> : null}
+          {timelineSlot
+            ? createPortal(
+                <DetailDisclosure
+                  panel="occurrences"
+                  label="Occurrences"
+                  count={d.summary.occurrence_count}
+                  open={panels.occurrences}
+                  onToggle={() => togglePanel("occurrences")}
+                />,
+                timelineSlot,
+              )
+            : null}
           {props.enabled ? (
-            <WorkspaceBrowser
-              className="code-auto-folder"
-              fetchGateway={proxyGatewayFetch}
-              runId={folderRun}
+            <AutomationFolderSection
+              panels={panels}
+              onToggle={() => togglePanel("folder")}
               title={folderTitle(d.automationId, folderRun, d.occurrences)}
-              refreshKey={folderRefreshKey(d.summary)}
-              onClose={folderRun !== d.automationId ? () => setFolder({ automationId, runId: "" }) : undefined}
-            />
+              own={folderRun === d.automationId}
+            >
+              <WorkspaceBrowser
+                className="code-auto-folder"
+                fetchGateway={proxyGatewayFetch}
+                runId={folderRun}
+                title={folderTitle(d.automationId, folderRun, d.occurrences)}
+                refreshKey={folderRefreshKey(d.summary)}
+                onClose={folderRun !== d.automationId ? () => setFolder({ automationId, runId: "" }) : undefined}
+              />
+            </AutomationFolderSection>
           ) : null}
         </div>
       )}

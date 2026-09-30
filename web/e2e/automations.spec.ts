@@ -129,3 +129,57 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   await expect(main.locator('.af-auto-occ[data-index="1"]')).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+// DESIGN §12 (space on phones): the automation detail's own lists (occurrences, folder) are
+// disclosures, open by default and remembered per viewer; at phone width the detail is flat
+// (no card around an occurrence) and a fact shares one line with its label.
+test("the automation detail's lists collapse, stay collapsed after a reload, and use the phone width", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page);
+  const title = `E2E lists ${Date.now()}`;
+  await page.locator(".code-mobile-nav").click();
+  await page.getByLabel("Show all workflows").evaluate((el) => (el as HTMLInputElement).checked || (el as HTMLInputElement).click());
+  await page.keyboard.press("Escape");
+  await page.getByLabel("Workflow", { exact: true }).selectOption({ label: "Native tool approval" });
+  await page.locator(".code-mobile-nav").click();
+  await page.getByRole("button", { name: "New automation" }).click();
+  const dialog = page.getByRole("dialog", { name: "Schedule a task" });
+  await dialog.getByLabel("Task").fill("Write the fixture file");
+  await dialog.getByText("Advanced").click();
+  await dialog.getByLabel("Title").fill(title);
+  await dialog.getByRole("button", { name: "Create automation" }).click();
+  await expect(dialog).toBeHidden();
+
+  const main = page.locator(".code-automation-main");
+  await expect(main.locator(".af-auto-occ").first()).toBeVisible({ timeout: 30_000 });
+  const occToggle = main.locator("#code-detail-occurrences-toggle");
+  const folderToggle = main.locator("#code-detail-folder-toggle");
+  await expect(occToggle).toHaveAttribute("aria-expanded", "true");
+  await expect(folderToggle).toHaveAttribute("aria-expanded", "true");
+  // The header sits right before the kit's timeline and names it.
+  expect(await occToggle.evaluate((el) => el.parentElement?.nextElementSibling?.id)).toBe("code-detail-occurrences");
+  expect((await occToggle.boundingBox())!.height).toBeGreaterThanOrEqual(32);
+
+  // Phone width: an occurrence is a flat section, the When fact shares its label's line.
+  const occ = main.locator(".af-auto-occ").first();
+  expect(await occ.evaluate((el) => getComputedStyle(el).borderLeftWidth)).toBe("0px");
+  const when = main.locator(".af-auto__head .af-auto__facts dt").first();
+  const whenValue = main.locator(".af-auto__head .af-auto__facts dd").first();
+  expect(Math.abs((await when.boundingBox())!.y - (await whenValue.boundingBox())!.y)).toBeLessThan(4);
+
+  await occToggle.click();
+  await expect(occToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(main.locator(".af-auto__timeline")).toBeHidden();
+  await folderToggle.click();
+  await expect(main.getByRole("region", { name: "Automation folder" })).toBeHidden();
+
+  // Remembered per viewer: reopen the same automation after a reload.
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.locator(".code-mobile-nav").click();
+  await page.locator(".code-auto-row", { hasText: title }).click();
+  await expect(main.locator("#code-detail-occurrences-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(main.locator(".af-auto__timeline")).toBeHidden();
+  await expect(main.locator("#code-detail-folder-toggle")).toHaveAttribute("aria-expanded", "false");
+  await main.locator("#code-detail-occurrences-toggle").click();
+  await expect(main.locator(".af-auto__timeline")).toBeVisible();
+});

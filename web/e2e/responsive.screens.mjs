@@ -3,7 +3,8 @@
 // Drives every main screen against the isolated fixture gateway (e2e/gateway_fixture.py, no model):
 //   signin → conversation (prompt-structured: answer_user + durable ask_user) → approval (tool-approval card)
 //   → automations (sidebar list) → automation-form (Schedule a task, Advanced open) → automation-detail
-//   (occurrences + folder) → workspace (inspector Files pane) → settings (drawer) → about (dialog)
+//   (occurrences + folder) → automation-occurrence (first occurrence transcript) → conversations (both sidebar
+//   lists open) → workspace (inspector Files pane) → settings (drawer) → about (dialog)
 //   → sidebar-collapsed (Automations panel collapsed, Conversations filling the sidebar).
 //
 //   node harness/capture.mjs --app code --url http://127.0.0.1:18782 --screens web/e2e/responsive.screens.mjs --out <dir> --sweep
@@ -222,6 +223,36 @@ export default {
         }
         await main.getByRole("region", { name: "Automation folder" }).waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
         await main.evaluate((el) => el.querySelector(".code-auto-main-body")?.scrollTo(0, 0));
+      },
+    },
+    {
+      // The selected automation's first occurrence (its trigger + answer transcript) scrolled into view.
+      name: "automation-occurrence",
+      settle: 900,
+      async run(page) {
+        const main = page.locator(".code-automation-main");
+        if (!(await main.isVisible().catch(() => false))) {
+          await closeOverlays(page);
+          await openNav(page);
+          await press(page, page.locator(".code-auto-row", { hasText: AUTOMATION_TITLE }).first(), "automation row");
+          await main.waitFor({ state: "visible", timeout: 15000 });
+        }
+        const occ = main.locator(".af-auto-occ").first();
+        await occ.waitFor({ state: "visible", timeout: 30000 }).catch(() => {});
+        await occ.scrollIntoViewIfNeeded().catch(() => {});
+      },
+    },
+    {
+      // Both sidebar lists open (Automations + Conversations; inside the drawer on phones and tablets).
+      name: "conversations",
+      async run(page) {
+        await closeOverlays(page);
+        await openConversationScreen(page);
+        await openNav(page);
+        for (const id of ["#code-panel-automations-toggle", "#code-panel-conversations-toggle"]) {
+          const t = page.locator(id);
+          if ((await t.getAttribute("aria-expanded")) === "false") await press(page, t, id);
+        }
       },
     },
     {

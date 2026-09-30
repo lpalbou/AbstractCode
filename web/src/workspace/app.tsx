@@ -1693,9 +1693,11 @@ export function CodeWorkspace() {
           </main>
           )}
           {inspectorOpen ? (
+            // A pointer-only backdrop: hidden from assistive tech so the drawer's own
+            // "Close workspace inspector" button is the one control with that name.
             <button
               className="code-inspector-scrim"
-              aria-label="Close workspace inspector"
+              aria-hidden="true"
               tabIndex={-1}
               onClick={() => setInspectorOpen(false)}
             />

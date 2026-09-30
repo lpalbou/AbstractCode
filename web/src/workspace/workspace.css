@@ -2417,16 +2417,307 @@ select option {
   border-radius: 8px;
   padding: 10px;
 }
-@container code-auto-main (max-width: 759.98px) {
+/* One column below 780 px of detail width (both columns >= ~360 px above): see the space block at the end. */
+/* "Back to the conversation" keeps its words at every width (it is the only way back). */
+.code-auto-main-head .code-subtle-button span {
+  display: inline;
+}
+
+/* ===========================================================================
+   Space on phones and tablets (DESIGN §12, operator 2026-09-30: "you do not use enough the space").
+   Measured on web 0.8.0 at 393 px: the automation detail stacked every label above its value, the
+   Workspace path sat in a bordered box, the definition, each occurrence and the folder were cards
+   inside the detail (the folder a card in a card), the approval card held the tool card, the
+   workspace inspector printed the same path twice, and the reading text was 10-12 px.
+   The fixes: disclosure headers on the detail's own lists (every width, detail_panels.tsx); below
+   780 px of detail width (phones, and tablets where two columns would be narrower than ~360 px)
+   flat sections with hairline dividers, label/value pairs on one line, plain full-width paths,
+   body-size (14 px) reading text; on phones the approval and the inspector lose their nested boxes.
+   ========================================================================= */
+
+/* Detail disclosures (automation occurrences and folder), every width. */
+.code-detail-head {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  --code-detail-h: 32px;
+}
+.code-detail-toggle {
+  appearance: none;
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: var(--code-detail-h);
+  margin: 0;
+  padding: 0 8px 0 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.code-detail-toggle > svg {
+  flex: none;
+  color: var(--text-secondary);
+  transition: transform 0.15s;
+}
+.code-detail-toggle[aria-expanded="false"] > svg {
+  transform: rotate(-90deg);
+}
+@media (hover: hover) {
+  .code-detail-toggle:hover {
+    color: var(--accent);
+  }
+}
+.code-detail-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.code-detail-toggle__count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--ui-surface-2);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+/* A collapsed occurrences list is its header only (the kit renders the list). */
+.code-auto-main-body[data-occurrences="closed"] .af-auto__timeline,
+.code-auto-main-body[data-occurrences="closed"] .af-auto__more {
+  display: none;
+}
+/* The folder: the disclosure is the title; the kit browser's refresh/close buttons share its row. */
+.code-auto-folder-section {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.code-auto-folder-section .pc-ws__title {
+  display: none;
+}
+.code-auto-folder-section .pc-ws__head {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-height: var(--code-detail-h, 32px);
+}
+.code-auto-folder-section .code-detail-toggle {
+  padding-right: 96px;
+}
+@media (pointer: coarse) {
+  .code-detail-head {
+    --code-detail-h: var(--tap-min, 44px);
+  }
+  .code-auto-folder-section .pc-ws__head {
+    min-height: var(--tap-min, 44px);
+  }
+}
+
+/* The detail in one column (its pane < 780 px): flat sections, one line per fact, plain paths. */
+@container code-auto-main (max-width: 779.98px) {
   .code-auto-main-body {
     grid-template-columns: minmax(0, 1fr);
+    gap: 0;
     padding-inline: var(--gutter, 16px);
   }
   .code-auto-main-head {
     padding-inline: var(--gutter, 16px);
   }
+  .code-auto-main-body .af-auto {
+    font-size: var(--font-size-body, 14px);
+  }
+  .code-auto-main-body .af-auto__facts {
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 4px 12px;
+  }
+  /* A value that cannot share the line (path, JSON, a rendered task) takes the full row. */
+  .code-auto-main-body .af-auto__facts > dd.af-auto__workspace,
+  .code-auto-main-body .af-auto__facts > dt:has(+ dd.af-auto__workspace),
+  .code-auto-main-body .af-auto__facts > dd:has(> .af-auto__json),
+  .code-auto-main-body .af-auto__facts > dt:has(+ dd > .af-auto__json),
+  .code-auto-main-body .af-auto__facts > dd:has(> .pc-chat-content),
+  .code-auto-main-body .af-auto__facts > dt:has(+ dd > .pc-chat-content) {
+    grid-column: 1 / -1;
+  }
+  .code-auto-main-body .af-auto__path {
+    width: 100%;
+    min-height: var(--tap-min, 32px);
+    padding: 4px 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+  }
+  .code-auto-main-body .af-auto__path-text,
+  .code-auto-main-body .af-auto__json {
+    font-size: var(--font-size-body, 14px);
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+  .code-auto-main-body .af-auto__json {
+    padding: 0;
+    background: none;
+  }
+  .code-auto-main-body .af-auto-turn__meta,
+  .code-auto-main-body .af-auto__reasons,
+  .code-auto-main-body .af-auto__definition-meta,
+  .code-auto-main-body .af-auto-occ__details > summary,
+  .code-auto-main-body .af-auto__definition > summary {
+    font-size: max(13px, var(--font-size-sm));
+  }
+  .code-auto-main-body .af-auto__definition {
+    border: 0;
+    border-top: 1px solid var(--ui-border-1);
+    border-radius: 0;
+    background: none;
+  }
+  .code-auto-main-body .af-auto__definition > summary {
+    min-height: var(--tap-min, 32px);
+    padding-inline: 0;
+  }
+  .code-auto-main-body .af-auto__definition > .af-auto__facts {
+    padding: 0 0 12px;
+  }
+  .code-auto-main-body .code-detail-head--occurrences {
+    border-top: 1px solid var(--ui-border-1);
+    padding-top: 4px;
+  }
+  .code-auto-main-body .af-auto__timeline {
+    gap: 0;
+  }
+  .code-auto-main-body .af-auto-occ {
+    padding: 12px 0;
+    border: 0;
+    border-top: 1px solid var(--ui-border-1);
+    border-radius: 0;
+    background: none;
+    opacity: 1;
+  }
+  .code-auto-main-body .af-auto-occ--failed {
+    border-top: 2px solid var(--error);
+  }
+  .code-auto-main-body .af-auto-occ--waiting {
+    border-top: 2px solid var(--warning);
+  }
+  .code-auto-main-body .af-auto-occ--running {
+    border-top: 2px solid var(--accent);
+  }
+  .code-auto-main-body .af-auto-turn--trigger {
+    max-width: 100%;
+    padding-inline: 0;
+    background: none;
+  }
+  /* Transcript turns: the text column is the full width, no bubble card. */
+  .code-auto-main-body .af-auto .pc-chat-item {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    max-width: 100%;
+  }
+  .code-auto-main-body .af-auto-occ__foot,
+  .code-auto-main-body .af-auto-discuss {
+    padding-inline: 0;
+  }
+  .code-auto-main-body .af-auto__controls > .af-auto__btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  /* The folder is a flat section under a hairline; its entries flow in the page scroll. */
+  .code-auto-folder-section {
+    margin-top: 12px;
+    padding-top: 4px;
+    border-top: 1px solid var(--ui-border-1);
+  }
+  .code-auto-folder-section .pc-ws__head {
+    top: 4px;
+  }
+  .code-auto-folder-section .code-auto-folder,
+  .code-auto-folder-section .pc-ws {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    font-size: var(--font-size-body, 14px);
+  }
+  .code-auto-folder-section .pc-ws__entries {
+    overflow: visible;
+  }
+  .code-auto-folder-section .pc-ws__root code {
+    font-size: var(--font-size-body, 14px);
+  }
+  .code-auto-folder-section .pc-ws__muted {
+    font-size: max(13px, var(--font-size-sm));
+  }
+  /* The automation's own folder path is already the Workspace fact above. */
+  .code-auto-folder-section[data-folder="automation"] .pc-ws__root {
+    display: none;
+  }
 }
-/* "Back to the conversation" keeps its words at every width (it is the only way back). */
-.code-auto-main-head .code-subtle-button span {
-  display: inline;
+
+/* Phones (< 768): the approval and the workspace inspector without nested boxes; list text at
+   reading size. */
+@media (max-width: 767.98px) {
+  /* The approval is a flat section of the transcript; the tool card inside stays the one card. */
+  .code-conversation .pc-workflow-interaction {
+    padding: 12px 0;
+    border: 0;
+    border-top: 1px solid var(--ui-border-1);
+    border-radius: 0;
+    background: none;
+  }
+  .code-conversation .pc-workflow-interaction__scope,
+  .code-conversation .pc-workflow-interaction__description {
+    font-size: max(13px, var(--font-size-sm));
+  }
+  .code-conversation .pc-workflow-interaction .pc-tool-activity__parameters code,
+  .code-conversation .pc-workflow-interaction .pc-json-viewer,
+  .code-conversation .pc-workflow-interaction .pc-json-string__preview,
+  .code-conversation .pc-workflow-interaction .pc-tool-activity__preview {
+    font-size: var(--font-size-body, 14px);
+  }
+  /* The inspector (a full-screen drawer here): the gutter once, the path once, reading sizes. */
+  .code-inspector-content {
+    padding: 12px var(--gutter, 16px);
+  }
+  .code-inspector-tabs button {
+    font-size: var(--font-size-body, 14px);
+  }
+  .code-files-mode button {
+    font-size: max(13px, var(--font-size-sm));
+  }
+  .code-session-workspace-path code {
+    font-size: var(--font-size-body, 14px);
+  }
+  .code-inspector-foot {
+    font-size: max(13px, var(--font-size-sm));
+  }
+  .code-inspector .code-workspace-browser {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    font-size: var(--font-size-body, 14px);
+  }
+  .code-inspector .code-workspace-browser .pc-ws__root {
+    display: none;
+  }
+  .code-inspector .code-workspace-browser .pc-ws__muted {
+    font-size: max(13px, var(--font-size-sm));
+  }
+  .code-inspector .code-workspace-browser .pc-ws__entries {
+    overflow: visible;
+  }
+  /* Sidebar rows (inside the drawer): the second lines at helper size, not 10 px. */
+  .code-session small,
+  .code-sidebar-bottom > button small {
+    font-size: max(13px, var(--font-size-sm));
+  }
 }
