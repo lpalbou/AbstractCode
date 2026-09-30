@@ -311,7 +311,7 @@ describe("email automations (framework backlog 0992 WP6)", () => {
     await none.refresh();
     const html = dialog(none, () => {});
     expect(html).toMatch(/disabled="" value="email"\/> When an email arrives/);
-    expect(html).toContain("Email isn&#x27;t set up — ");
+    expect(html).toContain("Connect a mailbox first — ");
     expect(html).toContain('data-action="open-my-email"');
   });
 

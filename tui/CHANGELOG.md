@@ -24,7 +24,7 @@ All notable changes to this project are documented here. The format follows
   confirmation describes the new state: "Active is off: scheduled runs are
   skipped." / "Active is on: it runs on its schedule."
 - `assets/automation_controls.json` re-synced with AbstractUIC ui-kit 0.3.3
-  (adds the `active` label and hint).
+  (adds the `active` label and hint, and the "Connect a mailbox first" wording).
 
 ## [0.7.1] - 2026-09-28
 

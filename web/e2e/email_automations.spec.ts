@@ -79,7 +79,7 @@ test("without a usable account the email options say so and stay off", async ({ 
   await disconnect(request);
   await signIn(page);
   const dialog = await openDialog(page);
-  await expect(dialog.getByText("Email isn't set up —").first()).toBeVisible();
+  await expect(dialog.getByText("Connect a mailbox first —").first()).toBeVisible();
   await expect(dialog.getByRole("button", { name: "open My email" }).first()).toBeVisible();
   await expect(dialog.getByRole("radio", { name: "When an email arrives" })).toBeDisabled();
   await expect(dialog.getByRole("switch", { name: "Email me the result" })).toBeDisabled();
@@ -91,7 +91,7 @@ test("creates an email-triggered automation with filters and allowed recipients"
   await signIn(page);
   const title = `E2E email automation ${Date.now()}`;
   const dialog = await openDialog(page);
-  await expect(dialog.getByText("Email isn't set up —")).toHaveCount(0);
+  await expect(dialog.getByText("Connect a mailbox first —")).toHaveCount(0);
   await dialog.getByLabel("Task").fill("Summarise the new invoices");
   await dialog.getByRole("radio", { name: "When an email arrives" }).check();
   await expect(dialog.getByText("checks once an hour by default")).toBeVisible();
