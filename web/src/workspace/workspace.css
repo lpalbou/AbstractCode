@@ -283,7 +283,8 @@ button {
 }
 .code-session small {
   color: var(--text-secondary);
-  font-size: var(--font-size-xxs);
+  /* The row's second lines (state, next run, date): helper text, the xs step (§12.1). */
+  font-size: var(--font-size-xs);
 }
 .code-session small span {
   margin: 0 3px;
@@ -1050,7 +1051,8 @@ select option {
 .code-session-workspace-path code {
   flex: 1;
   min-width: 0;
-  font-size: var(--font-size-xxs);
+  /* A path is reading text (the xs step), not meta. */
+  font-size: var(--font-size-xs);
   overflow-wrap: anywhere;
   user-select: all;
 }
@@ -2435,6 +2437,25 @@ select option {
    body-size (14 px) reading text; on phones the approval and the inspector lose their nested boxes.
    ========================================================================= */
 
+/* Type scale floors (DESIGN §12.1, decision 2026-09-30 00:20): the small steps of the kit scale are
+   raised here, at the scale, so every element that uses them follows. Desktop: dense data 12 px
+   minimum, helper and labels 13 px. Touch screens (phones and tablets): reading, helper and chrome
+   text 14 px (15 px for body and form text), meta (dates, counts, badges) 12 px. The user's font scale still multiplies all of them. */
+:root {
+  --font-size-xxs: calc(12px * var(--font-scale));
+  --font-size-xs: calc(13px * var(--font-scale));
+  --font-size-sm: calc(13px * var(--font-scale));
+}
+@media (pointer: coarse) {
+  :root {
+    --font-size-xxs: calc(12px * var(--font-scale));
+    --font-size-xs: calc(14px * var(--font-scale));
+    --font-size-sm: calc(14px * var(--font-scale));
+    --font-size-md: calc(15px * var(--font-scale));
+    --font-size-base: calc(15px * var(--font-scale));
+  }
+}
+
 /* Detail disclosures (automation occurrences and folder), every width. */
 .code-detail-head {
   display: flex;
@@ -2537,9 +2558,11 @@ select option {
     grid-template-columns: max-content minmax(0, 1fr);
     gap: 4px 12px;
   }
-  /* A value that cannot share the line (path, JSON, a rendered task) takes the full row. */
+  /* A value that cannot share the line (path, code, JSON, a rendered task) takes the full row. */
   .code-auto-main-body .af-auto__facts > dd.af-auto__workspace,
   .code-auto-main-body .af-auto__facts > dt:has(+ dd.af-auto__workspace),
+  .code-auto-main-body .af-auto__facts > dd:has(> code),
+  .code-auto-main-body .af-auto__facts > dt:has(+ dd > code),
   .code-auto-main-body .af-auto__facts > dd:has(> .af-auto__json),
   .code-auto-main-body .af-auto__facts > dt:has(+ dd > .af-auto__json),
   .code-auto-main-body .af-auto__facts > dd:has(> .pc-chat-content),
@@ -2662,6 +2685,24 @@ select option {
   }
 }
 
+/* The navigation drawer (< 1024): one scroll for the whole drawer (the two lists take their
+   content height; a collapsed list folds to its header) instead of one per list. */
+@media (max-width: 1023.98px) {
+  .code-sidebar {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .code-sidebar .code-panel[data-open] {
+    flex: none;
+    max-height: none;
+  }
+  .code-sidebar .code-panel > nav,
+  .code-sidebar .code-panel > [role="region"] {
+    flex: none;
+    overflow: visible;
+  }
+}
+
 /* Phones (< 768): the approval and the workspace inspector without nested boxes; list text at
    reading size. */
 @media (max-width: 767.98px) {
@@ -2682,6 +2723,11 @@ select option {
   .code-conversation .pc-workflow-interaction .pc-json-string__preview,
   .code-conversation .pc-workflow-interaction .pc-tool-activity__preview {
     font-size: var(--font-size-body, 14px);
+  }
+  /* A long argument (a path) wraps in the page scroll instead of a scroll box of its own. */
+  .code-conversation .pc-workflow-interaction .pc-tool-activity__parameters dd {
+    max-height: none;
+    overflow: visible;
   }
   /* The inspector (a full-screen drawer here): the gutter once, the path once, reading sizes. */
   .code-inspector-content {
@@ -2715,9 +2761,28 @@ select option {
   .code-inspector .code-workspace-browser .pc-ws__entries {
     overflow: visible;
   }
-  /* Sidebar rows (inside the drawer): the second lines at helper size, not 10 px. */
-  .code-session small,
-  .code-sidebar-bottom > button small {
-    font-size: max(13px, var(--font-size-sm));
+  /* The navigation drawer is the phone's list screen: the full width, the gutter once. */
+  .code-sidebar {
+    width: 100vw;
+    box-shadow: none;
+  }
+  .code-sessions,
+  .code-auto-rows {
+    padding-inline: 4px;
+  }
+  .code-session {
+    padding: 10px 8px;
+  }
+  .code-sidebar-bottom {
+    padding-inline: 4px;
+  }
+  .code-sidebar-bottom > button {
+    gap: 10px;
+  }
+  .code-new-chat {
+    margin-inline: var(--gutter, 12px);
+  }
+  .code-session-search {
+    padding-inline: var(--gutter, 12px);
   }
 }

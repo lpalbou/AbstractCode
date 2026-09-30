@@ -9,12 +9,18 @@
 //
 //   node harness/capture.mjs --app code --url http://127.0.0.1:18782 --screens web/e2e/responsive.screens.mjs --out <dir> --sweep
 //
-// Env overrides: ABSTRACTCODE_E2E_GATEWAY_URL / _USER / _TOKEN (fixture defaults below).
+// Env overrides: ABSTRACTCODE_E2E_GATEWAY_URL / _USER / _TOKEN (fixture defaults below);
+// ABSTRACTCODE_RESPONSIVE_THEME=<theme id> (e.g. light) for a light capture.
 
 const GATEWAY = process.env.ABSTRACTCODE_E2E_GATEWAY_URL || "http://127.0.0.1:18781";
 const USER = process.env.ABSTRACTCODE_E2E_USER || "web-tester";
 const TOKEN = process.env.ABSTRACTCODE_E2E_TOKEN || "abstractcode-e2e-only";
 const AUTOMATION_TITLE = "Responsive check automation";
+
+// Space metrics (DESIGN §12) measure the layer the user is looking at. On screens that show a modal
+// layer (the navigation drawer, a dialog, a settings drawer) the conversation or automation behind the
+// scrim is excluded (`spaceIgnore`): it is not the screen's content and keeps its own one scroll.
+const BEHIND_OVERLAY = [".code-conversation", ".code-automation-main"];
 
 /** Per-page state (one page per viewport). */
 const state = new WeakMap();
@@ -147,6 +153,16 @@ async function ensureAutomation(page) {
 export default {
   async setup(page, info) {
     await blockExternal(page, info.baseUrl);
+    // ABSTRACTCODE_RESPONSIVE_THEME=light captures the app's Light theme (the app's own setting;
+    // the browser's prefers-color-scheme does not change it). Default: the app default.
+    const theme = process.env.ABSTRACTCODE_RESPONSIVE_THEME;
+    if (theme) {
+      await page.addInitScript((id) => {
+        try {
+          localStorage.setItem("af_appearance_abstractcode_v1", JSON.stringify({ theme: id }));
+        } catch {}
+      }, theme);
+    }
     await page.goto(info.baseUrl, { waitUntil: "domcontentloaded" });
   },
   screens: [
@@ -188,6 +204,7 @@ export default {
     },
     {
       name: "automations",
+      spaceIgnore: BEHIND_OVERLAY,
       async run(page) {
         await closeOverlays(page);
         await ensureAutomation(page);
@@ -196,6 +213,7 @@ export default {
     },
     {
       name: "automation-form",
+      spaceIgnore: [...BEHIND_OVERLAY, ".code-sidebar"],
       async run(page) {
         await closeOverlays(page);
         await openNav(page);
@@ -245,6 +263,7 @@ export default {
     {
       // Both sidebar lists open (Automations + Conversations; inside the drawer on phones and tablets).
       name: "conversations",
+      spaceIgnore: BEHIND_OVERLAY,
       async run(page) {
         await closeOverlays(page);
         await openConversationScreen(page);
@@ -268,6 +287,7 @@ export default {
     },
     {
       name: "settings",
+      spaceIgnore: BEHIND_OVERLAY,
       async run(page) {
         await closeOverlays(page);
         const toggle = page.getByRole("button", { name: "Toggle workspace inspector" });
@@ -284,6 +304,7 @@ export default {
     },
     {
       name: "about",
+      spaceIgnore: BEHIND_OVERLAY,
       async run(page) {
         await closeOverlays(page);
         await press(page, page.locator(".af-topbar__btn--about"), "About");
@@ -293,6 +314,7 @@ export default {
     {
       // Automations collapsed, Conversations filling the sidebar (inside the open drawer on phones).
       name: "sidebar-collapsed",
+      spaceIgnore: BEHIND_OVERLAY,
       async run(page) {
         await closeOverlays(page);
         await openNav(page);

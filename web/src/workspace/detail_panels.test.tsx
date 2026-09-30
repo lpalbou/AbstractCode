@@ -121,7 +121,7 @@ describe("automation detail lists: disclosure markup", () => {
   });
 
   it("disclosure headers are 44 px on touch", () => {
-    const coarse = block("@media (pointer: coarse) {", SPACE);
+    const coarse = block("@media (pointer: coarse) {", css.indexOf(".code-detail-head {", SPACE));
     expect(coarse).toMatch(/\.code-detail-head \{\s*--code-detail-h: var\(--tap-min, 44px\);/);
     expect(rule(css.slice(SPACE), ".code-detail-toggle")).toContain("min-height: var(--code-detail-h);");
   });
@@ -211,7 +211,7 @@ describe("space on phones and tablets (DESIGN §12)", () => {
 
   it("label/value facts share a line; a path takes the full row without a box", () => {
     expect(rule(detail, ".code-auto-main-body .af-auto__facts")).toContain("grid-template-columns: max-content minmax(0, 1fr);");
-    expect(detail).toMatch(/dd\.af-auto__workspace,[\s\S]*?grid-column: 1 \/ -1;/);
+    expect(detail).toMatch(/dd\.af-auto__workspace,[\s\S]*?dd:has\(> code\),[\s\S]*?grid-column: 1 \/ -1;/);
     const path = rule(detail, ".code-auto-main-body .af-auto__path");
     expect(path).toContain("border: 0;");
     expect(path).toContain("background: none;");
@@ -240,11 +240,45 @@ describe("space on phones and tablets (DESIGN §12)", () => {
     expect(rule(phone, ".code-session-workspace-path code")).toContain("font-size: var(--font-size-body, 14px);");
   });
 
+  it("phones: the navigation drawer is the full-width list screen, rows keep the text within 40 px of the edge", () => {
+    expect(rule(phone, ".code-sidebar")).toContain("width: 100vw;");
+    expect(rule(phone, ".code-session")).toContain("padding: 10px 8px;");
+  });
+
   it("the inspector backdrop is not a second 'Close workspace inspector' control", () => {
     const at = appSource.indexOf('className="code-inspector-scrim"');
     expect(at).toBeGreaterThan(0);
     const tag = appSource.slice(at, appSource.indexOf("/>", at));
     expect(tag).toContain('aria-hidden="true"');
     expect(tag).not.toContain("aria-label");
+  });
+});
+
+describe("the navigation drawer scrolls as one (DESIGN §12: no list scrolling inside a scrolling page)", () => {
+  const drawer = block("@media (max-width: 1023.98px) {", SPACE);
+  it("the drawer is the one scroll; its lists take their content height", () => {
+    expect(rule(drawer, ".code-sidebar")).toContain("overflow-y: auto;");
+    expect(drawer).toMatch(/\.code-sidebar \.code-panel > \[role="region"\] \{\s*flex: none;\s*overflow: visible;/);
+  });
+});
+
+describe("type scale floors (DESIGN §12.1)", () => {
+  const space = css.slice(SPACE);
+  it("desktop: meta 12 px, helper and labels 13 px, at the scale", () => {
+    const root = block(":root {", SPACE);
+    expect(root).toContain("--font-size-xxs: calc(12px * var(--font-scale));");
+    expect(root).toContain("--font-size-xs: calc(13px * var(--font-scale));");
+    expect(root).toContain("--font-size-sm: calc(13px * var(--font-scale));");
+  });
+  it("touch: reading, helper and chrome text 14 px, body 15 px, meta 12 px", () => {
+    const coarse = block("@media (pointer: coarse) {", SPACE);
+    expect(coarse).toContain("--font-size-xs: calc(14px * var(--font-scale));");
+    expect(coarse).toContain("--font-size-sm: calc(14px * var(--font-scale));");
+    expect(coarse).toContain("--font-size-base: calc(15px * var(--font-scale));");
+    expect(space.indexOf(":root {")).toBeLessThan(space.indexOf(".code-detail-head {"));
+  });
+  it("paths and sidebar second lines use the xs step, not the 10 px meta step", () => {
+    expect(css).toMatch(/\.code-session-workspace-path code \{[^}]*font-size: var\(--font-size-xs\);/);
+    expect(css).toMatch(/\.code-session small \{[^}]*font-size: var\(--font-size-xs\);/);
   });
 });
