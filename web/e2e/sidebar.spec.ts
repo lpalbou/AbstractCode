@@ -1,7 +1,8 @@
+import { readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 
 // The sidebar (round 2, item 10) against the isolated fixture gateway (e2e/gateway_fixture.py):
-// the Workspace row never overflows, the two lists are panels, conversations page by 25.
+// the Workspace row never overflows, the two panel headers (round 3) never hide a row, conversations page by 25.
 const appOrigin = process.env.ABSTRACTCODE_E2E_URL || "http://127.0.0.1:18782";
 const fixtureGateway = process.env.ABSTRACTCODE_E2E_GATEWAY_URL || "http://127.0.0.1:18781";
 const fixtureUser = process.env.ABSTRACTCODE_E2E_USER || "web-tester";
@@ -126,27 +127,68 @@ test.describe("AbstractCode sidebar", () => {
     }
   });
 
-  test("Automations and Conversations are panels: own surface, radius, inset, header inside", async ({ page }) => {
+  test("Automations and Conversations headers are 44 px rows on the New conversation surface; no row is ever hidden under a header", async ({ page }) => {
+    // 5 automations (the 0.9.0 panel clipped the fourth): the ui-kit's canonical wire fixture + one copy.
+    const fixture = JSON.parse(readFileSync(new URL("../../tui/tests/fixtures/automations/list.json", import.meta.url), "utf8"));
+    const autos = [...fixture.items, { ...fixture.items[1], automation_id: "copy-5", title: "Release notes digest" }];
     await route(page, []);
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await signIn(page);
-    for (const panel of [".code-automations", ".code-conversations"]) {
-      const s = await page.locator(`.code-sidebar ${panel}`).evaluate((el) => {
-        const cs = getComputedStyle(el);
-        const sidebar = el.closest(".code-sidebar")!.getBoundingClientRect();
-        const r = el.getBoundingClientRect();
-        return {
-          background: cs.backgroundColor, sidebarBackground: getComputedStyle(el.closest(".code-sidebar")!).backgroundColor,
-          radius: parseFloat(cs.borderTopLeftRadius), insetLeft: r.left - sidebar.left, insetRight: sidebar.right - r.right,
-          headerInside: el.firstElementChild?.classList.contains("code-section-label") === true,
-        };
+    // Registered last = consulted first (Playwright routes run newest-first).
+    await page.route((url) => /\/automations$/.test(url.pathname), (r) => (r.request().method() === "GET" ? r.fulfill({ json: { items: autos, next_cursor: null } }) : r.fallback()));
+    for (const [width, height] of [[1440, 900], [390, 844]]) {
+      await page.setViewportSize({ width, height });
+      if (width === 1440) await signIn(page);
+      const opener = page.locator(".code-mobile-nav");
+      if (await opener.isVisible()) await opener.click();
+      // The drawer slides in (0.2 s): measure once it has arrived.
+      await page.waitForFunction(() => getComputedStyle(document.querySelector(".code-sidebar")!).transform === "none");
+      await expect(page.locator(".code-auto-row")).toHaveCount(5);
+      const g = await page.evaluate(() => {
+        const newChat = getComputedStyle(document.querySelector(".code-new-chat")!).backgroundColor;
+        const headers = [...document.querySelectorAll(".code-sidebar .code-panel-header")].map((h) => {
+          const r = h.getBoundingClientRect();
+          const toggle = h.querySelector("button.code-panel-toggle")!;
+          const actions = h.querySelector(".code-panel-actions")!.getBoundingClientRect();
+          return {
+            background: getComputedStyle(h).backgroundColor, height: r.height,
+            expanded: toggle.getAttribute("aria-expanded"), chevronFirst: toggle.firstElementChild?.tagName.toLowerCase() === "svg",
+            actionsRight: r.right - actions.right <= 8 && actions.left > toggle.getBoundingClientRect().left + 40,
+          };
+        });
+        const lists = [...document.querySelectorAll(".code-sidebar .code-panel > nav, .code-sidebar .code-panel > [role=region]")].map((l) => ({
+          background: getComputedStyle(l).backgroundColor, overflowY: getComputedStyle(l).overflowY, clipped: l.scrollHeight > l.clientHeight + 1,
+        }));
+        const hidden: string[] = [];
+        for (const row of document.querySelectorAll<HTMLElement>(".code-auto-row, .code-sessions .code-session")) {
+          row.scrollIntoView({ block: "nearest" });
+          const last = (row.querySelector("span > small:last-child") || row).getBoundingClientRect();
+          const hit = document.elementFromPoint(last.left + 4, last.top + last.height / 2);
+          if (!hit || !row.contains(hit)) hidden.push(row.textContent || "");
+        }
+        const sidebar = document.querySelector(".code-sidebar")!.getBoundingClientRect();
+        const bottom = document.querySelector(".code-sidebar-bottom")!.getBoundingClientRect();
+        return { newChat, headers, lists, hidden, bottomPinned: bottom.bottom <= sidebar.bottom + 1 };
       });
-      expect(s.background, panel).not.toBe("rgba(0, 0, 0, 0)");
-      expect(s.background, panel).not.toBe(s.sidebarBackground);
-      expect(s.radius, panel).toBeGreaterThanOrEqual(8);
-      expect(s.insetLeft, panel).toBeGreaterThanOrEqual(8);
-      expect(s.insetRight, panel).toBeGreaterThanOrEqual(8);
-      expect(s.headerInside, panel).toBe(true);
+      expect(g.headers, `${width}`).toHaveLength(2);
+      for (const h of g.headers) {
+        expect(h.background, `${width} header background`).toBe(g.newChat);
+        expect(h.height, `${width} header height`).toBeGreaterThanOrEqual(44);
+        expect(h.expanded).toBe("true");
+        expect(h.chevronFirst).toBe(true);
+        expect(h.actionsRight, `${width} actions at the right`).toBe(true);
+      }
+      for (const l of g.lists) {
+        expect(l.background, `${width} items on the sidebar background`).toBe("rgba(0, 0, 0, 0)");
+        expect(l.clipped, `${width} list clipped`).toBe(false);
+      }
+      expect(g.hidden, `${width} rows hidden under a header`).toEqual([]);
+      expect(g.bottomPinned, `${width} bottom block pinned`).toBe(true);
+      // Keyboard: Enter on the focused header folds the list; the state survives a reload.
+      await page.locator("#code-panel-automations-toggle").focus();
+      await page.keyboard.press("Enter");
+      await expect(page.locator("#code-panel-automations")).toBeHidden();
+      await page.keyboard.press(" ");
+      await expect(page.locator("#code-panel-automations")).toBeVisible();
+      await page.keyboard.press("Escape");
     }
   });
 

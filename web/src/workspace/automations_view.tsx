@@ -82,9 +82,8 @@ export function AutomationsSection(props: {
   onRefresh(): void;
   onShowArchived(show: boolean): void;
   nowMs?: number;
-  /** Collapsible panel (sidebar_panels.tsx): open by default; `fill` = the other panel is collapsed. */
+  /** Collapsible panel (sidebar_panels.tsx): open by default. */
   open?: boolean;
-  fill?: boolean;
   onToggle?(): void;
 }): React.ReactElement {
   const open = props.open ?? true;
@@ -98,13 +97,12 @@ export function AutomationsSection(props: {
       className="code-panel code-automations"
       aria-label="Automations"
       data-open={open ? "true" : "false"}
-      data-fill={open && props.fill ? "true" : undefined}
     >
       <PanelHeader
         panel="automations"
         open={open}
         onToggle={() => props.onToggle?.()}
-        label={<>AUTOMATIONS{waiting ? <span className="code-auto-badge" data-field="attention-total">{waiting}</span> : null}</>}
+        label={<>Automations{waiting ? <span className="code-auto-badge" data-field="attention-total">{waiting}</span> : null}</>}
         actions={<span className="code-auto-actions">
           <button className="code-icon-button" aria-label="New automation" title="New automation (runs the toolbar's workflow on a schedule)" disabled={!props.available.available} onClick={props.onNew}>
             <Icon name="plus" size={13} />

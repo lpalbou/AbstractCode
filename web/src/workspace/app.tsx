@@ -35,7 +35,7 @@ import {
   type PaneMode,
 } from "./layout";
 import { SidebarDrawer } from "./sidebar_drawer";
-import { ConversationsPanel, WorkspaceRow, useSidebarPanels } from "./sidebar_panels";
+import { ConversationsPanel, SidebarLists, WorkspaceRow, useSidebarPanels } from "./sidebar_panels";
 import {
   WorkflowChat,
   chatToMarkdown,
@@ -1129,6 +1129,7 @@ export function CodeWorkspace() {
           />
           <kbd>⌘K</kbd>
         </div>
+        <SidebarLists>
         <AutomationsSection
           state={automationsState}
           available={automationsAvailable}
@@ -1142,7 +1143,6 @@ export function CodeWorkspace() {
           onRefresh={() => void automations.refresh()}
           onShowArchived={(show) => automations.setShowArchived(show)}
           open={panels.automations}
-          fill={!panels.conversations}
           onToggle={() => togglePanelOpen("automations")}
         />
         <ConversationsPanel
@@ -1199,6 +1199,7 @@ export function CodeWorkspace() {
             </button>
           ) : null}
         </ConversationsPanel>
+        </SidebarLists>
         <div className="code-sidebar-bottom">
           <WorkspaceRow
             path={effectiveWorkspace}

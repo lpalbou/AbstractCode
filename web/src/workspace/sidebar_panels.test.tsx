@@ -6,6 +6,7 @@ import { AutomationsSection } from "./automations_view";
 import {
   ConversationsPanel,
   DEFAULT_PANELS,
+  SidebarLists,
   WorkspaceRow,
   workspaceLabel,
   PanelHeader,
@@ -125,33 +126,84 @@ describe("sidebar panels DOM", () => {
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("collapsing Automations hides its list; the open Conversations panel is the flex-1 element", () => {
+  it("collapsing Automations hides its list (the header stays)", () => {
     const html = renderToStaticMarkup(<AutomationsSection {...automationsBase} onNew={() => undefined} open={false} onToggle={() => undefined} />);
     expect(html).toMatch(/data-open="false"/);
     expect(html).toMatch(/aria-expanded="false"/);
+    expect(html).toMatch(/<div class="code-panel-header"><button/);
     expect(html).toMatch(/<div class="code-auto-rows"[^>]*hidden=""/);
-    const conv = renderToStaticMarkup(<ConversationsPanel open onToggle={() => undefined}>rows</ConversationsPanel>);
-    expect(conv).toMatch(/<section class="code-panel code-conversations" data-open="true">/);
-    expect(css).toMatch(/\.code-panel\[data-open="true"\] \{\s*flex: 1 1 0;\s*min-height: 0;/);
   });
 
-  it("app.tsx renders both panels from the persisted state", () => {
+  it("app.tsx renders both panels from the persisted state inside the one scroll container, the bottom block after it", () => {
     expect(appSource).toMatch(/useSidebarPanels\(\)/);
     expect(appSource).toMatch(/<ConversationsPanel\s+open=\{panels\.conversations\}/);
-    expect(appSource).toMatch(/open=\{panels\.automations\}\s+fill=\{!panels\.conversations\}/);
+    expect(appSource).toMatch(/open=\{panels\.automations\}\s+onToggle=/);
+    const lists = /<SidebarLists>([\s\S]*?)<\/SidebarLists>\s*<div className="code-sidebar-bottom">/.exec(appSource)?.[1] ?? "";
+    expect(lists).toMatch(/^\s*<AutomationsSection[\s\S]*<ConversationsPanel[\s\S]*<\/ConversationsPanel>\s*$/);
+    expect(renderToStaticMarkup(<SidebarLists>x</SidebarLists>)).toBe('<div class="code-sidebar-lists">x</div>');
   });
 });
 
-describe("sidebar panels CSS contract", () => {
-  it("an open panel's list scrolls on its own; a collapsed panel is header-only", () => {
-    expect(css).toMatch(/\.code-panel > nav,\s*\.code-panel > \[role="region"\] \{[^}]*min-height: 0;[^}]*overflow-y: auto;/);
-    expect(css).toMatch(/\.code-panel\[data-open="false"\] \{\s*flex: 0 0 auto;/);
-    expect(css).toMatch(/\.code-automations\[data-fill="true"\] \{\s*flex: 1 1 0;/);
+/** One rule's declarations (the first `selector {` at top level of the stylesheet). */
+function cssRule(selector: string): string {
+  const at = css.indexOf(`\n${selector} {`);
+  expect(at, `${selector} rule exists`).toBeGreaterThanOrEqual(0);
+  return css.slice(at, css.indexOf("}", at) + 1);
+}
+const decl = (rule: string, prop: string) => new RegExp(`\\n\\s*${prop}: ([^;]+);`).exec(rule)?.[1];
+
+describe("panel headers (round 3: the operator's 12:00 screenshot of 0.9.0)", () => {
+  it("each header is a full-width row: the toggle (chevron, then label) on the left, the actions on the right", () => {
+    const html = renderToStaticMarkup(
+      <AutomationsSection {...automationsBase} onNew={() => undefined} open onToggle={() => undefined} />,
+    );
+    const header = /<div class="code-panel-header">([\s\S]*?)<\/div><div class="code-auto-rows"/.exec(html)?.[1] ?? "";
+    expect(header).toMatch(/^<button type="button" class="code-panel-toggle"[^>]*aria-expanded="true"[^>]*><svg[\s\S]*?<\/svg><span>Automations<\/span><\/button><span class="code-panel-actions">/);
+    expect(header).toMatch(/<span class="code-panel-actions">[\s\S]*aria-label="New automation"[\s\S]*aria-label="Refresh automations"[\s\S]*<\/span>$/);
+    const conv = renderToStaticMarkup(
+      <ConversationsPanel open={false} onToggle={() => {}} actions={<button aria-label="Refresh conversations">r</button>}>
+        <p>row</p>
+      </ConversationsPanel>,
+    );
+    expect(conv).toMatch(/^<section class="code-panel code-conversations" data-open="false"><div class="code-panel-header"><button type="button" class="code-panel-toggle"[^>]*aria-expanded="false"[^>]*><svg[\s\S]*?<\/svg><span>Conversations<\/span><\/button><span class="code-panel-actions"><button aria-label="Refresh conversations">/);
   });
 
-  it("the toggle is 32 px on desktop and 44 px (--tap-min) under a coarse pointer", () => {
-    expect(css).toMatch(/\.code-panel-toggle \{[^}]*min-height: 32px;/);
-    expect(css).toMatch(/@media \(pointer: coarse\) \{[\s\S]*?\.code-panel-toggle \{\s*min-height: var\(--tap-min, 44px\);/);
+  it("the header row wears the New conversation button's background, border and radius, and is 44 px tall", () => {
+    const header = cssRule(".code-panel-header");
+    const newChat = cssRule(".code-new-chat");
+    expect(decl(header, "display")).toBe("flex");
+    expect(decl(header, "background")).toBe(decl(newChat, "background"));
+    expect(decl(header, "border")).toBe(decl(newChat, "border"));
+    expect(decl(header, "border-radius")).toBe(decl(newChat, "border-radius"));
+    expect(decl(header, "min-height")).toBe("var(--tap-min, 44px)");
+    // The toggle takes the row's free width, so the actions sit at the right edge.
+    expect(decl(cssRule(".code-panel-toggle"), "flex")).toBe("1 1 auto");
+    expect(decl(cssRule(".code-panel-actions"), "flex")).toBe("none");
+  });
+
+  it("the items sit on the plain sidebar background: the panel is no card", () => {
+    const panel = cssRule(".code-panel");
+    for (const prop of ["background", "border", "border-radius", "overflow", "max-height", "height"]) {
+      expect(decl(panel, prop), `.code-panel ${prop}`).toBeUndefined();
+    }
+  });
+});
+
+describe("no clipping (round 3): one scroll for both lists, the bottom block pinned", () => {
+  it("the shared container is the scroll; every list takes its content height", () => {
+    const lists = cssRule(".code-sidebar-lists");
+    expect(decl(lists, "flex")).toBe("1 1 0");
+    expect(decl(lists, "min-height")).toBe("0");
+    expect(decl(lists, "overflow-y")).toBe("auto");
+    expect(decl(cssRule(".code-panel"), "flex")).toBe("none");
+    expect(css).toMatch(/\n\.code-panel > nav,\n\.code-panel > \[role="region"\] \{\n\s*flex: none;\n\s*overflow: visible;/);
+  });
+
+  it("nothing bounds a panel or a list to a share of the sidebar (0.9.0 capped Automations at 38 %)", () => {
+    expect(css).not.toMatch(/\.code-automations\[data-open="true"\] \{[^}]*max-height/);
+    expect(css).not.toMatch(/\.code-panel\[data-open="true"\] \{[^}]*flex: 1 1 0/);
+    expect(css).not.toMatch(/\.code-auto-rows \{[^}]*overflow-y: auto/);
+    expect(css).not.toMatch(/\.code-sessions \{[^}]*overflow-y: auto/);
   });
 });
 
@@ -174,21 +226,3 @@ describe("Workspace row (round 2, item 10)", () => {
   });
 });
 
-describe("sidebar lists are panels (round 2, item 10)", () => {
-  it("each panel has its own kit surface, border, radius and an 8 px inset", () => {
-    const rule = css.match(/\.code-panel \{([^}]*)\}/)?.[1] ?? "";
-    expect(rule).toMatch(/background: var\(--ui-surface-1\);/);
-    expect(rule).toMatch(/border: 1px solid var\(--ui-border-1\);/);
-    expect(rule).toMatch(/border-radius: 10px;/);
-    expect(rule).toMatch(/margin: 0 8px 8px;/);
-  });
-
-  it("the header is the panel's first child (inside the surface)", () => {
-    const html = renderToStaticMarkup(
-      <ConversationsPanel open onToggle={() => {}}>
-        <p>row</p>
-      </ConversationsPanel>,
-    );
-    expect(html).toMatch(/^<section class="code-panel code-conversations"[^>]*><div class="code-section-label">/);
-  });
-});

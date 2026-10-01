@@ -169,101 +169,94 @@ button {
   white-space: nowrap;
   opacity: 0.65;
 }
-.code-section-label {
+/* Collapsible panels (sidebar_panels.tsx, round 3). The two panels share ONE scroll container
+   between the search field and the pinned bottom block; each panel takes its content height, so a
+   list is never clipped under the next header (0.9.0 cut the fourth automation in half). */
+.code-sidebar-lists {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  /* The disclosure chevron (11 px + 6 px gap) sits where the padding was: the label text keeps
-     its x; the 32 px toggle row replaces the old 23 px row + 10 px gap. */
-  padding: 0 19px 1px 6px;
-  color: var(--text-secondary);
-  font-size: calc(9px * var(--font-scale));
-  font-weight: 650;
-  letter-spacing: 1.2px;
-}
-.code-sessions {
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 4px;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 10px 16px;
+  overscroll-behavior: contain;
+  /* A visible edge on both ends: rows scrolling away pass under this line and the bottom
+     block's own top border, never under a header. */
+  border-top: 1px solid var(--ui-border-1);
+  padding-block: 8px;
 }
-/* Collapsible panels (sidebar_panels.tsx). Open: the panel takes its share of the sidebar and
-   its list scrolls on its own; collapsed: header only, the other panel takes the freed height.
-   Each panel is its own surface (kit token, light + dark), inset 8 px from the sidebar edges with
-   its header inside, so it reads as a panel distinct from the item rows (round 2, item 10). */
 .code-panel {
   display: flex;
+  flex: none;
   flex-direction: column;
-  min-height: 0;
-  margin: 0 8px 8px;
-  border: 1px solid var(--ui-border-1);
-  border-radius: 10px;
-  background: var(--ui-surface-1);
-  overflow: hidden;
 }
-.code-panel > .code-section-label {
-  padding: 2px 6px 0 8px;
-}
-.code-panel > .code-sessions,
-.code-panel > .code-auto-rows {
-  padding: 0 4px 6px;
-}
-.code-panel[data-open="true"] {
-  flex: 1 1 0;
-  min-height: 0;
-}
-.code-panel[data-open="false"] {
-  flex: 0 0 auto;
-}
-.code-panel > nav,
-.code-panel > [role="region"] {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-}
-.code-panel > [hidden] {
-  display: none;
-}
-/* Both open: Automations keeps today's share (its content, at most 38 %); alone, it fills. */
-.code-automations[data-open="true"] {
-  flex: 0 1 auto;
-  max-height: 38%;
-}
-.code-automations[data-fill="true"] {
-  flex: 1 1 0;
-  max-height: none;
+/* The header: a full-width 44 px row on the "New conversation" button's surface (same background,
+   border and radius, same 15 px inset), label + chevron on the left, the actions on the right. */
+.code-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--tap-min, 44px);
+  margin: 0 15px;
+  padding: 0 5px 0 0;
+  border: 1px solid var(--ui-border-2);
+  border-radius: 8px;
+  background: var(--ui-surface-2);
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  font-weight: 600;
 }
 .code-panel-toggle {
   display: inline-flex;
   flex: 1 1 auto;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  align-self: stretch;
   min-width: 0;
-  min-height: 32px;
+  min-height: 42px;
   margin: 0;
-  padding: 0;
+  padding: 0 0 0 11px;
   border: 0;
+  border-radius: 7px;
   background: transparent;
   color: inherit;
   font: inherit;
-  letter-spacing: inherit;
   text-align: left;
   cursor: pointer;
 }
 .code-panel-toggle > svg {
-  opacity: 0.75;
+  color: var(--text-secondary);
   transition: transform 0.15s;
 }
 .code-panel-toggle[aria-expanded="false"] > svg {
   transform: rotate(-90deg);
 }
-.code-panel-toggle:hover {
-  color: var(--text-primary);
+.code-panel-header:hover {
+  border-color: var(--accent-border);
+}
+.code-panel-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .code-panel-actions {
   display: inline-flex;
   flex: none;
+  align-items: center;
   gap: 2px;
+}
+.code-panel-header .code-icon-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+/* The items: plain sidebar background below the header (no card around them). */
+.code-panel > nav,
+.code-panel > [role="region"] {
+  flex: none;
+  overflow: visible;
+  /* The rows line up with the header and the New conversation button (same 15 px inset). */
+  padding: 6px 15px 8px;
+}
+.code-panel > [hidden] {
+  display: none;
 }
 .code-session {
   display: flex;
@@ -1828,9 +1821,7 @@ select option {
     border: 0;
     padding: 0;
   }
-  .code-inspector-content,
-  .code-sessions,
-  .code-auto-rows {
+  .code-inspector-content {
     overscroll-behavior: contain;
   }
   .code-topbar {
@@ -2136,19 +2127,14 @@ select option {
     padding-top: 4px;
   }
 }
-/* Phone landscape (short): too little height for two scrolling panels — the navigation drawer
-   scrolls as one list (collapsed panels still fold to their header). */
+/* Phone landscape (short): too little height to pin the bottom block — the navigation drawer
+   scrolls as one, the lists included (collapsed panels still fold to their header). */
 @media (max-height: 500px) {
   .code-sidebar {
     overflow-y: auto;
     overscroll-behavior: contain;
   }
-  .code-sidebar .code-panel[data-open] {
-    flex: none;
-    max-height: none;
-  }
-  .code-sidebar .code-panel > nav,
-  .code-sidebar .code-panel > [role="region"] {
+  .code-sidebar .code-sidebar-lists {
     flex: none;
     overflow: visible;
   }
@@ -2205,9 +2191,6 @@ select option {
   .code-session {
     min-height: var(--tap-min, 44px);
   }
-  .code-panel-toggle {
-    min-height: var(--tap-min, 44px);
-  }
   .code-session strong,
   .code-sidebar-bottom > button,
   .code-file-list button,
@@ -2230,7 +2213,6 @@ select option {
   }
   .code-statusbar,
   .code-inspector-foot,
-  .code-section-label,
   .code-conversation .pc-workflow-chat__footer,
   .code-auto-archived {
     font-size: var(--font-size-xs);
@@ -2386,16 +2368,6 @@ select option {
 
 /* Automations: the sidebar section (above the conversations) and the main
    view for the selected automation (the kit panel + its folder). */
-.code-automations {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.code-auto-rows {
-  overflow-y: auto;
-  min-height: 0;
-  padding: 0 10px 10px;
-}
 .code-auto-actions {
   display: inline-flex;
   gap: 2px;
@@ -2724,24 +2696,6 @@ select option {
   }
 }
 
-/* The navigation drawer (< 1024): one scroll for the whole drawer (the two lists take their
-   content height; a collapsed list folds to its header) instead of one per list. */
-@media (max-width: 1023.98px) {
-  .code-sidebar {
-    overflow-y: auto;
-    overscroll-behavior: contain;
-  }
-  .code-sidebar .code-panel[data-open] {
-    flex: none;
-    max-height: none;
-  }
-  .code-sidebar .code-panel > nav,
-  .code-sidebar .code-panel > [role="region"] {
-    flex: none;
-    overflow: visible;
-  }
-}
-
 /* Phones (< 768): the approval and the workspace inspector without nested boxes; list text at
    reading size. */
 @media (max-width: 767.98px) {
@@ -2805,9 +2759,12 @@ select option {
     width: 100vw;
     box-shadow: none;
   }
-  .code-sessions,
-  .code-auto-rows {
-    padding-inline: 4px;
+  .code-panel > nav,
+  .code-panel > [role="region"] {
+    padding-inline: var(--gutter, 12px);
+  }
+  .code-panel-header {
+    margin-inline: var(--gutter, 12px);
   }
   .code-session {
     padding: 10px 8px;
