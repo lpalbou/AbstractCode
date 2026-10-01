@@ -5,6 +5,13 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Release:** a `web-v*` tag now also gets a GitHub release page carrying its CHANGELOG section
+  (job `github-release-web`), like the terminal client's tag and the framework's other packages.
+  The page for `web-v0.9.0` was created by hand.
+
 ## [terminal 0.8.0 / web 0.9.0] - 2026-10-01
 
 ### Changed
