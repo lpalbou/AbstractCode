@@ -7,18 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- **Web: a new conversation never carries another conversation's attachments.** Opening a
-  conversation restored its last run's workflow fields into the form — including the agent's
-  `context`, which held that turn's attachments and media — and the form kept them when
-  "New conversation" started a fresh session, so the first turn of the new conversation sent the
-  old screenshot along with its question and the model answered about it (2026-10-01). Now a
-  conversation switch resets the form to the workflow's defaults, a run's `context`,
-  `messages`, `attachments` and `media` are never restored into the form, and a turn's run input
-  carries exactly the attachments added to that turn (`restoreWorkflowFields`, `buildWorkflowInput`;
-  tests red on removal).
 
 ### Changed
+
 - **Release:** a `web-v*` tag now also gets a GitHub release page carrying its CHANGELOG section
   (job `github-release-web`), like the terminal client's tag and the framework's other packages.
   The page for `web-v0.9.0` was created by hand.
@@ -29,12 +20,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Both sections now grow to their full length and the sidebar scrolls them as one list (docked, overlay and phone
   drawer), with the Workspace and Settings rows kept at the bottom; in 0.9.0 the automations list was capped
   and its fourth row was hidden under the Conversations header.
-### Changed
 - **Web: the toolbar's workflow picker lists only what this app can run for you.** "Show all workflows" is
   removed. The picker is the kit's `WorkflowPicker` (ui-kit, unreleased): "Gateway default", then **Shared**
   (workflows your admin made available) and **Mine** (your own), each with its version in small text. The list
   is the gateway's answer to `GET /api/gateway/bundles?executable_for=abstractcode.agent.v1`; a gateway that does
   not filter per app is reported next to the picker. An old saved "show all" preference is ignored.
+
+### Fixed
+
+- **Web: a new conversation never carries another conversation's attachments.** Opening a
+  conversation restored its last run's workflow fields into the form — including the agent's
+  `context`, which held that turn's attachments and media — and the form kept them when
+  "New conversation" started a fresh session, so the first turn of the new conversation sent the
+  old screenshot along with its question and the model answered about it (2026-10-01). Now a
+  conversation switch resets the form to the workflow's defaults, a run's `context`,
+  `messages`, `attachments` and `media` are never restored into the form, and a turn's run input
+  carries exactly the attachments added to that turn (`restoreWorkflowFields`, `buildWorkflowInput`;
+  tests red on removal).
 
 ## [terminal 0.8.0 / web 0.9.0] - 2026-10-01
 

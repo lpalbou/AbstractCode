@@ -1393,6 +1393,8 @@ The gateway owns workspace roots, mount visibility, access modes, tool availabil
 
 Shared workflow restoration uses the gateway's verified public selection: registry scope, bundle ID, version, and flow ID. If that exact workflow is unavailable, restore it on the gateway or start a new conversation.
 
+A turn sends exactly what you attached to it. Reopening a conversation restores its workflow fields (its request text, tool choices, limits) into the form, never a run's context, attachments or media; switching to another conversation or starting a new one resets the form to the workflow's defaults, so nothing from one conversation rides into the first turn of another.
+
 Credentials are exchanged through the app server for HttpOnly session cookies. Gateway requests stay same-origin and mutations include the app's CSRF token. Appearance and non-secret settings may be saved locally; transcripts and run state are loaded from the gateway.
 
 ## Optional voice
@@ -3306,9 +3308,12 @@ token is not persisted in browser settings. Vite development and the packaged
 server use the same session proxy; the browser keeps API requests same-origin.
 
 Choose a workflow in the toolbar: **Gateway default** (the coding agent your
-gateway's operator set, resolved by the gateway when the turn starts), a
-published coding agent, or, with **Show all workflows**, any registered
-workflow. The **Files** tab shows the conversation's workspace on the gateway
+gateway's operator set, resolved by the gateway when the turn starts), or a
+coding agent listed under **Shared** (made available by your gateway's admin)
+or **Mine** (agents you published or imported). The list holds only the
+workflows the gateway says this app can run for you
+(`GET /api/gateway/bundles?executable_for=abstractcode.agent.v1`); there is no
+"show all" switch — ask your admin when a workflow is missing. The **Files** tab shows the conversation's workspace on the gateway
 with previews, **Settings → Stream replies** shows replies as the model writes
 them (on gateways that support it), and **About** lists the app's and the
 gateway's versions. Agent tasks use the composer; structured workflows use
@@ -3340,7 +3345,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
 ### Changed
+
+- **Release:** a `web-v*` tag now also gets a GitHub release page carrying its CHANGELOG section
+  (job `github-release-web`), like the terminal client's tag and the framework's other packages.
+  The page for `web-v0.9.0` was created by hand.
 - **Web sidebar: Automations and Conversations headers are panel headers, and no list is cut off.** Each header is
   a full-width 44 px row with the same background as the "New conversation" button: the arrow and the name on
   the left, the section's buttons (+ for automations, refresh) on the right. Click, Enter or Space folds the
@@ -3348,6 +3358,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Both sections now grow to their full length and the sidebar scrolls them as one list (docked, overlay and phone
   drawer), with the Workspace and Settings rows kept at the bottom; in 0.9.0 the automations list was capped
   and its fourth row was hidden under the Conversations header.
+- **Web: the toolbar's workflow picker lists only what this app can run for you.** "Show all workflows" is
+  removed. The picker is the kit's `WorkflowPicker` (ui-kit, unreleased): "Gateway default", then **Shared**
+  (workflows your admin made available) and **Mine** (your own), each with its version in small text. The list
+  is the gateway's answer to `GET /api/gateway/bundles?executable_for=abstractcode.agent.v1`; a gateway that does
+  not filter per app is reported next to the picker. An old saved "show all" preference is ignored.
+
+### Fixed
+
+- **Web: a new conversation never carries another conversation's attachments.** Opening a
+  conversation restored its last run's workflow fields into the form — including the agent's
+  `context`, which held that turn's attachments and media — and the form kept them when
+  "New conversation" started a fresh session, so the first turn of the new conversation sent the
+  old screenshot along with its question and the model answered about it (2026-10-01). Now a
+  conversation switch resets the form to the workflow's defaults, a run's `context`,
+  `messages`, `attachments` and `media` are never restored into the form, and a turn's run input
+  carries exactly the attachments added to that turn (`restoreWorkflowFields`, `buildWorkflowInput`;
+  tests red on removal).
 
 ## [terminal 0.8.0 / web 0.9.0] - 2026-10-01
 
