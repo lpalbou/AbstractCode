@@ -78,8 +78,8 @@ When your gateway account has a working mailbox (the gateway console's
 - **May send email without asking to** — **Only me** (the default) or **Me and
   these addresses**. Mail to anyone else waits for your approval.
 
-Without a usable mailbox these options are off and the dialog says **"Email
-isn't set up — open My email"**; the link opens the gateway console in a new
+Without a connected mailbox these options are off and the dialog says
+**"Connect a mailbox first — open My email"**; the link opens the gateway console in a new
 tab. The automation's **Edit** form changes the check interval, Email me the
 result and the allowed addresses; its **Definition** card lists them. The
 terminal client does not create email automations yet (it lists and manages

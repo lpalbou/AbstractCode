@@ -5,18 +5,30 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [terminal 0.8.0 / web 0.9.0] - 2026-10-01
 
 ### Changed
+- **Web: requires `@abstractframework/ui-kit` 0.4.0.** The switches, the http fallbacks and the phone layout build on
+  the kit's `AfSwitch`, `randomId()` and `insecureContextReason()`.
+- **Terminal: on/off rows use one marker.** `/tools` and `/skills` show `[x] name` in the accent colour and bold
+  when on, `[ ] name` in plain text when off, and `[-] name — reason` dimmed when the row cannot change (a tool
+  disabled on this gateway, a skill the gateway blocks). Space switches the selected row; the key hints say
+  "space switch". The workspace access mode, a choice of one, shows `(•)` / `( )`.
+- **Terminal: automations have an "Active" switch instead of pause/resume.** In `/automations` each row starts
+  with its Active marker, and one automation shows `[x] Active — runs on its schedule` or
+  `[ ] Active — paused: scheduled runs are skipped (Run now still works)`. Space switches it (`p` still works);
+  the switch sends `automation.pause` or `automation.resume`. When it cannot change it says why: legacy
+  schedule, archived, ended, a command in flight, or the change not permitted. The confirmation describes the new
+  state: "Active is off: scheduled runs are skipped." / "Active is on: it runs on its schedule."
+- **TUI assets:** `tui/assets/automation_controls.json` is again byte-identical to the kit's (ui-kit 0.4.0: the
+  `active` label and hint, and "Connect a mailbox first — open My email").
 - **Web sidebar: the Workspace row, the two lists as panels, 25 conversations per page.**
   - The Workspace row at the bottom of the sidebar keeps the folder name on one line, shortened with "…", and
-    never runs under the arrow; the full path shows on hover. A folder named by a session id used to wrap across
-    the arrow and out of the sidebar.
+    never runs under the arrow; the full path shows on hover.
   - Automations and Conversations each sit on their own panel background (light and dark), with the heading
     inside the panel; collapsing a panel and the remembered state work as before.
-  - The conversation list shows 25 conversations and "Load more conversations" adds 25. It used to load the 100
-    most recent turns, which on a real gateway is about 20 conversations (one conversation holds several turns),
-    and "Load more" reloaded the whole workspace catalog.
+  - The conversation list shows 25 conversations and "Load more conversations" adds 25 (counted in
+    conversations, not turns); it reloads only the list.
 - **Web: phones and tablets use the whole screen.** On a phone the automation detail, the approval card, the
   workspace panel and the conversation list now reach the edges of the screen (16 px margins or less) instead of
   sitting in boxes inside boxes:
@@ -35,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   text 15 px; dates, counts and badges stay at 12 px. On desktops nothing is smaller than 12 px, and helper text
   and labels are 13 px. Your font size setting still scales everything.
 - **Web: on/off settings are switches labelled by what they control.** Every setting that is either on or
-  off uses the kit's switch (ui-kit 0.3.3): highlighted with a check mark and bold label when on, plain when
+  off uses the kit's switch (ui-kit 0.4.0): highlighted with a check mark and bold label when on, plain when
   off, and dimmed with the reason when it cannot change right now. It applies at once; there is nothing to
   save.
   - Toolbar: "Show all workflows" (shown as "All" on phones). While no gateway is connected or a run is in
@@ -66,10 +78,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inspector" button for screen readers; the panel's own close button is the one control with that name.
 - **Web: works over plain http from another machine.** Opening AbstractCode at `http://<host>:8080/apps/code/` from a
   laptop (LAN or Tailscale) stopped at "crypto.randomUUID is not a function": browsers offer that function only on
-  https or localhost. Ids now come from the kit's `randomId()` (needs `@abstractframework/ui-kit` 0.3.3). Copy
-  buttons fall back to the browser's copy command and say "Copied" or "Copy failed — select and copy". Where the
-  browser withholds the microphone, the dictation button stays off and says: "Voice and camera need an https
-  address (Network → HTTPS in the gateway console)." The web manifest is requested with the app's session cookie
+  https or localhost. Ids come from the kit's `randomId()`. Copy buttons fall back to the browser's copy command
+  and say "Copied" or "Copy failed — select and copy". Over plain http the dictation button stays off and says:
+  "This page is loaded over http, so voice and camera is unavailable — open it over https (for example through
+  tailscale serve; the gateway console's Network page explains how) or on the gateway's own computer." The web
+  manifest is requested with the app's session cookie
   (`crossorigin="use-credentials"`), so the gateway no longer answers it with 401.
 
 ## [web 0.8.0] - 2026-09-30

@@ -6,7 +6,7 @@ Start with [getting started](getting-started.md). For hosting and authentication
 
 ## Working in the interface
 
-- **Conversations** restores gateway sessions and history. Search by conversation text or session ID; load more to browse older runs.
+- **Conversations** restores gateway sessions and history. Search by conversation text or session ID. The list shows 25 conversations; **Load more conversations** adds the next 25.
 - **Workflow** chooses what runs your next turn. The first entry, **Gateway default → name @version**, follows the default coding agent your gateway's operator set; if they change it, your next new turn uses the new one. Below it are the coding agents published on your gateway; switch on **Show all workflows** to list schema-driven workflows too. Your choice is remembered in this browser for your account. After you send, the toolbar shows which workflow the gateway actually started (for example "running Coder @0.1.0 (gateway default)"). A conversation whose last run came from the gateway default keeps following it on every turn, on any device (so a change on the gateway applies to its next turn); a conversation started with a specific workflow keeps that workflow. If the list says "gateway does not report a default agent workflow", the gateway does not provide a default: pick a workflow from the list, or update AbstractGateway. When the gateway's default does not declare the coding-agent interface, the list says so instead of using it. See [workflows](workflows.md#the-gateway-default).
 - **Inputs** presents the registered input schema. Use JSON input mode for nested or custom input objects. The gateway validates submitted values.
 - **Settings** contains model, reasoning, MTP depth, tool policy, workspace requests, and gateway skills for agent workflows. Unset options preserve workflow defaults. When the gateway offers no skills, the Skills tab shows the gateway's own explanation and where its skill shelf is.
@@ -34,16 +34,28 @@ AbstractCode Web works on phones, tablets, laptop windows and wide screens, and 
 | 1024 to 1439 px (smaller laptop windows, iPad landscape) | The left sidebar stays docked; the workspace inspector opens as an overlay from its header button. If you had it open at 1440 px or wider, it returns docked when the window is wide again. |
 | Below 1024 px (tablets in portrait, narrow windows, phones) | The conversation uses the full width. The menu button opens conversations and automations as a drawer; the workspace button opens the inspector as a drawer. Close a drawer with Escape, a tap on the dimmed backdrop, or its close button. |
 
-- **Phones.** The toolbar fits one row (the model is chosen in **Settings**), dialogs such as sign-in, **Schedule a task**, appearance and **About** open as bottom sheets with their buttons always visible, and the composer shows its icons on one row and the destination, **Stop** and **Send** on the next.
+- **Phones use the whole screen.** Content reaches the screen edges with margins of 16 px or less, and nothing is drawn as a box inside a box. The automation detail is one flat page: each fact sits on one line with its label ("When  every 24 hours"), paths and identifiers take a full line as plain text, and the definition, each occurrence, its transcript and the folder are separated by thin lines. The approval card is part of the conversation, and a long tool argument such as a file path wraps. The navigation drawer takes the full width and scrolls as one list (Automations, then Conversations); tablets keep the narrower drawer, also as one list. On tablets the automation detail shows two columns only when each is at least about 360 px wide.
+- **Phone toolbar and dialogs.** The toolbar fits one row (the model is chosen in **Settings**), dialogs such as sign-in, **Schedule a task**, appearance and **About** open as bottom sheets with their buttons always visible, and the composer shows its icons on one row and the destination, **Stop** and **Send** on the next.
 - **Phone landscape.** The header and toolbar share one thin row and the status bar is hidden, so the conversation keeps most of the height.
 - **On-screen keyboard.** While you type, the header, toolbar, run strip and status bar step aside and the message field is limited to about 30 % of the visible height; they return when the keyboard closes.
 - **Touch.** Buttons and list rows are at least 44 px tall and text fields use 16 px text, so iOS does not zoom when you focus one. Keyboard shortcut hints are hidden on touch-only devices, and file actions show without hover.
+- **Text size.** On touch screens, reading, helper and toolbar text is 14 px and body text 15 px; dates, counts and badges are 12 px. On desktops nothing is smaller than 12 px, and helper text and labels are 13 px. The font size setting in the appearance control scales everything.
 - **Zoom and notches.** Pinch zoom is allowed, and the layout respects the safe areas of notched phones.
 - **Escape.** One press closes the topmost layer only: with **Settings** or a dialog open over the navigation drawer, the drawer stays open.
 
 ### Collapsible sidebar sections
 
-The **Automations** and **Conversations** sections of the left navigation (docked sidebar, overlay or phone drawer) fold and unfold when you click their header. The **+** and refresh buttons next to a header keep their own action. Open sections share the height and scroll independently; a folded section gives its space to the other. Both start open, and your choice is remembered in this browser (`localStorage`, key `abstractcode.sidebar.panels`); if the browser blocks storage, both sections simply start open.
+The **Automations** and **Conversations** sections of the left navigation (docked sidebar, overlay or phone drawer) fold and unfold when you click their header. The **+** and refresh buttons next to a header keep their own action. Open sections share the height and scroll independently; a folded section gives its space to the other. Both start open, and your choice is remembered in this browser (`localStorage`, key `abstractcode.sidebar.panels`); if the browser blocks storage, both sections simply start open. Each section sits on its own panel background with its header inside the panel.
+
+The **Workspace** row at the bottom of the sidebar shows the conversation's folder name on one line, shortened with "…" when it is long; hover it to see the full path.
+
+### Automation detail sections
+
+In an automation's page, **Occurrences** and the folder ("Automation folder", or "Run #N folder") have a header you can click or tap to fold the list away. Both start open, and your choice is remembered in this browser (`localStorage`, key `abstractcode.automation.panels`).
+
+### Switches
+
+Every setting that is either on or off is a switch named after what it controls: **Show all workflows** (shown as "All" on phones), **Run queued turns**, each automation's **Active**, **Show archived** in the Automations section, and one switch per skill in **Settings**. A switch that is on is highlighted with a check mark and a bold label; off is plain; a switch that cannot change right now is dimmed and says why (for example "Connect to a gateway first." or "A run is in progress." — next to the switch on touch screens, in its tooltip with a mouse). A switch applies at once; there is nothing to save. One-shot actions such as **Pause**, **Resume**, **Conclude**, **Revoke** and read-aloud playback stay buttons.
 
 ## Stream replies
 
@@ -68,7 +80,7 @@ Answer questions in their dedicated cards. Tool approvals show requested argumen
 
 An event-driven workflow stays attached while waiting for its trigger. Its wait card can also submit an explicit JSON event through the gateway's durable command path. Messages and status updates emitted by workflow nodes are replayable. See the [UI event contract](ui_events.md).
 
-Use **Pause**, **Resume**, **Conclude**, or **Stop** to supervise an active run. Commands are requests, not optimistic lifecycle changes: the display follows confirmed gateway state. Guidance is consumed at supported workflow boundaries. **Queue next turn** keeps a local queue for this conversation; a failure or cancellation pauses it for explicit review. Switching conversations or signing out clears it. Unsent drafts and queued turns do not survive reload.
+Use **Pause**, **Resume**, **Conclude**, or **Stop** to supervise an active run. Commands are requests, not optimistic lifecycle changes: the display follows confirmed gateway state. Guidance is consumed at supported workflow boundaries. **Queue next turn** keeps a local queue for this conversation. With **Run queued turns** on, each queued turn starts when the current run ends; off, the turns wait (**Run next** starts one). A failure or cancellation switches the queue off for explicit review. Switching conversations or signing out clears it. Unsent drafts and queued turns do not survive reload.
 
 ## Automations
 
@@ -92,6 +104,10 @@ Credentials are exchanged through the app server for HttpOnly session cookies. G
 When the gateway advertises configured speech capabilities, a conversation with a run offers hold-to-dictate and read-aloud controls. Hold the microphone button (or Space/Enter while focused), then release to transcribe into the draft. Review the text before sending. Read-aloud supports pause, resume, and stop.
 
 Recording and playback happen in the browser; transcription and synthesis use the gateway's durable media endpoints. Microphone access requires permission and a secure context (HTTPS or localhost). No speech model runs in the browser.
+
+## Opening the app from another computer over http
+
+You can open AbstractCode from another computer at the gateway's plain http address, for example `http://<host>:8080/apps/code/` on your LAN or over Tailscale. Conversations, automations, files and copy buttons work there: when the browser withholds the clipboard, **Copy** uses the browser's copy command and says "Copied" or "Copy failed — select and copy". Browsers offer the microphone and camera only on https or on the computer itself, so over plain http the dictation button stays off and says: "This page is loaded over http, so voice and camera is unavailable — open it over https (for example through tailscale serve; the gateway console's Network page explains how) or on the gateway's own computer." To use voice from another computer, open the app through an https address such as `tailscale serve` or your own HTTPS reverse proxy (see [Web deployment](deployment-web.md#reverse-proxies-and-https)).
 
 ## Development and build
 

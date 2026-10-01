@@ -32,6 +32,10 @@ panes become drawers below 1024 px, dialogs become bottom sheets on phones,
 and touch devices get 44 px targets. See
 [responsive layout](../docs/web.md#responsive-layout).
 
+You can open it from another computer at the gateway's plain http address
+(LAN or Tailscale); voice needs an https address there. See
+[opening the app from another computer over http](../docs/web.md#opening-the-app-from-another-computer-over-http).
+
 Docs:
 - Web overview: [`../docs/web.md`](../docs/web.md)
 - Deployment: [`../docs/deployment-web.md`](../docs/deployment-web.md)

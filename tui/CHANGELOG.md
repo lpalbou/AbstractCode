@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.8.0] - 2026-10-01
 
 ### Changed
 
@@ -23,7 +23,7 @@ All notable changes to this project are documented here. The format follows
   archived, ended, a command in flight, or the change not permitted. The
   confirmation describes the new state: "Active is off: scheduled runs are
   skipped." / "Active is on: it runs on its schedule."
-- `assets/automation_controls.json` re-synced with AbstractUIC ui-kit 0.3.3
+- `assets/automation_controls.json` re-synced with AbstractUIC ui-kit 0.4.0
   (adds the `active` label and hint, and the "Connect a mailbox first" wording).
 
 ## [0.7.1] - 2026-09-28

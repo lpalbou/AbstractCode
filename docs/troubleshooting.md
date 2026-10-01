@@ -25,6 +25,14 @@ the one you expect. `abstractcode login` saves a URL only when you give one
 (`--gateway-url` or the environment); a login taken from the pointer saves the
 token alone, so the client keeps following the gateway to a new port.
 
+**The microphone button is off and says "This page is loaded over http, so voice and camera is unavailable".**
+You opened AbstractCode Web from another computer at a plain http address
+(for example `http://<host>:8080/apps/code/`). Browsers offer the microphone
+and camera only on https or on the computer itself; everything else works.
+Open the app through an https address (for example with `tailscale serve`;
+the gateway console's Network page explains how) or on the gateway's own
+computer. See [Opening the app from another computer over http](web.md#opening-the-app-from-another-computer-over-http).
+
 **`not signed in to <gateway>` at launch, or "not signed in" in the app.**
 The gateway is running and reachable but refuses this client's credential:
 none is saved, it was rotated, or it was a one-use sign-in from the gateway
