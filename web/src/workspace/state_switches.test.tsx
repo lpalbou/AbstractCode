@@ -95,6 +95,7 @@ describe("workspace toolbar and queue", () => {
     expect(block).toContain("workflows={{ ...catalog.executable");
     expect(block).toContain('unavailableReason={!connection.connected ? "Connect to a gateway first." : locked ? "A run is in progress." : null}');
     expect(appSource).toContain("executableChoices(catalog.executable.data)");
+    expect(appSource).toContain('<div className="code-workflow-select" aria-busy={schemaLoading || undefined}>');
     expect(appSource).not.toMatch(/<select\s+aria-label="Workflow"/);
     expect(catalogSource).toContain("request(executableWorkflowsPath(CODE_AGENT_INTERFACE))");
     expect(catalogSource).toContain("parseExecutableWorkflows(value(7), CODE_AGENT_INTERFACE)");

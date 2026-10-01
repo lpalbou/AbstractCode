@@ -1283,7 +1283,8 @@ export function CodeWorkspace() {
           />
         </header>
         <div className="code-toolbar">
-          <div className="code-workflow-select">
+          {/* aria-busy while the chosen workflow's inputs load (a send then would be refused). */}
+          <div className="code-workflow-select" aria-busy={schemaLoading || undefined}>
             <Icon name="agent" size={17} />
             <WorkflowPicker
               id="code-workflow-picker"
