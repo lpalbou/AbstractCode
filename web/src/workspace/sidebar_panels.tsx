@@ -1,7 +1,10 @@
 // Collapsible sidebar panels (Automations, Conversations) — docked sidebar, tablet and phone
-// drawer alike. Each header is a disclosure toggle; its "+" / refresh actions are separate sibling
-// buttons that never toggle. Open panels share the sidebar height and scroll on their own; a
-// collapsed panel is header-only and the other takes the freed height. State persists per viewer.
+// drawer alike. Each header is a full-width 44 px row on the "New conversation" button's surface:
+// the disclosure toggle (chevron + label) on the left, the section's "+" / refresh actions on the
+// right as separate sibling buttons that never toggle. The items sit below on the plain sidebar
+// background. Both panels live in ONE scroll container (`.code-sidebar-lists`, app.tsx): each
+// panel takes its content height, so no list is ever clipped under the next header, and the
+// bottom Workspace/Settings block stays pinned. State persists per viewer.
 import React, { useCallback, useState } from "react";
 import { Icon } from "@abstractframework/ui-kit";
 
@@ -76,7 +79,7 @@ export function PanelHeader(props: {
 }): React.ReactElement {
   const ids = panelIds(props.panel);
   return (
-    <div className="code-section-label">
+    <div className="code-panel-header">
       <button
         type="button"
         className="code-panel-toggle"
@@ -85,12 +88,17 @@ export function PanelHeader(props: {
         aria-controls={ids.region}
         onClick={props.onToggle}
       >
-        <Icon name="chevronDown" size={11} />
+        <Icon name="chevronDown" size={14} />
         <span>{props.label}</span>
       </button>
       {props.actions ? <span className="code-panel-actions">{props.actions}</span> : null}
     </div>
   );
+}
+
+/** The scroll container both panels share (between the search field and the bottom block). */
+export function SidebarLists(props: { children: React.ReactNode }): React.ReactElement {
+  return <div className="code-sidebar-lists">{props.children}</div>;
 }
 
 /** The Conversations panel of the sidebar (the Automations one lives in automations_view.tsx). */
@@ -103,7 +111,7 @@ export function ConversationsPanel(props: {
   const ids = panelIds("conversations");
   return (
     <section className="code-panel code-conversations" data-open={props.open ? "true" : "false"}>
-      <PanelHeader panel="conversations" label="CONVERSATIONS" open={props.open} onToggle={props.onToggle} actions={props.actions} />
+      <PanelHeader panel="conversations" label="Conversations" open={props.open} onToggle={props.onToggle} actions={props.actions} />
       <nav className="code-sessions" id={ids.region} aria-labelledby={ids.toggle} hidden={!props.open}>
         {props.children}
       </nav>

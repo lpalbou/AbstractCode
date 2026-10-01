@@ -255,10 +255,19 @@ describe("space on phones and tablets (DESIGN §12)", () => {
 });
 
 describe("the navigation drawer scrolls as one (DESIGN §12: no list scrolling inside a scrolling page)", () => {
-  const drawer = block("@media (max-width: 1023.98px) {", SPACE);
-  it("the drawer is the one scroll; its lists take their content height", () => {
-    expect(rule(drawer, ".code-sidebar")).toContain("overflow-y: auto;");
-    expect(drawer).toMatch(/\.code-sidebar \.code-panel > \[role="region"\] \{\s*flex: none;\s*overflow: visible;/);
+  // Round 3: docked sidebar and drawer alike, the two lists share ONE scroll (.code-sidebar-lists);
+  // each list takes its content height; the drawer itself only scrolls on short (landscape) screens.
+  it("one scroll container holds both lists at their content height; the drawer does not scroll too", () => {
+    expect(rule(css, ".code-sidebar-lists")).toContain("overflow-y: auto;");
+    expect(css).toMatch(/\.code-panel > nav,\s*\.code-panel > \[role="region"\] \{\s*flex: none;\s*overflow: visible;/);
+    // No drawer-width block makes the whole sidebar scroll as well (that was 0.9.0's drawer rule).
+    let drawers = 0;
+    for (let at = css.indexOf("@media (max-width: 1023.98px) {"); at >= 0; at = css.indexOf("@media (max-width: 1023.98px) {", at + 1)) {
+      const drawer = block("@media (max-width: 1023.98px) {", at);
+      drawers++;
+      if (drawer.includes(".code-sidebar {")) expect(rule(drawer, ".code-sidebar")).not.toContain("overflow-y: auto;");
+    }
+    expect(drawers).toBeGreaterThan(0);
   });
 });
 
