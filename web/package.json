@@ -44,7 +44,7 @@
   "devDependencies": {
     "@abstractframework/monitor-flow": "^0.1.10",
     "@abstractframework/monitor-gpu": "^0.1.10",
-    "@abstractframework/panel-chat": "^0.2.3",
+    "@abstractframework/panel-chat": "^0.2.4",
     "@abstractframework/ui-kit": "^0.5.0",
     "@monaco-editor/react": "^4.6.0",
     "@playwright/test": "^1.63.0",
