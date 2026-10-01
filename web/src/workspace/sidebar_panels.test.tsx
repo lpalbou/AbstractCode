@@ -6,6 +6,8 @@ import { AutomationsSection } from "./automations_view";
 import {
   ConversationsPanel,
   DEFAULT_PANELS,
+  WorkspaceRow,
+  workspaceLabel,
   PanelHeader,
   SIDEBAR_PANELS_KEY,
   readPanels,
@@ -150,5 +152,43 @@ describe("sidebar panels CSS contract", () => {
   it("the toggle is 32 px on desktop and 44 px (--tap-min) under a coarse pointer", () => {
     expect(css).toMatch(/\.code-panel-toggle \{[^}]*min-height: 32px;/);
     expect(css).toMatch(/@media \(pointer: coarse\) \{[\s\S]*?\.code-panel-toggle \{\s*min-height: var\(--tap-min, 44px\);/);
+  });
+});
+
+describe("Workspace row (round 2, item 10)", () => {
+  const long = "/srv/af/runtime/gateway/workspaces/sess_ed8c3b0bf5fd4d249477aca68da7f494-3f2a9c71e0b84d5e";
+
+  it("shows the folder's last segment, the full path as its title, icon | text | chevron", () => {
+    const html = renderToStaticMarkup(<WorkspaceRow path={long} onOpen={() => {}} />);
+    expect(html).toContain('class="code-workspace-row"');
+    expect(html).toContain(`title="Workspace: ${long}"`);
+    expect(html).toContain("<small>sess_ed8c3b0bf5fd4d249477aca68da7f494-3f2a9c71e0b84d5e</small>");
+    expect(workspaceLabel("")).toBe("Gateway managed");
+    expect(appSource).toMatch(/<WorkspaceRow\s+path=\{effectiveWorkspace\}/);
+  });
+
+  it("is a three-column grid whose value never wraps or reaches the chevron", () => {
+    expect(css).toMatch(/\.code-sidebar-bottom > button\.code-workspace-row \{[^}]*display: grid;[^}]*grid-template-columns: auto minmax\(0, 1fr\) auto;/);
+    expect(css).toMatch(/\.code-workspace-row small \{[^}]*min-width: 0;[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
+    expect(css).toMatch(/\.code-sidebar-bottom > button > span \{[^}]*min-width: 0;/);
+  });
+});
+
+describe("sidebar lists are panels (round 2, item 10)", () => {
+  it("each panel has its own kit surface, border, radius and an 8 px inset", () => {
+    const rule = css.match(/\.code-panel \{([^}]*)\}/)?.[1] ?? "";
+    expect(rule).toMatch(/background: var\(--ui-surface-1\);/);
+    expect(rule).toMatch(/border: 1px solid var\(--ui-border-1\);/);
+    expect(rule).toMatch(/border-radius: 10px;/);
+    expect(rule).toMatch(/margin: 0 8px 8px;/);
+  });
+
+  it("the header is the panel's first child (inside the surface)", () => {
+    const html = renderToStaticMarkup(
+      <ConversationsPanel open onToggle={() => {}}>
+        <p>row</p>
+      </ConversationsPanel>,
+    );
+    expect(html).toMatch(/^<section class="code-panel code-conversations"[^>]*><div class="code-section-label">/);
   });
 });

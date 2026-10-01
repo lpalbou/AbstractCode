@@ -188,11 +188,25 @@ button {
   padding: 0 10px 16px;
 }
 /* Collapsible panels (sidebar_panels.tsx). Open: the panel takes its share of the sidebar and
-   its list scrolls on its own; collapsed: header only, the other panel takes the freed height. */
+   its list scrolls on its own; collapsed: header only, the other panel takes the freed height.
+   Each panel is its own surface (kit token, light + dark), inset 8 px from the sidebar edges with
+   its header inside, so it reads as a panel distinct from the item rows (round 2, item 10). */
 .code-panel {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  margin: 0 8px 8px;
+  border: 1px solid var(--ui-border-1);
+  border-radius: 10px;
+  background: var(--ui-surface-1);
+  overflow: hidden;
+}
+.code-panel > .code-section-label {
+  padding: 2px 6px 0 8px;
+}
+.code-panel > .code-sessions,
+.code-panel > .code-auto-rows {
+  padding: 0 4px 6px;
 }
 .code-panel[data-open="true"] {
   flex: 1 1 0;
@@ -340,6 +354,21 @@ button {
   flex-direction: column;
   gap: 2px;
   flex: 1;
+  min-width: 0;
+}
+/* icon | label + value | chevron: the value is one ellipsised line and never reaches the chevron
+   (a session-id folder name used to wrap across it). The full path is the row's title. */
+.code-sidebar-bottom > button.code-workspace-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.code-workspace-row strong,
+.code-workspace-row small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .code-sidebar-bottom strong {
   color: var(--text-primary);

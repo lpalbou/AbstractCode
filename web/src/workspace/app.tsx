@@ -35,7 +35,7 @@ import {
   type PaneMode,
 } from "./layout";
 import { SidebarDrawer } from "./sidebar_drawer";
-import { ConversationsPanel, useSidebarPanels } from "./sidebar_panels";
+import { ConversationsPanel, WorkspaceRow, useSidebarPanels } from "./sidebar_panels";
 import {
   WorkflowChat,
   chatToMarkdown,
@@ -1200,17 +1200,10 @@ export function CodeWorkspace() {
           ) : null}
         </ConversationsPanel>
         <div className="code-sidebar-bottom">
-          <button onClick={() => openSettings("workspace")}>
-            <Icon name="terminal" size={17} />
-            <span>
-              <strong>Workspace</strong>
-              <small>
-                {effectiveWorkspace.split("/").filter(Boolean).pop() ||
-                  "Gateway managed"}
-              </small>
-            </span>
-            <Icon name="chevronRight" size={14} />
-          </button>
+          <WorkspaceRow
+            path={effectiveWorkspace}
+            onOpen={() => openSettings("workspace")}
+          />
           <button onClick={() => openSettings("model")}>
             <Icon name="settings" size={17} />
             <span>Settings</span>

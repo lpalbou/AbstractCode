@@ -26,6 +26,12 @@ import {
   gatewayDefaultFromEnvelope,
   type GatewayDefaultState,
 } from "./workflow_selection";
+import {
+  CONVERSATIONS_PAGE,
+  conversationPage,
+  conversationRunsPath,
+  fetchConversationRuns,
+} from "./conversation_paging";
 
 type CatalogState = {
   workflows: WorkflowDefinition[];
@@ -66,15 +72,98 @@ export function capabilityContracts(value: any): Record<string, any> {
 
 export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
   const [state, setState] = useState<CatalogState>(empty);
-  const [limit, setLimit] = useState(100);
+  // Conversations shown (not runs): CONVERSATIONS_PAGE, "Load more" adds CONVERSATIONS_PAGE.
+  const visible = useRef(CONVERSATIONS_PAGE);
   const generation = useRef(0);
   const pending = useRef<AbortController>();
+  // The conversation list alone ("Load more") has its own generation: it never discards the
+  // workflows/tools half of a refresh, and a newer list always wins over an older one.
+  const listGeneration = useRef(0);
+  const listPending = useRef<AbortController>();
   const inputCache = useRef<{
     identity: string;
     values: Record<string, unknown>;
   }>({ identity: "", values: {} });
+  const fetchRuns = useCallback(
+    (signal: AbortSignal) =>
+      fetchConversationRuns(
+        (runLimit) =>
+          gatewayRequest(gatewayApiPath(conversationRunsPath(runLimit)), {
+            signal,
+          }),
+        visible.current,
+      ),
+    [],
+  );
+  const pageOf = (runs: any) =>
+    conversationPage(
+      normalizeSessionSummaries(runs, inputCache.current.values),
+      visible.current,
+    );
+  // Run summaries intentionally omit user input. Hydrate the SHOWN conversations' labels through
+  // the authorized input endpoint, with bounded concurrency and identity-local cache.
+  const hydrateLabels = useCallback(
+    async (runs: any, listGen: number, signal: AbortSignal) => {
+      const stale = () => listGeneration.current !== listGen || signal.aborted;
+      const missing = pageOf(runs).sessions.filter(
+        (item) => !item.prompt && !(item.firstRunId in inputCache.current.values),
+      );
+      for (let index = 0; index < missing.length; index += 4) {
+        if (stale()) return;
+        await Promise.all(
+          missing.slice(index, index + 4).map(async (item) => {
+            try {
+              const input = await gatewayRequest(
+                gatewayApiPath(`runs/${encodeURIComponent(item.firstRunId)}/input_data`),
+                { signal },
+              );
+              if (!stale()) inputCache.current.values[item.firstRunId] = input;
+            } catch (reason: any) {
+              if (!signal.aborted && reason?.status === 401) onAuthError();
+              // A missing/forbidden old run must not hide the conversation itself.
+            }
+          }),
+        );
+        if (stale()) return;
+        setState((previous) => ({ ...previous, sessions: pageOf(runs).sessions }));
+      }
+    },
+    [onAuthError],
+  );
+  /** "Load more": refetches the conversation list only (the rest of the catalog stays on screen). */
+  const loadConversations = useCallback(async () => {
+    if (!identity) return;
+    const listGen = ++listGeneration.current;
+    listPending.current?.abort();
+    const abort = new AbortController();
+    listPending.current = abort;
+    setState((s) => ({ ...s, loading: true }));
+    try {
+      const runs = await fetchRuns(abort.signal);
+      if (listGeneration.current !== listGen) return;
+      const page = pageOf(runs);
+      setState((s) => ({
+        ...s,
+        loading: false,
+        sessions: page.sessions,
+        hasMore: page.hasMore,
+        errors: s.errors.filter((e) => !e.startsWith("Conversations: ")),
+      }));
+      await hydrateLabels(runs, listGen, abort.signal);
+    } catch (reason: any) {
+      if (abort.signal.aborted || listGeneration.current !== listGen) return;
+      if (reason?.status === 401) onAuthError();
+      setState((s) => ({
+        ...s,
+        loading: false,
+        errors: [...s.errors.filter((e) => !e.startsWith("Conversations: ")), `Conversations: ${formatError(reason)}`],
+      }));
+    }
+  }, [identity, fetchRuns, hydrateLabels, onAuthError]);
   const refresh = useCallback(async () => {
     const gen = ++generation.current;
+    const listGen = ++listGeneration.current;
+    listPending.current?.abort();
     pending.current?.abort();
     const abort = new AbortController();
     pending.current = abort;
@@ -85,20 +174,17 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       return;
     }
     setState((s) => ({ ...s, loading: true, errors: [] }));
-    const paths = [
-      "bundles?all_versions=true&include_drafts=false",
-      "workspace/policy",
-      "discovery/tools",
-      `runs?root_only=true&include_ledger_len=false&limit=${limit}`,
-      "discovery/capabilities",
-      "workflow-catalog?scope=tenant",
-      "config/capability-defaults",
-    ];
-    const result = await Promise.allSettled(
-      paths.map((path) =>
-        gatewayRequest(gatewayApiPath(`${path}`), { signal: abort.signal }),
-      ),
-    );
+    const request = (path: string) =>
+      gatewayRequest(gatewayApiPath(path), { signal: abort.signal });
+    const result = await Promise.allSettled([
+      request("bundles?all_versions=true&include_drafts=false"),
+      request("workspace/policy"),
+      request("discovery/tools"),
+      fetchRuns(abort.signal),
+      request("discovery/capabilities"),
+      request("workflow-catalog?scope=tenant"),
+      request("config/capability-defaults"),
+    ]);
     if (generation.current !== gen) return;
     const value = (i: number): any =>
       result[i].status === "fulfilled"
@@ -113,12 +199,15 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
         `${["Workflows", "Workspace policy", "Tools", "Conversations", "Capabilities", "Shared workflows", "Gateway defaults"][index]}: ${formatError(item.reason)}`,
       );
     });
-    setState({
+    // A "Load more" started while this refresh was in flight owns the list now.
+    const listCurrent = listGeneration.current === listGen;
+    const page = pageOf(value(3));
+    setState((previous) => ({
       workflows: normalizeWorkflowCatalog(value(0), value(5)),
       choices: publishedWorkflowChoices(normalizeWorkflowCatalog(value(0), value(5))),
       policy: value(1) ? normalizeWorkspacePolicy(value(1)) : null,
       tools: normalizeToolCatalog(value(2)),
-      sessions: normalizeSessionSummaries(value(3), inputCache.current.values),
+      sessions: listCurrent ? page.sessions : previous.sessions,
       capabilities: capabilityContracts(value(4)),
       streaming: streamingCapability(
         value(4),
@@ -130,55 +219,27 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       gatewayDefault: gatewayDefaultFromEnvelope(value(0)),
       loading: false,
       errors,
-      hasMore: Boolean(value(3)?.has_more),
-    });
-    // Run summaries intentionally omit user input. Hydrate labels through the
-    // authorized input endpoint, with bounded concurrency and identity-local cache.
-    const missing = normalizeSessionSummaries(
-      value(3),
-      inputCache.current.values,
-    ).filter(
-      (item) => !item.prompt && !(item.firstRunId in inputCache.current.values),
-    );
-    for (let index = 0; index < missing.length; index += 4) {
-      if (generation.current !== gen || abort.signal.aborted) return;
-      await Promise.all(
-        missing.slice(index, index + 4).map(async (item) => {
-          try {
-            const input = await gatewayRequest(
-              gatewayApiPath(`runs/${encodeURIComponent(item.firstRunId)}/input_data`),
-              { signal: abort.signal },
-            );
-            if (generation.current === gen && !abort.signal.aborted)
-              inputCache.current.values[item.firstRunId] = input;
-          } catch (reason: any) {
-            if (!abort.signal.aborted && reason?.status === 401) onAuthError();
-            // A missing/forbidden old run must not hide the conversation itself.
-          }
-        }),
-      );
-      if (generation.current !== gen || abort.signal.aborted) return;
-      setState((previous) => ({
-        ...previous,
-        sessions: normalizeSessionSummaries(
-          value(3),
-          inputCache.current.values,
-        ),
-      }));
-    }
-  }, [identity, limit, onAuthError]);
+      hasMore: listCurrent ? page.hasMore : previous.hasMore,
+    }));
+    if (listCurrent && value(3)) await hydrateLabels(value(3), listGen, abort.signal);
+  }, [identity, onAuthError, fetchRuns, hydrateLabels]);
   useEffect(() => {
-    setLimit(100);
-  }, [identity]);
-  useEffect(() => {
+    // A new identity starts again at one page of conversations.
+    visible.current = CONVERSATIONS_PAGE;
     setState(empty);
     void refresh();
     return () => {
       generation.current += 1;
+      listGeneration.current += 1;
       pending.current?.abort();
+      listPending.current?.abort();
     };
   }, [refresh]);
-  return { ...state, refresh, loadMore: () => setLimit((n) => n + 100) };
+  const loadMore = useCallback(() => {
+    visible.current += CONVERSATIONS_PAGE;
+    void loadConversations();
+  }, [loadConversations]);
+  return { ...state, refresh, loadMore };
 }
 
 export async function fetchWorkflowSchema(

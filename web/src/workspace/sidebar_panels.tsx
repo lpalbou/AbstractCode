@@ -110,3 +110,32 @@ export function ConversationsPanel(props: {
     </section>
   );
 }
+
+/** The workspace folder's last segment, or "Gateway managed" when the run names none. */
+export function workspaceLabel(path: string): string {
+  return path.split("/").filter(Boolean).pop() || "Gateway managed";
+}
+
+/**
+ * The sidebar's bottom Workspace row: icon | label + value | chevron on one grid row. The value
+ * (often a per-conversation folder named by a session id) stays on one line with an ellipsis and
+ * never runs under the chevron; the full path is the row's tooltip.
+ */
+export function WorkspaceRow(props: { path: string; onOpen(): void }): React.ReactElement {
+  const value = workspaceLabel(props.path);
+  return (
+    <button
+      type="button"
+      className="code-workspace-row"
+      title={props.path ? `Workspace: ${props.path}` : "Workspace: gateway managed"}
+      onClick={props.onOpen}
+    >
+      <Icon name="terminal" size={17} />
+      <span>
+        <strong>Workspace</strong>
+        <small>{value}</small>
+      </span>
+      <Icon name="chevronRight" size={14} />
+    </button>
+  );
+}

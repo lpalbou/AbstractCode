@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Web sidebar: the Workspace row, the two lists as panels, 25 conversations per page.**
+  - The Workspace row at the bottom of the sidebar keeps the folder name on one line, shortened with "…", and
+    never runs under the arrow; the full path shows on hover. A folder named by a session id used to wrap across
+    the arrow and out of the sidebar.
+  - Automations and Conversations each sit on their own panel background (light and dark), with the heading
+    inside the panel; collapsing a panel and the remembered state work as before.
+  - The conversation list shows 25 conversations and "Load more conversations" adds 25. It used to load the 100
+    most recent turns, which on a real gateway is about 20 conversations (one conversation holds several turns),
+    and "Load more" reloaded the whole workspace catalog.
 - **Web: phones and tablets use the whole screen.** On a phone the automation detail, the approval card, the
   workspace panel and the conversation list now reach the edges of the screen (16 px margins or less) instead of
   sitting in boxes inside boxes:
