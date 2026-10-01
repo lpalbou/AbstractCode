@@ -29,7 +29,7 @@ function syntheticRuns(): Record<string, unknown>[] {
 
 /** Only the local Code origin is reachable; the conversation list gets the synthetic runs appended
  * (limit/offset/has_more like the gateway); the open run's workspace_root is the long path. */
-async function route(page: Page, runLimits: number[]): Promise<void> {
+async function route(page: Page, runLimits: number[], opts: { syntheticOnly?: boolean } = {}): Promise<void> {
   const synthetic = syntheticRuns();
   await page.route("**/*", async (r) => {
     const url = new URL(r.request().url());
@@ -41,7 +41,9 @@ async function route(page: Page, runLimits: number[]): Promise<void> {
       const real = new URL(url);
       real.searchParams.set("limit", "1000");
       real.searchParams.set("offset", "0");
-      const body = await (await r.fetch({ url: real.toString() })).json();
+      // syntheticOnly: the list is exactly the 40 synthetic conversations, whatever other specs
+      // left on the shared fixture gateway (automation sessions, earlier runs): deterministic counts.
+      const body = opts.syntheticOnly ? { items: [] } : await (await r.fetch({ url: real.toString() })).json();
       const all = [...(body.items || []), ...synthetic];
       const items = all.slice(offset, offset + limit);
       return r.fulfill({ json: { items, count: items.length, offset, has_more: all.length > offset + limit } });
@@ -80,6 +82,8 @@ async function chooseWorkflow(page: Page, name: string): Promise<void> {
     .first()
     .click();
   await expect(page.locator("#code-workflow-picker .af-workflow-picker__name")).toHaveText(name);
+  // The chosen workflow's inputs have loaded (a send before that is refused).
+  await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");
 }
 
 async function signIn(page: Page): Promise<void> {
@@ -175,7 +179,7 @@ test.describe("AbstractCode sidebar", () => {
 
   test("Conversations show 25 and Load more adds 25, counted in conversations rather than runs", async ({ page }) => {
     const runLimits: number[] = [];
-    await route(page, runLimits);
+    await route(page, runLimits, { syntheticOnly: true });
     await page.setViewportSize({ width: 1440, height: 900 });
     await signIn(page);
     const rows = page.locator(".code-sessions .code-session:not(.is-selected)");
@@ -184,14 +188,8 @@ test.describe("AbstractCode sidebar", () => {
     expect(runLimits[0]).toBe(100);
     expect(runLimits).toContain(200);
     await page.getByRole("button", { name: "Load more conversations" }).click();
-    await expect(rows).toHaveCount(Math.min(50, 40 + (await realConversations(page))));
+    // 40 synthetic conversations, nothing else: Load more shows all of them (fewer than 50).
+    await expect(rows).toHaveCount(40);
   });
 });
 
-async function realConversations(page: Page): Promise<number> {
-  return page.evaluate(async () => {
-    const r = await fetch("/api/gateway/runs?root_only=true&include_ledger_len=false&limit=1000", { headers: { accept: "application/json" }, credentials: "include" });
-    const body = r.ok ? await r.json() : { items: [] };
-    return new Set((body.items || []).filter((x: any) => !String(x.run_id).startsWith("syn-")).map((x: any) => x.session_id)).size;
-  });
-}

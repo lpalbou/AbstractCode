@@ -64,6 +64,8 @@ async function chooseWorkflow(page: Page, name: string): Promise<void> {
     .first()
     .click();
   await expect(page.locator("#code-workflow-picker .af-workflow-picker__name")).toHaveText(name);
+  // The chosen workflow's inputs have loaded (a send before that is refused).
+  await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");
 }
 
 async function signIn(page: Page, captureLogin = false): Promise<void> {
