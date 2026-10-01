@@ -379,3 +379,34 @@ describe("buildWorkflowInput", () => {
     });
   });
 });
+
+describe("a turn carries only its own attachments (2026-10-01: a new conversation answered about another conversation's screenshot)", () => {
+  const restoredContext = {
+    task: "can you see my screenshot?",
+    attachments: [{ $artifact: "screenshot-from-conversation-A", name: "gateway.png" }],
+    media: [{ $artifact: "screenshot-from-conversation-A", name: "gateway.png" }],
+    messages: [{ role: "user", content: "earlier" }],
+  };
+
+  it("drops a restored context's attachments and media when the new turn attaches nothing", () => {
+    const output = buildWorkflowInput({
+      workflow: agentWorkflow,
+      schemaInputs: { context: restoredContext, attachments: [{ $artifact: "stale" }], media: [{ $artifact: "stale" }] },
+      prompt: "send an email with my host info",
+    });
+    expect(output.context).toEqual({ task: "send an email with my host info" });
+    expect(output).not.toHaveProperty("attachments");
+    expect(output).not.toHaveProperty("media");
+    expect(JSON.stringify(output)).not.toContain("screenshot-from-conversation-A");
+  });
+
+  it("sends exactly the new turn's attachments, never the restored ones", () => {
+    const output = buildWorkflowInput({
+      workflow: agentWorkflow,
+      schemaInputs: { context: restoredContext },
+      prompt: "look at this",
+      attachments: [{ $artifact: "new-one" }],
+    });
+    expect(output.context).toEqual({ task: "look at this", attachments: [{ $artifact: "new-one" }] });
+  });
+});

@@ -810,11 +810,19 @@ export function buildWorkflowInput(options: WorkflowInputOptions): JsonObject {
     // client authority on a fresh turn; the gateway reconstructs history
     // (one window, server-side; ADR-0026). There is no client history input.
     delete context.messages;
+    // A turn carries ONLY its own attachments: whatever an earlier run's
+    // restored `context` held (`attachments`, legacy `media`) must never ride
+    // along, or a new conversation answers about another conversation's
+    // screenshot (2026-10-01).
+    delete context.media;
+    const turnAttachments = (options.attachments ?? []).map((attachment) => ({
+      ...attachment,
+    }));
+    if (turnAttachments.length) context.attachments = turnAttachments;
+    else delete context.attachments;
     output.use_context = false;
-    if (options.attachments?.length)
-      context.attachments = options.attachments.map((attachment) => ({
-        ...attachment,
-      }));
+    delete output.attachments;
+    delete output.media;
     output.context = context;
     output.use_session_history = options.useSessionHistory ?? true;
   }
