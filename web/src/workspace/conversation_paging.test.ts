@@ -71,6 +71,9 @@ describe("conversations page by 25 conversations, not runs", () => {
 
   it("the catalog hook fetches the list through the conversation pager and Load more adds a page", () => {
     expect(hookSource).toContain("fetchConversationRuns(");
+    // The refresh fetches the list through the pager; no fixed run limit is left in the hook.
+    expect(hookSource).toMatch(/request\("discovery\/tools"\),\s*fetchRuns\(abort\.signal\),/);
+    expect(hookSource).not.toMatch(/runs\?root_only=true/);
     expect(hookSource).toContain("conversationPage(");
     expect(hookSource).toMatch(/visible\.current \+= CONVERSATIONS_PAGE;/);
     expect(hookSource).not.toMatch(/limit=\$\{limit\}/);
