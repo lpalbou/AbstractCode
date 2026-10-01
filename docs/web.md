@@ -45,7 +45,7 @@ AbstractCode Web works on phones, tablets, laptop windows and wide screens, and 
 
 ### Collapsible sidebar sections
 
-The **Automations** and **Conversations** sections of the left navigation (docked sidebar, overlay or phone drawer) fold and unfold when you click their header. The **+** and refresh buttons next to a header keep their own action. Open sections share the height and scroll independently; a folded section gives its space to the other. Both start open, and your choice is remembered in this browser (`localStorage`, key `abstractcode.sidebar.panels`); if the browser blocks storage, both sections simply start open. Each section sits on its own panel background with its header inside the panel.
+The **Automations** and **Conversations** sections of the left navigation (docked sidebar, overlay or phone drawer) each have a full-width header row on the same background as the **New conversation** button: the arrow and the name on the left, the section's **+** and refresh buttons on the right (they keep their own action). Click the header, or focus it and press Enter or Space, to fold or unfold the section. Both sections take their full length and scroll together as one list, with the **Workspace** and **Settings** rows kept at the bottom, so no item is ever hidden under the next header. Both start open, and your choice is remembered in this browser (`localStorage`, key `abstractcode.sidebar.panels`); if the browser blocks storage, both sections simply start open.
 
 The **Workspace** row at the bottom of the sidebar shows the conversation's folder name on one line, shortened with "…" when it is long; hover it to see the full path.
 

@@ -5,6 +5,17 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Web sidebar: Automations and Conversations headers are panel headers, and no list is cut off.** Each header is
+  a full-width 44 px row with the same background as the "New conversation" button: the arrow and the name on
+  the left, the section's buttons (+ for automations, refresh) on the right. Click, Enter or Space folds the
+  section; the choice is still remembered in this browser. The items sit below on the plain sidebar background.
+  Both sections now grow to their full length and the sidebar scrolls them as one list (docked, overlay and phone
+  drawer), with the Workspace and Settings rows kept at the bottom; in 0.9.0 the automations list was capped
+  and its fourth row was hidden under the Conversations header.
+
 ## [terminal 0.8.0 / web 0.9.0] - 2026-10-01
 
 ### Changed
