@@ -40,6 +40,16 @@ async function blockExternalTraffic(page: Page): Promise<void> {
   });
 }
 
+/** Round 3: every workflow the Code picker offers declares abstractcode.agent.v1, so a turn
+ * starts from the composer (the inputs drawer says "Back to chat"; there is no "Run workflow"). */
+async function sendTurn(page: Page, text = "Run the fixture."): Promise<void> {
+  const drawer = page.getByRole("complementary", { name: "Workflow inputs" });
+  if (await drawer.isVisible()) await drawer.getByRole("button", { name: "Back to chat", exact: true }).click();
+  const composer = page.locator(".pc-composer textarea");
+  if (!(await composer.inputValue()).trim()) await composer.fill(text);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+}
+
 /** The header's kit WorkflowPicker (round 3: no "Show all workflows" — it lists only what the
  * gateway returns for abstractcode.agent.v1): open it and choose the entry named `name`. */
 async function chooseWorkflow(page: Page, name: string): Promise<void> {
@@ -98,15 +108,13 @@ async function expectPersistedCompletion(page: Page): Promise<void> {
 async function startPromptWorkflow(page: Page, prompt: string): Promise<void> {
   await selectWorkflow(page, "Prompt structured");
   await page
-    .getByRole("button", { name: "Configure inputs", exact: true })
+    .getByRole("button", { name: "Inputs", exact: true })
     .click();
   const drawer = page.getByRole("complementary", { name: "Workflow inputs" });
   await expect(drawer).toBeVisible();
   await drawer.getByLabel(/Ticket/).fill(unique("ticket"));
   await page.locator(".pc-composer textarea").fill(prompt);
-  await drawer
-    .getByRole("button", { name: "Run workflow", exact: true })
-    .click();
+  await sendTurn(page);
   // The real Ask User node receives the flow's Prompt input as its durable
   // question; asserting the submitted value proves it is not a mock dialog.
   await expect(page.getByText(prompt, { exact: true })).toBeVisible();
@@ -253,9 +261,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await expect(secondInputs).toBeVisible();
     await secondInputs.getByLabel(/Ticket/).fill(unique("ticket"));
     await page.locator(".pc-composer textarea").fill(secondPrompt);
-    await secondInputs
-      .getByRole("button", { name: "Run workflow", exact: true })
-      .click();
+    await sendTurn(page);
     await expect(page.getByText(secondPrompt, { exact: true })).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "A question for you" }),
@@ -294,9 +300,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
   }) => {
     await signIn(page);
     await selectWorkflow(page, "Event listener");
-    await page
-      .getByRole("button", { name: "Run workflow", exact: true })
-      .click();
+    await sendTurn(page);
 
     await expect(
       page.getByRole("heading", { name: "Waiting for an event" }),
@@ -318,9 +322,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
 
     await page.locator(".code-new-chat").click();
     await selectWorkflow(page, "Event emitter");
-    await page
-      .getByRole("button", { name: "Run workflow", exact: true })
-      .click();
+    await sendTurn(page);
     await expect(page.getByText("Completed", { exact: true })).toBeVisible();
     await expectPersistedCompletion(page);
   });
@@ -330,9 +332,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
   }) => {
     await signIn(page);
     await selectWorkflow(page, "Event listener");
-    await page
-      .getByRole("button", { name: "Run workflow", exact: true })
-      .click();
+    await sendTurn(page);
     await expect(
       page.getByRole("heading", { name: "Waiting for an event" }),
     ).toBeVisible();
@@ -363,9 +363,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     });
 
     await selectWorkflow(page, "Native tool approval");
-    await page
-      .getByRole("button", { name: "Run workflow", exact: true })
-      .click();
+    await sendTurn(page);
     await expect(
       page.getByRole("heading", { name: "1 action needs permission" }),
     ).toBeVisible();
@@ -379,9 +377,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
 
     await page.locator(".code-new-chat").click();
     await selectWorkflow(page, "Native tool approval");
-    await page
-      .getByRole("button", { name: "Run workflow", exact: true })
-      .click();
+    await sendTurn(page);
     await expect(
       page.getByRole("heading", { name: "1 action needs permission" }),
     ).toBeVisible();
@@ -420,9 +416,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
         commands.push(request.postDataJSON());
     });
     await selectWorkflow(page, "Tool supervision");
-    await page
-      .getByRole("button", { name: "Run workflow", exact: true })
-      .click();
+    await sendTurn(page);
     await expect(
       page.getByRole("heading", { name: "3 actions need permission" }),
     ).toBeVisible();
@@ -622,9 +616,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
   }) => {
     await signIn(page);
     await selectWorkflow(page, "Event listener");
-    await page
-      .getByRole("button", { name: "Run workflow", exact: true })
-      .click();
+    await sendTurn(page);
     await expect(
       page.getByRole("heading", { name: "Waiting for an event", exact: true }),
     ).toBeVisible();
@@ -928,54 +920,26 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     expect(submissions).toHaveLength(2);
   });
 
-  test("shows one published choice across installed copies and catalog versions", async ({ page }) => {
-    const submissions: any[] = [];
-    page.on("request", request => {
-      if (request.method() === "POST" && request.url().endsWith("/api/gateway/runs/start")) submissions.push(request.postDataJSON());
+  // Round 3 (operator 2026-10-01): the picker lists only GET /bundles?executable_for=abstractcode.agent.v1.
+  // Workflows of another interface (abstractcode.coding.v1: the installed and catalog
+  // "Published coding" copies, "Coding request defaults") are not offered, whatever the
+  // registry, and there is no switch that brings them back.
+  test("offers only workflows declaring abstractcode.agent.v1: coding-contract workflows are absent", async ({ page }) => {
+    const asked: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/gateway/bundles?")) asked.push(new URL(request.url()).search);
     });
     await signIn(page);
-    // Round 3: the picker lists only the gateway's executable_for=abstractcode.agent.v1 answer.
-    await selectWorkflow(page, "Published coding");
-    await page.locator(".pc-composer textarea").fill("Use the preferred published coding workflow");
-    await page.getByRole("button", { name: "Send", exact: true }).click();
-    await expectPersistedCompletion(page);
-    expect(submissions[0]).toMatchObject({ bundle_id: "e2e-published-coding", bundle_version: "1.0.0", registry_scope: "tenant_catalog" });
-    await page.reload();
-    await expect(page.locator("#code-workflow-picker .af-workflow-picker__name")).toHaveText("Published coding");
-    await capture(page, "published-workflow-selection");
-  });
-
-  test("sends coding workflow requests with published defaults and restores them without configuration", async ({ page }) => {
-    const submissions: any[] = [];
-    page.on("request", request => {
-      if (request.method() === "POST" && request.url().endsWith("/api/gateway/runs/start")) submissions.push(request.postDataJSON());
-    });
-    await signIn(page);
-    await selectWorkflow(page, "Coding request defaults");
-    const composer = page.locator(".pc-composer textarea");
-    const request = "Build a playable arcade game in the Gateway workspace";
-    await composer.fill(request);
-    await page.getByRole("button", { name: "Send", exact: true }).click();
-    await expectPersistedCompletion(page);
-    await expect(page.getByText("Coding workflow accepted your request with its published defaults. No model was invoked.", { exact: true })).toBeVisible();
-    expect(submissions).toHaveLength(1);
-    expect(submissions[0].input_data).toMatchObject({ request, build_command: "", run_command: "", max_rounds: 2 });
-    for (const field of ["provider", "model", "prompt", "context", "messages"]) expect(submissions[0].input_data).not.toHaveProperty(field);
-    await page.getByRole("button", { name: "Inputs", exact: true }).click();
-    const drawer = page.getByRole("complementary", { name: "Workflow inputs" });
-    await expect(drawer.getByText("Ready to chat", { exact: true })).toBeVisible();
-    await expect(drawer.getByLabel("build command", { exact: true })).toBeHidden();
-    await capture(page, "coding-workflow-defaults");
-    await drawer.getByRole("button", { name: "Close panel" }).click();
-    await page.reload();
-    await expect(page.locator(".pc-chat-thread").getByText(request, { exact: true })).toBeVisible();
-    await composer.fill("Continue the arcade game");
-    await page.getByRole("button", { name: "Send", exact: true }).click();
-    await expect.poll(() => submissions.length).toBe(2);
-    await expectPersistedCompletion(page);
-    expect(submissions[1].input_data.request).toBe("Continue the arcade game");
-    expect(submissions[1].input_data.max_rounds).toBe(2);
-    await capture(page, "coding-workflow-conversation");
+    await expect.poll(() => asked.some((q) => q.includes("executable_for=abstractcode.agent.v1"))).toBe(true);
+    const picker = page.getByRole("combobox", { name: "Workflow", exact: true });
+    await picker.click();
+    const names = page.getByRole("listbox", { name: "Workflow" }).locator(".af-workflow-picker__option .af-workflow-picker__name");
+    await expect(names.filter({ hasText: /^Basic agent defaults$/ })).toHaveCount(1);
+    await expect(names.filter({ hasText: /^Published coding$/ })).toHaveCount(0);
+    await expect(names.filter({ hasText: /^Coding request defaults$/ })).toHaveCount(0);
+    await expect(page.getByText("Show all workflows")).toHaveCount(0);
+    await capture(page, "executable-workflows-only");
+    await page.keyboard.press("Escape");
   });
 
   test("permissions all never executes a tool unchecked in the enabled selection", async ({ page }) => {
@@ -995,7 +959,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await row.getByRole("switch").uncheck();
     await capture(page, "permissions-all-enabled-tools");
     await settings.getByRole("button", { name: "Close panel", exact: true }).click();
-    await page.getByRole("button", { name: "Run workflow", exact: true }).click();
+    await sendTurn(page);
     await expectPersistedCompletion(page);
     await expect(page.locator(".pc-tool-activity--failed")).toContainText("not allowed");
     await expect(page.locator(".pc-workflow-interaction")).toHaveCount(0);
@@ -1009,7 +973,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await settings.getByRole("switch", { name: "write_file", exact: true }).check();
     await settings.getByRole("button", { name: "Close panel", exact: true }).click();
     await page.getByRole("button", { name: "Inputs", exact: true }).click();
-    await page.getByRole("complementary", { name: "Workflow inputs" }).getByRole("button", { name: "Run workflow", exact: true }).click();
+    await sendTurn(page);
     await expect.poll(() => submissions.length).toBe(2);
     await expectPersistedCompletion(page);
     expect(submissions[1].input_data._runtime.allowed_tools).toContain("write_file");
@@ -1027,7 +991,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     const settings = page.getByRole("complementary", { name: "Run settings" });
     await settings.getByLabel("Permissions", { exact: true }).selectOption("all");
     await settings.getByRole("button", { name: "Close panel", exact: true }).click();
-    await page.getByRole("button", { name: "Run workflow", exact: true }).click();
+    await sendTurn(page);
     await expect(page.getByRole("heading", { name: "A question for you" })).toBeVisible();
     expect(submissions[0].input_data._runtime.tool_policy.require_approval_tools).toContain("write_file");
     expect(submissions[0].input_data._runtime.tool_policy).not.toHaveProperty("auto_approve_tools");

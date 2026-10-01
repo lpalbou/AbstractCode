@@ -28,6 +28,16 @@ async function blockExternalTraffic(page: Page): Promise<void> {
   });
 }
 
+/** Round 3: every workflow the Code picker offers declares abstractcode.agent.v1, so a turn
+ * starts from the composer (the inputs drawer says "Back to chat"; there is no "Run workflow"). */
+async function sendTurn(page: Page, text = "Run the fixture."): Promise<void> {
+  const drawer = page.getByRole("complementary", { name: "Workflow inputs" });
+  if (await drawer.isVisible()) await drawer.getByRole("button", { name: "Back to chat", exact: true }).click();
+  const composer = page.locator(".pc-composer textarea");
+  if (!(await composer.inputValue()).trim()) await composer.fill(text);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+}
+
 /** The header's kit WorkflowPicker (round 3: no "Show all workflows" — it lists only what the
  * gateway returns for abstractcode.agent.v1): open it and choose the entry named `name`. */
 async function chooseWorkflow(page: Page, name: string): Promise<void> {
@@ -83,7 +93,7 @@ test("a client that opens the conversation later sees the gate the originating c
   await blockExternalTraffic(a);
   await signIn(a);
   await selectWorkflow(a, "Delegated tool approval");
-  await a.getByRole("button", { name: "Run workflow", exact: true }).click();
+  await sendTurn(a);
   await expectGate(a, "client A (started the turn)");
   await expect(a).toHaveURL(/(?:#|&)run=/);
   const conversationUrl = a.url();

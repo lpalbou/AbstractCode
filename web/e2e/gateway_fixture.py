@@ -249,7 +249,13 @@ def _basic_agent_contract_flow() -> dict[str, Any]:
 
 
 def _coding_contract_flow() -> dict[str, Any]:
-    source = Path(__file__).resolve().parents[3] / "abstractgateway" / "flows" / "bundles" / "coding-agent@0.2.7.flow"
+    # The newest shipped coding-agent bundle (the gateway prunes old versions; a pinned
+    # file name broke the fixture when coding-agent@0.2.7 left the shipped set).
+    shipped = Path(__file__).resolve().parents[3] / "abstractgateway" / "flows" / "bundles"
+    candidates = sorted(shipped.glob("coding-agent@*.flow"), key=lambda p: tuple(int(x) for x in p.stem.split("@", 1)[1].split(".")))
+    if not candidates:
+        raise SystemExit(f"no shipped coding-agent bundle under {shipped}")
+    source = candidates[-1]
     with zipfile.ZipFile(source) as archive:
         manifest = json.loads(archive.read("manifest.json"))
         original = json.loads(archive.read(manifest["flows"]["coding-agent"]))
@@ -267,16 +273,19 @@ def _write_bundle(bundles: Path) -> Path:
     manifest = {
         "bundle_format_version": "1", "bundle_id": BUNDLE_ID, "bundle_version": BUNDLE_VERSION,
         "created_at": "2026-09-20T00:00:00+00:00", "default_entrypoint": "prompt-structured",
+        # Round 3: the Code picker lists only GET /bundles?executable_for=abstractcode.agent.v1,
+        # so every flow a spec picks there declares it (Coding request defaults keeps only
+        # abstractcode.coding.v1: the specs assert Code does NOT offer it).
         "entrypoints": [
-            {"flow_id": "prompt-structured", "name": "Prompt structured", "description": "answer_user → ask_user → structured output", "interfaces": ["chat"]},
-            {"flow_id": "event-listener", "name": "Event listener", "description": "on_event fixture.ping", "interfaces": ["event"]},
-            {"flow_id": "event-emitter", "name": "Event emitter", "description": "emit_event fixture.ping", "interfaces": ["event"]},
-            {"flow_id": "tool-approval", "name": "Native tool approval", "description": "harmless write_file Tool Calls request", "interfaces": ["tools"]},
-            {"flow_id": "delegated-approval", "name": "Delegated tool approval", "description": "root parked on a subflow that requests the write_file approval", "interfaces": ["tools"]},
-            {"flow_id": "tool-supervision", "name": "Tool supervision", "description": "Multiple approval batches, failures, and a real question", "interfaces": ["tools"]},
-            {"flow_id": "assistant-contract", "name": "Assistant contract", "description": "Real Assistant inputs; deterministic no-model execution", "interfaces": ["abstractassistant.agent.v1"]},
-            {"flow_id": "authored-contract", "name": "Authored model contract", "description": "Workflow provider/model defaults override Gateway routing", "interfaces": ["abstractassistant.agent.v1"]},
-            {"flow_id": "typed-contract", "name": "Typed workflow inputs", "description": "Typed controls with real Assistant input metadata", "interfaces": ["chat"]},
+            {"flow_id": "prompt-structured", "name": "Prompt structured", "description": "answer_user → ask_user → structured output", "interfaces": ["chat", "abstractcode.agent.v1"]},
+            {"flow_id": "event-listener", "name": "Event listener", "description": "on_event fixture.ping", "interfaces": ["event", "abstractcode.agent.v1"]},
+            {"flow_id": "event-emitter", "name": "Event emitter", "description": "emit_event fixture.ping", "interfaces": ["event", "abstractcode.agent.v1"]},
+            {"flow_id": "tool-approval", "name": "Native tool approval", "description": "harmless write_file Tool Calls request", "interfaces": ["tools", "abstractcode.agent.v1"]},
+            {"flow_id": "delegated-approval", "name": "Delegated tool approval", "description": "root parked on a subflow that requests the write_file approval", "interfaces": ["tools", "abstractcode.agent.v1"]},
+            {"flow_id": "tool-supervision", "name": "Tool supervision", "description": "Multiple approval batches, failures, and a real question", "interfaces": ["tools", "abstractcode.agent.v1"]},
+            {"flow_id": "assistant-contract", "name": "Assistant contract", "description": "Real Assistant inputs; deterministic no-model execution", "interfaces": ["abstractassistant.agent.v1", "abstractcode.agent.v1"]},
+            {"flow_id": "authored-contract", "name": "Authored model contract", "description": "Workflow provider/model defaults override Gateway routing", "interfaces": ["abstractassistant.agent.v1", "abstractcode.agent.v1"]},
+            {"flow_id": "typed-contract", "name": "Typed workflow inputs", "description": "Typed controls with real Assistant input metadata", "interfaces": ["chat", "abstractcode.agent.v1"]},
             {"flow_id": "basic-agent-contract", "name": "Basic agent defaults", "description": "Unchanged shipped basic-agent start pins; deterministic no-model execution", "interfaces": ["abstractcode.agent.v1"]},
             {"flow_id": "coding-contract", "name": "Coding request defaults", "description": "Published coding-agent start pins; deterministic no-model execution", "interfaces": ["abstractcode.coding.v1"]},
         ],
@@ -291,7 +300,7 @@ def _write_bundle(bundles: Path) -> Path:
     return path
 
 
-def _configure(root: Path) -> dict[str, Path]:
+def _configure(root: Path, app_origins: tuple[str, ...] = ("http://127.0.0.1:18782", "http://localhost:18782")) -> dict[str, Path]:
     _clear_inherited_runtime_environment()
     data, bundles, workspace = root / "data", root / "bundles", root / "workspace"
     for directory in (data, bundles, workspace):
@@ -315,7 +324,7 @@ def _configure(root: Path) -> dict[str, Path]:
         "ABSTRACTGATEWAY_WORKSPACE_DIR": str(workspace),
         "ABSTRACTGATEWAY_POLL_S": "0.05",
         "ABSTRACTGATEWAY_TICK_WORKERS": "1",
-        "ABSTRACTGATEWAY_ALLOWED_ORIGINS": "http://127.0.0.1:18782,http://localhost:18782",
+        "ABSTRACTGATEWAY_ALLOWED_ORIGINS": ",".join(app_origins),
         "ABSTRACTGATEWAY_DEV_ALLOW_UNAUTHENTICATED_READS": "0",
     })
     # Separate published bundle proves installed/catalog/version dedup through
@@ -351,13 +360,14 @@ def main() -> int:
     parser.add_argument("--host", default=HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--root", type=Path, default=None, help="Optional empty fixture root. Defaults to a fresh temp directory.")
+    parser.add_argument("--app-origin", action="append", default=None, help="Origin of the Code app under test (repeatable; default http://127.0.0.1:18782 and http://localhost:18782).")
     args = parser.parse_args()
     if args.host != HOST:
         parser.error("fixture only binds 127.0.0.1")
     root = args.root.resolve() if args.root else Path(tempfile.mkdtemp(prefix="abstractcode-e2e-gateway-"))
     if args.root:
         root.mkdir(parents=True, exist_ok=True)
-    paths = _configure(root)
+    paths = _configure(root, tuple(args.app_origin)) if args.app_origin else _configure(root)
     _mint_user()
     fixture = {
         "url": f"http://{HOST}:{args.port}", "user_id": USER_ID, "token": TOKEN,

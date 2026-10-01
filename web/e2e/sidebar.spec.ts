@@ -57,6 +57,16 @@ async function route(page: Page, runLimits: number[]): Promise<void> {
   });
 }
 
+/** Round 3: every workflow the Code picker offers declares abstractcode.agent.v1, so a turn
+ * starts from the composer (the inputs drawer says "Back to chat"; there is no "Run workflow"). */
+async function sendTurn(page: Page, text = "Run the fixture."): Promise<void> {
+  const drawer = page.getByRole("complementary", { name: "Workflow inputs" });
+  if (await drawer.isVisible()) await drawer.getByRole("button", { name: "Back to chat", exact: true }).click();
+  const composer = page.locator(".pc-composer textarea");
+  if (!(await composer.inputValue()).trim()) await composer.fill(text);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+}
+
 /** The header's kit WorkflowPicker (round 3: no "Show all workflows" — it lists only what the
  * gateway returns for abstractcode.agent.v1): open it and choose the entry named `name`. */
 async function chooseWorkflow(page: Page, name: string): Promise<void> {
@@ -87,11 +97,11 @@ async function signIn(page: Page): Promise<void> {
 
 async function runPromptConversation(page: Page): Promise<void> {
   await chooseWorkflow(page, "Prompt structured");
-  await page.getByRole("button", { name: "Configure inputs", exact: true }).click();
+  await page.getByRole("button", { name: "Inputs", exact: true }).click();
   const drawer = page.getByRole("complementary", { name: "Workflow inputs" });
   await drawer.getByLabel(/Ticket/).fill(`sidebar-${Date.now()}`);
   await page.locator(".pc-composer textarea").fill("Sidebar check.");
-  await drawer.getByRole("button", { name: "Run workflow", exact: true }).click();
+  await sendTurn(page);
   await expect(page.getByText("A question for you").first()).toBeVisible({ timeout: 30_000 });
 }
 
