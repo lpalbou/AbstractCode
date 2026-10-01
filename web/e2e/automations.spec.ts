@@ -18,6 +18,22 @@ async function capture(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(artifactsDir, `${name}.png`), fullPage: true });
 }
 
+/** The header's kit WorkflowPicker (round 3: no "Show all workflows" — it lists only what the
+ * gateway returns for abstractcode.agent.v1): open it and choose the entry named `name`. */
+async function chooseWorkflow(page: Page, name: string): Promise<void> {
+  const picker = page.getByRole("combobox", { name: "Workflow", exact: true });
+  await expect(picker).toBeEnabled();
+  await picker.click();
+  const exact = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+  await page
+    .getByRole("listbox", { name: "Workflow" })
+    .locator('[role="option"]')
+    .filter({ has: page.locator(".af-workflow-picker__name", { hasText: exact }) })
+    .first()
+    .click();
+  await expect(page.locator("#code-workflow-picker .af-workflow-picker__name")).toHaveText(name);
+}
+
 async function signIn(page: Page): Promise<void> {
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
@@ -42,8 +58,7 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   const title = `E2E automation ${Date.now()}`;
 
   // The toolbar's workflow is the target: the fixture's native tool call.
-  await page.getByLabel("Show all workflows").check();
-  await page.getByLabel("Workflow", { exact: true }).selectOption({ label: "Native tool approval" });
+  await chooseWorkflow(page, "Native tool approval");
 
   // Create with the kit dialog: ask before each tool call.
   await page.getByRole("button", { name: "New automation" }).click();
@@ -137,10 +152,7 @@ test("the automation detail's lists collapse, stay collapsed after a reload, and
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
   const title = `E2E lists ${Date.now()}`;
-  await page.locator(".code-mobile-nav").click();
-  await page.getByLabel("Show all workflows").evaluate((el) => (el as HTMLInputElement).checked || (el as HTMLInputElement).click());
-  await page.keyboard.press("Escape");
-  await page.getByLabel("Workflow", { exact: true }).selectOption({ label: "Native tool approval" });
+  await chooseWorkflow(page, "Native tool approval");
   await page.locator(".code-mobile-nav").click();
   await page.getByRole("button", { name: "New automation" }).click();
   const dialog = page.getByRole("dialog", { name: "Schedule a task" });

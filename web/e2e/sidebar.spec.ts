@@ -56,6 +56,22 @@ async function route(page: Page, runLimits: number[]): Promise<void> {
   });
 }
 
+/** The header's kit WorkflowPicker (round 3: no "Show all workflows" — it lists only what the
+ * gateway returns for abstractcode.agent.v1): open it and choose the entry named `name`. */
+async function chooseWorkflow(page: Page, name: string): Promise<void> {
+  const picker = page.getByRole("combobox", { name: "Workflow", exact: true });
+  await expect(picker).toBeEnabled();
+  await picker.click();
+  const exact = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+  await page
+    .getByRole("listbox", { name: "Workflow" })
+    .locator('[role="option"]')
+    .filter({ has: page.locator(".af-workflow-picker__name", { hasText: exact }) })
+    .first()
+    .click();
+  await expect(page.locator("#code-workflow-picker .af-workflow-picker__name")).toHaveText(name);
+}
+
 async function signIn(page: Page): Promise<void> {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   const dialog = page.getByRole("dialog", { name: "Gateway connection" });
@@ -69,10 +85,7 @@ async function signIn(page: Page): Promise<void> {
 }
 
 async function runPromptConversation(page: Page): Promise<void> {
-  const select = page.getByLabel("Workflow", { exact: true });
-  const listed = (await select.locator("option").allTextContents()).map((t) => t.trim());
-  if (!listed.includes("Prompt structured")) await page.getByLabel("Show all workflows").evaluate((el: HTMLElement) => el.click());
-  await select.selectOption({ label: "Prompt structured" });
+  await chooseWorkflow(page, "Prompt structured");
   await page.getByRole("button", { name: "Configure inputs", exact: true }).click();
   const drawer = page.getByRole("complementary", { name: "Workflow inputs" });
   await drawer.getByLabel(/Ticket/).fill(`sidebar-${Date.now()}`);
