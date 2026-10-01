@@ -10,7 +10,8 @@ export function preferencesKey(identity: string): string {
  * defaults (a fresh browser uses the gateway default workflow). */
 export function parsePreferences(raw: string | null): RunPreferences {
   try {
-    const saved = JSON.parse(raw || "{}");
+    // "showAllWorkflows" (the removed toolbar switch) is dropped: the gateway decides what the picker lists.
+    const { showAllWorkflows: _removed, ...saved } = JSON.parse(raw || "{}");
     const workflow =
       typeof saved.workflow === "string" && saved.workflow.trim()
         ? saved.workflow.trim()
@@ -19,7 +20,6 @@ export function parsePreferences(raw: string | null): RunPreferences {
       ...DEFAULT_PREFERENCES,
       ...saved,
       workflow,
-      showAllWorkflows: saved.showAllWorkflows === true,
       speculation: normalizeSpeculationValue(saved.speculation),
       streamReplies: normalizeStreamReplies(saved.streamReplies),
       tools: { ...DEFAULT_PREFERENCES.tools, ...saved.tools },

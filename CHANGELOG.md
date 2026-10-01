@@ -5,6 +5,15 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Web: the toolbar's workflow picker lists only what this app can run for you.** "Show all workflows" is
+  removed. The picker is the kit's `WorkflowPicker` (ui-kit, unreleased): "Gateway default", then **Shared**
+  (workflows your admin made available) and **Mine** (your own), each with its version in small text. The list
+  is the gateway's answer to `GET /api/gateway/bundles?executable_for=abstractcode.agent.v1`; a gateway that does
+  not filter per app is reported next to the picker. An old saved "show all" preference is ignored.
+
 ## [terminal 0.8.0 / web 0.9.0] - 2026-10-01
 
 ### Changed
