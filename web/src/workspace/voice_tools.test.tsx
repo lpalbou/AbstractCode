@@ -2,6 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, it, expect } from "vitest";
 import { VoiceTools } from "./voice_tools";
+import { MEDIA_NEEDS_HTTPS } from "../lib/secure-context";
 
 describe("gateway voice controls", () => {
   const base = {
@@ -53,14 +54,13 @@ describe("gateway voice controls", () => {
     expect(markup).toContain("Read latest reply aloud");
     expect(markup.match(/disabled=""/g)?.length).toBe(2);
   });
-  it("says why dictation is off when the browser withholds the microphone (plain http)", () => {
+  it("says why dictation is off when the browser withholds the microphone", () => {
     setNavigator({});
     const markup = renderToStaticMarkup(
       <VoiceTools {...base} runId="run" capability={{ stt: { available: true } }} />,
     );
-    expect(markup).toContain(
-      "Voice and camera need an https address (Network → HTTPS in the gateway console).",
-    );
+    // The sentence itself (http: the kit's; secure context: browser lacks it): lib/media_sentence.test.ts.
+    expect(markup).toContain(MEDIA_NEEDS_HTTPS);
     expect(markup).not.toContain("Hold to dictate");
     expect(markup).toContain('disabled=""');
   });
