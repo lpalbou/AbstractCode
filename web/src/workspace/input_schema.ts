@@ -3,12 +3,25 @@ export type InputSchema = Record<string, any>;
 const object = (value: any): InputSchema =>
   value && typeof value === "object" && !Array.isArray(value) ? value : {};
 
-/** Restore authored form values, never an old run's host permissions/routing.
- * Runtime namespaces are rebuilt from schema defaults and current Settings. */
+/** What rides with ONE turn besides its text: its context, attachments and media. They are never
+ * restored into the form, so the next turn — above all a NEW conversation — never resends an
+ * earlier turn's attachments (2026-10-01: a new conversation answered about the screenshot
+ * attached to another conversation, because the previous run's `context` had been restored into
+ * the form and the fresh turn spread it into its run input). The authored prompt text IS restored:
+ * reopening a conversation shows what it asked. */
+export const TURN_FIELDS = ["context", "messages", "attachments", "media"] as const;
+
+export function isTurnField(name: string): boolean {
+  return (TURN_FIELDS as readonly string[]).includes(name);
+}
+
+/** Restore authored form values, never an old run's host permissions/routing and never a turn's
+ * attachments/context (`TURN_FIELDS`). Runtime namespaces are rebuilt from schema defaults and
+ * current Settings. */
 export function restoreWorkflowFields(schema: InputSchema, input: unknown): Record<string, unknown> {
   const source = object(input);
   return Object.fromEntries(Object.keys(object(schema.properties)).flatMap(name => {
-    if (["_runtime", "_limits"].includes(name) || !Object.prototype.hasOwnProperty.call(source, name)) return [];
+    if (["_runtime", "_limits"].includes(name) || isTurnField(name) || !Object.prototype.hasOwnProperty.call(source, name)) return [];
     return [[name, structuredClone(source[name])]];
   }));
 }

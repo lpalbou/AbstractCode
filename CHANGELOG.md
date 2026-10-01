@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Web: a new conversation never carries another conversation's attachments.** Opening a
+  conversation restored its last run's workflow fields into the form — including the agent's
+  `context`, which held that turn's attachments and media — and the form kept them when
+  "New conversation" started a fresh session, so the first turn of the new conversation sent the
+  old screenshot along with its question and the model answered about it (2026-10-01). Now a
+  conversation switch resets the form to the workflow's defaults, a run's `context`,
+  `messages`, `attachments` and `media` are never restored into the form, and a turn's run input
+  carries exactly the attachments added to that turn (`restoreWorkflowFields`, `buildWorkflowInput`;
+  tests red on removal).
+
 ### Changed
 - **Release:** a `web-v*` tag now also gets a GitHub release page carrying its CHANGELOG section
   (job `github-release-web`), like the terminal client's tag and the framework's other packages.

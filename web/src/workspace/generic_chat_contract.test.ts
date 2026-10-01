@@ -42,3 +42,34 @@ describe("schema-driven generic chat", () => {
     expect(buildWorkflowInput({ workflow, schemaInputs: { _runtime: { allowed_tools: ["read_file"] } }, tools: ["read_file", "write_file"] })).toEqual({ _runtime: { allowed_tools: ["read_file"] } });
   });
 });
+
+describe("restoreWorkflowFields never restores a turn's own fields", () => {
+  it("leaves context, messages, attachments and media behind (2026-10-01 cross-conversation screenshot)", () => {
+    const agentSchema = {
+      properties: {
+        prompt: { type: "string" },
+        context: { type: "object" },
+        messages: { type: "array" },
+        attachments: { type: "array" },
+        media: { type: "array" },
+        tools: { type: "array" },
+        max_iterations: { type: "number" },
+      },
+    };
+    const restored = restoreWorkflowFields(agentSchema, {
+      prompt: "can you see my screenshot?",
+      context: { task: "x", attachments: [{ $artifact: "screenshot-A" }] },
+      messages: [{ role: "user", content: "earlier" }],
+      attachments: [{ $artifact: "screenshot-A" }],
+      media: [{ $artifact: "screenshot-A" }],
+      tools: ["read_file"],
+      max_iterations: 7,
+    });
+    expect(restored).toEqual({ prompt: "can you see my screenshot?", tools: ["read_file"], max_iterations: 7 });
+  });
+
+  it("still restores the authored request text of a reopened conversation", () => {
+    const restored = restoreWorkflowFields(schema, { request: "Earlier", max_rounds: 5, context: { attachments: [{ $artifact: "a" }] } });
+    expect(restored).toEqual({ request: "Earlier", max_rounds: 5 });
+  });
+});

@@ -254,6 +254,8 @@ export function CodeWorkspace() {
   const [uploadNotice, setUploadNotice] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
   const [schema, setSchema] = useState<Record<string, any>>();
+  const schemaRef = useRef(schema);
+  schemaRef.current = schema;
   const [schemaLoading, setSchemaLoading] = useState(false);
   const [schemaError, setSchemaError] = useState("");
   const [schemaRevision, setSchemaRevision] = useState(0);
@@ -572,6 +574,10 @@ export function CodeWorkspace() {
     setSending(false);
     setUploads([]);
     setAttachments([]);
+    // A conversation's form values belong to it: a new or other conversation
+    // starts from the schema defaults, never from the fields restored out of
+    // the previous conversation's run (its context carried its attachments).
+    setInputs(schemaDefaults(schemaRef.current));
     setOptimistic([]);
     // A notice raised by the switch itself (a Discuss fork) survives it.
     setNotice(switchNotice.current);
