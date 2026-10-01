@@ -81,7 +81,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   https or localhost. Ids come from the kit's `randomId()`. Copy buttons fall back to the browser's copy command
   and say "Copied" or "Copy failed — select and copy". Over plain http the dictation button stays off and says:
   "This page is loaded over http, so voice and camera is unavailable — open it over https (for example through
-  tailscale serve; the gateway console's Network page explains how) or on the gateway's own computer." The web
+  tailscale serve; the gateway console's Network page explains how) or on the gateway's own computer." On https or
+  localhost in a browser without the microphone API it says "Voice and camera are not supported in this browser
+  (getUserMedia unavailable)." The web
   manifest is requested with the app's session cookie
   (`crossorigin="use-credentials"`), so the gateway no longer answers it with 401.
 
