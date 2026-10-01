@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Both sections now grow to their full length and the sidebar scrolls them as one list (docked, overlay and phone
   drawer), with the Workspace and Settings rows kept at the bottom; in 0.9.0 the automations list was capped
   and its fourth row was hidden under the Conversations header.
+### Changed
+- **Web: the toolbar's workflow picker lists only what this app can run for you.** "Show all workflows" is
+  removed. The picker is the kit's `WorkflowPicker` (ui-kit, unreleased): "Gateway default", then **Shared**
+  (workflows your admin made available) and **Mine** (your own), each with its version in small text. The list
+  is the gateway's answer to `GET /api/gateway/bundles?executable_for=abstractcode.agent.v1`; a gateway that does
+  not filter per app is reported next to the picker. An old saved "show all" preference is ignored.
 
 ## [terminal 0.8.0 / web 0.9.0] - 2026-10-01
 

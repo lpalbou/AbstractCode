@@ -1,8 +1,12 @@
-import { gatewayApiPath } from "@abstractframework/ui-kit";
+import {
+  executableWorkflowsPath,
+  gatewayApiPath,
+  parseExecutableWorkflows,
+  type ExecutableWorkflows,
+} from "@abstractframework/ui-kit";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   normalizeWorkflowCatalog,
-  publishedWorkflowChoices,
   normalizeWorkspacePolicy,
   normalizeToolCatalog,
   normalizeSessionSummaries,
@@ -23,6 +27,7 @@ import {
   type StreamingCapability,
 } from "./stream_replies";
 import {
+  CODE_AGENT_INTERFACE,
   gatewayDefaultFromEnvelope,
   type GatewayDefaultState,
 } from "./workflow_selection";
@@ -35,7 +40,6 @@ import {
 
 type CatalogState = {
   workflows: WorkflowDefinition[];
-  choices: WorkflowDefinition[];
   policy: WorkspacePolicy | null;
   tools: ToolSpec[];
   sessions: SessionSummary[];
@@ -48,11 +52,14 @@ type CatalogState = {
   defaultModel?: { provider: string; model: string };
   /** `default_agent_workflows["abstractcode.agent.v1"]` of the `/bundles` envelope. */
   gatewayDefault: GatewayDefaultState;
+  /** The header picker's list: `GET /bundles?executable_for=abstractcode.agent.v1`
+   * (the workflows this app can run that the signed-in person may use). */
+  executable: { status: "idle" | "loading" | "ready" | "error"; data: ExecutableWorkflows | null; error: string };
 };
 const empty: CatalogState = {
   gatewayDefault: { status: "loading" },
+  executable: { status: "idle", data: null, error: "" },
   workflows: [],
-  choices: [],
   policy: null,
   tools: [],
   sessions: [],
@@ -173,7 +180,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       setState(empty);
       return;
     }
-    setState((s) => ({ ...s, loading: true, errors: [] }));
+    setState((s) => ({ ...s, loading: true, errors: [], executable: { ...s.executable, status: "loading", error: "" } }));
     const request = (path: string) =>
       gatewayRequest(gatewayApiPath(path), { signal: abort.signal });
     const result = await Promise.allSettled([
@@ -184,6 +191,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       request("discovery/capabilities"),
       request("workflow-catalog?scope=tenant"),
       request("config/capability-defaults"),
+      request(executableWorkflowsPath(CODE_AGENT_INTERFACE)),
     ]);
     if (generation.current !== gen) return;
     const value = (i: number): any =>
@@ -195,6 +203,8 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       if (item.status !== "rejected") return;
       if (item.reason?.status === 401) onAuthError();
       if (index === 5 && [403, 404, 501].includes(item.reason?.status)) return;
+      // The picker says its own error (next to the control).
+      if (index === 7) return;
       errors.push(
         `${["Workflows", "Workspace policy", "Tools", "Conversations", "Capabilities", "Shared workflows", "Gateway defaults"][index]}: ${formatError(item.reason)}`,
       );
@@ -202,9 +212,20 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
     // A "Load more" started while this refresh was in flight owns the list now.
     const listCurrent = listGeneration.current === listGen;
     const page = pageOf(value(3));
+    let executable: CatalogState["executable"];
+    if (result[7].status === "rejected")
+      executable = { status: "error", data: null, error: `Workflows for this app: ${formatError((result[7] as PromiseRejectedResult).reason)}` };
+    else {
+      try {
+        executable = { status: "ready", data: parseExecutableWorkflows(value(7), CODE_AGENT_INTERFACE), error: "" };
+      } catch (reason: any) {
+        // A gateway that does not filter per app is said, never papered over.
+        executable = { status: "error", data: null, error: String(reason?.message || reason) };
+      }
+    }
     setState((previous) => ({
+      executable,
       workflows: normalizeWorkflowCatalog(value(0), value(5)),
-      choices: publishedWorkflowChoices(normalizeWorkflowCatalog(value(0), value(5))),
       policy: value(1) ? normalizeWorkspacePolicy(value(1)) : null,
       tools: normalizeToolCatalog(value(2)),
       sessions: listCurrent ? page.sessions : previous.sessions,

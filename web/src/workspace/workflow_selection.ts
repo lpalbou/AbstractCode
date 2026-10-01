@@ -1,3 +1,8 @@
+import {
+  WORKFLOW_PICKER_DEFAULT,
+  type ExecutableWorkflows,
+  type WorkflowPickerEntry,
+} from "@abstractframework/ui-kit";
 import type { WorkflowDefinition, WorkflowRegistryScope } from "./catalog";
 
 /** The persisted choice "whatever the gateway's default agent workflow is".
@@ -139,15 +144,35 @@ export function defaultInterfaceMismatch(
   return `The gateway default ${definition.name} does not declare ${interfaceId} (it declares ${declared}); it will not run as a coding agent here.`;
 }
 
-/** Agent workflows only, unless the person asked to see every workflow. */
-export function visibleWorkflowChoices(
-  choices: readonly WorkflowDefinition[],
-  showAll: boolean,
-  interfaceId: string = CODE_AGENT_INTERFACE,
-): WorkflowDefinition[] {
-  return showAll
-    ? [...choices]
-    : choices.filter((workflow) => workflow.interfaces.includes(interfaceId));
+/** The header picker's choices: exactly the gateway's answer to
+ * `GET /bundles?executable_for=abstractcode.agent.v1` (the kit parsed and
+ * checked it), as the workflow definitions a run starts from. Nothing is
+ * added or filtered here: which workflows a person may run is the gateway's
+ * availability rule, never a client switch. */
+export function executableChoices(data: ExecutableWorkflows | null): WorkflowDefinition[] {
+  return (data?.entries ?? []).map((entry) => ({
+    id: `${entry.registryScope}:${entry.value}`,
+    workflowId: entry.value,
+    bundleId: entry.bundleId,
+    ...(entry.bundleVersion ? { bundleVersion: entry.bundleVersion } : {}),
+    flowId: entry.flowId,
+    name: entry.name,
+    description: entry.description,
+    interfaces: entry.interfaces,
+    registryScope: entry.registryScope as WorkflowRegistryScope,
+  }));
+}
+
+/** The kit picker's value for a selection ("@default" stays "@default"). */
+export function pickerValue(selection: string, workflow: WorkflowDefinition | null): string {
+  if (selection === GATEWAY_DEFAULT) return WORKFLOW_PICKER_DEFAULT;
+  return workflow?.workflowId ?? selection;
+}
+
+/** The selection a picker choice stands for (the catalog id of the entry). */
+export function selectionFromPicker(value: string, entry: WorkflowPickerEntry | null): string {
+  if (value === WORKFLOW_PICKER_DEFAULT || !entry) return GATEWAY_DEFAULT;
+  return `${entry.registryScope}:${entry.value}`;
 }
 
 /** Keep a valid selection; otherwise the saved preference; otherwise the

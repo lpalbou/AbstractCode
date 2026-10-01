@@ -15,8 +15,11 @@ import {
   reconcileSelection,
   resolvedWorkflowNote,
   startRunBody,
-  visibleWorkflowChoices,
+  executableChoices,
+  pickerValue,
+  selectionFromPicker,
 } from "./workflow_selection";
+import { parseExecutableWorkflows, WORKFLOW_PICKER_DEFAULT } from "@abstractframework/ui-kit";
 
 const agent: WorkflowDefinition = {
   id: "private:coding-agent@0.1.0:coder",
@@ -109,9 +112,40 @@ describe("gateway default agent workflow", () => {
 });
 
 describe("workflow selection", () => {
-  it("lists agent workflows unless every workflow is requested", () => {
-    expect(visibleWorkflowChoices([agent, report], false)).toEqual([agent]);
-    expect(visibleWorkflowChoices([agent, report], true)).toEqual([agent, report]);
+  // The header lists exactly GET /bundles?executable_for=abstractcode.agent.v1:
+  // a bundle that does not declare the interface is not in that answer, and
+  // there is no client switch that would bring it back.
+  const executable = {
+    executable_for: "abstractcode.agent.v1",
+    items: [
+      { bundle_id: "coding-agent", bundle_version: "0.1.0", registry_scope: "private", owner: { kind: "gateway", user_id: null }, shipped: true,
+        entrypoints: [{ flow_id: "coder", name: "Coder", interfaces: ["abstractcode.agent.v1"], workflow_id: "coding-agent@0.1.0:coder" }] },
+      { bundle_id: "mine", bundle_version: "0.0.1", registry_scope: "private", owner: { kind: "user", user_id: "u1" }, shipped: false,
+        entrypoints: [{ flow_id: "main", name: "My agent", interfaces: ["abstractcode.agent.v1"], workflow_id: "mine@0.0.1:main" }] },
+    ],
+    default_agent_workflows: {},
+  };
+
+  it("lists exactly the gateway's executable_for answer (no client-side widening)", () => {
+    const choices = executableChoices(parseExecutableWorkflows(executable, "abstractcode.agent.v1"));
+    expect(choices.map((c) => c.id)).toEqual(["private:coding-agent@0.1.0:coder", "private:mine@0.0.1:main"]);
+    expect(choices[0]).toMatchObject({ bundleId: "coding-agent", bundleVersion: "0.1.0", flowId: "coder", registryScope: "private", name: "Coder" });
+    expect(choices.some((c) => c.id === report.id)).toBe(false);
+    expect(executableChoices(null)).toEqual([]);
+  });
+
+  it("refuses a gateway answer that carries a workflow without the interface", () => {
+    const leaky = { ...executable, items: [{ ...executable.items[0], entrypoints: [{ flow_id: "r", name: "Report", interfaces: ["abstractflow.prompt.v1"] }] }] };
+    expect(() => parseExecutableWorkflows(leaky, "abstractcode.agent.v1")).toThrow(/does not declare abstractcode.agent.v1/);
+    expect(() => parseExecutableWorkflows({ ...executable, executable_for: undefined }, "abstractcode.agent.v1")).toThrow(/does not filter workflows per app/);
+  });
+
+  it("maps picker values to selections and back", () => {
+    const [entry] = parseExecutableWorkflows(executable, "abstractcode.agent.v1").entries;
+    expect(selectionFromPicker(entry.value, entry)).toBe("private:coding-agent@0.1.0:coder");
+    expect(selectionFromPicker(WORKFLOW_PICKER_DEFAULT, null)).toBe(GATEWAY_DEFAULT);
+    expect(pickerValue(GATEWAY_DEFAULT, null)).toBe(WORKFLOW_PICKER_DEFAULT);
+    expect(pickerValue(agent.id, agent)).toBe("coding-agent@0.1.0:coder");
   });
 
   it("keeps a valid choice, then the saved preference, then the gateway default", () => {
@@ -174,17 +208,15 @@ describe("workflow preference persistence", () => {
     expect(DEFAULT_PREFERENCES.workflow).toBe(GATEWAY_DEFAULT);
     expect(parsePreferences(null).workflow).toBe(GATEWAY_DEFAULT);
     expect(parsePreferences("{not json").workflow).toBe(GATEWAY_DEFAULT);
-    expect(parsePreferences(JSON.stringify({ model: "x" })).showAllWorkflows).toBe(false);
+    // The removed "Show all workflows" preference is dropped from old saves.
+    expect(parsePreferences(JSON.stringify({ model: "x", showAllWorkflows: true }))).not.toHaveProperty("showAllWorkflows");
   });
 
   it("round-trips the sentinel and explicit ids verbatim", () => {
     const saved = { ...DEFAULT_PREFERENCES, workflow: GATEWAY_DEFAULT };
     expect(parsePreferences(JSON.stringify(saved)).workflow).toBe("@default");
-    const explicit = { ...DEFAULT_PREFERENCES, workflow: agent.id, showAllWorkflows: true };
-    expect(parsePreferences(JSON.stringify(explicit))).toMatchObject({
-      workflow: agent.id,
-      showAllWorkflows: true,
-    });
+    const explicit = { ...DEFAULT_PREFERENCES, workflow: agent.id };
+    expect(parsePreferences(JSON.stringify(explicit))).toMatchObject({ workflow: agent.id });
   });
 
 });

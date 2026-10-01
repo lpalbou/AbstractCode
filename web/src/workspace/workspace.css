@@ -453,18 +453,17 @@ button {
 .code-workflow-select > svg {
   color: var(--accent);
 }
-.code-workflow-select select {
-  /* background-color only: a shorthand would erase the kit's touch chevron (ui-kit >= 0.3.2). */
-  background-color: transparent;
-  border: 0;
-  font-size: var(--font-size-md);
-  font-weight: 550;
-  max-width: 320px;
-  min-width: 4em;
+/* The kit WorkflowPicker (ui-kit theme.css af-workflow-picker): it lists only what the gateway
+   returns for abstractcode.agent.v1; the toolbar keeps it borderless and lets it shrink. */
+.code-workflow-picker {
+  min-width: 0;
   flex: 0 1 auto;
-  text-overflow: ellipsis;
-  padding: 5px 4px;
-  cursor: pointer;
+}
+.code-workflow-picker .af-workflow-picker__trigger {
+  background-color: transparent;
+  border-color: transparent;
+  max-width: 360px;
+  font-size: var(--font-size-md);
 }
 select option {
   background: var(--bg-secondary);
@@ -477,30 +476,6 @@ select option {
   padding: 2px 5px;
   border-radius: 4px;
   color: var(--text-secondary);
-}
-/* "Show all workflows" is a kit switch (AfSwitch sm); the short "All" label shows on phones only. */
-.code-workflow-all.af-switch {
-  flex: none;
-  font-size: var(--font-size-xs);
-  white-space: nowrap;
-}
-.code-workflow-all__short {
-  display: none;
-}
-/* Unavailable: the reason sits next to the switch as text (a tap must say why). With a fine
-   pointer and hover, the tooltip carries it and the text is kept for assistive tech only. */
-#code-workflow-all-reason {
-  white-space: normal;
-}
-@media (hover: hover) and (pointer: fine) {
-  #code-workflow-all-reason {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
 }
 .code-workflow-resolved {
   font-size: var(--font-size-xxs);
@@ -1843,7 +1818,7 @@ select option {
   .code-workflow-select {
     flex: 1 1 18rem;
   }
-  .code-workflow-select select {
+  .code-workflow-picker .af-workflow-picker__trigger {
     max-width: none;
   }
   .code-welcome {
@@ -1930,16 +1905,9 @@ select option {
   :root {
     --code-topbar-h: 52px;
   }
-  /* One toolbar row on a phone: the workflow select takes the room; "Show all workflows" shows
-     as "All" (its full words stay the accessible name). */
+  /* One toolbar row on a phone: the workflow picker takes the room. */
   .code-workflow-select {
     flex: 1 1 8rem;
-  }
-  .code-workflow-all__long {
-    display: none;
-  }
-  .code-workflow-all__short {
-    display: inline;
   }
   /* The model is one tap away in Run settings (the Tools button opens it). */
   .code-model-button,
@@ -1959,7 +1927,7 @@ select option {
   .code-run-strip:has(.code-run-strip__consent) {
     flex-wrap: wrap;
   }
-  .code-workflow-select select {
+  .code-workflow-picker .af-workflow-picker__trigger {
     font-size: var(--font-size-sm);
   }
   .code-welcome h1 {
@@ -2158,8 +2126,7 @@ select option {
   .code-load-more,
   .code-model-button,
   .code-subtle-button,
-  .code-workflow-all,
-  .code-workflow-select select,
+  .code-workflow-picker .af-workflow-picker__trigger,
   .code-inspector-tabs button,
   .code-files-mode button,
   .code-file-list button,
@@ -2206,7 +2173,6 @@ select option {
   .code-field > select,
   .code-field > textarea,
   .code-field > label + textarea,
-  .code-workflow-select select,
   .code-conversation .pc-composer__actions select {
     min-height: var(--tap-min, 44px);
     font-size: var(--font-size-input, 16px);
@@ -2327,7 +2293,6 @@ select option {
   /* Touch selects take the kit's single-select rule (ui-kit >= 0.3.2: appearance none, 44 px,
      16 px, its own chevron). The app keeps only colours; its desktop paddings must leave room
      for the kit chevron. */
-  .code-workflow-select select,
   .code-conversation .pc-composer__actions select,
   .code-field > select {
     padding-right: 32px;

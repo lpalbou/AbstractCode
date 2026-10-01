@@ -19,6 +19,7 @@ import {
   appIdentity,
   AF_MEDIA,
   useAfMedia,
+  WorkflowPicker,
   type VoicePreferences,
 } from "@abstractframework/ui-kit";
 import {
@@ -48,7 +49,6 @@ import {
 import {
   buildWorkflowInput,
   isChatAgent,
-  workflowChoiceLabel,
   resolveRestoredWorkflow,
   type WorkflowDefinition,
   type SessionSummary,
@@ -65,7 +65,6 @@ import {
   type RunPreferences,
   type SettingsTab,
 } from "./settings_panel";
-import { ShowAllWorkflowsSwitch } from "./workflow_all_switch";
 import { WorkspaceInspector, type InspectorTab } from "./workspace_panels";
 import { aboutExtraRows, type FetchOutcome } from "./about_rows";
 import { automationTarget, automationsAvailability, myEmailConsoleUrl } from "./automations";
@@ -95,11 +94,14 @@ import {
   runSelectionSource,
   selectionSourceNote,
   gatewayDefaultDefinition,
+  CODE_AGENT_INTERFACE,
   gatewayDefaultOptionLabel,
   reconcileSelection,
   resolvedWorkflowNote,
   startRunBody,
-  visibleWorkflowChoices,
+  executableChoices,
+  pickerValue,
+  selectionFromPicker,
   type ResolvedWorkflowNote,
 } from "./workflow_selection";
 import {
@@ -220,9 +222,11 @@ export function CodeWorkspace() {
   );
   // "@default" (the gateway default agent workflow) or a catalog workflow id.
   const [selection, setSelection] = useState(DEFAULT_PREFERENCES.workflow);
+  // The header picker's choices: exactly what the gateway lists for this app
+  // (GET /bundles?executable_for=abstractcode.agent.v1), never widened here.
   const visibleChoices = useMemo(
-    () => visibleWorkflowChoices(catalog.choices, preferences.showAllWorkflows),
-    [catalog.choices, preferences.showAllWorkflows],
+    () => executableChoices(catalog.executable.data),
+    [catalog.executable.data],
   );
   const defaultWorkflow = useMemo(
     () => gatewayDefaultDefinition(catalog.gatewayDefault, catalog.workflows),
@@ -231,7 +235,9 @@ export function CodeWorkspace() {
   const workflow =
     selection === GATEWAY_DEFAULT
       ? defaultWorkflow
-      : catalog.workflows.find((item) => item.id === selection) || null;
+      : catalog.workflows.find((item) => item.id === selection) ||
+        visibleChoices.find((item) => item.id === selection) ||
+        null;
   // What the gateway said it started, for the run this page started.
   const [resolvedNote, setResolvedNote] = useState<
     (ResolvedWorkflowNote & { runId: string }) | null
@@ -1279,40 +1285,28 @@ export function CodeWorkspace() {
         <div className="code-toolbar">
           <div className="code-workflow-select">
             <Icon name="agent" size={17} />
-            <select
-              aria-label="Workflow"
-              value={selection}
-              disabled={locked || catalog.loading || !connection.connected}
-              onChange={(e) => {
-                const next = e.target.value;
+            <WorkflowPicker
+              id="code-workflow-picker"
+              className="code-workflow-picker"
+              interfaceId={CODE_AGENT_INTERFACE}
+              ariaLabel="Workflow"
+              workflows={{ ...catalog.executable, reload: () => void catalog.refresh() }}
+              value={pickerValue(selection, workflow)}
+              currentLabel={
+                workflow && selection !== GATEWAY_DEFAULT && !visibleChoices.some((item) => item.id === workflow.id)
+                  ? { name: workflow.name, detail: session.runId && workflow.bundleVersion ? `conversation version ${workflow.bundleVersion}` : workflow.bundleVersion ? `@${workflow.bundleVersion}` : "" }
+                  : null
+              }
+              unavailableReason={!connection.connected ? "Connect to a gateway first." : locked ? "A run is in progress." : null}
+              onChange={(value, entry) => {
+                const next = selectionFromPicker(value, entry);
                 setSelection(next);
                 setPreferences((previous) => ({ ...previous, workflow: next }));
               }}
-            >
-              <option value={GATEWAY_DEFAULT}>
-                {gatewayDefaultOptionLabel(catalog.gatewayDefault)}
-              </option>
-              {workflow && selection !== GATEWAY_DEFAULT && !visibleChoices.some(item => item.id === workflow.id) ? <option value={workflow.id}>{workflow.name}{session.runId ? ` · conversation version ${workflow.bundleVersion || ""}` : ""}</option> : null}
-              {visibleChoices.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {workflowChoiceLabel(item, visibleChoices)}
-                </option>
-              ))}
-            </select>
+            />
             <span className="code-workflow-kind">
               {isAgent ? "AGENT" : "WORKFLOW"}
             </span>
-            <ShowAllWorkflowsSwitch
-              checked={preferences.showAllWorkflows}
-              connected={connection.connected}
-              locked={locked}
-              onChange={(next) =>
-                setPreferences((previous) => ({
-                  ...previous,
-                  showAllWorkflows: next,
-                }))
-              }
-            />
             {selection === GATEWAY_DEFAULT && defaultInterfaceMismatch(defaultWorkflow) ? (
               <span className="code-workflow-resolved is-missing" role="alert" title={defaultInterfaceMismatch(defaultWorkflow)}>
                 {defaultInterfaceMismatch(defaultWorkflow)}

@@ -40,6 +40,22 @@ async function blockExternalTraffic(page: Page): Promise<void> {
   });
 }
 
+/** The header's kit WorkflowPicker (round 3: no "Show all workflows" — it lists only what the
+ * gateway returns for abstractcode.agent.v1): open it and choose the entry named `name`. */
+async function chooseWorkflow(page: Page, name: string): Promise<void> {
+  const picker = page.getByRole("combobox", { name: "Workflow", exact: true });
+  await expect(picker).toBeEnabled();
+  await picker.click();
+  const exact = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+  await page
+    .getByRole("listbox", { name: "Workflow" })
+    .locator('[role="option"]')
+    .filter({ has: page.locator(".af-workflow-picker__name", { hasText: exact }) })
+    .first()
+    .click();
+  await expect(page.locator("#code-workflow-picker .af-workflow-picker__name")).toHaveText(name);
+}
+
 async function signIn(page: Page, captureLogin = false): Promise<void> {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   const dialog = page.getByRole("dialog", { name: "Gateway connection" });
@@ -57,15 +73,7 @@ async function signIn(page: Page, captureLogin = false): Promise<void> {
 }
 
 async function selectWorkflow(page: Page, name: string): Promise<void> {
-  const select = page.getByLabel("Workflow", { exact: true });
-  await expect(select).toBeEnabled();
-  // The picker lists coding-agent workflows by default; the fixture's other
-  // flows (prompt, events, tool approval) appear with "Show all workflows".
-  const listed = await select.locator("option").allTextContents();
-  if (!listed.map((label) => label.trim()).includes(name))
-    await page.getByLabel("Show all workflows").check();
-  await select.selectOption({ label: name });
-  await expect(select).toHaveValue(/.+/);
+  await chooseWorkflow(page, name);
 }
 
 async function expectPersistedCompletion(page: Page): Promise<void> {
@@ -926,19 +934,14 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       if (request.method() === "POST" && request.url().endsWith("/api/gateway/runs/start")) submissions.push(request.postDataJSON());
     });
     await signIn(page);
-    // Every workflow, not only coding agents: the fixture's published copy is a coding contract.
-    await page.getByLabel("Show all workflows").check();
-    const selector = page.getByLabel("Workflow", { exact: true });
-    await expect(selector.locator("option").filter({ hasText: "Published coding" })).toHaveCount(1);
-    expect(await selector.locator("option").allTextContents()).not.toEqual(expect.arrayContaining([expect.stringContaining(" · shared")]));
+    // Round 3: the picker lists only the gateway's executable_for=abstractcode.agent.v1 answer.
     await selectWorkflow(page, "Published coding");
-    await expect(selector).toHaveValue("tenant_catalog:e2e-published-coding@1.0.0:coding-contract");
     await page.locator(".pc-composer textarea").fill("Use the preferred published coding workflow");
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await expectPersistedCompletion(page);
     expect(submissions[0]).toMatchObject({ bundle_id: "e2e-published-coding", bundle_version: "1.0.0", registry_scope: "tenant_catalog" });
     await page.reload();
-    await expect(selector).toHaveValue("tenant_catalog:e2e-published-coding@1.0.0:coding-contract");
+    await expect(page.locator("#code-workflow-picker .af-workflow-picker__name")).toHaveText("Published coding");
     await capture(page, "published-workflow-selection");
   });
 

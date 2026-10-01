@@ -3,16 +3,16 @@
 // reason — never a checkbox or a verb pair ("Pause queue" / "Resume queue"). These tests go red
 // when a surface falls back to the old control.
 import React from "react";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { AfSwitch } from "@abstractframework/ui-kit";
 
 import { SkillSwitch, type GatewaySkill } from "./skills_picker";
-import { ShowAllWorkflowsSwitch } from "./workflow_all_switch";
 
 const appSource = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("./workspace.css", import.meta.url), "utf8");
+const catalogSource = readFileSync(new URL("./use_workspace_catalog.ts", import.meta.url), "utf8");
 
 const skill = (over: Partial<GatewaySkill> = {}): GatewaySkill => ({
   name: "coredoc",
@@ -84,43 +84,21 @@ describe("Run settings → Skills: one switch per skill", () => {
 });
 
 describe("workspace toolbar and queue", () => {
-  const allSwitch = (p: { checked?: boolean; connected?: boolean; locked?: boolean }) =>
-    renderToStaticMarkup(
-      <ShowAllWorkflowsSwitch checked={p.checked ?? false} connected={p.connected ?? true} locked={p.locked ?? false} onChange={() => {}} />,
-    );
-
-  it('"Show all workflows" is a kit switch named by the feature, ON and OFF', () => {
-    const on = allSwitch({ checked: true });
-    expect(on).toMatch(/role="switch" id="code-workflow-all" class="af-switch af-switch--sm code-workflow-all" data-action="show-all-workflows" aria-checked="true"/);
-    expect(on).toContain('aria-label="Show all workflows"');
-    expect(on).not.toContain("aria-disabled");
-    expect(allSwitch({ checked: false })).toMatch(/aria-checked="false"/);
-    expect(appSource).toContain("<ShowAllWorkflowsSwitch");
-    expect(appSource).not.toMatch(/type="checkbox"/);
-    expect(css).not.toMatch(/\.code-workflow-all::after/);
-  });
-
-  it("unavailable: aria-disabled, and the reason is VISIBLE text it points at (a tap must say why)", () => {
-    for (const [p, reason] of [
-      [{ connected: false }, "Connect to a gateway first."],
-      [{ locked: true }, "A run is in progress."],
-    ] as const) {
-      const html = allSwitch(p);
-      expect(html).toMatch(/role="switch"[^>]*aria-disabled="true" aria-describedby="code-workflow-all-reason"/);
-      // Rendered as the kit's visible reason node (not the --hidden variant).
-      expect(html).toContain(`<span id="code-workflow-all-reason" class="af-switch__reason">${reason}</span>`);
-    }
-    // Only a hover-capable fine pointer hides the text (the tooltip carries it there).
-    const rule = /@media \(hover: hover\) and \(pointer: fine\) \{\s*#code-workflow-all-reason \{/;
-    expect(css).toMatch(rule);
-    expect(css.replace(rule, "")).not.toMatch(/#code-workflow-all-reason \{[^}]*clip-path/);
-  });
-
-  it("switching calls back with the new state", () => {
-    const onChange = vi.fn();
-    const el = switchOf(ShowAllWorkflowsSwitch({ checked: false, connected: true, locked: false, onChange }));
-    el.props.onChange?.(true);
-    expect(onChange).toHaveBeenCalledWith(true);
+  // Operator 2026-10-01: no "Show all workflows" anywhere — the header is the
+  // kit WorkflowPicker over GET /bundles?executable_for=abstractcode.agent.v1.
+  it("the toolbar has no show-all switch: it renders the kit WorkflowPicker for abstractcode.agent.v1", () => {
+    expect(appSource).not.toMatch(/Show all workflows|ShowAllWorkflowsSwitch|showAllWorkflows|code-workflow-all/);
+    expect(css).not.toMatch(/code-workflow-all/);
+    expect(existsSync(new URL("./workflow_all_switch.tsx", import.meta.url))).toBe(false);
+    const block = /<WorkflowPicker\s[\s\S]*?\/>/.exec(appSource)?.[0] ?? "";
+    expect(block).toContain("interfaceId={CODE_AGENT_INTERFACE}");
+    expect(block).toContain("workflows={{ ...catalog.executable");
+    expect(block).toContain('unavailableReason={!connection.connected ? "Connect to a gateway first." : locked ? "A run is in progress." : null}');
+    expect(appSource).toContain("executableChoices(catalog.executable.data)");
+    expect(appSource).not.toMatch(/<select\s+aria-label="Workflow"/);
+    expect(catalogSource).toContain("request(executableWorkflowsPath(CODE_AGENT_INTERFACE))");
+    expect(catalogSource).toContain("parseExecutableWorkflows(value(7), CODE_AGENT_INTERFACE)");
+    expect(catalogSource).not.toMatch(/publishedWorkflowChoices/);
   });
 
   it('the queue is a "Run queued turns" switch, not a Pause/Resume queue verb pair', () => {

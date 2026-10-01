@@ -59,9 +59,12 @@ token is not persisted in browser settings. Vite development and the packaged
 server use the same session proxy; the browser keeps API requests same-origin.
 
 Choose a workflow in the toolbar: **Gateway default** (the coding agent your
-gateway's operator set, resolved by the gateway when the turn starts), a
-published coding agent, or, with **Show all workflows**, any registered
-workflow. The **Files** tab shows the conversation's workspace on the gateway
+gateway's operator set, resolved by the gateway when the turn starts), or a
+coding agent listed under **Shared** (made available by your gateway's admin)
+or **Mine** (agents you published or imported). The list holds only the
+workflows the gateway says this app can run for you
+(`GET /api/gateway/bundles?executable_for=abstractcode.agent.v1`); there is no
+"show all" switch — ask your admin when a workflow is missing. The **Files** tab shows the conversation's workspace on the gateway
 with previews, **Settings → Stream replies** shows replies as the model writes
 them (on gateways that support it), and **About** lists the app's and the
 gateway's versions. Agent tasks use the composer; structured workflows use

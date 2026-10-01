@@ -40,8 +40,6 @@ export type RunPreferences = {
   /** Workflow for new conversations: "@default" (the gateway's default agent
    * workflow, resolved by the server at run start) or a catalog workflow id. */
   workflow: string;
-  /** List non-agent workflows in the selector too. */
-  showAllWorkflows: boolean;
   /** "Stream replies": show the reply while the model writes it. */
   streamReplies: StreamRepliesMode;
 };
@@ -60,7 +58,6 @@ export const DEFAULT_PREFERENCES: RunPreferences = {
   permissions: "default",
   skills: [],
   workflow: "@default",
-  showAllWorkflows: false,
   streamReplies: "gateway_default",
 };
 export type SettingsTab = "model" | "workspace" | "tools" | "skills";
