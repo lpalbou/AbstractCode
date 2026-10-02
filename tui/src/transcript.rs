@@ -373,7 +373,7 @@ pub(crate) fn tool_args_full(v: Option<&Value>) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut lead_key: Option<&str> = None;
     for k in ARGS_PRIMARY {
-        if let Some(val) = obj.get(k).and_then(&scalar) {
+        if let Some(val) = obj.get(k).and_then(scalar) {
             if !val.is_empty() {
                 parts.push(format!("{k}: {val}"));
                 lead_key = Some(k);
@@ -451,7 +451,7 @@ pub(crate) fn tool_args_preview(v: Option<&Value>, max: usize) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut lead_key: Option<&str> = None;
     for k in ARGS_PRIMARY {
-        if let Some(val) = obj.get(k).and_then(&scalar) {
+        if let Some(val) = obj.get(k).and_then(scalar) {
             if !val.is_empty() {
                 parts.push(val);
                 lead_key = Some(k);
