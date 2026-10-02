@@ -168,13 +168,12 @@ describe("panel headers (round 3: the operator's 12:00 screenshot of 0.9.0)", ()
     expect(conv).toMatch(/^<section class="code-panel code-conversations" data-open="false"><div class="code-panel-header"><button type="button" class="code-panel-toggle"[^>]*aria-expanded="false"[^>]*><svg[\s\S]*?<\/svg><span>Conversations<\/span><\/button><span class="code-panel-actions"><button aria-label="Refresh conversations">/);
   });
 
-  it("the header row wears the New conversation button's background, border and radius, and is 44 px tall", () => {
+  it("the header row is a raised 44 px row (surface-2 background, border-2, 8 px radius)", () => {
     const header = cssRule(".code-panel-header");
-    const newChat = cssRule(".code-new-chat");
     expect(decl(header, "display")).toBe("flex");
-    expect(decl(header, "background")).toBe(decl(newChat, "background"));
-    expect(decl(header, "border")).toBe(decl(newChat, "border"));
-    expect(decl(header, "border-radius")).toBe(decl(newChat, "border-radius"));
+    expect(decl(header, "background")).toBe("var(--ui-surface-2)");
+    expect(decl(header, "border")).toBe("1px solid var(--ui-border-2)");
+    expect(decl(header, "border-radius")).toBe("8px");
     expect(decl(header, "min-height")).toBe("var(--tap-min, 44px)");
     // The toggle takes the row's free width, so the actions sit at the right edge.
     expect(decl(cssRule(".code-panel-toggle"), "flex")).toBe("1 1 auto");

@@ -522,10 +522,10 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       await page
         .getByRole("button", { name: "Close navigation", exact: true })
         .click();
-    if (await page.locator(".code-inspector").count())
-      await page
-        .getByRole("button", { name: "Close workspace inspector", exact: true })
-        .click();
+    // The docked inspector may close itself on the resize (narrow layout); close it only
+    // when it is still there — the count assertion below holds either way.
+    const closeInspector = page.getByRole("button", { name: "Close workspace inspector", exact: true });
+    if (await closeInspector.isVisible().catch(() => false)) await closeInspector.click({ timeout: 3000 }).catch(() => {});
     await expect(page.locator(".code-app")).not.toHaveClass(
       /code-app--nav-open/,
     );

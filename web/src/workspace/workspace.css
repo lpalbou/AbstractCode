@@ -123,27 +123,6 @@ button {
   letter-spacing: 1.3px;
   color: var(--text-secondary);
 }
-.code-new-chat {
-  margin: 0 15px 16px;
-  padding: 11px 12px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  border: 1px solid var(--ui-border-2);
-  border-radius: 8px;
-  background: var(--ui-surface-2);
-  font-size: var(--font-size-md);
-  font-weight: 550;
-}
-.code-new-chat:hover {
-  border-color: var(--accent-border);
-  background: var(--accent-subtle);
-}
-.code-new-chat kbd {
-  margin-left: auto;
-  color: var(--text-secondary);
-  font: var(--font-size-xxs) var(--font-sans);
-}
 .code-session-search {
   display: flex;
   align-items: center;
@@ -190,8 +169,8 @@ button {
   flex: none;
   flex-direction: column;
 }
-/* The header: a full-width 44 px row on the "New conversation" button's surface (same background,
-   border and radius, same 15 px inset), label + chevron on the left, the actions on the right. */
+/* The header: a full-width 44 px row on the raised surface (ui-surface-2 background,
+   border-2 and 8 px radius, 15 px inset), label + chevron on the left, the actions on the right. */
 .code-panel-header {
   display: flex;
   align-items: center;
@@ -1315,7 +1294,7 @@ select option {
 .code-run-strip__activity { display: flex; min-width: 0; flex: 1; align-items: center; gap: 8px; }
 .code-run-strip__icon { display: inline-flex; color: var(--run-tone); }
 .code-run-strip--working .code-run-strip__icon { animation: code-progress-spin 1.5s linear infinite; }
-.code-run-strip__detail { flex: 1; min-width: 0; max-width: 420px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
+.code-run-strip__detail { flex: 1; min-width: 0; max-width: 420px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
 .code-run-strip__metrics { display: flex; align-items: center; gap: 9px; color: var(--text-secondary); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; }
 .code-run-strip__consent { flex-basis: 100%; display: flex; align-items: center; gap: 7px; color: var(--warning); border-top: 1px solid var(--ui-border-1); padding-top: 7px; }
 .code-run-strip__consent button { margin-left: auto; text-decoration: underline; }
@@ -1886,7 +1865,7 @@ select option {
     padding: 6px var(--gutter, 16px);
     gap: 6px;
   }
-  .code-run-strip__detail {
+  .code-run-strip__detail:not(.code-run-strip__detail--live) {
     display: none;
   }
   /* The status keeps its words on one line; the actions wrap to a second row if needed. */
@@ -2079,7 +2058,7 @@ select option {
     min-height: 34px;
     padding-block: 3px;
   }
-  .code-run-strip__detail {
+  .code-run-strip__detail:not(.code-run-strip__detail--live) {
     display: none;
   }
   .code-brand {
@@ -2306,7 +2285,6 @@ select option {
 }
 /* Touch-only devices: keyboard shortcut hints (⇧⌘N, ⌘K) only take room. */
 @media (hover: none) and (pointer: coarse) {
-  .code-new-chat kbd,
   .code-session-search kbd {
     display: none;
   }
@@ -2739,9 +2717,6 @@ select option {
   }
   .code-sidebar-bottom > button {
     gap: 10px;
-  }
-  .code-new-chat {
-    margin-inline: var(--gutter, 12px);
   }
   .code-session-search {
     padding-inline: var(--gutter, 12px);

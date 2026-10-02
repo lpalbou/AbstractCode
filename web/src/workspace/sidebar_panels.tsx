@@ -1,5 +1,5 @@
 // Collapsible sidebar panels (Automations, Conversations) — docked sidebar, tablet and phone
-// drawer alike. Each header is a full-width 44 px row on the "New conversation" button's surface:
+// drawer alike. Each header is a full-width 44 px row on the raised surface (ui-surface-2):
 // the disclosure toggle (chevron + label) on the left, the section's "+" / refresh actions on the
 // right as separate sibling buttons that never toggle. The items sit below on the plain sidebar
 // background. Both panels live in ONE scroll container (`.code-sidebar-lists`, app.tsx): each

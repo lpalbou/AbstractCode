@@ -881,7 +881,10 @@ export function attach_progress(
  * (the status bar's text) and `resume` (it closes a wait, it is not an event).
  * Everything else collapses per step and is described.
  */
-export function activity_rows(entries: readonly ActivityEntry[]): ActivityRow[] {
+export function activity_rows(entries: readonly ActivityEntry[], rootRunId?: string): ActivityRow[] {
+  // The terminal record of a CHILD run says that subflow finished, never that
+  // the run did: the root may still be waiting on it (or on the next step).
+  const root = String(rootRunId || entries?.[0]?.runId || "");
   const groups = new Map<string, ActivityEntry[]>();
   const order: string[] = [];
   const resumeKeys: string[] = [];
@@ -921,7 +924,10 @@ export function activity_rows(entries: readonly ActivityEntry[]): ActivityRow[] 
       runId: groupEntries[0].runId,
       cursor: groupEntries[groupEntries.length - 1].cursor,
       kind: description.kind,
-      title: description.title,
+      title:
+        description.kind === "run" && root && groupEntries[0].runId !== root
+          ? "subflow finished"
+          : description.title,
       detail: description.detail,
       status: state.status,
       statusLabel: state.statusLabel,

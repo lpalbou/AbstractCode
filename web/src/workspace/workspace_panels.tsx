@@ -57,7 +57,7 @@ export function WorkspaceInspector({
   // `abstract.progress` / `abstract.status` records are progress UI rather than
   // activity. The badge counts what the operator can actually read — a turn
   // that wrote 156 records has ten things in it.
-  const rows = useMemo(() => activity_rows(records), [records]);
+  const rows = useMemo(() => activity_rows(records, runId), [records, runId]);
   return (
     <aside className="code-inspector" aria-label="Workspace inspector">
       <div className="code-inspector-heading">

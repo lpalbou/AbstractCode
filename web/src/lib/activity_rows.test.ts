@@ -280,7 +280,8 @@ describe("collapsing", () => {
       "subflow · agent loop — completed",
       "llm · mlx · Qwen3.8-Flash-Next-oQ4e-mtp — completed",
       "tools · web_search ×3 — completed",
-      "run finished — completed",
+      // The child's terminal record: the subflow finished, the parent then finished.
+      "subflow finished — completed",
       "run finished — completed",
     ]);
   });

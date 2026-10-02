@@ -88,7 +88,8 @@ export function RunStatusBar({
         ) : (
           <strong>{progress.label}</strong>
         )}
-        <span className="code-run-strip__detail" title={detail}>
+        {/* A live model phase stays visible on phones too (the static detail does not). */}
+        <span className={`code-run-strip__detail${phase ? " code-run-strip__detail--live" : ""}`} title={detail}>
           {detail}
         </span>
       </div>

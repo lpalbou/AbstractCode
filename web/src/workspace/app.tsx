@@ -1125,11 +1125,6 @@ export function CodeWorkspace() {
             <Icon name="x" size={18} />
           </button>
         </div>
-        <button className="code-new-chat" onClick={newConversation}>
-          <Icon name="plus" size={17} />
-          <span>New conversation</span>
-          <kbd>⇧⌘N</kbd>
-        </button>
         <div className="code-session-search">
           <Icon name="history" size={14} />
           <input
@@ -1161,14 +1156,25 @@ export function CodeWorkspace() {
           open={panels.conversations}
           onToggle={() => togglePanelOpen("conversations")}
           actions={
-            <button
-            className="code-icon-button"
-            aria-label="Refresh conversations"
-            disabled={!connection.connected || catalog.loading}
-            onClick={() => void catalog.refresh()}
-          >
-            <Icon name="refresh" size={13} />
-          </button>
+            <span className="code-auto-actions">
+              <button
+                className="code-icon-button code-new-chat"
+                aria-label="New conversation"
+                title="New conversation (⇧⌘N)"
+                aria-keyshortcuts="Shift+Meta+N"
+                onClick={newConversation}
+              >
+                <Icon name="plus" size={13} />
+              </button>
+              <button
+                className="code-icon-button"
+                aria-label="Refresh conversations"
+                disabled={!connection.connected || catalog.loading}
+                onClick={() => void catalog.refresh()}
+              >
+                <Icon name="refresh" size={13} />
+              </button>
+            </span>
           }
         >
           {!currentSession ? (
@@ -1305,9 +1311,6 @@ export function CodeWorkspace() {
                 setPreferences((previous) => ({ ...previous, workflow: next }));
               }}
             />
-            <span className="code-workflow-kind">
-              {isAgent ? "AGENT" : "WORKFLOW"}
-            </span>
             {selection === GATEWAY_DEFAULT && defaultInterfaceMismatch(defaultWorkflow) ? (
               <span className="code-workflow-resolved is-missing" role="alert" title={defaultInterfaceMismatch(defaultWorkflow)}>
                 {defaultInterfaceMismatch(defaultWorkflow)}
@@ -1318,26 +1321,21 @@ export function CodeWorkspace() {
                 {sourceNote}
               </span>
             ) : null}
-            {resolvedNote && resolvedNote.runId === session.runId ? (
-              <span
-                className={`code-workflow-resolved${resolvedNote.missing ? " is-missing" : ""}`}
-                role="status"
-              >
+            {/* The picker already names what runs; only a resolution that went wrong is said here. */}
+            {resolvedNote && resolvedNote.runId === session.runId && resolvedNote.missing ? (
+              <span className="code-workflow-resolved is-missing" role="status">
                 {resolvedNote.text}
               </span>
             ) : null}
           </div>
           <span className="code-toolbar-divider" />
           <button
-            className="code-model-button"
+            className="code-icon-button code-model-button"
             onClick={() => openSettings("model")}
-            // The label is visually hidden on narrow toolbars: the name stays.
-            aria-label={`Model: ${modelLabel}`}
-            title={`Model: ${modelLabel}`}
+            aria-label="Run settings"
+            title={`Run settings · model: ${modelLabel}`}
           >
-            <Icon name="sparkle" size={14} />
-            <span aria-hidden="true">{modelLabel}</span>
-            <Icon name="chevronDown" size={12} />
+            <Icon name="settings" size={16} />
           </button>
           <div className="code-toolbar-spacer" />
           <button

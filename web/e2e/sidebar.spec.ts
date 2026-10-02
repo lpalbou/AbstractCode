@@ -154,7 +154,7 @@ test.describe("AbstractCode sidebar", () => {
     }
   });
 
-  test("Automations and Conversations headers are 44 px rows on the New conversation surface; no row is ever hidden under a header", async ({ page }) => {
+  test("Automations and Conversations headers are 44 px rows on the raised surface (with the New conversation + in the Conversations header); no row is ever hidden under a header", async ({ page }) => {
     // 5 automations (the 0.9.0 panel clipped the fourth): the ui-kit's canonical wire fixture + one copy.
     const fixture = JSON.parse(readFileSync(new URL("../../tui/tests/fixtures/automations/list.json", import.meta.url), "utf8"));
     const autos = [...fixture.items, { ...fixture.items[1], automation_id: "copy-5", title: "Release notes digest" }];
@@ -169,8 +169,16 @@ test.describe("AbstractCode sidebar", () => {
       // The drawer slides in (0.2 s): measure once it has arrived.
       await page.waitForFunction(() => getComputedStyle(document.querySelector(".code-sidebar")!).transform === "none");
       await expect(page.locator(".code-auto-row")).toHaveCount(5);
+      // Round 4: no big top button; New conversation is the "+" beside the Conversations refresh.
+      await expect(page.locator(".code-conversations .code-panel-header").getByRole("button", { name: "New conversation", exact: true })).toBeVisible();
+      await expect(page.locator(".code-conversations .code-panel-header").getByRole("button", { name: "Refresh conversations", exact: true })).toBeVisible();
       const g = await page.evaluate(() => {
-        const newChat = getComputedStyle(document.querySelector(".code-new-chat")!).backgroundColor;
+        // The raised surface the headers wear (ui-surface-2), resolved by the browser.
+        const probe = document.createElement("div");
+        probe.style.background = "var(--ui-surface-2)";
+        document.querySelector(".code-sidebar")!.appendChild(probe);
+        const newChat = getComputedStyle(probe).backgroundColor;
+        probe.remove();
         const headers = [...document.querySelectorAll(".code-sidebar .code-panel-header")].map((h) => {
           const r = h.getBoundingClientRect();
           const toggle = h.querySelector("button.code-panel-toggle")!;
