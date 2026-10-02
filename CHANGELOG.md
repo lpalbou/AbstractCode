@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [web 0.10.1] - 2026-10-02
+
+### Changed
+
+- **Web sidebar: New conversation is a "+" in the Conversations header.** The large "+ New conversation" button
+  at the top of the sidebar is removed; the "+" sits beside the Conversations refresh button. ⇧⌘N and the
+  "Search conversations" row are unchanged; the Automations header keeps its "+" and refresh.
+- **Web run header: no duplicated text.** The "AGENT · running <workflow> (gateway default)" text beside the
+  workflow picker is removed (the picker already names the workflow); a workflow that could not be resolved is
+  still reported there. The "Gateway default ⌄" model control is now a settings (gear) icon that opens the same
+  Run settings; its tooltip names the model.
+
+### Fixed
+
+- **Web: live model progress is shown at phone width.** The run strip's "Prefill · 2,560 / 17,110 tokens (15%)"
+  / "Generating · 46 tokens · 38 tok/s" line was hidden on narrow screens with the rest of the strip's detail; a
+  live model phase now stays visible there (the static detail is still hidden). Desktop behaviour is unchanged:
+  the phase line comes from the gateway's `abstract.progress` records, including those of a subflow's run.
+- **Web Activity panel: a subflow finishing no longer reads as the run finishing.** The terminal row of a child
+  run is titled "subflow finished"; "run finished" is kept for the conversation's own run.
+- Test: the run strip and the Activity llm row are rendered through the real session controller from a fake
+  child-run ledger stream (prefill tokens done / total with %, decode tokens and tok/s), red when the phase line
+  is removed.
+
 ## [web 0.10.0] - 2026-10-01
 
 

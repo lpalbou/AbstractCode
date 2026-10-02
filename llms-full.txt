@@ -1341,7 +1341,7 @@ AbstractCode Web works on phones, tablets, laptop windows and wide screens, and 
 
 ### Collapsible sidebar sections
 
-The **Automations** and **Conversations** sections of the left navigation (docked sidebar, overlay or phone drawer) each have a full-width header row on the same background as the **New conversation** button: the arrow and the name on the left, the section's **+** and refresh buttons on the right (they keep their own action). Click the header, or focus it and press Enter or Space, to fold or unfold the section. Both sections take their full length and scroll together as one list, with the **Workspace** and **Settings** rows kept at the bottom, so no item is ever hidden under the next header. Both start open, and your choice is remembered in this browser (`localStorage`, key `abstractcode.sidebar.panels`); if the browser blocks storage, both sections simply start open.
+The **Automations** and **Conversations** sections of the left navigation (docked sidebar, overlay or phone drawer) each have a full-width header row on a raised background: the arrow and the name on the left, the section's **+** and refresh buttons on the right (they keep their own action). The Conversations **+** starts a new conversation (also ⇧⌘N). Click the header, or focus it and press Enter or Space, to fold or unfold the section. Both sections take their full length and scroll together as one list, with the **Workspace** and **Settings** rows kept at the bottom, so no item is ever hidden under the next header. Both start open, and your choice is remembered in this browser (`localStorage`, key `abstractcode.sidebar.panels`); if the browser blocks storage, both sections simply start open.
 
 The **Workspace** row at the bottom of the sidebar shows the conversation's folder name on one line, shortened with "…" when it is long; hover it to see the full path.
 
@@ -3344,6 +3344,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+Nothing yet.
+
+## [web 0.10.1] - 2026-10-02
+
+### Changed
+
+- **Web sidebar: New conversation is a "+" in the Conversations header.** The large "+ New conversation" button
+  at the top of the sidebar is removed; the "+" sits beside the Conversations refresh button. ⇧⌘N and the
+  "Search conversations" row are unchanged; the Automations header keeps its "+" and refresh.
+- **Web run header: no duplicated text.** The "AGENT · running <workflow> (gateway default)" text beside the
+  workflow picker is removed (the picker already names the workflow); a workflow that could not be resolved is
+  still reported there. The "Gateway default ⌄" model control is now a settings (gear) icon that opens the same
+  Run settings; its tooltip names the model.
+
+### Fixed
+
+- **Web: live model progress is shown at phone width.** The run strip's "Prefill · 2,560 / 17,110 tokens (15%)"
+  / "Generating · 46 tokens · 38 tok/s" line was hidden on narrow screens with the rest of the strip's detail; a
+  live model phase now stays visible there (the static detail is still hidden). Desktop behaviour is unchanged:
+  the phase line comes from the gateway's `abstract.progress` records, including those of a subflow's run.
+- **Web Activity panel: a subflow finishing no longer reads as the run finishing.** The terminal row of a child
+  run is titled "subflow finished"; "run finished" is kept for the conversation's own run.
+- Test: the run strip and the Activity llm row are rendered through the real session controller from a fake
+  child-run ledger stream (prefill tokens done / total with %, decode tokens and tok/s), red when the phase line
+  is removed.
+
+## [web 0.10.0] - 2026-10-01
 
 
 ### Changed
