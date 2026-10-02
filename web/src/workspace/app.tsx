@@ -1,3 +1,4 @@
+import { LoadingStatus } from "./loading_status";
 import { gatewayApiPath } from "@abstractframework/ui-kit";
 import React, {
   useCallback,
@@ -1140,6 +1141,7 @@ export function CodeWorkspace() {
         <AutomationsSection
           state={automationsState}
           available={automationsAvailable}
+          discovering={catalog.capabilitiesLoading}
           selectedId={automationView ? automationsState.selectedId : ""}
           onSelect={(id) => {
             setAutomationView(true);
@@ -1207,9 +1209,7 @@ export function CodeWorkspace() {
             </p>
           ) : null}
           {catalog.loading ? (
-            <p className="code-history-empty" role="status">
-              Loading conversations…
-            </p>
+            <LoadingStatus>Loading conversations…</LoadingStatus>
           ) : null}
           {catalog.hasMore ? (
             <button className="code-load-more" onClick={catalog.loadMore}>

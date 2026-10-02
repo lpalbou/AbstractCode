@@ -197,3 +197,84 @@ test("the automation detail's lists collapse, stay collapsed after a reload, and
   await main.locator("#code-detail-occurrences-toggle").click();
   await expect(main.locator(".af-auto__timeline")).toBeVisible();
 });
+
+
+test("creates and edits a custom growing context budget", async ({ page }) => {
+  await signIn(page);
+  await chooseWorkflow(page, "Native tool approval");
+  const title = `Growing budget ${Date.now()}`;
+  await page.getByRole("button", { name: "New automation" }).click();
+  const dialog = page.getByRole("dialog", { name: "Schedule a task" });
+  await dialog.getByLabel("Task").fill("Check growing history");
+  await expect(dialog.getByRole("spinbutton", { name: /Max growing context/ })).toBeHidden();
+  await dialog.getByText("Growing — each run sees the previous runs", { exact: true }).click();
+  const budget = dialog.getByRole("spinbutton", { name: /Max growing context/ });
+  await expect(budget).toHaveValue("50000");
+  await budget.fill("30000");
+  await dialog.getByText("Ask me before each tool call").click();
+  await dialog.getByText("Advanced").click();
+  await dialog.getByLabel("Title").fill(title);
+  const posted = page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/automations"));
+  await dialog.getByRole("button", { name: "Create automation" }).click();
+  expect((await posted).postDataJSON().context).toEqual({ mode: "growing", growing: { max_tokens: 30000 } });
+  await expect(dialog).toBeHidden();
+  const row = page.locator(".code-auto-row", { hasText: title });
+  await expect(row).toBeVisible();
+  const main = page.locator(".code-automation-main");
+  await main.getByRole("button", { name: "Edit", exact: true }).click();
+  const editBudget = main.getByRole("spinbutton", { name: /Max growing context/ });
+  await expect(editBudget).toHaveValue("30000");
+  await main.getByRole("radio", { name: /Independent/ }).check();
+  await expect(editBudget).toBeHidden();
+  await main.getByRole("radio", { name: /Growing —/ }).check();
+  await expect(editBudget).toHaveValue("30000");
+  await editBudget.fill("20000");
+  const patched = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/automations/"));
+  await main.getByRole("button", { name: "Save changes", exact: true }).click();
+  expect((await patched).postDataJSON().changes).toEqual({ context: { mode: "growing", growing: { max_tokens: 20000 } } });
+  await expect(main.locator(".af-auto__revise")).toBeHidden();
+  await page.reload();
+  await expect(row).toBeVisible();
+  await row.click();
+  await main.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(editBudget).toHaveValue("20000");
+  await editBudget.scrollIntoViewIfNeeded();
+  await capture(page, "automation-growing-context-budget");
+});
+
+test("list refreshes display loading messages with spinners", async ({ page }) => {
+  await signIn(page);
+  for (const [label, endpoint, message] of [
+    ["Refresh automations", /\/automations\?/, "Loading automations…"],
+    ["Refresh conversations", /\/runs\?/, "Loading conversations…"],
+  ] as const) {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    await page.route(endpoint, async (route) => { await pending; await route.continue(); });
+    try {
+      await page.getByRole("button", { name: label, exact: true }).click();
+      const status = page.getByRole("status").filter({ hasText: message });
+      await expect(status).toBeVisible();
+      await expect(status.locator(".code-loading-spinner")).toBeVisible();
+      await expect(page.getByText("No automations yet.", { exact: true })).toBeHidden();
+    } finally {
+      release();
+      await page.unroute(endpoint);
+    }
+  }
+});
+
+test("initial discovery shows loading instead of an unsupported gateway warning", async ({ page }) => {
+  await signIn(page);
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/discovery/capabilities", async (route) => { await pending; await route.continue(); });
+  try {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const status = page.getByRole("status").filter({ hasText: "Loading automations…" });
+    await expect(status).toBeVisible();
+    await expect(status.locator(".code-loading-spinner")).toBeVisible();
+    await expect(page.locator('[data-unavailable="true"]')).toBeHidden();
+  } finally { release(); }
+  await expect(page.getByRole("button", { name: "New automation", exact: true })).toBeEnabled();
+});

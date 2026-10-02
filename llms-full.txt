@@ -745,7 +745,7 @@ tool approval. The workflow is the one you already selected:
 | When (UTC) | every 5 or 30 minutes, every hour, 8 hours, 24 hours or 7 days, every N minutes/hours/days, or once at a date and time. The first run starts at once. |
 | Context | **Independent** — each run starts fresh. **Growing** — each run is the next turn of one conversation and sees the previous runs, within the gateway's history window. |
 | Tools | **Run without asking** — tools run without asking (you approve them now by creating this automation). **Ask me before each tool call** — every tool call waits for your approval. Questions a workflow asks always wait for you. |
-| Email (browser) | **When an email arrives** (a When choice), **Email me the result** and **May send email without asking to** — see [Email automations](#email-automations-browser). |
+| Email (browser) | **When an email arrives** (a When choice), **Email result** and **Recipients** — see [Email automations](#email-automations-browser). |
 
 **Terminal.** `/schedule [task]` opens four steps: the task (default: your
 last prompt, or the text after `/schedule`), when, context, tools. Enter on
@@ -768,15 +768,15 @@ When your gateway account has a working mailbox (the gateway console's
   default (the rest wait for the next run). Each email is read once; mail that
   arrived before the automation existed, or while it was paused, is skipped.
   Incoming mail is data, never instructions: link-opening tools always ask.
-- **Email me the result** — a run that notifies you, or fails for good, is also
-  emailed to you.
-- **May send email without asking to** — **Only me** (the default) or **Me and
-  these addresses**. Mail to anyone else waits for your approval.
+- **Email result** emails every completed run’s full result.
+- **Recipients** appears when Email result is enabled: **Only me** (default) or
+  **Me and these addresses**. Recipients are stored in `notify.recipients`;
+  this setting does not grant email-tool permissions. The mailbox recipient policy still applies.
 
 Without a connected mailbox these options are off and the dialog says
 **"Connect a mailbox first — open My email"**; the link opens the gateway console in a new
 tab. The automation's **Edit** form changes the check interval, Email me the
-result and the allowed addresses; its **Definition** card lists them. The
+result and its recipients; its **Definition** card lists them. The
 terminal client does not create email automations yet (it lists and manages
 them like any other).
 
@@ -843,6 +843,19 @@ pane beside the runs lists and previews its files.
 - [Terminal reference](../tui/docs/api.md) — `/automations`, `/schedule` and
   their keys.
 - [Browser client](web.md) — the sidebar and the conversation view.
+
+## Growing context limit
+
+These options require AbstractGateway 0.11.3 or later.
+
+Choose **Growing** to set **Max growing context (tokens)** when creating or editing an
+automation. The default is 50,000; enter `30000` for a 30,000-token history budget.
+The limit is hidden for **Independent** runs. Changing it affects subsequent occurrences;
+already admitted occurrences retain their history for retries. History retains whole turns,
+including the newest turn even when that turn alone exceeds the budget.
+
+The API field is `context.growing.max_tokens`, a positive integer. Existing definitions
+that omit it retain the 50,000-token default.
 
 
 ==============================================================================
@@ -3346,6 +3359,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Nothing yet.
+
+## [web 0.10.2] - 2026-10-02
+
+- Configure the growing-context token budget at automation creation and editing (default 50,000); the field is shown only for Growing context.
+- Email result delivers every completed result to the selected Recipients without changing email-tool permissions.
+- Conversations and automations show accurate loading messages with spinners.
 
 ## [web 0.10.1] - 2026-10-02
 

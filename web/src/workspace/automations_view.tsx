@@ -11,6 +11,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
+import { LoadingStatus } from "./loading_status";
 import { PanelHeader, panelIds } from "./sidebar_panels";
 import { DetailDisclosure, detailPanelIds, useDetailPanels, useTimelineSlot, type DetailPanelsState } from "./detail_panels";
 import {
@@ -76,6 +77,7 @@ function ErrorLine({ error }: { error: ApiError | null }): React.ReactElement | 
 export function AutomationsSection(props: {
   state: AutomationsState;
   available: { available: boolean; reason: string };
+  discovering?: boolean;
   selectedId: string;
   onSelect(id: string): void;
   onNew(): void;
@@ -113,13 +115,14 @@ export function AutomationsSection(props: {
         </span>}
       />
       <div className="code-auto-rows" id={ids.region} role="region" aria-labelledby={ids.toggle} hidden={!open}>
-        {!props.available.available ? (
+        {!props.discovering && !props.available.available ? (
           <p className="code-history-empty" role="note" data-unavailable="true">
             {props.available.reason}
           </p>
         ) : null}
         <ErrorLine error={st.listError} />
-        {props.available.available && st.loaded && !st.items.length ? (
+        {props.discovering || (props.available.available && st.loading) ? <LoadingStatus>Loading automations…</LoadingStatus> : null}
+        {props.available.available && st.loaded && !st.loading && !st.listError && !st.items.length ? (
           <p className="code-history-empty">No automations yet. + runs the toolbar's workflow on a schedule.</p>
         ) : null}
         {rows.map((s) => {
@@ -297,9 +300,7 @@ export function AutomationMain(props: {
         st.error ? (
           <ErrorLine error={st.error} />
         ) : (
-          <p className="code-muted" role="status">
-            Loading the automation…
-          </p>
+          <LoadingStatus>Loading automation…</LoadingStatus>
         )
       ) : (
         <div className="code-auto-main-body" ref={bodyRef} data-occurrences={panels.occurrences ? "open" : "closed"}>

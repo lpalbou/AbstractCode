@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [web 0.10.2] - 2026-10-02
+
+- Configure the growing-context token budget at automation creation and editing (default 50,000); the field is shown only for Growing context.
+- Email result delivers every completed result to the selected Recipients without changing email-tool permissions.
+- Conversations and automations show accurate loading messages with spinners.
+
 ## [web 0.10.1] - 2026-10-02
 
 ### Changed

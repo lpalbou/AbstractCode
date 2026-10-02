@@ -44,6 +44,7 @@ type CatalogState = {
   tools: ToolSpec[];
   sessions: SessionSummary[];
   capabilities: Record<string, any>;
+  capabilitiesLoading: boolean;
   /** Live-reply support (`capabilities.streaming`) for "Stream replies". */
   streaming: StreamingCapability;
   loading: boolean;
@@ -64,6 +65,7 @@ const empty: CatalogState = {
   tools: [],
   sessions: [],
   capabilities: {},
+  capabilitiesLoading: true,
   streaming: STREAMING_LOADING,
   loading: false,
   errors: [],
@@ -180,7 +182,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       setState(empty);
       return;
     }
-    setState((s) => ({ ...s, loading: true, errors: [], executable: { ...s.executable, status: "loading", error: "" } }));
+    setState((s) => ({ ...s, loading: true, capabilitiesLoading: true, errors: [], executable: { ...s.executable, status: "loading", error: "" } }));
     const request = (path: string) =>
       gatewayRequest(gatewayApiPath(path), { signal: abort.signal });
     const result = await Promise.allSettled([
@@ -230,6 +232,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       tools: normalizeToolCatalog(value(2)),
       sessions: listCurrent ? page.sessions : previous.sessions,
       capabilities: capabilityContracts(value(4)),
+      capabilitiesLoading: false,
       streaming: streamingCapability(
         value(4),
         result[4].status === "rejected"
