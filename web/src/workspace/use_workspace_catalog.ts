@@ -48,6 +48,7 @@ type CatalogState = {
   /** Live-reply support (`capabilities.streaming`) for "Stream replies". */
   streaming: StreamingCapability;
   loading: boolean;
+  sessionsLoaded: boolean;
   errors: string[];
   hasMore: boolean;
   defaultModel?: { provider: string; model: string };
@@ -68,6 +69,7 @@ const empty: CatalogState = {
   capabilitiesLoading: true,
   streaming: STREAMING_LOADING,
   loading: false,
+  sessionsLoaded: false,
   errors: [],
   hasMore: false,
 };
@@ -155,6 +157,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
         ...s,
         loading: false,
         sessions: page.sessions,
+        sessionsLoaded: true,
         hasMore: page.hasMore,
         errors: s.errors.filter((e) => !e.startsWith("Conversations: ")),
       }));
@@ -230,7 +233,8 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       workflows: normalizeWorkflowCatalog(value(0), value(5)),
       policy: value(1) ? normalizeWorkspacePolicy(value(1)) : null,
       tools: normalizeToolCatalog(value(2)),
-      sessions: listCurrent ? page.sessions : previous.sessions,
+      sessions: listCurrent && value(3) ? page.sessions : previous.sessions,
+      sessionsLoaded: previous.sessionsLoaded || Boolean(listCurrent && value(3)),
       capabilities: capabilityContracts(value(4)),
       capabilitiesLoading: false,
       streaming: streamingCapability(
@@ -243,7 +247,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       gatewayDefault: gatewayDefaultFromEnvelope(value(0)),
       loading: false,
       errors,
-      hasMore: listCurrent ? page.hasMore : previous.hasMore,
+      hasMore: listCurrent && value(3) ? page.hasMore : previous.hasMore,
     }));
     if (listCurrent && value(3)) await hydrateLabels(value(3), listGen, abort.signal);
   }, [identity, onAuthError, fetchRuns, hydrateLabels]);

@@ -1,5 +1,5 @@
 import { LoadingStatus } from "./loading_status";
-import { gatewayApiPath } from "@abstractframework/ui-kit";
+import { automationToolSelection, gatewayApiPath } from "@abstractframework/ui-kit";
 import React, {
   useCallback,
   useEffect,
@@ -374,7 +374,7 @@ export function CodeWorkspace() {
   ]);
   const voiceCapability = catalog.capabilities?.assistant?.voice || {};
   const voice = useWorkspaceVoice({
-    scope: `${identity}:${session.sessionId}:${session.runId}`,
+    scope: `${identity}:${session.sessionId}:${session.runId}:${automationView}`,
     runId: identity ? session.runId : "",
     sessionId: session.sessionId,
     capability: voiceCapability,
@@ -710,6 +710,59 @@ export function CodeWorkspace() {
     setInspectorOpen,
   ]);
 
+  function currentWorkflowInput(text: string, values: Record<string, unknown>, attachments: AttachmentRef[] = [], forAutomation = false, selectedWorkflow = workflow, selectedSchema = schema) {
+    const input = buildWorkflowInput({
+      workflow: selectedWorkflow || undefined,
+      inputSchema: selectedSchema,
+      schemaInputs: values,
+      prompt: text,
+      promptProperty,
+      model: preferences,
+      reasoning: preferences.reasoning || undefined,
+      speculation: preferences.speculation,
+      streamReplies: streamReplies,
+      systemPromptExtra: preferences.system || undefined,
+      attachments,
+      limits: {
+        maxIterations: preferences.maxIterations
+          ? Number(preferences.maxIterations)
+          : undefined,
+        maxTokens: preferences.maxTokens
+          ? Number(preferences.maxTokens)
+          : undefined,
+      },
+      workspace: catalog.policy?.clientWorkspaceScopeOverrides
+        ? {
+            root:
+              preferences.workspaceRoot || effectiveWorkspace || undefined,
+            accessMode: preferences.workspaceMode || undefined,
+            allowedPaths: preferences.allowedPaths
+              .split("\n")
+              .filter(Boolean),
+          }
+        : effectiveWorkspace
+          ? { root: effectiveWorkspace }
+          : undefined,
+      tools: preferences.toolsCustomized ? toolPermissions.enabledTools : undefined,
+      toolPolicy: preferences.toolsCustomized || preferences.permissions !== "default"
+        // Keep consent revocable by this host. The durable server policy
+        // asks; the controller approves only currently enabled, permitted
+        // tools. Closing the client parks an asking call safely.
+        ? { autoApproveTools: [], requireApprovalTools: toolPermissions.enabledTools }
+        : undefined,
+      skills: preferences.skills.length ? preferences.skills : undefined,
+    });
+    if (forAutomation) {
+      // Automations own their workspace and consent policy; never inherit a
+      // conversation's directory or its client-dependent approval policy.
+      delete input.workspace_root;
+      delete input.workspace_access_mode;
+      delete input.workspace_allowed_paths;
+      if (input._runtime && typeof input._runtime === "object") delete (input._runtime as Record<string, unknown>).tool_policy;
+    }
+    return input;
+  }
+
   async function startTurn(text: string): Promise<string> {
     if (sendLock.current) throw new Error("A turn is already being submitted.");
     if (!connection.connected)
@@ -771,47 +824,7 @@ export function CodeWorkspace() {
     const startedEpoch = authEpoch.current;
     let attachedRun = "";
     try {
-      const input = buildWorkflowInput({
-        workflow,
-        inputSchema: schema,
-        schemaInputs: values,
-        prompt: text,
-        promptProperty,
-        model: preferences,
-        reasoning: preferences.reasoning || undefined,
-        speculation: preferences.speculation,
-        streamReplies: streamReplies,
-        systemPromptExtra: preferences.system || undefined,
-        attachments,
-        limits: {
-          maxIterations: preferences.maxIterations
-            ? Number(preferences.maxIterations)
-            : undefined,
-          maxTokens: preferences.maxTokens
-            ? Number(preferences.maxTokens)
-            : undefined,
-        },
-        workspace: catalog.policy.clientWorkspaceScopeOverrides
-          ? {
-              root:
-                preferences.workspaceRoot || effectiveWorkspace || undefined,
-              accessMode: preferences.workspaceMode || undefined,
-              allowedPaths: preferences.allowedPaths
-                .split("\n")
-                .filter(Boolean),
-            }
-          : effectiveWorkspace
-            ? { root: effectiveWorkspace }
-            : undefined,
-        tools: preferences.toolsCustomized ? toolPermissions.enabledTools : undefined,
-        toolPolicy: preferences.toolsCustomized || preferences.permissions !== "default"
-          // Keep consent revocable by this host. The durable server policy
-          // asks; the controller approves only currently enabled, permitted
-          // tools. Closing the client parks an asking call safely.
-          ? { autoApproveTools: [], requireApprovalTools: toolPermissions.enabledTools }
-          : undefined,
-        skills: preferences.skills.length ? preferences.skills : undefined,
-      });
+      const input = currentWorkflowInput(text, values, attachments);
       // Validate the actual outgoing payload, after composer context and
       // explicit Settings overrides. Empty optional pins stay absent so the
       // workflow/Gateway resolves them just as it does for the TUI/Assistant.
@@ -1142,6 +1155,7 @@ export function CodeWorkspace() {
           state={automationsState}
           available={automationsAvailable}
           discovering={catalog.capabilitiesLoading}
+          createDisabled={schemaLoading || !!schemaError || !workflow}
           selectedId={automationView ? automationsState.selectedId : ""}
           onSelect={(id) => {
             setAutomationView(true);
@@ -1201,14 +1215,14 @@ export function CodeWorkspace() {
               }
             />
           ))}
-          {!catalog.loading && !filteredSessions.length ? (
+          {catalog.sessionsLoaded && !filteredSessions.length ? (
             <p className="code-history-empty">
               {search
                 ? "No conversations match your search."
                 : "Your conversations will live here. Pick up where you left off, on any device."}
             </p>
           ) : null}
-          {catalog.loading ? (
+          {catalog.loading && !catalog.sessionsLoaded ? (
             <LoadingStatus>Loading conversations…</LoadingStatus>
           ) : null}
           {catalog.hasMore ? (
@@ -1288,7 +1302,7 @@ export function CodeWorkspace() {
             }}
           />
         </header>
-        <div className="code-toolbar">
+        {!automationView ? <div className="code-toolbar">
           {/* aria-busy while the chosen workflow's inputs load (a send then would be refused). */}
           <div className="code-workflow-select" aria-busy={schemaLoading || undefined}>
             <Icon name="agent" size={17} />
@@ -1372,12 +1386,26 @@ export function CodeWorkspace() {
               <Icon name="download" size={15} />
             </button>
           ) : null}
-        </div>
+        </div> : null}
         <div className="code-content">
           {automationView ? (
             <AutomationMain
+              prepareTarget={async (target) => {
+                const next = target.flow_id === "@default" ? defaultWorkflow : catalog.workflows.find(w => `${w.bundleId}@${w.bundleVersion}` === ("bundle_ref" in target ? target.bundle_ref : "") && w.flowId === target.flow_id);
+                if (!next) throw new Error("The selected workflow is no longer available. Refresh the workflow list.");
+                const nextSchema = await fetchWorkflowSchema(next);
+                if (!nextSchema) throw new Error("Workflow inputs could not be checked. Refresh the workflow list and try again.");
+                const input = { ...schemaDefaults(nextSchema), ...target.input_data };
+                const problems = validateWorkflowInputs(nextSchema, input);
+                if (problems.length) throw new Error(`${problems.join(" ")} Configure a new automation from that workflow's input form, or choose a compatible workflow.`);
+                return { ...target, input_data: input as typeof target.input_data };
+              }}
+              workflowPickerOptions={{ interfaceId: CODE_AGENT_INTERFACE, workflows: { ...catalog.executable, reload: () => void catalog.refresh() } }}
               ctl={automations}
+              availableTools={catalog.tools.filter(t => t.enabled).map(t => t.name)}
               host={automationHost}
+              voiceCapability={voiceCapability}
+              voicePreferences={voicePreferences}
               enabled={connection.connected}
               onClose={() => setAutomationView(false)}
             />
@@ -1764,9 +1792,23 @@ export function CodeWorkspace() {
         }}
       />
       <NewAutomationDialog
+        workflowPickerOptions={{ interfaceId: CODE_AGENT_INTERFACE, workflows: { ...catalog.executable, reload: () => void catalog.refresh() } }}
         open={newAutomationOpen}
         onClose={() => setNewAutomationOpen(false)}
         target={automationTarget(selection, workflow)}
+        availableTools={catalog.tools.filter(t => t.enabled).map(t => t.name)}
+        initialTools={automationToolSelection(preferences.toolsCustomized ? { ...inputs, tools: toolPermissions.enabledTools } : inputs)}
+        buildInput={async (prompt, target) => {
+          if (!target) return currentWorkflowInput(prompt, { ...schemaDefaults(schema), ...inputs }, [], true);
+          const next = target.flow_id === "@default" ? defaultWorkflow : catalog.workflows.find(w => `${w.bundleId}@${w.bundleVersion}` === ("bundle_ref" in target ? target.bundle_ref : "") && w.flowId === target.flow_id);
+          if (!next) throw new Error("The selected workflow is no longer available. Refresh the workflow list.");
+          const nextSchema = await fetchWorkflowSchema(next);
+                if (!nextSchema) throw new Error("Workflow inputs could not be checked. Refresh the workflow list and try again.");
+          const input = currentWorkflowInput(prompt, schemaDefaults(nextSchema), [], true, next, nextSchema);
+          const problems = validateWorkflowInputs(nextSchema, input);
+          if (problems.length) throw new Error(problems.join(" "));
+          return input;
+        }}
         workflowLabel={
           selection === GATEWAY_DEFAULT
             ? gatewayDefaultOptionLabel(catalog.gatewayDefault)

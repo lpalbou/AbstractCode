@@ -14,6 +14,10 @@ model itself (controller runs, occurrences, triggers, crash safety, the HTTP
 API), see the framework guide:
 [AbstractFramework: Automations](https://github.com/lpalbou/AbstractFramework/blob/main/docs/automations.md).
 
+Browser creation uses the selected model, tools and workflow inputs at submission. Each automation receives its own workspace and the approval policy chosen in its schedule form. Changes to chat settings after creation do not change a saved automation.
+
+In browser creation and **Edit**, the Tools dropdown supports search, selected-tool chips, **All**, and **Clear**. Clear saves an explicit empty list (no tools); **Use workflow default tools** removes the override. Tool availability and the choice to ask before execution are separate settings. Background sidebar refreshes keep existing rows in place.
+
 ## Requirements
 
 A gateway that advertises the Automations API
@@ -39,7 +43,8 @@ reason.
 
 Both clients create the same definition (`POST /api/gateway/automations`):
 the task (sent as the prompt of every run), when it runs, its context and its
-tool approval. The workflow is the one you already selected:
+tool approval. The browser form includes its own **Workflow** picker, initially set to the
+conversation workflow. Choosing a different automation workflow leaves the conversation unchanged:
 
 - the **gateway default** agent is sent as `@default` and resolved by the
   gateway when the automation is created;
@@ -57,7 +62,7 @@ last prompt, or the text after `/schedule`), when, context, tools. Enter on
 the last step creates it and opens it.
 
 **Browser.** Select **+** in the **Automations** section of the sidebar. The
-dialog names the workflow it runs (the toolbar's workflow); **Advanced** holds
+dialog lets you choose the workflow it runs; **Advanced** holds
 the title, the first run time, "stop after this many runs" and "stop at".
 
 ### Email automations (browser)
@@ -80,8 +85,8 @@ When your gateway account has a working mailbox (the gateway console's
 
 Without a connected mailbox these options are off and the dialog says
 **"Connect a mailbox first — open My email"**; the link opens the gateway console in a new
-tab. The automation's **Edit** form changes the check interval, Email me the
-result and its recipients; its **Definition** card lists them. The
+tab. The automation's **Edit** form changes the workflow, task, tools, check interval, **Email result**
+and its recipients; its **Definition** card lists them. The
 terminal client does not create email automations yet (it lists and manages
 them like any other).
 
@@ -149,6 +154,14 @@ pane beside the runs lists and previews its files.
   their keys.
 - [Browser client](web.md) — the sidebar and the conversation view.
 
+The automation header identifies its own workflow. Conversation workflow, model and tool
+controls are hidden while viewing an automation; use the automation’s **Edit** form.
+
+Changing workflows preserves the task, portable agent settings, selected tools and result-email
+recipients. The new workflow supplies its input defaults. If additional required inputs are
+missing, the form refuses the change; configure those inputs when creating a new automation
+or choose a compatible workflow.
+
 ## Growing context limit
 
 These options require AbstractGateway 0.11.3 or later.
@@ -158,6 +171,10 @@ automation. The default is 50,000; enter `30000` for a 30,000-token history budg
 The limit is hidden for **Independent** runs. Changing it affects subsequent occurrences;
 already admitted occurrences retain their history for retries. History retains whole turns,
 including the newest turn even when that turn alone exceeds the budget.
+
+This budget limits inherited history at the start of a run. New messages, tool results,
+system instructions and generated output can increase the model’s working context beyond it.
+It is not a per-call context or memory limit.
 
 The API field is `context.growing.max_tokens`, a positive integer. Existing definitions
 that omit it retain the 50,000-token default.

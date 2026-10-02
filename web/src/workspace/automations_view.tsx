@@ -1,3 +1,4 @@
+import { AutomationWorkflowPicker, type AutomationWorkflowPickerOptions, automationToolSelection, withAutomationTools } from "@abstractframework/ui-kit";
 /**
  * Automations in the AbstractCode web app: a sidebar section (every
  * automation of the signed-in gateway user, state as text + icon, what runs
@@ -21,6 +22,7 @@ import {
   Icon,
   apiErrorText,
   type ApiError,
+  type VoicePreferences,
   type AutomationTarget,
   type AutomationCommandType,
   type DiscussResponse,
@@ -39,6 +41,7 @@ import {
   type AutomationsState,
 } from "./automations";
 import { proxyGatewayFetch } from "./session_files";
+import { useWorkspaceVoice } from "./voice_tools";
 import { newId } from "./transport";
 
 /** One controller per signed-in identity; polls while visible and available. */
@@ -78,6 +81,7 @@ export function AutomationsSection(props: {
   state: AutomationsState;
   available: { available: boolean; reason: string };
   discovering?: boolean;
+  createDisabled?: boolean;
   selectedId: string;
   onSelect(id: string): void;
   onNew(): void;
@@ -106,7 +110,7 @@ export function AutomationsSection(props: {
         onToggle={() => props.onToggle?.()}
         label={<>Automations{waiting ? <span className="code-auto-badge" data-field="attention-total">{waiting}</span> : null}</>}
         actions={<span className="code-auto-actions">
-          <button className="code-icon-button" aria-label="New automation" title="New automation (runs the toolbar's workflow on a schedule)" disabled={!props.available.available} onClick={props.onNew}>
+          <button className="code-icon-button" aria-label="New automation" title="New automation (runs the toolbar's workflow on a schedule)" disabled={!props.available.available || props.createDisabled} onClick={props.onNew}>
             <Icon name="plus" size={13} />
           </button>
           <button className="code-icon-button" aria-label="Refresh automations" disabled={!props.available.available || st.loading} onClick={props.onRefresh}>
@@ -121,8 +125,8 @@ export function AutomationsSection(props: {
           </p>
         ) : null}
         <ErrorLine error={st.listError} />
-        {props.discovering || (props.available.available && st.loading) ? <LoadingStatus>Loading automations…</LoadingStatus> : null}
-        {props.available.available && st.loaded && !st.loading && !st.listError && !st.items.length ? (
+        {!st.loaded && (props.discovering || (props.available.available && st.loading)) ? <LoadingStatus>Loading automations…</LoadingStatus> : null}
+        {props.available.available && st.loaded && !st.listError && !st.items.length ? (
           <p className="code-history-empty">No automations yet. + runs the toolbar's workflow on a schedule.</p>
         ) : null}
         {rows.map((s) => {
@@ -264,8 +268,13 @@ export function AutomationFolderSection(props: {
 
 /** The main area for the selected automation: the kit panel + its folder. */
 export function AutomationMain(props: {
+  prepareTarget?(target: AutomationTarget): Promise<AutomationTarget>;
+  workflowPickerOptions?: AutomationWorkflowPickerOptions;
   ctl: AutomationsController;
   host: Omit<AutomationHost, "openWorkspace">;
+  voiceCapability?: Record<string, any>;
+  voicePreferences?: VoicePreferences;
+  availableTools?: string[];
   enabled: boolean;
   onClose(): void;
 }): React.ReactElement {
@@ -275,6 +284,17 @@ export function AutomationMain(props: {
   // "Browse" asked for; it resets when another automation opens.
   const [folder, setFolder] = useState({ automationId: "", runId: "" });
   const automationId = d?.automationId ?? "";
+  const [voiceError, setVoiceError] = useState("");
+  const voice = useWorkspaceVoice({
+    scope: automationId,
+    runId: props.enabled ? automationId : "",
+    sessionId: automationId,
+    capability: props.voiceCapability || {},
+    preferences: props.voicePreferences || {},
+    onTranscript: () => {},
+    onError: setVoiceError,
+  });
+  useEffect(() => setVoiceError(""), [automationId]);
   const folderRun = folder.automationId === automationId && folder.runId ? folder.runId : automationId;
   const p = automationPanelProps(props.ctl, {
     ...props.host,
@@ -290,6 +310,9 @@ export function AutomationMain(props: {
         <button className="code-subtle-button" onClick={props.onClose}>
           <Icon name="chat" size={14} /> <span>Back to the conversation</span>
         </button>
+        {voice.tts_playback.status !== "idle" ? (
+          <button type="button" className="code-subtle-button" onClick={voice.stop_tts}>Stop audio</button>
+        ) : null}
         {st.notice ? (
           <p className="code-field-help" role="status">
             {st.notice}
@@ -305,7 +328,14 @@ export function AutomationMain(props: {
       ) : (
         <div className="code-auto-main-body" ref={bodyRef} data-occurrences={panels.occurrences ? "open" : "closed"}>
           {/* Ledger and artifact links open through this app's proxy (safe tab-open rule). */}
-          {p ? <AutomationPanelWithMarkdown {...p} fetchGateway={proxyGatewayFetch} /> : null}
+          {voiceError ? <p className="code-inline-error" role="alert">{voiceError}</p> : null}
+          {p ? <AutomationPanelWithMarkdown {...p} prepareTarget={props.prepareTarget} workflowPickerOptions={props.workflowPickerOptions} availableTools={props.availableTools} fetchGateway={proxyGatewayFetch} messageProps={{
+            ...(voice.tts_supported ? { onSpeakToggle: (message) => {
+              void voice.toggle_tts(String(message.id || message.content), message.content);
+            } } : {}),
+            getSpeakState: (message) => voice.tts_playback.key === String(message.id || message.content)
+              ? voice.tts_playback.status : "idle",
+          }} /> : null}
           {timelineSlot
             ? createPortal(
                 <DetailDisclosure
@@ -346,6 +376,10 @@ export function NewAutomationDialog(props: {
   open: boolean;
   onClose(): void;
   target: AutomationTarget | null;
+  buildInput?(prompt: string, target?: AutomationTarget): Record<string, any> | Promise<Record<string, any>>;
+  workflowPickerOptions?: AutomationWorkflowPickerOptions;
+  availableTools?: string[];
+  initialTools?: string[] | null;
   workflowLabel: string;
   initialPrompt: string;
   ctl: AutomationsController;
@@ -354,6 +388,10 @@ export function NewAutomationDialog(props: {
   onOpenMyEmail?: () => void;
 }): React.ReactElement | null {
   const [error, setError] = useState<ApiError | undefined>();
+  const [preparing, setPreparing] = useState(false);
+  const submitting = useRef(false);
+  const [chosenTarget, setChosenTarget] = useState<AutomationTarget>();
+  useEffect(() => { if (!props.open) setChosenTarget(undefined); }, [props.open]);
   useEffect(() => {
     if (!props.open) return;
     setError(undefined);
@@ -364,30 +402,39 @@ export function NewAutomationDialog(props: {
     <AfScheduleDialog
       open={props.open}
       onClose={props.onClose}
-      target={props.target}
+      target={chosenTarget || props.target}
+      availableTools={props.availableTools}
+      initialTools={chosenTarget ? null : props.initialTools}
       workflowPicker={
-        <p className="code-field-help" data-field="target">
+        props.workflowPickerOptions && (chosenTarget || props.target) ? <AutomationWorkflowPicker
+          target={(chosenTarget || props.target)!} options={props.workflowPickerOptions} onChange={setChosenTarget} /> : <p className="code-field-help" data-field="target">
           {props.target ? `Runs ${props.workflowLabel} (the toolbar's workflow).` : "Choose a published workflow in the toolbar first."}
         </p>
       }
       initialPrompt={props.initialPrompt}
       emailStatus={props.ctl.state.emailStatus}
       onOpenMyEmail={props.onOpenMyEmail}
-      busy={props.ctl.state.busy}
+      busy={props.ctl.state.busy || preparing}
       error={error}
-      onSubmit={(body) =>
-        props.ctl.create(body).then(
-          (created) => {
-            props.onCreated(created.automation_id);
-            props.onClose();
-            return created;
-          },
-          (e) => {
-            setError(toApiError(e));
-            throw e;
-          },
-        )
-      }
+      onSubmit={async (body) => {
+        if (submitting.current) return;
+        submitting.current = true;
+        setPreparing(true);
+        try {
+          const built = await props.buildInput?.(String(body.target.input_data?.prompt || ""), chosenTarget);
+          const input = built && props.availableTools !== undefined ? withAutomationTools(built, automationToolSelection(body.target.input_data)) : built;
+          const created = await props.ctl.create(input ? { ...body, target: { ...body.target, input_data: input } } : body);
+          props.onCreated(created.automation_id);
+          props.onClose();
+          return created;
+        } catch (e) {
+          setError(toApiError(e));
+          throw e;
+        } finally {
+          submitting.current = false;
+          setPreparing(false);
+        }
+      }}
     />
   );
 }

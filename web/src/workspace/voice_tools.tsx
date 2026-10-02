@@ -1,7 +1,7 @@
 import { gatewayApiPath } from "@abstractframework/ui-kit";
 import React, { useEffect, useRef } from "react";
-import { Icon, useGatewayVoice } from "@abstractframework/ui-kit";
-import { gateway, gatewayRequest, newId } from "./transport";
+import { Icon, useGatewayVoice, streamTtsJsonl } from "@abstractframework/ui-kit";
+import { gateway, gatewayRequest, newId, csrfHeaders } from "./transport";
 import { MEDIA_NEEDS_HTTPS, mediaAvailable } from "../lib/secure-context";
 import type { VoicePreferences } from "@abstractframework/ui-kit";
 
@@ -37,36 +37,24 @@ export function useWorkspaceVoice({
       throw new Error("Voice session changed.");
   };
   const voice = useGatewayVoice({
-    tts:
+    tts_stream:
       capability.tts?.available === true && runId
-        ? async (text) => {
+        ? async function* (text, signal) {
             assertCurrent();
-            const response = await gatewayRequest(
-              gatewayApiPath(`runs/${encodeURIComponent(runId)}/voice/tts`),
-              {
-                method: "POST",
-                body: JSON.stringify({
-                  text,
-                  request_id: newId(),
-                  ...Object.fromEntries(
-                    Object.entries(preferences).filter(
-                      ([, value]) => value !== "" && value !== undefined,
-                    ),
+            yield* streamTtsJsonl({
+              path: gatewayApiPath(`runs/${encodeURIComponent(runId)}/voice/tts/stream`),
+              headers: csrfHeaders(),
+              signal,
+              body: {
+                text,
+                request_id: newId(),
+                ...Object.fromEntries(
+                  Object.entries(preferences).filter(
+                    ([, value]) => value !== "" && value !== undefined,
                   ),
-                }),
+                ),
               },
-            );
-            assertCurrent();
-            const artifact = response?.audio_artifact;
-            if (!artifact?.$artifact)
-              throw new Error("The gateway did not return an audio artifact.");
-            const { blob } = await gateway.get_run_artifact_blob(
-              String(artifact.run_id || response.child_run_id || runId),
-              artifact.$artifact,
-              { max_bytes: 25_000_000 },
-            );
-            assertCurrent();
-            return blob.arrayBuffer();
+            });
           }
         : undefined,
     transcribe:
@@ -218,7 +206,7 @@ export function VoiceTools({
           }}
           onBlur={stop}
         >
-          <Icon name={voice.voice_ptt_busy ? "loader" : "mic"} size={15} />
+          <Icon name={voice.voice_ptt_busy ? "loader" : "mic"} size={15} className={voice.voice_ptt_busy ? "code-loading-spinner" : undefined} />
         </button>
       ) : null}
       {capability.tts?.available ? (
@@ -247,6 +235,7 @@ export function VoiceTools({
           }}
         >
           <Icon
+            className={voice.tts_playback.status === "loading" ? "code-loading-spinner" : undefined}
             name={
               voice.tts_playback.status === "playing"
                 ? "pause"

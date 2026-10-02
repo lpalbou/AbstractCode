@@ -225,3 +225,15 @@ describe("Workspace row (round 2, item 10)", () => {
   });
 });
 
+
+
+describe("automation sidebar background refresh", () => {
+  it("keeps the empty state in place without inserting a loading row after the first load", () => {
+    const render = (loading: boolean, loaded = true) => renderToStaticMarkup(<AutomationsSection {...automationsBase}
+      state={{ ...automationsBase.state, items: [], loaded, loading }} />);
+    expect(render(true)).not.toContain("Loading automations");
+    expect(render(true)).toContain("No automations yet");
+    expect(render(false)).toContain("No automations yet");
+    expect(render(true, false)).toContain("Loading automations");
+  });
+});

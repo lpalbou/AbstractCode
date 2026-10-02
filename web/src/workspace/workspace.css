@@ -2363,17 +2363,18 @@ select option {
   min-height: 0;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   padding: 12px 18px 24px;
   align-items: start;
+  align-content: start;
 }
 .code-auto-folder {
   border: 1px solid var(--ui-border, transparent);
   border-radius: 8px;
   padding: 10px;
 }
-/* One column below 780 px of detail width (both columns >= ~360 px above): see the space block at the end. */
+/* The folder follows the transcript so collapsed folders never reserve a column. */
 /* "Back to the conversation" keeps its words at every width (it is the only way back). */
 .code-auto-main-head .code-subtle-button span {
   display: inline;
@@ -2737,3 +2738,33 @@ select option {
   animation: code-progress-spin .8s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) { .code-loading-spinner { animation: none; } }
+
+/* Give automation turns the same available width as conversation turns. */
+.code-auto-main-body .af-auto-turn,
+.code-auto-main-body .af-auto .pc-chat-item {
+  width: 100%;
+  max-width: 100%;
+  align-self: stretch;
+  box-sizing: border-box;
+}
+/* User and trigger messages remain easy to scan in both session types. */
+.code-conversation .pc-chat-item--user,
+.code-auto-main-body .af-auto .pc-chat-item--user {
+  background: var(--ui-surface-2);
+  border: 1px solid var(--ui-border-2);
+  border-radius: 8px;
+  padding: 16px;
+  text-align: right;
+}
+.code-conversation .pc-chat-item--user .pc-chat-content,
+.code-auto-main-body .pc-chat-item--user .pc-chat-content {
+  text-align: right;
+}
+/* Code and tables retain their natural reading direction. */
+.code-conversation .pc-chat-item--user :is(pre, table),
+.code-auto-main-body .pc-chat-item--user :is(pre, table) {
+  text-align: left;
+}
+
+/* Narration and copy remain discoverable without hovering over a reply. */
+.code-conversation .pc-chat-header-actions { opacity: 1; }

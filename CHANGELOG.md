@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+- Automation creation and editing include a workflow picker. The scheduling form uses a compact responsive layout with visible email-recipient controls and persistent action buttons. Automation views identify their own workflow and hide conversation-only controls.
+
+- Automation creation and editing include the shared searchable tool dropdown, with explicit empty selections and workflow defaults. Sidebar refreshes preserve rows and show loading text only before the initial load.
+
+- Browser automation creation preserves the selected model, tool selection and workflow settings. Automation workspaces and approval policy remain separate from the conversation.
 
 ## [web 0.10.2] - 2026-10-02
 
