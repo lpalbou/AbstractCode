@@ -1217,13 +1217,13 @@ export function CodeWorkspace() {
         >
           {!currentSession ? (
             <button
-              className="code-session is-selected"
+              type="button"
+              className="code-session code-card is-selected"
               onClick={() => setSidebarOpen(false)}
             >
-              <Icon name="chat" size={15} />
               <span>
-                <strong>New conversation</strong>
-                <small>Ready when you are</small>
+                <strong className="code-card-title">New conversation</strong>
+                <small className="code-card-meta">Ready when you are</small>
               </span>
             </button>
           ) : null}

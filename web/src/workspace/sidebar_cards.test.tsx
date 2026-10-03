@@ -94,6 +94,9 @@ describe("automation header (DESIGN §4)", () => {
     expect(html).toContain('data-field="timing">every 30 min · running now · next in 25 min<');
     const news = list().find((s) => s.title === "AI news monitor")!;
     expect(header(news)).not.toContain("waiting for you");
+    // The badge means an approval is pending — not merely unseen results.
+    expect(header({ ...news, attention: { ...news.attention, unseen_count: 3, unread: true, pending_waits: 0 } })).not.toContain("waiting for you");
+    expect(header({ ...news, attention: { ...news.attention, unseen_count: 0, pending_waits: 1 } })).toContain("waiting for you");
   });
 
   it("the workspace as a short name with open and copy icons, never the full path on screen", () => {

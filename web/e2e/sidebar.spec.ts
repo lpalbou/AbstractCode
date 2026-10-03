@@ -23,6 +23,8 @@ function syntheticRuns(): Record<string, unknown>[] {
         run_id: `syn-${s}-${t}`, workflow_id: "fixture:synthetic", status: "completed",
         created_at: at, updated_at: at, session_id: `sess_synthetic_${String(s).padStart(2, "0")}`,
         parent_run_id: null, session_kind: "chat", input_data: { prompt: `Synthetic conversation ${s + 1}` },
+        // The gateway's per-turn total (GET /runs?include_metrics=true): conversation s has s*turns tools.
+        tool_calls: s,
       });
     }
   }
@@ -149,7 +151,7 @@ test.describe("AbstractCode sidebar", () => {
       if (await opener.isVisible()) await opener.click();
       // The drawer slides in (0.2 s): measure once it has arrived.
       await page.waitForFunction(() => getComputedStyle(document.querySelector(".code-sidebar")!).transform === "none");
-      await expect(page.locator(".code-auto-row")).toHaveCount(5);
+      await expect(page.locator(".code-auto-card")).toHaveCount(5);
       // Round 4: no big top button; New conversation is the "+" beside the Conversations refresh.
       await expect(page.locator(".code-conversations .code-panel-header").getByRole("button", { name: "New conversation", exact: true })).toBeVisible();
       await expect(page.locator(".code-conversations .code-panel-header").getByRole("button", { name: "Refresh conversations", exact: true })).toBeVisible();
@@ -171,12 +173,12 @@ test.describe("AbstractCode sidebar", () => {
           };
         });
         const lists = [...document.querySelectorAll(".code-sidebar .code-panel > nav, .code-sidebar .code-panel > [role=region]")].map((l) => ({
-          background: getComputedStyle(l).backgroundColor, overflowY: getComputedStyle(l).overflowY, clipped: l.scrollHeight > l.clientHeight + 1,
+          background: getComputedStyle(l).backgroundColor, overflowY: getComputedStyle(l).overflowY,
         }));
         const hidden: string[] = [];
-        for (const row of document.querySelectorAll<HTMLElement>(".code-auto-row, .code-sessions .code-session")) {
+        for (const row of document.querySelectorAll<HTMLElement>(".code-auto-card, .code-sessions .code-session")) {
           row.scrollIntoView({ block: "nearest" });
-          const last = (row.querySelector("span > small:last-child") || row).getBoundingClientRect();
+          const last = (row.querySelector(".code-card-meta") || row).getBoundingClientRect();
           const hit = document.elementFromPoint(last.left + 4, last.top + last.height / 2);
           if (!hit || !row.contains(hit)) hidden.push(row.textContent || "");
         }
@@ -194,7 +196,8 @@ test.describe("AbstractCode sidebar", () => {
       }
       for (const l of g.lists) {
         expect(l.background, `${width} items on the sidebar background`).toBe("rgba(0, 0, 0, 0)");
-        expect(l.clipped, `${width} list clipped`).toBe(false);
+        // Round 4: each list scrolls inside its own drawer (rows reachable, never under a header).
+        expect(l.overflowY, `${width} list scrolls inside its drawer`).toBe("auto");
       }
       expect(g.hidden, `${width} rows hidden under a header`).toEqual([]);
       expect(g.bottomPinned, `${width} bottom block pinned`).toBe(true);
@@ -205,6 +208,100 @@ test.describe("AbstractCode sidebar", () => {
       await page.keyboard.press(" ");
       await expect(page.locator("#code-panel-automations")).toBeVisible();
       await page.keyboard.press("Escape");
+    }
+  });
+
+  test("round 4: two stacking drawers fold and split as DESIGN §3, lists scroll inside, the state survives a reload; cards carry one meta line", async ({ page }) => {
+    const fixture = JSON.parse(readFileSync(new URL("../../tui/tests/fixtures/automations/list.json", import.meta.url), "utf8"));
+    // 14 automations: enough to overflow half the sidebar at every size.
+    const autos = Array.from({ length: 14 }, (_, i) => ({ ...fixture.items[i % 3], automation_id: `auto-${i}`, title: `Automation ${i + 1}` }));
+    const runLimits: number[] = [];
+    await route(page, runLimits, { syntheticOnly: true });
+    await page.route((url) => /\/automations$/.test(url.pathname), (r) => (r.request().method() === "GET" ? r.fulfill({ json: { items: autos, next_cursor: null } }) : r.fallback()));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+    // The list asks the gateway for the per-turn tool totals.
+    expect(runLimits.length).toBeGreaterThan(0);
+    // Synthetic conversation 3 (s = 2): 3 turns, 2 tools each.
+    await expect(page.locator(".code-sessions .code-session", { hasText: "Synthetic conversation 3" }).locator('[data-field="meta"]')).toHaveText(/ · 3 turns · 6 tools$/);
+    // Automation cards: name + Active switch, one timing line, no year, no seconds.
+    const first = page.locator(".code-auto-card").first();
+    await expect(first.getByRole("switch", { name: "Active" })).toBeVisible();
+    await expect(first.locator('[data-field="timing"]')).toHaveText(/^every [^·]+ · (last [^·]+ ago|running now|last never)( · next (in [^·]+|due now))?$/);
+
+    for (const [width, height] of [[1440, 900], [834, 1194], [390, 844]] as const) {
+      await page.setViewportSize({ width, height });
+      const opener = page.locator(".code-mobile-nav");
+      if (await opener.isVisible()) {
+        await opener.click();
+        await page.waitForFunction(() => getComputedStyle(document.querySelector(".code-sidebar")!).transform === "none");
+      }
+      // The lists have loaded (after the previous size's reload too).
+      await expect(page.locator(".code-auto-card")).toHaveCount(14);
+      await expect(page.locator(".code-sessions .code-session[data-session-id]")).toHaveCount(25);
+      const geometry = () =>
+        page.evaluate(() => {
+          const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+          const lists = box(".code-sidebar-lists");
+          const aHead = box(".code-automations .code-panel-header");
+          const cHead = box(".code-conversations .code-panel-header");
+          const aList = document.querySelector<HTMLElement>("#code-panel-automations")!;
+          const cList = document.querySelector<HTMLElement>("#code-panel-conversations")!;
+          const listBox = (el: HTMLElement) => (el.hidden ? null : { top: el.getBoundingClientRect().top, bottom: el.getBoundingClientRect().bottom, scrolls: el.scrollHeight > el.clientHeight + 1, overflowY: getComputedStyle(el).overflowY });
+          return { top: lists.top, bottom: lists.bottom, height: lists.height, aHead: { top: aHead.top, bottom: aHead.bottom }, cHead: { top: cHead.top, bottom: cHead.bottom }, aList: listBox(aList), cList: listBox(cList), docOverflow: document.documentElement.scrollWidth > window.innerWidth };
+        });
+      const set = async (panel: "automations" | "conversations", open: boolean) => {
+        const toggle = page.locator(`#code-panel-${panel}-toggle`);
+        if ((await toggle.getAttribute("aria-expanded")) !== String(open)) await toggle.click();
+        await expect(toggle).toHaveAttribute("aria-expanded", String(open));
+      };
+      const mid = (g: Awaited<ReturnType<typeof geometry>>) => g.top + g.height / 2;
+
+      // Both closed: the two header rows at the top, nothing below.
+      await set("automations", false);
+      await set("conversations", false);
+      let g = await geometry();
+      expect(g.aHead.top - g.top, `${width} both closed: Automations header at the top`).toBeLessThanOrEqual(12);
+      expect(g.cHead.top - g.aHead.bottom, `${width} both closed: Conversations header right below`).toBeLessThanOrEqual(12);
+      expect(g.aList).toBeNull();
+      expect(g.cList).toBeNull();
+
+      // Automations open: it takes the space above the Conversations header, which sits mid-height.
+      await set("automations", true);
+      g = await geometry();
+      expect(Math.abs(g.cHead.top - mid(g)), `${width} A open: Conversations header mid-height`).toBeLessThanOrEqual(10);
+      expect(g.aList!.bottom, `${width} A list ends above the Conversations header`).toBeLessThanOrEqual(g.cHead.top + 1);
+      expect(g.aList!.scrolls && g.aList!.overflowY === "auto", `${width} A list scrolls inside its drawer`).toBe(true);
+      expect(g.cList).toBeNull();
+
+      // Conversations open alone: it takes the rest below its header.
+      await set("automations", false);
+      await set("conversations", true);
+      g = await geometry();
+      expect(g.cHead.top - g.aHead.bottom, `${width} C open: its header right below Automations`).toBeLessThanOrEqual(12);
+      expect(g.bottom - g.cList!.bottom, `${width} C list reaches the bottom`).toBeLessThanOrEqual(12);
+      expect(g.cList!.scrolls && g.cList!.overflowY === "auto", `${width} C list scrolls inside its drawer`).toBe(true);
+
+      // Both open: an even split, the Conversations header pinned mid-height; each list scrolls.
+      await set("automations", true);
+      g = await geometry();
+      expect(Math.abs(g.cHead.top - mid(g)), `${width} both open: Conversations header mid-height`).toBeLessThanOrEqual(10);
+      expect(g.aList!.scrolls && g.cList!.scrolls, `${width} both lists scroll inside their drawers`).toBe(true);
+      // The last automation card is reachable by scrolling ITS drawer, and not under a header.
+      const last = page.locator(".code-auto-card").last();
+      await last.scrollIntoViewIfNeeded();
+      const lb = (await last.boundingBox())!;
+      expect(lb.y + lb.height, `${width} last card above the Conversations header`).toBeLessThanOrEqual(g.cHead.top + 1);
+      expect(g.docOverflow, `${width} no horizontal overflow`).toBe(false);
+
+      // Remembered: Automations closed survives a reload.
+      await set("automations", false);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      if (await page.locator(".code-mobile-nav").isVisible()) await page.locator(".code-mobile-nav").click();
+      await expect(page.locator("#code-panel-automations-toggle")).toHaveAttribute("aria-expanded", "false");
+      await expect(page.locator("#code-panel-conversations-toggle")).toHaveAttribute("aria-expanded", "true");
+      await set("automations", true);
+      if (await page.locator(".code-mobile-close").isVisible()) await page.locator(".code-mobile-close").click();
     }
   });
 

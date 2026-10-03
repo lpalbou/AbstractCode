@@ -180,6 +180,7 @@ button {
    border-2 and 8 px radius, 15 px inset), label + chevron on the left, the actions on the right. */
 .code-panel-header {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 4px;
   min-height: var(--tap-min, 44px);
