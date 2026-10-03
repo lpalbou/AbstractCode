@@ -1,9 +1,9 @@
 import { gatewayApiPath } from "@abstractframework/ui-kit";
 import React, { useEffect, useRef } from "react";
-import { Icon, useGatewayVoice, streamTtsJsonl } from "@abstractframework/ui-kit";
+import { Icon, useGatewayVoice, streamTtsJsonl, voiceSttRequest, voiceTtsRequest } from "@abstractframework/ui-kit";
 import { gateway, gatewayRequest, newId, csrfHeaders } from "./transport";
 import { MEDIA_NEEDS_HTTPS, mediaAvailable } from "../lib/secure-context";
-import type { VoicePreferences } from "@abstractframework/ui-kit";
+import type { VoiceClientPreferences } from "@abstractframework/ui-kit";
 
 /** Optional media stays in the gateway; the browser only records and plays audio. */
 export function useWorkspaceVoice({
@@ -19,7 +19,7 @@ export function useWorkspaceVoice({
   sessionId: string;
   capability: Record<string, any>;
   scope: string;
-  preferences: VoicePreferences;
+  preferences: VoiceClientPreferences;
   onTranscript: (text: string) => void;
   onError: (text: string) => void;
 }) {
@@ -37,6 +37,7 @@ export function useWorkspaceVoice({
       throw new Error("Voice session changed.");
   };
   const voice = useGatewayVoice({
+    output_device_id: preferences.output_device || "",
     tts_stream:
       capability.tts?.available === true && runId
         ? async function* (text, signal) {
@@ -48,11 +49,9 @@ export function useWorkspaceVoice({
               body: {
                 text,
                 request_id: newId(),
-                ...Object.fromEntries(
-                  Object.entries(preferences).filter(
-                    ([, value]) => value !== "" && value !== undefined,
-                  ),
-                ),
+                // Only the speech fields: read-aloud, speaker and the
+                // transcription route are this app's, not the request's.
+                ...voiceTtsRequest(preferences),
               },
             });
           }
@@ -84,6 +83,7 @@ export function useWorkspaceVoice({
             const response = await gateway.audio_transcribe(runId, {
               audio_artifact: attachment,
               request_id: newId(),
+              ...voiceSttRequest(preferences),
             });
             assertCurrent();
             return String(response.text || "");
@@ -263,7 +263,7 @@ export function VoiceTools({
           title="Voice settings"
           onClick={onSettings}
         >
-          <Icon name="settings" size={14} />
+          <Icon name="cog" size={14} />
         </button>
       ) : null}
       {voice.voice_ptt_recording || voice.voice_ptt_busy ? (

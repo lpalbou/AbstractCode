@@ -96,9 +96,10 @@ describe("pane modes (DESIGN §5.3)", () => {
     expect(sidebarOnModeChange(false, "drawers")).toBe(false);
   });
 
-  it("app.tsx keeps responsive navigation and uses one workspace drawer", () => {
+  it("app.tsx keeps responsive navigation and uses the rail drawer (round 4), never a tab drawer", () => {
     expect(appSource).toMatch(/sidebarOnModeChange\(open, paneMode\)/);
-    expect(appSource).toContain("<WorkspaceDrawer");
+    expect(appSource).toContain("<CodeRightRail");
+    expect(appSource).not.toContain("<WorkspaceDrawer");
     expect(appSource).not.toContain("<WorkspaceInspector");
   });
 });

@@ -160,19 +160,26 @@ export type SettingsContentProps = {
   defaultModel?: { provider: string; model: string };
   workflowDefault?: boolean;
   streaming?: StreamingCapability;
+  /** An automation's folder: shown read-only instead of the root field (its runs always work there). */
+  workspaceRootFixed?: string;
+  /** Hide "Stream replies" (a conversation display choice; automations have no live view). */
+  hideStreamReplies?: boolean;
+  /** Replaces the locked notice (e.g. why an automation cannot be edited now). */
+  lockedText?: string;
 };
 
 export function SettingsContent({
   tab, value, onChange, policy, tools, disabled, defaultModel,
   workflowDefault, streaming = STREAMING_LOADING,
   lockedReasonId = SETTINGS_LOCKED_ID,
+  workspaceRootFixed, hideStreamReplies, lockedText,
 }: SettingsContentProps) {
   const update = (patch: Partial<RunPreferences>) => onChange({ ...value, ...patch });
   return <>
         {disabled ? (
           <p className="code-notice" id={lockedReasonId}>
-            Settings are unavailable while disconnected or while a run is
-            active. Reconnect, or finish or stop the run, then try again.
+            {lockedText ||
+              "Settings are unavailable while disconnected or while a run is active. Reconnect, or finish or stop the run, then try again."}
           </p>
         ) : null}
         {tab === "model" ? (
@@ -189,6 +196,7 @@ export function SettingsContent({
                 effectiveDefault={defaultModel}
                 fetchModelCapabilities={modelDiscovery.fetchModelCapabilities}
                 enableSpeculation
+                inheritLabel="Gateway default"
                 defaultHint={
                   defaultModel
                     ? `${workflowDefault ? "Workflow" : "Gateway"} default: ${defaultModel.provider} · ${defaultModel.model}.`
@@ -259,12 +267,14 @@ export function SettingsContent({
                 Reasoning and additional instructions depend on the selected
                 workflow and model.
               </p>
-              <StreamRepliesField
-                value={value.streamReplies}
-                onChange={(streamReplies) => update({ streamReplies })}
-                disabled={disabled}
-                streaming={streaming}
-              />
+              {hideStreamReplies ? null : (
+                <StreamRepliesField
+                  value={value.streamReplies}
+                  onChange={(streamReplies) => update({ streamReplies })}
+                  disabled={disabled}
+                  streaming={streaming}
+                />
+              )}
             </section>
           </>
         ) : tab === "workspace" ? (
@@ -294,8 +304,14 @@ export function SettingsContent({
                   : "Default workspace"}
               </dd>
             </dl>
+            {workspaceRootFixed ? (
+              <p className="code-field-help" data-setting="workspace-root-fixed">
+                Runs work in the automation folder <code title={workspaceRootFixed}>{workspaceRootFixed.split(/[\\/]/).filter(Boolean).pop() || workspaceRootFixed}</code>.
+              </p>
+            ) : null}
             {policy?.clientWorkspaceScopeOverrides ? (
               <>
+                {workspaceRootFixed ? null : (
                 <label className="code-field">
                   Workspace root
                   <input
@@ -305,6 +321,7 @@ export function SettingsContent({
                     onChange={(e) => update({ workspaceRoot: e.target.value })}
                   />
                 </label>
+                )}
                 <label className="code-field">
                   Access mode
                   <select
@@ -340,7 +357,7 @@ export function SettingsContent({
             <label className="code-field">
               Permissions
               <select aria-label="Permissions" value={value.permissions} disabled={disabled} onChange={event => update({ permissions: event.target.value as PermissionLevel })}>
-                <option value="default">Workflow / Gateway defaults</option>
+                <option value="default">Gateway default</option>
                 <option value="read">Read</option>
                 <option value="write">Write</option>
                 <option value="all">All enabled tools</option>
@@ -393,7 +410,7 @@ export function SettingsContent({
                 })
               }
             >
-              Use workflow tool defaults
+              Use gateway default
             </button>
             {tab === "toolsSkills" ? (
               <section className="code-settings-section">

@@ -440,12 +440,15 @@ export class GatewayClient {
     return attachment as AttachmentRef;
   }
 
-  async audio_transcribe(run_id: string, req: { audio_artifact: AttachmentRef; request_id?: string; language?: string | null }): Promise<any> {
+  async audio_transcribe(run_id: string, req: { audio_artifact: AttachmentRef; request_id?: string; language?: string | null; provider?: string; model?: string }): Promise<any> {
     const rid = String(run_id || "").trim();
     if (!rid) throw new Error("audio_transcribe: run_id is required");
     const body: any = { audio_artifact: req?.audio_artifact, request_id: req?.request_id || undefined };
     const lang = req?.language === null || req?.language === undefined ? "" : String(req.language || "").trim();
     if (lang) body.language = lang;
+    // The user's transcription override (Settings → Voice); absent = the gateway default.
+    if (req?.provider) body.provider = String(req.provider);
+    if (req?.provider && req?.model) body.model = String(req.model);
     const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`runs/${encodeURIComponent(rid)}/audio/transcribe`)), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._auth_headers(this._cfg.auth_token) },

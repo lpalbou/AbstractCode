@@ -3,18 +3,17 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { Markdown, formatBytes, workspaceContentUrl, type RunWorkspace } from "@abstractframework/panel-chat";
 import {
-  FilePreview,
   PREVIEW_TEXT_LIMIT,
   SessionFiles,
   attachOutcomeNotice,
   attachPrecheck,
+  attachWorkspaceFile,
   partialPreviewNote,
   readBoundedText,
   safeMarkdownImages,
-  WorkspaceHeader,
   canOpenFolder,
-  previewKind,
 } from "./session_files";
+import { FileViewer, WorkspaceBrowserView } from "@abstractframework/panel-chat";
 
 const noop = () => {};
 const info = (patch: Partial<RunWorkspace> = {}): RunWorkspace => ({
@@ -26,38 +25,23 @@ const info = (patch: Partial<RunWorkspace> = {}): RunWorkspace => ({
   open_supported: true,
   ...patch,
 });
-const header = (value: RunWorkspace) =>
-  renderToStaticMarkup(<WorkspaceHeader info={value} onCopy={noop} onOpen={noop} />);
-
-describe("session workspace header", () => {
-  it("shows the absolute path with a copy button", () => {
-    const html = header(info());
-    expect(html).toContain("/Users/me/.abstractgateway/workspaces/session-abc");
-    expect(html).toContain('aria-label="Copy workspace path"');
-  });
-
-  it("offers Open folder only to a browser on the gateway machine that can open folders", () => {
+describe("open folder (round 4: an icon beside the short root name)", () => {
+  it("is offered only to a browser on the gateway machine that can open folders", () => {
     expect(canOpenFolder(info())).toBe(true);
-    expect(header(info())).toContain("Open folder");
-    expect(header(info())).not.toContain("on the gateway host");
-
-    const remote = info({ host: { hostname: "studio.local", caller_is_this_machine: false } });
-    expect(canOpenFolder(remote)).toBe(false);
-    expect(header(remote)).not.toContain("Open folder");
-    expect(header(remote)).toContain("on the gateway host studio.local");
-
-    const headless = info({ open_supported: false });
-    expect(canOpenFolder(headless)).toBe(false);
-    expect(header(headless)).not.toContain("Open folder");
-
-    // A gateway that does not say where the caller is: treated as remote.
-    const unknown = info({ host: undefined });
-    expect(canOpenFolder(unknown)).toBe(false);
-    expect(header(unknown)).toContain("on the gateway host");
+    expect(canOpenFolder(info({ open_supported: false }))).toBe(false);
+    expect(canOpenFolder(info({ host: { hostname: "studio.local", caller_is_this_machine: false } }))).toBe(false);
   });
 
-  it("says when the folder does not exist yet", () => {
-    expect(header(info({ exists: false }))).toContain("does not exist yet");
+  it("the root shows once as its short name, with open-folder and copy-path icons", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceBrowserView title="Conversation files" where={info()} path="" listing={{ path: "", entries: [], truncated: false }}
+        error="" loading={false} fileBusy="" onNavigate={noop} onRefresh={noop} onCopyPath={noop} onOpenFolder={noop} />,
+    );
+    expect(html).toContain('title="/Users/me/.abstractgateway/workspaces/session-abc"');
+    expect(html).toContain(">session-abc</span>");
+    expect(html).toContain('data-action="open-folder"');
+    expect(html).toContain('data-action="copy-path"');
+    expect(html.split("/Users/me/.abstractgateway").length - 1).toBe(2); // title + data-workspace-root only, never printed
   });
 });
 
@@ -81,54 +65,40 @@ describe("session workspace listing", () => {
   });
 });
 
-describe("file preview", () => {
-  it("chooses the preview from the name, then the gateway's content type", () => {
-    expect(previewKind("README.md")).toBe("markdown");
-    expect(previewKind("data.json")).toBe("json");
-    expect(previewKind("events.jsonl")).toBe("text");
-    expect(previewKind("plot.PNG")).toBe("image");
-    expect(previewKind("index.html")).toBe("html");
-    expect(previewKind("main.py")).toBe("text");
-    expect(previewKind("Dockerfile")).toBe("text");
-    expect(previewKind("archive.zip")).toBe("binary");
-    expect(previewKind("model.bin", "application/octet-stream")).toBe("binary");
-    expect(previewKind("noext", "text/plain; charset=utf-8")).toBe("text");
-    expect(previewKind("noext", "image/webp")).toBe("image");
-    expect(previewKind("payload", "application/json")).toBe("json");
-  });
-
-  const entry = { name: "page.html", path: "out/page.html", type: "file" as const, size_bytes: 10 };
-  const render = (state: any, e = entry) =>
-    renderToStaticMarkup(
-      <FilePreview entry={e} url="api/gateway/x" state={state} onAttach={noop} attaching={false} />,
-    );
-
-  it("shows HTML as source, never rendered", () => {
-    const html = render({ status: "ready", kind: "html", text: "<b>hi</b>", partial: false });
+describe("file preview (the kit's shared FileViewer)", () => {
+  it("shows HTML as highlighted source, never rendered", () => {
+    const html = renderToStaticMarkup(<FileViewer name="page.html" nowMs={0} status="ready" text="<b>hi</b>" />);
     expect(html).toContain("&lt;b&gt;hi&lt;/b&gt;");
-    expect(html).toContain("<pre");
+    expect(html).not.toContain("<b>hi</b>");
+    expect(html).toContain('data-kind="code"');
   });
 
-  it("renders images from the content URL and offers binaries as a download", () => {
-    expect(render({ status: "ready", kind: "image", partial: false })).toContain('<img class="code-file-preview-image" src="api/gateway/x"');
-    const binary = render({ status: "ready", kind: "binary", partial: false });
-    expect(binary).toContain("No preview for this file type");
-    expect(binary).toContain('download="page.html"');
+  it("renders markdown, says when a preview is partial, and surfaces the gateway's error", () => {
+    expect(renderToStaticMarkup(<FileViewer name="a.md" nowMs={0} status="ready" text="**bold**" />)).toContain("<strong>bold</strong>");
+    expect(renderToStaticMarkup(<FileViewer name="a.txt" nowMs={0} status="ready" text="x" partialNote={partialPreviewNote(3 * 1024 * 1024)} />))
+      .toContain("Showing the first 1 MiB of 3.0 MiB; download for the rest.");
+    expect(renderToStaticMarkup(<FileViewer name="a.txt" nowMs={0} status="error" error="Preview failed (HTTP 404): no route" />))
+      .toContain("Preview failed (HTTP 404): no route");
   });
+});
 
-  it("keeps the attach-to-conversation action and says when a preview is partial", () => {
-    const html = render(
-      { status: "ready", kind: "text", text: "x", partial: true, total: 3 * 1024 * 1024 },
-      { ...entry, size_bytes: 3 * 1024 * 1024 },
-    );
-    expect(html).toContain("Attach to conversation");
-    expect(html).toContain("Showing the first 1 MiB of 3.0 MiB; download for the rest.");
+describe("attach a workspace file (the viewer's Attach action)", () => {
+  const entry = { name: "big.bin", path: "out/big.bin", type: "file" as const, size_bytes: 10 };
+  it("refuses over the gateway limit BEFORE downloading", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const text = await attachWorkspaceFile("r1", { ...entry, size_bytes: 5000 }, 1000, () => []);
+    expect(text).toMatch(/^Not attached: /);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
-
-  it("surfaces a gateway error instead of an empty preview", () => {
-    expect(render({ status: "error", message: "Preview failed (404): no route" })).toContain(
-      "Preview failed (404): no route",
-    );
+  it("queues the file and never claims success before the upload", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("abc", { status: 200, headers: { "content-length": "3" } }));
+    const files: File[] = [];
+    const text = await attachWorkspaceFile("r1", entry, 1000, (f) => { files.push(...f); return [{ id: "u", name: "big.bin", status: "uploading" } as any]; });
+    expect(files.map((f) => f.name)).toEqual(["big.bin"]);
+    expect(text).toBe("big.bin is uploading; its chip in the message box shows when it is attached.");
+    expect(String(fetchSpy.mock.calls[0][0])).toContain("workspace/content?path=out%2Fbig.bin");
+    fetchSpy.mockRestore();
   });
 });
 

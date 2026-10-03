@@ -245,8 +245,8 @@ describe("space on phones and tablets (DESIGN §12)", () => {
     expect(rule(phone, ".code-session")).toContain("padding: 10px 8px;");
   });
 
-  it("the unified drawer replaces the inspector and its separate backdrop", () => {
-    expect(appSource).toContain("<WorkspaceDrawer");
+  it("the rail drawer replaces the inspector and its separate backdrop", () => {
+    expect(appSource).toContain("<CodeRightRail");
     expect(appSource).not.toContain('className="code-inspector-scrim"');
     expect(appSource).not.toContain('aria-label="Close workspace inspector"');
   });
