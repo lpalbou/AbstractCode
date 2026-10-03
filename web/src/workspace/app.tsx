@@ -23,6 +23,7 @@ import {
   useAfMedia,
   WorkflowPicker,
   type VoiceClientPreferences,
+  type AutomationTarget,
 } from "@abstractframework/ui-kit";
 import {
   escapeTarget,
@@ -296,7 +297,8 @@ export function CodeWorkspace() {
   const setInputsOpen = (open: boolean) => {
     setInputsExpanded(open);
     if (open) openPanel("model");
-    else if (railPanel === "settings") setPanelOpen(false);
+    // "Back to chat" leaves the settings: the panel collapses to the rail (docked or floating).
+    else if (railPanel === "settings") setRailPanel(null);
   };
   // Conversation navigation becomes a drawer below the tablet breakpoint.
   const panesAreDrawers = useAfMedia(AF_MEDIA.md);
@@ -471,14 +473,6 @@ export function CodeWorkspace() {
         window.open(myEmailUrl, "_blank", "noopener,noreferrer");
       }
     : undefined;
-  // The automation header's Edit: the Settings panel on that automation (round 4 seam with the
-  // right rail, untracked/round4/COORD.md — the rail's openAutomationSettings(id) is this body).
-  // Until the rail lands, Edit opens the kit panel's own Edit form (controlled here).
-  const [automationEditOpen, setAutomationEditOpen] = useState(false);
-  const onEditAutomation = (automationId: string) => {
-    if (automationsState.selectedId !== automationId) void automations.select(automationId);
-    setAutomationEditOpen(true);
-  };
   // Automations open gateway sessions here: a Discuss fork becomes THIS
   // app's conversation (one session pool for every client).
   const automationHost: Omit<AutomationHost, "openWorkspace"> = {
@@ -512,6 +506,17 @@ export function CodeWorkspace() {
     setSidebarOpen(false);
     setAssistantOpen(false);
     setRailPanel("settings");
+  };
+  /** A new automation target is checked against that workflow's input schema before a revision is sent. */
+  const prepareAutomationTargetForCode = async (target: AutomationTarget): Promise<AutomationTarget> => {
+    const next = target.flow_id === "@default" ? defaultWorkflow : catalog.workflows.find(w => `${w.bundleId}@${w.bundleVersion}` === ("bundle_ref" in target ? target.bundle_ref : "") && w.flowId === target.flow_id);
+    if (!next) throw new Error("The selected workflow is no longer available. Refresh the workflow list.");
+    const nextSchema = await fetchWorkflowSchema(next);
+    if (!nextSchema) throw new Error("Workflow inputs could not be checked. Refresh the workflow list and try again.");
+    const input = { ...schemaDefaults(nextSchema), ...target.input_data };
+    const problems = validateWorkflowInputs(nextSchema, input);
+    if (problems.length) throw new Error(`${problems.join(" ")} Configure a new automation from that workflow's input form, or choose a compatible workflow.`);
+    return { ...target, input_data: input as typeof target.input_data };
   };
   const automationTitle =
     automationsState.detail?.summary.title || "Automation";
@@ -1214,6 +1219,8 @@ export function CodeWorkspace() {
         emailStatus={automationsState.emailStatus}
         onOpenMyEmail={automationHost.openMyEmail}
         onRevise={(changes, expected) => automations.revise(automationDetail.automationId, changes, expected)}
+        prepareTarget={prepareAutomationTargetForCode}
+        workflowPickerOptions={{ interfaceId: CODE_AGENT_INTERFACE, workflows: { ...catalog.executable, reload: () => void catalog.refresh() } }}
         sections={(value, onChange) => {
           const root = { root: automationDetail.definition?.workspace_root || "" };
           return (
@@ -1464,7 +1471,6 @@ export function CodeWorkspace() {
           createDisabled={schemaLoading || !!schemaError || !workflow}
           selectedId={automationView ? automationsState.selectedId : ""}
           onSelect={(id) => {
-            setAutomationEditOpen(false);
             setAutomationView(true);
             setSidebarOpen(false);
             void automations.select(id);
@@ -1593,16 +1599,7 @@ export function CodeWorkspace() {
         <div className="code-content">
           {automationView ? (
             <AutomationMain
-              prepareTarget={async (target) => {
-                const next = target.flow_id === "@default" ? defaultWorkflow : catalog.workflows.find(w => `${w.bundleId}@${w.bundleVersion}` === ("bundle_ref" in target ? target.bundle_ref : "") && w.flowId === target.flow_id);
-                if (!next) throw new Error("The selected workflow is no longer available. Refresh the workflow list.");
-                const nextSchema = await fetchWorkflowSchema(next);
-                if (!nextSchema) throw new Error("Workflow inputs could not be checked. Refresh the workflow list and try again.");
-                const input = { ...schemaDefaults(nextSchema), ...target.input_data };
-                const problems = validateWorkflowInputs(nextSchema, input);
-                if (problems.length) throw new Error(`${problems.join(" ")} Configure a new automation from that workflow's input form, or choose a compatible workflow.`);
-                return { ...target, input_data: input as typeof target.input_data };
-              }}
+              prepareTarget={prepareAutomationTargetForCode}
               workflowPickerOptions={{ interfaceId: CODE_AGENT_INTERFACE, workflows: { ...catalog.executable, reload: () => void catalog.refresh() } }}
               ctl={automations}
               availableTools={catalog.tools.filter(t => t.enabled).map(t => t.name)}
@@ -1611,9 +1608,7 @@ export function CodeWorkspace() {
               voicePreferences={voicePreferences}
               enabled={connection.connected}
               onClose={() => setAutomationView(false)}
-              onEdit={onEditAutomation}
-              editOpen={automationEditOpen}
-              onEditOpenChange={setAutomationEditOpen}
+              onEdit={openAutomationSettings}
             />
           ) : (
           <main

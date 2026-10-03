@@ -228,18 +228,20 @@ test("creates and edits a custom growing context budget", async ({ page }) => {
   const row = page.locator(".code-auto-card", { hasText: title });
   await expect(row).toBeVisible();
   const main = page.locator(".code-automation-main");
+  // Round 4: Edit opens the rail's Settings on this automation; its Automation card holds the context.
   await main.getByRole("button", { name: "Edit", exact: true }).click();
-  const editBudget = main.getByRole("spinbutton", { name: /Max growing context/ });
+  const settings = page.locator("#code-rail-panel-settings");
+  const editBudget = settings.getByRole("spinbutton", { name: /Max growing context/ });
   await expect(editBudget).toHaveValue("30000");
-  await main.getByRole("radio", { name: /Independent/ }).check();
+  await settings.getByRole("radio", { name: /Independent/ }).check();
   await expect(editBudget).toBeHidden();
-  await main.getByRole("radio", { name: /Growing —/ }).check();
+  await settings.getByRole("radio", { name: /Growing —/ }).check();
   await expect(editBudget).toHaveValue("30000");
   await editBudget.fill("20000");
   const patched = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/automations/"));
-  await main.getByRole("button", { name: "Save changes", exact: true }).click();
+  await settings.getByRole("button", { name: "Save", exact: true }).click();
   expect((await patched).postDataJSON().changes).toEqual({ context: { mode: "growing", growing: { max_tokens: 20000 } } });
-  await expect(main.locator(".af-auto__revise")).toBeHidden();
+  await expect(settings.getByTestId("automation-revision")).toHaveText("Revision 2");
   await page.reload();
   await expect(row).toBeVisible();
   await row.locator(".code-card-main").click();

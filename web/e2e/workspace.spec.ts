@@ -1138,7 +1138,11 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await expect(message).toBeVisible();
     await openWorkspaceSection(page, "Voice");
     const drawer = page.locator(".code-rail .af-rail__panel");
-    await drawer.getByRole("button", { name: "AI voice" }).click();
+    // Round 4: the Assistant's layout — Text → speech reads "Gateway default"; Change opens the picker in place.
+    const tts = drawer.locator('#code-settings-voice [data-setting="tts"]');
+    await expect(tts.locator(".af-override__summary")).toContainText("Gateway default");
+    await tts.locator('[data-action="change"]').click();
+    await tts.getByRole("button", { name: "AI voice" }).click();
     await expect(
       page.getByRole("option", {
         name: "Warm · fixture-alternative",
@@ -1152,38 +1156,38 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       })
       .click();
     await expect(
-      drawer.getByRole("button", { name: "Speech provider", exact: true }),
+      tts.getByRole("button", { name: "Speech provider", exact: true }),
     ).toContainText("fixture-voice");
     await expect(
-      drawer.getByRole("button", { name: "Speech model", exact: true }),
+      tts.getByRole("button", { name: "Speech model", exact: true }),
     ).toContainText("fixture-speaker");
-    await drawer
-      .getByRole("button", { name: "Reset to Gateway defaults", exact: true })
-      .click();
+    await expect(tts.locator(".af-override__summary")).toContainText("fixture-voice · fixture-speaker");
+    await tts.locator('[data-action="use-default"]').click();
+    await expect(tts.locator(".af-override__summary")).toContainText("Gateway default");
     await expect(
-      drawer.getByRole("tab", { name: "Gateway default", exact: true }),
+      tts.getByRole("tab", { name: "Gateway default", exact: true }),
     ).toHaveAttribute("aria-selected", "true");
-    await drawer.getByRole("tab", { name: "Custom", exact: true }).click();
-    await drawer
+    await tts.getByRole("tab", { name: "Custom", exact: true }).click();
+    await tts
       .getByRole("button", { name: "Speech provider", exact: true })
       .click();
     await page
       .getByRole("option", { name: "fixture-voice", exact: true })
       .click();
-    await drawer
+    await tts
       .getByRole("button", { name: "Speech model", exact: true })
       .click();
     await page
       .getByRole("option", { name: "fixture-speaker", exact: true })
       .click();
-    await drawer.getByRole("button", { name: "AI voice" }).click();
+    await tts.getByRole("button", { name: "AI voice" }).click();
     await page
       .getByRole("option", {
         name: "Warm · clear and conversational",
         exact: true,
       })
       .click();
-    await drawer
+    await tts
       .getByLabel("Speech speed", { exact: true })
       .selectOption("1.25");
     await capture(page, "voice-settings");

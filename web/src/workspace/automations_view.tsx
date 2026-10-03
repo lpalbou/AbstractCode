@@ -260,9 +260,6 @@ export function AutomationMain(props: {
   onClose(): void;
   /** The header's Edit: opens the Settings panel on this automation. */
   onEdit(automationId: string): void;
-  /** The kit panel's Edit form, when the host drives it (interim Edit target, COORD.md). */
-  editOpen?: boolean;
-  onEditOpenChange?(open: boolean): void;
   nowMs?: number;
 }): React.ReactElement {
   const st = props.ctl.state;
@@ -332,7 +329,7 @@ export function AutomationMain(props: {
             }}
             onCopyPath={copy_text}
           />
-          {p ? <AutomationPanelWithMarkdown {...p} hideHeader {...(props.onEditOpenChange ? { editOpen: props.editOpen === true, onEditOpenChange: props.onEditOpenChange } : {})} prepareTarget={props.prepareTarget} workflowPickerOptions={props.workflowPickerOptions} availableTools={props.availableTools} fetchGateway={proxyGatewayFetch} messageProps={{
+          {p ? <AutomationPanelWithMarkdown {...p} hideHeader prepareTarget={props.prepareTarget} workflowPickerOptions={props.workflowPickerOptions} availableTools={props.availableTools} fetchGateway={proxyGatewayFetch} messageProps={{
             ...(voice.tts_supported ? { onSpeakToggle: (message) => {
               void voice.toggle_tts(String(message.id || message.content), message.content);
             } } : {}),

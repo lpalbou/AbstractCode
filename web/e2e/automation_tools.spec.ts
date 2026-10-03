@@ -69,36 +69,36 @@ test("workflow and tool pickers persist; email recipients remain visible; refres
   const main = page.getByRole("main", { name: "Automation", exact: true });
   await expect(main.locator('[data-def="target"]')).toContainText("authored-contract");
   await expect(page.getByRole("main", { name: "Automation", exact: true })).toBeVisible();
+  // Round 4: the header's Edit opens the rail's Settings bound to this automation's definition.
   await main.locator('[data-action="edit"]').click();
-  const edit = main.locator(".af-auto__revise");
-  await expect(edit.getByRole("button", { name: "Remove web_search" })).toBeVisible();
+  const settings = page.locator("#code-rail-panel-settings");
+  await expect(settings).toBeVisible();
+  await expect(settings.locator(".code-settings-binding")).toContainText("Automation");
+  const edit = settings.locator(".af-auto__revise");
+  // Tools are the shared tool policy (Tools & skills), never a second picker in the card.
+  await expect(edit.getByRole("button", { name: "Remove web_search" })).toHaveCount(0);
+  await expect(settings.locator("#code-settings-tools")).toContainText("web_search");
   await edit.getByRole("combobox", { name: "Automation workflow", exact: true }).click();
   await edit.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Basic agent defaults" }) }).click();
   await page.screenshot({ path: "e2e/artifacts/automation-workflow-edit.png" });
-  await edit.getByRole("button", { name: "Clear", exact: true }).click();
   const revision = page.waitForRequest(r => r.method() === "PATCH" && new URL(r.url()).pathname.includes("/automations/"));
-  await edit.getByRole("button", { name: "Save changes", exact: true }).click();
+  await edit.getByRole("button", { name: "Save", exact: true }).click();
   const body = (await revision).postDataJSON();
   expect(body.changes.target.flow_id).toBe("basic-agent-contract");
-  expect(body.changes.target.input_data.tools).toEqual([]);
-  expect(body.changes.target.input_data._runtime.allowed_tools).toEqual([]);
-  await expect(edit).not.toBeVisible();
-  // PATCH queues a durable command; wait for the committed revision before reopening.
-  await expect(main.locator(".af-auto__definition")).toHaveAttribute("data-definition-revision", "2");
+  expect(body.changes.target.input_data.tools).toEqual(["web_search"]);
+  // PATCH queues a durable command; the panel shows the committed revision.
+  await expect(settings.getByTestId("automation-revision")).toHaveText("Revision 2");
   await expect(main.locator('[data-def="target"]')).toContainText("basic-agent-contract");
-  await main.locator('[data-action="edit"]').click();
-  await expect(edit.getByRole("button", { name: /^Select.*No tools enabled/ })).toBeVisible();
-  await expect(edit.getByLabel("Use workflow default tools")).not.toBeChecked();
   await edit.getByRole("combobox", { name: "Automation workflow", exact: true }).click();
   await edit.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Prompt structured" }) }).click();
   let invalidPatch = false;
   const watchInvalidPatch = (request: import("@playwright/test").Request) => { if (request.method() === "PATCH" && new URL(request.url()).pathname.includes("/automations/")) invalidPatch = true; };
   page.on("request", watchInvalidPatch);
-  await edit.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(main.getByRole("alert")).toContainText(/ticket/i);
+  await edit.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(edit.getByRole("alert")).toContainText(/ticket/i);
   expect(invalidPatch).toBe(false);
   page.off("request", watchInvalidPatch);
-  await edit.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.locator('.code-rail .af-rail__section:not([hidden]) [data-action="collapse-panel"]').click();
 
   await page.route("**/api/gateway/**", async route => {
     if (route.request().method() === "GET") await new Promise(resolve => setTimeout(resolve, 450));

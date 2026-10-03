@@ -16,6 +16,8 @@ import {
   type AutomationChanges,
   type AutomationDefinition,
   type AutomationSummary,
+  type AutomationTarget,
+  type AutomationWorkflowPickerOptions,
   type CommandReceipt,
   type MyEmailStatus,
   type ReviseForm,
@@ -57,6 +59,9 @@ export type AutomationSettingsPanelProps = {
   emailStatus?: MyEmailStatus | null;
   onOpenMyEmail?: () => void;
   onRevise: (changes: AutomationChanges, expectedRevision: number) => Promise<CommandReceipt>;
+  /** Checks a NEW workflow target against its input schema (the Automation card's workflow picker). */
+  prepareTarget?: (target: AutomationTarget) => Promise<AutomationTarget>;
+  workflowPickerOptions?: AutomationWorkflowPickerOptions;
   /** The conversation sections, rendered for these preferences. */
   sections: (value: RunPreferences, onChange: (next: RunPreferences) => void) => React.ReactNode;
 };
@@ -126,6 +131,7 @@ export function AutomationSettingsPanel(p: AutomationSettingsPanelProps): React.
           submitLabel="Save"
           emailStatus={p.emailStatus}
           onOpenMyEmail={p.onOpenMyEmail}
+          workflowPickerOptions={p.workflowPickerOptions}
           onSubmit={(form: ReviseForm) => {
             const changes = reviseChanges(p.summary, form, p.definition);
             if (changes === null) {
@@ -138,10 +144,22 @@ export function AutomationSettingsPanel(p: AutomationSettingsPanelProps): React.
             }
             setFormErrors([]);
             setSave({ status: "saving" });
-            void p
-              .onRevise(changes as AutomationChanges, revision)
+            const prepared = async (): Promise<AutomationChanges> => {
+              const c = changes as AutomationChanges;
+              return form.target && c.target && p.prepareTarget ? { ...c, target: await p.prepareTarget(c.target) } : c;
+            };
+            void prepared()
+              .then((c) => p.onRevise(c, revision))
               .then(() => setSave({ status: "saved", revision: revision + 1 }))
-              .catch((e) => setSave({ status: "error", message: saveErrorText(e) }));
+              .catch((e) => {
+                // A target the workflow's inputs refuse is a form problem (shown in the form);
+                // a gateway refusal is a save outcome.
+                if (isApiError(e)) setSave({ status: "error", message: saveErrorText(e) });
+                else {
+                  setSave({ status: "idle" });
+                  setFormErrors([String((e as { message?: string } | null)?.message || e)]);
+                }
+              });
           }}
         />
       </AfSettingsGroup>

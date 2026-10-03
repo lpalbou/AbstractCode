@@ -65,7 +65,7 @@ async function route(page: Page, runLimits: number[], opts: { syntheticOnly?: bo
 /** Round 3: every workflow the Code picker offers declares abstractcode.agent.v1, so a turn
  * starts from the composer (the inputs drawer says "Back to chat"; there is no "Run workflow"). */
 async function sendTurn(page: Page, text = "Run the fixture."): Promise<void> {
-  const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
+  const drawer = page.locator(".code-rail .af-rail__panel");
   await closeWorkspaceDrawer(page);
   const composer = page.locator(".code-conversation .pc-composer textarea");
   if (!(await composer.inputValue()).trim()) await composer.fill(text);
@@ -109,7 +109,7 @@ async function signIn(page: Page): Promise<void> {
 async function runPromptConversation(page: Page): Promise<void> {
   await chooseWorkflow(page, "Prompt structured");
   await openWorkflowInputs(page);
-  const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
+  const drawer = page.locator(".code-rail .af-rail__panel");
   await drawer.getByLabel(/Ticket/).fill(`sidebar-${Date.now()}`);
   await page.locator(".code-conversation .pc-composer textarea").fill("Sidebar check.");
   await sendTurn(page);
@@ -127,9 +127,11 @@ test.describe("AbstractCode sidebar", () => {
       await page.setViewportSize({ width, height });
       const drawer = await openWorkspaceSection(page, "Workspace");
       const path = drawer.locator(".code-current-workspace");
-      await expect(path).toContainText(LONG_WS);
+      // Round 4: the workspace shows ONCE as its short name; the full path is its tooltip.
+      await expect(path).toContainText(LONG_WS.split("/").filter(Boolean).pop()!);
+      await expect(path.locator("code")).toHaveAttribute("title", LONG_WS);
       await path.scrollIntoViewIfNeeded();
-      expect(await path.evaluate(el => el.scrollWidth <= el.clientWidth + 1), `${width}: full path wraps inside category`).toBe(true);
+      expect(await path.evaluate(el => el.scrollWidth <= el.clientWidth + 1), `${width}: the short name fits its group`).toBe(true);
       const bounds = (await path.boundingBox())!;
       expect(bounds.x).toBeGreaterThanOrEqual(0);
       expect(bounds.x + bounds.width).toBeLessThanOrEqual(width + 1);
@@ -227,7 +229,7 @@ test.describe("AbstractCode sidebar", () => {
     // Automation cards: name + Active switch, one timing line, no year, no seconds.
     const first = page.locator(".code-auto-card").first();
     await expect(first.getByRole("switch", { name: "Active" })).toBeVisible();
-    await expect(first.locator('[data-field="timing"]')).toHaveText(/^every [^·]+ · (last [^·]+ ago|running now|last never)( · next (in [^·]+|due now))?$/);
+    await expect(first.locator('[data-field="timing"]')).toHaveText(/^every [^·]+ · (last [^·]+ ago|running now|waiting since [^·]+|last never)( · next (in [^·]+|due now))?$/);
 
     for (const [width, height] of [[1440, 900], [834, 1194], [390, 844]] as const) {
       await page.setViewportSize({ width, height });
