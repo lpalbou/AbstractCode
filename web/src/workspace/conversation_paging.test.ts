@@ -29,7 +29,7 @@ function store(sessions: number, turns: number) {
 describe("conversations page by 25 conversations, not runs", () => {
   it("one page is 25 conversations and the first fetch asks 100 runs", () => {
     expect(CONVERSATIONS_PAGE).toBe(25);
-    expect(conversationRunsPath(100)).toBe("runs?root_only=true&include_ledger_len=false&limit=100");
+    expect(conversationRunsPath(100)).toBe("runs?root_only=true&include_ledger_len=false&include_metrics=true&limit=100");
   });
 
   it("grows the run fetch until it holds one conversation more than shown (5 turns each: 100 runs = 20 conversations)", async () => {

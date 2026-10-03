@@ -1,5 +1,6 @@
 // Conversations in the sidebar are counted in CONVERSATIONS, not runs. The gateway lists runs
-// (`GET /runs?root_only=true`: one root run per turn), so a page of N runs folds into fewer
+// (`GET /runs?root_only=true`: one root run per turn; `include_metrics=true` adds each turn's
+// `tool_calls`, totalled by the gateway over the turn's sub-runs), so a page of N runs folds into fewer
 // conversations — on a real store 100 runs were ~20 conversations. The sidebar shows
 // CONVERSATIONS_PAGE conversations and "Load more" adds CONVERSATIONS_PAGE more; the run fetch
 // grows (the same `limit` parameter, no cursor) until it holds one conversation more than shown,
@@ -11,7 +12,7 @@ export const CONVERSATIONS_PAGE = 25;
 export const RUNS_PER_CONVERSATION = 4;
 
 export const conversationRunsPath = (runLimit: number) =>
-  `runs?root_only=true&include_ledger_len=false&limit=${runLimit}`;
+  `runs?root_only=true&include_ledger_len=false&include_metrics=true&limit=${runLimit}`;
 
 function runCount(body: any): number {
   const items = body?.items ?? body?.runs;

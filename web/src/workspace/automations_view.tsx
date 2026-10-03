@@ -14,17 +14,20 @@ import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } fro
 import { createPortal } from "react-dom";
 import { LoadingStatus } from "./loading_status";
 import { PanelHeader, panelIds } from "./sidebar_panels";
+import { AutomationCard } from "./sidebar_cards";
+import { AutomationHeaderBar } from "./automation_header";
+import { copy_text } from "../lib/clipboard";
 import { DetailDisclosure, detailPanelIds, useDetailPanels, useTimelineSlot, type DetailPanelsState } from "./detail_panels";
 import {
   AfScheduleDialog,
   AfSwitch,
-  AutomationStateLabel,
   Icon,
   apiErrorText,
   type ApiError,
   type VoicePreferences,
   type AutomationTarget,
   type AutomationCommandType,
+  type AutomationSummary,
   type DiscussResponse,
 } from "@abstractframework/ui-kit";
 import { AutomationPanelWithMarkdown, WorkspaceBrowser, type AutomationPanelWithMarkdownProps } from "@abstractframework/panel-chat";
@@ -32,7 +35,6 @@ import { AutomationPanelWithMarkdown, WorkspaceBrowser, type AutomationPanelWith
 import {
   AUTOMATIONS_POLL_MS,
   AutomationsController,
-  automationRowView,
   codeAutomationsClient,
   discussionNotice,
   proxyAnswerWait,
@@ -87,6 +89,8 @@ export function AutomationsSection(props: {
   onNew(): void;
   onRefresh(): void;
   onShowArchived(show: boolean): void;
+  /** The card's Active switch (pause / resume through the gateway). */
+  onToggleActive?(s: AutomationSummary): void;
   nowMs?: number;
   /** Collapsible panel (sidebar_panels.tsx): open by default. */
   open?: boolean;
@@ -129,42 +133,19 @@ export function AutomationsSection(props: {
         {props.available.available && st.loaded && !st.listError && !st.items.length ? (
           <p className="code-history-empty">No automations yet. + lets you choose a workflow and schedule.</p>
         ) : null}
-        {rows.map((s) => {
-          const v = automationRowView(s, props.nowMs);
-          const selected = props.selectedId === s.automation_id;
-          return (
-            <button
-              key={s.automation_id}
-              className={`code-session code-auto-row${selected ? " is-selected" : ""}`}
-              aria-current={selected ? "page" : undefined}
-              data-automation-id={s.automation_id}
-              data-status={s.status}
-              title={`${v.title} — ${v.cadence}`}
-              onClick={() => props.onSelect(s.automation_id)}
-            >
-              <Icon name="history" size={15} />
-              <span>
-                <strong>{v.title}</strong>
-                <small>
-                  <span data-field="state">
-                    <AutomationStateLabel status={s.status} />
-                  </span>{" "}
-                  {v.cadence}
-                  {v.legacy ? " · legacy schedule" : ""}
-                </small>
-                {v.current ? (
-                  <small data-field="current">now: {v.current}</small>
-                ) : null}
-                <small data-field="next">next: {v.next}</small>
-                {v.attention ? (
-                  <small className="code-auto-attention" data-field="attention">
-                    {v.attention}
-                  </small>
-                ) : null}
-              </span>
-            </button>
-          );
-        })}
+        {rows.map((s) => (
+          <React.Fragment key={s.automation_id}>
+            <AutomationCard
+              summary={s}
+              selected={props.selectedId === s.automation_id}
+              busy={st.busy}
+              nowMs={props.nowMs ?? Date.now()}
+              onSelect={() => props.onSelect(s.automation_id)}
+              onToggleActive={() => props.onToggleActive?.(s)}
+            />
+            {st.rowError?.automationId === s.automation_id ? <ErrorLine error={st.rowError.error} /> : null}
+          </React.Fragment>
+        ))}
         {archived > 0 ? (
           <AfSwitch
             className="code-auto-archived"
@@ -277,6 +258,12 @@ export function AutomationMain(props: {
   availableTools?: string[];
   enabled: boolean;
   onClose(): void;
+  /** The header's Edit: opens the Settings panel on this automation. */
+  onEdit(automationId: string): void;
+  /** The kit panel's Edit form, when the host drives it (interim Edit target, COORD.md). */
+  editOpen?: boolean;
+  onEditOpenChange?(open: boolean): void;
+  nowMs?: number;
 }): React.ReactElement {
   const st = props.ctl.state;
   const d = st.detail;
@@ -329,7 +316,23 @@ export function AutomationMain(props: {
         <div className="code-auto-main-body" ref={bodyRef} data-occurrences={panels.occurrences ? "open" : "closed"}>
           {/* Ledger and artifact links open through this app's proxy (safe tab-open rule). */}
           {voiceError ? <p className="code-inline-error" role="alert">{voiceError}</p> : null}
-          {p ? <AutomationPanelWithMarkdown {...p} prepareTarget={props.prepareTarget} workflowPickerOptions={props.workflowPickerOptions} availableTools={props.availableTools} fetchGateway={proxyGatewayFetch} messageProps={{
+          <AutomationHeaderBar
+            summary={d.summary}
+            occurrences={d.occurrences}
+            triggerSources={st.triggerSources}
+            busy={st.busy}
+            nowMs={props.nowMs}
+            onCommand={(type) => props.ctl.command(d.automationId, type as AutomationCommandType)}
+            onToggleActive={() => props.ctl.toggleActive(d.summary)}
+            onEdit={() => props.onEdit(d.automationId)}
+            onOpenFolder={() => {
+              setFolder({ automationId, runId: "" });
+              if (!panels.folder) togglePanel("folder");
+              window.requestAnimationFrame(() => bodyRef.current?.querySelector(".code-auto-folder-section")?.scrollIntoView({ block: "nearest" }));
+            }}
+            onCopyPath={copy_text}
+          />
+          {p ? <AutomationPanelWithMarkdown {...p} hideHeader {...(props.onEditOpenChange ? { editOpen: props.editOpen === true, onEditOpenChange: props.onEditOpenChange } : {})} prepareTarget={props.prepareTarget} workflowPickerOptions={props.workflowPickerOptions} availableTools={props.availableTools} fetchGateway={proxyGatewayFetch} messageProps={{
             ...(voice.tts_supported ? { onSpeakToggle: (message) => {
               void voice.toggle_tts(String(message.id || message.content), message.content);
             } } : {}),

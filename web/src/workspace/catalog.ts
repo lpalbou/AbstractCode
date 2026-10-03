@@ -85,6 +85,12 @@ export interface SessionSummary {
   /** Newest first, matching the gateway's recent-runs view. */
   runIds: string[];
   turnCount: number;
+  /**
+   * Tool calls across the listed turns: the sum of each turn's `tool_calls`, which the gateway
+   * totals over the turn and its sub-runs (`GET /runs?include_metrics=true`). Absent when any
+   * listed turn lacks the count (an older gateway): the card then shows no tool figure.
+   */
+  toolCalls?: number;
   prompt?: string;
   /** True when the source run page says there are more rows. */
   truncated: boolean;
@@ -650,6 +656,11 @@ export function normalizeSessionSummaries(
         promptFrom(run);
       if (prompt) break;
     }
+    let toolCalls: number | undefined = 0;
+    for (const { run } of group) {
+      const count = run.tool_calls;
+      toolCalls = typeof count === "number" && Number.isFinite(count) && toolCalls !== undefined ? toolCalls + count : undefined;
+    }
     summaries.push({
       sessionId,
       state,
@@ -662,6 +673,7 @@ export function normalizeSessionSummaries(
       latestRunId: runIds[0],
       runIds,
       turnCount: group.length,
+      ...(toolCalls !== undefined ? { toolCalls } : {}),
       ...(prompt ? { prompt } : {}),
       truncated,
     });

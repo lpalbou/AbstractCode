@@ -19,6 +19,7 @@
  */
 import { gatewayApiPath } from "@abstractframework/ui-kit";
 import {
+  activeToggleCommand,
   attentionLabel,
   automationControls,
   createAutomationsClient,
@@ -203,6 +204,8 @@ export type AutomationsState = {
    * isn't set up — open My email" and offers no email option.
    */
   emailStatus: MyEmailStatus | null;
+  /** Why the last Active switch flip from a sidebar card failed (cleared by the next flip or list read). */
+  rowError: { automationId: string; error: ApiError } | null;
 };
 
 export const INITIAL_AUTOMATIONS_STATE: AutomationsState = {
@@ -218,6 +221,7 @@ export const INITIAL_AUTOMATIONS_STATE: AutomationsState = {
   busy: false,
   notice: "",
   emailStatus: null,
+  rowError: null,
 };
 
 /** How a wait is answered: the gateway's resume command on the waiting run. */
@@ -384,6 +388,21 @@ export class AutomationsController {
   /** `POST /automations/{id}/commands`. Rejects with ApiError. */
   command(id: string, type: AutomationCommandType, commandId?: string): Promise<CommandReceipt> {
     return this.busyCall(() => this.client.sendAutomationCommand(id, { type, ...(commandId ? { command_id: commandId } : {}) }));
+  }
+
+  /**
+   * The Active switch (card or header): pause an active automation, resume a paused one (kit
+   * `activeToggleCommand`). A failure is kept in `rowError` for the card and rethrown.
+   */
+  async toggleActive(s: Pick<AutomationSummary, "automation_id" | "status">, commandId?: string): Promise<CommandReceipt> {
+    this.set({ rowError: null });
+    try {
+      return await this.command(s.automation_id, activeToggleCommand(s) as AutomationCommandType, commandId);
+    } catch (e) {
+      const error = toApiError(e);
+      this.set({ rowError: { automationId: s.automation_id, error } });
+      throw error;
+    }
   }
 
   /** `PATCH /automations/{id}` with `expected_revision`. Rejects with ApiError. */

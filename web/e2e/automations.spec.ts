@@ -80,12 +80,11 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   await expect(dialog).toBeHidden();
 
   // The row states the gateway's truth: text + icon, next run from next_fire_at.
-  const row = page.locator(".code-auto-row", { hasText: title });
+  const row = page.locator(".code-auto-card", { hasText: title });
   await expect(row).toBeVisible();
   // The kit's state label: the word, then its icon.
-  await expect(row.locator('[data-field="state"] [data-state="active"]')).toHaveText("Active");
-  await expect(row.locator('[data-field="state"] [data-state="active"] svg')).toHaveCount(1);
-  await expect(row.locator('[data-field="next"]')).toContainText("UTC");
+  await expect(row.getByRole("switch", { name: "Active" })).toHaveAttribute("aria-checked", "true");
+  await expect(row.locator('[data-field="timing"]')).toContainText(/^every /);
 
   // The first run starts now and parks on a typed tool approval.
   const main = page.locator(".code-automation-main");
@@ -124,8 +123,8 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   await tab.waitForLoadState();
   expect(await tab.evaluate(() => document.contentType)).toBe("text/plain");
   await tab.close();
-  // The panel's workspace fact opens the same folder pane.
-  await main.locator('[data-fact="workspace"] button').first().click();
+  // The header's open-folder icon opens the same folder pane (round 4: short name, no full path).
+  await main.locator('.code-auto-header [data-action="open-folder"]').click();
   await expect(main.getByRole("region", { name: "Automation folder" })).toBeVisible();
 
   // Discuss run #1: the fork opens as THIS app's conversation, in place.
@@ -141,13 +140,14 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   await capture(page, "automation-discussion");
 
   // Archive: asks first; then hidden from the list, history kept (Show archived).
-  await row.click();
-  await main.getByRole("button", { name: "Archive…" }).click();
+  await row.locator(".code-card-main").click();
+  await main.getByRole("button", { name: "Archive", exact: true }).click();
   await main.locator('[data-action="archive-confirm"]').click();
+  await expect(main.locator('.code-auto-header [data-field="result"]')).toHaveText("Automation archived.");
   await expect(row).toHaveCount(0, { timeout: 15_000 });
-  await page.locator('[data-action="show-archived"]').check();
-  await expect(row.locator('[data-field="state"] [data-state="archived"]')).toHaveText("Archived");
-  await row.click();
+  await page.locator('[data-action="show-archived"]').click();
+  await expect(row).toHaveAttribute("data-status", "archived");
+  await row.locator(".code-card-main").click();
   await expect(main.locator('.af-auto-occ[data-index="1"]')).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -179,12 +179,12 @@ test("the automation detail's lists collapse, stay collapsed after a reload, and
   expect(await occToggle.evaluate((el) => el.parentElement?.nextElementSibling?.id)).toBe("code-detail-occurrences");
   expect((await occToggle.boundingBox())!.height).toBeGreaterThanOrEqual(32);
 
-  // Phone width: an occurrence is a flat section, the When fact shares its label's line.
+  // Phone width: an occurrence is a flat section; the header (round 4) fits the width.
   const occ = main.locator(".af-auto-occ").first();
   expect(await occ.evaluate((el) => getComputedStyle(el).borderLeftWidth)).toBe("0px");
-  const when = main.locator(".af-auto__head .af-auto__facts dt").first();
-  const whenValue = main.locator(".af-auto__head .af-auto__facts dd").first();
-  expect(Math.abs((await when.boundingBox())!.y - (await whenValue.boundingBox())!.y)).toBeLessThan(4);
+  const header = main.locator(".code-auto-header");
+  await expect(header.locator('[data-field="timing"]')).toBeVisible();
+  expect(await header.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
 
   await occToggle.click();
   await expect(occToggle).toHaveAttribute("aria-expanded", "false");
@@ -195,7 +195,7 @@ test("the automation detail's lists collapse, stay collapsed after a reload, and
   // Remembered per viewer: reopen the same automation after a reload.
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.locator(".code-mobile-nav").click();
-  await page.locator(".code-auto-row", { hasText: title }).click();
+  await page.locator(".code-auto-card", { hasText: title }).locator(".code-card-main").click();
   await expect(main.locator("#code-detail-occurrences-toggle")).toHaveAttribute("aria-expanded", "false");
   await expect(main.locator(".af-auto__timeline")).toBeHidden();
   await expect(main.locator("#code-detail-folder-toggle")).toHaveAttribute("aria-expanded", "false");
@@ -223,7 +223,7 @@ test("creates and edits a custom growing context budget", async ({ page }) => {
   await dialog.getByRole("button", { name: "Create automation" }).click();
   expect((await posted).postDataJSON().context).toEqual({ mode: "growing", growing: { max_tokens: 30000 } });
   await expect(dialog).toBeHidden();
-  const row = page.locator(".code-auto-row", { hasText: title });
+  const row = page.locator(".code-auto-card", { hasText: title });
   await expect(row).toBeVisible();
   const main = page.locator(".code-automation-main");
   await main.getByRole("button", { name: "Edit", exact: true }).click();
@@ -240,7 +240,7 @@ test("creates and edits a custom growing context budget", async ({ page }) => {
   await expect(main.locator(".af-auto__revise")).toBeHidden();
   await page.reload();
   await expect(row).toBeVisible();
-  await row.click();
+  await row.locator(".code-card-main").click();
   await main.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(editBudget).toHaveValue("20000");
   await editBudget.scrollIntoViewIfNeeded();
@@ -255,7 +255,7 @@ test("list refreshes preserve sidebar rows without adding loading messages", asy
   ] as const) {
     const button = page.getByRole("button", { name: label, exact: true });
     await expect(button).toBeEnabled();
-    const rows = page.locator(".code-auto-row, .code-session");
+    const rows = page.locator(".code-auto-card, .code-session");
     const before = await rows.allTextContents();
     expect(before.length).toBeGreaterThan(0);
     const bounds = await button.boundingBox();

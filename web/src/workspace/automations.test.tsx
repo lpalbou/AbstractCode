@@ -17,6 +17,7 @@ import {
   waitResumeCommand,
 } from "./automations";
 import { AutomationsSection, NewAutomationDialog, automationPanelProps, folderRefreshKey, folderTitle } from "./automations_view";
+import { AutomationCard } from "./sidebar_cards";
 
 // The ui-kit's canonical wire fixtures, vendored byte-identical (checksums
 // verified by the terminal client's contract test in this repo).
@@ -233,15 +234,68 @@ describe("the sidebar section", () => {
   };
   const state = (items: AutomationSummary[], showArchived = false) => ({ ...new AutomationsController(stubClient(), vi.fn()).state, items, loaded: true, showArchived });
 
-  it("lists state (the kit's word + icon), now and next as the gateway says", () => {
+  it("round 4 cards: name, the Active switch, the waiting badge, one timing line (every · last · next)", () => {
     const html = renderToStaticMarkup(<AutomationsSection {...base} state={state(list())} />);
-    const label = (status: string, word: string) =>
-      new RegExp(`data-state="${status}"><span class="af-auto__status-word">${word}</span><svg`);
-    expect(html).toMatch(label("active", "Active"));
-    expect(html).toMatch(label("paused", "Paused"));
-    expect(html).toContain("now: Run #7 running");
-    expect(html).toContain("next: none while paused");
-    expect(html).toContain("legacy schedule");
+    const card = (title: string) => {
+      const id = list().find((s) => s.title === title)!.automation_id;
+      const at = html.indexOf(`data-automation-id="${id}"`);
+      expect(at, title).toBeGreaterThan(-1);
+      return html.slice(at, html.indexOf('</div>', html.indexOf('role="switch"', at)));
+    };
+    const timing = (c: string) => /data-field="timing">([^<]*)</.exec(c)?.[1];
+    // The operator's line, from the gateway's facts only (NOW = 2026-09-27 06:35 UTC).
+    expect(timing(card("Inbox triage"))).toBe("every 30 min · running now · next in 25 min");
+    expect(timing(card("AI news monitor"))).toBe("every 8 h · last 6 h ago · next in 1 h");
+    expect(timing(card("Weekly journal monitor"))).toBe("every 7 d · last 6 d ago");
+    // An approval is pending only on Inbox triage (pending_waits 2): the badge there and nowhere else.
+    expect(card("Inbox triage")).toContain('data-field="waiting">waiting for you<');
+    expect(card("AI news monitor")).not.toContain("waiting for you");
+    // The state is a switch labelled by the feature: on = active, off = paused (never a verb).
+    expect(card("AI news monitor")).toMatch(/role="switch" class="af-switch af-switch--sm code-card-switch" data-action="active" aria-checked="true"[\s\S]*af-switch__label">Active</);
+    expect(card("Weekly journal monitor")).toMatch(/data-action="active" aria-checked="false"/);
+    expect(html).not.toMatch(/>(Pause|Resume)</);
+    // No year and no seconds anywhere on the cards.
+    for (const line of html.matchAll(/data-field="timing">([^<]*)</g)) expect(line[1]).not.toMatch(/20\d\d|\bsec|\d+ ?s\b/);
+    // The legacy row's switch is unavailable, with the kit's reason as its tooltip.
+    expect(card("echo")).toMatch(/aria-disabled="true"[^>]*title="Legacy schedule/);
+  });
+
+  it("the card body selects and the switch flips Active through the controller (never nested buttons)", () => {
+    const onSelect = vi.fn();
+    const onToggleActive = vi.fn();
+    const items = list();
+    const html = renderToStaticMarkup(<AutomationsSection {...base} onSelect={onSelect} onToggleActive={onToggleActive} state={state(items)} />);
+    expect(html).not.toMatch(/<button[^>]*>(?:(?!<\/button>)[\s\S])*<button/);
+    const tree = AutomationsSection({ ...base, onSelect, onToggleActive, state: state(items) } as any);
+    const cards: any[] = [];
+    const visit = (n: any) => {
+      if (Array.isArray(n)) return n.forEach(visit);
+      if (!React.isValidElement(n)) return;
+      if (n.type === AutomationCard) cards.push(n);
+      visit((n.props as any).children);
+    };
+    visit(tree);
+    expect(cards).toHaveLength(items.length);
+    (cards[1].props as any).onSelect();
+    expect(onSelect).toHaveBeenCalledWith(items[1].automation_id);
+    (cards[1].props as any).onToggleActive();
+    expect(onToggleActive).toHaveBeenCalledWith(items[1]);
+  });
+
+  it("toggleActive pauses an active automation, resumes a paused one, and keeps a refusal for the card", async () => {
+    const client = stubClient();
+    const ctl = new AutomationsController(client, vi.fn(), []);
+    await ctl.toggleActive({ automation_id: "a1", status: "active" });
+    await ctl.toggleActive({ automation_id: "a2", status: "paused" });
+    const sent = (client.sendAutomationCommand as any).mock.calls.map((c: any[]) => [c[0], c[1].type]);
+    expect(sent).toEqual([["a1", "automation.pause"], ["a2", "automation.resume"]]);
+    const refusing = stubClient({ sendAutomationCommand: vi.fn(async () => Promise.reject({ status: 409, code: "not_permitted", message: "no" })) });
+    const ctl2 = new AutomationsController(refusing, vi.fn(), []);
+    await expect(ctl2.toggleActive({ automation_id: "a3", status: "active" })).rejects.toMatchObject({ code: "not_permitted" });
+    expect(ctl2.state.rowError).toMatchObject({ automationId: "a3", error: { code: "not_permitted" } });
+    const items = list().map((s, i) => (i === 0 ? { ...s, automation_id: "a3" } : s));
+    const html = renderToStaticMarkup(<AutomationsSection {...base} state={{ ...state(items), rowError: ctl2.state.rowError }} />);
+    expect(html).toMatch(/data-automation-id="a3"[\s\S]*?<\/div><p class="code-inline-error" role="alert" data-code="not_permitted">/);
   });
 
   it("hides archived rows behind a toggle", () => {
@@ -250,7 +304,7 @@ describe("the sidebar section", () => {
     expect(hidden).not.toContain(`data-automation-id="${items[1].automation_id}"`);
     expect(hidden).toContain("Show archived (1)");
     const shown = renderToStaticMarkup(<AutomationsSection {...base} state={state(items, true)} />);
-    expect(shown).toContain('data-state="archived"');
+    expect(shown).toContain(`data-automation-id="${items[1].automation_id}" data-status="archived"`);
   });
 
   it("Show archived is a switch labelled by the feature, not a checkbox (state toggles)", () => {

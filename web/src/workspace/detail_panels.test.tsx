@@ -252,12 +252,14 @@ describe("space on phones and tablets (DESIGN §12)", () => {
   });
 });
 
-describe("the navigation drawer scrolls as one (DESIGN §12: no list scrolling inside a scrolling page)", () => {
-  // Round 3: docked sidebar and drawer alike, the two lists share ONE scroll (.code-sidebar-lists);
-  // each list takes its content height; the drawer itself only scrolls on short (landscape) screens.
-  it("one scroll container holds both lists at their content height; the drawer does not scroll too", () => {
-    expect(rule(css, ".code-sidebar-lists")).toContain("overflow-y: auto;");
-    expect(css).toMatch(/\.code-panel > nav,\s*\.code-panel > \[role="region"\] \{\s*flex: none;\s*overflow: visible;/);
+describe("no list scrolls inside a scrolling page (DESIGN §12, round 4 drawers)", () => {
+  // Round 4 (DESIGN §3): each list scrolls inside its own drawer and the frame around them never
+  // scrolls, so no list scrolls inside a scrolling page; the drawer itself only scrolls on short
+  // (landscape) screens, where every part takes its content height instead.
+  it("each list scrolls inside its drawer, the frame and the drawer do not scroll too", () => {
+    expect(rule(css, ".code-sidebar-lists")).toContain("overflow: hidden;");
+    expect(rule(css, ".code-sidebar-lists")).not.toContain("overflow-y: auto;");
+    expect(css).toMatch(/\.code-panel > nav,\s*\.code-panel > \[role="region"\] \{\s*flex: 1 1 auto;\s*min-height: 0;\s*overflow-y: auto;/);
     // No drawer-width block makes the whole sidebar scroll as well (that was 0.9.0's drawer rule).
     let drawers = 0;
     for (let at = css.indexOf("@media (max-width: 1023.98px) {"); at >= 0; at = css.indexOf("@media (max-width: 1023.98px) {", at + 1)) {

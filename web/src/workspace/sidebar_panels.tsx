@@ -1,10 +1,14 @@
-// Collapsible sidebar panels (Automations, Conversations) — docked sidebar, tablet and phone
-// drawer alike. Each header is a full-width 44 px row on the raised surface (ui-surface-2):
-// the disclosure toggle (chevron + label) on the left, the section's "+" / refresh actions on the
-// right as separate sibling buttons that never toggle. The items sit below on the plain sidebar
-// background. Both panels live in ONE scroll container (`.code-sidebar-lists`, app.tsx): each
-// panel takes its content height, so no list is ever clipped under the next header, and the
-// bottom Workspace/Settings block stays pinned. State persists per viewer.
+// The sidebar's two stacking drawers (round 4, DESIGN §3), Automations above Conversations, both
+// full width, docked sidebar and phone/tablet drawer alike. Each header is a full-width 44 px row
+// on the raised surface (ui-surface-2): the disclosure toggle (chevron + label) on the left, the
+// section's "+" / refresh actions on the right as sibling buttons that never toggle. Both headers
+// are always visible; the layout follows the two open states (CSS on `.code-sidebar-lists`):
+//   - both closed: the two header rows at the top;
+//   - Automations open: it takes the space above the Conversations header, which sits mid-height;
+//   - Conversations open (Automations closed): it takes the rest below its header;
+//   - both open: an even split, the Conversations header pinned mid-height.
+// Each list scrolls inside its own drawer (never clipped under the other header); the bottom
+// block stays pinned. The two open states persist per viewer (localStorage).
 import React, { useCallback, useState } from "react";
 import { Icon } from "@abstractframework/ui-kit";
 
@@ -96,9 +100,18 @@ export function PanelHeader(props: {
   );
 }
 
-/** The scroll container both panels share (between the search field and the bottom block). */
-export function SidebarLists(props: { children: React.ReactNode }): React.ReactElement {
-  return <div className="code-sidebar-lists">{props.children}</div>;
+/** The drawers' frame (between the search field and the bottom block); its two data attributes
+ * drive the fold/split layout. */
+export function SidebarLists(props: { panels: PanelsState; children: React.ReactNode }): React.ReactElement {
+  return (
+    <div
+      className="code-sidebar-lists"
+      data-automations={props.panels.automations ? "open" : "closed"}
+      data-conversations={props.panels.conversations ? "open" : "closed"}
+    >
+      {props.children}
+    </div>
+  );
 }
 
 /** The Conversations panel of the sidebar (the Automations one lives in automations_view.tsx). */

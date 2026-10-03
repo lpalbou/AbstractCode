@@ -134,13 +134,18 @@ describe("sidebar panels DOM", () => {
     expect(html).toMatch(/<div class="code-auto-rows"[^>]*hidden=""/);
   });
 
-  it("app.tsx renders both panels from the persisted state inside the one scroll container, the bottom block after it", () => {
+  it("app.tsx renders both drawers from the persisted state inside the drawers frame, the bottom block after it", () => {
     expect(appSource).toMatch(/useSidebarPanels\(\)/);
     expect(appSource).toMatch(/<ConversationsPanel\s+open=\{panels\.conversations\}/);
     expect(appSource).toMatch(/open=\{panels\.automations\}\s+onToggle=/);
-    const lists = /<SidebarLists>([\s\S]*?)<\/SidebarLists>\s*<div className="code-sidebar-bottom">/.exec(appSource)?.[1] ?? "";
+    const lists = /<SidebarLists panels=\{panels\}>([\s\S]*?)<\/SidebarLists>\s*<div className="code-sidebar-bottom">/.exec(appSource)?.[1] ?? "";
     expect(lists).toMatch(/^\s*<AutomationsSection[\s\S]*<ConversationsPanel[\s\S]*<\/ConversationsPanel>\s*$/);
-    expect(renderToStaticMarkup(<SidebarLists>x</SidebarLists>)).toBe('<div class="code-sidebar-lists">x</div>');
+    expect(renderToStaticMarkup(<SidebarLists panels={{ automations: true, conversations: false }}>x</SidebarLists>)).toBe(
+      '<div class="code-sidebar-lists" data-automations="open" data-conversations="closed">x</div>',
+    );
+    expect(renderToStaticMarkup(<SidebarLists panels={{ automations: false, conversations: true }}>x</SidebarLists>)).toContain(
+      'data-automations="closed" data-conversations="open"',
+    );
   });
 });
 
@@ -188,21 +193,45 @@ describe("panel headers (round 3: the operator's 12:00 screenshot of 0.9.0)", ()
   });
 });
 
-describe("no clipping (round 3): one scroll for both lists, the bottom block pinned", () => {
-  it("the shared container is the scroll; every list takes its content height", () => {
+describe("two stacking drawers (round 4, DESIGN §3): fold/split, each list scrolls inside its drawer", () => {
+  /** The declarations of a rule whose selector list is exactly `selectors` (one per line). */
+  const ruleFor = (selectors: string) => {
+    const at = css.indexOf(`\n${selectors} {`);
+    expect(at, `${selectors} rule exists`).toBeGreaterThanOrEqual(0);
+    return css.slice(at, css.indexOf("}", at) + 1);
+  };
+
+  it("the frame takes the free height and never scrolls itself; a closed drawer is its header only", () => {
     const lists = cssRule(".code-sidebar-lists");
+    expect(decl(lists, "display")).toBe("flex");
+    expect(decl(lists, "flex-direction")).toBe("column");
     expect(decl(lists, "flex")).toBe("1 1 0");
     expect(decl(lists, "min-height")).toBe("0");
-    expect(decl(lists, "overflow-y")).toBe("auto");
-    expect(decl(cssRule(".code-panel"), "flex")).toBe("none");
-    expect(css).toMatch(/\n\.code-panel > nav,\n\.code-panel > \[role="region"\] \{\n\s*flex: none;\n\s*overflow: visible;/);
+    expect(decl(lists, "overflow")).toBe("hidden");
+    const panel = cssRule(".code-panel");
+    expect(decl(panel, "flex")).toBe("none");
+    expect(decl(panel, "min-height")).toBe("0");
   });
 
-  it("nothing bounds a panel or a list to a share of the sidebar (0.9.0 capped Automations at 38 %)", () => {
-    expect(css).not.toMatch(/\.code-automations\[data-open="true"\] \{[^}]*max-height/);
-    expect(css).not.toMatch(/\.code-panel\[data-open="true"\] \{[^}]*flex: 1 1 0/);
-    expect(css).not.toMatch(/\.code-auto-rows \{[^}]*overflow-y: auto/);
-    expect(css).not.toMatch(/\.code-sessions \{[^}]*overflow-y: auto/);
+  it("Automations open: both drawers share the height (the Conversations header mid-height); only Conversations open: it takes the rest", () => {
+    const split = ruleFor(
+      '.code-sidebar-lists[data-automations="open"] > .code-panel,\n.code-sidebar-lists[data-automations="closed"][data-conversations="open"] > .code-conversations',
+    );
+    expect(decl(split, "flex")).toBe("1 1 0");
+    // Nothing else grows a drawer: both closed = the two header rows at the top.
+    expect(css.match(/> \.code-(panel|conversations|automations)[^{]*\{[^}]*flex: 1 1 0/g) ?? []).toHaveLength(1);
+  });
+
+  it("each list scrolls inside its drawer (never clipped under the other header)", () => {
+    const list = ruleFor('.code-panel > nav,\n.code-panel > [role="region"]');
+    expect(decl(list, "flex")).toBe("1 1 auto");
+    expect(decl(list, "min-height")).toBe("0");
+    expect(decl(list, "overflow-y")).toBe("auto");
+  });
+
+  it("a short phone landscape scrolls the whole drawer instead (each part at its content height)", () => {
+    const short = css.slice(css.indexOf("@media (max-height: 500px) {"));
+    expect(short).toMatch(/\.code-sidebar \.code-sidebar-lists,\n\s*\.code-sidebar \.code-sidebar-lists > \.code-panel,\n\s*\.code-sidebar \.code-panel > nav,\n\s*\.code-sidebar \.code-panel > \[role="region"\] \{\n\s*flex: none;\n\s*overflow: visible;/);
   });
 });
 

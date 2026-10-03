@@ -148,19 +148,21 @@ button {
   white-space: nowrap;
   opacity: 0.65;
 }
-/* Collapsible panels (sidebar_panels.tsx, round 3). The two panels share ONE scroll container
-   between the search field and the pinned bottom block; each panel takes its content height, so a
-   list is never clipped under the next header (0.9.0 cut the fourth automation in half). */
+/* The two stacking drawers (sidebar_panels.tsx, round 4, DESIGN §3). Both headers always show;
+   the frame's data attributes set the split:
+   - Automations open: the two drawers share the height evenly, so the Conversations header sits
+     mid-height (pinned there whether or not Conversations is open);
+   - only Conversations open: it takes everything below its header;
+   - both closed: the two header rows at the top.
+   Each list scrolls inside its own drawer: nothing is clipped under the other header, and the
+   bottom block stays pinned. */
 .code-sidebar-lists {
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  /* A visible edge on both ends: rows scrolling away pass under this line and the bottom
-     block's own top border, never under a header. */
+  overflow: hidden;
   border-top: 1px solid var(--ui-border-1);
   padding-block: 8px;
 }
@@ -168,6 +170,11 @@ button {
   display: flex;
   flex: none;
   flex-direction: column;
+  min-height: 0;
+}
+.code-sidebar-lists[data-automations="open"] > .code-panel,
+.code-sidebar-lists[data-automations="closed"][data-conversations="open"] > .code-conversations {
+  flex: 1 1 0;
 }
 /* The header: a full-width 44 px row on the raised surface (ui-surface-2 background,
    border-2 and 8 px radius, 15 px inset), label + chevron on the left, the actions on the right. */
@@ -226,13 +233,16 @@ button {
 .code-panel-header .code-icon-button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--text-primary) 10%, transparent);
 }
-/* The items: plain sidebar background below the header (no card around them). */
+/* The items: plain sidebar background below the header (no card around them); the list scrolls
+   inside its drawer. */
 .code-panel > nav,
 .code-panel > [role="region"] {
-  flex: none;
-  overflow: visible;
-  /* The rows line up with the header and the New conversation button (same 15 px inset). */
-  padding: 6px 15px 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* The cards line up with the header (same 15 px inset). */
+  padding: 8px 15px;
 }
 .code-panel > [hidden] {
   display: none;
@@ -2081,7 +2091,10 @@ select option {
     overflow-y: auto;
     overscroll-behavior: contain;
   }
-  .code-sidebar .code-sidebar-lists {
+  .code-sidebar .code-sidebar-lists,
+  .code-sidebar .code-sidebar-lists > .code-panel,
+  .code-sidebar .code-panel > nav,
+  .code-sidebar .code-panel > [role="region"] {
     flex: none;
     overflow: visible;
   }
@@ -2811,4 +2824,214 @@ select option {
 @media (max-width: 767.98px) {
   .code-topbar { gap: 4px; padding-inline: 8px; }
   .code-topbar .af-topbar__pill { padding: 0; width: 44px; min-width: 44px; min-height: 44px; }
+}
+
+/* ===========================================================================
+   Round 4 (DESIGN §3, §4 automation header): sidebar cards and the automation header.
+   Cards use the full drawer width (no leading icon), an 8/12 px rhythm, no box around them.
+   =========================================================================== */
+.code-session.code-card {
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 4px;
+}
+.code-card .code-card-title {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.code-card .code-card-meta {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+.code-session.code-card > .code-status-dot {
+  margin-top: 6px;
+}
+/* Automation card: the body button spans the card; the Active switch sits top-right over it, the
+   title leaves room for it, the badge and the timing line use the full width. */
+.code-auto-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 4px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+}
+.code-auto-card > .code-card-main {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.code-auto-card > .code-card-main > .code-card-title {
+  max-width: calc(100% - var(--code-card-switch-w, 84px));
+}
+.code-auto-card > .code-card-main > .code-card-meta {
+  max-width: 100%;
+}
+.code-auto-card > .code-card-switch {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  z-index: 1;
+  margin: 4px 8px 0 0;
+}
+.code-auto-card.is-selected {
+  background: var(--accent-subtle);
+  border-color: color-mix(in srgb, var(--accent-border) 50%, transparent);
+}
+.code-auto-card:hover:not(.is-selected) {
+  background: var(--ui-surface-2);
+}
+.code-auto-card > .code-card-main:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.code-waiting-badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--warning-subtle, var(--accent-subtle));
+  color: var(--warning, var(--accent));
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The automation header (automation_header.tsx). */
+.code-auto-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--ui-border-1);
+}
+.code-auto-header__title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.code-auto-header__state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+.code-auto-header__timing {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+.code-auto-header__warn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--warning, var(--text-secondary));
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+.code-auto-header__workspace {
+  display: flex;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+}
+.code-auto-header__label {
+  color: var(--text-secondary);
+}
+.code-auto-header__folder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.code-auto-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+.code-auto-header__actions .code-subtle-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.code-auto-header .code-danger-button:not(:disabled) {
+  color: var(--error);
+}
+.code-auto-header__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--error);
+  background: var(--error-subtle);
+  border-radius: 6px;
+}
+.code-auto-header__confirm p {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+.code-auto-header__result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+.code-auto-header__result.is-ok {
+  color: var(--success, var(--text-secondary));
+}
+.code-auto-header__result.is-error {
+  color: var(--error);
+}
+/* Touch: 44 px targets and at least 14 px text on the cards and the header. */
+@media (pointer: coarse) {
+  .code-card .code-card-title,
+  .code-card .code-card-meta,
+  .code-waiting-badge,
+  .code-auto-header__timing,
+  .code-auto-header__workspace,
+  .code-auto-header__result,
+  .code-auto-header__confirm p,
+  .code-auto-header__actions .code-subtle-button {
+    font-size: max(14px, var(--font-size-body, 14px));
+  }
+  .code-auto-card > .code-card-main,
+  .code-auto-header__actions .code-subtle-button {
+    min-height: var(--tap-min, 44px);
+  }
+  .code-auto-card {
+    --code-card-switch-w: 96px;
+  }
 }

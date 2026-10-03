@@ -34,6 +34,7 @@ import {
 } from "./layout";
 import { SidebarDrawer } from "./sidebar_drawer";
 import { ConversationsPanel, SidebarLists, useSidebarPanels } from "./sidebar_panels";
+import { ConversationCard } from "./sidebar_cards";
 import {
   WorkflowChat,
   WorkspaceBrowser,
@@ -49,7 +50,6 @@ import {
   isChatAgent,
   resolveRestoredWorkflow,
   type WorkflowDefinition,
-  type SessionSummary,
 } from "./catalog";
 import {
   fetchWorkflowSchema,
@@ -436,6 +436,14 @@ export function CodeWorkspace() {
         window.open(myEmailUrl, "_blank", "noopener,noreferrer");
       }
     : undefined;
+  // The automation header's Edit: the Settings panel on that automation (round 4 seam with the
+  // right rail, untracked/round4/COORD.md — the rail's openAutomationSettings(id) is this body).
+  // Until the rail lands, Edit opens the kit panel's own Edit form (controlled here).
+  const [automationEditOpen, setAutomationEditOpen] = useState(false);
+  const onEditAutomation = (automationId: string) => {
+    if (automationsState.selectedId !== automationId) void automations.select(automationId);
+    setAutomationEditOpen(true);
+  };
   // Automations open gateway sessions here: a Discuss fork becomes THIS
   // app's conversation (one session pool for every client).
   const automationHost: Omit<AutomationHost, "openWorkspace"> = {
@@ -1162,7 +1170,7 @@ export function CodeWorkspace() {
           />
           <kbd>⌘K</kbd>
         </div>
-        <SidebarLists>
+        <SidebarLists panels={panels}>
         <AutomationsSection
           state={automationsState}
           available={automationsAvailable}
@@ -1170,6 +1178,7 @@ export function CodeWorkspace() {
           createDisabled={schemaLoading || !!schemaError || !workflow}
           selectedId={automationView ? automationsState.selectedId : ""}
           onSelect={(id) => {
+            setAutomationEditOpen(false);
             setAutomationView(true);
             setSidebarOpen(false);
             void automations.select(id);
@@ -1177,6 +1186,7 @@ export function CodeWorkspace() {
           onNew={() => setNewAutomationOpen(true)}
           onRefresh={() => void automations.refresh()}
           onShowArchived={(show) => automations.setShowArchived(show)}
+          onToggleActive={(s) => void automations.toggleActive(s).catch(() => undefined)}
           open={panels.automations}
           onToggle={() => togglePanelOpen("automations")}
         />
@@ -1218,7 +1228,7 @@ export function CodeWorkspace() {
             </button>
           ) : null}
           {filteredSessions.map((item) => (
-            <SessionButton
+            <ConversationCard
               key={item.sessionId}
               item={item}
               selected={item.sessionId === session.sessionId}
@@ -1314,6 +1324,9 @@ export function CodeWorkspace() {
               voicePreferences={voicePreferences}
               enabled={connection.connected}
               onClose={() => setAutomationView(false)}
+              onEdit={onEditAutomation}
+              editOpen={automationEditOpen}
+              onEditOpenChange={setAutomationEditOpen}
             />
           ) : (
           <main
@@ -1846,48 +1859,6 @@ export function CodeWorkspace() {
         </section>,
       }} />
     </div>
-  );
-}
-
-function SessionButton({
-  item,
-  selected,
-  onClick,
-}: {
-  item: SessionSummary;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  const label = item.prompt || `Conversation ${item.sessionId.slice(0, 8)}`;
-  const date = item.updatedAt ? new Date(item.updatedAt) : null;
-  return (
-    <button
-      className={`code-session${selected ? " is-selected" : ""}`}
-      aria-current={selected ? "page" : undefined}
-      onClick={onClick}
-      title={label}
-    >
-      <Icon name="chat" size={15} />
-      <span>
-        <strong>{label}</strong>
-        <small>
-          {date && Number.isFinite(date.getTime())
-            ? date.toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-              })
-            : "Saved conversation"}{" "}
-          <span aria-hidden="true">·</span> {item.turnCount}{" "}
-          {item.turnCount === 1 ? "turn" : "turns"}
-        </small>
-      </span>
-      {item.state === "running" || item.state === "waiting" ? (
-        <span
-          className={`code-status-dot ${item.state === "running" ? "is-working" : "is-waiting"}`}
-          title={item.state}
-        />
-      ) : null}
-    </button>
   );
 }
 

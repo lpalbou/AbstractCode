@@ -130,7 +130,7 @@ async function openConversationScreen(page) {
 
 async function ensureAutomation(page) {
   await openNav(page);
-  const row = page.locator(".code-auto-row", { hasText: AUTOMATION_TITLE }).first();
+  const row = page.locator(".code-auto-card", { hasText: AUTOMATION_TITLE }).locator(".code-card-main").first();
   if (await row.isVisible({ timeout: 4000 }).catch(() => false)) return;
   await closeOverlays(page);
   await newConversation(page);
@@ -230,7 +230,7 @@ export default {
       async run(page) {
         await closeOverlays(page);
         await openNav(page);
-        await press(page, page.locator(".code-auto-row", { hasText: AUTOMATION_TITLE }).first(), "automation row");
+        await press(page, page.locator(".code-auto-card", { hasText: AUTOMATION_TITLE }).locator(".code-card-main").first(), "automation row");
         const main = page.locator(".code-automation-main");
         await main.waitFor({ state: "visible", timeout: 15000 });
         await main.locator(".af-auto-occ").first().waitFor({ state: "visible", timeout: 30000 }).catch(() => {});
@@ -252,7 +252,7 @@ export default {
         if (!(await main.isVisible().catch(() => false))) {
           await closeOverlays(page);
           await openNav(page);
-          await press(page, page.locator(".code-auto-row", { hasText: AUTOMATION_TITLE }).first(), "automation row");
+          await press(page, page.locator(".code-auto-card", { hasText: AUTOMATION_TITLE }).locator(".code-card-main").first(), "automation row");
           await main.waitFor({ state: "visible", timeout: 15000 });
         }
         const occ = main.locator(".af-auto-occ").first();

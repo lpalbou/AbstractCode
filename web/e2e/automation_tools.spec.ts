@@ -67,7 +67,7 @@ test("workflow and tool pickers persist; email recipients remain visible; refres
   expect(createdBody.target.input_data.tools).toEqual(["web_search"]);
   expect(createdBody.target.input_data._runtime.allowed_tools).toEqual(["web_search"]);
   const main = page.getByRole("main", { name: "Automation", exact: true });
-  await expect(main.locator('[data-fact="workflow"]')).toContainText("authored-contract");
+  await expect(main.locator('[data-def="target"]')).toContainText("authored-contract");
   await expect(page.getByRole("main", { name: "Automation", exact: true })).toBeVisible();
   await main.locator('[data-action="edit"]').click();
   const edit = main.locator(".af-auto__revise");
@@ -84,8 +84,8 @@ test("workflow and tool pickers persist; email recipients remain visible; refres
   expect(body.changes.target.input_data._runtime.allowed_tools).toEqual([]);
   await expect(edit).not.toBeVisible();
   // PATCH queues a durable command; wait for the committed revision before reopening.
-  await expect(main.locator('[data-fact="revision"]')).toHaveText("2");
-  await expect(main.locator('[data-fact="workflow"]')).toContainText("basic-agent-contract");
+  await expect(main.locator(".af-auto__definition")).toHaveAttribute("data-definition-revision", "2");
+  await expect(main.locator('[data-def="target"]')).toContainText("basic-agent-contract");
   await main.locator('[data-action="edit"]').click();
   await expect(edit.getByRole("button", { name: /^Select.*No tools enabled/ })).toBeVisible();
   await expect(edit.getByLabel("Use workflow default tools")).not.toBeChecked();

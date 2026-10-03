@@ -34,8 +34,8 @@ test("works under /apps/code/: automations, approval, folder and discuss", async
   await dialog.getByRole("button", { name: "Create automation" }).click();
   await expect(dialog).toBeHidden();
 
-  const row = page.locator(".code-auto-row", { hasText: title });
-  await expect(row.locator('[data-field="state"] [data-state="active"]')).toHaveText("Active");
+  const row = page.locator(".code-auto-card", { hasText: title });
+  await expect(row.getByRole("switch", { name: "Active" })).toHaveAttribute("aria-checked", "true");
   const main = page.locator(".code-automation-main");
   await expect(main.getByRole("button", { name: "Approve" }).first()).toBeVisible({ timeout: 45_000 });
   await main.getByRole("button", { name: "Approve" }).first().click();
