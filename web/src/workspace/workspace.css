@@ -2885,12 +2885,13 @@ select option {
   text-align: left;
   cursor: pointer;
 }
+/* The name has its full row; the icon-only Active switch sits right-aligned on the last line. */
 .code-auto-card > .code-card-main > .code-card-title {
-  max-width: calc(100% - var(--code-card-switch-w, 84px));
+  max-width: 100%;
 }
 /* The timing line is never cut: at a narrow docked width its parts wrap at the separators. */
 .code-auto-card > .code-card-main > .code-card-meta {
-  max-width: 100%;
+  max-width: calc(100% - var(--code-card-switch-w, 48px));
   overflow: visible;
   white-space: normal;
   text-overflow: clip;
@@ -2901,9 +2902,20 @@ select option {
 .code-auto-card > .code-card-switch {
   grid-column: 2;
   grid-row: 1;
-  align-self: start;
+  align-self: end;
   z-index: 1;
-  margin: 4px 8px 0 0;
+  margin: 0 8px 6px 0;
+}
+.code-switch-icon-only .af-switch__text {
+  display: none;
+}
+.code-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 .code-auto-card.is-selected {
   background: var(--accent-subtle);
@@ -3040,6 +3052,6 @@ select option {
     min-height: var(--tap-min, 44px);
   }
   .code-auto-card {
-    --code-card-switch-w: 96px;
+    --code-card-switch-w: 56px;
   }
 }

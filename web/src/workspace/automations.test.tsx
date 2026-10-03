@@ -244,14 +244,20 @@ describe("the sidebar section", () => {
     };
     const timing = (c: string) => /data-field="timing">([\s\S]*?)<\/small>/.exec(c)?.[1].replace(/<[^>]+>/g, "");
     // The operator's line, from the gateway's facts only (NOW = 2026-09-27 06:35 UTC).
-    expect(timing(card("Inbox triage"))).toBe("every 30 min · running now · next in 25 min");
+    // Run #7 waits for an approval: "waiting since", never "running now" beside the badge.
+    expect(timing(card("Inbox triage"))).toBe("every 30 min · waiting since 4 min · next in 25 min");
+    const executing = { ...list()[0], attention: { ...list()[0].attention, pending_waits: 0, unseen_count: 0 } };
+    const run = renderToStaticMarkup(<AutomationsSection {...base} state={state([executing])} />);
+    expect(timing(run)).toBe("every 30 min · running now · next in 25 min");
     expect(timing(card("AI news monitor"))).toBe("every 8 h · last 6 h ago · next in 1 h");
     expect(timing(card("Weekly journal monitor"))).toBe("every 7 d · last 6 d ago");
     // An approval is pending only on Inbox triage (pending_waits 2): the badge there and nowhere else.
     expect(card("Inbox triage")).toContain('data-field="waiting">waiting for you<');
     expect(card("AI news monitor")).not.toContain("waiting for you");
     // The state is a switch labelled by the feature: on = active, off = paused (never a verb).
-    expect(card("AI news monitor")).toMatch(/role="switch" class="af-switch af-switch--sm code-card-switch" data-action="active" aria-checked="true"[\s\S]*af-switch__label">Active</);
+    // Icon-only in the card (the name keeps its full row): "Active" is the accessible name and tooltip.
+    expect(card("AI news monitor")).toMatch(/role="switch" class="af-switch af-switch--sm code-card-switch code-switch-icon-only" data-action="active" aria-checked="true" aria-label="Active"[^>]*title="Active\n/);
+    expect(card("AI news monitor")).toContain('<span class="code-visually-hidden">Active</span>');
     expect(card("Weekly journal monitor")).toMatch(/data-action="active" aria-checked="false"/);
     expect(html).not.toMatch(/>(Pause|Resume)</);
     // No year and no seconds anywhere on the cards.

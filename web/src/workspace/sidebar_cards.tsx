@@ -30,7 +30,8 @@ export function conversationMetaLine(
       ? date.toLocaleDateString(options.locale, { month: "short", day: "numeric", ...(options.timeZone ? { timeZone: options.timeZone } : {}) })
       : "Saved conversation";
   const parts = [day, plural(item.turnCount, "turn", "turns")];
-  if (typeof item.toolCalls === "number") parts.push(plural(item.toolCalls, "tool", "tools"));
+  // Only a non-zero figure: "0 tools" on every chat card is noise.
+  if (typeof item.toolCalls === "number" && item.toolCalls > 0) parts.push(plural(item.toolCalls, "tool", "tools"));
   return parts.join(" · ");
 }
 
@@ -81,19 +82,22 @@ export function AutomationActiveSwitch(props: {
   onToggle(): void;
   className?: string;
   variant?: "inline" | "sm";
+  /** Track and thumb only (the card): the name "Active" is the accessible name and the tooltip. */
+  iconOnly?: boolean;
 }): React.ReactElement {
   const c = automationControls(props.summary, [], props.busy).active;
   return (
     <AfSwitch
-      className={props.className}
+      className={`${props.className ?? ""}${props.iconOnly ? " code-switch-icon-only" : ""}`.trim() || undefined}
       variant={props.variant ?? "sm"}
       action="active"
-      label="Active"
+      label={props.iconOnly ? <span className="code-visually-hidden">Active</span> : "Active"}
+      ariaLabel="Active"
       checked={props.summary.status === "active"}
       unavailableReason={c.enabled || props.busy ? null : c.reason ?? "Not available now."}
       reasonVisible={false}
       busy={props.busy}
-      hint={controlHint("active", props.summary)}
+      hint={props.iconOnly ? `Active\n${controlHint("active", props.summary)}` : controlHint("active", props.summary)}
       onChange={() => props.onToggle()}
     />
   );
@@ -131,7 +135,7 @@ export function AutomationCard(props: {
           ))}
         </small>
       </button>
-      <AutomationActiveSwitch className="code-card-switch" summary={s} busy={props.busy} onToggle={props.onToggleActive} />
+      <AutomationActiveSwitch className="code-card-switch" iconOnly summary={s} busy={props.busy} onToggle={props.onToggleActive} />
     </div>
   );
 }

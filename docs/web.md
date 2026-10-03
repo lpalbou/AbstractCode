@@ -65,9 +65,9 @@ The sidebar holds two stacking drawers, **Automations** above **Conversations**,
 
 Each list scrolls inside its own drawer. Fold choices are remembered in this browser (`abstractcode.sidebar.panels`). On a short landscape phone screen the whole drawer scrolls instead. The current workspace path is available under **Workspace & settings → Workspace**.
 
-A conversation card shows its title on one line, then `Oct 2 · 2 turns · 7 tools`: the date of the latest turn, the number of turns and the tool calls across them. The tool figure comes from the gateway (`GET /api/gateway/runs?include_metrics=true`, each turn's total including its sub-runs); with a gateway that does not report it, the card shows no tool figure.
+A conversation card shows its title on one line, then `Oct 2 · 2 turns · 7 tools`: the date of the latest turn, the number of turns and, when there were any, the tool calls across them. The tool figure comes from the gateway (`GET /api/gateway/runs?include_metrics=true`, each turn's total including its sub-runs); with a gateway that does not report it, the card shows no tool figure.
 
-An automation card shows its name with the **Active** switch beside it, **waiting for you** while an approval or question is pending, then one line such as `every 24 h · last 3 h ago · next in 14 h` (relative times rounded down, no year or seconds; `last never` before the first run, `running now` while a run is in progress, no next part when nothing is scheduled).
+An automation card shows its name on its own line, **waiting for you** while an approval or question is pending, then one line such as `every 24 h · last 3 h ago · next in 14 h` with the **Active** switch at its right (relative times rounded down, no year or seconds; `last never` before the first run, `running now` while a run executes, `waiting since 5 min` while a run waits for you, no next part when nothing is scheduled).
 
 ### Automation detail sections
 

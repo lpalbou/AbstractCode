@@ -37,9 +37,9 @@ describe("conversation card", () => {
     expect(none.toolCalls).toBeUndefined();
   });
 
-  it("singular words, zero tools, and no year", () => {
+  it("singular words, no figure for zero tools, and no year", () => {
     expect(conversationMetaLine({ updatedAt: "2025-01-31T12:00:00Z", turnCount: 1, toolCalls: 1 }, { locale: "en-US", timeZone: "UTC" })).toBe("Jan 31 · 1 turn · 1 tool");
-    expect(conversationMetaLine({ updatedAt: "2026-10-02T12:00:00Z", turnCount: 3, toolCalls: 0 }, { locale: "en-US", timeZone: "UTC" })).toBe("Oct 2 · 3 turns · 0 tools");
+    expect(conversationMetaLine({ updatedAt: "2026-10-02T12:00:00Z", turnCount: 3, toolCalls: 0 }, { locale: "en-US", timeZone: "UTC" })).toBe("Oct 2 · 3 turns");
     expect(conversationMetaLine({ turnCount: 2, toolCalls: 5 })).toBe("Saved conversation · 2 turns · 5 tools");
   });
 
@@ -91,7 +91,9 @@ describe("automation header (DESIGN §4)", () => {
     expect(html).toContain('<h2 class="code-auto-header__title" tabindex="-1">Inbox triage</h2>');
     expect(html).toMatch(/role="switch"[^>]*data-action="active" aria-checked="true"[\s\S]*?af-switch__label">Active</);
     expect(html).toContain('data-field="waiting">waiting for you<');
-    expect(html).toContain('data-field="timing">every 30 min · running now · next in 25 min<');
+    // An approval is pending on run #7: waiting since it fired (06:30), never "running now".
+    expect(html).toContain('data-field="timing">every 30 min · waiting since 4 min · next in 25 min<');
+    expect(html).not.toContain("running now");
     const news = list().find((s) => s.title === "AI news monitor")!;
     expect(header(news)).not.toContain("waiting for you");
     // The badge means an approval is pending — not merely unseen results.
