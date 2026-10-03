@@ -54,7 +54,20 @@ AbstractCode Web works on phones, tablets, laptop windows and wide screens, and 
 
 ### Navigation panels
 
-The **Automations** and **Conversations** sections each have a header with a fold control, **+** and refresh. The Conversations **+** starts a new conversation (also ⇧⌘N). Both lists scroll together. Fold choices are remembered in this browser (`abstractcode.sidebar.panels`). The current workspace path is available under **Workspace & settings → Workspace**.
+The sidebar holds two stacking drawers, **Automations** above **Conversations**, both full width. Each header has a fold control, **+** and refresh; the Conversations **+** starts a new conversation (also ⇧⌘N). Both headers always stay visible:
+
+| Automations | Conversations | Layout |
+|---|---|---|
+| closed | closed | The two header rows at the top. |
+| open | closed | Automations fills the space above the Conversations header, which sits mid-height. |
+| closed | open | Conversations fills everything below its header. |
+| open | open | An even split; the Conversations header stays mid-height. |
+
+Each list scrolls inside its own drawer. Fold choices are remembered in this browser (`abstractcode.sidebar.panels`). On a short landscape phone screen the whole drawer scrolls instead. The current workspace path is available under **Workspace & settings → Workspace**.
+
+A conversation card shows its title on one line, then `Oct 2 · 2 turns · 7 tools`: the date of the latest turn, the number of turns and the tool calls across them. The tool figure comes from the gateway (`GET /api/gateway/runs?include_metrics=true`, each turn's total including its sub-runs); with a gateway that does not report it, the card shows no tool figure.
+
+An automation card shows its name with the **Active** switch beside it, **waiting for you** while an approval or question is pending, then one line such as `every 24 h · last 3 h ago · next in 14 h` (relative times rounded down, no year or seconds; `last never` before the first run, `running now` while a run is in progress, no next part when nothing is scheduled).
 
 ### Automation detail sections
 
@@ -92,10 +105,15 @@ Use **Pause**, **Resume**, **Conclude**, or **Stop** to supervise an active run.
 ## Automations
 
 The **Automations** section of the sidebar lists the gateway's automations —
-the same ones the Assistant, the Observer and the terminal show — with their
-state ("Active ▶", "Paused ⏸"), what runs now and the next run. **+** creates
-one with its own workflow picker, initially set to the conversation's workflow. Selecting one opens its page: controls,
-runs as chat pairs, approvals and questions, and its folder. **Discuss** on a
+the same ones the Assistant, the Observer and the terminal show — as cards
+(see [Navigation panels](#navigation-panels)). **+** creates
+one with its own workflow picker, initially set to the conversation's workflow. Selecting one opens its page. Its header shows
+the title, the **Active** switch, the timing line, **waiting for you** when
+something is pending, the workspace folder by its short name with **Open folder**
+and **Copy path** icons, and the buttons **Run now**, **Stop**, **Edit** and
+**Archive** (Archive asks for confirmation in place). Every action shows that it is
+working, then its result or the gateway's reason for refusing. Below the header:
+the definition, runs as chat pairs, approvals and questions, and its folder. **Discuss** on a
 run opens the fork as a conversation here. See [Automations](automations.md).
 
 ## Workspaces and authorization

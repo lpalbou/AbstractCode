@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- web: the sidebar's Automations and Conversations sections are two stacking full-width drawers. Both headers stay visible; with Automations open the Conversations header sits mid-height, Conversations alone fills the rest, and each list scrolls inside its own drawer. Fold state is remembered.
+- web: conversation cards read `title` then `Oct 2 · 2 turns · 7 tools`; the tool figure is the gateway's per-turn total (`GET /runs?include_metrics=true`, AbstractGateway with sub-run totals).
+- web: automation cards show the name, the **Active** switch, **waiting for you** while an approval is pending, and one line `every 24 h · last 3 h ago · next in 14 h`.
+- web: the automation page has its own header: title, **Active** switch, timing line, waiting badge, the workspace as a short name with Open folder / Copy path icons, and **Run now**, **Stop**, **Edit**, **Archive** (inline confirmation). Requires `@abstractframework/ui-kit` with `automationTiming` and the panel's `hideHeader`.
+
 ## [web 0.10.3] - 2026-10-03
 
 - Conversations and automation answers share narration controls, with an animated loading spinner, incremental audio playback and immediate cancellation. Automation answers use the central panel width.

@@ -100,8 +100,10 @@ them like any other).
 | Revise | `e` | Title, interval (schedules) and context; applies from the next run. In the terminal, a field left empty keeps its current value. |
 | Archive | `a`, then `a` again | The automation stops and is hidden from the list; its history stays readable (**Show archived**, or `h` in the terminal). Archiving never deletes anything. |
 
-In the browser the same controls are buttons on the automation's page; hovering
-one shows what it does (Run now's tooltip adds the next scheduled time). The
+In the browser the switch and the buttons **Run now**, **Stop**, **Edit** and
+**Archive** sit in the automation's header, next to its timing line
+(`every 24 h · last 3 h ago · next in 14 h`); each sidebar card carries the
+**Active** switch too. Hovering a control shows what it does (Run now's tooltip adds the next scheduled time). The
 terminal shows Run now's effect in one line under the key hints: "g run now:
 Run it once now, without waiting for the schedule; the next scheduled run keeps
 its time." Every AbstractFramework client uses the same wording and the same
