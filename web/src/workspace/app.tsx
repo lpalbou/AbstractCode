@@ -292,6 +292,8 @@ export function CodeWorkspace() {
       return;
     }
     setRailPanel("settings");
+    // The requested group wins over the "new binding starts at the top" reset.
+    settingsScrolledFor.current = settingsBinding;
     revealSettingsGroup(section);
   };
   const setInputsOpen = (open: boolean) => {
@@ -1365,10 +1367,16 @@ export function CodeWorkspace() {
   );
   // Settings follow the selection: a newly selected conversation or automation starts at the top.
   const settingsBinding = automationView ? `automation:${automationsState.selectedId}` : `conversation:${session.sessionId}`;
+  const settingsScrolledFor = useRef("");
   useEffect(() => {
-    const body = document.querySelector<HTMLElement>("#code-rail-panel-settings .af-rail__body");
-    if (body) body.scrollTop = 0;
-  }, [settingsBinding]);
+    // Only a VISIBLE panel can scroll: reset when Settings shows a binding it has not shown yet.
+    if (railPanel !== "settings" || settingsScrolledFor.current === settingsBinding) return;
+    settingsScrolledFor.current = settingsBinding;
+    window.requestAnimationFrame(() => {
+      const body = document.querySelector<HTMLElement>("#code-rail-panel-settings .af-rail__body");
+      if (body) body.scrollTop = 0;
+    });
+  }, [settingsBinding, railPanel]);
   const activityAttn = automationView ? { count: 0, hint: "" } : activityAttention(snapshot.records, session.runId);
   const railElement = (
     <CodeRightRail

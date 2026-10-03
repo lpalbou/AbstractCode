@@ -9,7 +9,7 @@ import http from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createCodeServer } from "../bin/server.js";
-import { railTab } from "./drawer_navigation";
+import { openWorkspaceSection, railTab } from "./drawer_navigation";
 
 const gateway = process.env.ABSTRACTCODE_E2E_GATEWAY_URL || "http://127.0.0.1:18781";
 const origin = process.env.ABSTRACTCODE_E2E_URL || "http://127.0.0.1:18782";
@@ -242,9 +242,17 @@ test("automation selected: Settings edit its definition and save a new revision"
   const id = created.automation_id;
   const rev0 = created.revision;
   await signIn(page);
+  // Leave the conversation's Settings scrolled down to Voice, then select the automation:
+  // its header's Edit opens Settings on the automation, at its top (the Automation card).
+  await openWorkspaceSection(page, "Voice");
+  await expect(page.locator("#code-rail-panel-settings .af-rail__body")).not.toHaveJSProperty("scrollTop", 0);
+  await railTab(page, "Settings").click(); // folded while the automation loads (its scroll position is kept)
   await page.locator(".code-sidebar").getByText(created.summary.title, { exact: true }).first().click();
-  await railTab(page, "Settings").click();
+  await expect(page.locator(".code-auto-header")).toBeVisible();
+  await page.locator('.code-auto-header [data-action="edit"]').click();
   const settings = page.locator("#code-rail-panel-settings");
+  await expect(settings).toBeVisible();
+  await expect(settings.locator("#code-settings-automation")).toBeInViewport();
   await expect(settings.locator(".code-settings-binding")).toContainText("Automation");
   await expect(settings.getByTestId("automation-revision")).toHaveText(`Revision ${rev0}`);
   await expect(settings).not.toContainText("These are conversation settings");
