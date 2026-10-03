@@ -32,7 +32,7 @@ async function blockExternalTraffic(page: Page): Promise<void> {
 /** Round 3: every workflow the Code picker offers declares abstractcode.agent.v1, so a turn
  * starts from the composer (the inputs drawer says "Back to chat"; there is no "Run workflow"). */
 async function sendTurn(page: Page, text = "Run the fixture."): Promise<void> {
-  const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
+  const drawer = page.locator(".code-rail .af-rail__panel");
   await closeWorkspaceDrawer(page);
   const composer = page.locator(".code-conversation .pc-composer textarea");
   if (!(await composer.inputValue()).trim()) await composer.fill(text);

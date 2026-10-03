@@ -44,7 +44,7 @@ async function blockExternalTraffic(page: Page): Promise<void> {
 /** Round 3: every workflow the Code picker offers declares abstractcode.agent.v1, so a turn
  * starts from the composer (the inputs drawer says "Back to chat"; there is no "Run workflow"). */
 async function sendTurn(page: Page, text = "Run the fixture."): Promise<void> {
-  const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
+  const drawer = page.locator(".code-rail .af-rail__panel");
   await closeWorkspaceDrawer(page);
   const composer = page.locator(".code-conversation .pc-composer textarea");
   if (!(await composer.inputValue()).trim()) await composer.fill(text);
@@ -115,7 +115,7 @@ async function expectPersistedCompletion(page: Page): Promise<void> {
 async function startPromptWorkflow(page: Page, prompt: string): Promise<void> {
   await selectWorkflow(page, "Prompt structured");
   await openWorkflowInputs(page);
-  const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
+  const drawer = page.locator(".code-rail .af-rail__panel");
   await expect(drawer).toBeVisible();
   await drawer.getByLabel(/Ticket/).fill(unique("ticket"));
   await page.locator(".code-conversation .pc-composer textarea").fill(prompt);
@@ -224,22 +224,12 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await capture(page, "light");
 
     await openWorkspaceSection(page, "Model & behavior");
-    const settings = page.getByRole("complementary", {
-      name: "Workspace & settings",
-    });
+    const settings = page.locator(".code-rail .af-rail__panel");
     await expect(settings).toBeVisible();
-    await expect(
-      settings.getByRole("tab", { name: "Tools & skills", exact: true }),
-    ).toBeVisible();
-    const closeSettings = settings.getByRole("button", {
-      name: "Close panel",
-      exact: true,
-    });
-    await closeSettings.focus();
-    await page.keyboard.press("Tab");
-    await expect(
-      settings.getByRole("tab", { name: "Model & behavior", exact: true }),
-    ).toBeFocused();
+    // Round 4: the Settings panel is one scroll of groups (no tab strip); its header collapses it.
+    await expect(settings.locator(".af-settings-group__title", { hasText: "Tools & skills" })).toBeVisible();
+    await expect(settings.locator(".af-tabs, .af-tabs__list")).toHaveCount(0);
+    await expect(settings.getByRole("button", { name: /^Collapse / })).toBeVisible();
     await capture(page, "skills");
   });
 
@@ -258,9 +248,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     // starts through the generic workflow Inputs surface rather than an agent
     // prompt shortcut.
     await openWorkflowInputs(page);
-    const secondInputs = page.getByRole("complementary", {
-      name: "Workspace & settings",
-    });
+    const secondInputs = page.locator(".code-rail .af-rail__panel");
     await expect(secondInputs).toBeVisible();
     await secondInputs.getByLabel(/Ticket/).fill(unique("ticket"));
     await page.locator(".code-conversation .pc-composer textarea").fill(secondPrompt);
@@ -521,7 +509,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
         .click();
     await closeWorkspaceDrawer(page);
     await expect(page.locator(".code-app")).not.toHaveClass(/code-app--nav-open/);
-    await expect(page.getByRole("complementary", { name: "Workspace & settings" })).toBeHidden();
+    await expect(page.locator(".code-rail .af-rail__panel")).toBeHidden();
     await page.waitForFunction(() => {
       const sidebar = document.querySelector(".code-sidebar");
       return sidebar && sidebar.getBoundingClientRect().right <= 0;
@@ -826,7 +814,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       name: "Message",
       exact: true,
     });
-    const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
+    const drawer = page.locator(".code-rail .af-rail__panel");
     for (const [index, message] of [
       "Hello, use the usual defaults",
       "Continue without any setup",
@@ -945,7 +933,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await signIn(page);
     await selectWorkflow(page, "Native tool approval");
     await openWorkspaceSection(page, "Tools & skills");
-    const settings = page.getByRole("complementary", { name: "Workspace & settings" });
+    const settings = page.locator(".code-rail .af-rail__panel");
     await settings.getByLabel("Permissions", { exact: true }).selectOption("all");
     await settings.getByRole("button", { name: "Custom allowlist", exact: true }).click();
     await settings.getByRole("button", { name: "Select all", exact: true }).click();
@@ -953,7 +941,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     const row = settings.locator(".af-tool-row").filter({ hasText: "write_file" });
     await row.getByRole("switch").uncheck();
     await capture(page, "permissions-all-enabled-tools");
-    await settings.getByRole("button", { name: "Close panel", exact: true }).click();
+    await settings.getByRole("button", { name: /^Collapse / }).click();
     await sendTurn(page);
     await expectPersistedCompletion(page);
     await expect(page.locator(".pc-tool-activity--failed")).toContainText("not allowed");
@@ -966,7 +954,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await openWorkspaceSection(page, "Tools & skills");
     await settings.getByPlaceholder("Filter tools...").fill("write_file");
     await settings.getByRole("switch", { name: "write_file", exact: true }).check();
-    await settings.getByRole("button", { name: "Close panel", exact: true }).click();
+    await settings.getByRole("button", { name: /^Collapse / }).click();
     await openWorkflowInputs(page);
     await sendTurn(page);
     await expect.poll(() => submissions.length).toBe(2);
@@ -983,9 +971,9 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await signIn(page);
     await selectWorkflow(page, "Tool supervision");
     await openWorkspaceSection(page, "Tools & skills");
-    const settings = page.getByRole("complementary", { name: "Workspace & settings" });
+    const settings = page.locator(".code-rail .af-rail__panel");
     await settings.getByLabel("Permissions", { exact: true }).selectOption("all");
-    await settings.getByRole("button", { name: "Close panel", exact: true }).click();
+    await settings.getByRole("button", { name: /^Collapse / }).click();
     await sendTurn(page);
     await expect(page.getByRole("heading", { name: "A question for you" })).toBeVisible();
     expect(submissions[0].input_data._runtime.tool_policy.require_approval_tools).toContain("write_file");
@@ -1033,7 +1021,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await signIn(page);
     await selectWorkflow(page, "Typed workflow inputs");
     await openWorkflowInputs(page);
-    const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
+    const drawer = page.locator(".code-rail .af-rail__panel");
     await drawer.getByText("Advanced workflow inputs", { exact: false }).click();
     const group = drawer.locator(".code-settings-section").filter({
       has: page.getByRole("heading", { name: "Text model", exact: true }),
@@ -1068,12 +1056,11 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await expect(
       group.getByRole("button", { name: "Reasoning effort" }),
     ).toHaveCount(0);
-    await drawer.getByRole("button", { name: "Close panel" }).click();
+    await drawer.getByRole("button", { name: /^Collapse / }).click();
     await selectWorkflow(page, "Authored model contract");
     await openWorkspaceSection(page, "Model & behavior");
     await expect(
-      page
-        .getByRole("complementary", { name: "Workspace & settings" })
+      page.locator(".code-rail .af-rail__panel")
         .getByText("Workflow default: fixture-authored · reasoner-authored."),
     ).toBeVisible();
   });
@@ -1150,7 +1137,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     const message = page.locator(".pc-chat-item--assistant").last();
     await expect(message).toBeVisible();
     await openWorkspaceSection(page, "Voice");
-    const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
+    const drawer = page.locator(".code-rail .af-rail__panel");
     await drawer.getByRole("button", { name: "AI voice" }).click();
     await expect(
       page.getByRole("option", {
@@ -1200,7 +1187,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       .getByLabel("Speech speed", { exact: true })
       .selectOption("1.25");
     await capture(page, "voice-settings");
-    await drawer.getByRole("button", { name: "Close panel" }).click();
+    await drawer.getByRole("button", { name: /^Collapse / }).click();
     await message.hover();
     await expect(
       message.getByRole("button", { name: "Copy message", exact: true }),

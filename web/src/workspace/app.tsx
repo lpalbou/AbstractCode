@@ -1197,6 +1197,7 @@ export function CodeWorkspace() {
         onChange={(next) => { voice.stop_tts(); changeVoicePreferences(next); }}
         fetchCatalog={fetchVoiceCatalog}
         overrideOwner="this app"
+        nested
         unavailableReason={connection.connected ? null : "Connect to a gateway to configure voice."}
       />
     </AfSettingsGroup>
@@ -1355,6 +1356,12 @@ export function CodeWorkspace() {
       {voiceGroup}
     </div>
   );
+  // Settings follow the selection: a newly selected conversation or automation starts at the top.
+  const settingsBinding = automationView ? `automation:${automationsState.selectedId}` : `conversation:${session.sessionId}`;
+  useEffect(() => {
+    const body = document.querySelector<HTMLElement>("#code-rail-panel-settings .af-rail__body");
+    if (body) body.scrollTop = 0;
+  }, [settingsBinding]);
   const activityAttn = automationView ? { count: 0, hint: "" } : activityAttention(snapshot.records, session.runId);
   const railElement = (
     <CodeRightRail

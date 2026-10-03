@@ -115,14 +115,16 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   const folder = main.getByRole("region", { name: "Automation folder" });
   await expect(folder).toBeVisible();
   await expect(folder.locator('[data-path="fixture-tool-approval.txt"]')).toBeVisible({ timeout: 15_000 });
-  // A text file opens in a new tab as plain text (never with a type that could run in the app origin).
-  const [tab] = await Promise.all([
-    page.waitForEvent("popup"),
-    folder.locator('[data-path="fixture-tool-approval.txt"] [data-action="open-file"]').click(),
-  ]);
-  await tab.waitForLoadState();
-  expect(await tab.evaluate(() => document.contentType)).toBe("text/plain");
-  await tab.close();
+  // Round 4: a click on the name previews the file in place with the kit's shared viewer
+  // (text as text; never rendered in the app origin); no "Open" button; download is an icon.
+  await expect(folder.locator('[data-action="open-file"]')).toHaveCount(0);
+  await folder.locator('[data-path="fixture-tool-approval.txt"] [data-action="select-file"]').click();
+  const viewer = folder.locator(".af-file-viewer");
+  await expect(viewer).toBeVisible();
+  await expect(viewer).toHaveAttribute("data-kind", "text");
+  await expect(viewer.locator('[data-action="download-file"]')).toBeVisible();
+  await viewer.locator('[data-action="close-preview"]').click();
+  await expect(viewer).toHaveCount(0);
   // The header's open-folder icon opens the same folder pane (round 4: short name, no full path).
   await main.locator('.code-auto-header [data-action="open-folder"]').click();
   await expect(main.getByRole("region", { name: "Automation folder" })).toBeVisible();
