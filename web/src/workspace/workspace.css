@@ -3077,3 +3077,5 @@ select option {
     --code-card-switch-w: 56px;
   }
 }
+/* The Automation card hosts the kit's Edit form flat (never a card in a card). */
+.code-automation-settings .af-settings-group .af-auto__revise { padding: 0; border: 0; background: transparent; }
