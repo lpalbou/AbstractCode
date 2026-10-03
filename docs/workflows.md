@@ -55,7 +55,7 @@ operations, not client ones — see the
 
 ### In the browser
 
-Open **Workspace & settings → Model & behavior → Workflow**. The picker starts
+Open **Settings → Model & behavior → Workflow**. The picker starts
 with the gateway default, then lists the workflows authorized for your account
 that declare `abstractcode.agent.v1`. Expand **Workflow inputs** in the same
 category to supply additional registered fields. The gateway validates inputs;

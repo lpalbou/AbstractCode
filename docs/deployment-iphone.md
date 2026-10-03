@@ -27,8 +27,8 @@ Related:
 
 ## Notes / constraints
 
-- The interface adapts to iPhone portrait and landscape: navigation and Workspace & settings open as
-  drawers, dialogs open as bottom sheets, touch targets are at least 44 px, and the composer stays usable with
+- The interface adapts to iPhone portrait and landscape: navigation opens as a drawer, the right
+  rail's panels (Activity, Files, Settings) float beside the rail, dialogs open as bottom sheets, touch targets are at least 44 px, and the composer stays usable with
   the keyboard up. See [responsive layout](web.md#responsive-layout).
 
 - iOS aggressively suspends background tabs; long-running workflows should be designed to be resumable (ledger replay).

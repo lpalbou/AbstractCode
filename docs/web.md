@@ -7,26 +7,27 @@ Start with [getting started](getting-started.md). For hosting and authentication
 ## Working in the interface
 
 - **Conversations** restores gateway sessions and history. Search by conversation text or session ID. The list shows 25 conversations; **Load more conversations** adds the next 25.
-- **Workspace & settings** in the header opens one drawer with six tabs:
+- **The right panel** is a vertical rail at the right edge of the window with three icons — **Activity**, **Files** and **Settings**. Clicking an icon opens its panel beside the rail; clicking it again (or the panel's collapse arrow) folds the panel back to the icons. The rail always stays. The gear button in the header (tooltip **Settings**) opens or closes the Settings panel.
 
-| Category | Controls and information |
+| Panel | What it shows |
 |---|---|
-| Activity | Durable workflow steps, tool arguments and results. In an automation, select a run to inspect its activity. |
-| Files | Conversation workspace browsing, previews, attachments, generated outputs, artifact downloads and conversation export. In an automation, browse its own folder. |
-| Model & behavior | Workflow selection, model, reasoning, MTP depth, iteration and context limits, instructions, streaming, and expandable **Workflow inputs**. |
-| Tools & skills | Tool availability, approval policy, and gateway skills. |
-| Workspace | The current conversation's workspace path and permitted workspace scope requests. |
-| Voice | Speech provider, voice and playback preferences. |
+| Activity | The run as the transcript shows it — model steps, tool calls, approvals — in foldable groups, one per agent iteration, the newest open. For an automation: one group per run (newest first, the latest open); opening a group reads that run's steps from the gateway. |
+| Files | The workspace folder: name, size, generated date (relative; the exact time on hover) and a download icon per file. Click a file to preview it. Generated outputs and attachments are listed below, with the same rows. |
+| Settings | The settings of what is selected: a conversation's run settings, or an automation's definition. |
+
+**Settings** has four sections — **Model & behavior** (workflow, the shared model picker with reasoning and MTP depth, limits, instructions, stream replies, **Workflow inputs**), **Tools & skills** (the shared tool policy and gateway skills), **Workspace** (access mode and mounts) and **Voice**. Everything reads **Gateway default** until you override it; an override shows only while it is set, and choosing the default again removes it.
+
+With an **automation** selected, Settings edit its saved definition in place: an **Automation** card (title, task, workflow, schedule, context, tool approval, email result; one **Save**) and the same Model & behavior / Tools & skills / Workspace sections, which save on change. Every change is saved through the gateway as a new revision; the revision number shown above the sections updates, and changes apply from the next run. The automation header's **Edit** opens this panel. If someone else changed the automation meanwhile, the save is refused and the latest revision is shown.
 
 The **Workflow** picker in **Model & behavior** lists workflows authorized by the gateway for `abstractcode.agent.v1`. **Gateway default** follows the default the operator configured; selecting a named workflow pins the conversation to that workflow. The choice is remembered for your account. Expand **Workflow inputs** for additional fields or JSON input. Unset settings preserve workflow defaults. When skills are unavailable, **Tools & skills** shows the gateway's explanation. See [workflows](workflows.md#the-gateway-default).
 
-**Files** shows the folder on the gateway where the agent reads and writes, with its path and host. Browse folders, preview Markdown, JSON, images or text, and download other files. Text previews show at most the first 1 MiB and say so; Markdown images load only from the workspace. **Attach to conversation** adds a selected file to your next message. Gateway admins also have **Shared workspace (admin)**. Generated outputs and attachments are listed below the workspace browser.
+**Files** shows the folder on the gateway where the agent reads and writes, once, as its short name — the full path is its tooltip — with **Open folder** (only on the gateway's own machine) and **Copy path** icons. Click a file to preview it with the shared viewer: Markdown rendered, code highlighted, JSON pretty-printed, images and PDFs shown, other text as text; HTML and SVG show as source. Text previews read at most the first 1 MiB and say so; Markdown images load only from the workspace. The preview header has the file's size and date, **Attach** (adds it to your next message), **Download** and close. Gateway admins also have **Shared workspace (admin)**.
 
-Settings apply to the selected conversation. While viewing an automation, use its **Edit** action to change its saved workflow, tools, context or email recipients. The drawer's conversation settings identify that distinction; Files and Activity show the automation's own data.
+**Voice** follows the Assistant's layout: **Engines** (*Text → speech* and *Speech → text*, each "Gateway default" with **Change**), **Output** (*Output device*, where the browser can choose a speaker), **Replies** (*Read aloud* switch: speak each new reply; *Voice latency*: Balanced, Faster or Higher quality, when the gateway's voice engine offers it). These are this browser's choices for your account; the gateway's defaults are never changed from here.
 
-The drawer remembers its selected category and preserves edits when switching categories. The upper-right **About** widget shows the app version, project links and gateway-reported versions. See [Responsive layout](#responsive-layout).
+The panel width is resizable on wide screens (drag the panel's left edge, or focus it and use the arrow keys) and remembered with the open panel. The upper-right **About** widget shows the app version, project links and gateway-reported versions. See [Responsive layout](#responsive-layout).
 
-The standard upper-right controls remain available: **Code assistant**, **Appearance**, **About**, **Workspace & settings**, and gateway connection. The assistant answers questions using the bundled app documentation, in its own gateway session with no tools; it does not inherit the conversation’s settings or attachments. Closing its drawer preserves its conversation.
+The standard upper-right controls remain available: **Code assistant**, **Appearance**, **About**, **Settings** (gear), and gateway connection. The assistant answers questions using the bundled app documentation, in its own gateway session with no tools; it does not inherit the conversation’s settings or attachments. Closing its drawer preserves its conversation.
 
 MTP depth is independent of reasoning. Leave it on **Inherit** to follow workflow and
 execution-host defaults, choose **Off** to send an explicit `false`, or request an advertised
@@ -42,15 +43,15 @@ AbstractCode Web works on phones, tablets, laptop windows and wide screens, and 
 
 | Width | Layout |
 |---|---|
-| 1024 px and wider | Conversations and automations stay in a docked left sidebar. Workspace & settings opens a right-side drawer with the shared tab navigation. |
-| 768–1023 px | Conversation navigation opens from the menu button. The settings drawer uses the available width and wraps its tabs as needed. |
-| Below 768 px | Both drawers use the full screen width. The settings tabs scroll horizontally above independently scrolling content. |
+| 1024 px and wider | Conversations and automations stay in a docked left sidebar. The right rail's panel opens beside the conversation (the conversation narrows); its width is resizable and remembered. |
+| 768–1023 px | Conversation navigation opens from the menu button. The rail stays at the right edge; its panel floats over the conversation with a dimmed backdrop. |
+| Below 768 px | Same as tablets; the floating panel takes the width left of the rail. |
 
-- **Touch controls.** The drawer opener, close button and category buttons are at least 44 px high. Categories and Close remain accessible while the content scrolls, including phone landscape.
-- **Keyboard.** Arrow keys, Home and End navigate categories. Escape closes the drawer and restores focus to its opener. A dialog or dropdown above it handles Escape first.
-- **On-screen keyboard.** The drawer stays above the keyboard; its content scrolls within the remaining height.
-- **Appearance.** The upper-right appearance widget contains theme and text-size controls. Long paths wrap inside the drawer.
-- **Conversation navigation.** The sidebar menu closes when you open Workspace & settings, keeping one navigation surface in front of the conversation.
+- **Touch controls.** The rail icons, the gear and every panel button are at least 44 px; the resize edge widens for touch.
+- **Keyboard.** Up/Down, Home and End move between rail icons; Enter or Space opens one. On a floating panel, Escape folds it and returns focus to its icon. A dialog or dropdown above it handles Escape first. The resize edge takes Left/Right (Shift for bigger steps), Home and End.
+- **On-screen keyboard.** The panel content scrolls within the remaining height.
+- **Appearance.** The upper-right appearance widget contains theme and text-size controls. Rows and paths wrap; nothing scrolls sideways.
+- **Conversation navigation.** The sidebar menu closes when you open a rail panel, keeping one navigation surface in front of the conversation.
 
 ### Navigation panels
 
@@ -63,7 +64,7 @@ The sidebar holds two stacking drawers, **Automations** above **Conversations**,
 | closed | open | Conversations fills everything below its header. |
 | open | open | An even split; the Conversations header stays mid-height. |
 
-Each list scrolls inside its own drawer. Fold choices are remembered in this browser (`abstractcode.sidebar.panels`). On a short landscape phone screen the whole drawer scrolls instead. The current workspace path is available under **Workspace & settings → Workspace**.
+Each list scrolls inside its own drawer. Fold choices are remembered in this browser (`abstractcode.sidebar.panels`). On a short landscape phone screen the whole drawer scrolls instead. The current workspace is shown under **Settings → Workspace** and in **Files**.
 
 A conversation card shows its title on one line, then `Oct 2 · 2 turns · 7 tools`: the date of the latest turn, the number of turns and, when there were any, the tool calls across them. The tool figure comes from the gateway (`GET /api/gateway/runs?include_metrics=true`, each turn's total including its sub-runs); with a gateway that does not report it, the card shows no tool figure.
 
@@ -79,7 +80,7 @@ Every setting that is either on or off is a switch named after what it controls:
 
 ## Stream replies
 
-**Workspace & settings → Model & behavior → Stream replies** shows the assistant's reply while the model writes it, instead of only when it is complete. Choose:
+**Settings → Model & behavior → Stream replies** shows the assistant's reply while the model writes it, instead of only when it is complete. Choose:
 
 - **Gateway default** (the default): the gateway operator's setting decides. When the gateway reports it, the option reads **Gateway default (on)** or **Gateway default (off)**.
 - **On** or **Off**: your choice for every new turn, whatever the gateway default.
