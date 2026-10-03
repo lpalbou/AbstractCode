@@ -459,12 +459,27 @@ function SharedWorkspaceBrowser({
 
 type ArtifactItem = { id: string; name: string; contentType: string; size?: number; created?: string };
 
+/** "PNG image", "Text file", "PDF document"… — the name of an artifact that has no filename. */
+export function artifactTypeLabel(contentType: string): string {
+  const type = String(contentType || "").split(";", 1)[0].trim().toLowerCase();
+  const sub = (type.split("/")[1] || "").replace(/^x-/, "").split("+")[0];
+  if (type === "application/pdf") return "PDF document";
+  if (type === "application/json" || type.endsWith("+json")) return "JSON file";
+  if (type.startsWith("image/")) return `${sub.toUpperCase()} image`;
+  if (type.startsWith("audio/")) return `${sub.toUpperCase()} audio`;
+  if (type.startsWith("video/")) return `${sub.toUpperCase()} video`;
+  if (type === "text/markdown") return "Markdown file";
+  if (type.startsWith("text/")) return "Text file";
+  return "File";
+}
+
 function artifactItem(item: any): ArtifactItem {
   const id = String(item.artifact_id || item.id || "");
+  const contentType = String(item.content_type || item.mime_type || "");
   return {
     id,
-    name: String(item.filename || item.metadata?.filename || item.name || id),
-    contentType: String(item.content_type || item.mime_type || ""),
+    name: String(item.filename || item.metadata?.filename || item.name || artifactTypeLabel(contentType)),
+    contentType,
     ...(typeof item.size_bytes === "number" ? { size: item.size_bytes } : typeof item.size === "number" ? { size: item.size } : {}),
     ...(item.created_at || item.timestamp ? { created: String(item.created_at || item.timestamp) } : {}),
   };
@@ -545,7 +560,7 @@ function Artifacts({ runId, enabled, refreshKey }: { runId: string; enabled: boo
         <ul className="code-file-rows">
           {items.map((item) => (
             <li key={item.id} className="code-file-row">
-              <button className="code-file-row-name" title={`Preview ${item.name}`} onClick={() => setSelected(item)}>
+              <button className="code-file-row-name" title={`Preview ${item.name} · ${item.id}`} onClick={() => setSelected(item)}>
                 <Icon name="file" size={14} />
                 <span>{item.name}</span>
               </button>

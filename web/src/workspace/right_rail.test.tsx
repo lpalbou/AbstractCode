@@ -156,3 +156,24 @@ describe("voice", () => {
     expect(appSource).not.toContain("<VoiceSettings");
   });
 });
+
+describe("adversary pass W4 fixes", () => {
+  it("F4: the workspace section names access modes in plain words", async () => {
+    const { SettingsContent, workspaceModeLabel } = await import("./settings_panel");
+    expect(workspaceModeLabel("workspace_or_allowed")).toBe("Workspace and allowed paths");
+    const html = renderToStaticMarkup(
+      <SettingsContent tab="workspace" value={DEFAULT_PREFERENCES} onChange={() => {}} tools={[]} disabled={false}
+        policy={{ allowedAccessModes: ["workspace_only", "workspace_or_allowed"], mounts: [], clientWorkspaceScopeOverrides: true } as any} />,
+    );
+    expect(html).toContain("This workspace only · Workspace and allowed paths");
+    expect(html).not.toMatch(/>[^<]*workspace_only[^<]*</);
+    expect(html).not.toMatch(/>[^<]*workspace or allowed[^<]*</);
+  });
+  it("F3: an artifact without a filename reads as its type, never its id", async () => {
+    const { artifactTypeLabel } = await import("./workspace_panels");
+    expect(artifactTypeLabel("image/png")).toBe("PNG image");
+    expect(artifactTypeLabel("application/pdf")).toBe("PDF document");
+    expect(artifactTypeLabel("text/plain; charset=utf-8")).toBe("Text file");
+    expect(artifactTypeLabel("")).toBe("File");
+  });
+});

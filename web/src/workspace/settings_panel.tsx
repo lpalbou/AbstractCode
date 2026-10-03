@@ -62,6 +62,18 @@ export const DEFAULT_PREFERENCES: RunPreferences = {
 };
 export type SettingsTab = "model" | "workspace" | "tools" | "skills";
 
+/** Plain names for the gateway's workspace access modes (the id stays the value sent). */
+export const WORKSPACE_MODE_LABELS: Record<string, string> = {
+  workspace_only: "This workspace only",
+  workspace_or_allowed: "Workspace and allowed paths",
+  all_except_ignored: "Everything except ignored paths",
+  unrestricted: "No restriction",
+};
+/** A mode's plain name; an unknown id (a newer gateway) is shown as the gateway sent it. */
+export function workspaceModeLabel(mode: string): string {
+  return WORKSPACE_MODE_LABELS[mode] || mode;
+}
+
 export function SettingsPanel({
   open,
   onClose,
@@ -295,7 +307,7 @@ export function SettingsContent({
             <dl className="code-facts">
               <dt>Allowed access modes</dt>
               <dd>
-                {policy?.allowedAccessModes.join(", ") || "Gateway default"}
+                {policy?.allowedAccessModes.map(workspaceModeLabel).join(" · ") || "Gateway default"}
               </dd>
               <dt>Available mounts</dt>
               <dd>
@@ -332,7 +344,7 @@ export function SettingsContent({
                     <option value="">Gateway default</option>
                     {policy.allowedAccessModes.map((mode) => (
                       <option key={mode} value={mode}>
-                        {mode.replace(/_/g, " ")}
+                        {workspaceModeLabel(mode)}
                       </option>
                     ))}
                   </select>

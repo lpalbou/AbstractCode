@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - web: **Voice** follows the Assistant's layout: Engines (text → speech, speech → text: "Gateway default" + Change), Output device, Read aloud switch (speaks each new reply), Voice latency. TTS requests carry only speech fields; dictation sends the speech-to-text override.
 - web: requires the unreleased `@abstractframework/ui-kit` 0.6.0 and `@abstractframework/panel-chat` 0.3.0 (local deploy overlays the packs; package.json pins move with the release).
 
+- web: workspace access modes read in plain words ("This workspace only", "Workspace and allowed paths"); a generated output without a filename reads as its type ("PNG image"), its id in the tooltip.
+
 ## [web 0.10.3] - 2026-10-03
 
 - Conversations and automation answers share narration controls, with an animated loading spinner, incremental audio playback and immediate cancellation. Automation answers use the central panel width.
