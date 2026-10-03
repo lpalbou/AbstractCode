@@ -55,14 +55,12 @@ operations, not client ones — see the
 
 ### In the browser
 
-The **Workflow** list in the toolbar starts with the gateway default, then the
-coding agents published on your gateway. Switch on **Show all workflows** to list
-every authorized workflow, including shared catalog workflows. The browser is
-not restricted to `abstractcode.agent.v1`: ordinary AbstractFlow workflows run
-from their registered schema using **Inputs** and **Run workflow**. Generic
-workflows receive the configured input object; agent-only model/tool/runtime
-settings are not injected. Questions, messages, event waits, and structured
-results use the shared workflow chat.
+Open **Workspace & settings → Model & behavior → Workflow**. The picker starts
+with the gateway default, then lists the workflows authorized for your account
+that declare `abstractcode.agent.v1`. Expand **Workflow inputs** in the same
+category to supply additional registered fields. The gateway validates inputs;
+questions, messages, event waits and structured results use the shared workflow
+chat. Automation creation and editing have their own workflow picker.
 
 A restored conversation follows how its last run was started: if the gateway
 recorded it as started from its default, the next turn follows the gateway

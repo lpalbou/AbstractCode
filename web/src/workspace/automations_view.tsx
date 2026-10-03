@@ -5,7 +5,7 @@ import { AutomationWorkflowPicker, type AutomationWorkflowPickerOptions, automat
  * now, the next run) and, for the selected one, the kit's shared
  * `AutomationPanel` (with the chat renderer) plus its folder, browsed through
  * the gateway's run-workspace routes. "New automation" is the kit's
- * `AfScheduleDialog` with the toolbar's workflow as target.
+ * `AfScheduleDialog` with the conversation's workflow as target.
  *
  * The list/rows and the panel wiring are hook-free so tests render them in
  * any state; `useAutomations` only subscribes to the controller and polls.
@@ -110,7 +110,7 @@ export function AutomationsSection(props: {
         onToggle={() => props.onToggle?.()}
         label={<>Automations{waiting ? <span className="code-auto-badge" data-field="attention-total">{waiting}</span> : null}</>}
         actions={<span className="code-auto-actions">
-          <button className="code-icon-button" aria-label="New automation" title="New automation (runs the toolbar's workflow on a schedule)" disabled={!props.available.available || props.createDisabled} onClick={props.onNew}>
+          <button className="code-icon-button" aria-label="New automation" title="New automation (choose a workflow and schedule)" disabled={!props.available.available || props.createDisabled} onClick={props.onNew}>
             <Icon name="plus" size={13} />
           </button>
           <button className="code-icon-button" aria-label="Refresh automations" disabled={!props.available.available || st.loading} onClick={props.onRefresh}>
@@ -127,7 +127,7 @@ export function AutomationsSection(props: {
         <ErrorLine error={st.listError} />
         {!st.loaded && (props.discovering || (props.available.available && st.loading)) ? <LoadingStatus>Loading automations…</LoadingStatus> : null}
         {props.available.available && st.loaded && !st.listError && !st.items.length ? (
-          <p className="code-history-empty">No automations yet. + runs the toolbar's workflow on a schedule.</p>
+          <p className="code-history-empty">No automations yet. + lets you choose a workflow and schedule.</p>
         ) : null}
         {rows.map((s) => {
           const v = automationRowView(s, props.nowMs);
@@ -371,7 +371,7 @@ export function AutomationMain(props: {
   );
 }
 
-/** "New automation": the kit dialog with the toolbar's workflow as target. */
+/** "New automation": the kit dialog with the conversation's workflow as target. */
 export function NewAutomationDialog(props: {
   open: boolean;
   onClose(): void;
@@ -408,7 +408,7 @@ export function NewAutomationDialog(props: {
       workflowPicker={
         props.workflowPickerOptions && (chosenTarget || props.target) ? <AutomationWorkflowPicker
           target={(chosenTarget || props.target)!} options={props.workflowPickerOptions} onChange={setChosenTarget} /> : <p className="code-field-help" data-field="target">
-          {props.target ? `Runs ${props.workflowLabel} (the toolbar's workflow).` : "Choose a published workflow in the toolbar first."}
+          {props.target ? `Initially uses ${props.workflowLabel}. Choose the workflow in this form.` : "Choose a workflow in Workspace & settings → Model & behavior first."}
         </p>
       }
       initialPrompt={props.initialPrompt}

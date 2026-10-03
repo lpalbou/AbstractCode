@@ -1,3 +1,4 @@
+import { openWorkspaceSection, openWorkflowInputs, closeWorkspaceDrawer } from "./drawer_navigation";
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -21,6 +22,7 @@ async function capture(page: Page, name: string): Promise<void> {
 /** The header's kit WorkflowPicker (round 3: no "Show all workflows" — it lists only what the
  * gateway returns for abstractcode.agent.v1): open it and choose the entry named `name`. */
 async function chooseWorkflow(page: Page, name: string): Promise<void> {
+  await openWorkspaceSection(page, "Model & behavior");
   const picker = page.getByRole("combobox", { name: "Workflow", exact: true });
   await expect(picker).toBeEnabled();
   await picker.click();
@@ -34,6 +36,7 @@ async function chooseWorkflow(page: Page, name: string): Promise<void> {
   await expect(page.locator("#code-workflow-picker .af-workflow-picker__name")).toHaveText(name);
   // The chosen workflow's inputs have loaded (a send before that is refused).
   await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");
+  await closeWorkspaceDrawer(page);
 }
 
 async function signIn(page: Page): Promise<void> {
@@ -50,7 +53,9 @@ async function signIn(page: Page): Promise<void> {
   await page.locator("#gateway-session-token").fill(fixtureToken);
   await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(dialog).toBeHidden();
+  await openWorkspaceSection(page, "Model & behavior");
   await expect(page.getByLabel("Workflow", { exact: true })).toBeEnabled();
+  await closeWorkspaceDrawer(page);
 }
 
 test("creates, runs, approves, browses, discusses and archives an automation", async ({ page }) => {
@@ -66,7 +71,7 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   await page.getByRole("button", { name: "New automation" }).click();
   const dialog = page.getByRole("dialog", { name: "Schedule a task" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText("Runs Native tool approval (the toolbar's workflow).")).toBeVisible();
+  await expect(dialog.getByRole("combobox", { name: "Automation workflow", exact: true })).toContainText("Native tool approval");
   await dialog.getByLabel("Task").fill("Write the fixture file");
   await dialog.getByText("Ask me before each tool call").click();
   await dialog.getByText("Advanced").click();
@@ -242,25 +247,33 @@ test("creates and edits a custom growing context budget", async ({ page }) => {
   await capture(page, "automation-growing-context-budget");
 });
 
-test("list refreshes display loading messages with spinners", async ({ page }) => {
+test("list refreshes preserve sidebar rows without adding loading messages", async ({ page }) => {
   await signIn(page);
   for (const [label, endpoint, message] of [
     ["Refresh automations", /\/automations\?/, "Loading automations…"],
     ["Refresh conversations", /\/runs\?/, "Loading conversations…"],
   ] as const) {
+    const button = page.getByRole("button", { name: label, exact: true });
+    await expect(button).toBeEnabled();
+    const rows = page.locator(".code-auto-row, .code-session");
+    const before = await rows.allTextContents();
+    expect(before.length).toBeGreaterThan(0);
+    const bounds = await button.boundingBox();
     let release!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });
     await page.route(endpoint, async (route) => { await pending; await route.continue(); });
     try {
-      await page.getByRole("button", { name: label, exact: true }).click();
+      await button.click();
+      await expect(button).toBeDisabled();
       const status = page.getByRole("status").filter({ hasText: message });
-      await expect(status).toBeVisible();
-      await expect(status.locator(".code-loading-spinner")).toBeVisible();
-      await expect(page.getByText("No automations yet.", { exact: true })).toBeHidden();
+      await expect(status).toBeHidden();
+      expect(await rows.allTextContents()).toEqual(before);
+      expect(await button.boundingBox()).toEqual(bounds);
     } finally {
       release();
       await page.unroute(endpoint);
     }
+    await expect(button).toBeEnabled();
   }
 });
 

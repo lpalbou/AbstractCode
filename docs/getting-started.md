@@ -134,14 +134,14 @@ choice is remembered in `~/.abstractcode/prefs.json`. `--workflow default`
 selects the gateway's default workflow explicitly; see
 [`workflows.md`](workflows.md#the-gateway-default).
 
-In the browser, the toolbar's **Workflow** list starts with **Gateway default →
-name @version**, and **Settings** holds the model, reasoning, MTP and
-**Stream replies** choices.
+In the browser, open **Workspace & settings → Model & behavior**. Its
+**Workflow** picker starts with **Gateway default**; the same category holds
+model, reasoning, MTP and **Stream replies** choices.
 
 ## Where the files are
 
 The agent reads and writes files on the gateway host, in the run's workspace.
-The browser's **Files** tab and the terminal's `/files` command show that
+The browser's **Workspace & settings → Files** category and the terminal's `/files` command show that
 folder: its absolute path, the host it is on, and a preview of each file. When
 the gateway runs on another machine, the terminal client does not send your
 local folder as the workspace; the agent works in a gateway-side session folder

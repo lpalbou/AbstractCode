@@ -1,6 +1,6 @@
 {
   "name": "@abstractframework/code",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "description": "Browser-based coding assistant for AbstractFramework - connects to AbstractGateway for durable agent sessions",
   "type": "module",
   "author": "Laurent-Philippe Albou",
@@ -44,8 +44,8 @@
   "devDependencies": {
     "@abstractframework/monitor-flow": "^0.1.10",
     "@abstractframework/monitor-gpu": "^0.1.10",
-    "@abstractframework/panel-chat": "^0.2.4",
-    "@abstractframework/ui-kit": "^0.5.1",
+    "@abstractframework/panel-chat": "^0.2.5",
+    "@abstractframework/ui-kit": "^0.5.2",
     "@monaco-editor/react": "^4.6.0",
     "@playwright/test": "^1.63.0",
     "@types/react": "^18.2.48",

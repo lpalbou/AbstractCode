@@ -77,9 +77,10 @@ describe("Run settings → Skills: one switch per skill", () => {
 
   it("the Run settings banner carries the id the skill switches point at", () => {
     const panel = readFileSync(new URL("./settings_panel.tsx", import.meta.url), "utf8");
-    expect(panel).toMatch(/<p className="code-notice" id=\{SETTINGS_LOCKED_ID\}>/);
+    expect(panel).toMatch(/<p className="code-notice" id=\{lockedReasonId\}>/);
     expect(panel).toContain('export const SETTINGS_LOCKED_ID = "code-settings-locked"');
-    expect(panel).toContain("lockedReasonId={SETTINGS_LOCKED_ID}");
+    expect(panel).toContain("lockedReasonId={lockedReasonId}");
+    expect(appSource).toContain("lockedReasonId={`code-${section}-locked`}");
   });
 });
 

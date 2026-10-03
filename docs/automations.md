@@ -14,7 +14,7 @@ model itself (controller runs, occurrences, triggers, crash safety, the HTTP
 API), see the framework guide:
 [AbstractFramework: Automations](https://github.com/lpalbou/AbstractFramework/blob/main/docs/automations.md).
 
-Browser creation uses the selected model, tools and workflow inputs at submission. Each automation receives its own workspace and the approval policy chosen in its schedule form. Changes to chat settings after creation do not change a saved automation.
+Browser conversation defaults are configured under **Workspace & settings** (Model & behavior, Tools & skills, and Workspace). Automation creation uses the selected model, tools and workflow inputs at submission. Each automation receives its own workspace and the approval policy chosen in its schedule form. Changes to chat settings after creation do not change a saved automation.
 
 In browser creation and **Edit**, the Tools dropdown supports search, selected-tool chips, **All**, and **Clear**. Clear saves an explicit empty list (no tools); **Use workflow default tools** removes the override. Tool availability and the choice to ask before execution are separate settings. Background sidebar refreshes keep existing rows in place.
 

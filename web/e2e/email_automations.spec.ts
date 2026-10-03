@@ -1,3 +1,4 @@
+import { openWorkspaceSection, openWorkflowInputs, closeWorkspaceDrawer } from "./drawer_navigation";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -23,6 +24,7 @@ async function capture(page: Page, name: string): Promise<void> {
 /** The header's kit WorkflowPicker (round 3: no "Show all workflows" — it lists only what the
  * gateway returns for abstractcode.agent.v1): open it and choose the entry named `name`. */
 async function chooseWorkflow(page: Page, name: string): Promise<void> {
+  await openWorkspaceSection(page, "Model & behavior");
   const picker = page.getByRole("combobox", { name: "Workflow", exact: true });
   await expect(picker).toBeEnabled();
   await picker.click();
@@ -36,6 +38,7 @@ async function chooseWorkflow(page: Page, name: string): Promise<void> {
   await expect(page.locator("#code-workflow-picker .af-workflow-picker__name")).toHaveText(name);
   // The chosen workflow's inputs have loaded (a send before that is refused).
   await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");
+  await closeWorkspaceDrawer(page);
 }
 
 async function signIn(page: Page): Promise<void> {
@@ -52,7 +55,9 @@ async function signIn(page: Page): Promise<void> {
   await page.locator("#gateway-session-token").fill(fixtureToken);
   await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(dialog).toBeHidden();
+  await openWorkspaceSection(page, "Model & behavior");
   await expect(page.getByLabel("Workflow", { exact: true })).toBeEnabled();
+  await closeWorkspaceDrawer(page);
 }
 
 async function disconnect(request: APIRequestContext): Promise<void> {
@@ -99,11 +104,11 @@ test("without a usable account the email options say so and stay off", async ({ 
   await expect(dialog.getByText("Connect a mailbox first —").first()).toBeVisible();
   await expect(dialog.getByRole("button", { name: "open My email" }).first()).toBeVisible();
   await expect(dialog.getByRole("radio", { name: "When an email arrives" })).toBeDisabled();
-  await expect(dialog.getByRole("switch", { name: "Email me the result" })).toBeDisabled();
+  await expect(dialog.getByRole("switch", { name: "Email result", exact: true })).toBeDisabled();
   await capture(page, "email-not-set-up");
 });
 
-test("creates an email-triggered automation with filters and allowed recipients", async ({ page, request }) => {
+test("creates an email-triggered automation with filters and result recipients", async ({ page, request }) => {
   await connectFixtureAccount(request);
   await signIn(page);
   const title = `E2E email automation ${Date.now()}`;
@@ -115,6 +120,7 @@ test("creates an email-triggered automation with filters and allowed recipients"
   await expect(dialog.getByLabel("Check interval amount")).toHaveValue("1");
   await dialog.getByLabel("From these domains").fill("example.test");
   await dialog.getByLabel("Subject contains").fill("invoice");
+  await dialog.getByRole("switch", { name: "Email result", exact: true }).check();
   await dialog.getByRole("radio", { name: "Me and these addresses" }).check();
   await dialog.getByRole("textbox", { name: "Me and these addresses" }).fill("colleague@example.test");
   await capture(page, "email-trigger-dialog");
@@ -127,8 +133,8 @@ test("creates an email-triggered automation with filters and allowed recipients"
   expect(def.trigger.source_id).toBe("email.received");
   expect(def.trigger.source_version).toBe(1);
   expect(def.trigger.config).toMatchObject({ uses_model: true, every: "1h", max_batch: 100, filter: { from_domain_in: ["example.test"], subject_contains: "invoice" } });
-  expect(def.policy.email_allowed_recipients).toEqual(["self", "colleague@example.test"]);
-  expect(def.notify).toEqual({ channels: ["console"] });
+  expect(def.policy.email_allowed_recipients).toEqual(["self"]);
+  expect(def.notify).toEqual({ channels: ["console", "email"], recipients: ["self", "colleague@example.test"] });
 
   // The panel's definition card reads the same truth.
   await page.getByText("Definition").first().click();
@@ -136,13 +142,13 @@ test("creates an email-triggered automation with filters and allowed recipients"
   await expect(page.getByText(/when an email arrives · from example\.test/).first()).toBeVisible();
 });
 
-test("Email me the result is stored as notify.channels email", async ({ page, request }) => {
+test("Email result is stored as notify.channels email", async ({ page, request }) => {
   await connectFixtureAccount(request);
   await signIn(page);
   const title = `E2E email notify ${Date.now()}`;
   const dialog = await openDialog(page);
   await dialog.getByLabel("Task").fill("Check the build and tell me");
-  await dialog.getByRole("switch", { name: "Email me the result" }).check();
+  await dialog.getByRole("switch", { name: "Email result", exact: true }).check();
   await dialog.getByText("Advanced").click();
   await dialog.getByLabel("Title").fill(title);
   await dialog.getByRole("button", { name: "Create automation" }).click();

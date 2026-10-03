@@ -96,10 +96,10 @@ describe("pane modes (DESIGN §5.3)", () => {
     expect(sidebarOnModeChange(false, "drawers")).toBe(false);
   });
 
-  it("app.tsx wires the resize effect and the toggle through these reducers", () => {
-    expect(appSource).toMatch(/inspectorOnModeChange\(state, from, paneMode\)/);
+  it("app.tsx keeps responsive navigation and uses one workspace drawer", () => {
     expect(appSource).toMatch(/sidebarOnModeChange\(open, paneMode\)/);
-    expect(appSource).toMatch(/inspectorOnToggle\(/);
+    expect(appSource).toContain("<WorkspaceDrawer");
+    expect(appSource).not.toContain("<WorkspaceInspector");
   });
 });
 
@@ -131,7 +131,7 @@ describe("Escape closes one layer", () => {
 
   it("app.tsx counts every drawer and dialog above the panes as the owner of the key", () => {
     const call = appSource.slice(appSource.indexOf("escapeTarget({"), appSource.indexOf("});", appSource.indexOf("escapeTarget({")));
-    for (const owner of ["settingsOpen", "inputsOpen", "voiceOpen", "newAutomationOpen", "appearanceOpen", "kitDialogOpen()"]) {
+    for (const owner of ["panelOpen", "assistantOpen", "newAutomationOpen", "appearanceOpen", "kitDialogOpen()"]) {
       expect(call, owner).toContain(owner);
     }
     expect(call).toContain("defaultPrevented: event.defaultPrevented");

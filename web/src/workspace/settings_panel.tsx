@@ -93,8 +93,6 @@ export function SettingsPanel({
   /** Where the drawer starts (px): under the app's chrome. Default 60 (the desktop top bar). */
   topOffset?: number;
 }) {
-  const update = (patch: Partial<RunPreferences>) =>
-    onChange({ ...value, ...patch });
   return (
     <AfDrawer
       open={open}
@@ -134,8 +132,45 @@ export function SettingsPanel({
             </button>
           ))}
         </div>
+        <SettingsContent
+          tab={tab}
+          value={value}
+          onChange={onChange}
+          policy={policy}
+          tools={tools}
+          disabled={disabled}
+          defaultModel={defaultModel}
+          workflowDefault={workflowDefault}
+          streaming={streaming}
+        />
+      </div>
+    </AfDrawer>
+  );
+}
+
+/** Preference sections for a host-owned drawer. No drawer or navigation wrappers. */
+export type SettingsContentProps = {
+  tab: SettingsTab | "toolsSkills";
+  value: RunPreferences;
+  onChange: (value: RunPreferences) => void;
+  policy: WorkspacePolicy | null;
+  tools: ToolSpec[];
+  disabled: boolean;
+  lockedReasonId?: string;
+  defaultModel?: { provider: string; model: string };
+  workflowDefault?: boolean;
+  streaming?: StreamingCapability;
+};
+
+export function SettingsContent({
+  tab, value, onChange, policy, tools, disabled, defaultModel,
+  workflowDefault, streaming = STREAMING_LOADING,
+  lockedReasonId = SETTINGS_LOCKED_ID,
+}: SettingsContentProps) {
+  const update = (patch: Partial<RunPreferences>) => onChange({ ...value, ...patch });
+  return <>
         {disabled ? (
-          <p className="code-notice" id={SETTINGS_LOCKED_ID}>
+          <p className="code-notice" id={lockedReasonId}>
             Settings are unavailable while disconnected or while a run is
             active. Reconnect, or finish or stop the run, then try again.
           </p>
@@ -300,7 +335,7 @@ export function SettingsPanel({
               </>
             ) : null}
           </section>
-        ) : tab === "tools" ? (
+        ) : tab === "tools" || tab === "toolsSkills" ? (
           <section className="code-settings-section">
             <label className="code-field">
               Permissions
@@ -360,18 +395,23 @@ export function SettingsPanel({
             >
               Use workflow tool defaults
             </button>
+            {tab === "toolsSkills" ? (
+              <section className="code-settings-section">
+                <h3>Skills</h3>
+                <SkillsPicker value={value.skills} onChange={(skills) => update({ skills })}
+                  disabled={disabled} lockedReasonId={lockedReasonId} />
+              </section>
+            ) : null}
           </section>
         ) : (
           <SkillsPicker
             value={value.skills}
             onChange={(skills) => update({ skills })}
             disabled={disabled}
-            lockedReasonId={SETTINGS_LOCKED_ID}
+            lockedReasonId={lockedReasonId}
           />
         )}
-      </div>
-    </AfDrawer>
-  );
+  </>;
 }
 
 /** "Stream replies": gateway default / on / off. Shown disabled, with the

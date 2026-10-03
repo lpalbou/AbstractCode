@@ -46,7 +46,7 @@ export default defineConfig(({ mode }) => ({
     host: "0.0.0.0",
     strictPort: false,
     fs: {
-      allow: [resolve(__dirname)],
+      allow: [resolve(__dirname), resolve(__dirname, "../docs")],
     },
   },
   test: {

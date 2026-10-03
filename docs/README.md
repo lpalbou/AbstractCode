@@ -21,7 +21,7 @@ shape first.
 
 | Page | What it covers |
 |---|---|
-| [`web.md`](web.md) | Workflow selection, conversation files, the responsive layout (phones, tablets, laptops, wide screens) and collapsible sidebar sections, Stream replies, settings, approvals, workspaces, reusable components, and optional voice |
+| [`web.md`](web.md) | The six-category Workspace & settings drawer, header widgets, workflow selection, files, responsive navigation, streamed replies and narration, approvals, and workspaces |
 | [`deployment-web.md`](deployment-web.md) | Hosting it, reverse proxies, forwarded addresses, and the gateway-first deployment model |
 | [`deployment-iphone.md`](deployment-iphone.md) | Safari and progressive web app notes, and how the interface adapts to the phone |
 

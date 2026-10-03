@@ -245,12 +245,10 @@ describe("space on phones and tablets (DESIGN §12)", () => {
     expect(rule(phone, ".code-session")).toContain("padding: 10px 8px;");
   });
 
-  it("the inspector backdrop is not a second 'Close workspace inspector' control", () => {
-    const at = appSource.indexOf('className="code-inspector-scrim"');
-    expect(at).toBeGreaterThan(0);
-    const tag = appSource.slice(at, appSource.indexOf("/>", at));
-    expect(tag).toContain('aria-hidden="true"');
-    expect(tag).not.toContain("aria-label");
+  it("the unified drawer replaces the inspector and its separate backdrop", () => {
+    expect(appSource).toContain("<WorkspaceDrawer");
+    expect(appSource).not.toContain('className="code-inspector-scrim"');
+    expect(appSource).not.toContain('aria-label="Close workspace inspector"');
   });
 });
 

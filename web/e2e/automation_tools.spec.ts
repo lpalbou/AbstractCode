@@ -1,3 +1,4 @@
+import { openWorkspaceSection, openWorkflowInputs, closeWorkspaceDrawer } from "./drawer_navigation";
 import { expect, test } from "@playwright/test";
 import http from "node:http";
 import { createCodeServer } from "../bin/server.js";
@@ -21,9 +22,12 @@ test("workflow and tool pickers persist; email recipients remain visible; refres
   await page.locator("#gateway-session-user").fill("web-tester");
   await page.locator("#gateway-session-token").fill("abstractcode-e2e-only");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await openWorkspaceSection(page, "Model & behavior");
   await page.getByRole("combobox", { name: "Workflow", exact: true }).click();
   await page.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Basic agent defaults" }) }).click();
-  await page.locator(".pc-composer textarea").fill("Conversation kept during refresh");
+  await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");
+  await closeWorkspaceDrawer(page);
+  await page.locator(".code-conversation .pc-composer textarea").fill("Conversation kept during refresh");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page.locator(".pc-chat-item--assistant").first()).toBeVisible();
   await page.getByRole("button", { name: "New automation", exact: true }).click();
@@ -35,7 +39,7 @@ test("workflow and tool pickers persist; email recipients remain visible; refres
   await dialog.getByRole("combobox", { name: "Automation workflow", exact: true }).click();
   await dialog.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Authored model contract" }) }).click();
   await expect(dialog.getByRole("textbox", { name: "Me and these addresses", exact: true })).toHaveValue("reviewer@example.test");
-  await expect(page.getByRole("combobox", { name: "Workflow", exact: true })).toContainText("Basic agent defaults");
+  await expect(page.locator("#code-workflow-picker")).toContainText("Basic agent defaults");
   await page.screenshot({ path: "e2e/artifacts/automation-workflow-email-create.png" });
   await page.setViewportSize({ width: 390, height: 844 });
   const box = await dialog.boundingBox();
@@ -64,7 +68,7 @@ test("workflow and tool pickers persist; email recipients remain visible; refres
   expect(createdBody.target.input_data._runtime.allowed_tools).toEqual(["web_search"]);
   const main = page.getByRole("main", { name: "Automation", exact: true });
   await expect(main.locator('[data-fact="workflow"]')).toContainText("authored-contract");
-  await expect(page.locator(".code-toolbar")).not.toBeVisible();
+  await expect(page.getByRole("main", { name: "Automation", exact: true })).toBeVisible();
   await main.locator('[data-action="edit"]').click();
   const edit = main.locator(".af-auto__revise");
   await expect(edit.getByRole("button", { name: "Remove web_search" })).toBeVisible();

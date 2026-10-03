@@ -1,3 +1,4 @@
+import { AppAssistantDrawer } from "./app_assistant";
 import { LoadingStatus } from "./loading_status";
 import { automationToolSelection, gatewayApiPath } from "@abstractframework/ui-kit";
 import React, {
@@ -9,9 +10,8 @@ import React, {
 } from "react";
 import {
   AfAppearanceDialog,
-  AfDrawer,
-  AfSwitch,
   AfTopBarActions,
+  AfSwitch,
   GatewayConnectModal,
   Icon,
   useAppearanceSettings,
@@ -25,21 +25,18 @@ import {
 } from "@abstractframework/ui-kit";
 import {
   escapeTarget,
-  initialInspector,
-  inspectorOnModeChange,
-  inspectorOnToggle,
   kitDialogOpen,
   paneModeFrom,
   sidebarOnModeChange,
   useChromeBottom,
   useDrawerFocus,
-  type InspectorState,
   type PaneMode,
 } from "./layout";
 import { SidebarDrawer } from "./sidebar_drawer";
-import { ConversationsPanel, SidebarLists, WorkspaceRow, useSidebarPanels } from "./sidebar_panels";
+import { ConversationsPanel, SidebarLists, useSidebarPanels } from "./sidebar_panels";
 import {
   WorkflowChat,
+  WorkspaceBrowser,
   chatToMarkdown,
   presentInteraction,
   downloadTextFile,
@@ -61,12 +58,13 @@ import {
 import { gateway, gatewayRequest, formatError, newId } from "./transport";
 import { createWorkflowTransport } from "./session_transport";
 import {
-  SettingsPanel,
+  SettingsContent,
   DEFAULT_PREFERENCES,
   type RunPreferences,
-  type SettingsTab,
 } from "./settings_panel";
-import { WorkspaceInspector, type InspectorTab } from "./workspace_panels";
+import { WorkspaceFilesContent, WorkspaceActivityContent } from "./workspace_panels";
+import { WorkspaceDrawer, type WorkspaceSection } from "./workspace_drawer";
+import { proxyGatewayFetch } from "./session_files";
 import { aboutExtraRows, type FetchOutcome } from "./about_rows";
 import { automationTarget, automationsAvailability, myEmailConsoleUrl } from "./automations";
 import {
@@ -168,6 +166,7 @@ export function CodeWorkspace() {
   const [appearance, setAppearance] = useAppearanceSettings("abstractcode", {
     defaults: { theme: "observer-night" },
   });
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   // `GET /api/gateway/about`, fetched each time the About dialog opens.
   const [gatewayAbout, setGatewayAbout] = useState<FetchOutcome>();
@@ -183,7 +182,6 @@ export function CodeWorkspace() {
         }),
       );
   }, []);
-  const [voiceOpen, setVoiceOpen] = useState(false);
   const [voicePreferences, setVoicePreferences] = useState<VoicePreferences>(
     {},
   );
@@ -197,7 +195,8 @@ export function CodeWorkspace() {
     } catch {
       setVoicePreferences({});
     }
-    setVoiceOpen(false);
+    setPanelOpen(false);
+    setAssistantOpen(false);
   }, [identity]);
   const changeVoicePreferences = (next: VoicePreferences) => {
     setVoicePreferences(next);
@@ -273,28 +272,22 @@ export function CodeWorkspace() {
     any
   > | null>(null);
   const [restoreError, setRestoreError] = useState("");
-  const [inputsOpen, setInputsOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>("model");
-  // Pane modes (layout.ts): xl docks three panes; 1024-1439 docks the sidebar and makes the
-  // inspector an overlay; below 1024 both side panes are drawers.
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelSection, setPanelSection] = useState<WorkspaceSection>("files");
+  const [inputsOpen, setInputsExpanded] = useState(false);
+  const openPanel = (section: WorkspaceSection) => { setPanelSection(section); setAssistantOpen(false); setPanelOpen(true); setSidebarOpen(false); };
+  const setInputsOpen = (open: boolean) => {
+    setInputsExpanded(open);
+    if (open) openPanel("model");
+    else if (panelSection === "model") setPanelOpen(false);
+  };
+  // Conversation navigation becomes a drawer below the tablet breakpoint.
   const panesAreDrawers = useAfMedia(AF_MEDIA.md);
   const belowLg = useAfMedia(AF_MEDIA.lg);
   const paneMode: PaneMode = paneModeFrom(belowLg, panesAreDrawers);
   const paneModeRef = useRef<PaneMode>(paneMode);
   // Kit drawers open under the measured chrome (top bar, or the one-row landscape chrome).
   const drawerTop = useChromeBottom(60);
-  const [inspector, setInspector] = useState<InspectorState>(() => initialInspector(paneMode));
-  const inspectorOpen = inspector.open;
-  const inspectorIsOverlay = paneMode !== "docked";
-  const setInspectorOpen = useCallback(
-    (next: boolean | ((open: boolean) => boolean)) =>
-      setInspector((state) =>
-        inspectorOnToggle(state, paneModeRef.current, typeof next === "function" ? next(state.open) : next),
-      ),
-    [],
-  );
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("files");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Collapsible Automations / Conversations panels, remembered per viewer.
   const [panels, togglePanelOpen] = useSidebarPanels();
@@ -642,13 +635,11 @@ export function CodeWorkspace() {
     setDraft("");
     setAutomationView(false);
   }, []);
-  // A resize that changes the pane mode: leaving xl folds the inspector (remembering the
-  // user's docked choice, restored back at xl); leaving drawer mode closes the navigation drawer.
+  // Close the mobile conversation navigation when returning to a docked layout.
   useEffect(() => {
     const from = paneModeRef.current;
     paneModeRef.current = paneMode;
     if (from === paneMode) return;
-    setInspector((state) => inspectorOnModeChange(state, from, paneMode));
     setSidebarOpen((open) => sidebarOnModeChange(open, paneMode));
   }, [paneMode]);
   useDrawerFocus(
@@ -657,12 +648,6 @@ export function CodeWorkspace() {
     () => document.querySelector<HTMLElement>(".code-sidebar"),
     () => document.querySelector<HTMLElement>(".code-mobile-close"),
   );
-  useDrawerFocus(
-    inspectorOpen,
-    inspectorIsOverlay,
-    () => document.querySelector<HTMLElement>(".code-inspector"),
-    () => document.querySelector<HTMLElement>(".code-inspector-heading .code-icon-button"),
-  );
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       // One Escape closes one layer: a dialog or kit drawer above the panes owns it.
@@ -670,23 +655,21 @@ export function CodeWorkspace() {
         key: event.key,
         defaultPrevented: event.defaultPrevented,
         overlayOpen:
-          settingsOpen || inputsOpen || voiceOpen || newAutomationOpen || appearanceOpen || kitDialogOpen(),
+          panelOpen || assistantOpen || newAutomationOpen || appearanceOpen || kitDialogOpen(),
         sidebarOpen,
-        inspectorOpen,
-        inspectorIsOverlay,
+        inspectorOpen: false,
+        inspectorIsOverlay: false,
       });
       if (target === "sidebar") {
         setSidebarOpen(false);
         document.querySelector<HTMLButtonElement>(".code-mobile-nav")?.focus();
         return;
       }
-      if (target === "inspector") {
-        setInspectorOpen(false);
-        return;
-      }
       if (!(event.metaKey || event.ctrlKey)) return;
       if (event.key.toLowerCase() === "k") {
         event.preventDefault();
+        setPanelOpen(false);
+        setAssistantOpen(false);
         setSidebarOpen(true);
         window.setTimeout(() => searchInput.current?.focus(), 0);
       }
@@ -700,14 +683,10 @@ export function CodeWorkspace() {
   }, [
     newConversation,
     sidebarOpen,
-    inspectorOpen,
-    inspectorIsOverlay,
-    settingsOpen,
-    inputsOpen,
-    voiceOpen,
     newAutomationOpen,
+    panelOpen,
+    assistantOpen,
     appearanceOpen,
-    setInspectorOpen,
   ]);
 
   function currentWorkflowInput(text: string, values: Record<string, unknown>, attachments: AttachmentRef[] = [], forAutomation = false, selectedWorkflow = workflow, selectedSchema = schema) {
@@ -1079,10 +1058,6 @@ export function CodeWorkspace() {
       setNotice("");
     }
   }
-  const openSettings = (tab: SettingsTab) => {
-    setSettingsTab(tab);
-    setSettingsOpen(true);
-  };
   const act = (callback: () => Promise<unknown>) => {
     const epoch = authEpoch.current;
     const sid = session.sessionId;
@@ -1111,13 +1086,50 @@ export function CodeWorkspace() {
     }
   })();
 
-  const modelLabel =
-    preferences.model ||
-    (inputs.provider && inputs.model ? `Workflow · ${inputs.model}` : "Gateway default");
+  const renderSettings = (section: "model" | "workspace" | "toolsSkills") => automationView ? (
+    <p className="code-notice">These are conversation settings. Select a conversation to change them. To configure this automation, close the drawer and choose Edit.</p>
+  ) : (
+      <SettingsContent
+          tab={section}
+          lockedReasonId={`code-${section}-locked`}
+          value={preferences}
+          onChange={(next) => {
+            // Reset only on an explicit Settings transition. Runtime values
+            // matching flat pins are not proof they were host-authored.
+            const reset: string[] = [];
+            if ((preferences.provider || preferences.model) && !next.provider && !next.model) reset.push("provider", "model");
+            if (preferences.toolsCustomized && !next.toolsCustomized) reset.push("tools");
+            if (preferences.maxIterations && !next.maxIterations) reset.push("max_iterations");
+            if (reset.length) setInputs(previous => {
+              const values = { ...previous }, defaults = schemaDefaults(schema);
+              for (const key of reset) {
+                delete values[key];
+                if (Object.prototype.hasOwnProperty.call(defaults, key)) values[key] = defaults[key];
+              }
+              return values;
+            });
+            setPreferences(next);
+          }}
+          policy={catalog.policy}
+          tools={catalog.tools}
+          defaultModel={
+            inputs.provider && inputs.model
+              ? {
+                  provider: String(inputs.provider),
+                  model: String(inputs.model),
+                }
+              : catalog.defaultModel
+          }
+          workflowDefault={Boolean(inputs.provider && inputs.model)}
+          streaming={catalog.streaming}
+          disabled={locked || !connection.connected}
+        />
+
+  );
 
   return (
     <div
-      className={`code-app${sidebarOpen ? " code-app--nav-open" : ""}${inspectorOpen ? " code-app--workspace-open" : ""}`}
+      className={`code-app${sidebarOpen ? " code-app--nav-open" : ""}`}
     >
       <a className="code-skip-link" href="#code-conversation">
         Skip to conversation
@@ -1233,14 +1245,6 @@ export function CodeWorkspace() {
         </ConversationsPanel>
         </SidebarLists>
         <div className="code-sidebar-bottom">
-          <WorkspaceRow
-            path={effectiveWorkspace}
-            onOpen={() => openSettings("workspace")}
-          />
-          <button onClick={() => openSettings("model")}>
-            <Icon name="settings" size={17} />
-            <span>Settings</span>
-          </button>
           <div className="code-gateway-foot">
             <span
               className={`code-status-dot ${connection.connected ? "is-online" : ""}`}
@@ -1264,7 +1268,7 @@ export function CodeWorkspace() {
           <button
             className="code-mobile-nav code-icon-button"
             aria-label="Open conversation navigation"
-            onClick={() => setSidebarOpen(true)}
+            onClick={() => { setPanelOpen(false); setAssistantOpen(false); setSidebarOpen(true); }}
           >
             <Icon name="list" size={19} />
           </button>
@@ -1276,117 +1280,19 @@ export function CodeWorkspace() {
             </strong>
           </div>
           <AfTopBarActions
+            assistant={{ open: assistantOpen, onToggle: () => { setAssistantOpen(open => !open); setPanelOpen(false); setSidebarOpen(false); }, label: "Code assistant (docs-grounded)" }}
             appearance={{ onOpen: () => setAppearanceOpen(true) }}
-            about={{
-              identity: APP_IDENTITY,
-              extraRows: aboutExtraRows(gatewayAbout),
-              onOpen: refreshGatewayAbout,
-            }}
+            about={{ identity: APP_IDENTITY, extraRows: aboutExtraRows(gatewayAbout), onOpen: refreshGatewayAbout }}
+            connection={{ phase: connection.phase, signingOut: connection.signingOut,
+              onConnect: connection.openModal, onDisconnect: () => void connection.signOut() }}
             extraActions={
-              <button
-                className={`af-topbar__btn${inspectorOpen ? " is-active" : ""}`}
-                aria-label="Toggle workspace inspector"
-                aria-pressed={inspectorOpen}
-                onClick={() => setInspectorOpen((v) => !v)}
-              >
-                <Icon name="board" size={17} />
-              </button>
+          <button className={`code-panel-opener af-topbar__btn${panelOpen ? " is-active" : ""}`}
+            aria-label="Workspace & settings" aria-expanded={panelOpen} onClick={() => { setPanelOpen(!panelOpen); setAssistantOpen(false); setSidebarOpen(false); }}>
+            <Icon name="settings" size={18} /><span>Workspace & settings</span>
+          </button>
             }
-            connection={{
-              phase: connection.phase,
-              signingOut: connection.signingOut,
-              onConnect: connection.openModal,
-              onDisconnect: () => {
-                void connection.signOut();
-              },
-            }}
           />
         </header>
-        {!automationView ? <div className="code-toolbar">
-          {/* aria-busy while the chosen workflow's inputs load (a send then would be refused). */}
-          <div className="code-workflow-select" aria-busy={schemaLoading || undefined}>
-            <Icon name="agent" size={17} />
-            <WorkflowPicker
-              id="code-workflow-picker"
-              className="code-workflow-picker"
-              interfaceId={CODE_AGENT_INTERFACE}
-              ariaLabel="Workflow"
-              workflows={{ ...catalog.executable, reload: () => void catalog.refresh() }}
-              value={pickerValue(selection, workflow)}
-              currentLabel={
-                workflow && selection !== GATEWAY_DEFAULT && !visibleChoices.some((item) => item.id === workflow.id)
-                  ? { name: workflow.name, detail: session.runId && workflow.bundleVersion ? `conversation version ${workflow.bundleVersion}` : workflow.bundleVersion ? `@${workflow.bundleVersion}` : "" }
-                  : null
-              }
-              unavailableReason={!connection.connected ? "Connect to a gateway first." : locked ? "A run is in progress." : null}
-              onChange={(value, entry) => {
-                const next = selectionFromPicker(value, entry);
-                setSelection(next);
-                setPreferences((previous) => ({ ...previous, workflow: next }));
-              }}
-            />
-            {selection === GATEWAY_DEFAULT && defaultInterfaceMismatch(defaultWorkflow) ? (
-              <span className="code-workflow-resolved is-missing" role="alert" title={defaultInterfaceMismatch(defaultWorkflow)}>
-                {defaultInterfaceMismatch(defaultWorkflow)}
-              </span>
-            ) : null}
-            {sourceNote ? (
-              <span className="code-workflow-resolved is-missing" role="status" title={sourceNote}>
-                {sourceNote}
-              </span>
-            ) : null}
-            {/* The picker already names what runs; only a resolution that went wrong is said here. */}
-            {resolvedNote && resolvedNote.runId === session.runId && resolvedNote.missing ? (
-              <span className="code-workflow-resolved is-missing" role="status">
-                {resolvedNote.text}
-              </span>
-            ) : null}
-          </div>
-          <span className="code-toolbar-divider" />
-          <button
-            className="code-icon-button code-model-button"
-            onClick={() => openSettings("model")}
-            aria-label="Run settings"
-            title={`Run settings · model: ${modelLabel}`}
-          >
-            <Icon name="settings" size={16} />
-          </button>
-          <div className="code-toolbar-spacer" />
-          <button
-            className="code-subtle-button"
-            onClick={() => setInputsOpen(true)}
-            disabled={!workflow}
-            aria-label="Inputs"
-            title="Workflow inputs"
-          >
-            <Icon name="settings" size={14} />
-            <span>Inputs</span>
-          </button>
-          <button
-            className="code-subtle-button"
-            onClick={() => openSettings("tools")}
-            aria-label="Tools"
-            title="Tools"
-          >
-            <Icon name="terminal" size={14} />
-            <span>Tools</span>
-          </button>
-          {messages.length ? (
-            <button
-              className="code-icon-button"
-              aria-label="Export conversation"
-              title="Export conversation"
-              onClick={() =>
-                downloadTextFile({
-                  filename: "conversation.md",
-                  text: chatToMarkdown(messages),
-                })
-              }
-            >
-              <Icon name="download" size={15} />
-            </button>
-          ) : null}
-        </div> : null}
         <div className="code-content">
           {automationView ? (
             <AutomationMain
@@ -1520,8 +1426,7 @@ export function CodeWorkspace() {
                   act(() => controller.sendCommand(command, {}))
                 }
                 onActivity={() => {
-                  setInspectorTab("activity");
-                  setInspectorOpen(true);
+                  openPanel("activity");
                 }}
               />
             ) : null}
@@ -1618,9 +1523,8 @@ export function CodeWorkspace() {
               }
               composerExtras={
                 <>
-                  <button
+                  <span
                     className="code-composer-workspace"
-                    onClick={() => openSettings("workspace")}
                     title={
                       effectiveWorkspace ||
                       "Workspace is managed by the gateway"
@@ -1631,14 +1535,13 @@ export function CodeWorkspace() {
                       {effectiveWorkspace.split("/").filter(Boolean).pop() ||
                         "Gateway workspace"}
                     </span>
-                  </button>
+                  </span>
                   {connection.connected ? (
                     <VoiceTools
                       key={`${identity}:${session.sessionId}:${session.runId}`}
                       runId={session.runId}
                       voice={voice}
                       capability={voiceCapability}
-                      onSettings={() => setVoiceOpen(true)}
                       answer={[...messages]
                         .reverse()
                         .find((message) => message.role === "assistant")}
@@ -1718,42 +1621,6 @@ export function CodeWorkspace() {
             ) : null}
           </main>
           )}
-          {inspectorOpen ? (
-            // A pointer-only backdrop: hidden from assistive tech so the drawer's own
-            // "Close workspace inspector" button is the one control with that name.
-            <button
-              className="code-inspector-scrim"
-              aria-hidden="true"
-              tabIndex={-1}
-              onClick={() => setInspectorOpen(false)}
-            />
-          ) : null}
-          {inspectorOpen ? (
-            <WorkspaceInspector
-              tab={inspectorTab}
-              onTab={setInspectorTab}
-              policy={catalog.policy}
-              runId={session.runId}
-              records={snapshot.records}
-              enabled={connection.connected}
-              isAdmin={connection.status?.gateway?.principal?.admin === true}
-              refreshKey={snapshot.status}
-              onAttachFiles={attachUploads}
-              onClose={() => setInspectorOpen(false)}
-              onAttach={async (path) => {
-                const sid = session.sessionId;
-                const rid = session.runId;
-                const epoch = authEpoch.current;
-                const ref = await gateway.attachments_ingest(sid, path);
-                if (
-                  sessionRef.current.sessionId === sid &&
-                  sessionRef.current.runId === rid &&
-                  authEpoch.current === epoch
-                )
-                  setAttachments((items) => [...items, ref]);
-              }}
-            />
-          ) : null}
         </div>
         <footer className="code-statusbar">
           <span>
@@ -1773,9 +1640,7 @@ export function CodeWorkspace() {
               ? `Run ${session.runId.slice(0, 8)}`
               : "Ready to start"}
           </span>
-          <button onClick={() => setAppearanceOpen(true)}>
-            {appearance.theme.replace(/-/g, " ")}
-          </button>
+          <span>{appearance.theme.replace(/-/g, " ")}</span>
         </footer>
       </div>
       <div className="pc-sr-only" role="status" aria-live="polite">
@@ -1827,89 +1692,82 @@ export function CodeWorkspace() {
         }}
       />
       <GatewayConnectModal {...connection.modalProps} />
-      <AfDrawer
-        open={voiceOpen}
-        onClose={() => setVoiceOpen(false)}
-        label="Voice settings"
-        title="AI voice"
-        width={480}
-        topOffset={drawerTop}
-        className="code-settings-drawer"
-      >
-        <div className="code-settings">
-          {/* The drawer keeps its content mounted: without a session the voice catalog
-              request can only answer 401 (it was the console error on the sign-in screen). */}
-          {connection.connected ? (
-          <VoiceSettings
-            value={voicePreferences}
-            onChange={(next) => {
-              voice.stop_tts();
-              changeVoicePreferences(next);
-            }}
-            fetchCatalog={(provider, model) =>
-              gatewayRequest(
-                gatewayApiPath(`voice/voices?compact=true${provider ? `&provider=${encodeURIComponent(provider)}` : ""}${model ? `&model=${encodeURIComponent(model)}` : ""}`),
-              )
-            }
-          />
-          ) : null}
-        </div>
-      </AfDrawer>
-      <AfAppearanceDialog
-        open={appearanceOpen}
-        onClose={() => setAppearanceOpen(false)}
-        value={appearance}
-        onChange={setAppearance}
-      />
-      <SettingsPanel
-          key={identity}
-          open={settingsOpen}
-          topOffset={drawerTop}
-          onClose={() => setSettingsOpen(false)}
-          tab={settingsTab}
-          onTab={setSettingsTab}
-          value={preferences}
-          onChange={(next) => {
-            // Reset only on an explicit Settings transition. Runtime values
-            // matching flat pins are not proof they were host-authored.
-            const reset: string[] = [];
-            if ((preferences.provider || preferences.model) && !next.provider && !next.model) reset.push("provider", "model");
-            if (preferences.toolsCustomized && !next.toolsCustomized) reset.push("tools");
-            if (preferences.maxIterations && !next.maxIterations) reset.push("max_iterations");
-            if (reset.length) setInputs(previous => {
-              const values = { ...previous }, defaults = schemaDefaults(schema);
-              for (const key of reset) {
-                delete values[key];
-                if (Object.prototype.hasOwnProperty.call(defaults, key)) values[key] = defaults[key];
+      <AppAssistantDrawer key={`assistant:${identity}`} open={assistantOpen} onClose={() => setAssistantOpen(false)} connected={connection.connected} topOffset={drawerTop} />
+      <AfAppearanceDialog open={appearanceOpen} onClose={() => setAppearanceOpen(false)} value={appearance} onChange={setAppearance} />
+      <WorkspaceDrawer key={`workspace:${identity}`} open={panelOpen} onClose={() => setPanelOpen(false)}
+        section={panelSection} onSection={setPanelSection} topOffset={drawerTop} pages={{
+        activity: automationView ? <section className="code-settings-section"><h2 className="code-panel-section-title">Automation activity</h2>
+          <p>{automationTitle}</p><p>Open a run to inspect its activity.</p>
+          {(automationsState.detail?.occurrences || []).map(row => <div key={row.run_id} className="code-automation-activity-row"><span>Run #{row.index} · {row.status}</span><button className="code-subtle-button" onClick={() => automationHost.openRun(row.run_id)}>Open run #{row.index}</button></div>)}
+          {!automationsState.detail?.occurrences.length ? <p>No runs yet.</p> : null}
+        </section> : <WorkspaceActivityContent records={snapshot.records} runId={session.runId} />,
+        files: automationView ? (connection.connected && automationsState.selectedId ? <WorkspaceBrowser fetchGateway={proxyGatewayFetch} runId={automationsState.selectedId} title="Automation files" refreshKey={automationsState.detail?.summary.updated_at} /> : <p>Connect to a gateway and select an automation to browse its files.</p>) : <>            <WorkspaceFilesContent
+              policy={catalog.policy}
+              runId={session.runId}
+              enabled={connection.connected}
+              isAdmin={connection.status?.gateway?.principal?.admin === true}
+              refreshKey={snapshot.status}
+              onAttachFiles={attachUploads}
+              onAttach={async (path) => {
+                const sid = session.sessionId;
+                const rid = session.runId;
+                const epoch = authEpoch.current;
+                const ref = await gateway.attachments_ingest(sid, path);
+                if (
+                  sessionRef.current.sessionId === sid &&
+                  sessionRef.current.runId === rid &&
+                  authEpoch.current === epoch
+                )
+                  setAttachments((items) => [...items, ref]);
+              }}
+            />
+          {messages.length ? <button className="code-subtle-button" onClick={() => downloadTextFile({ filename: "conversation.md", text: chatToMarkdown(messages) })}>Export conversation</button> : null}
+        </>,
+        model: <>
+          <h2 className="code-panel-section-title">Model & behavior</h2>
+                    {!automationView ? <div className="code-workflow-select" aria-busy={schemaLoading || undefined}>
+            <Icon name="agent" size={17} />
+            <WorkflowPicker
+              id="code-workflow-picker"
+              className="code-workflow-picker"
+              interfaceId={CODE_AGENT_INTERFACE}
+              ariaLabel="Workflow"
+              workflows={{ ...catalog.executable, reload: () => void catalog.refresh() }}
+              value={pickerValue(selection, workflow)}
+              currentLabel={
+                workflow && selection !== GATEWAY_DEFAULT && !visibleChoices.some((item) => item.id === workflow.id)
+                  ? { name: workflow.name, detail: session.runId && workflow.bundleVersion ? `conversation version ${workflow.bundleVersion}` : workflow.bundleVersion ? `@${workflow.bundleVersion}` : "" }
+                  : null
               }
-              return values;
-            });
-            setPreferences(next);
-          }}
-          policy={catalog.policy}
-          tools={catalog.tools}
-          defaultModel={
-            inputs.provider && inputs.model
-              ? {
-                  provider: String(inputs.provider),
-                  model: String(inputs.model),
-                }
-              : catalog.defaultModel
-          }
-          workflowDefault={Boolean(inputs.provider && inputs.model)}
-          streaming={catalog.streaming}
-          disabled={locked || !connection.connected}
-        />
-      <AfDrawer
-        open={inputsOpen}
-        onClose={() => setInputsOpen(false)}
-        label="Workflow inputs"
-        title={workflow?.name || "Workflow inputs"}
-        width={480}
-        topOffset={drawerTop}
-        className="code-settings-drawer"
-      >
-        <div className="code-settings">
+              unavailableReason={!connection.connected ? "Connect to a gateway first." : locked ? "A run is in progress." : null}
+              onChange={(value, entry) => {
+                const next = selectionFromPicker(value, entry);
+                setSelection(next);
+                setPreferences((previous) => ({ ...previous, workflow: next }));
+              }}
+            />
+            {selection === GATEWAY_DEFAULT && defaultInterfaceMismatch(defaultWorkflow) ? (
+              <span className="code-workflow-resolved is-missing" role="alert" title={defaultInterfaceMismatch(defaultWorkflow)}>
+                {defaultInterfaceMismatch(defaultWorkflow)}
+              </span>
+            ) : null}
+            {sourceNote ? (
+              <span className="code-workflow-resolved is-missing" role="status" title={sourceNote}>
+                {sourceNote}
+              </span>
+            ) : null}
+            {/* The picker already names what runs; only a resolution that went wrong is said here. */}
+            {resolvedNote && resolvedNote.runId === session.runId && resolvedNote.missing ? (
+              <span className="code-workflow-resolved is-missing" role="status">
+                {resolvedNote.text}
+              </span>
+            ) : null}
+          </div> : null}
+
+          {renderSettings("model")}
+          {!automationView ? <details className="code-panel-inputs" open={inputsOpen} onToggle={event => setInputsExpanded(event.currentTarget.open)}>
+            <summary>Workflow inputs</summary>
+                    <div className="code-settings">
           <p className="code-muted">
             {workflow?.description ||
               "Configure the values this workflow needs to run."}
@@ -1973,7 +1831,20 @@ export function CodeWorkspace() {
             </button>
           )}
         </div>
-      </AfDrawer>
+
+          </details> : null}
+        </>,
+        tools: <><h2 className="code-panel-section-title">Tools & skills</h2>{renderSettings("toolsSkills")}</>,
+        workspace: <>
+          <h2 className="code-panel-section-title">Workspace</h2>
+          {!automationView ? <p className="code-current-workspace">Current workspace<br /><code>{effectiveWorkspace || "Gateway workspace"}</code></p> : null}
+          {renderSettings("workspace")}
+        </>,
+        voice: <section className="code-settings-section"><h2 className="code-panel-section-title">Voice</h2>
+            {connection.connected ? <VoiceSettings value={voicePreferences} onChange={next => { voice.stop_tts(); changeVoicePreferences(next); }}
+              fetchCatalog={(provider, model) => gatewayRequest(gatewayApiPath(`voice/voices?compact=true${provider ? `&provider=${encodeURIComponent(provider)}` : ""}${model ? `&model=${encodeURIComponent(model)}` : ""}`))} /> : <p>Connect to a gateway to configure voice.</p>}
+        </section>,
+      }} />
     </div>
   );
 }
@@ -2117,7 +1988,7 @@ function EmptyConversation({
           "Discovering your workflows…"
         ) : workflow ? (
           <>
-            Using <strong>{workflow.name}</strong> · Change workflows above
+            Using <strong>{workflow.name}</strong> · Choose a workflow in Workspace & settings
           </>
         ) : connected ? (
           "Register a workflow with AbstractGateway to get started."

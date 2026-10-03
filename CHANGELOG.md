@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [web 0.10.3] - 2026-10-03
+
+- Conversations and automation answers share narration controls, with an animated loading spinner, incremental audio playback and immediate cancellation. Automation answers use the central panel width.
+
+- User and automation-trigger cards use 75% of the available width, align to the right, and keep normal left-aligned text.
+
+- Web navigation uses one **Workspace & settings** drawer with six shared tabs: Activity, Files, Model & behavior, Tools & skills, Workspace, and Voice. The standard upper-right appearance, About and connection controls remain available, alongside a docs-grounded Code assistant. Workflow inputs, generated outputs, voice controls remain available within those categories. The drawer supports desktop, tablet and phone layouts, touch controls, independent content scrolling and keyboard navigation.
+
 - Automation creation and editing include a workflow picker. The scheduling form uses a compact responsive layout with visible email-recipient controls and persistent action buttons. Automation views identify their own workflow and hide conversation-only controls.
 
 - Automation creation and editing include the shared searchable tool dropdown, with explicit empty selections and workflow defaults. Sidebar refreshes preserve rows and show loading text only before the initial load.

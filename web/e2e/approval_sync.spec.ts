@@ -1,3 +1,4 @@
+import { openWorkspaceSection, openWorkflowInputs, closeWorkspaceDrawer } from "./drawer_navigation";
 import { expect, test, type Page } from "@playwright/test";
 
 // The approval gate is the same in every client (operator rulings: one session
@@ -31,9 +32,9 @@ async function blockExternalTraffic(page: Page): Promise<void> {
 /** Round 3: every workflow the Code picker offers declares abstractcode.agent.v1, so a turn
  * starts from the composer (the inputs drawer says "Back to chat"; there is no "Run workflow"). */
 async function sendTurn(page: Page, text = "Run the fixture."): Promise<void> {
-  const drawer = page.getByRole("complementary", { name: "Workflow inputs" });
-  if (await drawer.isVisible()) await drawer.getByRole("button", { name: "Back to chat", exact: true }).click();
-  const composer = page.locator(".pc-composer textarea");
+  const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
+  await closeWorkspaceDrawer(page);
+  const composer = page.locator(".code-conversation .pc-composer textarea");
   if (!(await composer.inputValue()).trim()) await composer.fill(text);
   await page.getByRole("button", { name: "Send", exact: true }).click();
 }
@@ -41,6 +42,7 @@ async function sendTurn(page: Page, text = "Run the fixture."): Promise<void> {
 /** The header's kit WorkflowPicker (round 3: no "Show all workflows" — it lists only what the
  * gateway returns for abstractcode.agent.v1): open it and choose the entry named `name`. */
 async function chooseWorkflow(page: Page, name: string): Promise<void> {
+  await openWorkspaceSection(page, "Model & behavior");
   const picker = page.getByRole("combobox", { name: "Workflow", exact: true });
   await expect(picker).toBeEnabled();
   await picker.click();
@@ -54,6 +56,7 @@ async function chooseWorkflow(page: Page, name: string): Promise<void> {
   await expect(page.locator("#code-workflow-picker .af-workflow-picker__name")).toHaveText(name);
   // The chosen workflow's inputs have loaded (a send before that is refused).
   await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");
+  await closeWorkspaceDrawer(page);
 }
 
 async function signIn(page: Page): Promise<void> {
@@ -65,7 +68,9 @@ async function signIn(page: Page): Promise<void> {
   await page.locator("#gateway-session-token").fill(fixtureToken);
   await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(dialog).toBeHidden();
+  await openWorkspaceSection(page, "Model & behavior");
   await expect(page.getByLabel("Workflow", { exact: true })).toBeEnabled();
+  await closeWorkspaceDrawer(page);
   await expect(page.locator(".code-statusbar").getByText("Connected", { exact: true })).toBeVisible();
 }
 
@@ -84,7 +89,7 @@ async function expectGate(page: Page, who: string): Promise<void> {
   // The composer waits for the decision: its send button says so and the
   // textarea points at the card (not "Guide the current workflow… / Steer").
   await expect(page.locator(".pc-composer").getByRole("button", { name: "Waiting for you" }), `${who}: the composer waits for the decision`).toBeVisible();
-  await expect(page.locator(".pc-composer textarea"), `${who}: the composer points at the request`).toHaveAttribute("placeholder", /Answer the request above/);
+  await expect(page.locator(".code-conversation .pc-composer textarea"), `${who}: the composer points at the request`).toHaveAttribute("placeholder", /Answer the request above/);
 }
 
 test("a client that opens the conversation later sees the gate the originating client sees", async ({ browser }) => {

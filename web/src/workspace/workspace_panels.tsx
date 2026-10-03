@@ -52,7 +52,6 @@ export function WorkspaceInspector({
   onAttachFiles: (files: File[]) => PendingUpload[];
   onClose: () => void;
 }) {
-  const [filesMode, setFilesMode] = useState<"session" | "shared">("session");
   // Rows, not records: the three records of one step are one row, and the
   // `abstract.progress` / `abstract.status` records are progress UI rather than
   // activity. The badge counts what the operator can actually read — a turn
@@ -104,7 +103,43 @@ export function WorkspaceInspector({
         aria-labelledby={`inspector-tab-${tab}`}
       >
         {tab === "files" ? (
-          <>
+          <WorkspaceFilesContent policy={policy} runId={runId} enabled={enabled}
+            isAdmin={isAdmin} refreshKey={refreshKey} onAttach={onAttach}
+            onAttachFiles={onAttachFiles} includeArtifacts={false} />
+        ) : tab === "activity" ? (
+          <WorkspaceActivityContent records={records} runId={runId} />
+        ) : (
+          <Artifacts runId={runId} enabled={enabled} refreshKey={refreshKey} />
+        )}
+      </div>
+      <div className="code-inspector-foot">
+        <Icon name="server" size={14} />
+        <span>Access enforced by your gateway</span>
+      </div>
+    </aside>
+  );
+}
+
+/** File browsing and generated output for a host-owned Files category. */
+export type WorkspaceFilesContentProps = {
+  policy: WorkspacePolicy | null;
+  runId: string;
+  enabled: boolean;
+  isAdmin: boolean;
+  refreshKey?: string;
+  onAttach: (path: string) => Promise<void>;
+  onAttachFiles: (files: File[]) => PendingUpload[];
+  includeArtifacts?: boolean;
+};
+
+export function WorkspaceFilesContent({
+  policy, runId, enabled, isAdmin, refreshKey, onAttach, onAttachFiles,
+  includeArtifacts = true,
+}: WorkspaceFilesContentProps) {
+  const [filesMode, setFilesMode] = useState<"session" | "shared">("session");
+  return <>
+    <section className="code-settings-section">
+      <h3>Workspace files</h3>
             {isAdmin ? (
               <div className="code-files-mode" role="group" aria-label="Files source">
                 <button
@@ -121,35 +156,38 @@ export function WorkspaceInspector({
                 </button>
               </div>
             ) : null}
-            {isAdmin && filesMode === "shared" ? (
+            {isAdmin ? <div hidden={filesMode !== "shared"}>
               <SharedWorkspaceBrowser
                 policy={policy}
-                enabled={enabled}
+                enabled={enabled && filesMode === "shared"}
                 runId={runId}
                 onAttach={onAttach}
               />
-            ) : (
+            </div> : null}
+            <div hidden={isAdmin && filesMode !== "session"}>
               <SessionFiles
                 runId={runId}
-                enabled={enabled}
+                enabled={enabled && (!isAdmin || filesMode === "session")}
                 refreshKey={refreshKey}
                 maxAttachmentBytes={policy?.maxAttachmentBytes}
                 onAttachFiles={onAttachFiles}
               />
-            )}
-          </>
-        ) : tab === "activity" ? (
-          <Activity rows={rows} />
-        ) : (
-          <Artifacts runId={runId} enabled={enabled} />
-        )}
-      </div>
-      <div className="code-inspector-foot">
-        <Icon name="server" size={14} />
-        <span>Access enforced by your gateway</span>
-      </div>
-    </aside>
-  );
+            </div>
+    </section>
+    {includeArtifacts ? <section className="code-settings-section">
+      <h3>Generated outputs & attachments</h3>
+      <Artifacts runId={runId} enabled={enabled} refreshKey={refreshKey} />
+    </section> : null}
+  </>;
+}
+
+/** Live activity remains readable while preference editing is locked. */
+export function WorkspaceActivityContent({ records, runId }: {
+  records: WorkflowRecord[];
+  runId: string;
+}) {
+  const rows = useMemo(() => activity_rows(records, runId), [records, runId]);
+  return <Activity rows={rows} />;
 }
 
 /** The gateway operator's shared workspace root (`/files/list|search`,
@@ -406,7 +444,7 @@ function Activity({ rows }: { rows: ActivityRow[] }) {
   );
 }
 
-function Artifacts({ runId, enabled }: { runId: string; enabled: boolean }) {
+function Artifacts({ runId, enabled, refreshKey }: { runId: string; enabled: boolean; refreshKey?: string }) {
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
@@ -432,7 +470,7 @@ function Artifacts({ runId, enabled }: { runId: string; enabled: boolean }) {
         if (!abort.signal.aborted) setError(formatError(e));
       });
     return () => abort.abort();
-  }, [runId, enabled, revision]);
+  }, [runId, enabled, revision, refreshKey]);
   return (
     <>
       <div className="code-pane-intro">

@@ -1,3 +1,4 @@
+import { openWorkspaceSection, openWorkflowInputs, closeWorkspaceDrawer } from "./drawer_navigation";
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -43,9 +44,9 @@ async function blockExternalTraffic(page: Page): Promise<void> {
 /** Round 3: every workflow the Code picker offers declares abstractcode.agent.v1, so a turn
  * starts from the composer (the inputs drawer says "Back to chat"; there is no "Run workflow"). */
 async function sendTurn(page: Page, text = "Run the fixture."): Promise<void> {
-  const drawer = page.getByRole("complementary", { name: "Workflow inputs" });
-  if (await drawer.isVisible()) await drawer.getByRole("button", { name: "Back to chat", exact: true }).click();
-  const composer = page.locator(".pc-composer textarea");
+  const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
+  await closeWorkspaceDrawer(page);
+  const composer = page.locator(".code-conversation .pc-composer textarea");
   if (!(await composer.inputValue()).trim()) await composer.fill(text);
   await page.getByRole("button", { name: "Send", exact: true }).click();
 }
@@ -53,6 +54,7 @@ async function sendTurn(page: Page, text = "Run the fixture."): Promise<void> {
 /** The header's kit WorkflowPicker (round 3: no "Show all workflows" — it lists only what the
  * gateway returns for abstractcode.agent.v1): open it and choose the entry named `name`. */
 async function chooseWorkflow(page: Page, name: string): Promise<void> {
+  await openWorkspaceSection(page, "Model & behavior");
   const picker = page.getByRole("combobox", { name: "Workflow", exact: true });
   await expect(picker).toBeEnabled();
   await picker.click();
@@ -66,6 +68,7 @@ async function chooseWorkflow(page: Page, name: string): Promise<void> {
   await expect(page.locator("#code-workflow-picker .af-workflow-picker__name")).toHaveText(name);
   // The chosen workflow's inputs have loaded (a send before that is refused).
   await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");
+  await closeWorkspaceDrawer(page);
 }
 
 async function signIn(page: Page, captureLogin = false): Promise<void> {
@@ -78,7 +81,9 @@ async function signIn(page: Page, captureLogin = false): Promise<void> {
   await page.locator("#gateway-session-token").fill(fixtureToken);
   await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(dialog).toBeHidden();
+  await openWorkspaceSection(page, "Model & behavior");
   await expect(page.getByLabel("Workflow", { exact: true })).toBeEnabled();
+  await closeWorkspaceDrawer(page);
   await expect(
     page.locator(".code-statusbar").getByText("Connected", { exact: true }),
   ).toBeVisible();
@@ -109,13 +114,11 @@ async function expectPersistedCompletion(page: Page): Promise<void> {
 
 async function startPromptWorkflow(page: Page, prompt: string): Promise<void> {
   await selectWorkflow(page, "Prompt structured");
-  await page
-    .getByRole("button", { name: "Inputs", exact: true })
-    .click();
-  const drawer = page.getByRole("complementary", { name: "Workflow inputs" });
+  await openWorkflowInputs(page);
+  const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
   await expect(drawer).toBeVisible();
   await drawer.getByLabel(/Ticket/).fill(unique("ticket"));
-  await page.locator(".pc-composer textarea").fill(prompt);
+  await page.locator(".code-conversation .pc-composer textarea").fill(prompt);
   await sendTurn(page);
   // The real Ask User node receives the flow's Prompt input as its durable
   // question; asserting the submitted value proves it is not a mock dialog.
@@ -165,7 +168,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     // client-only optimistic message cache.
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByText(/structured-output/).first()).toBeVisible();
-    const restoredTranscript = page.locator(".pc-chat-thread");
+    const restoredTranscript = page.locator(".code-conversation .pc-chat-thread");
     await expect(
       restoredTranscript.getByText(prompt, { exact: true }),
     ).toBeVisible();
@@ -199,9 +202,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await priorSession.click();
     await expect(page.getByText(/structured-output/).first()).toBeVisible();
 
-    await page
-      .getByRole("button", { name: "Appearance (theme and typography)" })
-      .click();
+    await page.getByRole("button", { name: "Appearance (theme and typography)", exact: true }).click();
     const appearance = page.getByRole("dialog", { name: "Appearance" });
     await expect(appearance).toBeVisible();
     await appearance.locator(".af-select-trigger").first().click();
@@ -215,20 +216,20 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       .locator("body")
       .evaluate((element) => getComputedStyle(element).color);
     await expect(
-      page.getByRole("button", { name: "Disconnect from gateway" }),
+      page.getByRole("button", { name: "Disconnect from gateway", exact: true }),
     ).toHaveCSS("color", settledBodyText);
     await appearance
       .getByRole("button", { name: "Close", exact: true })
       .click();
     await capture(page, "light");
 
-    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await openWorkspaceSection(page, "Model & behavior");
     const settings = page.getByRole("complementary", {
-      name: "Run settings",
+      name: "Workspace & settings",
     });
     await expect(settings).toBeVisible();
     await expect(
-      settings.getByRole("tab", { name: "Tools", exact: true }),
+      settings.getByRole("tab", { name: "Tools & skills", exact: true }),
     ).toBeVisible();
     const closeSettings = settings.getByRole("button", {
       name: "Close panel",
@@ -256,13 +257,13 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     // The second turn deliberately reuses the active durable session and
     // starts through the generic workflow Inputs surface rather than an agent
     // prompt shortcut.
-    await page.getByRole("button", { name: "Inputs", exact: true }).click();
+    await openWorkflowInputs(page);
     const secondInputs = page.getByRole("complementary", {
-      name: "Workflow inputs",
+      name: "Workspace & settings",
     });
     await expect(secondInputs).toBeVisible();
     await secondInputs.getByLabel(/Ticket/).fill(unique("ticket"));
-    await page.locator(".pc-composer textarea").fill(secondPrompt);
+    await page.locator(".code-conversation .pc-composer textarea").fill(secondPrompt);
     await sendTurn(page);
     await expect(page.getByText(secondPrompt, { exact: true })).toBeVisible();
     await expect(
@@ -272,7 +273,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await expect(page.getByText("Completed", { exact: true })).toBeVisible();
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    const transcript = page.locator(".pc-chat-thread");
+    const transcript = page.locator(".code-conversation .pc-chat-thread");
     await expect(
       transcript.getByText(firstPrompt, { exact: true }),
     ).toBeVisible();
@@ -463,13 +464,11 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       failed.getByRole("heading", { name: "Parameters" }),
     ).toBeVisible();
     await page.keyboard.press("Enter");
-    await page.locator(".pc-chat-thread").evaluate((element) => {
+    await page.locator(".code-conversation .pc-chat-thread").evaluate((element) => {
       element.scrollTop = 0;
     });
     await capture(page, "compact-tool-supervision");
-    await page
-      .getByRole("button", { name: "Appearance (theme and typography)" })
-      .click();
+    await page.getByRole("button", { name: "Appearance (theme and typography)", exact: true }).click();
     await page
       .getByRole("dialog", { name: "Appearance" })
       .locator(".af-select-trigger")
@@ -490,9 +489,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
         ),
     );
     await capture(page, "compact-tool-supervision-tokyo");
-    await page
-      .getByRole("button", { name: "Appearance (theme and typography)" })
-      .click();
+    await page.getByRole("button", { name: "Appearance (theme and typography)", exact: true }).click();
     await page
       .getByRole("dialog", { name: "Appearance" })
       .locator(".af-select-trigger")
@@ -522,19 +519,14 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       await page
         .getByRole("button", { name: "Close navigation", exact: true })
         .click();
-    // The docked inspector may close itself on the resize (narrow layout); close it only
-    // when it is still there — the count assertion below holds either way.
-    const closeInspector = page.getByRole("button", { name: "Close workspace inspector", exact: true });
-    if (await closeInspector.isVisible().catch(() => false)) await closeInspector.click({ timeout: 3000 }).catch(() => {});
-    await expect(page.locator(".code-app")).not.toHaveClass(
-      /code-app--nav-open/,
-    );
-    await expect(page.locator(".code-inspector")).toHaveCount(0);
+    await closeWorkspaceDrawer(page);
+    await expect(page.locator(".code-app")).not.toHaveClass(/code-app--nav-open/);
+    await expect(page.getByRole("complementary", { name: "Workspace & settings" })).toBeHidden();
     await page.waitForFunction(() => {
       const sidebar = document.querySelector(".code-sidebar");
       return sidebar && sidebar.getBoundingClientRect().right <= 0;
     });
-    await page.locator(".pc-chat-thread").evaluate((element) => {
+    await page.locator(".code-conversation .pc-chat-thread").evaluate((element) => {
       element.scrollTop = 0;
     });
     await capture(page, "compact-tool-supervision-mobile");
@@ -758,7 +750,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     });
     await signIn(page);
     await selectWorkflow(page, "Assistant contract");
-    const composer = page.locator(".pc-composer textarea");
+    const composer = page.locator(".code-conversation .pc-composer textarea");
     await composer.fill("Check the workflow defaults");
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await expect(
@@ -834,7 +826,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       name: "Message",
       exact: true,
     });
-    const drawer = page.getByRole("complementary", { name: "Workflow inputs" });
+    const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
     for (const [index, message] of [
       "Hello, use the usual defaults",
       "Continue without any setup",
@@ -898,7 +890,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     );
     await capture(page, "basic-agent-zero-configuration");
 
-    await page.getByRole("button", { name: "Inputs", exact: true }).click();
+    await openWorkflowInputs(page);
     await expect(
       drawer.getByText("Ready to chat", { exact: true }),
     ).toBeVisible();
@@ -933,6 +925,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     });
     await signIn(page);
     await expect.poll(() => asked.some((q) => q.includes("executable_for=abstractcode.agent.v1"))).toBe(true);
+    await openWorkspaceSection(page, "Model & behavior");
     const picker = page.getByRole("combobox", { name: "Workflow", exact: true });
     await picker.click();
     const names = page.getByRole("listbox", { name: "Workflow" }).locator(".af-workflow-picker__option .af-workflow-picker__name");
@@ -951,8 +944,8 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     });
     await signIn(page);
     await selectWorkflow(page, "Native tool approval");
-    await page.getByRole("button", { name: "Tools", exact: true }).click();
-    const settings = page.getByRole("complementary", { name: "Run settings" });
+    await openWorkspaceSection(page, "Tools & skills");
+    const settings = page.getByRole("complementary", { name: "Workspace & settings" });
     await settings.getByLabel("Permissions", { exact: true }).selectOption("all");
     await settings.getByRole("button", { name: "Custom allowlist", exact: true }).click();
     await settings.getByRole("button", { name: "Select all", exact: true }).click();
@@ -970,11 +963,11 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await capture(page, "unchecked-tool-denied");
     // The previous turn's immutable ceiling must not prevent an explicit
     // enablement for the next run in the same conversation.
-    await page.getByRole("button", { name: "Tools", exact: true }).click();
+    await openWorkspaceSection(page, "Tools & skills");
     await settings.getByPlaceholder("Filter tools...").fill("write_file");
     await settings.getByRole("switch", { name: "write_file", exact: true }).check();
     await settings.getByRole("button", { name: "Close panel", exact: true }).click();
-    await page.getByRole("button", { name: "Inputs", exact: true }).click();
+    await openWorkflowInputs(page);
     await sendTurn(page);
     await expect.poll(() => submissions.length).toBe(2);
     await expectPersistedCompletion(page);
@@ -989,8 +982,8 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     });
     await signIn(page);
     await selectWorkflow(page, "Tool supervision");
-    await page.getByRole("button", { name: "Tools", exact: true }).click();
-    const settings = page.getByRole("complementary", { name: "Run settings" });
+    await openWorkspaceSection(page, "Tools & skills");
+    const settings = page.getByRole("complementary", { name: "Workspace & settings" });
     await settings.getByLabel("Permissions", { exact: true }).selectOption("all");
     await settings.getByRole("button", { name: "Close panel", exact: true }).click();
     await sendTurn(page);
@@ -1039,8 +1032,8 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     );
     await signIn(page);
     await selectWorkflow(page, "Typed workflow inputs");
-    await page.getByRole("button", { name: "Inputs", exact: true }).click();
-    const drawer = page.getByRole("complementary", { name: "Workflow inputs" });
+    await openWorkflowInputs(page);
+    const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
     await drawer.getByText("Advanced workflow inputs", { exact: false }).click();
     const group = drawer.locator(".code-settings-section").filter({
       has: page.getByRole("heading", { name: "Text model", exact: true }),
@@ -1077,10 +1070,10 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     ).toHaveCount(0);
     await drawer.getByRole("button", { name: "Close panel" }).click();
     await selectWorkflow(page, "Authored model contract");
-    await page.locator(".code-model-button").click();
+    await openWorkspaceSection(page, "Model & behavior");
     await expect(
       page
-        .getByRole("complementary", { name: "Run settings" })
+        .getByRole("complementary", { name: "Workspace & settings" })
         .getByText("Workflow default: fixture-authored · reasoner-authored."),
     ).toBeVisible();
   });
@@ -1137,28 +1130,27 @@ test.describe("AbstractCode isolated gateway workspace", () => {
         },
       }),
     );
-    await page.route("**/api/gateway/runs/*/voice/tts", (route) => {
+    await page.route("**/api/gateway/runs/*/voice/tts/stream", (route) => {
       requestBody = route.request().postDataJSON();
       return route.fulfill({
-        json: { audio_artifact: { $artifact: "browser-voice-fixture" } },
+        contentType: "application/x-ndjson",
+        body: [
+          { type: "start" },
+          { type: "audio", audio_b64: wav.toString("base64") },
+          { type: "done" },
+        ].map(event => JSON.stringify(event) + "\n").join(""),
       });
     });
-    await page.route(
-      "**/api/gateway/runs/*/artifacts/browser-voice-fixture/content",
-      (route) => route.fulfill({ contentType: "audio/wav", body: wav }),
-    );
     await signIn(page);
     await selectWorkflow(page, "Assistant contract");
     await page
-      .locator(".pc-composer textarea")
+      .locator(".code-conversation .pc-composer textarea")
       .fill("Explain this change clearly");
     await page.getByRole("button", { name: "Send", exact: true }).click();
     const message = page.locator(".pc-chat-item--assistant").last();
     await expect(message).toBeVisible();
-    await page
-      .getByRole("button", { name: "Voice settings", exact: true })
-      .click();
-    const drawer = page.getByRole("complementary", { name: "Voice settings" });
+    await openWorkspaceSection(page, "Voice");
+    const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
     await drawer.getByRole("button", { name: "AI voice" }).click();
     await expect(
       page.getByRole("option", {
@@ -1269,7 +1261,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     });
     await signIn(page);
     await selectWorkflow(page, "Assistant contract");
-    await page.locator(".pc-composer textarea").fill("Prepare dictation");
+    await page.locator(".code-conversation .pc-composer textarea").fill("Prepare dictation");
     await page.getByRole("button", { name: "Send", exact: true }).click();
     const mic = page.getByRole("button", {
       name: "Hold to dictate",
@@ -1288,7 +1280,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
         page.evaluate(() => (window as any).__microphoneFixture.stops),
       )
       .toBe(1);
-    await expect(page.locator(".pc-composer textarea")).toHaveValue("");
+    await expect(page.locator(".code-conversation .pc-composer textarea")).toHaveValue("");
     await expect(
       page.getByRole("button", {
         name: "Recording — release to transcribe",
@@ -1353,7 +1345,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await signIn(page);
     await selectWorkflow(page, "Assistant contract");
     const start = async (prompt: string) => {
-      await page.locator(".pc-composer textarea").fill(prompt);
+      await page.locator(".code-conversation .pc-composer textarea").fill(prompt);
       await page.getByRole("button", { name: "Send", exact: true }).click();
       await expect(
         page.getByRole("button", { name: "Hold to dictate", exact: true }),
@@ -1394,7 +1386,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       }),
     ).toBeVisible();
     expect(audioUploads).toEqual([]);
-    await expect(page.locator(".pc-composer textarea")).toHaveValue("");
+    await expect(page.locator(".code-conversation .pc-composer textarea")).toHaveValue("");
     await page.locator(".code-new-chat").click();
     await expect
       .poll(() =>
@@ -1407,6 +1399,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     page,
   }) => {
     await signIn(page);
+    await openWorkspaceSection(page, "Files");
     // The Files tab opens on this conversation's own files; the fixture file
     // lives in the operator's shared workspace.
     await page
@@ -1435,6 +1428,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
         .getByText("browser-upload.txt", { exact: true }),
     ).toBeVisible();
 
+    await closeWorkspaceDrawer(page);
     await page
       .getByRole("button", { name: "Disconnect from gateway", exact: true })
       .click();

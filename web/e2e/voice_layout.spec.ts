@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { openWorkspaceSection, openWorkflowInputs, closeWorkspaceDrawer } from "./drawer_navigation";
+import { expect, test, type Locator } from "@playwright/test";
 import http from "node:http";
 import { createCodeServer } from "../bin/server.js";
 
@@ -46,6 +47,21 @@ test.afterAll(async () => {
   await Promise.all([app, upstream].map(s => new Promise<void>(resolve => s.close(() => resolve()))));
 });
 
+async function expectRightAlignedCard(card: Locator) {
+  await expect(card).toHaveCSS("text-align", "left");
+  const geometry = await card.evaluate(element => {
+    const parent = element.parentElement!;
+    const style = getComputedStyle(parent);
+    const rect = parent.getBoundingClientRect();
+    const box = element.getBoundingClientRect();
+    const left = rect.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
+    const right = rect.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
+    return { width: box.width, available: right - left, rightGap: right - box.right };
+  });
+  expect(Math.abs(geometry.width - geometry.available * .75)).toBeLessThan(2);
+  expect(Math.abs(geometry.rightGap)).toBeLessThan(2);
+}
+
 test("conversation and automation reuse narration, stream early and use the available width", async ({ page }) => {
   await page.route("**/api/gateway/discovery/capabilities", async route => {
     const response = await route.fetch(); const data = await response.json();
@@ -57,12 +73,19 @@ test("conversation and automation reuse narration, stream early and use the avai
   await page.locator("#gateway-session-user").fill("web-tester");
   await page.locator("#gateway-session-token").fill("abstractcode-e2e-only");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await openWorkspaceSection(page, "Model & behavior");
   await page.getByRole("combobox", { name: "Workflow", exact: true }).click();
   await page.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Basic agent defaults" }) }).click();
-  await page.locator(".pc-composer textarea").fill("A visually distinct user request.");
+  await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");
+  await closeWorkspaceDrawer(page);
+  await page.locator(".code-conversation .pc-composer textarea").fill("A visually distinct user request.");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   const user = page.locator(".pc-chat-item--user").first();
-  await expect(user).toHaveCSS("text-align", "right");
+  for (const width of [1440, 768, 390]) {
+    await page.setViewportSize({ width, height: 960 });
+    await expectRightAlignedCard(user);
+  }
+  await page.setViewportSize({ width: 1440, height: 960 });
   expect(await user.evaluate(e => getComputedStyle(e).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
   const speaker = page.getByRole("button", { name: "Speak (TTS)", exact: true }).last();
   await speaker.click();
@@ -83,7 +106,7 @@ test("conversation and automation reuse narration, stream early and use the avai
   const answer = main.locator(".pc-chat-item--assistant").first();
   await expect(answer).toBeVisible();
   const trigger = main.locator(".pc-chat-item--user").first();
-  await expect(trigger).toHaveCSS("text-align", "right");
+  await expectRightAlignedCard(trigger);
   await expect(answer.getByRole("button", { name: "Speak (TTS)", exact: true })).toBeVisible();
   const bodyWidth = (await main.locator(".code-auto-main-body").boundingBox())!.width;
   expect((await answer.boundingBox())!.width).toBeGreaterThan(bodyWidth * .85);
@@ -94,10 +117,12 @@ test("conversation and automation reuse narration, stream early and use the avai
   await main.getByRole("button", { name: "Stop audio", exact: true }).click();
   await expect.poll(() => disconnected).toBe(true);
   await page.screenshot({ path: "e2e/artifacts/voice-layout-desktop.png" });
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await expectRightAlignedCard(trigger);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator(".code-sidebar")).toBeHidden();
   await trigger.scrollIntoViewIfNeeded();
-  await expect(trigger).toHaveCSS("text-align", "right");
+  await expectRightAlignedCard(trigger);
   expect(await main.evaluate(e => e.scrollWidth <= e.clientWidth + 1)).toBe(true);
   await page.screenshot({ path: "e2e/artifacts/voice-layout-mobile.png" });
 });

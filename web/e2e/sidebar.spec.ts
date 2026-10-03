@@ -1,3 +1,4 @@
+import { openWorkspaceSection, openWorkflowInputs, closeWorkspaceDrawer } from "./drawer_navigation";
 import { readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -62,9 +63,9 @@ async function route(page: Page, runLimits: number[], opts: { syntheticOnly?: bo
 /** Round 3: every workflow the Code picker offers declares abstractcode.agent.v1, so a turn
  * starts from the composer (the inputs drawer says "Back to chat"; there is no "Run workflow"). */
 async function sendTurn(page: Page, text = "Run the fixture."): Promise<void> {
-  const drawer = page.getByRole("complementary", { name: "Workflow inputs" });
-  if (await drawer.isVisible()) await drawer.getByRole("button", { name: "Back to chat", exact: true }).click();
-  const composer = page.locator(".pc-composer textarea");
+  const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
+  await closeWorkspaceDrawer(page);
+  const composer = page.locator(".code-conversation .pc-composer textarea");
   if (!(await composer.inputValue()).trim()) await composer.fill(text);
   await page.getByRole("button", { name: "Send", exact: true }).click();
 }
@@ -72,6 +73,7 @@ async function sendTurn(page: Page, text = "Run the fixture."): Promise<void> {
 /** The header's kit WorkflowPicker (round 3: no "Show all workflows" — it lists only what the
  * gateway returns for abstractcode.agent.v1): open it and choose the entry named `name`. */
 async function chooseWorkflow(page: Page, name: string): Promise<void> {
+  await openWorkspaceSection(page, "Model & behavior");
   const picker = page.getByRole("combobox", { name: "Workflow", exact: true });
   await expect(picker).toBeEnabled();
   await picker.click();
@@ -85,6 +87,7 @@ async function chooseWorkflow(page: Page, name: string): Promise<void> {
   await expect(page.locator("#code-workflow-picker .af-workflow-picker__name")).toHaveText(name);
   // The chosen workflow's inputs have loaded (a send before that is refused).
   await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");
+  await closeWorkspaceDrawer(page);
 }
 
 async function signIn(page: Page): Promise<void> {
@@ -96,60 +99,38 @@ async function signIn(page: Page): Promise<void> {
   await page.locator("#gateway-session-token").fill(fixtureToken);
   await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(dialog).toBeHidden();
+  await openWorkspaceSection(page, "Model & behavior");
   await expect(page.getByLabel("Workflow", { exact: true })).toBeEnabled();
+  await closeWorkspaceDrawer(page);
 }
 
 async function runPromptConversation(page: Page): Promise<void> {
   await chooseWorkflow(page, "Prompt structured");
-  await page.getByRole("button", { name: "Inputs", exact: true }).click();
-  const drawer = page.getByRole("complementary", { name: "Workflow inputs" });
+  await openWorkflowInputs(page);
+  const drawer = page.getByRole("complementary", { name: "Workspace & settings" });
   await drawer.getByLabel(/Ticket/).fill(`sidebar-${Date.now()}`);
-  await page.locator(".pc-composer textarea").fill("Sidebar check.");
+  await page.locator(".code-conversation .pc-composer textarea").fill("Sidebar check.");
   await sendTurn(page);
   await expect(page.getByText("A question for you").first()).toBeVisible({ timeout: 30_000 });
-}
-
-async function workspaceRowGeometry(page: Page) {
-  return page.locator(".code-sidebar-bottom .code-workspace-row").evaluate((row) => {
-    const icons = row.querySelectorAll("svg");
-    const value = row.querySelector("small")!;
-    const chevron = icons[icons.length - 1].getBoundingClientRect();
-    const v = value.getBoundingClientRect();
-    const r = row.getBoundingClientRect();
-    const sidebar = row.closest(".code-sidebar")!.getBoundingClientRect();
-    return {
-      title: row.getAttribute("title"),
-      text: value.textContent,
-      valueRight: v.right, valueHeight: v.height, lineHeight: parseFloat(getComputedStyle(value).lineHeight) || v.height,
-      chevronLeft: chevron.left, chevronRight: chevron.right, rowRight: r.right, sidebarRight: sidebar.right,
-      ellipsis: getComputedStyle(value).textOverflow, clipped: value.scrollWidth > value.clientWidth,
-    };
-  });
 }
 
 test.describe("AbstractCode sidebar", () => {
   test.describe.configure({ mode: "serial" });
 
-  test("Workspace row keeps a long folder on one ellipsised line left of the chevron at 1440, 834 and in the 390 drawer", async ({ page }) => {
+  test("Current workspace preserves the full long path without overflow at desktop, tablet and phone sizes", async ({ page }) => {
     await route(page, []);
-    await page.setViewportSize({ width: 1440, height: 900 });
     await signIn(page);
     await runPromptConversation(page);
     for (const [width, height] of [[1440, 900], [834, 1194], [390, 844]]) {
       await page.setViewportSize({ width, height });
-      const opener = page.locator(".code-mobile-nav");
-      if (await opener.isVisible()) await opener.click();
-      const row = page.locator(".code-sidebar-bottom .code-workspace-row");
-      await row.scrollIntoViewIfNeeded();
-      await expect(row.locator("small")).toHaveText(LONG_WS.split("/").pop()!);
-      const g = await workspaceRowGeometry(page);
-      expect(g.title, `${width}`).toBe(`Workspace: ${LONG_WS}`);
-      expect(g.ellipsis, `${width}`).toBe("ellipsis");
-      expect(g.clipped, `${width}: the long value is cut by the ellipsis`).toBe(true);
-      expect(g.valueHeight, `${width}: one line`).toBeLessThanOrEqual(g.lineHeight + 1);
-      expect(g.valueRight, `${width}: value ends before the chevron`).toBeLessThanOrEqual(g.chevronLeft);
-      expect(g.chevronRight, `${width}: chevron inside the row`).toBeLessThanOrEqual(g.rowRight);
-      expect(g.rowRight, `${width}: row inside the sidebar`).toBeLessThanOrEqual(g.sidebarRight + 0.5);
+      const drawer = await openWorkspaceSection(page, "Workspace");
+      const path = drawer.locator(".code-current-workspace");
+      await expect(path).toContainText(LONG_WS);
+      await path.scrollIntoViewIfNeeded();
+      expect(await path.evaluate(el => el.scrollWidth <= el.clientWidth + 1), `${width}: full path wraps inside category`).toBe(true);
+      const bounds = (await path.boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(0);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(width + 1);
       await page.keyboard.press("Escape");
     }
   });
