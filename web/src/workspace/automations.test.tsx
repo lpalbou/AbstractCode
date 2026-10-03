@@ -242,7 +242,7 @@ describe("the sidebar section", () => {
       expect(at, title).toBeGreaterThan(-1);
       return html.slice(at, html.indexOf('</div>', html.indexOf('role="switch"', at)));
     };
-    const timing = (c: string) => /data-field="timing">([^<]*)</.exec(c)?.[1];
+    const timing = (c: string) => /data-field="timing">([\s\S]*?)<\/small>/.exec(c)?.[1].replace(/<[^>]+>/g, "");
     // The operator's line, from the gateway's facts only (NOW = 2026-09-27 06:35 UTC).
     expect(timing(card("Inbox triage"))).toBe("every 30 min · running now · next in 25 min");
     expect(timing(card("AI news monitor"))).toBe("every 8 h · last 6 h ago · next in 1 h");
@@ -255,7 +255,7 @@ describe("the sidebar section", () => {
     expect(card("Weekly journal monitor")).toMatch(/data-action="active" aria-checked="false"/);
     expect(html).not.toMatch(/>(Pause|Resume)</);
     // No year and no seconds anywhere on the cards.
-    for (const line of html.matchAll(/data-field="timing">([^<]*)</g)) expect(line[1]).not.toMatch(/20\d\d|\bsec|\d+ ?s\b/);
+    for (const line of html.matchAll(/data-field="timing">([\s\S]*?)<\/small>/g)) expect(line[1].replace(/<[^>]+>/g, "")).not.toMatch(/20\d\d|\bsec|\d+ ?s\b/);
     // The legacy row's switch is unavailable, with the kit's reason as its tooltip.
     expect(card("echo")).toMatch(/aria-disabled="true"[^>]*title="Legacy schedule/);
   });

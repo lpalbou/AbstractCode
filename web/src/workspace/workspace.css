@@ -2888,8 +2888,15 @@ select option {
 .code-auto-card > .code-card-main > .code-card-title {
   max-width: calc(100% - var(--code-card-switch-w, 84px));
 }
+/* The timing line is never cut: at a narrow docked width its parts wrap at the separators. */
 .code-auto-card > .code-card-main > .code-card-meta {
   max-width: 100%;
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+}
+.code-card-part {
+  white-space: nowrap;
 }
 .code-auto-card > .code-card-switch {
   grid-column: 2;

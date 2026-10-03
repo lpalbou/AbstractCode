@@ -125,7 +125,11 @@ export function AutomationCard(props: {
       >
         <strong className="code-card-title">{s.title}</strong>
         {waiting ? <WaitingBadge /> : null}
-        <small className="code-card-meta" data-field="timing">{timing.line}</small>
+        <small className="code-card-meta" data-field="timing">
+          {[timing.cadence, timing.last, timing.next].filter(Boolean).map((part, i) => (
+            <React.Fragment key={i}>{i ? " · " : ""}<span className="code-card-part">{part}</span></React.Fragment>
+          ))}
+        </small>
       </button>
       <AutomationActiveSwitch className="code-card-switch" summary={s} busy={props.busy} onToggle={props.onToggleActive} />
     </div>
