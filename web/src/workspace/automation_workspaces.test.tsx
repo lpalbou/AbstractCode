@@ -47,8 +47,10 @@ describe("New automation: the kit dialog's Workspaces section (R13.2)", () => {
     expect(view).toMatch(/const input = withAutomationWorkspace\(tooled \|\| body\.target\.input_data, workspace\);/);
   });
 
-  it("uses ui-kit 0.8.4: the dialog has the Workspaces slot and no Advanced disclosure", () => {
-    expect(kitPkg.version).toBe("0.8.4");
+  it("uses ui-kit >= 0.8.4: the dialog has the Workspaces slot (one heading) and no Advanced disclosure", () => {
+    const [maj, min, pat] = String(kitPkg.version).split(".").map(Number);
+    expect(maj * 1e6 + min * 1e3 + pat).toBeGreaterThanOrEqual(8004);
+    expect(kitDialog).toContain('role: "group"');
     expect(kitDialog).toContain("Title and limits");
     expect(kitDialog).toContain('"data-field": "workspaces"');
     expect(kitDialog).not.toMatch(/af-schedule__advanced|"summary"/);
