@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildWorkflowInput } from './catalog';
 import { GatewayClient } from '../lib/gateway_client';
-import { DEFAULT_PREFERENCES, SettingsPanel } from './settings_panel';
+import { DEFAULT_PREFERENCES, SettingsContent } from './settings_panel';
 import { parsePreferences } from './preferences';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -25,9 +25,9 @@ describe('MTP application transport', () => {
       expect(fetch.mock.calls[0][1].method).toBeUndefined();
     } finally { vi.unstubAllGlobals(); }
   });
-  it('shows the MTP control in Settings > Model & behavior', () => {
-    const html = renderToStaticMarkup(React.createElement(SettingsPanel, {
-      open: true, onClose: () => {}, tab: 'model', onTab: () => {},
+  it('shows the MTP control in the Model panel', () => {
+    const html = renderToStaticMarkup(React.createElement(SettingsContent, {
+      tab: 'model',
       value: DEFAULT_PREFERENCES, onChange: () => {}, policy: null, tools: [], disabled: false,
     }));
     expect(html).toContain('aria-label="MTP depth"');

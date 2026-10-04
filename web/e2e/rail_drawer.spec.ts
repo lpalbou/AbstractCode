@@ -1,6 +1,6 @@
-// Round 4 right panel against the disposable fixture gateway (e2e/gateway_fixture.py):
-// gear-only Settings button; the kit rail drawer (Activity / Files / Settings) at the
-// right edge — docked + resizable from 1024 px, floating below; files previewed in the
+// Round 4/5 right panel against the disposable fixture gateway (e2e/gateway_fixture.py):
+// gear-only Settings button; the kit rail drawer (Activity, Files, Model, Workflow,
+// Workspace, Tools, Skills, Voice — round 5) at the right edge — docked + resizable from 1024 px, floating below; files previewed in the
 // shared viewer; activity in foldable groups; Settings bound to the selection (an
 // automation's definition is saved as a new revision through the gateway); the
 // Assistant-style Voice rows. Real gateway routes, no mocks, no model.
@@ -9,7 +9,7 @@ import http from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createCodeServer } from "../bin/server.js";
-import { openWorkspaceSection, railTab } from "./drawer_navigation";
+import { openWorkspaceSection, RAIL_PANELS, railTab } from "./drawer_navigation";
 
 const gateway = process.env.ABSTRACTCODE_E2E_GATEWAY_URL || "http://127.0.0.1:18781";
 const origin = process.env.ABSTRACTCODE_E2E_URL || "http://127.0.0.1:18782";
@@ -73,9 +73,12 @@ for (const [name, width, height] of [["desktop", 1440, 960], ["tablet", 834, 111
       const rail = page.getByRole("tablist", { name: "Workspace panels", exact: true });
       await expect(rail).toHaveAttribute("aria-orientation", "vertical");
       const tabs = rail.getByRole("tab");
-      await expect(tabs).toHaveCount(3);
-      for (const label of ["Activity", "Files", "Settings"]) {
-        const box = (await railTab(page, label as any).boundingBox())!;
+      // R5: one icon per subject, in this order; no "Settings" panel, no "Model & behavior".
+      await expect(tabs).toHaveCount(RAIL_PANELS.length);
+      expect(await tabs.evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")))).toEqual([...RAIL_PANELS]);
+      await expect(page.getByText("Model & behavior")).toHaveCount(0);
+      for (const label of RAIL_PANELS) {
+        const box = (await railTab(page, label).boundingBox())!;
         expect(box.width).toBeGreaterThanOrEqual(44);
         expect(box.height).toBeGreaterThanOrEqual(44);
         expect(box.x + box.width).toBeGreaterThan(width - 52);
@@ -127,14 +130,31 @@ for (const [name, width, height] of [["desktop", 1440, 960], ["tablet", 834, 111
       await expect(page.locator("#code-rail-panel-activity")).toBeHidden();
       await expect(rail).toBeVisible();
 
-      // The gear opens Settings in the rail; sections for the selected conversation.
+      // The gear opens the Model panel; every settings panel is bound to the selected conversation.
       await gear.click();
-      const settings = page.locator("#code-rail-panel-settings");
-      await expect(settings).toBeVisible();
-      await expect(railTab(page, "Settings")).toHaveAttribute("aria-selected", "true");
-      await expect(settings.locator(".code-settings-binding")).toContainText("Conversation");
-      for (const title of ["Model & behavior", "Tools & skills", "Workspace", "Voice"])
-        await expect(settings.locator(".af-settings-group__title", { hasText: new RegExp(`^${title.replace(/[&]/g, "\\$&")}$`) })).toHaveCount(1);
+      const model = page.locator("#code-rail-panel-model");
+      await expect(model).toBeVisible();
+      await expect(railTab(page, "Model")).toHaveAttribute("aria-selected", "true");
+      await expect(gear).toHaveAttribute("aria-expanded", "true");
+      await expect(model.locator(".code-settings-binding")).toContainText("Conversation");
+      await expect(model.getByRole("button", { name: /Gateway default|Workflow default/ }).or(model.getByText(/Gateway default|Workflow default/)).first()).toBeVisible();
+      await shot(page, `panel-model-${name}`);
+      for (const [panelName, probe] of [
+        ["Workflow", (p: ReturnType<Page["locator"]>) => p.getByRole("combobox", { name: "Workflow", exact: true })],
+        ["Workspace", (p: ReturnType<Page["locator"]>) => p.getByText("Current workspace")],
+        ["Tools", (p: ReturnType<Page["locator"]>) => p.getByLabel("Permissions", { exact: true })],
+        ["Skills", (p: ReturnType<Page["locator"]>) => p.locator("#code-settings-skills")],
+      ] as const) {
+        const panelLocator = await openWorkspaceSection(page, panelName);
+        await expect(panelLocator.locator(".code-settings-binding")).toContainText("Conversation");
+        await expect(probe(panelLocator).first()).toBeVisible();
+        await noHorizontalOverflow(page);
+        await shot(page, `panel-${panelName.toLowerCase()}-${name}`);
+      }
+      // Workflow: the gateway default by default.
+      await openWorkspaceSection(page, "Workflow");
+      await expect(page.locator("#code-rail-panel-workflow").getByRole("combobox", { name: "Workflow", exact: true })).toContainText(/Gateway default/);
+      const settings = await openWorkspaceSection(page, "Voice");
       await expect(settings).not.toContainText("close the drawer and choose Edit");
       // D7: the Assistant's Voice layout, compact.
       const voice = settings.locator("#code-settings-voice");
@@ -146,7 +166,8 @@ for (const [name, width, height] of [["desktop", 1440, 960], ["tablet", 834, 111
       await voice.getByRole("switch", { name: /Read aloud/ }).click();
       await expect(voice.getByRole("switch", { name: /Read aloud/ })).toHaveAttribute("aria-checked", "true");
       await noHorizontalOverflow(page);
-      await shot(page, `settings-conversation-${name}`);
+      await shot(page, `panel-voice-${name}`);
+      // The gear closes an open settings panel.
       await gear.click();
       await expect(settings).toBeHidden();
     });
@@ -155,12 +176,12 @@ for (const [name, width, height] of [["desktop", 1440, 960], ["tablet", 834, 111
 
 test("files preview in the shared viewer; activity groups; no Open button", async ({ page }) => {
   await signIn(page);
-  await railTab(page, "Settings").click();
-  const settingsPanel = page.locator("#code-rail-panel-settings");
-  await settingsPanel.getByRole("combobox", { name: "Workflow", exact: true }).click();
+  await railTab(page, "Workflow").click();
+  const workflowPanel = page.locator("#code-rail-panel-workflow");
+  await workflowPanel.getByRole("combobox", { name: "Workflow", exact: true }).click();
   await page.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Basic agent defaults" }) }).click();
   await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");
-  await railTab(page, "Settings").click();
+  await railTab(page, "Workflow").click();
   await page.locator(".code-conversation .pc-composer textarea").fill("Rail drawer activity check.");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page.locator(".pc-chat-item--assistant").first()).toBeVisible();
@@ -229,7 +250,7 @@ test("files preview in the shared viewer; activity groups; no Open button", asyn
   await noHorizontalOverflow(page);
 });
 
-test("automation selected: Settings edit its definition and save a new revision", async ({ page }) => {
+test("automation selected: every settings panel edits its definition and saves a new revision", async ({ page }) => {
   const created = await api("automations", {
     method: "POST",
     body: JSON.stringify({
@@ -242,20 +263,25 @@ test("automation selected: Settings edit its definition and save a new revision"
   const id = created.automation_id;
   const rev0 = created.revision;
   await signIn(page);
-  // Leave the conversation's Settings scrolled down to Voice, then select the automation:
-  // its header's Edit opens Settings on the automation, at its top (the Automation card).
-  await openWorkspaceSection(page, "Voice");
-  await expect(page.locator("#code-rail-panel-settings .af-rail__body")).not.toHaveJSProperty("scrollTop", 0);
-  await railTab(page, "Settings").click(); // folded while the automation loads (its scroll position is kept)
+  // Leave the conversation's Workflow panel scrolled down, then select the automation:
+  // its header's Edit opens the Workflow panel on the automation, at its top (the definition form).
+  const conversationWorkflow = await openWorkspaceSection(page, "Workflow");
+  await conversationWorkflow.locator(".af-rail__body").evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  await railTab(page, "Workflow").click(); // folded while the automation loads (its scroll position is kept)
   await page.locator(".code-sidebar").getByText(created.summary.title, { exact: true }).first().click();
   await expect(page.locator(".code-auto-header")).toBeVisible();
   await page.locator('.code-auto-header [data-action="edit"]').click();
-  const settings = page.locator("#code-rail-panel-settings");
-  await expect(settings).toBeVisible();
-  await expect(settings.locator("#code-settings-automation")).toBeInViewport();
+  const workflow = page.locator("#code-rail-panel-workflow");
+  await expect(workflow).toBeVisible();
+  await expect(workflow.locator(".code-automation-definition")).toBeInViewport();
+  await expect(workflow.locator(".code-settings-binding")).toContainText("Automation");
+  await expect(workflow.getByTestId("automation-revision")).toHaveText(`Revision ${rev0}`);
+  await expect(workflow).not.toContainText("These are conversation settings");
+  await shot(page, "panel-workflow-automation-desktop");
+  // Model: the same automation, the same revision line.
+  const settings = await openWorkspaceSection(page, "Model");
   await expect(settings.locator(".code-settings-binding")).toContainText("Automation");
   await expect(settings.getByTestId("automation-revision")).toHaveText(`Revision ${rev0}`);
-  await expect(settings).not.toContainText("These are conversation settings");
   // Gateway default until overridden.
   await expect(settings.locator('input[placeholder="Workflow default"]').first()).toHaveValue("");
   const limit = settings.getByLabel("Iteration limit");
@@ -274,6 +300,9 @@ test("automation selected: Settings edit its definition and save a new revision"
   // Activity: one group per occurrence (none yet).
   await railTab(page, "Activity").click();
   await expect(page.locator("#code-rail-panel-activity")).toContainText("No runs yet.");
+  // Tools: the same draft and revision (one line for every panel).
+  const tools = await openWorkspaceSection(page, "Tools");
+  await expect(tools.getByTestId("automation-revision")).toHaveText(`Revision ${rev0 + 2}`);
   await shot(page, "settings-automation-desktop");
   await api(`automations/${encodeURIComponent(id)}/commands`, { method: "POST", body: JSON.stringify({ type: "automation.archive" }) }).catch(() => {});
 });

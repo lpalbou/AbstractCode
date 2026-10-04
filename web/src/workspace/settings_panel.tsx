@@ -1,6 +1,5 @@
 import React from "react";
 import {
-  AfDrawer,
   ProviderModelPicker,
   ToolPolicyEditor,
   type ToolPolicySelection,
@@ -9,7 +8,6 @@ import {
 import type { ToolSpec, WorkspacePolicy } from "./catalog";
 import { gateway } from "./transport";
 import { SkillsPicker } from "./skills_picker";
-import { navigateTabs } from "./tabs";
 import { modelDiscovery } from "./model_discovery";
 import { resolveToolPermissions, type PermissionLevel } from "./tool_permissions";
 import {
@@ -60,6 +58,7 @@ export const DEFAULT_PREFERENCES: RunPreferences = {
   workflow: "@default",
   streamReplies: "gateway_default",
 };
+/** The settings panels SettingsContent renders (Workflow and Voice have their own components). */
 export type SettingsTab = "model" | "workspace" | "tools" | "skills";
 
 /** Plain names for the gateway's workspace access modes (the id stays the value sent). */
@@ -74,95 +73,9 @@ export function workspaceModeLabel(mode: string): string {
   return WORKSPACE_MODE_LABELS[mode] || mode;
 }
 
-export function SettingsPanel({
-  open,
-  onClose,
-  tab,
-  onTab,
-  value,
-  onChange,
-  policy,
-  tools,
-  disabled,
-  defaultModel,
-  workflowDefault,
-  streaming = STREAMING_LOADING,
-  topOffset,
-}: {
-  open: boolean;
-  onClose: () => void;
-  tab: SettingsTab;
-  onTab: (tab: SettingsTab) => void;
-  value: RunPreferences;
-  onChange: (value: RunPreferences) => void;
-  policy: WorkspacePolicy | null;
-  tools: ToolSpec[];
-  disabled: boolean;
-  defaultModel?: { provider: string; model: string };
-  workflowDefault?: boolean;
-  /** The gateway's live-reply support (`/discovery/capabilities`). */
-  streaming?: StreamingCapability;
-  /** Where the drawer starts (px): under the app's chrome. Default 60 (the desktop top bar). */
-  topOffset?: number;
-}) {
-  return (
-    <AfDrawer
-      open={open}
-      onClose={onClose}
-      label="Run settings"
-      title="Run settings"
-      width={480}
-      topOffset={topOffset ?? 60}
-      className="code-settings-drawer"
-    >
-      <div className="code-settings">
-        <p className="code-muted">
-          Settings apply to the next turn. Your gateway enforces the available
-          permissions.
-        </p>
-        <div
-          className="code-settings-tabs"
-          role="tablist"
-          aria-label="Settings sections"
-          onKeyDown={navigateTabs}
-        >
-          {(["model", "workspace", "tools", "skills"] as const).map((name) => (
-            <button
-              role="tab"
-              key={name}
-              tabIndex={tab === name ? 0 : -1}
-              aria-selected={tab === name}
-              onClick={() => onTab(name)}
-            >
-              {name === "model"
-                ? "Model & behavior"
-                : name === "workspace"
-                  ? "Workspace"
-                  : name === "tools"
-                    ? "Tools"
-                    : "Skills"}
-            </button>
-          ))}
-        </div>
-        <SettingsContent
-          tab={tab}
-          value={value}
-          onChange={onChange}
-          policy={policy}
-          tools={tools}
-          disabled={disabled}
-          defaultModel={defaultModel}
-          workflowDefault={workflowDefault}
-          streaming={streaming}
-        />
-      </div>
-    </AfDrawer>
-  );
-}
-
-/** Preference sections for a host-owned drawer. No drawer or navigation wrappers. */
+/** One rail panel's preference sections (Model, Workspace, Tools or Skills). No drawer or navigation wrappers. */
 export type SettingsContentProps = {
-  tab: SettingsTab | "toolsSkills";
+  tab: SettingsTab;
   value: RunPreferences;
   onChange: (value: RunPreferences) => void;
   policy: WorkspacePolicy | null;
@@ -364,7 +277,7 @@ export function SettingsContent({
               </>
             ) : null}
           </section>
-        ) : tab === "tools" || tab === "toolsSkills" ? (
+        ) : tab === "tools" ? (
           <section className="code-settings-section">
             <label className="code-field">
               Permissions
@@ -424,13 +337,6 @@ export function SettingsContent({
             >
               Use gateway default
             </button>
-            {tab === "toolsSkills" ? (
-              <section className="code-settings-section">
-                <h3>Skills</h3>
-                <SkillsPicker value={value.skills} onChange={(skills) => update({ skills })}
-                  disabled={disabled} lockedReasonId={lockedReasonId} />
-              </section>
-            ) : null}
           </section>
         ) : (
           <SkillsPicker

@@ -9,7 +9,7 @@ import type { ActivityRow } from "../lib/activity_rows";
 import { automationRunPreferences, automationSettingsChanges, withAutomationRunPreferences } from "./automation_settings";
 import { saveErrorText, saveStateText } from "./automation_settings_view";
 import { ActivityGroups, AutomationActivity } from "./workspace_panels";
-import { CodeRightRail } from "./right_rail";
+import { CodeRightRail, RAIL_ITEMS, RAIL_PANEL_KEY, RAIL_PANEL_KEY_V1, readRailPanel, type RailPanel } from "./right_rail";
 import { DEFAULT_PREFERENCES } from "./settings_panel";
 
 const appSource = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
@@ -38,16 +38,34 @@ describe("header: the usual gear, icon-only, tooltip Settings", () => {
 });
 
 describe("the rail drawer", () => {
-  it("renders the kit rail with Activity, Files, Settings and no horizontal tab strip", () => {
-    const html = renderToStaticMarkup(
-      <CodeRightRail panel="files" onPanel={() => {}} activity={<p>A</p>} files={<p>FILES</p>} settings={<p>S</p>} activityBadge={2} />,
-    );
+  const content = Object.fromEntries(RAIL_ITEMS.map((item) => [item.id, <p key={item.id}>{item.id.toUpperCase()}</p>])) as Record<RailPanel, React.ReactNode>;
+  it("renders the kit rail with one icon per subject, in order, and no horizontal tab strip", () => {
+    const html = renderToStaticMarkup(<CodeRightRail panel="files" onPanel={() => {}} content={content} activityBadge={2} />);
     expect(html).toContain('role="tablist"');
     expect(html).toContain('aria-orientation="vertical"');
-    for (const name of ["Activity", "Files", "Settings"]) expect(html).toContain(`aria-label="${name}"`);
+    const names = [...html.matchAll(/role="tab"[^>]*aria-label="([^"]+)"|aria-label="([^"]+)"[^>]*role="tab"/g)].map((m) => m[1] || m[2]);
+    expect(names).toEqual(["Activity", "Files", "Model", "Workflow", "Workspace", "Tools", "Skills", "Voice"]);
     expect(html).toContain("FILES");
     expect(html).not.toContain("af-tabs");
     expect(html).toContain('class="af-rail__badge"');
+  });
+  it("has no 'Settings' panel and no 'Model & behavior' anywhere in the app shell", () => {
+    expect(RAIL_ITEMS.map((item) => item.label)).not.toContain("Settings");
+    expect(appSource).not.toContain("Model & behavior");
+    expect(appSource).not.toContain("Tools & skills");
+    expect(appSource).not.toMatch(/setRailPanel\("settings"\)/);
+  });
+  it("app.tsx gives every rail panel its own content", () => {
+    for (const id of ["activity", "files", "model", "workflow", "workspace", "tools", "skills", "voice"]) expect(appSource).toMatch(new RegExp(`\\n\\s+${id}: `));
+  });
+  it("restores the remembered panel; a round-4 'settings' opens Model", () => {
+    const store = (values: Record<string, string>) => ({ getItem: (k: string) => (k in values ? values[k] : null) });
+    expect(readRailPanel(store({ [RAIL_PANEL_KEY]: "skills" }))).toBe("skills");
+    expect(readRailPanel(store({ [RAIL_PANEL_KEY]: "" }))).toBeNull();
+    expect(readRailPanel(store({ [RAIL_PANEL_KEY_V1]: "settings" }))).toBe("model");
+    expect(readRailPanel(store({ [RAIL_PANEL_KEY_V1]: "files" }))).toBe("files");
+    expect(readRailPanel(store({ [RAIL_PANEL_KEY]: "bogus" }))).toBeNull();
+    expect(readRailPanel(null)).toBeNull();
   });
   it("is mounted inside the content area (beside the conversation), not as an overlay drawer", () => {
     expect(appSource).toMatch(/<\/main>\s*\)\}\s*\{railElement\}\s*<\/div>/);
@@ -138,10 +156,13 @@ describe("automation settings = its definition", () => {
     expect(saveErrorText({ status: 409, code: "revision_conflict", message: "x" })).toMatch(/changed elsewhere/);
     expect(saveErrorText({ status: 409, code: "automation_busy", message: "revision" })).not.toMatch(/changed elsewhere/);
   });
-  it("app.tsx binds Settings to the selection: an automation edits its definition through the gateway", () => {
-    expect(appSource).toContain("<AutomationSettingsPanel");
+  it("app.tsx binds every settings panel to the selection: an automation edits its definition through the gateway", () => {
+    expect(appSource).toContain("useAutomationSettings(");
+    expect(appSource).toMatch(/\(automationId, changes, expected\) => automations\.revise\(automationId, changes, expected\)/);
+    expect(appSource).toContain("<AutomationDefinitionForm");
     expect(appSource).toMatch(/onRevise=\{\(changes, expected\) => automations\.revise\(automationDetail\.automationId, changes, expected\)\}/);
-    expect(appSource).toContain("const openAutomationSettings = (automationId: string)");
+    // Edit on the automation header opens its Workflow panel (task, schedule, workflow).
+    expect(appSource).toMatch(/const openAutomationSettings = \(automationId: string\) => \{[\s\S]*?setRailPanel\("workflow"\);/);
   });
 });
 

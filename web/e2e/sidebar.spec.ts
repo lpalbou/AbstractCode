@@ -75,7 +75,7 @@ async function sendTurn(page: Page, text = "Run the fixture."): Promise<void> {
 /** The header's kit WorkflowPicker (round 3: no "Show all workflows" — it lists only what the
  * gateway returns for abstractcode.agent.v1): open it and choose the entry named `name`. */
 async function chooseWorkflow(page: Page, name: string): Promise<void> {
-  await openWorkspaceSection(page, "Model & behavior");
+  await openWorkspaceSection(page, "Workflow");
   const picker = page.getByRole("combobox", { name: "Workflow", exact: true });
   await expect(picker).toBeEnabled();
   await picker.click();
@@ -101,7 +101,7 @@ async function signIn(page: Page): Promise<void> {
   await page.locator("#gateway-session-token").fill(fixtureToken);
   await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await openWorkspaceSection(page, "Model & behavior");
+  await openWorkspaceSection(page, "Workflow");
   await expect(page.getByLabel("Workflow", { exact: true })).toBeEnabled();
   await closeWorkspaceDrawer(page);
 }

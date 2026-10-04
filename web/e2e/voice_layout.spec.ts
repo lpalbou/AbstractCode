@@ -73,7 +73,7 @@ test("conversation and automation reuse narration, stream early and use the avai
   await page.locator("#gateway-session-user").fill("web-tester");
   await page.locator("#gateway-session-token").fill("abstractcode-e2e-only");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await openWorkspaceSection(page, "Model & behavior");
+  await openWorkspaceSection(page, "Workflow");
   await page.getByRole("combobox", { name: "Workflow", exact: true }).click();
   await page.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Basic agent defaults" }) }).click();
   await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");

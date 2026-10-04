@@ -2792,8 +2792,9 @@ select option {
 .code-rail .af-rail__panel-wrap { background: var(--bg-secondary); }
 .code-panel-opener { display: inline-flex; align-items: center; justify-content: center; width: 44px; min-width: 44px; min-height: 44px; padding: 0; flex-shrink: 0; }
 .code-panel-section-title { margin: 0 0 12px; font-size: var(--font-size-base); }
-.code-panel-inputs { margin-top: 12px; border-top: 1px solid var(--ui-border-1); padding-top: 8px; }
-.code-panel-inputs > summary { min-height: 44px; padding: 10px 0; cursor: pointer; font-weight: 600; }
+/* Workflow panel (round 5): the picker, then the workflow's inputs under a quiet heading. */
+.code-workflow-inputs { margin-top: 12px; border-top: 1px solid var(--ui-border-1); padding-top: 12px; }
+.code-settings-heading { margin: 0 0 6px; font-size: var(--font-size-sm); font-weight: 600; color: var(--text-secondary); }
 .code-rail .code-settings { padding: 0; }
 .code-rail .code-settings-section { margin: 0 0 12px; }
 .code-rail .code-settings-section:last-child { margin-bottom: 0; }

@@ -1,36 +1,28 @@
 import { expect, type Page } from "@playwright/test";
 
-// Round 4: the right panel is the kit rail drawer (Activity / Files /
-// Settings). The old drawer categories map onto it: Activity and Files are
-// panels; Model & behavior, Tools & skills, Workspace and Voice are groups of
-// the Settings panel.
-const SETTINGS_GROUPS: Record<string, string> = {
-  "Model & behavior": "model",
-  "Tools & skills": "tools",
-  Workspace: "workspace",
-  Voice: "voice",
-};
+// Round 5: the right panel is the kit rail drawer with one icon per subject:
+// Activity, Files, Model, Workflow, Workspace, Tools, Skills, Voice. Each is
+// its own panel (`#code-rail-panel-<id>`); there is no Settings panel.
+export const RAIL_PANELS = ["Activity", "Files", "Model", "Workflow", "Workspace", "Tools", "Skills", "Voice"] as const;
+export type RailPanelName = (typeof RAIL_PANELS)[number];
 
-export function railTab(page: Page, panel: "Activity" | "Files" | "Settings") {
+export function railTab(page: Page, panel: RailPanelName) {
   return page.getByRole("tablist", { name: "Workspace panels", exact: true }).getByRole("tab", { name: panel, exact: true });
 }
 
-export async function openWorkspaceSection(page: Page, section: string) {
-  const panelName = section === "Activity" || section === "Files" ? section : "Settings";
-  const tab = railTab(page, panelName as "Activity" | "Files" | "Settings");
+export async function openWorkspaceSection(page: Page, section: RailPanelName) {
+  if (!RAIL_PANELS.includes(section)) throw new Error(`no rail panel named ${section}`);
+  const tab = railTab(page, section);
   if ((await tab.getAttribute("aria-selected")) !== "true") await tab.click();
-  const panel = page.locator(`#code-rail-panel-${panelName.toLowerCase()}`);
+  const panel = page.locator(`#code-rail-panel-${section.toLowerCase()}`);
   await expect(panel).toBeVisible();
-  const group = SETTINGS_GROUPS[section];
-  if (group) await panel.locator(`#code-settings-${group}`).scrollIntoViewIfNeeded();
   return panel;
 }
 
+/** The Workflow panel: the workflow picker, then that workflow's inputs. */
 export async function openWorkflowInputs(page: Page) {
-  const panel = await openWorkspaceSection(page, "Model & behavior");
-  const details = panel.locator(".code-panel-inputs");
-  if (await details.getAttribute("open") === null) await details.locator(":scope > summary").click();
-  await expect(details).toHaveAttribute("open", "");
+  const panel = await openWorkspaceSection(page, "Workflow");
+  await expect(panel.locator(".code-workflow-inputs")).toBeVisible();
   return panel;
 }
 

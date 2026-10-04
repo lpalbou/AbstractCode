@@ -22,7 +22,7 @@ async function capture(page: Page, name: string): Promise<void> {
 /** The header's kit WorkflowPicker (round 3: no "Show all workflows" — it lists only what the
  * gateway returns for abstractcode.agent.v1): open it and choose the entry named `name`. */
 async function chooseWorkflow(page: Page, name: string): Promise<void> {
-  await openWorkspaceSection(page, "Model & behavior");
+  await openWorkspaceSection(page, "Workflow");
   const picker = page.getByRole("combobox", { name: "Workflow", exact: true });
   await expect(picker).toBeEnabled();
   await picker.click();
@@ -53,7 +53,7 @@ async function signIn(page: Page): Promise<void> {
   await page.locator("#gateway-session-token").fill(fixtureToken);
   await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await openWorkspaceSection(page, "Model & behavior");
+  await openWorkspaceSection(page, "Workflow");
   await expect(page.getByLabel("Workflow", { exact: true })).toBeEnabled();
   await closeWorkspaceDrawer(page);
 }
@@ -228,9 +228,9 @@ test("creates and edits a custom growing context budget", async ({ page }) => {
   const row = page.locator(".code-auto-card", { hasText: title });
   await expect(row).toBeVisible();
   const main = page.locator(".code-automation-main");
-  // Round 4: Edit opens the rail's Settings on this automation; its Automation card holds the context.
+  // Round 5: Edit opens the rail's Workflow panel on this automation; its definition form holds the context.
   await main.getByRole("button", { name: "Edit", exact: true }).click();
-  const settings = page.locator("#code-rail-panel-settings");
+  const settings = page.locator("#code-rail-panel-workflow");
   const editBudget = settings.getByRole("spinbutton", { name: /Max growing context/ });
   await expect(editBudget).toHaveValue("30000");
   await settings.getByRole("radio", { name: /Independent/ }).check();

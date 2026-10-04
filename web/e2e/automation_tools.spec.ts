@@ -22,7 +22,7 @@ test("workflow and tool pickers persist; email recipients remain visible; refres
   await page.locator("#gateway-session-user").fill("web-tester");
   await page.locator("#gateway-session-token").fill("abstractcode-e2e-only");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await openWorkspaceSection(page, "Model & behavior");
+  await openWorkspaceSection(page, "Workflow");
   await page.getByRole("combobox", { name: "Workflow", exact: true }).click();
   await page.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Basic agent defaults" }) }).click();
   await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");
@@ -69,15 +69,16 @@ test("workflow and tool pickers persist; email recipients remain visible; refres
   const main = page.getByRole("main", { name: "Automation", exact: true });
   await expect(main.locator('[data-def="target"]')).toContainText("authored-contract");
   await expect(page.getByRole("main", { name: "Automation", exact: true })).toBeVisible();
-  // Round 4: the header's Edit opens the rail's Settings bound to this automation's definition.
+  // Round 5: the header's Edit opens the rail's Workflow panel bound to this automation's definition.
   await main.locator('[data-action="edit"]').click();
-  const settings = page.locator("#code-rail-panel-settings");
+  const settings = page.locator("#code-rail-panel-workflow");
   await expect(settings).toBeVisible();
   await expect(settings.locator(".code-settings-binding")).toContainText("Automation");
   const edit = settings.locator(".af-auto__revise");
-  // Tools are the shared tool policy (Tools & skills), never a second picker in the card.
+  // Tools are the shared tool policy (the Tools panel), never a second picker in the form.
   await expect(edit.getByRole("button", { name: "Remove web_search" })).toHaveCount(0);
-  await expect(settings.locator("#code-settings-tools")).toContainText("web_search");
+  await expect((await openWorkspaceSection(page, "Tools")).locator("#code-settings-tools")).toContainText("web_search");
+  await openWorkspaceSection(page, "Workflow");
   await edit.getByRole("combobox", { name: "Automation workflow", exact: true }).click();
   await edit.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Basic agent defaults" }) }).click();
   await page.screenshot({ path: "e2e/artifacts/automation-workflow-edit.png" });

@@ -54,7 +54,7 @@ async function sendTurn(page: Page, text = "Run the fixture."): Promise<void> {
 /** The header's kit WorkflowPicker (round 3: no "Show all workflows" — it lists only what the
  * gateway returns for abstractcode.agent.v1): open it and choose the entry named `name`. */
 async function chooseWorkflow(page: Page, name: string): Promise<void> {
-  await openWorkspaceSection(page, "Model & behavior");
+  await openWorkspaceSection(page, "Workflow");
   const picker = page.getByRole("combobox", { name: "Workflow", exact: true });
   await expect(picker).toBeEnabled();
   await picker.click();
@@ -81,7 +81,7 @@ async function signIn(page: Page, captureLogin = false): Promise<void> {
   await page.locator("#gateway-session-token").fill(fixtureToken);
   await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await openWorkspaceSection(page, "Model & behavior");
+  await openWorkspaceSection(page, "Workflow");
   await expect(page.getByLabel("Workflow", { exact: true })).toBeEnabled();
   await closeWorkspaceDrawer(page);
   await expect(
@@ -223,11 +223,11 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       .click();
     await capture(page, "light");
 
-    await openWorkspaceSection(page, "Model & behavior");
+    await openWorkspaceSection(page, "Skills");
     const settings = page.locator(".code-rail .af-rail__panel");
     await expect(settings).toBeVisible();
-    // Round 4: the Settings panel is one scroll of groups (no tab strip); its header collapses it.
-    await expect(settings.locator(".af-settings-group__title", { hasText: "Tools & skills" })).toBeVisible();
+    // Round 5: Skills is its own rail panel (no tab strip, no group of a Settings panel); its header collapses it.
+    await expect(page.locator("#code-settings-skills")).toBeVisible();
     await expect(settings.locator(".af-tabs, .af-tabs__list")).toHaveCount(0);
     await expect(settings.getByRole("button", { name: /^Collapse / })).toBeVisible();
     await capture(page, "skills");
@@ -913,7 +913,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     });
     await signIn(page);
     await expect.poll(() => asked.some((q) => q.includes("executable_for=abstractcode.agent.v1"))).toBe(true);
-    await openWorkspaceSection(page, "Model & behavior");
+    await openWorkspaceSection(page, "Workflow");
     const picker = page.getByRole("combobox", { name: "Workflow", exact: true });
     await picker.click();
     const names = page.getByRole("listbox", { name: "Workflow" }).locator(".af-workflow-picker__option .af-workflow-picker__name");
@@ -932,7 +932,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     });
     await signIn(page);
     await selectWorkflow(page, "Native tool approval");
-    await openWorkspaceSection(page, "Tools & skills");
+    await openWorkspaceSection(page, "Tools");
     const settings = page.locator(".code-rail .af-rail__panel");
     await settings.getByLabel("Permissions", { exact: true }).selectOption("all");
     await settings.getByRole("button", { name: "Custom allowlist", exact: true }).click();
@@ -951,7 +951,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await capture(page, "unchecked-tool-denied");
     // The previous turn's immutable ceiling must not prevent an explicit
     // enablement for the next run in the same conversation.
-    await openWorkspaceSection(page, "Tools & skills");
+    await openWorkspaceSection(page, "Tools");
     await settings.getByPlaceholder("Filter tools...").fill("write_file");
     await settings.getByRole("switch", { name: "write_file", exact: true }).check();
     await settings.getByRole("button", { name: /^Collapse / }).click();
@@ -970,7 +970,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     });
     await signIn(page);
     await selectWorkflow(page, "Tool supervision");
-    await openWorkspaceSection(page, "Tools & skills");
+    await openWorkspaceSection(page, "Tools");
     const settings = page.locator(".code-rail .af-rail__panel");
     await settings.getByLabel("Permissions", { exact: true }).selectOption("all");
     await settings.getByRole("button", { name: /^Collapse / }).click();
@@ -1058,7 +1058,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     ).toHaveCount(0);
     await drawer.getByRole("button", { name: /^Collapse / }).click();
     await selectWorkflow(page, "Authored model contract");
-    await openWorkspaceSection(page, "Model & behavior");
+    await openWorkspaceSection(page, "Model");
     await expect(
       page.locator(".code-rail .af-rail__panel")
         .getByText("Workflow default: fixture-authored · reasoner-authored."),
