@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Requires the AbstractGateway round-11 workspace model (`/api/gateway/sessions/{id}/workspaces`, `/api/gateway/workspace/policy/me`, `POST /api/gateway/workspace/effective/me`) and `@abstractframework/ui-kit` 0.8.2.
+Requires the AbstractGateway round-11 workspace model (`/api/gateway/sessions/{id}/workspaces`, `/api/gateway/workspace/policy/me`, `POST /api/gateway/workspace/effective/me`) and `@abstractframework/ui-kit` 0.8.3.
 
 ### Changed
 
