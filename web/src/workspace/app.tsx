@@ -17,7 +17,7 @@ import {
   Icon,
   useAppearanceSettings,
   useGatewayConnection,
-  AfVoiceSection,
+  sttRouteText,
   appIdentity,
   AF_MEDIA,
   useAfMedia,
@@ -127,7 +127,7 @@ import {
 } from "./attachment_uploads";
 import { ComposerAttachments } from "./composer_attachments";
 import { RunStatusBar } from "./run_status_bar";
-import { VoiceTools, useWorkspaceVoice } from "./voice_tools";
+import { CodeVoiceSettings, VoiceTools, useVoiceDefaults, useWorkspaceVoice } from "./voice_tools";
 import { workflowPromptProperty, restoreWorkflowFields } from "./input_schema";
 import { resolveToolPermissions, intersectToolPermissions } from "./tool_permissions";
 import {
@@ -386,6 +386,7 @@ export function CodeWorkspace() {
     ...(streamNotes.scope === streamScope ? streamNotes.notes : []),
   ]);
   const voiceCapability = catalog.capabilities?.assistant?.voice || {};
+  const voiceDefaults = useVoiceDefaults(connection.connected);
   const voice = useWorkspaceVoice({
     scope: `${identity}:${session.sessionId}:${session.runId}:${automationView}`,
     runId: identity ? session.runId : "",
@@ -1235,16 +1236,12 @@ export function CodeWorkspace() {
       lockedText={automation ? "Connect to a gateway to edit this automation." : undefined}
     />
   );
-  const fetchVoiceCatalog = (provider?: string, model?: string) =>
-    gatewayRequest(gatewayApiPath(`voice/voices?compact=true${provider ? `&provider=${encodeURIComponent(provider)}` : ""}${model ? `&model=${encodeURIComponent(model)}` : ""}`));
   const voiceSection = (
-      <AfVoiceSection
+      <CodeVoiceSettings
         value={voicePreferences}
         onChange={(next) => { voice.stop_tts(); changeVoicePreferences(next); }}
-        fetchCatalog={fetchVoiceCatalog}
-        overrideOwner="this app"
-        nested
-        unavailableReason={connection.connected ? null : "Connect to a gateway to configure voice."}
+        defaults={voiceDefaults}
+        connected={connection.connected}
       />
   );
   const automationDetail = automationsState.detail;
@@ -1940,6 +1937,7 @@ export function CodeWorkspace() {
                       runId={session.runId}
                       voice={voice}
                       capability={voiceCapability}
+                      route={sttRouteText(voicePreferences, voiceDefaults.value)}
                     />
                   ) : null}
                   {active ? (

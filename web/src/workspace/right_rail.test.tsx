@@ -173,7 +173,10 @@ describe("voice", () => {
     expect(voiceSource).toContain('output_device_id: preferences.output_device || ""');
   });
   it("Settings → Voice is the kit's Assistant-layout section", () => {
-    expect(appSource).toContain("<AfVoiceSection");
+    // Round 6: the kit section is mounted through CodeVoiceSettings (voice_tools.tsx) with the gateway's voice/defaults.
+    expect(appSource).toContain("<CodeVoiceSettings");
+    expect(voiceSource).toContain("<AfVoiceSection");
+    expect(voiceSource).toContain("fetchDefaults={fetchVoiceDefaults}");
     expect(appSource).not.toContain("<VoiceSettings");
   });
 });

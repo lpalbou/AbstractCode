@@ -2807,6 +2807,16 @@ select option {
   color: var(--text-secondary);
   max-width: 34ch;
 }
+/* "Recording… 2 s" / "Transcribing… 12 s · faster-whisper / large-v3" beside the mic (round 6). */
+.code-voice-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
 
 .code-loading-status { display: flex; align-items: center; gap: 8px; }
 .code-loading-spinner {

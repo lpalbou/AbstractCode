@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- web: the Voice panel showed "Gateway default · openai" for both engines on a gateway routed to supertonic and faster-whisper. It now reads the gateway's `GET /api/gateway/voice/defaults` (kit 0.7.1 `AfVoiceSection` through `CodeVoiceSettings`) and shows "Gateway default · supertonic / supertonic-3" and "· faster-whisper / large-v3".
+- web: dictation that "didn't work": a quick click recorded nothing and failed silently. The mic now starts on a tap and stops on the next tap (or records while held), records from the microphone chosen in Voice, shows "Recording… 3 s" then "Transcribing… 12 s · faster-whisper / large-v3", and says why in a sentence when nothing was heard, the recording was too short or transcription failed.
+
 ### Added
 
 - web: **Archive** a conversation from its card's **⋯** or from the **⋯** next to its title in the header (shared kit `AfMenu`), with an inline confirmation ("Archive this conversation? It stays searchable and auditable; it just leaves this list."). It calls `POST /api/gateway/sessions/{id}/archive` (never a delete); the conversation moves under **Archived · N** with **Unarchive**, and archiving the open conversation opens the next one.
+- web: Voice panel — output device with **Test**, reply volume, microphone with a live level meter and **Test** (3 s recording played back), spoken language (faster transcription) and input level.
 
 ### Removed
 

@@ -1,9 +1,73 @@
 import { gatewayApiPath } from "@abstractframework/ui-kit";
-import React, { useEffect, useRef } from "react";
-import { Icon, useGatewayVoice, streamTtsJsonl, voiceSttRequest, voiceTtsRequest } from "@abstractframework/ui-kit";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  AfVoiceSection,
+  Icon,
+  elapsedSeconds,
+  streamTtsJsonl,
+  transcribingLine,
+  useGatewayVoice,
+  voiceSttRequest,
+  voiceTtsRequest,
+} from "@abstractframework/ui-kit";
 import { gateway, gatewayRequest, newId, csrfHeaders } from "./transport";
 import { MEDIA_NEEDS_HTTPS, mediaAvailable } from "../lib/secure-context";
-import type { VoiceClientPreferences } from "@abstractframework/ui-kit";
+import type { VoiceClientPreferences, VoiceDefaults } from "@abstractframework/ui-kit";
+
+/** The gateway's default voice routes (output.voice / input.voice): what "Gateway default" names. */
+export function fetchVoiceDefaults(): Promise<VoiceDefaults> {
+  return gatewayRequest<VoiceDefaults>(gatewayApiPath("voice/defaults"));
+}
+
+/** The voice catalog: engines, models and voices to pick an override from. */
+export function fetchVoiceCatalog(provider?: string, model?: string) {
+  const query = new URLSearchParams({ compact: "true" });
+  if (provider) query.set("provider", provider);
+  if (model) query.set("model", model);
+  return gatewayRequest(gatewayApiPath(`voice/voices?${query.toString()}`));
+}
+
+/** Default voice routes, read once per connection (null until known; `failed` when the gateway could not answer). */
+export function useVoiceDefaults(connected: boolean): { value: VoiceDefaults | null; failed: boolean } {
+  const [state, setState] = useState<{ value: VoiceDefaults | null; failed: boolean }>({ value: null, failed: false });
+  useEffect(() => {
+    if (!connected) return;
+    let alive = true;
+    void fetchVoiceDefaults()
+      .then((value) => alive && setState({ value: value || {}, failed: false }))
+      .catch(() => alive && setState({ value: null, failed: true }));
+    return () => {
+      alive = false;
+    };
+  }, [connected]);
+  return state;
+}
+
+/** Code's Voice panel: the kit's shared section, fed by this gateway. */
+export function CodeVoiceSettings({
+  value,
+  onChange,
+  defaults,
+  connected,
+}: {
+  value: VoiceClientPreferences;
+  onChange: (next: VoiceClientPreferences) => void;
+  defaults: { value: VoiceDefaults | null; failed: boolean };
+  connected: boolean;
+}) {
+  return (
+    <AfVoiceSection
+      value={value}
+      onChange={onChange}
+      fetchCatalog={fetchVoiceCatalog}
+      fetchDefaults={fetchVoiceDefaults}
+      defaults={defaults.value ?? undefined}
+      overrideOwner="this app"
+      nested
+      unavailableReason={connected ? null : "Connect to a gateway to configure voice."}
+    />
+  );
+}
 
 /** Optional media stays in the gateway; the browser only records and plays audio. */
 export function useWorkspaceVoice({
@@ -38,6 +102,11 @@ export function useWorkspaceVoice({
   };
   const voice = useGatewayVoice({
     output_device_id: preferences.output_device || "",
+    input_device_id: preferences.input_device || "",
+    input_gain: preferences.input_gain,
+    volume: preferences.reply_volume,
+    // Tap to start / tap to stop, or hold: VoiceTools stops the recording itself.
+    stop_on_pointerup: false,
     tts_stream:
       capability.tts?.available === true && runId
         ? async function* (text, signal) {
@@ -86,7 +155,11 @@ export function useWorkspaceVoice({
               ...voiceSttRequest(preferences),
             });
             assertCurrent();
-            return String(response.text || "");
+            return {
+              text: String(response.text || ""),
+              provider: response.provider ?? null,
+              model: response.model ?? null,
+            };
           }
         : undefined,
     on_transcript: (text) => {
@@ -107,51 +180,102 @@ export function useWorkspaceVoice({
   return voice;
 }
 
+/** A press shorter than this is a tap: recording keeps going until the next tap. */
+export const TAP_MS = 350;
+
+/** Ticks once a second while `active` (the elapsed seconds of "Recording…" / "Transcribing…"). */
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return now;
+}
+
 export function VoiceTools({
   voice,
   runId,
   capability,
+  route = "",
   onSettings,
 }: {
   voice: ReturnType<typeof useWorkspaceVoice>;
   runId: string;
   capability: Record<string, any>;
+  /** The transcription route ("faster-whisper / large-v3": the override, else the gateway default). */
+  route?: string;
   onSettings?: () => void;
 }) {
   const held = useRef(false);
+  const latched = useRef(false);
+  const pressedAt = useRef(0);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       held.current = false;
+      latched.current = false;
     };
   }, []);
+  // Press: start (or, while a tapped recording runs, stop it).
   const begin = () => {
+    if (latched.current) {
+      latched.current = false;
+      voice.stop_voice_ptt_recording();
+      return;
+    }
     held.current = true;
+    pressedAt.current = Date.now();
     void voice.start_voice_ptt_recording().then(() => {
       // A permission prompt may outlive the press; never leave the mic open.
-      if (!held.current || !mounted.current) voice.stop_voice_ptt_recording();
+      if (!held.current && !latched.current) voice.stop_voice_ptt_recording();
+      if (!mounted.current) voice.cancel_voice_ptt_recording?.();
     });
   };
-  const stop = () => {
+  // Release: a hold ends the recording; a tap keeps it going until the next tap.
+  const release = () => {
+    if (!held.current) return;
     held.current = false;
+    if (Date.now() - pressedAt.current < TAP_MS) {
+      latched.current = true;
+      return;
+    }
+    voice.stop_voice_ptt_recording();
+  };
+  // Focus left the page: end any recording.
+  const stopAll = () => {
+    held.current = false;
+    latched.current = false;
     voice.stop_voice_ptt_recording();
   };
   useEffect(() => {
-    window.addEventListener("pointerup", stop);
-    window.addEventListener("pointercancel", stop);
-    window.addEventListener("blur", stop);
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+    window.addEventListener("blur", stopAll);
     return () => {
-      window.removeEventListener("pointerup", stop);
-      window.removeEventListener("pointercancel", stop);
-      window.removeEventListener("blur", stop);
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
+      window.removeEventListener("blur", stopAll);
     };
   }, [voice.stop_voice_ptt_recording]);
+  useEffect(() => {
+    if (!voice.voice_ptt_recording) latched.current = false;
+  }, [voice.voice_ptt_recording]);
+  const since = voice.voice_ptt_since || 0;
+  const now = useNow(Boolean(since));
   if (!capability.tts?.available && !capability.stt?.available) return null;
   // Over plain http from another machine the browser withholds the microphone:
   // say why on the control instead of a silently disabled button.
   const micBlocked = !mediaAvailable();
+  const status = voice.voice_ptt_recording
+    ? `Recording… ${since ? elapsedSeconds(since, now) : ""}`.trim()
+    : voice.voice_ptt_busy
+      ? transcribingLine(since || now, now, route)
+      : "";
   return (
     <>
       {capability.stt?.available && micBlocked ? (
@@ -175,12 +299,12 @@ export function VoiceTools({
           className="code-icon-button"
           aria-label={
             voice.voice_ptt_recording
-              ? "Recording — release to transcribe"
+              ? "Recording — tap or release to transcribe"
               : "Hold to dictate"
           }
           title={
             runId
-              ? "Hold to dictate (Space or Enter on keyboard)"
+              ? "Hold to dictate, or tap to start and tap again to stop (Space or Enter on keyboard)"
               : "Start a conversation to enable dictation"
           }
           disabled={!voice.voice_ptt_supported || voice.voice_ptt_busy}
@@ -188,8 +312,8 @@ export function VoiceTools({
           onPointerDown={(event) => {
             if (event.button === 0) begin();
           }}
-          onPointerUp={stop}
-          onPointerCancel={stop}
+          onPointerUp={release}
+          onPointerCancel={release}
           onKeyDown={(event) => {
             if ([" ", "Enter"].includes(event.key) && !event.repeat) {
               event.preventDefault();
@@ -199,10 +323,12 @@ export function VoiceTools({
           onKeyUp={(event) => {
             if ([" ", "Enter"].includes(event.key)) {
               event.preventDefault();
-              stop();
+              release();
             }
           }}
-          onBlur={stop}
+          onBlur={() => {
+            if (!latched.current) release();
+          }}
         >
           <Icon name={voice.voice_ptt_busy ? "loader" : "mic"} size={15} className={voice.voice_ptt_busy ? "code-loading-spinner" : undefined} />
         </button>
@@ -227,9 +353,9 @@ export function VoiceTools({
           <Icon name="cog" size={14} />
         </button>
       ) : null}
-      {voice.voice_ptt_recording || voice.voice_ptt_busy ? (
-        <span role="status">
-          {voice.voice_ptt_recording ? "Recording…" : "Transcribing…"}
+      {status ? (
+        <span role="status" className="code-voice-status" data-voice-status>
+          {status}
         </span>
       ) : null}
     </>

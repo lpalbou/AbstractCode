@@ -1344,7 +1344,7 @@ Start with [getting started](getting-started.md). For hosting and authentication
 | Workspace | The current workspace (short name; the full path as tooltip), access mode and mounts. |
 | Tools | Permissions and the shared tool policy (which tools, and when each asks you). |
 | Skills | The gateway's skills, one switch each. |
-| Voice | Engines, output device, read aloud and voice latency. |
+| Voice | Engines, output device and volume, microphone, read aloud and voice latency. |
 
 The six settings panels are bound to what is selected in the sidebar. Each starts with a line saying what it edits — **Conversation** and its title, or **Automation**, its title and its revision. Everything reads **Gateway default** until you override it; an override shows only while it is set, and choosing the default again removes it.
 
@@ -1354,7 +1354,7 @@ The **Workflow** picker lists workflows authorized by the gateway for `abstractc
 
 **Files** shows the folder on the gateway where the agent reads and writes, once, as its short name — the full path is its tooltip — with **Open folder** (only on the gateway's own machine) and **Copy path** icons. Click a file to preview it with the shared viewer: Markdown rendered, code and JSON in the shared code viewer (highlighted; JSON pretty-printed), images and PDFs shown, audio in the shared waveform player (play, pause, seek), other text as text; HTML and SVG show as source. Text previews read at most the first 1 MiB and say so; Markdown images load only from the workspace. The preview header has the file's size and date, **Attach** (adds it to your next message), **Download** and close. Gateway admins also have **Shared workspace (admin)**.
 
-**Voice** follows the Assistant's layout: **Engines** (*Text → speech* and *Speech → text*, each "Gateway default" with **Change**), **Output** (*Output device*, where the browser can choose a speaker), **Replies** (*Read aloud* switch: speak each new reply; *Voice latency*: Balanced, Faster or Higher quality, when the gateway's voice engine offers it). These are this browser's choices for your account; the gateway's defaults are never changed from here.
+**Voice** follows the Assistant's layout: **Engines** (*Text → speech* and *Speech → text*, each "Gateway default · provider / model" — the gateway's `output.voice` and `input.voice` routes, read from `GET /api/gateway/voice/defaults` — with **Change**), **Output** (*Output device* with **Test**, which plays a short chime on that speaker; Safari cannot choose a speaker and says so; *Reply volume*), **Microphone** (*Input device* with **Test**: three seconds recorded with a live level meter, then played back, or a sentence saying what is wrong; *Spoken language*: naming it skips language detection, so transcription is faster; *Input level* where the browser allows; device names appear after you allow the microphone once — **Show names**), **Replies** (*Read aloud* switch: speak each new reply; *Voice latency*: Balanced, Faster or Higher quality, when the gateway's voice engine offers it). These are this browser's choices for your account; the gateway's defaults are never changed from here.
 
 The panel width is resizable on wide screens (drag the panel's left edge, or focus it and use the arrow keys) and remembered with the open panel. The upper-right **About** widget is the shared AbstractFramework About: the app name and version, the AbstractFramework and AbstractGateway versions the connected gateway reports (or why one is missing), links (website, source, docs, issues, feedback, contact) and the author/licence line — no package list. See [Responsive layout](#responsive-layout).
 
@@ -1466,7 +1466,7 @@ Credentials are exchanged through the app server for HttpOnly session cookies. G
 
 ## Optional voice
 
-When the gateway advertises configured speech capabilities, a conversation with a run offers hold-to-dictate in the composer and a speaker button on each reply. Hold the microphone button (or Space/Enter while focused), then release to transcribe into the draft. Review the text before sending. A reply's speaker reads it aloud, with pause and resume; while a reply plays, the composer shows **Stop spoken reply**. The composer has no speaker button of its own.
+When the gateway advertises configured speech capabilities, a conversation with a run offers dictation in the composer and a speaker button on each reply. Tap the microphone button to start and tap again to stop, or hold it (or Space/Enter while focused) and release; the text lands in the draft. While it works the composer shows "Recording… 3 s", then "Transcribing… 12 s · faster-whisper / large-v3" (the route: your override, else the gateway default). A recording that is too short, silent or fails says so in a sentence. Transcription speed is the route's: faster-whisper large-v3 runs on the CPU of a Mac (about 25 s for a 4 s sentence, 9 s with the spoken language named); a smaller model such as `small` takes 1–2 s. Review the text before sending. A reply's speaker reads it aloud, with pause and resume; while a reply plays, the composer shows **Stop spoken reply**. The composer has no speaker button of its own.
 
 Recording and playback happen in the browser; transcription and synthesis use the gateway's durable media endpoints. Microphone access requires permission and a secure context (HTTPS or localhost). No speech model runs in the browser.
 
@@ -3412,9 +3412,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- web: the Voice panel showed "Gateway default · openai" for both engines on a gateway routed to supertonic and faster-whisper. It now reads the gateway's `GET /api/gateway/voice/defaults` (kit 0.7.1 `AfVoiceSection` through `CodeVoiceSettings`) and shows "Gateway default · supertonic / supertonic-3" and "· faster-whisper / large-v3".
+- web: dictation that "didn't work": a quick click recorded nothing and failed silently. The mic now starts on a tap and stops on the next tap (or records while held), records from the microphone chosen in Voice, shows "Recording… 3 s" then "Transcribing… 12 s · faster-whisper / large-v3", and says why in a sentence when nothing was heard, the recording was too short or transcription failed.
+
 ### Added
 
 - web: **Archive** a conversation from its card's **⋯** or from the **⋯** next to its title in the header (shared kit `AfMenu`), with an inline confirmation ("Archive this conversation? It stays searchable and auditable; it just leaves this list."). It calls `POST /api/gateway/sessions/{id}/archive` (never a delete); the conversation moves under **Archived · N** with **Unarchive**, and archiving the open conversation opens the next one.
+- web: Voice panel — output device with **Test**, reply volume, microphone with a live level meter and **Test** (3 s recording played back), spoken language (faster transcription) and input level.
 
 ### Removed
 
