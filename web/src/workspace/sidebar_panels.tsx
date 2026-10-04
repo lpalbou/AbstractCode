@@ -160,3 +160,91 @@ export function WorkspaceRow(props: { path: string; onOpen(): void }): React.Rea
     </button>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Round 5: the quiet `Archived · N` footer at the end of EACH list (automations and conversations).
+// No "Show archived" switch: the footer opens the archived items inline, each with Unarchive. N is
+// the gateway's figure (never a client count of a partial page); the footer is absent when N is 0.
+// Whether each footer is open is remembered per viewer.
+
+export type ArchivedLists = Record<SidebarPanel, boolean>;
+export const SIDEBAR_ARCHIVED_KEY = "abstractcode.sidebar.archived";
+const ARCHIVED_CLOSED: ArchivedLists = { automations: false, conversations: false };
+
+export function readArchivedOpen(storage: ReadStore): ArchivedLists {
+  try {
+    const raw = storage?.getItem(SIDEBAR_ARCHIVED_KEY);
+    const value = raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+    if (!value || typeof value !== "object") return { ...ARCHIVED_CLOSED };
+    return { automations: value.automations === true, conversations: value.conversations === true };
+  } catch {
+    return { ...ARCHIVED_CLOSED };
+  }
+}
+
+export function useArchivedOpen(): [ArchivedLists, (list: SidebarPanel) => void] {
+  const [state, setState] = useState<ArchivedLists>(() => readArchivedOpen(viewerStorage()));
+  const toggle = useCallback((list: SidebarPanel) => {
+    setState((prev) => {
+      const next = { ...prev, [list]: !prev[list] };
+      try {
+        viewerStorage()?.setItem(SIDEBAR_ARCHIVED_KEY, JSON.stringify(next));
+      } catch {
+        // the in-memory state still applies
+      }
+      return next;
+    });
+  }, []);
+  return [state, toggle];
+}
+
+export function ArchivedFooter(props: {
+  list: SidebarPanel;
+  /** The gateway's count of archived items. */
+  count: number;
+  open: boolean;
+  onToggle(): void;
+  /** The archived items (rendered only while open). */
+  children: React.ReactNode;
+}): React.ReactElement | null {
+  if (!(props.count > 0)) return null;
+  const region = `code-archived-${props.list}`;
+  return (
+    <div className="code-archived" data-list={props.list} data-open={props.open ? "true" : "false"}>
+      <button type="button" className="code-archived-toggle" aria-expanded={props.open} aria-controls={region} onClick={props.onToggle}>
+        <span>Archived · {props.count}</span>
+        <Icon name="chevronDown" size={12} />
+      </button>
+      {props.open ? (
+        <ul className="code-archived-list" id={region} aria-label={`Archived ${props.list}`}>
+          {props.children}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/** One archived item: its name (opens it; history is kept) and Unarchive. */
+export function ArchivedRow(props: {
+  id: string;
+  title: string;
+  meta?: string;
+  busy: boolean;
+  error?: string;
+  onOpen(): void;
+  onUnarchive(): void;
+}): React.ReactElement {
+  return (
+    <li className="code-archived-row" data-id={props.id}>
+      <button type="button" className="code-archived-name" title={props.title} onClick={props.onOpen}>
+        <strong>{props.title}</strong>
+        {props.meta ? <small>{props.meta}</small> : null}
+      </button>
+      <button type="button" className="code-subtle-button code-archived-unarchive" data-action="unarchive" disabled={props.busy} aria-busy={props.busy || undefined} onClick={props.onUnarchive}>
+        {props.busy ? <Icon name="loader" size={12} /> : <Icon name="archive" size={12} />}
+        <span>Unarchive</span>
+      </button>
+      {props.error ? <p className="code-inline-error" role="alert">{props.error}</p> : null}
+    </li>
+  );
+}

@@ -13,6 +13,7 @@ import {
   automationsAvailability,
   codeAutomationsClient,
   visibleAutomations,
+  archivedAutomationCount,
   waitAnswerPayload,
   waitResumeCommand,
 } from "./automations";
@@ -57,10 +58,12 @@ describe("automation rows", () => {
     expect(folderTitle(INBOX, occ[0].run_id, occ)).toBe(`Run #${occ[0].index} folder`);
   });
 
-  it("hide archived automations until asked", () => {
+  it("archived automations are never list rows; N is the gateway's `archived_automations`", () => {
     const items = list().map((s, i) => (i === 1 ? { ...s, status: "archived" as const } : s));
-    expect(visibleAutomations(items, false).map((s) => s.title)).not.toContain(items[1].title);
-    expect(visibleAutomations(items, true)).toHaveLength(items.length);
+    expect(visibleAutomations(items).map((s) => s.title)).not.toContain(items[1].title);
+    expect(visibleAutomations(items)).toHaveLength(items.length - 1);
+    expect(archivedAutomationCount({ items: [], next_cursor: null, archived_automations: 6 })).toBe(6);
+    expect(archivedAutomationCount({ items: [], next_cursor: null })).toBe(0);
   });
 });
 
@@ -229,10 +232,9 @@ describe("the sidebar section", () => {
     onSelect: () => {},
     onNew: () => {},
     onRefresh: () => {},
-    onShowArchived: () => {},
     nowMs: NOW,
   };
-  const state = (items: AutomationSummary[], showArchived = false) => ({ ...new AutomationsController(stubClient(), vi.fn()).state, items, loaded: true, showArchived });
+  const state = (items: AutomationSummary[]) => ({ ...new AutomationsController(stubClient(), vi.fn()).state, items, loaded: true });
 
   it("round 5 cards: name, the waiting badge, `every · last` then `next` + the Active switch on the second line", () => {
     const html = renderToStaticMarkup(<AutomationsSection {...base} state={state(list())} />);
@@ -312,23 +314,53 @@ describe("the sidebar section", () => {
     expect(html).toMatch(/data-automation-id="a3"[\s\S]*?<\/div><p class="code-inline-error" role="alert" data-code="not_permitted">/);
   });
 
-  it("hides archived rows behind a toggle", () => {
-    const items = list().map((s, i) => (i === 1 ? { ...s, status: "archived" as const } : s));
-    const hidden = renderToStaticMarkup(<AutomationsSection {...base} state={state(items)} />);
-    expect(hidden).not.toContain(`data-automation-id="${items[1].automation_id}"`);
-    expect(hidden).toContain("Show archived (1)");
-    const shown = renderToStaticMarkup(<AutomationsSection {...base} state={state(items, true)} />);
-    expect(shown).toContain(`data-automation-id="${items[1].automation_id}" data-status="archived"`);
+  it("R5: no Show archived switch; a quiet `Archived · N` footer at the end opens them inline with Unarchive", () => {
+    const all = list().map((s, i) => (i === 1 || i === 2 ? { ...s, status: "archived" as const } : s));
+    const items = all;
+    const live = all.filter((s) => s.status !== "archived");
+    const withArchived = (archived: AutomationSummary[] | null) => ({ ...state(live), archivedCount: 2, archived });
+    const closed = renderToStaticMarkup(<AutomationsSection {...base} state={withArchived(null)} />);
+    expect(closed).not.toMatch(/Show archived|show-archived/);
+    expect(closed).not.toContain(`data-automation-id="${items[1].automation_id}"`);
+    // The footer is the LAST thing in the list region.
+    expect(closed).toMatch(/<div class="code-archived" data-list="automations" data-open="false"><button type="button" class="code-archived-toggle" aria-expanded="false" aria-controls="code-archived-automations"><span>Archived · 2<\/span>[\s\S]*?<\/button><\/div><\/div><\/section>$/);
+    expect(closed).not.toContain('data-action="unarchive"');
+    const onUnarchive = vi.fn();
+    expect(renderToStaticMarkup(<AutomationsSection {...base} archivedOpen state={withArchived(null)} />)).toContain("Loading archived automations…");
+    const open = renderToStaticMarkup(<AutomationsSection {...base} archivedOpen onUnarchive={onUnarchive} state={withArchived([all[1], all[2]])} />);
+    expect(open).toContain('aria-expanded="true"');
+    for (const s of [items[1], items[2]])
+      expect(open).toMatch(new RegExp(`<li class="code-archived-row" data-id="${s.automation_id}">[\\s\\S]*?data-action="unarchive"[^>]*>[\\s\\S]*?<span>Unarchive</span>`));
+    // Nothing archived: no footer at all.
+    expect(renderToStaticMarkup(<AutomationsSection {...base} state={{ ...state(live), archivedCount: 0, archived: [] }} />)).not.toContain("code-archived");
   });
 
-  it("Show archived is a switch labelled by the feature, not a checkbox (state toggles)", () => {
-    const items = list().map((s, i) => (i === 1 ? { ...s, status: "archived" as const } : s));
-    const onShowArchived = vi.fn();
-    const off = renderToStaticMarkup(<AutomationsSection {...base} onShowArchived={onShowArchived} state={state(items)} />);
-    expect(off).toMatch(/<button type="button" role="switch" class="af-switch af-switch--sm code-auto-archived" data-action="show-archived" aria-checked="false"[^>]*>[\s\S]*?<span class="af-switch__label">Show archived \(1\)<\/span>/);
-    expect(off).not.toContain('type="checkbox"');
-    const on = renderToStaticMarkup(<AutomationsSection {...base} state={state(items, true)} />);
-    expect(on).toMatch(/data-action="show-archived" aria-checked="true"/);
+  it("refresh reads the gateway's count; the opened footer lists `status=archived` (all pages) and stays fresh", async () => {
+    const archivedRow = { ...list()[1], status: "archived" as const };
+    const client = stubClient({
+      listAutomations: vi.fn(async (q: any = {}) =>
+        q.status === "archived" ? { items: [archivedRow], next_cursor: null } : ({ items: list().slice(0, 1), next_cursor: null, archived_automations: 1 } as any),
+      ),
+    });
+    const ctl = new AutomationsController(client, vi.fn(), []);
+    await ctl.refresh();
+    expect(ctl.state.archivedCount).toBe(1);
+    expect(ctl.state.archived).toBeNull();
+    expect((client.listAutomations as any).mock.calls.every((c: any[]) => !c[0]?.status)).toBe(true);
+    await ctl.loadArchived();
+    expect(ctl.state.archived?.map((s) => s.automation_id)).toEqual([archivedRow.automation_id]);
+    expect((client.listAutomations as any).mock.calls.at(-1)[0]).toMatchObject({ status: "archived" });
+  });
+
+  it("Unarchive sends the gateway's automation.unarchive (the kit control) and keeps a refusal for the row", async () => {
+    const client = stubClient();
+    const ctl = new AutomationsController(client, vi.fn(), []);
+    await ctl.unarchive("a9");
+    expect((client.sendAutomationCommand as any).mock.calls.map((c: any[]) => [c[0], c[1].type])).toEqual([["a9", "automation.unarchive"]]);
+    const refusing = stubClient({ sendAutomationCommand: vi.fn(async () => Promise.reject({ status: 409, code: "not_permitted", message: "no" })) });
+    const ctl2 = new AutomationsController(refusing, vi.fn(), []);
+    await expect(ctl2.unarchive("a3")).rejects.toMatchObject({ code: "not_permitted" });
+    expect(ctl2.state.rowError).toMatchObject({ automationId: "a3" });
   });
 
   it("says why when the gateway lacks the API", () => {

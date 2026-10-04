@@ -31,6 +31,7 @@ import {
   gatewayDefaultFromEnvelope,
   type GatewayDefaultState,
 } from "./workflow_selection";
+import { archivedSessionCount } from "./archived_conversations";
 import {
   CONVERSATIONS_PAGE,
   conversationPage,
@@ -51,6 +52,8 @@ type CatalogState = {
   sessionsLoaded: boolean;
   errors: string[];
   hasMore: boolean;
+  /** The gateway's count of archived conversations (`archived_sessions` of the runs list). */
+  archivedSessions: number;
   defaultModel?: { provider: string; model: string };
   /** `default_agent_workflows["abstractcode.agent.v1"]` of the `/bundles` envelope. */
   gatewayDefault: GatewayDefaultState;
@@ -72,6 +75,7 @@ const empty: CatalogState = {
   sessionsLoaded: false,
   errors: [],
   hasMore: false,
+  archivedSessions: 0,
 };
 
 export function capabilityContracts(value: any): Record<string, any> {
@@ -159,6 +163,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
         sessions: page.sessions,
         sessionsLoaded: true,
         hasMore: page.hasMore,
+        archivedSessions: archivedSessionCount(runs),
         errors: s.errors.filter((e) => !e.startsWith("Conversations: ")),
       }));
       await hydrateLabels(runs, listGen, abort.signal);
@@ -248,6 +253,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       loading: false,
       errors,
       hasMore: listCurrent && value(3) ? page.hasMore : previous.hasMore,
+      archivedSessions: listCurrent && value(3) ? archivedSessionCount(value(3)) : previous.archivedSessions,
     }));
     if (listCurrent && value(3)) await hydrateLabels(value(3), listGen, abort.signal);
   }, [identity, onAuthError, fetchRuns, hydrateLabels]);

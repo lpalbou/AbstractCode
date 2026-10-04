@@ -13,14 +13,13 @@ import { AutomationWorkflowPicker, type AutomationWorkflowPickerOptions, automat
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { LoadingStatus } from "./loading_status";
-import { PanelHeader, panelIds } from "./sidebar_panels";
+import { ArchivedFooter, ArchivedRow, PanelHeader, panelIds } from "./sidebar_panels";
 import { AutomationCard } from "./sidebar_cards";
 import { AutomationHeaderBar } from "./automation_header";
 import { copy_text } from "../lib/clipboard";
 import { DetailDisclosure, detailPanelIds, useDetailPanels, useTimelineSlot, type DetailPanelsState } from "./detail_panels";
 import {
   AfScheduleDialog,
-  AfSwitch,
   Icon,
   apiErrorText,
   type ApiError,
@@ -78,7 +77,7 @@ function ErrorLine({ error }: { error: ApiError | null }): React.ReactElement | 
   );
 }
 
-/** The sidebar section: rows + New automation + Show archived (hook-free). */
+/** The sidebar section: rows + New automation + the `Archived · N` footer (hook-free). */
 export function AutomationsSection(props: {
   state: AutomationsState;
   available: { available: boolean; reason: string };
@@ -88,7 +87,11 @@ export function AutomationsSection(props: {
   onSelect(id: string): void;
   onNew(): void;
   onRefresh(): void;
-  onShowArchived(show: boolean): void;
+  /** The `Archived · N` footer: open state (remembered by the host) and its toggle. */
+  archivedOpen?: boolean;
+  onToggleArchived?(): void;
+  /** Unarchive one automation (the gateway's `automation.unarchive`). */
+  onUnarchive?(s: AutomationSummary): void;
   /** The card's Active switch (pause / resume through the gateway). */
   onToggleActive?(s: AutomationSummary): void;
   nowMs?: number;
@@ -99,8 +102,8 @@ export function AutomationsSection(props: {
   const open = props.open ?? true;
   const ids = panelIds("automations");
   const st = props.state;
-  const rows = visibleAutomations(st.items, st.showArchived);
-  const archived = st.items.filter((s) => s.status === "archived").length;
+  const rows = visibleAutomations(st.items);
+  const archived = st.archived ?? [];
   const waiting = st.items.reduce((n, s) => n + s.attention.pending_waits + s.attention.unseen_count, 0);
   return (
     <section
@@ -146,16 +149,20 @@ export function AutomationsSection(props: {
             {st.rowError?.automationId === s.automation_id ? <ErrorLine error={st.rowError.error} /> : null}
           </React.Fragment>
         ))}
-        {archived > 0 ? (
-          <AfSwitch
-            className="code-auto-archived"
-            variant="sm"
-            action="show-archived"
-            label={`Show archived (${archived})`}
-            checked={st.showArchived}
-            onChange={props.onShowArchived}
-          />
-        ) : null}
+        <ArchivedFooter list="automations" count={st.archivedCount} open={props.archivedOpen === true} onToggle={() => props.onToggleArchived?.()}>
+          {st.archived === null ? <li><LoadingStatus>Loading archived automations…</LoadingStatus></li> : null}
+          {archived.map((s) => (
+            <ArchivedRow
+              key={s.automation_id}
+              id={s.automation_id}
+              title={s.title}
+              busy={st.busy}
+              error={st.rowError?.automationId === s.automation_id ? apiErrorText(st.rowError.error).title : undefined}
+              onOpen={() => props.onSelect(s.automation_id)}
+              onUnarchive={() => props.onUnarchive?.(s)}
+            />
+          ))}
+        </ArchivedFooter>
       </div>
     </section>
   );

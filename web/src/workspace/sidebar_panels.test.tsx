@@ -267,3 +267,38 @@ describe("automation sidebar background refresh", () => {
     expect(render(true, false)).toContain("Loading automations");
   });
 });
+
+describe("R5: the `Archived · N` footer of each list", () => {
+  it("is absent at 0, a quiet closed line otherwise, the items inline when open", async () => {
+    const { ArchivedFooter, ArchivedRow } = await import("./sidebar_panels");
+    expect(renderToStaticMarkup(<ArchivedFooter list="conversations" count={0} open onToggle={() => {}}><li>x</li></ArchivedFooter>)).toBe("");
+    const closed = renderToStaticMarkup(<ArchivedFooter list="conversations" count={6} open={false} onToggle={() => {}}><li>ROW</li></ArchivedFooter>);
+    expect(closed).toContain("<span>Archived · 6</span>");
+    expect(closed).toContain('aria-expanded="false"');
+    expect(closed).not.toContain("ROW");
+    const open = renderToStaticMarkup(
+      <ArchivedFooter list="conversations" count={1} open onToggle={() => {}}>
+        <ArchivedRow id="s1" title="Old chat" meta="Oct 2 · 2 turns" busy={false} onOpen={() => {}} onUnarchive={() => {}} />
+      </ArchivedFooter>,
+    );
+    expect(open).toMatch(/<ul class="code-archived-list" id="code-archived-conversations" aria-label="Archived conversations"><li class="code-archived-row" data-id="s1">/);
+    expect(open).toMatch(/data-action="unarchive"[^>]*>[\s\S]*?<span>Unarchive<\/span>/);
+  });
+  it("remembers which footers are open (defaults closed; junk reads closed)", async () => {
+    const { readArchivedOpen, SIDEBAR_ARCHIVED_KEY } = await import("./sidebar_panels");
+    const store = (v: string | null) => ({ getItem: (k: string) => (k === SIDEBAR_ARCHIVED_KEY ? v : null) });
+    expect(readArchivedOpen(store(null))).toEqual({ automations: false, conversations: false });
+    expect(readArchivedOpen(store('{"conversations":true}'))).toEqual({ automations: false, conversations: true });
+    expect(readArchivedOpen(store("nope"))).toEqual({ automations: false, conversations: false });
+  });
+  it("conversations: N is the gateway's `archived_sessions`, the list and Unarchive use the gateway contract", async () => {
+    const { archivedSessionCount, ARCHIVED_RUNS_PATH, unarchiveSessionPath } = await import("./archived_conversations");
+    expect(archivedSessionCount({ items: [], archived_sessions: 6 })).toBe(6);
+    expect(archivedSessionCount({ items: [] })).toBe(0);
+    expect(archivedSessionCount({ archived_sessions: "6" })).toBe(0);
+    expect(ARCHIVED_RUNS_PATH).toMatch(/^runs\?root_only=true&archived_only=true&/);
+    expect(unarchiveSessionPath("a b")).toBe("sessions/a%20b/unarchive");
+    expect(appSource).toMatch(/<ArchivedFooter list="conversations" count=\{catalog\.archivedSessions\}/);
+    expect(appSource).toMatch(/<ArchivedFooter list="conversations"[\s\S]*?<\/ArchivedFooter>\s*<\/ConversationsPanel>/);
+  });
+});

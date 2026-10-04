@@ -34,7 +34,8 @@ import {
   type PaneMode,
 } from "./layout";
 import { SidebarDrawer } from "./sidebar_drawer";
-import { ConversationsPanel, SidebarLists, useSidebarPanels } from "./sidebar_panels";
+import { ArchivedFooter, ConversationsPanel, SidebarLists, useArchivedOpen, useSidebarPanels } from "./sidebar_panels";
+import { ArchivedConversations } from "./archived_conversations";
 import { ConversationCard } from "./sidebar_cards";
 import {
   WorkflowChat,
@@ -68,7 +69,7 @@ import { CodeRightRail, useRailPanel, type RailPanel, type SettingsRailPanel } f
 import { AutomationBinding, AutomationDefinitionForm, useAutomationSettings } from "./automation_settings_view";
 import { proxyGatewayFetch, openRunFolder } from "./session_files";
 import { copy_text } from "../lib/clipboard";
-import { aboutExtraRows, type FetchOutcome } from "./about_rows";
+import { aboutVersions, type FetchOutcome } from "./about_rows";
 import { automationTarget, automationsAvailability, myEmailConsoleUrl } from "./automations";
 import {
   AutomationMain,
@@ -304,12 +305,19 @@ export function CodeWorkspace() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Collapsible Automations / Conversations panels, remembered per viewer.
   const [panels, togglePanelOpen] = useSidebarPanels();
+  // The `Archived · N` footers of both lists: open or closed, remembered per viewer.
+  const [archivedOpen, toggleArchivedOpen] = useArchivedOpen();
   // Automations: the sidebar section and, for the selected one, the main view.
   const automationsAvailable = automationsAvailability(catalog.capabilities);
   const { ctl: automations, state: automationsState } = useAutomations(
     identity,
     connection.connected && automationsAvailable.available,
   );
+  // The automations' `Archived · N` footer lists the archived ones once opened (the gateway lists them only when asked).
+  useEffect(() => {
+    if (archivedOpen.automations && automationsState.loaded && automationsState.archivedCount > 0 && automationsState.archived === null)
+      void automations.loadArchived();
+  }, [archivedOpen.automations, automationsState.loaded, automationsState.archivedCount, automationsState.archived, automations]);
   const [automationView, setAutomationView] = useState(false);
   const [newAutomationOpen, setNewAutomationOpen] = useState(false);
   const switchNotice = useRef("");
@@ -1516,7 +1524,9 @@ export function CodeWorkspace() {
           }}
           onNew={() => setNewAutomationOpen(true)}
           onRefresh={() => void automations.refresh()}
-          onShowArchived={(show) => automations.setShowArchived(show)}
+          archivedOpen={archivedOpen.automations}
+          onToggleArchived={() => toggleArchivedOpen("automations")}
+          onUnarchive={(s) => void automations.unarchive(s.automation_id).catch(() => undefined)}
           onToggleActive={(s) => void automations.toggleActive(s).catch(() => undefined)}
           open={panels.automations}
           onToggle={() => togglePanelOpen("automations")}
@@ -1583,6 +1593,14 @@ export function CodeWorkspace() {
               Load more conversations
             </button>
           ) : null}
+          <ArchivedFooter list="conversations" count={catalog.archivedSessions} open={archivedOpen.conversations} onToggle={() => toggleArchivedOpen("conversations")}>
+            <ArchivedConversations
+              enabled={connection.connected && archivedOpen.conversations}
+              revision={catalog.archivedSessions}
+              onOpen={(item) => { setSidebarOpen(false); openConversation(item.sessionId, item.latestRunId); }}
+              onUnarchived={() => void catalog.refresh()}
+            />
+          </ArchivedFooter>
         </ConversationsPanel>
         </SidebarLists>
         <div className="code-sidebar-bottom">
@@ -1623,7 +1641,7 @@ export function CodeWorkspace() {
           <AfTopBarActions
             assistant={{ open: assistantOpen, onToggle: () => { setAssistantOpen(open => !open); setPanelOpen(false); setSidebarOpen(false); }, label: "Code assistant (docs-grounded)" }}
             appearance={{ onOpen: () => setAppearanceOpen(true) }}
-            about={{ identity: APP_IDENTITY, extraRows: aboutExtraRows(gatewayAbout), onOpen: refreshGatewayAbout }}
+            about={{ identity: APP_IDENTITY, versions: aboutVersions(gatewayAbout), onOpen: refreshGatewayAbout }}
             connection={{ phase: connection.phase, signingOut: connection.signingOut,
               onConnect: connection.openModal, onDisconnect: () => void connection.signOut() }}
             extraActions={

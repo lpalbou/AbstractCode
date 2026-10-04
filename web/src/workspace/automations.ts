@@ -20,6 +20,7 @@
 import { gatewayApiPath } from "@abstractframework/ui-kit";
 import {
   activeToggleCommand,
+  CONTROL_COMMANDS,
   attentionLabel,
   automationControls,
   createAutomationsClient,
@@ -128,9 +129,15 @@ export function automationRowView(s: AutomationSummary, nowMs: number = Date.now
   };
 }
 
-/** Archived automations are hidden unless asked for. */
-export function visibleAutomations(items: AutomationSummary[], showArchived: boolean): AutomationSummary[] {
-  return showArchived ? items : items.filter((s) => s.status !== "archived");
+/** The list's rows: archived automations are not among them (they sit under the `Archived · N` footer). */
+export function visibleAutomations(items: AutomationSummary[]): AutomationSummary[] {
+  return items.filter((s) => s.status !== "archived");
+}
+
+/** `archived_automations` of a `GET /automations` page: the gateway's count of archived automations (it lists them only when asked). */
+export function archivedAutomationCount(page: unknown): number {
+  const n = (page as { archived_automations?: unknown } | null)?.archived_automations;
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
 /**
@@ -192,7 +199,10 @@ export type AutomationsState = {
   loading: boolean;
   listError: ApiError | null;
   error: ApiError | null;
-  showArchived: boolean;
+  /** The gateway's count of archived automations (`archived_automations`), for the `Archived · N` footer. */
+  archivedCount: number;
+  /** The archived automations (`GET /automations?status=archived`); null until the footer is opened. */
+  archived: AutomationSummary[] | null;
   selectedId: string;
   detail: AutomationDetailState | null;
   triggerSources: TriggerSourceEntry[];
@@ -214,7 +224,8 @@ export const INITIAL_AUTOMATIONS_STATE: AutomationsState = {
   loading: false,
   listError: null,
   error: null,
-  showArchived: false,
+  archivedCount: 0,
+  archived: null,
   selectedId: "",
   detail: null,
   triggerSources: [],
@@ -266,17 +277,33 @@ export class AutomationsController {
     for (const fn of this.listeners) fn();
   }
 
-  /** Every page of `GET /automations` (v1 has no change cursor). */
-  async listAll(): Promise<AutomationSummary[]> {
+  /** Every page of `GET /automations` (v1 has no change cursor); archived ones only with `status: "archived"`. */
+  async listAll(status?: "archived"): Promise<AutomationSummary[]> {
+    return (await this.listPages(status)).items;
+  }
+
+  private async listPages(status?: "archived"): Promise<{ items: AutomationSummary[]; archivedCount: number }> {
     const out: AutomationSummary[] = [];
     let cursor: string | undefined;
+    let archivedCount = 0;
     for (let guard = 0; guard < 200; guard += 1) {
-      const page = await this.client.listAutomations({ ...(cursor ? { cursor } : {}), limit: AUTOMATIONS_PAGE_LIMIT });
+      const page = await this.client.listAutomations({ ...(status ? { status } : {}), ...(cursor ? { cursor } : {}), limit: AUTOMATIONS_PAGE_LIMIT });
+      if (!cursor) archivedCount = archivedAutomationCount(page);
       out.push(...page.items);
-      if (!page.next_cursor) return out;
+      if (!page.next_cursor) return { items: out, archivedCount };
       cursor = page.next_cursor;
     }
     throw new Error("GET /api/gateway/automations kept returning next_cursor after 200 pages.");
+  }
+
+  /** The `Archived · N` footer opened: list the archived automations (re-read on every refresh from then on). */
+  async loadArchived(): Promise<void> {
+    try {
+      const { items } = await this.listPages("archived");
+      this.set({ archived: items });
+    } catch (e) {
+      this.set({ archived: this.state.archived ?? [], listError: toApiError(e) });
+    }
   }
 
   /** `GET /me/email` → `state.emailStatus` (null when it cannot be read; never an automations error). */
@@ -293,21 +320,18 @@ export class AutomationsController {
     const seq = ++this.listSeq;
     this.set({ loading: true });
     try {
-      const items = await this.listAll();
+      const { items, archivedCount } = await this.listPages();
       void this.loadEmailStatus();
       if (seq !== this.listSeq) return;
       const detail = this.state.detail;
       const fresh = detail ? items.find((s) => s.automation_id === detail.automationId) : undefined;
-      this.set({ items, loaded: true, loading: false, listError: null, ...(detail && fresh ? { detail: { ...detail, summary: fresh } } : {}) });
+      this.set({ items, archivedCount, loaded: true, loading: false, listError: null, ...(detail && fresh ? { detail: { ...detail, summary: fresh } } : {}) });
+      if (this.state.archived !== null) void this.loadArchived();
       if (detail) await this.reloadDetail(detail.automationId);
     } catch (e) {
       if (seq !== this.listSeq) return;
       this.set({ loading: false, loaded: true, listError: toApiError(e) });
     }
-  }
-
-  setShowArchived(show: boolean): void {
-    this.set({ showArchived: show });
   }
 
   async select(automationId: string): Promise<void> {
@@ -401,6 +425,21 @@ export class AutomationsController {
     } catch (e) {
       const error = toApiError(e);
       this.set({ rowError: { automationId: s.automation_id, error } });
+      throw error;
+    }
+  }
+
+  /**
+   * Unarchive (the `Archived · N` footer): the gateway's `automation.unarchive` command (the kit's
+   * `unarchive` control). A failure is kept in `rowError` for that row and rethrown.
+   */
+  async unarchive(id: string, commandId?: string): Promise<CommandReceipt> {
+    this.set({ rowError: null });
+    try {
+      return await this.command(id, CONTROL_COMMANDS.unarchive as AutomationCommandType, commandId);
+    } catch (e) {
+      const error = toApiError(e);
+      this.set({ rowError: { automationId: id, error } });
       throw error;
     }
   }
