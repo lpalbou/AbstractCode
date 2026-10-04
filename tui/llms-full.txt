@@ -1199,7 +1199,9 @@ The panels follow what is selected:
   apply from the next run.", then "Saving…", "Saved as revision 4; applies
   from the next run.", "Not saved: …", or, when someone else saved first,
   "Not saved: the automation changed elsewhere. The latest revision is
-  shown; make the change again.". Every change is one `PATCH
+  shown; make the change again.". While the panels are open they re-read
+  the automation every 15 s and right after a save, so a revision saved
+  elsewhere appears without reopening them. Every change is one `PATCH
   /automations/{id}` with `expected_revision`, writing the same
   `input_data` keys a conversation turn writes (`provider`/`model` +
   `_runtime.provider`/`model`, `_runtime.thinking`, `_runtime.speculation`,
