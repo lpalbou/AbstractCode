@@ -3,12 +3,14 @@
 // - Conversation: the title on one line (ellipsis), then `Oct 2 · 2 turns · 7 tools`. The tool
 //   figure is the gateway's (`tool_calls` per turn, totalled over its sub-runs; catalog.ts adds the
 //   listed turns); without it the card shows no tool figure rather than a guess.
-// - Automation: the name on one line with the Active switch beside it, the "waiting for you" badge
-//   while an approval is pending, then ONE line `every 24 h · last 3 h ago · next in 14 h` (kit
-//   `automationTiming`, deterministic). The card body selects; the switch is a sibling control.
+// - Automation (round 5): the name on its own row (+ the "waiting for you" badge while an approval
+//   is pending), then two quiet lines from the kit's `automationTiming` (deterministic):
+//   `↻ every 24 h · last 3 h ago`, then `next in 20 h` with the Active switch right-aligned on that
+//   same line. The card body selects; the switch is a sibling control.
 import React from "react";
 import {
   AfSwitch,
+  Icon,
   automationControls,
   automationTiming,
   controlHint,
@@ -103,6 +105,12 @@ export function AutomationActiveSwitch(props: {
   );
 }
 
+/** The card's two timing lines: `every 24 h · last 3 h ago` and `next in 20 h` ("" when nothing is scheduled). */
+export function automationCardLines(s: AutomationSummary, nowMs: number): { first: string; second: string; scheduled: boolean } {
+  const t = automationTiming(s, nowMs);
+  return { first: [t.cadence, t.last].filter(Boolean).join(" · "), second: t.next || "", scheduled: s.trigger.source_id === "schedule" };
+}
+
 export function AutomationCard(props: {
   summary: AutomationSummary;
   selected: boolean;
@@ -112,7 +120,7 @@ export function AutomationCard(props: {
   onToggleActive(): void;
 }): React.ReactElement {
   const s = props.summary;
-  const timing = automationTiming(s, props.nowMs);
+  const lines = automationCardLines(s, props.nowMs);
   const waiting = automationIsWaiting(s);
   return (
     <div
@@ -124,18 +132,20 @@ export function AutomationCard(props: {
         type="button"
         className="code-card-main"
         aria-current={props.selected ? "page" : undefined}
-        title={`${s.title}\n${timing.line}`}
+        title={`${s.title}\n${[lines.first, lines.second].filter(Boolean).join(" · ")}`}
         onClick={props.onSelect}
       >
         <strong className="code-card-title">{s.title}</strong>
         {waiting ? <WaitingBadge /> : null}
         <small className="code-card-meta" data-field="timing">
-          {[timing.cadence, timing.last, timing.next].filter(Boolean).map((part, i) => (
-            <React.Fragment key={i}>{i ? " · " : ""}<span className="code-card-part">{part}</span></React.Fragment>
-          ))}
+          {lines.scheduled ? <Icon name="refresh" size={12} className="code-card-cadence-icon" /> : null}
+          <span className="code-card-part">{lines.first}</span>
         </small>
       </button>
-      <AutomationActiveSwitch className="code-card-switch" iconOnly summary={s} busy={props.busy} onToggle={props.onToggleActive} />
+      <div className="code-card-line2">
+        <small className="code-card-meta" data-field="next">{lines.second}</small>
+        <AutomationActiveSwitch className="code-card-switch" iconOnly summary={s} busy={props.busy} onToggle={props.onToggleActive} />
+      </div>
     </div>
   );
 }

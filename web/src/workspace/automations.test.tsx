@@ -234,7 +234,7 @@ describe("the sidebar section", () => {
   };
   const state = (items: AutomationSummary[], showArchived = false) => ({ ...new AutomationsController(stubClient(), vi.fn()).state, items, loaded: true, showArchived });
 
-  it("round 4 cards: name, the Active switch, the waiting badge, one timing line (every · last · next)", () => {
+  it("round 5 cards: name, the waiting badge, `every · last` then `next` + the Active switch on the second line", () => {
     const html = renderToStaticMarkup(<AutomationsSection {...base} state={state(list())} />);
     const card = (title: string) => {
       const id = list().find((s) => s.title === title)!.automation_id;
@@ -242,15 +242,23 @@ describe("the sidebar section", () => {
       expect(at, title).toBeGreaterThan(-1);
       return html.slice(at, html.indexOf('</div>', html.indexOf('role="switch"', at)));
     };
-    const timing = (c: string) => /data-field="timing">([\s\S]*?)<\/small>/.exec(c)?.[1].replace(/<[^>]+>/g, "");
+    const field = (name: string) => (c: string) => new RegExp(`data-field="${name}">([\\s\\S]*?)<\\/small>`).exec(c)?.[1].replace(/<[^>]+>/g, "");
+    const line1 = field("timing");
+    const line2 = field("next");
+    const timing = (c: string) => [line1(c), line2(c)].filter(Boolean).join(" / ");
     // The operator's line, from the gateway's facts only (NOW = 2026-09-27 06:35 UTC).
     // Run #7 waits for an approval: "waiting since", never "running now" beside the badge.
-    expect(timing(card("Inbox triage"))).toBe("every 30 min · waiting since 4 min · next in 25 min");
+    expect(timing(card("Inbox triage"))).toBe("every 30 min · waiting since 4 min / next in 25 min");
+    // Line 1 starts with the ↻ icon for a schedule; line 2 holds `next` and the Active switch, in that order.
+    expect(card("Inbox triage")).toMatch(/data-field="timing"><svg[^>]*code-card-cadence-icon/);
+    expect(card("Inbox triage")).toMatch(/<div class="code-card-line2"><small class="code-card-meta" data-field="next">next in 25 min<\/small><button[^>]*role="switch"/);
     const executing = { ...list()[0], attention: { ...list()[0].attention, pending_waits: 0, unseen_count: 0 } };
     const run = renderToStaticMarkup(<AutomationsSection {...base} state={state([executing])} />);
-    expect(timing(run)).toBe("every 30 min · running now · next in 25 min");
-    expect(timing(card("AI news monitor"))).toBe("every 8 h · last 6 h ago · next in 1 h");
+    expect(timing(run)).toBe("every 30 min · running now / next in 25 min");
+    expect(timing(card("AI news monitor"))).toBe("every 8 h · last 6 h ago / next in 1 h");
+    // Nothing scheduled (paused): line 2 keeps only the switch.
     expect(timing(card("Weekly journal monitor"))).toBe("every 7 d · last 6 d ago");
+    expect(card("Weekly journal monitor")).toContain('data-field="next"></small>');
     // An approval is pending only on Inbox triage (pending_waits 2): the badge there and nowhere else.
     expect(card("Inbox triage")).toContain('data-field="waiting">waiting for you<');
     expect(card("AI news monitor")).not.toContain("waiting for you");

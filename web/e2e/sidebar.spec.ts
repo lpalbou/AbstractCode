@@ -226,10 +226,18 @@ test.describe("AbstractCode sidebar", () => {
     expect(runLimits.length).toBeGreaterThan(0);
     // Synthetic conversation 3 (s = 2): 3 turns, 2 tools each.
     await expect(page.locator(".code-sessions .code-session", { hasText: "Synthetic conversation 3" }).locator('[data-field="meta"]')).toHaveText(/ · 3 turns · 6 tools$/);
-    // Automation cards: name + Active switch, one timing line, no year, no seconds.
+    // Automation cards (R5): name, then `every … · last …`, then `next …` with the Active switch right-aligned on that line.
     const first = page.locator(".code-auto-card").first();
     await expect(first.getByRole("switch", { name: "Active" })).toBeVisible();
-    await expect(first.locator('[data-field="timing"]')).toHaveText(/^every [^·]+ · (last [^·]+ ago|running now|waiting since [^·]+|last never)( · next (in [^·]+|due now))?$/);
+    await expect(first.locator('[data-field="timing"]')).toHaveText(/^every [^·]+ · (last [^·]+ ago|running now|waiting since [^·]+|last never)$/);
+    await expect(first.locator('[data-field="next"]')).toHaveText(/^(next (in [^·]+|due now))?$/);
+    const line2 = (await first.locator(".code-card-line2").boundingBox())!;
+    const sw = (await first.getByRole("switch", { name: "Active" }).boundingBox())!;
+    const next = (await first.locator('[data-field="next"]').boundingBox())!;
+    const card = (await first.boundingBox())!;
+    expect(Math.abs(sw.y + sw.height / 2 - (line2.y + line2.height / 2))).toBeLessThan(4); // same line as `next`
+    expect(card.x + card.width - (sw.x + sw.width)).toBeLessThan(16); // right-aligned
+    expect(sw.x).toBeGreaterThan(next.x);
 
     for (const [width, height] of [[1440, 900], [834, 1194], [390, 844]] as const) {
       await page.setViewportSize({ width, height });
