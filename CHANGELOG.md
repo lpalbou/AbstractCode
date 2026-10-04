@@ -11,7 +11,7 @@ Requires the AbstractGateway round-9 workspace model (`/api/gateway/workspace/po
 
 ### Changed
 
-- web: the **Workspace** panel is the kit `WorkspaceChooser`, the same folder model and wording as the gateway console and the AbstractAssistant: the shared workspace (always on), the admin-allowed folders as switches (off until turned on), **My folders** rows only while the admin allows any folder, and "Agents may use: …" from the gateway. A conversation edits your account's folders (`GET/PUT /api/gateway/workspace/policy/me`, one PUT per change, the gateway's refusal shown with "Not saved."); an automation stores its chosen set in `input_data.workspace_allowed_paths` (a new revision), following your account until changed.
+- web: the **Workspace** panel is the kit `WorkspaceChooser`, the same model and wording as the gateway console and the AbstractAssistant: the gateway's posture ("Deny everything, allow listed workspaces" / "Allow everything, refuse listed workspaces"), the shared workspace (always on, Read & write), the allowed and refused workspaces each with Read & write / Read-only / Refused (lower, never raise), under the second posture Everything else and Add a workspace path, and the gateway's line verbatim. A conversation edits your account's workspaces (`GET/PUT /api/gateway/workspace/policy/me`, one PUT per change, the gateway's refusal shown with "Not saved."); an automation stores its chosen set in `input_data.workspace_allowed_paths` (a new revision), following your account until changed.
 
 ### Removed
 

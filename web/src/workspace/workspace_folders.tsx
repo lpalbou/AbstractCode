@@ -41,7 +41,7 @@ export function useWorkspaceAccount(connected: boolean, refreshKey?: unknown, re
     workspaceChooserClient(request)
       .load()
       .then((next) => live && setState(next))
-      .catch((e) => live && setError(`Could not read your workspace folders: ${formatError(e)}`));
+      .catch((e) => live && setError(`Could not read your workspaces: ${formatError(e)}`));
     return () => {
       live = false;
     };
@@ -65,7 +65,7 @@ export type CodeWorkspaceFoldersProps = {
 
 export function CodeWorkspaceFolders({ connected, automation, request }: CodeWorkspaceFoldersProps) {
   const account = useWorkspaceAccount(connected, undefined, request);
-  const unavailable = connected ? null : "Connect to your gateway to change workspace folders.";
+  const unavailable = connected ? null : "Connect to your gateway to change workspaces.";
   if (automation)
     return (
       <WorkspaceChooser
