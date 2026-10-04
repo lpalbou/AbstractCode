@@ -428,18 +428,6 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     ("/help", "this help"),
     (
-        "/voice [read-aloud on|off]",
-        "voice settings: Text → speech and Speech → text (Gateway default · the gateway's routes, or an override), output device + Test, reply volume, microphone + Test with a level meter, spoken language, Read aloud, voice latency; audio plays and records on THIS computer through AbstractVoice (--voice-python <path> picks the Python)",
-    ),
-    (
-        "/speak [stop]",
-        "read the latest reply aloud — streamed sentence by sentence from the gateway (Ctrl+P toggles; Esc stops)",
-    ),
-    (
-        "/dictate",
-        "record from this computer's microphone, transcribe with the gateway's default speech-to-text route, text lands in the composer (Ctrl+R starts and stops; Esc cancels)",
-    ),
-    (
         "/new",
         "fresh session (cancels an active run, new durable id)",
     ),
@@ -581,6 +569,18 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     (
         "/schedule [task]",
         "create an automation that runs the current workflow: the task (default: your last prompt), when (every N minutes/hours/days or once, UTC), context (independent or growing), tools (run without asking, or ask each time)",
+    ),
+    (
+        "/voice [read-aloud on|off]",
+        "voice settings: Text → speech and Speech → text (Gateway default · the gateway's routes, or an override), output device + Test, reply volume, microphone + Test with a level meter, spoken language, Read aloud, voice latency; audio plays and records on THIS computer through AbstractVoice (--voice-python <path> picks the Python)",
+    ),
+    (
+        "/speak [stop]",
+        "read the latest reply aloud — streamed sentence by sentence from the gateway (Ctrl+P toggles; Esc stops)",
+    ),
+    (
+        "/dictate",
+        "record from this computer's microphone, transcribe with the gateway's default speech-to-text route, text lands in the composer (Ctrl+R starts and stops; Esc cancels)",
     ),
     ("/about", "version, author, licence, links, gateway versions"),
     ("/quit", "leave (Ctrl+Q too; Ctrl+C clears the prompt — twice in a row quits)"),

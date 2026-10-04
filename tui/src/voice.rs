@@ -86,14 +86,28 @@ pub struct VoicePrefs {
     pub read_aloud: bool,
 }
 
-const TTS_KEYS: [&str; 7] = ["provider", "model", "voice", "profile", "speed", "quality_preset", "instructions"];
+const TTS_KEYS: [&str; 7] = [
+    "provider",
+    "model",
+    "voice",
+    "profile",
+    "speed",
+    "quality_preset",
+    "instructions",
+];
 
 impl VoicePrefs {
     pub fn from_json(v: Option<&Value>) -> VoicePrefs {
         let Some(v) = v.filter(|v| v.is_object()) else {
             return VoicePrefs::default();
         };
-        let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").trim().to_string();
+        let s = |k: &str| {
+            v.get(k)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string()
+        };
         let f = |k: &str| v.get(k).and_then(Value::as_f64).filter(|x| x.is_finite());
         VoicePrefs {
             provider: s("provider"),
@@ -110,7 +124,10 @@ impl VoicePrefs {
             input_device: s("input_device"),
             input_gain: f("input_gain"),
             reply_volume: f("reply_volume"),
-            read_aloud: v.get("read_aloud").and_then(Value::as_bool).unwrap_or(false),
+            read_aloud: v
+                .get("read_aloud")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         }
     }
 
@@ -202,7 +219,11 @@ impl VoicePrefs {
 
     /// "provider · model · voice" of the TTS override, "" when the gateway default applies.
     pub fn tts_override_summary(&self) -> String {
-        let voice = if self.profile.is_empty() { &self.voice } else { &self.profile };
+        let voice = if self.profile.is_empty() {
+            &self.voice
+        } else {
+            &self.profile
+        };
         [&self.provider, &self.model, voice]
             .iter()
             .filter(|s| !s.is_empty())
@@ -242,9 +263,18 @@ impl VoiceDefaults {
     pub fn from_json(v: &Value) -> VoiceDefaults {
         let route = |k: &str| {
             v.get(k).filter(|r| r.is_object()).map(|r| {
-                let s = |f: &str| r.get(f).and_then(Value::as_str).unwrap_or("").trim().to_string();
+                let s = |f: &str| {
+                    r.get(f)
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string()
+                };
                 RouteDefault {
-                    configured: r.get("configured").and_then(Value::as_bool).unwrap_or(false),
+                    configured: r
+                        .get("configured")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
                     provider: s("provider"),
                     model: s("model"),
                     voice: s("voice"),
@@ -252,7 +282,10 @@ impl VoiceDefaults {
                 }
             })
         };
-        VoiceDefaults { tts: route("tts"), stt: route("stt") }
+        VoiceDefaults {
+            tts: route("tts"),
+            stt: route("stt"),
+        }
     }
 }
 
@@ -319,7 +352,11 @@ pub fn elapsed_seconds(since: Instant, now: Instant) -> String {
 
 /// "Transcribing… 12 s · faster-whisper / large-v3" (the kit's `transcribingLine`).
 pub fn transcribing_line(since: Instant, now: Instant, route: &str) -> String {
-    let route = if route.is_empty() { String::new() } else { format!(" · {route}") };
+    let route = if route.is_empty() {
+        String::new()
+    } else {
+        format!(" · {route}")
+    };
     format!("Transcribing… {}{route}", elapsed_seconds(since, now))
 }
 
@@ -355,7 +392,10 @@ pub enum Speaking {
 pub enum Devices {
     Unknown,
     Loading,
-    Loaded { output: Vec<(String, String)>, input: Vec<(String, String)> },
+    Loaded {
+        output: Vec<(String, String)>,
+        input: Vec<(String, String)>,
+    },
     Failed(String),
 }
 
@@ -507,7 +547,11 @@ impl VoiceGateway {
 
     fn get(&self, path: &str) -> Result<Value, String> {
         let resp = self
-            .auth(self.agent.get(&self.url(path)).set("Accept", "application/json"))
+            .auth(
+                self.agent
+                    .get(&self.url(path))
+                    .set("Accept", "application/json"),
+            )
             .call()
             .map_err(ureq_detail)?;
         let body = resp.into_string().map_err(|e| e.to_string())?;
@@ -516,7 +560,8 @@ impl VoiceGateway {
 
     /// `GET /voice/defaults` — the routes "Gateway default" names.
     pub fn defaults(&self) -> Result<VoiceDefaults, String> {
-        self.get("/voice/defaults").map(|v| VoiceDefaults::from_json(&v))
+        self.get("/voice/defaults")
+            .map(|v| VoiceDefaults::from_json(&v))
     }
 
     /// `GET /voice/voices?compact=true[&provider&model]` — engines, models and
@@ -547,7 +592,10 @@ impl VoiceGateway {
     ) -> Result<Value, String> {
         let mut body = prefs.tts_request();
         body.insert("text".into(), json!(text));
-        body.insert("request_id".into(), json!(crate::gateway::mint_command_id()));
+        body.insert(
+            "request_id".into(),
+            json!(crate::gateway::mint_command_id()),
+        );
         let path = format!("/runs/{}/voice/tts/stream", url_encode(run_id));
         let resp = self
             .auth(
@@ -569,8 +617,8 @@ impl VoiceGateway {
             if line.is_empty() {
                 continue;
             }
-            let evt: Value =
-                serde_json::from_str(line).map_err(|_| "the speech stream returned invalid JSON".to_string())?;
+            let evt: Value = serde_json::from_str(line)
+                .map_err(|_| "the speech stream returned invalid JSON".to_string())?;
             let typ = evt.get("type").and_then(Value::as_str).unwrap_or("");
             if typ == "error" {
                 return Err(evt
@@ -579,7 +627,11 @@ impl VoiceGateway {
                     .unwrap_or("TTS stream error")
                     .to_string());
             }
-            if let Some(b64) = evt.get("audio_b64").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+            if let Some(b64) = evt
+                .get("audio_b64")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+            {
                 segments += 1;
                 on_audio(b64)?;
             }
@@ -599,14 +651,23 @@ impl VoiceGateway {
     /// Upload `wav` as a session attachment, then `POST
     /// /runs/{run_id}/audio/transcribe` (override route + language only when
     /// set). Returns the text and the route that ran.
-    pub fn transcribe(&self, session_id: &str, run_id: &str, wav: &[u8], prefs: &VoicePrefs) -> Result<Transcription, String> {
+    pub fn transcribe(
+        &self,
+        session_id: &str,
+        run_id: &str,
+        wav: &[u8],
+        prefs: &VoicePrefs,
+    ) -> Result<Transcription, String> {
         let artifact = self
             .client
             .upload_attachment(session_id, "recording.wav", wav)
             .map_err(|e| e.compact_reason())?;
         let mut body = prefs.stt_request();
         body.insert("audio_artifact".into(), artifact);
-        body.insert("request_id".into(), json!(crate::gateway::mint_command_id()));
+        body.insert(
+            "request_id".into(),
+            json!(crate::gateway::mint_command_id()),
+        );
         let path = format!("/runs/{}/audio/transcribe", url_encode(run_id));
         let resp = self
             .auth(
@@ -625,7 +686,13 @@ impl VoiceGateway {
             })?;
         let v: Value = serde_json::from_str(&resp.into_string().map_err(|e| e.to_string())?)
             .map_err(|e| format!("invalid JSON from the transcription route: {e}"))?;
-        let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").trim().to_string();
+        let s = |k: &str| {
+            v.get(k)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string()
+        };
         Ok(Transcription {
             text: s("text"),
             provider: s("provider"),
@@ -653,7 +720,12 @@ pub fn reply_line(r: &SpokenReply) -> String {
     if let Some(d) = r.first_audio {
         parts.push(format!("first audio {:.2} s", d.as_secs_f64()));
     }
-    if let Some(dev) = r.metrics.get("device").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+    if let Some(dev) = r
+        .metrics
+        .get("device")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
         parts.push(format!("engine on {dev}"));
     }
     parts.join(" · ")
@@ -679,7 +751,9 @@ pub fn speak_blocking(
         let device = prefs.output_device.clone();
         let volume = prefs.volume();
         let cancelled = || !host.is_current_speech(gen);
-        let drain = |first: &mut Option<Duration>, on_started: &mut dyn FnMut(Duration)| -> Result<(), String> {
+        let drain = |first: &mut Option<Duration>,
+                     on_started: &mut dyn FnMut(Duration)|
+         -> Result<(), String> {
             while let Ok(ev) = events.try_recv() {
                 match ev {
                     HostEvent::Started { .. } if first.is_none() => {
@@ -699,10 +773,16 @@ pub fn speak_blocking(
             if cancelled() {
                 return Ok(());
             }
-            host.send(&json!({"op": "play", "gen": gen, "b64": b64, "device": device, "volume": volume}))
+            host.send(
+                &json!({"op": "play", "gen": gen, "b64": b64, "device": device, "volume": volume}),
+            )
         })?;
         if cancelled() {
-            return Ok(SpokenReply { first_audio: first, metrics, stopped: true });
+            return Ok(SpokenReply {
+                first_audio: first,
+                metrics,
+                stopped: true,
+            });
         }
         host.send(&json!({"op": "end", "gen": gen}))?;
         loop {
@@ -714,20 +794,32 @@ pub fn speak_blocking(
                 }
                 Ok(HostEvent::Done { .. }) => break,
                 Ok(HostEvent::Stopped { .. }) => {
-                    return Ok(SpokenReply { first_audio: first, metrics, stopped: true })
+                    return Ok(SpokenReply {
+                        first_audio: first,
+                        metrics,
+                        stopped: true,
+                    })
                 }
                 Ok(HostEvent::Error { message, .. }) => return Err(message),
                 Ok(HostEvent::Exited(why)) => return Err(why),
                 Ok(_) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                     if cancelled() {
-                        return Ok(SpokenReply { first_audio: first, metrics, stopped: true });
+                        return Ok(SpokenReply {
+                            first_audio: first,
+                            metrics,
+                            stopped: true,
+                        });
                     }
                 }
                 Err(_) => return Err("the audio player stopped answering".into()),
             }
         }
-        Ok(SpokenReply { first_audio: first, metrics, stopped: false })
+        Ok(SpokenReply {
+            first_audio: first,
+            metrics,
+            stopped: false,
+        })
     })();
     host.unsubscribe(gen);
     result
@@ -753,7 +845,10 @@ pub fn record_blocking(
     let events = host.subscribe(gen);
     let result = (|| {
         host.ensure().map_err(|e| e.to_string())?;
-        let path = std::env::temp_dir().join(format!("abstractcode-voice-{}-{gen}.wav", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "abstractcode-voice-{}-{gen}.wav",
+            std::process::id()
+        ));
         host.send(&json!({
             "op": "record", "gen": gen, "device": prefs.input_device, "gain": prefs.gain(),
             "path": path.to_string_lossy(), "max_s": max_s,
@@ -761,8 +856,17 @@ pub fn record_blocking(
         loop {
             match events.recv_timeout(Duration::from_secs(max_s + 15)) {
                 Ok(HostEvent::Level { rms, .. }) => on_level(rms),
-                Ok(HostEvent::Recorded { path, duration_ms, peak, .. }) => {
-                    return Ok(Recording { path, duration_ms, peak })
+                Ok(HostEvent::Recorded {
+                    path,
+                    duration_ms,
+                    peak,
+                    ..
+                }) => {
+                    return Ok(Recording {
+                        path,
+                        duration_ms,
+                        peak,
+                    })
                 }
                 Ok(HostEvent::Error { message, .. }) => return Err(message),
                 Ok(HostEvent::Exited(why)) => return Err(why),
@@ -777,7 +881,9 @@ pub fn record_blocking(
 
 /// Ask the bridge for the host's audio devices: `(id, name)` per output and input.
 #[allow(clippy::type_complexity)]
-pub fn devices_blocking(host: &Host) -> Result<(Vec<(String, String)>, Vec<(String, String)>), String> {
+pub fn devices_blocking(
+    host: &Host,
+) -> Result<(Vec<(String, String)>, Vec<(String, String)>), String> {
     let gen = host.next_gen();
     let events = host.subscribe(gen);
     let result = (|| {
@@ -821,14 +927,17 @@ pub fn tone_blocking(host: &Host, prefs: &VoicePrefs) -> Result<(), String> {
 /// Play a recorded WAV file on the chosen output and wait until it ends
 /// (the microphone Test's playback).
 pub fn play_file_blocking(host: &Host, path: &str, prefs: &VoicePrefs) -> Result<(), String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("the recording could not be read ({e})"))?;
+    let bytes =
+        std::fs::read(path).map_err(|e| format!("the recording could not be read ({e})"))?;
     let gen = host.next_gen();
     host.claim_speech(gen);
     let events = host.subscribe(gen);
     let result = (|| {
         host.ensure().map_err(|e| e.to_string())?;
-        host.send(&json!({"op": "play", "gen": gen, "b64": crate::voice_host::b64_encode(&bytes),
-            "device": prefs.output_device, "volume": prefs.volume()}))?;
+        host.send(
+            &json!({"op": "play", "gen": gen, "b64": crate::voice_host::b64_encode(&bytes),
+            "device": prefs.output_device, "volume": prefs.volume()}),
+        )?;
         host.send(&json!({"op": "end", "gen": gen}))?;
         loop {
             match events.recv_timeout(Duration::from_secs(30)) {
@@ -854,7 +963,10 @@ mod tests {
             "tts": {"route": "output.voice", "configured": true, "provider": "supertonic", "model": "supertonic-3", "voice": "M3"},
             "stt": {"route": "input.voice", "configured": false, "provider": null, "model": null, "note": "No gateway default is set for speech to text."}
         }));
-        assert_eq!(default_summary(Some(&d), VoiceKind::Tts, false), "supertonic / supertonic-3");
+        assert_eq!(
+            default_summary(Some(&d), VoiceKind::Tts, false),
+            "supertonic / supertonic-3"
+        );
         assert_eq!(default_summary(Some(&d), VoiceKind::Stt, false), "not set");
         assert_eq!(default_summary(None, VoiceKind::Tts, false), "");
         assert_eq!(default_summary(Some(&d), VoiceKind::Tts, true), "unknown");
@@ -863,7 +975,10 @@ mod tests {
     #[test]
     fn requests_carry_only_what_the_user_overrode() {
         let p = VoicePrefs::default();
-        assert!(p.tts_request().is_empty(), "gateway default = no provider/model/voice in the request");
+        assert!(
+            p.tts_request().is_empty(),
+            "gateway default = no provider/model/voice in the request"
+        );
         assert!(p.stt_request().is_empty());
         let p = VoicePrefs {
             provider: "piper".into(),
@@ -901,19 +1016,37 @@ mod tests {
     #[test]
     fn transcribing_line_names_elapsed_time_and_route() {
         let t0 = Instant::now();
-        let line = transcribing_line(t0, t0 + Duration::from_millis(12_400), "faster-whisper / large-v3");
+        let line = transcribing_line(
+            t0,
+            t0 + Duration::from_millis(12_400),
+            "faster-whisper / large-v3",
+        );
         assert_eq!(line, "Transcribing… 12 s · faster-whisper / large-v3");
         assert_eq!(transcribing_line(t0, t0, ""), "Transcribing… 0 s");
         let prefs = VoicePrefs::default();
-        let d = VoiceDefaults::from_json(&json!({"stt": {"configured": true, "provider": "faster-whisper", "model": "large-v3"}}));
-        assert_eq!(stt_route_text(&prefs, Some(&d)), "faster-whisper / large-v3");
-        let o = VoicePrefs { stt_provider: "openai".into(), ..Default::default() };
+        let d = VoiceDefaults::from_json(
+            &json!({"stt": {"configured": true, "provider": "faster-whisper", "model": "large-v3"}}),
+        );
+        assert_eq!(
+            stt_route_text(&prefs, Some(&d)),
+            "faster-whisper / large-v3"
+        );
+        let o = VoicePrefs {
+            stt_provider: "openai".into(),
+            ..Default::default()
+        };
         assert_eq!(stt_route_text(&o, Some(&d)), "openai");
     }
 
     #[test]
     fn error_sentences_are_one_sentence() {
-        assert_eq!(error_sentence("Reading aloud failed", "HTTP 503."), "Reading aloud failed: HTTP 503.");
-        assert_eq!(error_sentence("Transcription failed", ""), "Transcription failed.");
+        assert_eq!(
+            error_sentence("Reading aloud failed", "HTTP 503."),
+            "Reading aloud failed: HTTP 503."
+        );
+        assert_eq!(
+            error_sentence("Transcription failed", ""),
+            "Transcription failed."
+        );
     }
 }

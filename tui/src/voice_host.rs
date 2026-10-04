@@ -34,14 +34,38 @@ pub const BRIDGE_SOURCE: &str = include_str!("../assets/voice_bridge.py");
 /// One event from the bridge (see `assets/voice_bridge.py`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum HostEvent {
-    Started { gen: u64 },
-    Done { gen: u64 },
-    Stopped { gen: u64 },
-    Level { gen: u64, rms: f32 },
-    Recorded { gen: u64, path: String, duration_ms: u64, peak: f64 },
-    Devices { gen: u64, output: Vec<(String, String)>, input: Vec<(String, String)> },
-    ToneDone { gen: u64 },
-    Error { gen: u64, op: String, message: String },
+    Started {
+        gen: u64,
+    },
+    Done {
+        gen: u64,
+    },
+    Stopped {
+        gen: u64,
+    },
+    Level {
+        gen: u64,
+        rms: f32,
+    },
+    Recorded {
+        gen: u64,
+        path: String,
+        duration_ms: u64,
+        peak: f64,
+    },
+    Devices {
+        gen: u64,
+        output: Vec<(String, String)>,
+        input: Vec<(String, String)>,
+    },
+    ToneDone {
+        gen: u64,
+    },
+    Error {
+        gen: u64,
+        op: String,
+        message: String,
+    },
     /// The bridge process is gone (sent to every waiter).
     Exited(String),
 }
@@ -80,9 +104,17 @@ impl HostEvent {
                 duration_ms: v.get("duration_ms").and_then(Value::as_u64).unwrap_or(0),
                 peak: v.get("peak").and_then(Value::as_f64).unwrap_or(0.0),
             },
-            "devices" => HostEvent::Devices { gen, output: pairs("output"), input: pairs("input") },
+            "devices" => HostEvent::Devices {
+                gen,
+                output: pairs("output"),
+                input: pairs("input"),
+            },
             "tone_done" => HostEvent::ToneDone { gen },
-            "error" => HostEvent::Error { gen, op: s("op"), message: s("message") },
+            "error" => HostEvent::Error {
+                gen,
+                op: s("op"),
+                message: s("message"),
+            },
             _ => return None,
         })
     }
@@ -170,12 +202,18 @@ impl Host {
 
     pub fn subscribe(&self, gen: u64) -> Receiver<HostEvent> {
         let (tx, rx) = channel();
-        self.routes.lock().unwrap_or_else(|e| e.into_inner()).insert(gen, tx);
+        self.routes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(gen, tx);
         rx
     }
 
     pub fn unsubscribe(&self, gen: u64) {
-        self.routes.lock().unwrap_or_else(|e| e.into_inner()).remove(&gen);
+        self.routes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&gen);
     }
 
     /// Start the bridge if it is not running (blocking; never on the UI thread).
@@ -233,7 +271,9 @@ impl Host {
 
     /// End `gen`'s claim on speech (no-op when a newer reply took over).
     pub fn release_speech(&self, gen: u64) {
-        let _ = self.speech.compare_exchange(gen, 0, Ordering::SeqCst, Ordering::SeqCst);
+        let _ = self
+            .speech
+            .compare_exchange(gen, 0, Ordering::SeqCst, Ordering::SeqCst);
     }
 
     pub fn shutdown(&self) {
@@ -254,7 +294,10 @@ fn host_slot() -> &'static Mutex<Option<Arc<Host>>> {
 
 /// `--voice-python <path>` (launch flag; `None` = discover).
 pub fn configure(python: Option<String>) {
-    *PYTHON_FLAG.get_or_init(|| Mutex::new(None)).lock().unwrap_or_else(|e| e.into_inner()) = python;
+    *PYTHON_FLAG
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = python;
 }
 
 /// Replace the host (tests install an in-process double).
@@ -271,7 +314,11 @@ pub fn host() -> Arc<Host> {
 
 /// Stop the bridge process (app exit).
 pub fn shutdown() {
-    if let Some(h) = host_slot().lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+    if let Some(h) = host_slot()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
         h.shutdown();
     }
 }
@@ -338,7 +385,11 @@ impl Transport for ProcessTransport {
 }
 
 /// Start `python -u -c <bridge> [extra…]` and wait for `ready` (or `fatal`).
-pub fn spawn_bridge_with(python: &Path, extra: &[&str], sink: EventSink) -> Result<Box<dyn Transport>, String> {
+pub fn spawn_bridge_with(
+    python: &Path,
+    extra: &[&str],
+    sink: EventSink,
+) -> Result<Box<dyn Transport>, String> {
     let mut child = Command::new(python)
         .arg("-u")
         .arg("-c")
@@ -367,7 +418,11 @@ pub fn spawn_bridge_with(python: &Path, extra: &[&str], sink: EventSink) -> Resu
                 t.push_str(&String::from_utf8_lossy(&buf[..n]));
                 let len = t.len();
                 if len > 2000 {
-                    let cut = t.char_indices().map(|(i, _)| i).find(|i| *i >= len - 2000).unwrap_or(0);
+                    let cut = t
+                        .char_indices()
+                        .map(|(i, _)| i)
+                        .find(|i| *i >= len - 2000)
+                        .unwrap_or(0);
                     t.replace_range(..cut, "");
                 }
             }
@@ -380,7 +435,9 @@ pub fn spawn_bridge_with(python: &Path, extra: &[&str], sink: EventSink) -> Resu
             let mut ready = Some(ready_tx);
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else { break };
-                let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { continue };
+                let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
+                    continue;
+                };
                 match v.get("event").and_then(Value::as_str) {
                     Some("ready") => {
                         if let Some(tx) = ready.take() {
@@ -388,7 +445,11 @@ pub fn spawn_bridge_with(python: &Path, extra: &[&str], sink: EventSink) -> Resu
                         }
                     }
                     Some("fatal") => {
-                        let msg = v.get("message").and_then(Value::as_str).unwrap_or("").to_string();
+                        let msg = v
+                            .get("message")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string();
                         if let Some(tx) = ready.take() {
                             let _ = tx.send(Err(msg));
                         }
@@ -403,7 +464,9 @@ pub fn spawn_bridge_with(python: &Path, extra: &[&str], sink: EventSink) -> Resu
             if let Some(tx) = ready.take() {
                 let _ = tx.send(Err("the bridge exited before it was ready".into()));
             }
-            sink(HostEvent::Exited("the audio bridge (AbstractVoice) stopped".into()));
+            sink(HostEvent::Exited(
+                "the audio bridge (AbstractVoice) stopped".into(),
+            ));
         })
         .map_err(|e| e.to_string())?;
     match ready_rx.recv_timeout(Duration::from_secs(20)) {
@@ -411,14 +474,25 @@ pub fn spawn_bridge_with(python: &Path, extra: &[&str], sink: EventSink) -> Resu
         Ok(Err(msg)) => {
             let _ = child.kill();
             let _ = child.wait();
-            let tail = tail.lock().unwrap_or_else(|e| e.into_inner()).trim().to_string();
+            let tail = tail
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .trim()
+                .to_string();
             let last = tail.lines().last().unwrap_or("").to_string();
-            Err(format!("{}: {}", python.display(), if msg.is_empty() { last } else { msg }))
+            Err(format!(
+                "{}: {}",
+                python.display(),
+                if msg.is_empty() { last } else { msg }
+            ))
         }
         Err(_) => {
             let _ = child.kill();
             let _ = child.wait();
-            Err(format!("{}: the bridge did not start within 20 s", python.display()))
+            Err(format!(
+                "{}: the bridge did not start within 20 s",
+                python.display()
+            ))
         }
     }
 }
@@ -453,12 +527,24 @@ pub fn b64_encode(bytes: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
         out.push(T[(n >> 18) as usize & 63] as char);
         out.push(T[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { T[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            T[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -478,16 +564,44 @@ mod tests {
 
     #[test]
     fn events_parse_with_their_generation() {
-        let ev = HostEvent::parse(&serde_json::json!({"event": "recorded", "gen": 4, "path": "/x.wav", "duration_ms": 1200, "peak": 0.3}));
-        assert_eq!(ev, Some(HostEvent::Recorded { gen: 4, path: "/x.wav".into(), duration_ms: 1200, peak: 0.3 }));
-        let ev = HostEvent::parse(&serde_json::json!({"event": "devices", "gen": 2, "output": [{"id": "uid-1", "name": "Speakers"}], "input": []}));
-        assert_eq!(ev, Some(HostEvent::Devices { gen: 2, output: vec![("uid-1".into(), "Speakers".into())], input: vec![] }));
-        assert_eq!(HostEvent::parse(&serde_json::json!({"event": "ready"})), None);
+        let ev = HostEvent::parse(
+            &serde_json::json!({"event": "recorded", "gen": 4, "path": "/x.wav", "duration_ms": 1200, "peak": 0.3}),
+        );
+        assert_eq!(
+            ev,
+            Some(HostEvent::Recorded {
+                gen: 4,
+                path: "/x.wav".into(),
+                duration_ms: 1200,
+                peak: 0.3
+            })
+        );
+        let ev = HostEvent::parse(
+            &serde_json::json!({"event": "devices", "gen": 2, "output": [{"id": "uid-1", "name": "Speakers"}], "input": []}),
+        );
+        assert_eq!(
+            ev,
+            Some(HostEvent::Devices {
+                gen: 2,
+                output: vec![("uid-1".into(), "Speakers".into())],
+                input: vec![]
+            })
+        );
+        assert_eq!(
+            HostEvent::parse(&serde_json::json!({"event": "ready"})),
+            None
+        );
     }
 
     #[test]
     fn a_launch_flag_is_the_only_candidate() {
-        assert_eq!(python_candidates(Some("/opt/py/bin/python3")), vec![PathBuf::from("/opt/py/bin/python3")]);
-        assert_eq!(python_candidates(None).last(), Some(&PathBuf::from("python3")));
+        assert_eq!(
+            python_candidates(Some("/opt/py/bin/python3")),
+            vec![PathBuf::from("/opt/py/bin/python3")]
+        );
+        assert_eq!(
+            python_candidates(None).last(),
+            Some(&PathBuf::from("python3"))
+        );
     }
 }

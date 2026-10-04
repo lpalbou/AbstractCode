@@ -30,6 +30,8 @@ include = [
     "/assets/abstractframework_identity.json",
     # `automations.rs` include_str!s the vendored automation controls (the kit's hints).
     "/assets/automation_controls.json",
+    # `voice_host.rs` include_str!s the host-audio bridge (AbstractVoice).
+    "/assets/voice_bridge.py",
     "/examples/*.rs",
     "/Cargo.toml",
     "/README.md",

@@ -29,8 +29,8 @@ use super::UiCtx;
 use crate::store::{Phase, Store};
 use crate::transcript::Item;
 use crate::voice::{
-    self, default_summary, error_sentence, stt_route_text, transcribing_line, DefaultsState, Devices, Dictation,
-    Speaking, Tone, VoiceDefaults, VoiceGateway, VoiceKind, VoicePrefs,
+    self, default_summary, error_sentence, stt_route_text, transcribing_line, DefaultsState,
+    Devices, Dictation, Speaking, Tone, VoiceDefaults, VoiceGateway, VoiceKind, VoicePrefs,
 };
 use crate::voice_host;
 
@@ -47,7 +47,11 @@ fn save_prefs(store: Store, ctx: &UiCtx, p: &VoicePrefs) {
     {
         let mut prefs = ctx.prefs.borrow_mut();
         let v = p.to_json();
-        prefs.voice = if v.as_object().is_some_and(|m| m.is_empty()) { None } else { Some(v) };
+        prefs.voice = if v.as_object().is_some_and(|m| m.is_empty()) {
+            None
+        } else {
+            Some(v)
+        };
         let _ = prefs.save();
     }
     store.voice.tick.update(|t| *t += 1);
@@ -58,14 +62,19 @@ fn spawn(name: &str, f: impl FnOnce() + Send + 'static) {
 }
 
 fn post_error(store: Store, text: String) {
-    store.fold.update(|f| f.push_item(Item::Error { text: text.clone() }));
+    store
+        .fold
+        .update(|f| f.push_item(Item::Error { text: text.clone() }));
     store.notify(text);
 }
 
 /// The gateway's default voice routes, fetched once per app (and again when
 /// the voice screen opens after a failure).
 pub fn load_defaults(store: Store, ctx: &UiCtx) {
-    if matches!(store.voice.defaults.get_untracked(), DefaultsState::Loaded(_)) {
+    if matches!(
+        store.voice.defaults.get_untracked(),
+        DefaultsState::Loaded(_)
+    ) {
         return;
     }
     let gw = VoiceGateway::new(&ctx.client);
@@ -86,7 +95,9 @@ pub fn latest_reply(store: Store) -> Option<String> {
     store.fold.with_untracked(|f| {
         for item in f.items.iter().rev() {
             match item {
-                Item::Assistant { text, .. } if !text.trim().is_empty() => return Some(text.clone()),
+                Item::Assistant { text, .. } if !text.trim().is_empty() => {
+                    return Some(text.clone())
+                }
                 Item::User { .. } => return None,
                 _ => {}
             }
@@ -111,7 +122,10 @@ pub fn toggle_speak(store: Store, ctx: &UiCtx) {
 pub fn speak_text(store: Store, ctx: &UiCtx, text: String) {
     let run_id = store.run_id.get_untracked();
     if run_id.is_empty() {
-        post_error(store, "Reading aloud failed: start a conversation first.".into());
+        post_error(
+            store,
+            "Reading aloud failed: start a conversation first.".into(),
+        );
         return;
     }
     let host = voice_host::host();
@@ -193,7 +207,10 @@ fn start_dictation(store: Store, ctx: &UiCtx) {
     let host = voice_host::host();
     let gen = host.next_gen();
     DICTATION.store(gen, Ordering::SeqCst);
-    store.voice.dictation.set(Dictation::Recording { since: Instant::now(), gen });
+    store.voice.dictation.set(Dictation::Recording {
+        since: Instant::now(),
+        gen,
+    });
     store.voice.level.set(0.0);
     let p = prefs(ctx);
     let gw = VoiceGateway::new(&ctx.client);
@@ -206,7 +223,9 @@ fn start_dictation(store: Store, ctx: &UiCtx) {
             level_wake.post(move || store.voice.level.set(rms));
         });
         let live = || DICTATION.load(Ordering::SeqCst) == gen;
-        let finish = move |wake: &abstracttui::reactive::WakeHandle, err: Option<String>, text: Option<String>| {
+        let finish = move |wake: &abstracttui::reactive::WakeHandle,
+                           err: Option<String>,
+                           text: Option<String>| {
             wake.post(move || {
                 if DICTATION.load(Ordering::SeqCst) != gen {
                     return; // cancelled (Esc) or superseded
@@ -225,7 +244,11 @@ fn start_dictation(store: Store, ctx: &UiCtx) {
         let rec = match recorded {
             Ok(r) => r,
             Err(e) => {
-                let msg = if e.ends_with('.') { e } else { error_sentence("The microphone did not start", &e) };
+                let msg = if e.ends_with('.') {
+                    e
+                } else {
+                    error_sentence("The microphone did not start", &e)
+                };
                 return finish(&wake, Some(msg), None);
             }
         };
@@ -250,14 +273,29 @@ fn start_dictation(store: Store, ctx: &UiCtx) {
         }
         let bytes = match bytes {
             Ok(b) => b,
-            Err(e) => return finish(&wake, Some(error_sentence("The recording could not be prepared", &e.to_string())), None),
+            Err(e) => {
+                return finish(
+                    &wake,
+                    Some(error_sentence(
+                        "The recording could not be prepared",
+                        &e.to_string(),
+                    )),
+                    None,
+                )
+            }
         };
         let since = Instant::now();
         let p2 = p.clone();
         wake.post(move || {
             if DICTATION.load(Ordering::SeqCst) == gen {
-                let route = store.voice.defaults.with_untracked(|d| stt_route_text(&p2, d.value()));
-                store.voice.dictation.set(Dictation::Transcribing { since, route });
+                let route = store
+                    .voice
+                    .defaults
+                    .with_untracked(|d| stt_route_text(&p2, d.value()));
+                store
+                    .voice
+                    .dictation
+                    .set(Dictation::Transcribing { since, route });
             }
         });
         match gw.transcribe(&session_id, &run_id, &bytes, &p) {
@@ -293,7 +331,9 @@ pub fn escape(store: Store) -> bool {
 pub fn wire(cx: Scope, store: Store, ctx: &UiCtx, composer: abstracttui::widgets::TextAreaState) {
     // A finished transcription lands at the end of the draft.
     cx.effect(move || {
-        let Some(text) = store.voice.transcript.get() else { return };
+        let Some(text) = store.voice.transcript.get() else {
+            return;
+        };
         store.voice.transcript.set(None);
         let draft = composer.text();
         let joined = if draft.trim().is_empty() {
@@ -307,7 +347,8 @@ pub fn wire(cx: Scope, store: Store, ctx: &UiCtx, composer: abstracttui::widgets
     });
     // Read aloud: when a turn ends with a reply, speak it once.
     let prev = Rc::new(Cell::new(store.phase.get_untracked()));
-    let spoken: Rc<RefCell<String>> = Rc::new(RefCell::new(latest_reply(store).unwrap_or_default()));
+    let spoken: Rc<RefCell<String>> =
+        Rc::new(RefCell::new(latest_reply(store).unwrap_or_default()));
     let rctx = ctx.clone();
     cx.effect(move || {
         let phase = store.phase.get();
@@ -318,7 +359,9 @@ pub fn wire(cx: Scope, store: Store, ctx: &UiCtx, composer: abstracttui::widgets
         if !prefs(&rctx).read_aloud {
             return;
         }
-        let Some(text) = latest_reply(store) else { return };
+        let Some(text) = latest_reply(store) else {
+            return;
+        };
         if *spoken.borrow() == text {
             return;
         }
@@ -327,7 +370,11 @@ pub fn wire(cx: Scope, store: Store, ctx: &UiCtx, composer: abstracttui::widgets
     });
     // Elapsed seconds for "Recording… 3 s" / "Transcribing… 4 s".
     let _ = abstracttui::reactive::interval(cx, Duration::from_millis(500), move || {
-        if store.voice.dictation.with_untracked(|d| !matches!(d, Dictation::Idle)) {
+        if store
+            .voice
+            .dictation
+            .with_untracked(|d| !matches!(d, Dictation::Idle))
+        {
             store.voice.tick.update(|t| *t += 1);
         }
     });
@@ -344,7 +391,9 @@ pub fn status_text(store: Store, now: Instant) -> Option<String> {
                 voice::elapsed_seconds(since, now)
             ))
         }
-        Dictation::Transcribing { since, route } => return Some(transcribing_line(since, now, &route)),
+        Dictation::Transcribing { since, route } => {
+            return Some(transcribing_line(since, now, &route))
+        }
         Dictation::Idle => {}
     }
     match store.voice.speaking.get() {
@@ -366,7 +415,12 @@ pub fn status_row(store: Store) -> View {
             .style(LayoutStyle::line(1).shrink(0.0))
             .draw(move |canvas, rect| {
                 let fitted = text::truncate_ellipsis(&line, (rect.w - 2).max(4));
-                canvas.print(Point::new(rect.x + 1, rect.y), &fitted, ink, Rgba::TRANSPARENT);
+                canvas.print(
+                    Point::new(rect.x + 1, rect.y),
+                    &fitted,
+                    ink,
+                    Rgba::TRANSPARENT,
+                );
             })
             .build()
     })
@@ -379,15 +433,29 @@ pub fn command_voice(cx: Scope, store: Store, ctx: &UiCtx, arg: Option<String>) 
         open_voice_settings(cx, store, ctx);
         return;
     };
-    let words: Vec<String> = arg.split_whitespace().map(|w| w.to_ascii_lowercase()).collect();
-    match words.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+    let words: Vec<String> = arg
+        .split_whitespace()
+        .map(|w| w.to_ascii_lowercase())
+        .collect();
+    match words
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
         ["read-aloud", v] | ["read", "aloud", v] if matches!(*v, "on" | "off") => {
             let mut p = prefs(ctx);
             p.read_aloud = *v == "on";
             save_prefs(store, ctx, &p);
-            store.notify(format!("Read aloud {}", if p.read_aloud { "[x]" } else { "[ ]" }));
+            store.notify(format!(
+                "Read aloud {}",
+                if p.read_aloud { "[x]" } else { "[ ]" }
+            ));
         }
-        _ => post_error(store, format!("/voice takes no argument or read-aloud on|off (got {arg:?}).")),
+        _ => post_error(
+            store,
+            format!("/voice takes no argument or read-aloud on|off (got {arg:?})."),
+        ),
     }
 }
 
@@ -396,7 +464,10 @@ pub fn command_speak(store: Store, ctx: &UiCtx, arg: Option<String>) {
         Some("stop") => {
             stop_speaking(store);
         }
-        Some(other) if !other.is_empty() => post_error(store, format!("/speak takes no argument or stop (got {other:?}).")),
+        Some(other) if !other.is_empty() => post_error(
+            store,
+            format!("/speak takes no argument or stop (got {other:?})."),
+        ),
         _ => toggle_speak(store, ctx),
     }
 }
@@ -466,12 +537,28 @@ fn settings_rows(store: Store, p: &VoicePrefs) -> Vec<(String, Row)> {
     let loading = matches!(devices, Devices::Loading | Devices::Unknown);
     let label = |name: &str, value: String| format!("  {name:<17} {value}");
     let mut rows: Vec<(String, Row)> = Vec::new();
-    rows.push(("Engines — which engines speak and listen.".into(), Row::None));
-    rows.push((label("Text → speech", engine_value(&tts, &p.tts_override_summary())), Row::Tts));
-    rows.push((label("Speech → text", engine_value(&stt, &p.stt_override_summary())), Row::Stt));
+    rows.push((
+        "Engines — which engines speak and listen.".into(),
+        Row::None,
+    ));
+    rows.push((
+        label(
+            "Text → speech",
+            engine_value(&tts, &p.tts_override_summary()),
+        ),
+        Row::Tts,
+    ));
+    rows.push((
+        label(
+            "Speech → text",
+            engine_value(&stt, &p.stt_override_summary()),
+        ),
+        Row::Stt,
+    ));
     if failed {
         rows.push((
-            "  The gateway's default voice routes could not be read. Requests still use them.".into(),
+            "  The gateway's default voice routes could not be read. Requests still use them."
+                .into(),
             Row::None,
         ));
     }
@@ -489,9 +576,16 @@ fn settings_rows(store: Store, p: &VoicePrefs) -> Vec<(String, Row)> {
         device_name(&outs, &p.output_device, "Saved speaker (not connected)")
     };
     rows.push((label("Output device", out_value), Row::Output));
-    let speaker = v.speaker_note.get().map(|(t, _)| t).unwrap_or_else(|| "Enter plays a short chime".into());
+    let speaker = v
+        .speaker_note
+        .get()
+        .map(|(t, _)| t)
+        .unwrap_or_else(|| "Enter plays a short chime".into());
     rows.push((label("Test speaker", speaker), Row::TestSpeaker));
-    rows.push((label("Reply volume", format!("{}  ←/→", percent(p.volume()))), Row::Volume));
+    rows.push((
+        label("Reply volume", format!("{}  ←/→", percent(p.volume()))),
+        Row::Volume,
+    ));
     rows.push(("Microphone".into(), Row::None));
     let in_value = if loading && !p.input_device.is_empty() {
         "…".into()
@@ -514,10 +608,16 @@ fn settings_rows(store: Store, p: &VoicePrefs) -> Vec<(String, Row)> {
         .map(|(_, l)| l.to_string())
         .unwrap_or_else(|| p.stt_language.clone());
     rows.push((label("Spoken language", lang), Row::Language));
-    rows.push((label("Input level", format!("{}  ←/→", percent(p.gain()))), Row::Gain));
+    rows.push((
+        label("Input level", format!("{}  ←/→", percent(p.gain()))),
+        Row::Gain,
+    ));
     rows.push(("Replies".into(), Row::None));
     rows.push((
-        format!("  {} Read aloud — Speak each new reply.", if p.read_aloud { "[x]" } else { "[ ]" }),
+        format!(
+            "  {} Read aloud — Speak each new reply.",
+            if p.read_aloud { "[x]" } else { "[ ]" }
+        ),
         Row::ReadAloud,
     ));
     let latency = voice::LATENCY
@@ -563,7 +663,11 @@ fn load_devices(store: Store) {
 }
 
 pub fn open_voice_settings(cx: Scope, store: Store, ctx: &UiCtx) {
-    if store.voice.defaults.with_untracked(|d| !matches!(d, DefaultsState::Loaded(_))) {
+    if store
+        .voice
+        .defaults
+        .with_untracked(|d| !matches!(d, DefaultsState::Loaded(_)))
+    {
         store.voice.defaults.set(DefaultsState::Unknown);
     }
     load_defaults(store, ctx);
@@ -574,7 +678,10 @@ pub fn open_voice_settings(cx: Scope, store: Store, ctx: &UiCtx) {
     let rows_ctx = ctx.clone();
     let rows_of = move || {
         let _ = store.voice.tick.get();
-        settings_rows(store, &prefs(&rows_ctx)).into_iter().map(|(l, _)| l).collect::<Vec<_>>()
+        settings_rows(store, &prefs(&rows_ctx))
+            .into_iter()
+            .map(|(l, _)| l)
+            .collect::<Vec<_>>()
     };
     let n = rows_of().len() as i32;
     let choose_ctx = ctx.clone();
@@ -582,11 +689,19 @@ pub fn open_voice_settings(cx: Scope, store: Store, ctx: &UiCtx) {
     let adjust = |delta: f64, store: Store, ctx: UiCtx, selected: Rc<Cell<usize>>| {
         move || {
             let rows = settings_rows(store, &prefs(&ctx));
-            let Some((_, row)) = rows.get(selected.get()) else { return };
+            let Some((_, row)) = rows.get(selected.get()) else {
+                return;
+            };
             let mut p = prefs(&ctx);
             match row {
-                Row::Volume => p.reply_volume = Some(((p.volume() + delta) * 20.0).round() / 20.0).map(|v| v.clamp(0.0, 1.0)),
-                Row::Gain => p.input_gain = Some(((p.gain() + delta) * 10.0).round() / 10.0).map(|v| v.clamp(0.5, 1.5)),
+                Row::Volume => {
+                    p.reply_volume = Some(((p.volume() + delta) * 20.0).round() / 20.0)
+                        .map(|v| v.clamp(0.0, 1.0))
+                }
+                Row::Gain => {
+                    p.input_gain =
+                        Some(((p.gain() + delta) * 10.0).round() / 10.0).map(|v| v.clamp(0.5, 1.5))
+                }
                 _ => return,
             }
             save_prefs(store, &ctx, &p);
@@ -608,7 +723,10 @@ pub fn open_voice_settings(cx: Scope, store: Store, ctx: &UiCtx) {
             live_hint: Some(Rc::new(move || {
                 let _ = store.voice.tick.get();
                 let rows = settings_rows(store, &prefs(&help_ctx));
-                rows.get(help_sel.get()).map(|(_, r)| row_help(*r)).unwrap_or("").to_string()
+                rows.get(help_sel.get())
+                    .map(|(_, r)| row_help(*r))
+                    .unwrap_or("")
+                    .to_string()
             })),
             keys: vec![
                 (
@@ -643,34 +761,60 @@ fn activate(cx: Scope, store: Store, ctx: &UiCtx, row: Row) {
             save_prefs(store, ctx, &p);
         }
         Row::Volume => {
-            p.reply_volume = Some(if p.volume() <= 0.0 { 1.0 } else { ((p.volume() - 0.25) * 4.0).round() / 4.0 });
+            p.reply_volume = Some(if p.volume() <= 0.0 {
+                1.0
+            } else {
+                ((p.volume() - 0.25) * 4.0).round() / 4.0
+            });
             save_prefs(store, ctx, &p);
         }
         Row::Gain => {
-            p.input_gain = Some(if p.gain() >= 1.5 { 0.5 } else { p.gain() + 0.25 });
+            p.input_gain = Some(if p.gain() >= 1.5 {
+                0.5
+            } else {
+                p.gain() + 0.25
+            });
             save_prefs(store, ctx, &p);
         }
         Row::TestSpeaker => test_speaker(store, &p),
         Row::TestMic => test_microphone(store, &p),
         Row::Output | Row::Input => open_device_picker(cx, store, ctx, row == Row::Output),
-        Row::Language => open_choice_picker(cx, store, ctx, "Spoken language", voice::LANGUAGES, p.stt_language.clone(), |p, v| {
-            p.stt_language = v
-        }),
-        Row::Latency => open_choice_picker(cx, store, ctx, "Voice latency", voice::LATENCY, p.quality_preset.clone(), |p, v| {
-            p.quality_preset = v
-        }),
+        Row::Language => open_choice_picker(
+            cx,
+            store,
+            ctx,
+            "Spoken language",
+            voice::LANGUAGES,
+            p.stt_language.clone(),
+            |p, v| p.stt_language = v,
+        ),
+        Row::Latency => open_choice_picker(
+            cx,
+            store,
+            ctx,
+            "Voice latency",
+            voice::LATENCY,
+            p.quality_preset.clone(),
+            |p, v| p.quality_preset = v,
+        ),
         Row::Tts | Row::Stt => open_engine_picker(cx, store, ctx, row == Row::Tts),
         Row::None => {}
     }
 }
 
 fn test_speaker(store: Store, p: &VoicePrefs) {
-    store.voice.speaker_note.set(Some(("Playing a short chime…".into(), Tone::Info)));
+    store
+        .voice
+        .speaker_note
+        .set(Some(("Playing a short chime…".into(), Tone::Info)));
     let p = p.clone();
     let wake = abstracttui::reactive::wake_handle();
     spawn("voice-test-speaker", move || {
         let note = match voice::tone_blocking(&voice_host::host(), &p) {
-            Ok(()) => ("Chime played. Heard nothing? Pick another output or raise the volume.".to_string(), Tone::Ok),
+            Ok(()) => (
+                "Chime played. Heard nothing? Pick another output or raise the volume.".to_string(),
+                Tone::Ok,
+            ),
             Err(e) => (error_sentence("The speaker test failed", &e), Tone::Error),
         };
         wake.post(move || store.voice.speaker_note.set(Some(note)));
@@ -682,17 +826,26 @@ fn test_microphone(store: Store, p: &VoicePrefs) {
         return;
     }
     store.voice.mic_testing.set(true);
-    store.voice.mic_note.set(Some(("Recording 3 seconds — say something.".into(), Tone::Info)));
+    store.voice.mic_note.set(Some((
+        "Recording 3 seconds — say something.".into(),
+        Tone::Info,
+    )));
     let p = p.clone();
     let wake = abstracttui::reactive::wake_handle();
     spawn("voice-test-microphone", move || {
         let host = voice_host::host();
         let gen = host.next_gen();
         let lw = wake.clone();
-        let rec = voice::record_blocking(&host, gen, &p, 3, &mut |rms| lw.post(move || store.voice.level.set(rms)));
+        let rec = voice::record_blocking(&host, gen, &p, 3, &mut |rms| {
+            lw.post(move || store.voice.level.set(rms))
+        });
         let note = match rec {
             Err(e) => {
-                let msg = if e.ends_with('.') { e } else { error_sentence("The microphone did not start", &e) };
+                let msg = if e.ends_with('.') {
+                    e
+                } else {
+                    error_sentence("The microphone did not start", &e)
+                };
                 (msg, Tone::Error)
             }
             Ok(r) if r.peak < voice::SILENT_LEVEL => {
@@ -704,11 +857,19 @@ fn test_microphone(store: Store, p: &VoicePrefs) {
                 )
             }
             Ok(r) => {
-                wake.post(move || store.voice.mic_note.set(Some(("Playing it back…".into(), Tone::Info))));
+                wake.post(move || {
+                    store
+                        .voice
+                        .mic_note
+                        .set(Some(("Playing it back…".into(), Tone::Info)))
+                });
                 let played = voice::play_file_blocking(&host, &r.path, &p);
                 let _ = std::fs::remove_file(&r.path);
                 match played {
-                    Ok(()) => (format!("The microphone works (peak level {}).", percent(r.peak)), Tone::Ok),
+                    Ok(()) => (
+                        format!("The microphone works (peak level {}).", percent(r.peak)),
+                        Tone::Ok,
+                    ),
                     Err(e) => (error_sentence("The playback failed", &e), Tone::Error),
                 }
             }
@@ -762,9 +923,16 @@ fn open_choice_picker(
 
 fn open_device_picker(cx: Scope, store: Store, ctx: &UiCtx, output: bool) {
     let p = prefs(ctx);
-    let saved = if output { p.output_device.clone() } else { p.input_device.clone() };
+    let saved = if output {
+        p.output_device.clone()
+    } else {
+        p.input_device.clone()
+    };
     let list = match store.voice.devices.get_untracked() {
-        Devices::Loaded { output: o, input: i } => {
+        Devices::Loaded {
+            output: o,
+            input: i,
+        } => {
             if output {
                 o
             } else {
@@ -786,7 +954,12 @@ fn open_device_picker(cx: Scope, store: Store, ctx: &UiCtx, output: bool) {
     if !saved.is_empty() && !choices.iter().any(|(id, _)| *id == saved) {
         choices.push((
             saved.clone(),
-            if output { "Saved speaker (not connected)" } else { "Saved microphone (not connected)" }.into(),
+            if output {
+                "Saved speaker (not connected)"
+            } else {
+                "Saved microphone (not connected)"
+            }
+            .into(),
         ));
     }
     let start = choices.iter().position(|(id, _)| *id == saved).unwrap_or(0);
@@ -797,7 +970,14 @@ fn open_device_picker(cx: Scope, store: Store, ctx: &UiCtx, output: bool) {
         cx,
         ctx,
         Picker {
-            title: format!("{} · Enter selects · Esc back", if output { "Output device" } else { "Input device" }),
+            title: format!(
+                "{} · Enter selects · Esc back",
+                if output {
+                    "Output device"
+                } else {
+                    "Input device"
+                }
+            ),
             size: modal_size(72, labels.len() as i32 + 6),
             labels,
             live: None,
@@ -828,14 +1008,22 @@ fn open_device_picker(cx: Scope, store: Store, ctx: &UiCtx, output: bool) {
 
 /// Engine choices from the voice catalog: TTS = the catalog's voices
 /// (provider/model/voice), STT = providers × models. First row = Gateway default.
-pub fn engine_choices(catalog: &Value, tts: bool, defaults: Option<&VoiceDefaults>) -> Vec<(String, VoicePrefs)> {
+pub fn engine_choices(
+    catalog: &Value,
+    tts: bool,
+    defaults: Option<&VoiceDefaults>,
+) -> Vec<(String, VoicePrefs)> {
     let names = |v: Option<&Value>| -> Vec<String> {
         v.and_then(Value::as_array)
             .map(|a| {
                 a.iter()
                     .filter_map(|x| match x {
                         Value::String(s) => Some(s.clone()),
-                        o => o.get("id").or_else(|| o.get("name")).and_then(Value::as_str).map(str::to_string),
+                        o => o
+                            .get("id")
+                            .or_else(|| o.get("name"))
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
                     })
                     .collect()
             })
@@ -845,24 +1033,55 @@ pub fn engine_choices(catalog: &Value, tts: bool, defaults: Option<&VoiceDefault
     let summary = default_summary(defaults, kind, false);
     let mut out = vec![(engine_value(&summary, ""), VoicePrefs::default())];
     if tts {
-        let items = catalog.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
+        let items = catalog
+            .get("items")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         for it in items {
-            let id = it.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+            let id = it
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             if id.is_empty() {
                 continue;
             }
-            let provider = it.get("provider").and_then(Value::as_str).unwrap_or("").to_string();
-            let model = it.get("model").and_then(Value::as_str).unwrap_or("").to_string();
-            let label = it.get("label").and_then(Value::as_str).unwrap_or(&id).to_string();
+            let provider = it
+                .get("provider")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let model = it
+                .get("model")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let label = it
+                .get("label")
+                .and_then(Value::as_str)
+                .unwrap_or(&id)
+                .to_string();
             let profile = it.get("voice_kind").and_then(Value::as_str) == Some("profile");
             let route = voice::route_text(&provider, &model);
-            let mut p = VoicePrefs { provider, model, ..Default::default() };
+            let mut p = VoicePrefs {
+                provider,
+                model,
+                ..Default::default()
+            };
             if profile {
                 p.profile = id;
             } else {
                 p.voice = id;
             }
-            out.push((if route.is_empty() { label } else { format!("{label} · {route}") }, p));
+            out.push((
+                if route.is_empty() {
+                    label
+                } else {
+                    format!("{label} · {route}")
+                },
+                p,
+            ));
         }
     } else {
         for provider in names(catalog.get("stt_providers")) {
@@ -873,12 +1092,22 @@ pub fn engine_choices(catalog: &Value, tts: bool, defaults: Option<&VoiceDefault
                     .or_else(|| catalog.get("stt_models")),
             );
             if models.is_empty() {
-                out.push((provider.clone(), VoicePrefs { stt_provider: provider.clone(), ..Default::default() }));
+                out.push((
+                    provider.clone(),
+                    VoicePrefs {
+                        stt_provider: provider.clone(),
+                        ..Default::default()
+                    },
+                ));
             }
             for m in models {
                 out.push((
                     voice::route_text(&provider, &m),
-                    VoicePrefs { stt_provider: provider.clone(), stt_model: m, ..Default::default() },
+                    VoicePrefs {
+                        stt_provider: provider.clone(),
+                        stt_model: m,
+                        ..Default::default()
+                    },
                 ));
             }
         }
@@ -901,9 +1130,14 @@ fn open_engine_picker(cx: Scope, store: Store, ctx: &UiCtx, tts: bool) {
     spawn("voice-catalog", move || {
         let res = gw.catalog("", "");
         wake.post(move || {
-            let Some((cx, ctx, tts)) = ENGINE_PICKER.with(|slot| slot.borrow_mut().take()) else { return };
+            let Some((cx, ctx, tts)) = ENGINE_PICKER.with(|slot| slot.borrow_mut().take()) else {
+                return;
+            };
             match res {
-                Err(e) => post_error(store, error_sentence("The voice engines could not be listed", &e)),
+                Err(e) => post_error(
+                    store,
+                    error_sentence("The voice engines could not be listed", &e),
+                ),
                 Ok(catalog) => show_engine_picker(cx, store, &ctx, tts, &catalog),
             }
         });
@@ -918,7 +1152,10 @@ fn show_engine_picker(cx: Scope, store: Store, ctx: &UiCtx, tts: bool, catalog: 
         .iter()
         .position(|(_, c)| {
             if tts {
-                c.provider == p.provider && c.model == p.model && c.voice == p.voice && c.profile == p.profile
+                c.provider == p.provider
+                    && c.model == p.model
+                    && c.voice == p.voice
+                    && c.profile == p.profile
             } else {
                 c.stt_provider == p.stt_provider && c.stt_model == p.stt_model
             }
@@ -931,12 +1168,21 @@ fn show_engine_picker(cx: Scope, store: Store, ctx: &UiCtx, tts: bool, catalog: 
         cx,
         ctx,
         Picker {
-            title: format!("{} · Enter selects · Esc back", if tts { "Text → speech" } else { "Speech → text" }),
+            title: format!(
+                "{} · Enter selects · Esc back",
+                if tts {
+                    "Text → speech"
+                } else {
+                    "Speech → text"
+                }
+            ),
             size: modal_size(84, labels.len() as i32 + 6),
             labels,
             live: None,
             start,
-            hint: Some("An override applies to this app only; Gateway default follows the gateway.".into()),
+            hint: Some(
+                "An override applies to this app only; Gateway default follows the gateway.".into(),
+            ),
             live_hint: None,
             keys: Vec::new(),
             on_mount: None,

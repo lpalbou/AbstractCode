@@ -7,8 +7,8 @@
 //!
 //! What would go red if the feature were removed: the request seams
 //! (`/voice/defaults`, `/runs/{id}/voice/tts/stream`, `/attachments/upload`
-//! + `/runs/{id}/audio/transcribe`), the segment order reaching the speaker,
-//! Esc stopping playback, the "Gateway default · supertonic / supertonic-3"
+//! then `/runs/{id}/audio/transcribe`), the segment order reaching the
+//! speaker, Esc stopping playback, the "Gateway default · supertonic / supertonic-3"
 //! wording (never "openai"), and the transcript landing in the composer.
 
 use std::cell::RefCell;
@@ -135,7 +135,9 @@ fn serve(script: GatewayScript) -> FakeGateway {
                 let mut body = vec![0u8; len];
                 let _ = reader.read_exact(&mut body);
                 let body_s = String::from_utf8_lossy(&body).to_string();
-                log.lock().unwrap().push((method.clone(), path.clone(), body_s));
+                log.lock()
+                    .unwrap()
+                    .push((method.clone(), path.clone(), body_s));
                 let p = path.split('?').next().unwrap_or("");
                 if p == "/api/gateway/voice/defaults" {
                     respond(&mut stream, 200, &script.defaults.to_string());
@@ -157,7 +159,11 @@ fn serve(script: GatewayScript) -> FakeGateway {
                         "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nConnection: close\r\n\r\n"
                     );
                     let _ = stream.flush();
-                    let _ = writeln!(stream, "{}", json!({"type": "start", "child_run_id": "tts-child"}));
+                    let _ = writeln!(
+                        stream,
+                        "{}",
+                        json!({"type": "start", "child_run_id": "tts-child"})
+                    );
                     for n in &script.segments {
                         std::thread::sleep(script.segment_delay);
                         let ev = json!({"type": "segment", "audio_b64": voice_host::b64_encode(&wav(*n))});
@@ -165,7 +171,11 @@ fn serve(script: GatewayScript) -> FakeGateway {
                             return;
                         }
                     }
-                    let _ = writeln!(stream, "{}", json!({"type": "done", "metrics": {"ttfb_s": 0.4, "device": "mps"}}));
+                    let _ = writeln!(
+                        stream,
+                        "{}",
+                        json!({"type": "done", "metrics": {"ttfb_s": 0.4, "device": "mps"}})
+                    );
                     let _ = stream.flush();
                 } else if p == "/api/gateway/attachments/upload" {
                     respond(
@@ -190,7 +200,13 @@ fn serve(script: GatewayScript) -> FakeGateway {
 
 impl FakeGateway {
     fn requests(&self, needle: &str) -> Vec<(String, String, String)> {
-        self.log.lock().unwrap().iter().filter(|(_, p, _)| p.contains(needle)).cloned().collect()
+        self.log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, p, _)| p.contains(needle))
+            .cloned()
+            .collect()
     }
 }
 
@@ -237,7 +253,11 @@ impl Transport for FakeTransport {
             }),
             "tone" => sink(HostEvent::ToneDone { gen }),
             "record" => {
-                let path = cmd.get("path").and_then(Value::as_str).unwrap_or("").to_string();
+                let path = cmd
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
                 self.recording = Some((gen, path));
                 sink(HostEvent::Level { gen, rms: 0.4 });
                 if let Some(max) = cmd.get("max_s").and_then(Value::as_u64).filter(|m| *m <= 3) {
@@ -279,8 +299,13 @@ fn fake_host(silent: bool) -> (Arc<Host>, Arc<Mutex<HostLog>>, Arc<AtomicUsize>)
     let (l, s) = (log.clone(), spawns.clone());
     let host = Arc::new(Host::new(Box::new(move |sink| {
         s.fetch_add(1, Ordering::SeqCst);
-        Ok(Box::new(FakeTransport { sink, log: l.clone(), started: Vec::new(), recording: None, silent })
-            as Box<dyn Transport>)
+        Ok(Box::new(FakeTransport {
+            sink,
+            log: l.clone(),
+            started: Vec::new(),
+            recording: None,
+            silent,
+        }) as Box<dyn Transport>)
     })));
     voice_host::install(host.clone());
     (host, log, spawns)
@@ -292,7 +317,12 @@ fn played(log: &Arc<Mutex<HostLog>>) -> Vec<String> {
         .commands
         .iter()
         .filter(|c| c.get("op").and_then(Value::as_str) == Some("play"))
-        .map(|c| c.get("b64").and_then(Value::as_str).unwrap_or("").to_string())
+        .map(|c| {
+            c.get("b64")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string()
+        })
         .collect()
 }
 
@@ -301,7 +331,12 @@ fn ops(log: &Arc<Mutex<HostLog>>) -> Vec<String> {
         .unwrap()
         .commands
         .iter()
-        .map(|c| c.get("op").and_then(Value::as_str).unwrap_or("").to_string())
+        .map(|c| {
+            c.get("op")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string()
+        })
         .collect()
 }
 
@@ -317,47 +352,95 @@ fn speak_streams_each_segment_to_the_speaker_in_order() {
     let gen = host.next_gen();
     host.claim_speech(gen);
     let mut started = None;
-    let reply = voice::speak_blocking(&host, &vg, gen, "run-1", "Hello there. Second sentence.", &VoicePrefs::default(), &mut |d| {
-        started = Some(d)
-    })
+    let reply = voice::speak_blocking(
+        &host,
+        &vg,
+        gen,
+        "run-1",
+        "Hello there. Second sentence.",
+        &VoicePrefs::default(),
+        &mut |d| started = Some(d),
+    )
     .expect("spoken");
     assert!(!reply.stopped);
-    assert!(started.is_some() && reply.first_audio.is_some(), "first audio is measured");
+    assert!(
+        started.is_some() && reply.first_audio.is_some(),
+        "first audio is measured"
+    );
     assert_eq!(reply.metrics.get("device"), Some(&json!("mps")));
-    let expected: Vec<String> = [1, 2, 3].iter().map(|n| voice_host::b64_encode(&wav(*n))).collect();
-    assert_eq!(played(&log), expected, "every segment, in order, as it arrives");
+    let expected: Vec<String> = [1, 2, 3]
+        .iter()
+        .map(|n| voice_host::b64_encode(&wav(*n)))
+        .collect();
+    assert_eq!(
+        played(&log),
+        expected,
+        "every segment, in order, as it arrives"
+    );
     assert_eq!(ops(&log).last().map(String::as_str), Some("end"));
     // The gateway default: the request names no engine (the gateway fills output.voice).
     let req = gw.requests("/runs/run-1/voice/tts/stream");
     assert_eq!(req.len(), 1);
     let body: Value = serde_json::from_str(&req[0].2).unwrap();
-    assert_eq!(body.get("text"), Some(&json!("Hello there. Second sentence.")));
-    for k in ["provider", "model", "voice", "profile", "output_device", "read_aloud"] {
-        assert!(body.get(k).is_none(), "{k} must not ride a gateway-default request: {body}");
+    assert_eq!(
+        body.get("text"),
+        Some(&json!("Hello there. Second sentence."))
+    );
+    for k in [
+        "provider",
+        "model",
+        "voice",
+        "profile",
+        "output_device",
+        "read_aloud",
+    ] {
+        assert!(
+            body.get(k).is_none(),
+            "{k} must not ride a gateway-default request: {body}"
+        );
     }
-    assert_eq!(voice::reply_line(&reply).split(" · ").nth(1), Some("engine on mps"));
+    assert_eq!(
+        voice::reply_line(&reply).split(" · ").nth(1),
+        Some("engine on mps")
+    );
 }
 
 #[test]
 fn an_override_rides_the_request_and_a_stop_ends_forwarding() {
     let _g = serial();
-    let gw = serve(GatewayScript { segment_delay: Duration::from_millis(150), ..Default::default() });
+    let gw = serve(GatewayScript {
+        segment_delay: Duration::from_millis(150),
+        ..Default::default()
+    });
     let (host, log, _) = fake_host(false);
     let client = abstractcode::gateway::GatewayClient::new(&gw.url, None);
     let vg = VoiceGateway::new(&client);
     let gen = host.next_gen();
     host.claim_speech(gen);
-    let prefs = VoicePrefs { provider: "piper".into(), voice: "amy".into(), ..Default::default() };
+    let prefs = VoicePrefs {
+        provider: "piper".into(),
+        voice: "amy".into(),
+        ..Default::default()
+    };
     let h2 = host.clone();
     let stopper = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(220)); // after the first segment
         h2.stop_speech()
     });
-    let reply = voice::speak_blocking(&host, &vg, gen, "run-2", "Long reply.", &prefs, &mut |_| {}).expect("ok");
+    let reply = voice::speak_blocking(&host, &vg, gen, "run-2", "Long reply.", &prefs, &mut |_| {})
+        .expect("ok");
     assert!(stopper.join().unwrap(), "something was speaking");
     assert!(reply.stopped);
-    assert_eq!(played(&log).len(), 1, "no segment after the stop: {:?}", ops(&log));
-    assert!(ops(&log).contains(&"stop".to_string()), "the bridge is told to stop at once");
+    assert_eq!(
+        played(&log).len(),
+        1,
+        "no segment after the stop: {:?}",
+        ops(&log)
+    );
+    assert!(
+        ops(&log).contains(&"stop".to_string()),
+        "the bridge is told to stop at once"
+    );
     let body: Value = serde_json::from_str(&gw.requests("/voice/tts/stream")[0].2).unwrap();
     assert_eq!(body.get("provider"), Some(&json!("piper")));
     assert_eq!(body.get("voice"), Some(&json!("amy")));
@@ -367,14 +450,26 @@ fn an_override_rides_the_request_and_a_stop_ends_forwarding() {
 fn a_refused_stream_is_one_sentence() {
     let _g = serial();
     let gw = serve(GatewayScript {
-        tts_refusal: Some((503, "Gateway runtime does not expose streaming voice synthesis.".into())),
+        tts_refusal: Some((
+            503,
+            "Gateway runtime does not expose streaming voice synthesis.".into(),
+        )),
         ..Default::default()
     });
     let (host, _log, _) = fake_host(false);
     let vg = VoiceGateway::new(&abstractcode::gateway::GatewayClient::new(&gw.url, None));
     let gen = host.next_gen();
     host.claim_speech(gen);
-    let err = voice::speak_blocking(&host, &vg, gen, "run-3", "x", &VoicePrefs::default(), &mut |_| {}).unwrap_err();
+    let err = voice::speak_blocking(
+        &host,
+        &vg,
+        gen,
+        "run-3",
+        "x",
+        &VoicePrefs::default(),
+        &mut |_| {},
+    )
+    .unwrap_err();
     assert_eq!(
         voice::error_sentence("Reading aloud failed", &err),
         "Reading aloud failed: Gateway runtime does not expose streaming voice synthesis."
@@ -394,32 +489,70 @@ fn dictation_uploads_the_recording_and_uses_the_default_route() {
         h2.send_if_running(&json!({"op": "record_stop", "gen": gen}));
     });
     let mut levels = Vec::new();
-    let rec = voice::record_blocking(&host, gen, &VoicePrefs::default(), 120, &mut |l| levels.push(l)).expect("recorded");
+    let rec = voice::record_blocking(&host, gen, &VoicePrefs::default(), 120, &mut |l| {
+        levels.push(l)
+    })
+    .expect("recorded");
     assert_eq!(levels, vec![0.4]);
     let bytes = std::fs::read(&rec.path).unwrap();
     let _ = std::fs::remove_file(&rec.path);
-    let t = vg.transcribe("sess-1", "run-4", &bytes, &VoicePrefs::default()).expect("transcribed");
+    let t = vg
+        .transcribe("sess-1", "run-4", &bytes, &VoicePrefs::default())
+        .expect("transcribed");
     assert_eq!(t.text, "hello from the microphone");
-    assert_eq!(voice::route_text(&t.provider, &t.model), "faster-whisper / large-v3");
+    assert_eq!(
+        voice::route_text(&t.provider, &t.model),
+        "faster-whisper / large-v3"
+    );
     assert_eq!(gw.requests("/attachments/upload").len(), 1);
-    let body: Value = serde_json::from_str(&gw.requests("/runs/run-4/audio/transcribe")[0].2).unwrap();
-    assert_eq!(body.pointer("/audio_artifact/artifact_id"), Some(&json!("att-1")));
-    assert!(body.get("provider").is_none() && body.get("model").is_none(), "gateway default = no route in the request");
+    let body: Value =
+        serde_json::from_str(&gw.requests("/runs/run-4/audio/transcribe")[0].2).unwrap();
+    assert_eq!(
+        body.pointer("/audio_artifact/artifact_id"),
+        Some(&json!("att-1"))
+    );
+    assert!(
+        body.get("provider").is_none() && body.get("model").is_none(),
+        "gateway default = no route in the request"
+    );
     // An override (and a named language) rides the request.
-    let o = VoicePrefs { stt_provider: "faster-whisper".into(), stt_model: "small".into(), stt_language: "fr".into(), ..Default::default() };
+    let o = VoicePrefs {
+        stt_provider: "faster-whisper".into(),
+        stt_model: "small".into(),
+        stt_language: "fr".into(),
+        ..Default::default()
+    };
     vg.transcribe("sess-1", "run-4", &bytes, &o).unwrap();
     let body: Value = serde_json::from_str(&gw.requests("/audio/transcribe")[1].2).unwrap();
-    assert_eq!((body.get("provider"), body.get("model"), body.get("language")), (Some(&json!("faster-whisper")), Some(&json!("small")), Some(&json!("fr"))));
+    assert_eq!(
+        (
+            body.get("provider"),
+            body.get("model"),
+            body.get("language")
+        ),
+        (
+            Some(&json!("faster-whisper")),
+            Some(&json!("small")),
+            Some(&json!("fr"))
+        )
+    );
 }
 
 #[test]
 fn a_missing_abstractvoice_is_named_with_the_way_out() {
     let _g = serial();
     let host = Arc::new(Host::new(Box::new(|_sink| {
-        Err(voice_host::bridge_missing_sentence(&["/usr/bin/python3: ModuleNotFoundError: No module named 'abstractvoice'".into()]))
+        Err(voice_host::bridge_missing_sentence(&[
+            "/usr/bin/python3: ModuleNotFoundError: No module named 'abstractvoice'".into(),
+        ]))
     })));
     let err = host.ensure().unwrap_err();
-    assert!(err.contains("need AbstractVoice") && err.contains("--voice-python") && err.contains("No module named 'abstractvoice'"), "{err}");
+    assert!(
+        err.contains("need AbstractVoice")
+            && err.contains("--voice-python")
+            && err.contains("No module named 'abstractvoice'"),
+        "{err}"
+    );
 }
 
 // -- the real bridge (Python + AbstractVoice), null output ---------------------------
@@ -438,8 +571,11 @@ fn voice_bridge_python_null_output() {
     let sink: EventSink = Arc::new(move |ev| {
         let _ = tx.lock().unwrap().send(ev);
     });
-    let py = std::path::PathBuf::from(std::env::var("ACODE_TEST_PYTHON").unwrap_or_else(|_| "python3".into()));
-    let mut t = voice_host::spawn_bridge_with(&py, &["--null-output", &dir_s], sink).expect("bridge ready");
+    let py = std::path::PathBuf::from(
+        std::env::var("ACODE_TEST_PYTHON").unwrap_or_else(|_| "python3".into()),
+    );
+    let mut t =
+        voice_host::spawn_bridge_with(&py, &["--null-output", &dir_s], sink).expect("bridge ready");
     for n in [1i16, 2] {
         t.send(&json!({"op": "play", "gen": 7, "b64": voice_host::b64_encode(&wav(n)), "device": "", "volume": 1.0}).to_string()).unwrap();
     }
@@ -457,13 +593,27 @@ fn voice_bridge_python_null_output() {
     }
     assert_eq!(got.first(), Some(&HostEvent::Started { gen: 7 }), "{got:?}");
     assert_eq!(got.last(), Some(&HostEvent::Done { gen: 7 }), "{got:?}");
-    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2, "two segments played");
+    assert_eq!(
+        std::fs::read_dir(&dir).unwrap().count(),
+        2,
+        "two segments played"
+    );
     let wav_path = dir.join("rec.wav");
-    t.send(&json!({"op": "record", "gen": 8, "path": wav_path.to_string_lossy(), "max_s": 0}).to_string()).unwrap();
-    t.send(&json!({"op": "record_stop", "gen": 8}).to_string()).unwrap();
+    t.send(
+        &json!({"op": "record", "gen": 8, "path": wav_path.to_string_lossy(), "max_s": 0})
+            .to_string(),
+    )
+    .unwrap();
+    t.send(&json!({"op": "record_stop", "gen": 8}).to_string())
+        .unwrap();
     let rec = loop {
         match rx.recv_timeout(Duration::from_secs(10)).expect("recorded") {
-            HostEvent::Recorded { gen, duration_ms, peak, .. } => break (gen, duration_ms, peak),
+            HostEvent::Recorded {
+                gen,
+                duration_ms,
+                peak,
+                ..
+            } => break (gen, duration_ms, peak),
             _ => continue,
         }
     };
@@ -471,11 +621,16 @@ fn voice_bridge_python_null_output() {
     assert!(rec.1 >= 900 && rec.2 > 0.2, "{rec:?}");
     t.send(r#"{"op":"devices","gen":9}"#).unwrap();
     let dev = loop {
-        if let HostEvent::Devices { output, .. } = rx.recv_timeout(Duration::from_secs(10)).expect("devices") {
+        if let HostEvent::Devices { output, .. } =
+            rx.recv_timeout(Duration::from_secs(10)).expect("devices")
+        {
             break output;
         }
     };
-    assert_eq!(dev, vec![("null-speaker".to_string(), "Null speaker".to_string())]);
+    assert_eq!(
+        dev,
+        vec![("null-speaker".to_string(), "Null speaker".to_string())]
+    );
     t.kill();
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -541,12 +696,21 @@ fn harness(gateway_url: &str) -> Harness {
     };
     let driver = Driver::new(&mut app, &mut term, cfg).expect("driver");
     let store = store_slot.borrow().expect("store");
-    Harness { app, term, driver, store, prefs, _rx: rx }
+    Harness {
+        app,
+        term,
+        driver,
+        store,
+        prefs,
+        _rx: rx,
+    }
 }
 
 impl Harness {
     fn turn(&mut self) -> String {
-        self.driver.turn(&mut self.app, &mut self.term).expect("turn");
+        self.driver
+            .turn(&mut self.app, &mut self.term)
+            .expect("turn");
         self.term.screen().to_text()
     }
     fn type_text(&mut self, s: &str) {
@@ -576,8 +740,13 @@ impl Harness {
     fn with_reply(&mut self, reply: &str) {
         self.store.run_id.set("run-ui".into());
         self.store.fold.update(|f| {
-            f.push_item(Item::User { text: "say something".into() });
-            f.push_item(Item::Assistant { text: reply.into(), final_answer: true });
+            f.push_item(Item::User {
+                text: "say something".into(),
+            });
+            f.push_item(Item::Assistant {
+                text: reply.into(),
+                final_answer: true,
+            });
         });
         for _ in 0..3 {
             self.turn();
@@ -593,14 +762,39 @@ fn voice_screen_names_the_gateway_routes_and_lists_host_devices() {
     let mut h = harness(&gw.url);
     h.with_reply("ok");
     h.type_text("/voice\r");
-    let s = h.until("the gateway defaults on the voice screen", |s| s.contains("supertonic / supertonic-3") && s.contains("faster-whisper / large-v3"));
-    assert!(s.contains("Text → speech     Gateway default · supertonic / supertonic-3"), "{s}");
-    assert!(s.contains("Speech → text     Gateway default · faster-whisper / large-v3"), "{s}");
-    assert!(!s.to_lowercase().contains("openai"), "openai must never appear unless it IS the route:\n{s}");
-    for row in ["Output device", "Test speaker", "Reply volume", "Input device", "Test microphone", "Spoken language", "Input level", "[ ] Read aloud — Speak each new reply.", "Voice latency"] {
+    let s = h.until("the gateway defaults on the voice screen", |s| {
+        s.contains("supertonic / supertonic-3") && s.contains("faster-whisper / large-v3")
+    });
+    assert!(
+        s.contains("Text → speech     Gateway default · supertonic / supertonic-3"),
+        "{s}"
+    );
+    assert!(
+        s.contains("Speech → text     Gateway default · faster-whisper / large-v3"),
+        "{s}"
+    );
+    assert!(
+        !s.to_lowercase().contains("openai"),
+        "openai must never appear unless it IS the route:\n{s}"
+    );
+    for row in [
+        "Output device",
+        "Test speaker",
+        "Reply volume",
+        "Input device",
+        "Test microphone",
+        "Spoken language",
+        "Input level",
+        "[ ] Read aloud — Speak each new reply.",
+        "Voice latency",
+    ] {
         assert!(s.contains(row), "missing {row:?}:\n{s}");
     }
-    assert_eq!(gw.requests("/voice/defaults").len(), 1, "ONE answer for the defaults");
+    assert_eq!(
+        gw.requests("/voice/defaults").len(),
+        1,
+        "ONE answer for the defaults"
+    );
     // Devices come from the host bridge (AbstractVoice); pick the speaker.
     // Rows: 0 Engines, 1 TTS, 2 STT, 3 Output, 4 Output device.
     h.term.push_input(b"\x1b[B\x1b[B\x1b[B");
@@ -611,7 +805,9 @@ fn voice_screen_names_the_gateway_routes_and_lists_host_devices() {
     h.term.push_input(b"\x1b[B");
     h.turn();
     h.type_text("\r");
-    let s = h.until("the chosen speaker on the voice screen", |s| s.contains("Output device     Desk Speakers"));
+    let s = h.until("the chosen speaker on the voice screen", |s| {
+        s.contains("Output device     Desk Speakers")
+    });
     assert!(s.contains("Voice ·"), "{s}");
     let saved = h.prefs.borrow().voice.clone().expect("saved");
     assert_eq!(saved.get("output_device"), Some(&json!("uid-speakers")));
@@ -626,27 +822,48 @@ fn read_aloud_switch_persists_from_the_command() {
     h.with_reply("ok");
     h.type_text("/voice read-aloud on\r");
     h.until("the switch notice", |s| s.contains("Read aloud [x]"));
-    assert_eq!(h.prefs.borrow().voice.as_ref().and_then(|v| v.get("read_aloud")), Some(&json!(true)));
+    assert_eq!(
+        h.prefs
+            .borrow()
+            .voice
+            .as_ref()
+            .and_then(|v| v.get("read_aloud")),
+        Some(&json!(true))
+    );
     h.type_text("/voice\r");
-    let s = h.until("the switch on the screen", |s| s.contains("[x] Read aloud — Speak each new reply."));
+    let s = h.until("the switch on the screen", |s| {
+        s.contains("[x] Read aloud — Speak each new reply.")
+    });
     assert!(s.contains("Voice ·"));
 }
 
 #[test]
 fn ctrl_p_speaks_the_latest_reply_and_esc_stops_it() {
     let _g = serial();
-    let gw = serve(GatewayScript { segment_delay: Duration::from_millis(300), segments: vec![1, 2, 3, 4, 5, 6], ..Default::default() });
+    let gw = serve(GatewayScript {
+        segment_delay: Duration::from_millis(300),
+        segments: vec![1, 2, 3, 4, 5, 6],
+        ..Default::default()
+    });
     let (_host, log, _) = fake_host(false);
     let mut h = harness(&gw.url);
     h.with_reply("The answer is forty-two. That is all.");
     h.term.push_input(&[0x10]); // Ctrl+P
     let s = h.until("speaking", |s| s.contains("♪ Speaking… · Esc stops"));
     assert!(!s.contains("Preparing"), "{s}");
-    let body: Value = serde_json::from_str(&gw.requests("/runs/run-ui/voice/tts/stream")[0].2).unwrap();
-    assert_eq!(body.get("text"), Some(&json!("The answer is forty-two. That is all.")));
+    let body: Value =
+        serde_json::from_str(&gw.requests("/runs/run-ui/voice/tts/stream")[0].2).unwrap();
+    assert_eq!(
+        body.get("text"),
+        Some(&json!("The answer is forty-two. That is all."))
+    );
     h.escape();
     let s = h.until("speech stopped", |s| !s.contains("♪"));
-    assert!(ops(&log).contains(&"stop".to_string()), "Esc tells the speaker to stop: {:?}", ops(&log));
+    assert!(
+        ops(&log).contains(&"stop".to_string()),
+        "Esc tells the speaker to stop: {:?}",
+        ops(&log)
+    );
     let n = played(&log).len();
     std::thread::sleep(Duration::from_millis(700));
     h.turn();
@@ -658,12 +875,17 @@ fn ctrl_p_speaks_the_latest_reply_and_esc_stops_it() {
 #[test]
 fn a_refused_reply_reads_as_a_sentence_in_the_transcript() {
     let _g = serial();
-    let gw = serve(GatewayScript { tts_refusal: Some((429, "openai quota exceeded".into())), ..Default::default() });
+    let gw = serve(GatewayScript {
+        tts_refusal: Some((429, "openai quota exceeded".into())),
+        ..Default::default()
+    });
     let (_host, _log, _) = fake_host(false);
     let mut h = harness(&gw.url);
     h.with_reply("hi");
     h.type_text("/speak\r");
-    h.until("the error sentence", |s| s.contains("Reading aloud failed: openai quota exceeded."));
+    h.until("the error sentence", |s| {
+        s.contains("Reading aloud failed: openai quota exceeded.")
+    });
 }
 
 #[test]
@@ -676,16 +898,29 @@ fn ctrl_r_dictates_into_the_composer_with_the_route_shown() {
     h.type_text("draft:");
     h.turn();
     h.term.push_input(&[0x12]); // Ctrl+R starts
-    h.until("recording", |s| s.contains("● Recording… 0 s · Ctrl+R transcribes · Esc cancels"));
+    h.until("recording", |s| {
+        s.contains("● Recording… 0 s · Ctrl+R transcribes · Esc cancels")
+    });
     // The defaults land while recording: the Transcribing line names the route.
-    h.until("defaults fetched", |_| !gw.requests("/voice/defaults").is_empty());
+    h.until("defaults fetched", |_| {
+        !gw.requests("/voice/defaults").is_empty()
+    });
     h.turn();
     h.term.push_input(&[0x12]); // Ctrl+R stops → transcribe
-    let s = h.until("the transcript in the composer", |s| s.contains("draft: hello from the microphone"));
-    assert!(!s.contains("Recording…") && !s.contains("Transcribing…"), "{s}");
+    let s = h.until("the transcript in the composer", |s| {
+        s.contains("draft: hello from the microphone")
+    });
+    assert!(
+        !s.contains("Recording…") && !s.contains("Transcribing…"),
+        "{s}"
+    );
     assert!(ops(&log).contains(&"record_stop".to_string()));
-    let body: Value = serde_json::from_str(&gw.requests("/runs/run-ui/audio/transcribe")[0].2).unwrap();
-    assert!(body.get("provider").is_none(), "gateway default route: {body}");
+    let body: Value =
+        serde_json::from_str(&gw.requests("/runs/run-ui/audio/transcribe")[0].2).unwrap();
+    assert!(
+        body.get("provider").is_none(),
+        "gateway default route: {body}"
+    );
 }
 
 #[test]
@@ -699,12 +934,18 @@ fn transcribing_line_is_shown_while_the_gateway_works() {
     h.store.voice.defaults.set(abstractcode::voice::DefaultsState::Loaded(abstractcode::voice::VoiceDefaults::from_json(
         &json!({"stt": {"configured": true, "provider": "faster-whisper", "model": "large-v3"}}),
     )));
-    h.store.voice.dictation.set(abstractcode::voice::Dictation::Transcribing {
-        since: Instant::now() - Duration::from_secs(4),
-        route: "faster-whisper / large-v3".into(),
-    });
+    h.store
+        .voice
+        .dictation
+        .set(abstractcode::voice::Dictation::Transcribing {
+            since: Instant::now() - Duration::from_secs(4),
+            route: "faster-whisper / large-v3".into(),
+        });
     let s = h.turn();
-    assert!(s.contains("Transcribing… 4 s · faster-whisper / large-v3"), "{s}");
+    assert!(
+        s.contains("Transcribing… 4 s · faster-whisper / large-v3"),
+        "{s}"
+    );
 }
 
 #[test]
@@ -717,8 +958,15 @@ fn a_silent_recording_is_never_sent_and_says_why() {
     h.term.push_input(&[0x12]);
     h.until("recording", |s| s.contains("● Recording…"));
     h.term.push_input(&[0x12]);
-    h.until("the silence sentence", |s| s.contains("Nothing was heard. Check the microphone in Settings → Voice (Test), then try again."));
-    assert!(gw.requests("/audio/transcribe").is_empty(), "silence is not uploaded");
+    h.until("the silence sentence", |s| {
+        s.contains(
+            "Nothing was heard. Check the microphone in Settings → Voice (Test), then try again.",
+        )
+    });
+    assert!(
+        gw.requests("/audio/transcribe").is_empty(),
+        "silence is not uploaded"
+    );
 }
 
 #[test]
@@ -731,7 +979,9 @@ fn esc_cancels_a_recording_and_nothing_is_transcribed() {
     h.term.push_input(&[0x12]);
     h.until("recording", |s| s.contains("● Recording…"));
     h.escape();
-    h.until("cancelled", |s| s.contains("Recording cancelled.") && !s.contains("● Recording…"));
+    h.until("cancelled", |s| {
+        s.contains("Recording cancelled.") && !s.contains("● Recording…")
+    });
     std::thread::sleep(Duration::from_millis(200));
     h.turn();
     assert!(gw.requests("/audio/transcribe").is_empty());
@@ -743,9 +993,19 @@ fn dictation_without_a_conversation_says_what_to_do() {
     let gw = serve(GatewayScript::default());
     let (_host, _log, spawns) = fake_host(false);
     let mut h = harness(&gw.url);
-    h.store.fold.update(|f| f.push_item(Item::User { text: "settle".into() }));
+    h.store.fold.update(|f| {
+        f.push_item(Item::User {
+            text: "settle".into(),
+        })
+    });
     h.turn();
     h.term.push_input(&[0x12]);
-    h.until("the sentence", |s| s.contains("Start a conversation to enable dictation."));
-    assert_eq!(spawns.load(Ordering::SeqCst), 0, "no bridge for a refused dictation");
+    h.until("the sentence", |s| {
+        s.contains("Start a conversation to enable dictation.")
+    });
+    assert_eq!(
+        spawns.load(Ordering::SeqCst),
+        0,
+        "no bridge for a refused dictation"
+    );
 }
