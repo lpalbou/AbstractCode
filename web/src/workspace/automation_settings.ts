@@ -100,8 +100,14 @@ export function withAutomationRunPreferences(input: Json | undefined, prefs: Run
   // A stored R9 list is left to the gateway (it converts it to `workspace` on
   // the next revision); a chosen payload replaces it. The access mode is retired.
   delete next.workspace_access_mode;
-  if (prefs.workspace === null) delete next.workspace;
-  else {
+  if (prefs.workspace === null) {
+    // Leaving a stored payload for "Use my default": the list the gateway
+    // derived from that payload goes with it (kept, it would narrow the
+    // account default and the gateway refuses the revision). A list stored
+    // without a payload (R9) stays, as before.
+    if (next.workspace && typeof next.workspace === "object") delete next.workspace_allowed_paths;
+    delete next.workspace;
+  } else {
     next.workspace = { posture: prefs.workspace.posture, default_mode: prefs.workspace.default_mode, folders: prefs.workspace.folders.map((f) => ({ path: f.path, mode: f.mode })) };
     delete next.workspace_allowed_paths;
   }

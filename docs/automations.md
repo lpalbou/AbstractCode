@@ -63,8 +63,28 @@ last prompt, or the text after `/schedule`), when, context, tools. Enter on
 the last step creates it and opens it.
 
 **Browser.** Select **+** in the **Automations** section of the sidebar. The
-dialog lets you choose the workflow it runs; **Advanced** holds
-the title, the first run time, "stop after this many runs" and "stop at".
+dialog lets you choose the workflow it runs. Every section is visible (no
+disclosure):
+
+- **Workspaces** (after Tools): the same chooser as the gateway console,
+  Observer, Flow and the AbstractAssistant, at the run level. The gateway's
+  line on top ("Gateway: …", the eligible workspaces), **Use my default** (on:
+  your account's default workspaces apply), the posture, each workspace with
+  Read & write / Read-only / Refused (a mode above the gateway's cap is
+  disabled), **Add a workspace path** and the effective line. Each change is
+  checked by the gateway (`POST /api/gateway/workspace/effective/me`, nothing
+  stored); a refused one shows the gateway's sentence with "Not saved.".
+  **Create automation** stores the choice in the definition
+  (`target.input_data.workspace`); the gateway clamps it to the eligible
+  workspaces at each run. With **Use my default** on, nothing is stored and
+  each run uses your default at that time.
+- **Title and limits**: the title, and for a repeating automation the first
+  run time, "stop after this many runs" and "stop at".
+
+The automation's header shows its workspaces in one line, **Workspaces:
+<summary>** (the gateway's summary for the stored choice, or for your default,
+verbatim). The pencil next to it (**Change workspaces**) opens the right rail's
+**Workspace** panel on that automation: each change there is one new revision.
 
 ### Email automations (browser)
 

@@ -68,6 +68,12 @@ describe("An existing automation's workspaces", () => {
     expect(prefs.workspace).toEqual(VALUE);
     const mine = automationSettingsChanges(definition, { ...prefs, workspace: null });
     expect(mine?.target?.input_data).not.toHaveProperty("workspace");
+    // The list the gateway derived from the payload goes with it (it would narrow the account default: 422).
+    expect(mine?.target?.input_data).not.toHaveProperty("workspace_allowed_paths");
+    // A list stored without a payload (R9) stays.
+    const r9 = { revision: 1, target: { bundle_ref: "a", flow_id: "b", input_data: { prompt: "x", workspace_allowed_paths: [PICS] } } } as any;
+    const r9prefs = automationRunPreferences(r9.target.input_data);
+    expect(automationSettingsChanges(r9, { ...r9prefs, system: "be brief" })?.target?.input_data).toHaveProperty("workspace_allowed_paths", [PICS]);
     const ro = automationSettingsChanges(definition, { ...prefs, workspace: { ...VALUE, folders: [{ path: PICS, mode: "ro" }] } });
     expect((ro?.target?.input_data as any).workspace.folders).toEqual([{ path: PICS, mode: "ro" }]);
     expect(ro?.target?.input_data).not.toHaveProperty("workspace_allowed_paths");
