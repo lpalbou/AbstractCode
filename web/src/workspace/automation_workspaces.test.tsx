@@ -60,8 +60,10 @@ describe("New automation: the kit dialog's Workspaces section (R13.2)", () => {
 describe("An existing automation's workspaces", () => {
   const definition = { revision: 2, target: { bundle_ref: "agent@1", flow_id: "main", input_data: { prompt: "x", workspace: VALUE, workspace_allowed_paths: [PICS] } } } as any;
 
-  it("reads the stored payload (absent = Use my default)", () => {
+  it("reads the stored payload (absent or the gateway's {configured: false} = Use my default)", () => {
     expect(automationWorkspace(definition)).toEqual(VALUE);
+    expect(automationWorkspace({ target: { bundle_ref: "a", flow_id: "b", input_data: { workspace: { configured: false } } } } as any)).toBeNull();
+    expect(automationRunPreferences({ prompt: "x", workspace: { configured: false } }).workspace).toBeNull();
     expect(automationWorkspace({ target: { bundle_ref: "a", flow_id: "b", input_data: {} } } as any)).toBeNull();
   });
 

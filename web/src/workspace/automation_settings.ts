@@ -50,7 +50,8 @@ export function automationRunPreferences(input: Json | undefined): RunPreference
     maxIterations: str(limits.max_iterations),
     maxTokens: str(limits.max_tokens),
     system: str(runtime.system_prompt_extra),
-    workspace: data.workspace && typeof data.workspace === "object" && !Array.isArray(data.workspace) ? (data.workspace as RunWorkspace) : null,
+    // A payload has `folders`; the gateway's `{configured: false}` ("follow my default at each run") is "Use my default".
+    workspace: data.workspace && typeof data.workspace === "object" && Array.isArray((data.workspace as RunWorkspace).folders) ? (data.workspace as RunWorkspace) : null,
     tools: selected === null ? { mode: "all", selected: [], approval } : { mode: "custom", selected, approval },
     toolsCustomized: customized,
     permissions: "default",
