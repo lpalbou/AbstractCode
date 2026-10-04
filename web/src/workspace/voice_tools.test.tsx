@@ -51,8 +51,16 @@ describe("gateway voice controls", () => {
       />,
     );
     expect(markup).toContain("Hold to dictate");
-    expect(markup).toContain("Read latest reply aloud");
-    expect(markup.match(/disabled=""/g)?.length).toBe(2);
+    expect(markup.match(/disabled=""/g)?.length).toBe(1);
+  });
+  it("has no composer speaker: replies carry their own (round 6); the mic stays", () => {
+    setNavigator({ mediaDevices: { getUserMedia: async () => ({}) } });
+    const markup = renderToStaticMarkup(
+      <VoiceTools {...base} runId="run" capability={{ tts: { available: true }, stt: { available: true } }} />,
+    );
+    expect(markup).toContain("Hold to dictate");
+    expect(markup).not.toContain("Read latest reply aloud");
+    expect(markup).not.toContain("spoken reply");
   });
   it("says why dictation is off when the browser withholds the microphone", () => {
     setNavigator({});

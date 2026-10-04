@@ -1894,9 +1894,6 @@ export function CodeWorkspace() {
                       runId={session.runId}
                       voice={voice}
                       capability={voiceCapability}
-                      answer={[...messages]
-                        .reverse()
-                        .find((message) => message.role === "assistant")}
                     />
                   ) : null}
                   {active ? (

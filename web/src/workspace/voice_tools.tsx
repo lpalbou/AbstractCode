@@ -111,13 +111,11 @@ export function VoiceTools({
   voice,
   runId,
   capability,
-  answer,
   onSettings,
 }: {
   voice: ReturnType<typeof useWorkspaceVoice>;
   runId: string;
   capability: Record<string, any>;
-  answer?: { id?: string; content: string };
   onSettings?: () => void;
 }) {
   const held = useRef(false);
@@ -209,44 +207,7 @@ export function VoiceTools({
           <Icon name={voice.voice_ptt_busy ? "loader" : "mic"} size={15} className={voice.voice_ptt_busy ? "code-loading-spinner" : undefined} />
         </button>
       ) : null}
-      {capability.tts?.available ? (
-        <button
-          className="code-icon-button"
-          aria-label={
-            voice.tts_playback.status === "playing"
-              ? "Pause spoken reply"
-              : voice.tts_playback.status === "paused"
-                ? "Resume spoken reply"
-                : "Read latest reply aloud"
-          }
-          disabled={
-            !voice.tts_supported ||
-            !answer ||
-            voice.tts_playback.status === "loading"
-          }
-          onClick={() => {
-            if (answer)
-              void voice.toggle_tts(
-                ["playing", "paused"].includes(voice.tts_playback.status)
-                  ? voice.tts_playback.key
-                  : answer.id || "latest",
-                answer.content,
-              );
-          }}
-        >
-          <Icon
-            className={voice.tts_playback.status === "loading" ? "code-loading-spinner" : undefined}
-            name={
-              voice.tts_playback.status === "playing"
-                ? "pause"
-                : voice.tts_playback.status === "loading"
-                  ? "loader"
-                  : "speaker"
-            }
-            size={15}
-          />
-        </button>
-      ) : null}
+      {/* No composer speaker (round 6): each reply has its own speaker button; Stop stays while one plays. */}
       {voice.tts_playback.status !== "idle" ? (
         <button
           className="code-icon-button"
