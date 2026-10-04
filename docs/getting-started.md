@@ -134,9 +134,9 @@ choice is remembered in `~/.abstractcode/prefs.json`. `--workflow default`
 selects the gateway's default workflow explicitly; see
 [`workflows.md`](workflows.md#the-gateway-default).
 
-In the browser, open **Settings → Model & behavior** (the gear, or the rail's Settings icon). Its
-**Workflow** picker starts with **Gateway default**; the same category holds
-model, reasoning, MTP and **Stream replies** choices.
+In the browser, open the rail's **Workflow** panel. Its picker starts with
+**Gateway default**; the **Model** panel (also the gear) holds model, reasoning,
+MTP and **Stream replies** choices.
 
 ## Where the files are
 

@@ -51,7 +51,7 @@ Ground rules for reading this repository:
 ## Browser client
 
 - [Browser client README](web/README.md): running it, configuration, credential handling
-- [Web overview](docs/web.md): the right rail (Activity, Files with the shared file viewer, Settings bound to the selected conversation or automation — an automation change saves a new revision) and standard header widgets, workflow selection, conversation files and generated outputs, responsive desktop/tablet/phone navigation, touch and keyboard controls, collapsible Automations / Conversations panels, streamed replies and narration, approvals, and workspace policy
+- [Web overview](docs/web.md): the right rail (Activity, Files with the shared file viewer and audio waveform player, and the settings panels Model, Workflow, Workspace, Tools, Skills, Voice bound to the selected conversation or automation — an automation change saves a new revision), the Archived · N line with Unarchive at the end of each sidebar list, the shared About, standard header widgets, workflow selection, conversation files and generated outputs, responsive desktop/tablet/phone navigation, touch and keyboard controls, collapsible Automations / Conversations panels, streamed replies and narration, approvals, and workspace policy
 - [Web deployment](docs/deployment-web.md): hosting it behind HTTPS, reverse proxies, forwarded client addresses
 - [iPhone notes](docs/deployment-iphone.md): Safari and progressive web app behavior, and how the interface adapts to the phone
 

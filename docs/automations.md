@@ -14,7 +14,7 @@ model itself (controller runs, occurrences, triggers, crash safety, the HTTP
 API), see the framework guide:
 [AbstractFramework: Automations](https://github.com/lpalbou/AbstractFramework/blob/main/docs/automations.md).
 
-Browser conversation defaults are configured in the right rail's **Settings** panel (Model & behavior, Tools & skills, and Workspace). With an automation selected, the same panel edits that automation's definition and saves each change as a new revision ([web](web.md#working-in-the-interface)). Automation creation uses the selected model, tools and workflow inputs at submission. Each automation receives its own workspace and the approval policy chosen in its schedule form. Changes to chat settings after creation do not change a saved automation.
+Browser conversation defaults are configured in the right rail's settings panels (Model, Workflow, Workspace, Tools, Skills). With an automation selected, the same panels edit that automation's definition and saves each change as a new revision ([web](web.md#working-in-the-interface)). Automation creation uses the selected model, tools and workflow inputs at submission. Each automation receives its own workspace and the approval policy chosen in its schedule form. Changes to chat settings after creation do not change a saved automation.
 
 In browser creation and **Edit**, the Tools dropdown supports search, selected-tool chips, **All**, and **Clear**. Clear saves an explicit empty list (no tools); **Use workflow default tools** removes the override. Tool availability and the choice to ask before execution are separate settings. Background sidebar refreshes keep existing rows in place.
 
@@ -98,7 +98,7 @@ them like any other).
 | Run now | `g` | One run at once, instead of waiting for the schedule. The schedule does not move: the next scheduled run keeps its time, and if that time comes while this run is still going, the scheduled run starts right after it. It does not count toward a run limit ("stop after this many runs"). Also works while paused (it stays paused). In a Growing automation, later runs see it in their history. Refused while a run is in progress. |
 | Stop current | `x` | Cancels the run in progress. |
 | Revise | `e` | Title, interval (schedules) and context; applies from the next run. In the terminal, a field left empty keeps its current value. |
-| Archive | `a`, then `a` again | The automation stops and is hidden from the list; its history stays readable (**Show archived**, or `h` in the terminal). Archiving never deletes anything. |
+| Archive | `a`, then `a` again | The automation stops and is hidden from the list; its history stays readable (the **Archived · N** line at the end of the browser's list, with **Unarchive**; `h` in the terminal). Archiving never deletes anything. |
 
 In the browser the switch and the buttons **Run now**, **Stop**, **Edit** and
 **Archive** sit in the automation's header, next to its timing line

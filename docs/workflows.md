@@ -55,10 +55,10 @@ operations, not client ones — see the
 
 ### In the browser
 
-Open **Settings → Model & behavior → Workflow**. The picker starts
+Open the rail's **Workflow** panel. The picker starts
 with the gateway default, then lists the workflows authorized for your account
-that declare `abstractcode.agent.v1`. Expand **Workflow inputs** in the same
-category to supply additional registered fields. The gateway validates inputs;
+that declare `abstractcode.agent.v1`. The workflow's **Inputs** follow in the same
+panel to supply additional registered fields. The gateway validates inputs;
 questions, messages, event waits and structured results use the shared workflow
 chat. Automation creation and editing have their own workflow picker.
 

@@ -65,9 +65,9 @@ or **Mine** (agents you published or imported). The list holds only the
 workflows the gateway says this app can run for you
 (`GET /api/gateway/bundles?executable_for=abstractcode.agent.v1`); there is no
 "show all" switch — ask your admin when a workflow is missing. The **Files** tab shows the conversation's workspace on the gateway
-with previews, **Settings → Stream replies** shows replies as the model writes
-them (on gateways that support it), and **About** lists the app's and the
-gateway's versions. Agent tasks use the composer; structured workflows use
+with previews, **Model → Stream replies** shows replies as the model writes
+them (on gateways that support it), and **About** shows the app's, the
+framework's and the gateway's versions. Agent tasks use the composer; structured workflows use
 **Inputs**. Questions, tool approvals, and
 event waits appear in the conversation. Runs and history remain on the gateway
 when you close the browser. Unsent drafts and queued turns do not survive reload.

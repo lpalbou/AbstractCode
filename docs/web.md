@@ -7,25 +7,30 @@ Start with [getting started](getting-started.md). For hosting and authentication
 ## Working in the interface
 
 - **Conversations** restores gateway sessions and history. Search by conversation text or session ID. The list shows 25 conversations; **Load more conversations** adds the next 25.
-- **The right panel** is a vertical rail at the right edge of the window with three icons — **Activity**, **Files** and **Settings**. Clicking an icon opens its panel beside the rail; clicking it again (or the panel's collapse arrow) folds the panel back to the icons. The rail always stays. The gear button in the header (tooltip **Settings**) opens or closes the Settings panel.
+- **The right panel** is a vertical rail at the right edge of the window with one icon per subject — **Activity**, **Files**, **Model**, **Workflow**, **Workspace**, **Tools**, **Skills** and **Voice**. Clicking an icon opens its panel beside the rail; clicking it again (or the panel's collapse arrow) folds the panel back to the icons. The rail always stays. The gear button in the header (tooltip **Settings**) opens the **Model** panel, or folds any open settings panel.
 
 | Panel | What it shows |
 |---|---|
 | Activity | The run as the transcript shows it — model steps, tool calls, approvals — in foldable groups, one per agent iteration, the newest open. For an automation: one group per run (newest first, the latest open); opening a group reads that run's steps from the gateway. |
 | Files | The workspace folder: name, size, generated date (relative; the exact time on hover) and a download icon per file. Click a file to preview it. Generated outputs and attachments are listed below, with the same rows. |
-| Settings | The settings of what is selected: a conversation's run settings, or an automation's definition. |
+| Model | The shared model picker (route, reasoning, MTP depth), then **Behavior**: iteration limit, context token limit, additional instructions, **Stream replies**. |
+| Workflow | Which workflow runs (**Gateway default** until you pick one), then that workflow's **Inputs** and **Run workflow** / **Back to chat**. For an automation: its definition — workflow, title, task, schedule, context, tool approval, email result (one **Save**). |
+| Workspace | The current workspace (short name; the full path as tooltip), access mode and mounts. |
+| Tools | Permissions and the shared tool policy (which tools, and when each asks you). |
+| Skills | The gateway's skills, one switch each. |
+| Voice | Engines, output device, read aloud and voice latency. |
 
-**Settings** has four sections — **Model & behavior** (workflow, the shared model picker with reasoning and MTP depth, limits, instructions, stream replies, **Workflow inputs**), **Tools & skills** (the shared tool policy and gateway skills), **Workspace** (access mode and mounts) and **Voice**. Everything reads **Gateway default** until you override it; an override shows only while it is set, and choosing the default again removes it.
+The six settings panels are bound to what is selected in the sidebar. Each starts with a line saying what it edits — **Conversation** and its title, or **Automation**, its title and its revision. Everything reads **Gateway default** until you override it; an override shows only while it is set, and choosing the default again removes it.
 
-With an **automation** selected, Settings edit its saved definition in place: an **Automation** card (title, task, workflow, schedule, context, tool approval, email result; one **Save**) and the same Model & behavior / Tools & skills / Workspace sections, which save on change. Every change is saved through the gateway as a new revision; the revision number shown above the sections updates, and changes apply from the next run. The automation header's **Edit** opens this panel. If someone else changed the automation meanwhile, the save is refused and the latest revision is shown.
+With an **automation** selected, Model, Workflow, Workspace, Tools and Skills edit its saved definition in place. Typed fields save when you pause, pickers at once, the Workflow form with its **Save**; every change is saved through the gateway as a new revision, the revision shown on every panel updates, and changes apply from the next run. The automation header's **Edit** opens its **Workflow** panel. If someone else changed the automation meanwhile, the save is refused and the latest revision is shown.
 
-The **Workflow** picker in **Model & behavior** lists workflows authorized by the gateway for `abstractcode.agent.v1`. **Gateway default** follows the default the operator configured; selecting a named workflow pins the conversation to that workflow. The choice is remembered for your account. Expand **Workflow inputs** for additional fields or JSON input. Unset settings preserve workflow defaults. When skills are unavailable, **Tools & skills** shows the gateway's explanation. See [workflows](workflows.md#the-gateway-default).
+The **Workflow** picker lists workflows authorized by the gateway for `abstractcode.agent.v1`. **Gateway default** follows the default the operator configured; selecting a named workflow pins the conversation to that workflow. The choice is remembered for your account. Unset settings preserve workflow defaults. When skills are unavailable, **Skills** shows the gateway's explanation. See [workflows](workflows.md#the-gateway-default).
 
-**Files** shows the folder on the gateway where the agent reads and writes, once, as its short name — the full path is its tooltip — with **Open folder** (only on the gateway's own machine) and **Copy path** icons. Click a file to preview it with the shared viewer: Markdown rendered, code highlighted, JSON pretty-printed, images and PDFs shown, other text as text; HTML and SVG show as source. Text previews read at most the first 1 MiB and say so; Markdown images load only from the workspace. The preview header has the file's size and date, **Attach** (adds it to your next message), **Download** and close. Gateway admins also have **Shared workspace (admin)**.
+**Files** shows the folder on the gateway where the agent reads and writes, once, as its short name — the full path is its tooltip — with **Open folder** (only on the gateway's own machine) and **Copy path** icons. Click a file to preview it with the shared viewer: Markdown rendered, code and JSON in the shared code viewer (highlighted; JSON pretty-printed), images and PDFs shown, audio in the shared waveform player (play, pause, seek), other text as text; HTML and SVG show as source. Text previews read at most the first 1 MiB and say so; Markdown images load only from the workspace. The preview header has the file's size and date, **Attach** (adds it to your next message), **Download** and close. Gateway admins also have **Shared workspace (admin)**.
 
 **Voice** follows the Assistant's layout: **Engines** (*Text → speech* and *Speech → text*, each "Gateway default" with **Change**), **Output** (*Output device*, where the browser can choose a speaker), **Replies** (*Read aloud* switch: speak each new reply; *Voice latency*: Balanced, Faster or Higher quality, when the gateway's voice engine offers it). These are this browser's choices for your account; the gateway's defaults are never changed from here.
 
-The panel width is resizable on wide screens (drag the panel's left edge, or focus it and use the arrow keys) and remembered with the open panel. The upper-right **About** widget shows the app version, project links and gateway-reported versions. See [Responsive layout](#responsive-layout).
+The panel width is resizable on wide screens (drag the panel's left edge, or focus it and use the arrow keys) and remembered with the open panel. The upper-right **About** widget is the shared AbstractFramework About: the app name and version, the AbstractFramework and AbstractGateway versions the connected gateway reports (or why one is missing), links (website, source, docs, issues, feedback, contact) and the author/licence line — no package list. See [Responsive layout](#responsive-layout).
 
 The standard upper-right controls remain available: **Code assistant**, **Appearance**, **About**, **Settings** (gear), and gateway connection. The assistant answers questions using the bundled app documentation, in its own gateway session with no tools; it does not inherit the conversation’s settings or attachments. Closing its drawer preserves its conversation.
 
@@ -64,11 +69,13 @@ The sidebar holds two stacking drawers, **Automations** above **Conversations**,
 | closed | open | Conversations fills everything below its header. |
 | open | open | An even split; the Conversations header stays mid-height. |
 
-Each list scrolls inside its own drawer. Fold choices are remembered in this browser (`abstractcode.sidebar.panels`). On a short landscape phone screen the whole drawer scrolls instead. The current workspace is shown under **Settings → Workspace** and in **Files**.
+Each list scrolls inside its own drawer. Fold choices are remembered in this browser (`abstractcode.sidebar.panels`). On a short landscape phone screen the whole drawer scrolls instead. The current workspace is shown in the **Workspace** panel and in **Files**.
+
+At the end of each list a quiet line **Archived · N** appears when the gateway reports archived items (N is the gateway's count: `archived_automations` of `GET /automations`, `archived_sessions` of `GET /runs?root_only=true`; no line at 0). Click it to show the archived automations or conversations inline, each with **Unarchive** (an automation comes back paused, with its history; a conversation comes back to the list). Clicking an archived item's name opens it. Whether each line is open is remembered in this browser (`abstractcode.sidebar.archived`). Archived items never appear among the live rows.
 
 A conversation card shows its title on one line, then `Oct 2 · 2 turns · 7 tools`: the date of the latest turn, the number of turns and, when there were any, the tool calls across them. The tool figure comes from the gateway (`GET /api/gateway/runs?include_metrics=true`, each turn's total including its sub-runs); with a gateway that does not report it, the card shows no tool figure.
 
-An automation card shows its name on its own line, **waiting for you** while an approval or question is pending, then one line such as `every 24 h · last 3 h ago · next in 14 h` with the **Active** switch at its right (relative times rounded down, no year or seconds; `last never` before the first run, `running now` while a run executes, `waiting since 5 min` while a run waits for you, no next part when nothing is scheduled).
+An automation card shows its name on its own line, **waiting for you** while an approval or question is pending, then two quiet lines: `↻ every 24 h · last 3 h ago`, and `next in 20 h` with the **Active** switch right-aligned on that line (relative times rounded down, no year or seconds; `last never` before the first run, `running now` while a run executes, `waiting since 5 min` while a run waits for you; the second line holds only the switch when nothing is scheduled).
 
 ### Automation detail sections
 
@@ -76,11 +83,11 @@ In an automation's page, **Occurrences** and the folder ("Automation folder", or
 
 ### Switches
 
-Every setting that is either on or off is a switch named after what it controls: **Run queued turns**, each automation's **Active**, **Show archived** in the Automations section, and one switch per skill in **Tools & skills**. A switch that is on is highlighted with a check mark and a bold label; off is plain; a switch that cannot change right now is dimmed and says why (for example "Connect to a gateway first." or "A run is in progress." — next to the switch on touch screens, in its tooltip with a mouse). A switch applies at once; there is nothing to save. One-shot actions such as **Pause**, **Resume**, **Conclude**, **Revoke** and read-aloud playback stay buttons.
+Every setting that is either on or off is a switch named after what it controls: **Run queued turns**, each automation's **Active**, and one switch per skill in **Skills**. A switch that is on is highlighted with a check mark and a bold label; off is plain; a switch that cannot change right now is dimmed and says why (for example "Connect to a gateway first." or "A run is in progress." — next to the switch on touch screens, in its tooltip with a mouse). A switch applies at once; there is nothing to save. One-shot actions such as **Pause**, **Resume**, **Conclude**, **Revoke** and read-aloud playback stay buttons.
 
 ## Stream replies
 
-**Settings → Model & behavior → Stream replies** shows the assistant's reply while the model writes it, instead of only when it is complete. Choose:
+**Model → Stream replies** shows the assistant's reply while the model writes it, instead of only when it is complete. Choose:
 
 - **Gateway default** (the default): the gateway operator's setting decides. When the gateway reports it, the option reads **Gateway default (on)** or **Gateway default (off)**.
 - **On** or **Off**: your choice for every new turn, whatever the gateway default.
