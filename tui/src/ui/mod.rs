@@ -21,6 +21,7 @@ pub mod splash;
 pub mod stance;
 pub mod thinking;
 pub mod transcript_view;
+pub mod voice_view;
 
 use queue_lane::{
     buffer_steer, steer_or_buffer, swap_queue_for_session, wire_pending_steer, wire_queue_drain,
@@ -294,6 +295,8 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     // type-to-focus handler needs it (see `chrome::ComposerAnchor`).
     let composer_anchor = chrome::ComposerAnchor::default();
     wire_ctrl_c(cx, actions, store, &ctx, &composer);
+    // Voice: read-aloud, dictation text into the composer, elapsed tick.
+    voice_view::wire(cx, store, &ctx, composer.clone());
 
     // One-shot composer seed (queue modal `e` pops an item into the
     // composer; the modal cannot reach the root-scoped TextAreaState, so
@@ -490,6 +493,16 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
         .shortcut(KeyChord::new(Mods::CTRL, Key::Char('t')), move |_| {
             cycle_theme(&root_ctx);
         })
+        // Voice: Ctrl+P reads the latest reply aloud (again = stop); Ctrl+R
+        // starts a dictation (again = transcribe). See `voice_view`.
+        .shortcut(KeyChord::new(Mods::CTRL, Key::Char('p')), {
+            let ctx = ctx.clone();
+            move |_| voice_view::toggle_speak(store, &ctx)
+        })
+        .shortcut(KeyChord::new(Mods::CTRL, Key::Char('r')), {
+            let ctx = ctx.clone();
+            move |_| voice_view::toggle_dictation(store, &ctx)
+        })
         .shortcut(KeyChord::new(Mods::CTRL, Key::Char('d')), {
             let ctx = ctx.clone();
             move |_| toggle_details(store, &ctx)
@@ -637,6 +650,9 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                     // reserved blank; CHROME_ROWS estimates deliberately
                     // exclude this sometimes-present row).
                     .child(attachments::chips_row(cx, store, &ctx))
+                    // Voice status (only while speaking / recording /
+                    // transcribing — no reserved blank, like the chips row).
+                    .child(voice_view::status_row(store))
                     .child(chrome::activity_strip(&t, store, spin, follow))
                     // In-flow composer: grows 1..4 rows with the draft (the
                     // absolute-position + spacer trick existed only for the
@@ -1391,6 +1407,9 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
             store.notify(&line);
         }
         Command::Redraw => abstracttui::app::request_full_redraw(),
+        Command::Voice(arg) => voice_view::command_voice(cx, store, ctx, arg),
+        Command::Speak(arg) => voice_view::command_speak(store, ctx, arg),
+        Command::Dictate => voice_view::toggle_dictation(store, ctx),
         Command::Entities(name) => {
             // Async refresh behind the instantly-opened cached view.
             store.entities_loading.set(true);
@@ -2154,6 +2173,12 @@ fn handle_escape(
     // Clearing `last_esc` on the way out is the second half of that.
     if store.animation.get_untracked() > 0 {
         store.animation.set(0);
+        store.last_esc.set(None);
+        return;
+    }
+    // Voice next, CONSUMING the press: Esc stops a spoken reply or cancels
+    // a recording — it never also clears the draft or arms run-cancel.
+    if voice_view::escape(store) {
         store.last_esc.set(None);
         return;
     }

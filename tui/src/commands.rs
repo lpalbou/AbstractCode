@@ -142,6 +142,17 @@ pub enum Command {
     Stance(Option<String>),
     /// Recovers from external screen clears the damage tracker cannot see.
     Redraw,
+    /// `/voice [read-aloud on|off]` — voice settings (engines = the
+    /// gateway's default routes, output/input device, tests, read aloud,
+    /// latency); `read-aloud on|off` flips that switch without the screen.
+    Voice(Option<String>),
+    /// `/speak [stop]` — read the latest reply aloud through the gateway's
+    /// streaming voice route (Ctrl+P); `stop` (or Esc) stops it.
+    Speak(Option<String>),
+    /// `/dictate` — record from this computer's microphone, transcribe with
+    /// the gateway's default speech-to-text route, text into the composer
+    /// (Ctrl+R starts and stops).
+    Dictate,
     Quit,
     Unknown(String),
 }
@@ -237,6 +248,9 @@ pub fn parse(text: &str) -> Option<Command> {
         }
         "/stance" | "/conduct" => Command::Stance(if rest.is_empty() { None } else { Some(rest) }),
         "/redraw" => Command::Redraw,
+        "/voice" => Command::Voice(if rest.is_empty() { None } else { Some(rest) }),
+        "/speak" | "/say" => Command::Speak(if rest.is_empty() { None } else { Some(rest) }),
+        "/dictate" | "/mic" => Command::Dictate,
         "/entities" | "/entity" => {
             Command::Entities(if rest.is_empty() { None } else { Some(rest) })
         }
@@ -287,6 +301,15 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
     (
         "stream",
         "stream replies as they are written: on | off | default · bare opens the picker",
+    ),
+    (
+        "voice",
+        "voice settings: engines (gateway default), devices, tests, read aloud",
+    ),
+    ("speak", "read the latest reply aloud (Ctrl+P) · stop"),
+    (
+        "dictate",
+        "dictate into the composer with this computer's microphone (Ctrl+R)",
     ),
     (
         "gating",
@@ -404,6 +427,18 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "send a task to the agent (steers when a run is active)",
     ),
     ("/help", "this help"),
+    (
+        "/voice [read-aloud on|off]",
+        "voice settings: Text → speech and Speech → text (Gateway default · the gateway's routes, or an override), output device + Test, reply volume, microphone + Test with a level meter, spoken language, Read aloud, voice latency; audio plays and records on THIS computer through AbstractVoice (--voice-python <path> picks the Python)",
+    ),
+    (
+        "/speak [stop]",
+        "read the latest reply aloud — streamed sentence by sentence from the gateway (Ctrl+P toggles; Esc stops)",
+    ),
+    (
+        "/dictate",
+        "record from this computer's microphone, transcribe with the gateway's default speech-to-text route, text lands in the composer (Ctrl+R starts and stops; Esc cancels)",
+    ),
     (
         "/new",
         "fresh session (cancels an active run, new durable id)",
@@ -556,7 +591,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
 pub const HELP_EXTRA: &[(&str, &str)] = &[
     (
         "Esc",
-        "clear the draft / defer an open prompt (Enter reopens) / when scrolled up, jump back to the live tail (that press never arms cancel)",
+        "stop a spoken reply / cancel a recording / clear the draft / defer an open prompt (Enter reopens) / when scrolled up, jump back to the live tail (that press never arms cancel)",
     ),
     (
         "PgUp / PgDn",
@@ -575,6 +610,8 @@ pub const HELP_EXTRA: &[(&str, &str)] = &[
         "move focus (composer / transcript / modal fields) — outside a modal, typing / pasting / dropping a file returns focus to the composer and keeps what arrived (a dropped file becomes a chip, as always)",
     ),
     ("Ctrl+T", "cycle theme"),
+    ("Ctrl+P", "read the latest reply aloud / stop it (/speak)"),
+    ("Ctrl+R", "dictate: start recording, press again to transcribe (/dictate)"),
     (
         "select text",
         "drag to select in-app; release copies (OSC 52 clipboard) — Shift/Option-drag still selects natively",
@@ -831,6 +868,9 @@ mod tests {
             "attach",
             "status",
             "history",
+            "voice",
+            "speak",
+            "dictate",
         ] {
             assert_eq!(
                 completion_heads.iter().filter(|c| **c == needle).count(),

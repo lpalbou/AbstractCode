@@ -1010,6 +1010,9 @@ pub struct Store {
     /// Which host/resource contracts the gateway declares
     /// (`/discovery/capabilities`); `None` until the boot fetch answers.
     pub host_contracts: Signal<Option<HostContracts>>,
+    /// Speak replies / dictate (`crate::voice`): playback, recording,
+    /// devices and the gateway's default voice routes.
+    pub voice: crate::voice::VoiceSignals,
     /// Latest `/models/context_estimate` answer for the `/resources`
     /// modal's inline result line: (subject "provider/model", line).
     pub host_estimate: Signal<Option<(String, String)>>,
@@ -1286,6 +1289,7 @@ impl Store {
             gpu: cx.signal(GpuMeter::Off),
             host_state: cx.signal(HostState::Idle),
             host_contracts: cx.signal(None),
+            voice: crate::voice::VoiceSignals::create(cx),
             host_estimate: cx.signal(None),
             context_window: cx.signal(0),
             last_call_rate: cx.signal(None),

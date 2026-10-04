@@ -495,6 +495,10 @@ pub struct Prefs {
     /// other client gets. An explicit `--max-iterations` at launch overrides
     /// it for that session without rewriting the file.
     pub max_iterations: u32,
+    /// Voice preferences (`/voice`), the kit's `VoiceClientPreferences`
+    /// keys (`crate::voice::VoicePrefs`): an unset key = the gateway's
+    /// default route; devices are this computer's. `None` = never set.
+    pub voice: Option<Value>,
     /// Where this Prefs persists. `None` = EPHEMERAL: `save()` is a no-op.
     /// Default-constructed prefs never touch the filesystem — a test
     /// harness building a UiCtx cannot pollute the operator's real file
@@ -756,6 +760,7 @@ impl Prefs {
             model: s("model"),
             reasoning: s("reasoning"),
             speculation: v.get("speculation").and_then(crate::speculation::normalize),
+            voice: v.get("voice").filter(|x| x.is_object()).cloned(),
             reasoning_provider: s("reasoning_provider"),
             reasoning_model: s("reasoning_model"),
             session_id: s("session_id"),
@@ -823,6 +828,7 @@ impl Prefs {
             "model": self.model,
             "reasoning": self.reasoning,
             "speculation": self.speculation,
+            "voice": self.voice,
             "reasoning_provider": self.reasoning_provider,
             "reasoning_model": self.reasoning_model,
             "session_id": self.session_id,
@@ -1380,6 +1386,7 @@ mod tests {
             model: Some("qwen3-4b".into()),
             reasoning: Some("high".into()),
             speculation: Some(json!(false)),
+            voice: Some(json!({"stt_language": "fr", "read_aloud": true, "reply_volume": 0.6})),
             reasoning_provider: Some("lmstudio".into()),
             reasoning_model: Some("qwen3-4b".into()),
             session_id: Some("acode-full".into()),

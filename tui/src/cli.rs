@@ -124,6 +124,10 @@ pub struct Args {
     /// boot gate still applies on top: no tty, `NO_COLOR`, `TERM=dumb` or
     /// `ABSTRACTTUI_NO_SPLASH` skip it regardless of this.
     pub animation: Option<bool>,
+    /// `--voice-python <PATH>` — the Python with AbstractVoice that plays
+    /// replies and records dictation on this computer (default: the one
+    /// next to the installed `abstractgateway`, else `python3`).
+    pub voice_python: Option<String>,
     pub show_caps: bool,
     pub show_help: bool,
     pub show_version: bool,
@@ -188,6 +192,10 @@ OPTIONS:
   --workspace-mode <M>    workspace access mode: workspace_only |
                           workspace_or_allowed | all_except_ignored
                           (default: server-managed; /workspace edits + persists)
+  --voice-python <PATH>   the Python with AbstractVoice that plays spoken
+                          replies and records dictation on this computer
+                          (default: the one next to the installed
+                          abstractgateway, else python3)
   --theme <ID>            start theme (26 built-in; /theme lists them)
   --animation <on|off>    the launch animation (default: on) — SAVED to
                           prefs.json, so `--animation off` once disables it
@@ -323,6 +331,7 @@ pub fn parse(argv: &[String]) -> Result<Args, String> {
             "--no-workspace" => args.no_workspace = true,
             "--no-project-context" => args.no_project_context = true,
             "--no-prompt-cache" => args.no_prompt_cache = true,
+            "--voice-python" => args.voice_python = Some(take(a)?),
             "--review" => args.review = Some(true),
             "--no-review" => args.review = Some(false),
             "--review-rounds" => {

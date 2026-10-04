@@ -46,6 +46,8 @@ pub mod streaming;
 pub mod tool_policy;
 pub mod transcript;
 pub mod ui;
+pub mod voice;
+pub mod voice_host;
 pub mod workspace_files;
 
 use std::cell::RefCell;
@@ -164,6 +166,8 @@ fn signin_preflight(conn: &config::Connection) -> Option<String> {
 }
 
 fn run_tui(args: &cli::Args) -> i32 {
+    // Host audio (speak replies, dictate): which Python runs AbstractVoice.
+    voice_host::configure(args.voice_python.clone());
     let conn = config::resolve_connection(args.gateway.as_deref(), args.token.as_deref());
     if let Some(report) = signin_preflight(&conn) {
         eprintln!("{report}");
@@ -513,6 +517,7 @@ fn run_tui(args: &cli::Args) -> i32 {
     // Stop the worker + any live streams before leaving (the process would
     // reap them anyway; being explicit keeps shutdown race-free).
     let _ = shutdown_tx.send(runner::Cmd::Shutdown);
+    voice_host::shutdown();
     // Queue persistence honesty (cycle-2: REVERSED from drop-on-quit —
     // the queue is saved per session by write-through): a courtesy line
     // where the user can still read it (post-teardown stderr).
