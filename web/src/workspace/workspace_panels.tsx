@@ -478,6 +478,16 @@ function artifactItem(item: any): ArtifactItem {
   };
 }
 
+/**
+ * How an artifact is previewed in the kit viewer: its text (markdown, code, JSON — the kit's
+ * AfCodeBlock — and plain text), an object URL (image, PDF, and audio in the kit waveform player),
+ * or nothing (a binary: download only).
+ */
+export function artifactPreviewMode(kind: ReturnType<typeof fileViewerKind>): "text" | "url" | "none" {
+  if (fileViewerNeedsText(kind)) return "text";
+  return kind === "image" || kind === "pdf" || kind === "audio" ? "url" : "none";
+}
+
 type ArtifactPreview =
   | { status: "loading" }
   | { status: "error"; message: string }
@@ -512,12 +522,12 @@ function Artifacts({ runId, enabled, refreshKey }: { runId: string; enabled: boo
     void gateway
       .get_run_artifact_blob(runId, selected.id)
       .then(async ({ blob, content_type }) => {
-        const kind = fileViewerKind(selected.name, content_type);
-        if (fileViewerNeedsText(kind)) {
+        const mode = artifactPreviewMode(fileViewerKind(selected.name, content_type));
+        if (mode === "text") {
           const text = await blob.slice(0, PREVIEW_TEXT_LIMIT).text();
           if (alive) setPreview({ status: "ready", text, partial: blob.size > PREVIEW_TEXT_LIMIT, total: blob.size, contentType: content_type });
-        } else if (kind === "image" || kind === "pdf") {
-          url = URL.createObjectURL(blob);
+        } else if (mode === "url") {
+          url = URL.createObjectURL(blob.type ? blob : new Blob([blob], { type: content_type }));
           if (alive) setPreview({ status: "ready", url, partial: false, contentType: content_type });
         } else if (alive) setPreview({ status: "ready", partial: false, contentType: content_type });
       })

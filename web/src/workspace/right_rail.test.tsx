@@ -198,3 +198,24 @@ describe("adversary pass W4 fixes", () => {
     expect(artifactTypeLabel("")).toBe("File");
   });
 });
+
+describe("R5 Files: audio in the kit waveform player, JSON/code in the kit code viewer", () => {
+  it("previews audio artifacts through an object URL (the kit's AfAudioPlayer), JSON/code as text (AfCodeBlock)", async () => {
+    const { artifactPreviewMode } = await import("./workspace_panels");
+    const { fileViewerKind } = await import("@abstractframework/ui-kit");
+    expect(artifactPreviewMode(fileViewerKind("reply.wav", "audio/wav"))).toBe("url");
+    expect(artifactPreviewMode(fileViewerKind("speech", "audio/mpeg"))).toBe("url");
+    expect(artifactPreviewMode(fileViewerKind("data.json", "application/json"))).toBe("text");
+    expect(artifactPreviewMode(fileViewerKind("main.py", "text/x-python"))).toBe("text");
+    expect(artifactPreviewMode(fileViewerKind("blob.bin", "application/octet-stream"))).toBe("none");
+  });
+  it("the kit viewer renders audio with the waveform player and JSON with the code block (no local viewer)", async () => {
+    const { FileViewer } = await import("@abstractframework/panel-chat");
+    const audio = renderToStaticMarkup(<FileViewer name="reply.wav" contentType="audio/wav" status="ready" url="blob:x" nowMs={0} onClose={() => {}} onDownload={() => {}} />);
+    expect(audio).toMatch(/af-audio/);
+    const json = renderToStaticMarkup(<FileViewer name="data.json" contentType="application/json" status="ready" text='{"a":1}' nowMs={0} onClose={() => {}} onDownload={() => {}} />);
+    expect(json).toMatch(/af-code/);
+    const panels = readFileSync(new URL("./workspace_panels.tsx", import.meta.url), "utf8");
+    expect(panels).not.toMatch(/<audio\b|<pre\b/);
+  });
+});
