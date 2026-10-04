@@ -162,20 +162,18 @@ describe("normalizeWorkflowCatalog", () => {
 });
 
 describe("normalizers", () => {
-  it("preserves raw workspace policy while exposing UI-safe fields", () => {
+  it("preserves raw workspace policy while exposing UI-safe fields (round 9: shared workspace, no modes)", () => {
     const policy = normalizeWorkspacePolicy({
-      client_workspace_scope_overrides: true,
-      allowed_access_modes: ["read", "write"],
-      max_attachment_bytes: 1024,
-      mounts: [{ name: "repo", path: "/workspace", read_only: true }],
-      future_field: { enabled: true },
+      policy: {
+        shared_workspace: "/srv/gw/workspaces",
+        allowed_folders: ["/data/projects"],
+        allow_any_folder: false,
+        max_attachment_bytes: 1024,
+        future_field: { enabled: true },
+      },
     });
-    expect(policy).toMatchObject({
-      clientWorkspaceScopeOverrides: true,
-      allowedAccessModes: ["read", "write"],
-      maxAttachmentBytes: 1024,
-      mounts: [{ id: "repo", path: "/workspace", readOnly: true }],
-    });
+    expect(policy).toMatchObject({ sharedWorkspace: "/srv/gw/workspaces", maxAttachmentBytes: 1024 });
+    expect(Object.keys(policy).sort()).toEqual(["maxAttachmentBytes", "raw", "sharedWorkspace"]);
     expect(policy.raw.future_field).toEqual({ enabled: true });
   });
 

@@ -11,7 +11,9 @@
 //   instructions          _runtime.system_prompt_extra
 //   tools                 input.tools + _runtime.allowed_tools (kit withAutomationTools)
 //   approvals             _runtime.tool_policy {auto_approve_tools, require_approval_tools}
-//   workspace             workspace_access_mode / workspace_allowed_paths
+//   workspace folders     workspace_allowed_paths (the chosen set, within the
+//                         account's folders; absent = follows the account;
+//                         the retired workspace_access_mode is removed on save)
 //   skills                input.skills
 // An unset value is REMOVED (never written as ""), so the gateway default
 // applies again — "Gateway default" until overridden.
@@ -46,9 +48,7 @@ export function automationRunPreferences(input: Json | undefined): RunPreference
     maxIterations: str(limits.max_iterations),
     maxTokens: str(limits.max_tokens),
     system: str(runtime.system_prompt_extra),
-    workspaceRoot: "",
-    workspaceMode: str(data.workspace_access_mode),
-    allowedPaths: strings(data.workspace_allowed_paths).join("\n"),
+    workspaceFolders: Array.isArray(data.workspace_allowed_paths) ? strings(data.workspace_allowed_paths) : null,
     tools: selected === null ? { mode: "all", selected: [], approval } : { mode: "custom", selected, approval },
     toolsCustomized: customized,
     permissions: "default",
@@ -93,8 +93,11 @@ export function withAutomationRunPreferences(input: Json | undefined, prefs: Run
   else delete next._runtime;
   if (Object.keys(limits).length) next._limits = limits;
   else delete next._limits;
-  setOrDelete(next, "workspace_access_mode", prefs.workspaceMode);
-  setOrDelete(next, "workspace_allowed_paths", prefs.workspaceMode === "workspace_or_allowed" ? prefs.allowedPaths.split("\n").map((p) => p.trim()).filter(Boolean) : []);
+  // Round 9: the access mode is gone (the gateway always scopes to the
+  // effective folders); the chosen set is stored as is, [] = shared only.
+  delete next.workspace_access_mode;
+  if (prefs.workspaceFolders === null) delete next.workspace_allowed_paths;
+  else next.workspace_allowed_paths = [...prefs.workspaceFolders];
   setOrDelete(next, "skills", prefs.skills);
   next = withAutomationTools(next as any, prefs.toolsCustomized && prefs.tools.mode === "custom" ? prefs.tools.selected : null) as Json;
   return next;

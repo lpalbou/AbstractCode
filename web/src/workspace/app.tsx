@@ -774,18 +774,9 @@ export function CodeWorkspace() {
           ? Number(preferences.maxTokens)
           : undefined,
       },
-      workspace: catalog.policy?.clientWorkspaceScopeOverrides
-        ? {
-            root:
-              preferences.workspaceRoot || effectiveWorkspace || undefined,
-            accessMode: preferences.workspaceMode || undefined,
-            allowedPaths: preferences.allowedPaths
-              .split("\n")
-              .filter(Boolean),
-          }
-        : effectiveWorkspace
-          ? { root: effectiveWorkspace }
-          : undefined,
+      // Round 9: a turn sends only its conversation folder (continuity); the
+      // gateway scopes the run to the account's effective folders.
+      workspace: effectiveWorkspace ? { root: effectiveWorkspace } : undefined,
       tools: preferences.toolsCustomized ? toolPermissions.enabledTools : undefined,
       toolPolicy: preferences.toolsCustomized || preferences.permissions !== "default"
         // Keep consent revocable by this host. The durable server policy
@@ -1221,8 +1212,9 @@ export function CodeWorkspace() {
       lockedReasonId={`code-${section}-locked`}
       value={value}
       onChange={onChange}
-      policy={catalog.policy}
       tools={catalog.tools}
+      connected={connection.connected}
+      automationFolders={Boolean(automation)}
       defaultModel={
         !automation && inputs.provider && inputs.model
           ? { provider: String(inputs.provider), model: String(inputs.model) }
@@ -1963,9 +1955,7 @@ export function CodeWorkspace() {
                     Enter for a new line
                   </span>
                   <span>
-                    {catalog.policy?.clientWorkspaceScopeOverrides
-                      ? "Gateway policy enforced"
-                      : "Managed workspace"}
+                    Managed workspace
                     <span className="code-small-dot" />
                   </span>
                 </>

@@ -113,17 +113,19 @@ describe("automation settings = its definition", () => {
     tools: ["read_file"],
     _runtime: { provider: "lmstudio", model: "qwen", thinking: "high", allowed_tools: ["read_file"], tool_policy: { require_approval_tools: ["read_file"] } },
     _limits: { max_iterations: 7 },
-    workspace_access_mode: "workspace_only",
+    workspace_allowed_paths: ["/data/projects"],
   };
   it("reads the definition with the same keys a conversation turn writes", () => {
     const p = automationRunPreferences(input);
-    expect([p.provider, p.model, p.reasoning, p.maxIterations, p.workspaceMode]).toEqual(["lmstudio", "qwen", "high", "7", "workspace_only"]);
+    expect([p.provider, p.model, p.reasoning, p.maxIterations]).toEqual(["lmstudio", "qwen", "high", "7"]);
+    expect(p.workspaceFolders).toEqual(["/data/projects"]);
     expect(p.tools).toEqual({ mode: "custom", selected: ["read_file"], approval: { read_file: "ask" } });
     expect(p.toolsCustomized).toBe(true);
   });
   it("an empty definition reads as Gateway default everywhere", () => {
     const p = automationRunPreferences({ prompt: "x" });
-    expect([p.provider, p.model, p.reasoning, p.maxIterations, p.maxTokens, p.system, p.workspaceMode]).toEqual(["", "", "", "", "", "", ""]);
+    expect([p.provider, p.model, p.reasoning, p.maxIterations, p.maxTokens, p.system]).toEqual(["", "", "", "", "", ""]);
+    expect(p.workspaceFolders).toBeNull();
     expect(p.toolsCustomized).toBe(false);
   });
   it("round-trips without a change (no revision for nothing)", () => {
@@ -182,16 +184,11 @@ describe("voice", () => {
 });
 
 describe("adversary pass W4 fixes", () => {
-  it("F4: the workspace section names access modes in plain words", async () => {
-    const { SettingsContent, workspaceModeLabel } = await import("./settings_panel");
-    expect(workspaceModeLabel("workspace_or_allowed")).toBe("Workspace and allowed paths");
-    const html = renderToStaticMarkup(
-      <SettingsContent tab="workspace" value={DEFAULT_PREFERENCES} onChange={() => {}} tools={[]} disabled={false}
-        policy={{ allowedAccessModes: ["workspace_only", "workspace_or_allowed"], mounts: [], clientWorkspaceScopeOverrides: true } as any} />,
-    );
-    expect(html).toContain("This workspace only · Workspace and allowed paths");
-    expect(html).not.toMatch(/>[^<]*workspace_only[^<]*</);
-    expect(html).not.toMatch(/>[^<]*workspace or allowed[^<]*</);
+  it("F4 (round 9): no access modes, no 'Any folder' — the workspace tab is the kit WorkspaceChooser", async () => {
+    const src = readFileSync(new URL("./settings_panel.tsx", import.meta.url), "utf8");
+    expect(src).toContain("<CodeWorkspaceFolders");
+    expect(src).not.toMatch(/workspace_or_allowed|all_except_ignored|Access mode|clientWorkspaceScopeOverrides/);
+    expect(appSource).not.toMatch(/clientWorkspaceScopeOverrides|workspaceMode|allowedPaths|accessMode:/);
   });
   it("F3: an artifact without a filename reads as its type, never its id", async () => {
     const { artifactTypeLabel } = await import("./workspace_panels");

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Requires the AbstractGateway round-9 workspace model (`/api/gateway/workspace/policy/{account}`) and `@abstractframework/ui-kit` 0.8.1.
+
+### Changed
+
+- web: the **Workspace** panel is the kit `WorkspaceChooser`, the same folder model and wording as the gateway console and the AbstractAssistant: the shared workspace (always on), the admin-allowed folders as switches (off until turned on), **My folders** rows only while the admin allows any folder, and "Agents may use: …" from the gateway. A conversation edits your account's folders (`GET/PUT /api/gateway/workspace/policy/me`, one PUT per change, the gateway's refusal shown with "Not saved."); an automation stores its chosen set in `input_data.workspace_allowed_paths` (a new revision), following your account until changed.
+
+### Removed
+
+- web: the access-mode select, the workspace-root field, the "additional allowed paths" text area and the client-scope notice (the gateway no longer has access modes or client scope overrides). Turns no longer send `workspace_access_mode` or `workspace_allowed_paths`; saving an automation's settings removes a stored `workspace_access_mode`.
+
 ## [terminal 0.9.0 / web 0.11.0] - 2026-10-04
 
 Requires AbstractGateway 0.13.0 or later for archiving conversations, the

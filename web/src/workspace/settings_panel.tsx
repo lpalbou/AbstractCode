@@ -4,8 +4,10 @@ import {
   ToolPolicyEditor,
   type ToolPolicySelection,
   type SpeculationValue,
+  type WorkspaceRequest,
 } from "@abstractframework/ui-kit";
-import type { ToolSpec, WorkspacePolicy } from "./catalog";
+import { CodeWorkspaceFolders } from "./workspace_folders";
+import type { ToolSpec } from "./catalog";
 import { gateway } from "./transport";
 import { SkillsPicker } from "./skills_picker";
 import { modelDiscovery } from "./model_discovery";
@@ -28,9 +30,8 @@ export type RunPreferences = {
   maxIterations: string;
   maxTokens: string;
   system: string;
-  workspaceRoot: string;
-  workspaceMode: string;
-  allowedPaths: string;
+  /** An automation's chosen folders (input_data.workspace_allowed_paths); null = follows the account. Conversations keep null (the account's folders apply). */
+  workspaceFolders: string[] | null;
   tools: ToolPolicySelection;
   toolsCustomized: boolean;
   permissions: PermissionLevel;
@@ -48,9 +49,7 @@ export const DEFAULT_PREFERENCES: RunPreferences = {
   maxIterations: "",
   maxTokens: "",
   system: "",
-  workspaceRoot: "",
-  workspaceMode: "",
-  allowedPaths: "",
+  workspaceFolders: null,
   tools: { mode: "all", selected: [], approval: {} },
   toolsCustomized: false,
   permissions: "default",
@@ -61,24 +60,11 @@ export const DEFAULT_PREFERENCES: RunPreferences = {
 /** The settings panels SettingsContent renders (Workflow and Voice have their own components). */
 export type SettingsTab = "model" | "workspace" | "tools" | "skills";
 
-/** Plain names for the gateway's workspace access modes (the id stays the value sent). */
-export const WORKSPACE_MODE_LABELS: Record<string, string> = {
-  workspace_only: "This workspace only",
-  workspace_or_allowed: "Workspace and allowed paths",
-  all_except_ignored: "Everything except ignored paths",
-  unrestricted: "No restriction",
-};
-/** A mode's plain name; an unknown id (a newer gateway) is shown as the gateway sent it. */
-export function workspaceModeLabel(mode: string): string {
-  return WORKSPACE_MODE_LABELS[mode] || mode;
-}
-
 /** One rail panel's preference sections (Model, Workspace, Tools or Skills). No drawer or navigation wrappers. */
 export type SettingsContentProps = {
   tab: SettingsTab;
   value: RunPreferences;
   onChange: (value: RunPreferences) => void;
-  policy: WorkspacePolicy | null;
   tools: ToolSpec[];
   disabled: boolean;
   lockedReasonId?: string;
@@ -91,13 +77,20 @@ export type SettingsContentProps = {
   hideStreamReplies?: boolean;
   /** Replaces the locked notice (e.g. why an automation cannot be edited now). */
   lockedText?: string;
+  /** Workspace tab: connected to a gateway (the folders load from it). */
+  connected?: boolean;
+  /** Workspace tab: an automation (its stored folder set) instead of the account's folders. */
+  automationFolders?: boolean;
+  /** Workspace tab: injected gateway request (tests). */
+  workspaceRequest?: WorkspaceRequest;
 };
 
 export function SettingsContent({
-  tab, value, onChange, policy, tools, disabled, defaultModel,
+  tab, value, onChange, tools, disabled, defaultModel,
   workflowDefault, streaming = STREAMING_LOADING,
   lockedReasonId = SETTINGS_LOCKED_ID,
   workspaceRootFixed, hideStreamReplies, lockedText,
+  connected = false, automationFolders = false, workspaceRequest,
 }: SettingsContentProps) {
   const update = (patch: Partial<RunPreferences>) => onChange({ ...value, ...patch });
   return <>
@@ -203,78 +196,16 @@ export function SettingsContent({
           </>
         ) : tab === "workspace" ? (
           <section className="code-settings-section">
-            <h3>Workspace access</h3>
-            <div className="code-policy">
-              <strong>
-                {policy?.clientWorkspaceScopeOverrides
-                  ? "Client scope requests enabled"
-                  : "Managed by your gateway"}
-              </strong>
-              <p>
-                {policy?.clientWorkspaceScopeOverrides
-                  ? "You may request a workspace scope. Gateway policy remains authoritative."
-                  : "The gateway chooses and restricts the workspace. File browsing and tool execution follow the same policy."}
-              </p>
-            </div>
-            <dl className="code-facts">
-              <dt>Allowed access modes</dt>
-              <dd>
-                {policy?.allowedAccessModes.map(workspaceModeLabel).join(" · ") || "Gateway default"}
-              </dd>
-              <dt>Available mounts</dt>
-              <dd>
-                {policy?.mounts.length
-                  ? policy.mounts.map((mount) => mount.label).join(", ")
-                  : "Default workspace"}
-              </dd>
-            </dl>
             {workspaceRootFixed ? (
               <p className="code-field-help" data-setting="workspace-root-fixed">
                 Runs work in the automation folder <code title={workspaceRootFixed}>{workspaceRootFixed.split(/[\\/]/).filter(Boolean).pop() || workspaceRootFixed}</code>.
               </p>
             ) : null}
-            {policy?.clientWorkspaceScopeOverrides ? (
-              <>
-                {workspaceRootFixed ? null : (
-                <label className="code-field">
-                  Workspace root
-                  <input
-                    value={value.workspaceRoot}
-                    placeholder="Gateway default"
-                    disabled={disabled}
-                    onChange={(e) => update({ workspaceRoot: e.target.value })}
-                  />
-                </label>
-                )}
-                <label className="code-field">
-                  Access mode
-                  <select
-                    value={value.workspaceMode}
-                    disabled={disabled}
-                    onChange={(e) => update({ workspaceMode: e.target.value })}
-                  >
-                    <option value="">Gateway default</option>
-                    {policy.allowedAccessModes.map((mode) => (
-                      <option key={mode} value={mode}>
-                        {workspaceModeLabel(mode)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {value.workspaceMode === "workspace_or_allowed" ? (
-                  <label className="code-field">
-                    Additional allowed paths
-                    <textarea
-                      rows={3}
-                      value={value.allowedPaths}
-                      disabled={disabled}
-                      placeholder="One path per line"
-                      onChange={(e) => update({ allowedPaths: e.target.value })}
-                    />
-                  </label>
-                ) : null}
-              </>
-            ) : null}
+            <CodeWorkspaceFolders
+              connected={connected}
+              request={workspaceRequest}
+              automation={automationFolders ? { selection: value.workspaceFolders, onChange: (workspaceFolders) => update({ workspaceFolders }) } : undefined}
+            />
           </section>
         ) : tab === "tools" ? (
           <section className="code-settings-section">

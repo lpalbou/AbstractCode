@@ -17,7 +17,7 @@ Archiving a conversation, the **Archived · N** lines and the gateway's default 
 | Files | The workspace folder: name, size, generated date (relative; the exact time on hover) and a download icon per file. Click a file to preview it. Generated outputs and attachments are listed below, with the same rows. |
 | Model | The shared model picker (route, reasoning, MTP depth), then **Behavior**: iteration limit, context token limit, additional instructions, **Stream replies**. |
 | Workflow | Which workflow runs (**Gateway default** until you pick one), then that workflow's **Inputs** and **Run workflow** / **Back to chat**. For an automation: its definition — workflow, title, task, schedule, context, tool approval, email result (one **Save**). |
-| Workspace | The current workspace (short name; the full path as tooltip), access mode and mounts. |
+| Workspace | The current conversation folder (short name; the full path as tooltip) and **Workspace folders**: the shared workspace (always on), the folders your gateway admin allows as switches, **My folders** when the admin allows any folder, and one line saying what agents may use. For an automation: the folders its runs may use. |
 | Tools | Permissions and the shared tool policy (which tools, and when each asks you). |
 | Skills | The gateway's skills, one switch each. |
 | Voice | Engines, output device and volume, microphone, read aloud and voice latency. |
@@ -132,7 +132,14 @@ run opens the fork as a conversation here. See [Automations](automations.md).
 
 ## Workspaces and authorization
 
-The gateway owns workspace roots, mount visibility, access modes, tool availability, and approval enforcement. Workspace controls are editable only when it permits client scope requests. Continuing an agent conversation restores its gateway-returned workspace instead of silently creating a different one.
+The gateway owns the workspace folders, tool availability and approval enforcement. The admin sets one **shared workspace** (every conversation, automation and entity gets its own folder in it), the extra folders accounts may use, whether accounts may add any folder of their own, and the folders that are never allowed. The **Workspace** panel shows the same model as the console and the AbstractAssistant (the kit `WorkspaceChooser`, identical wording):
+
+- **Shared workspace** — always on, never a switch.
+- **Allowed folders** — one switch per folder the admin allows, off until you turn it on. For a conversation each switch is one `PUT /api/gateway/workspace/policy/me` (your account's folders, used by every client); a refused change shows the gateway's sentence with "Not saved.".
+- **My folders** — rows with **Add**, only while the admin allows any folder; otherwise one sentence says why.
+- **Agents may use:** the gateway's one-line summary of the effective folders.
+
+An automation keeps its own set, chosen among your account's folders and stored in its definition (`input_data.workspace_allowed_paths`, saved as a new revision); until you change it, it follows your account's folders (**Use this account's folders** returns to that). Conversation turns send no folder list: the gateway scopes every run to your effective folders and refuses a folder outside them. Continuing an agent conversation restores its gateway-returned workspace instead of silently creating a different one.
 
 Shared workflow restoration uses the gateway's verified public selection: registry scope, bundle ID, version, and flow ID. If that exact workflow is unavailable, restore it on the gateway or start a new conversation.
 

@@ -38,19 +38,11 @@ export interface NormalizeWorkflowCatalogOptions {
   includeDeprecated?: boolean;
 }
 
-export interface WorkspaceMount {
-  id: string;
-  label: string;
-  path?: string;
-  readOnly: boolean;
-  raw: JsonObject;
-}
-
+/** GET /workspace/policy, as Code uses it (round 9: the folder model lives in the kit WorkspaceChooser). */
 export interface WorkspacePolicy {
   raw: JsonObject;
-  clientWorkspaceScopeOverrides: boolean;
-  allowedAccessModes: string[];
-  mounts: WorkspaceMount[];
+  /** The gateway's shared workspace (every conversation gets its own folder in it). */
+  sharedWorkspace?: string;
   maxAttachmentBytes?: number;
 }
 
@@ -442,38 +434,14 @@ export function resolveRestoredWorkflow(
 export function normalizeWorkspacePolicy(value: unknown): WorkspacePolicy {
   const raw = record(value) ?? {};
   const policy = record(raw.policy) ?? raw;
-  const rawMounts = array(policy.mounts ?? policy.workspace_mounts);
-  const mounts = rawMounts.flatMap((value, index): WorkspaceMount[] => {
-    const item = record(value);
-    if (!item) return [];
-    const path = text(item.path ?? item.root);
-    const id = text(item.id ?? item.name) ?? path ?? `mount-${index + 1}`;
-    return [
-      {
-        id,
-        label: text(item.label ?? item.name) ?? id,
-        ...(path ? { path } : {}),
-        readOnly:
-          item.read_only === true ||
-          item.readOnly === true ||
-          item.writable === false,
-        raw: { ...item },
-      },
-    ];
-  });
+  const sharedWorkspace = text(policy.shared_workspace);
   const maxAttachmentBytes = finiteInteger(
     policy.max_attachment_bytes ?? policy.maxAttachmentBytes,
     1,
   );
   return {
     raw: { ...policy },
-    clientWorkspaceScopeOverrides:
-      policy.client_workspace_scope_overrides === true ||
-      policy.clientWorkspaceScopeOverrides === true,
-    allowedAccessModes: strings(
-      policy.allowed_access_modes ?? policy.allowedAccessModes,
-    ),
-    mounts,
+    ...(sharedWorkspace ? { sharedWorkspace } : {}),
     ...(maxAttachmentBytes !== undefined ? { maxAttachmentBytes } : {}),
   };
 }
