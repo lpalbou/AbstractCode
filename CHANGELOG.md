@@ -16,6 +16,7 @@ Requires the AbstractGateway round-9 workspace model (`/api/gateway/workspace/po
 ### Removed
 
 - web: the access-mode select, the workspace-root field, the "additional allowed paths" text area and the client-scope notice (the gateway no longer has access modes or client scope overrides). Turns no longer send `workspace_access_mode` or `workspace_allowed_paths`; saving an automation's settings removes a stored `workspace_access_mode`.
+- web: the unmounted legacy UI (`src/ui/app.tsx`, never imported by the app) and the old access-mode / allowed-paths / ignored-paths scope fields in `lib/storage.ts`, `lib/gateway_client.ts` and the workflow-input builder.
 
 ## [terminal 0.9.0 / web 0.11.0] - 2026-10-04
 

@@ -315,11 +315,7 @@ describe("buildWorkflowInput", () => {
       attachments: [{ $artifact: "a1" }],
       tools: [],
       model: { provider: "openai", model: "gpt" },
-      workspace: {
-        root: "/repo",
-        accessMode: "write",
-        allowedPaths: ["/repo/src"],
-      },
+      workspace: { root: "/repo" },
       limits: { maxIterations: 10, maxTokens: 1000 },
       reasoning: "high",
       systemPromptExtra: "Be concise",
@@ -344,8 +340,6 @@ describe("buildWorkflowInput", () => {
       model: "gpt",
       tools: [],
       workspace_root: "/repo",
-      workspace_access_mode: "write",
-      workspace_allowed_paths: ["/repo/src"],
       _runtime: {
         provider: "openai",
         model: "gpt",

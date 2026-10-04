@@ -326,7 +326,7 @@ export class GatewayClient {
     query: string,
     opts?: {
       limit?: number;
-      scope?: { workspace_root?: string; workspace_access_mode?: string; workspace_allowed_paths?: string; workspace_ignored_paths?: string };
+      scope?: { workspace_root?: string };
       signal?: AbortSignal;
     }
   ): Promise<any> {
@@ -338,13 +338,7 @@ export class GatewayClient {
     const scope = opts?.scope;
     if (scope && typeof scope === "object") {
       const wr = String(scope.workspace_root || "").trim();
-      const wm = String(scope.workspace_access_mode || "").trim();
-      const wa = String(scope.workspace_allowed_paths || "").trim();
-      const wi = String(scope.workspace_ignored_paths || "").trim();
       if (wr) qs.set("workspace_root", wr);
-      if (wm) qs.set("workspace_access_mode", wm);
-      if (wa) qs.set("workspace_allowed_paths", wa);
-      if (wi) qs.set("workspace_ignored_paths", wi);
     }
     const url = joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`files/search?${qs.toString()}`));
     const r = await fetch(url, { headers: { ..._auth_headers(this._cfg.auth_token) }, signal: opts?.signal });
@@ -385,7 +379,7 @@ export class GatewayClient {
   async attachments_ingest(
     session_id: string,
     path: string,
-    opts?: { scope?: { workspace_root?: string; workspace_access_mode?: string; workspace_allowed_paths?: string; workspace_ignored_paths?: string } }
+    opts?: { scope?: { workspace_root?: string } }
   ): Promise<AttachmentRef> {
     const sid = String(session_id || "").trim();
     const p = String(path || "").trim();
@@ -395,13 +389,7 @@ export class GatewayClient {
     const scope = opts?.scope;
     if (scope && typeof scope === "object") {
       const wr = String(scope.workspace_root || "").trim();
-      const wm = String(scope.workspace_access_mode || "").trim();
-      const wa = String(scope.workspace_allowed_paths || "").trim();
-      const wi = String(scope.workspace_ignored_paths || "").trim();
       if (wr) body.workspace_root = wr;
-      if (wm) body.workspace_access_mode = wm;
-      if (wa) body.workspace_allowed_paths = wa;
-      if (wi) body.workspace_ignored_paths = wi;
     }
     const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath("attachments/ingest")), {
       method: "POST",

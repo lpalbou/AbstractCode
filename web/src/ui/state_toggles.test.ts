@@ -24,7 +24,7 @@ describe("state toggles", () => {
   it("scans the app sources (the gate is not empty)", () => {
     const files = sourceFiles(SRC).map((f) => relative(SRC, f));
     expect(files).toContain("workspace/automations_view.tsx");
-    expect(files).toContain("ui/app.tsx");
+    expect(files).toContain("workspace/app.tsx");
     expect(files.length).toBeGreaterThan(20);
   });
 

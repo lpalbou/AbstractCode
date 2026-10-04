@@ -142,7 +142,7 @@ describe("web builds from its own directory", () => {
     // once every host imported it explicitly. Rendering the panel without this
     // import produces an unstyled panel and no error anywhere — exactly the
     // regression that shipped before.
-    const app = read("src/ui/app.tsx");
+    const app = read("src/workspace/app.tsx");
     if (app.includes("AgentCyclesPanel")) {
       expect(app, "AgentCyclesPanel is rendered without its stylesheet").toContain(
         "@abstractframework/monitor-flow/agent_cycles.css",

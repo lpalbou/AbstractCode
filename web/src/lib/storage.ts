@@ -35,9 +35,6 @@ export type Settings = {
 
   // Optional workspace scope controls for /files/search + attachment ingestion.
   workspace_root?: string;
-  workspace_access_mode?: string;
-  workspace_allowed_paths?: string;
-  workspace_ignored_paths?: string;
 };
 
 export type ReplTemplate = {
@@ -152,9 +149,6 @@ function _default_settings(): Settings {
     files_keep: true,
 
     workspace_root: "",
-    workspace_access_mode: "workspace_only",
-    workspace_allowed_paths: "",
-    workspace_ignored_paths: "",
   };
 }
 
@@ -188,9 +182,6 @@ export function load_settings(): Settings {
   out.tools = Array.isArray((out as any).tools) ? (out as any).tools.map((x: any) => String(x || "").trim()).filter(Boolean) : [];
   out.files_keep = Boolean((out as any).files_keep);
   out.workspace_root = String((out as any).workspace_root || "");
-  out.workspace_access_mode = String((out as any).workspace_access_mode || base.workspace_access_mode);
-  out.workspace_allowed_paths = String((out as any).workspace_allowed_paths || "");
-  out.workspace_ignored_paths = String((out as any).workspace_ignored_paths || "");
   return out;
 }
 

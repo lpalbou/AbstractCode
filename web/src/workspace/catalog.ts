@@ -95,8 +95,6 @@ export interface ModelSettings {
 
 export interface WorkspaceSettings {
   root?: string;
-  accessMode?: string;
-  allowedPaths?: string[];
 }
 
 export interface WorkflowLimits {
@@ -689,14 +687,10 @@ function assignCommonRuntimeInputs(
   if (skills?.length) output.skills = skills; // Gateway-resolved run envelope.
 
   const workspaceRoot = text(options.workspace?.root);
-  const workspaceMode = text(options.workspace?.accessMode);
-  const workspacePaths = cleanStrings(options.workspace?.allowedPaths);
   // These are Gateway-owned envelope fields, not arbitrary authored pins.
   // The server validates them; the same conversation must retain its workspace
   // even when a workflow exposes no workspace input of its own.
   if (workspaceRoot !== undefined) output.workspace_root = workspaceRoot;
-  if (workspaceMode !== undefined) output.workspace_access_mode = workspaceMode;
-  if (workspacePaths?.length) output.workspace_allowed_paths = workspacePaths;
   assign("system", text(options.system));
 
   const runtime = cloneObject(record(output._runtime));
