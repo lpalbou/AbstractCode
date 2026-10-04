@@ -44,6 +44,9 @@ import {
 import { proxyGatewayFetch } from "./session_files";
 import { useWorkspaceVoice } from "./voice_tools";
 import { newId } from "./transport";
+import { CodeWorkspaceFolders, codeWorkspaceRequest } from "./workspace_folders";
+import { AutomationWorkspacesLine, automationWorkspace, withAutomationWorkspace } from "./automation_workspaces";
+import type { RunWorkspace } from "./settings_panel";
 
 /** One controller per signed-in identity; polls while visible and available. */
 export function useAutomations(identity: string, available: boolean): { ctl: AutomationsController; state: AutomationsState } {
@@ -267,6 +270,8 @@ export function AutomationMain(props: {
   onClose(): void;
   /** The header's Edit: opens the Workflow panel on this automation. */
   onEdit(automationId: string): void;
+  /** Opens the rail's Workspace panel bound to this automation (its workspaces; a change saves a revision). */
+  onEditWorkspaces?(automationId: string): void;
   nowMs?: number;
 }): React.ReactElement {
   const st = props.ctl.state;
@@ -329,6 +334,8 @@ export function AutomationMain(props: {
             onCommand={(type) => props.ctl.command(d.automationId, type as AutomationCommandType)}
             onToggleActive={() => props.ctl.toggleActive(d.summary)}
             onEdit={() => props.onEdit(d.automationId)}
+            workspaces={d.definition ? <AutomationWorkspacesLine request={codeWorkspaceRequest} connected={props.enabled} value={automationWorkspace(d.definition)} refreshKey={d.summary.revision ?? ""} /> : null}
+            onEditWorkspaces={props.onEditWorkspaces ? () => props.onEditWorkspaces?.(d.automationId) : undefined}
             onOpenFolder={() => {
               setFolder({ automationId, runId: "" });
               if (!panels.folder) togglePanel("folder");
@@ -393,8 +400,13 @@ export function NewAutomationDialog(props: {
   onCreated(id: string): void;
   /** Opens the gateway console's My email ("Email isn't set up — open My email"). */
   onOpenMyEmail?: () => void;
+  /** Signed in to the gateway (the Workspaces section reads the gateway's dry run). */
+  connected?: boolean;
 }): React.ReactElement | null {
   const [error, setError] = useState<ApiError | undefined>();
+  // Workspaces (R13.2): this new automation's own workspaces; null = "Use my default".
+  const [workspace, setWorkspace] = useState<RunWorkspace | null>(null);
+  useEffect(() => { if (!props.open) setWorkspace(null); }, [props.open]);
   const [preparing, setPreparing] = useState(false);
   const submitting = useRef(false);
   const [chosenTarget, setChosenTarget] = useState<AutomationTarget>();
@@ -419,6 +431,7 @@ export function NewAutomationDialog(props: {
         </p>
       }
       initialPrompt={props.initialPrompt}
+      workspaces={<CodeWorkspaceFolders connected={props.connected !== false} automation={{ value: workspace, onChange: setWorkspace }} idPrefix="code-new-automation-workspace" />}
       emailStatus={props.ctl.state.emailStatus}
       onOpenMyEmail={props.onOpenMyEmail}
       busy={props.ctl.state.busy || preparing}
@@ -429,8 +442,10 @@ export function NewAutomationDialog(props: {
         setPreparing(true);
         try {
           const built = await props.buildInput?.(String(body.target.input_data?.prompt || ""), chosenTarget);
-          const input = built && props.availableTools !== undefined ? withAutomationTools(built, automationToolSelection(body.target.input_data)) : built;
-          const created = await props.ctl.create(input ? { ...body, target: { ...body.target, input_data: input } } : body);
+          const tooled = built && props.availableTools !== undefined ? withAutomationTools(built, automationToolSelection(body.target.input_data)) : built;
+          // The Workspaces section's value rides the definition (target.input_data.workspace).
+          const input = withAutomationWorkspace(tooled || body.target.input_data, workspace);
+          const created = await props.ctl.create({ ...body, target: { ...body.target, input_data: input } });
           props.onCreated(created.automation_id);
           props.onClose();
           return created;

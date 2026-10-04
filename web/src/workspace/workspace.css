@@ -3230,3 +3230,21 @@ select option {
 @media (max-width: 767.98px) {
   .code-archive-confirm-bar { padding: 8px 12px; }
 }
+
+/* Workspaces (R13.2): the automation's one line, "Workspaces: <summary>"
+   (the gateway's words), and the icon that opens its Workspace panel. Paths wrap. */
+.code-auto-header__workspaces-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.code-auto-header__workspaces {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--font-size-xs, 12px);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  padding-top: 4px;
+}

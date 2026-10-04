@@ -83,6 +83,8 @@ export type CodeWorkspaceFoldersProps = {
   sessionId?: string;
   /** Set for an automation: its stored payload and the setter that saves a new revision (run level). */
   automation?: { value: RunWorkspace | null; onChange: (next: RunWorkspace | null) => void };
+  /** The chooser's id prefix (run level; default "code-workspace-automation"), so two run-level choosers never share ids. */
+  idPrefix?: string;
   /** Opens "My default workspaces" (the account level). */
   onOpenDefaults?: () => void;
   /** Bumped when the account default changed (the session's "Use my default" view follows it). */
@@ -197,13 +199,13 @@ export function useRunWorkspaceLevel(
   return { effective, error, onChange };
 }
 
-function CodeRunWorkspaces({ connected, automation, request = codeWorkspaceRequest }: CodeWorkspaceFoldersProps & { automation: NonNullable<CodeWorkspaceFoldersProps["automation"]> }) {
+function CodeRunWorkspaces({ connected, automation, idPrefix = "code-workspace-automation", request = codeWorkspaceRequest }: CodeWorkspaceFoldersProps & { automation: NonNullable<CodeWorkspaceFoldersProps["automation"]> }) {
   const run = useRunWorkspaceLevel(connected, automation.value, automation.onChange, request);
   const unavailable = connected ? null : DISCONNECTED;
   return (
     <WorkspaceChooser
       level="run"
-      idPrefix="code-workspace-automation"
+      idPrefix={idPrefix}
       value={automation.value}
       effective={run.effective}
       onChange={run.onChange}

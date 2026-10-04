@@ -514,6 +514,11 @@ export function CodeWorkspace() {
     setAssistantOpen(false);
     setRailPanel("workflow");
   };
+  /** The automation header's "Change workspaces": the same, on the rail's Workspace panel (its chooser). */
+  const openAutomationWorkspaces = (automationId: string) => {
+    openAutomationSettings(automationId);
+    setRailPanel("workspace");
+  };
   /** A new automation target is checked against that workflow's input schema before a revision is sent. */
   const prepareAutomationTargetForCode = async (target: AutomationTarget): Promise<AutomationTarget> => {
     const next = target.flow_id === "@default" ? defaultWorkflow : catalog.workflows.find(w => `${w.bundleId}@${w.bundleVersion}` === ("bundle_ref" in target ? target.bundle_ref : "") && w.flowId === target.flow_id);
@@ -1707,6 +1712,7 @@ export function CodeWorkspace() {
               enabled={connection.connected}
               onClose={() => setAutomationView(false)}
               onEdit={openAutomationSettings}
+              onEditWorkspaces={openAutomationWorkspaces}
             />
           ) : (
           <main
@@ -2050,6 +2056,7 @@ export function CodeWorkspace() {
         }}
       />
       <NewAutomationDialog
+        connected={connection.connected}
         workflowPickerOptions={{ interfaceId: CODE_AGENT_INTERFACE, workflows: { ...catalog.executable, reload: () => void catalog.refresh() } }}
         open={newAutomationOpen}
         onClose={() => setNewAutomationOpen(false)}

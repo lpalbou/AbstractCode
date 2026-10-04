@@ -70,6 +70,10 @@ export function AutomationHeaderBar(props: {
   onOpenFolder(): void;
   /** Copies the folder's full path; resolves true when it reached the clipboard. */
   onCopyPath(path: string): Promise<boolean>;
+  /** The automation's "Workspaces: <summary>" line (R13.2). */
+  workspaces?: React.ReactNode;
+  /** Opens the Workspace panel on this automation (its chooser). */
+  onEditWorkspaces?(): void;
 }): React.ReactElement {
   const s = props.summary;
   const controls = automationControls(s, props.occurrences, props.busy);
@@ -150,6 +154,16 @@ export function AutomationHeaderBar(props: {
           >
             <Icon name="copy" size={15} />
           </button>
+        </div>
+      ) : null}
+      {props.workspaces ? (
+        <div className="code-auto-header__workspaces-row" data-section="workspaces">
+          {props.workspaces}
+          {props.onEditWorkspaces ? (
+            <button type="button" className="code-icon-button" data-action="edit-workspaces" aria-label="Change workspaces" title="Change workspaces" onClick={props.onEditWorkspaces}>
+              <Icon name="edit" size={15} />
+            </button>
+          ) : null}
         </div>
       ) : null}
       {confirmingArchive ? (
