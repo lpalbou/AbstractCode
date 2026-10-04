@@ -1406,7 +1406,7 @@ The **Workflow** picker lists workflows authorized by the gateway for `abstractc
 
 The panel width is resizable on wide screens (drag the panel's left edge, or focus it and use the arrow keys) and remembered with the open panel. The upper-right **About** widget is the shared AbstractFramework About: the app name and version, the AbstractFramework and AbstractGateway versions the connected gateway reports (or why one is missing), links (website, source, docs, issues, feedback, contact) and the author/licence line — no package list. See [Responsive layout](#responsive-layout).
 
-The standard upper-right controls remain available: **Code assistant**, **Appearance**, **About** and gateway connection. Next to the conversation's title, **⋯** holds **Archive** (see [Archiving a conversation](#archiving-a-conversation)). The assistant answers questions using the bundled app documentation, in its own gateway session with no tools; it does not inherit the conversation’s settings or attachments. Closing its drawer preserves its conversation.
+The standard upper-right controls remain available: **Docs assistant** (book icon), **Appearance**, **About** and gateway connection. Next to the conversation's title, **⋯** holds **Archive** (see [Archiving a conversation](#archiving-a-conversation)). The Docs assistant is the same chat as the gateway console and the other apps: it answers from AbstractCode's llms.txt (this app serves it at `/llms.txt`; the gateway reads it at `GET /api/gateway/docs/corpus?app=code`) through the gateway's docs-qa workflow, in its own gateway session; it does not inherit the conversation’s settings or attachments. You can attach files to a question, the answer streams when the gateway's **Streamed replies** setting is on, each message has **Copy**, and the icon at the top starts a new conversation. Closing its drawer preserves its conversation.
 
 MTP depth is independent of reasoning. Leave it on **Inherit** to follow workflow and
 execution-host defaults, choose **Off** to send an explicit `false`, or request an advertised
@@ -3681,10 +3681,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Requires AbstractGateway 0.13.0 or later for archiving conversations, the
 **Archived · N** lists and the gateway's default voice routes. The web client
 builds against `@abstractframework/ui-kit` ^0.8.0 and
-`@abstractframework/panel-chat` ^0.3.1.
+`@abstractframework/panel-chat` ^0.4.0.
 
 ### Added
 
+- web: the **Docs assistant** (book icon in the top bar) is the kit's shared `DocsAssistantDrawer`, the same chat as the gateway console and the other apps: your question on the right, the answer on the left with Markdown, code, JSON and links, copy, attachments, live streaming, an icon-only New conversation and close. It answers from AbstractCode's llms.txt (served by this app at `/llms.txt`, read by the gateway at `docs/corpus?app=code`) through the gateway's docs-qa workflow, replacing the basic-agent run over bundled guide pages.
 - web: **Archive** a conversation from its card's **⋯** or from the **⋯** next to its title in the header, with an inline confirmation ("Archive this conversation? It stays searchable and auditable; it just leaves this list."). It calls `POST /api/gateway/sessions/{id}/archive` (nothing is deleted); the conversation moves under **Archived · N** with **Unarchive**, and archiving the open conversation opens the next one.
 - web: a quiet **Archived · N** line at the end of each sidebar list (automations and conversations) shows the archived items inline, each with **Unarchive**; N is the gateway's count (`archived_automations`, `archived_sessions`), the line is absent at 0 and its open state is remembered.
 - web: the right panel is a vertical rail at the right edge with **Activity**, **Files**, **Model**, **Workflow**, **Workspace**, **Tools**, **Skills** and **Voice**; a click opens the panel beside the rail (docked and resizable from 1024 px, the width remembered; floating below), the open icon folds it back.

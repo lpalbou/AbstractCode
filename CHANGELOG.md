@@ -12,10 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Requires AbstractGateway 0.13.0 or later for archiving conversations, the
 **Archived · N** lists and the gateway's default voice routes. The web client
 builds against `@abstractframework/ui-kit` ^0.8.0 and
-`@abstractframework/panel-chat` ^0.3.1.
+`@abstractframework/panel-chat` ^0.4.0.
 
 ### Added
 
+- web: the **Docs assistant** (book icon in the top bar) is the kit's shared `DocsAssistantDrawer`, the same chat as the gateway console and the other apps: your question on the right, the answer on the left with Markdown, code, JSON and links, copy, attachments, live streaming, an icon-only New conversation and close. It answers from AbstractCode's llms.txt (served by this app at `/llms.txt`, read by the gateway at `docs/corpus?app=code`) through the gateway's docs-qa workflow, replacing the basic-agent run over bundled guide pages.
 - web: **Archive** a conversation from its card's **⋯** or from the **⋯** next to its title in the header, with an inline confirmation ("Archive this conversation? It stays searchable and auditable; it just leaves this list."). It calls `POST /api/gateway/sessions/{id}/archive` (nothing is deleted); the conversation moves under **Archived · N** with **Unarchive**, and archiving the open conversation opens the next one.
 - web: a quiet **Archived · N** line at the end of each sidebar list (automations and conversations) shows the archived items inline, each with **Unarchive**; N is the gateway's count (`archived_automations`, `archived_sessions`), the line is absent at 0 and its open state is remembered.
 - web: the right panel is a vertical rail at the right edge with **Activity**, **Files**, **Model**, **Workflow**, **Workspace**, **Tools**, **Skills** and **Voice**; a click opens the panel beside the rail (docked and resizable from 1024 px, the width remembered; floating below), the open icon folds it back.
