@@ -158,7 +158,7 @@ fn run(client: &GatewayClient, wake: &WakeHandle, store: Store, cmd: RailCmd) {
             // revision someone else saved). The gateway applies a revision
             // moments after accepting it, so re-read now and twice more —
             // the web's +1.5 s / +4 s re-reads.
-            for pause in [0u64, 1500, 2500] {
+            for pause in [0u64, 1500, 2500, 4000] {
                 std::thread::sleep(std::time::Duration::from_millis(pause));
                 let detail = auto_client.detail(&id);
                 let id = id.clone();

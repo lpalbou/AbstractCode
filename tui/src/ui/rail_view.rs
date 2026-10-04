@@ -1083,6 +1083,21 @@ pub fn open_rail(cx: Scope, store: Store, ctx: &UiCtx, binding: Binding, panel: 
         });
         let open = mcx.signal(Vec::<(String, bool)>::new());
         let binding2 = binding.clone();
+        // Bound to an automation: re-read its definition while the panels
+        // are open (owned by the modal scope — nothing ticks once closed).
+        if let Binding::Automation(id) = &binding {
+            let ctx = ctx2.clone();
+            let id = id.clone();
+            let _ = abstracttui::reactive::interval(
+                mcx,
+                std::time::Duration::from_secs(15),
+                move || {
+                    ctx.send(Cmd::Automations(
+                        crate::gateway::automations::AutoCmd::Open { id: id.clone() },
+                    ));
+                },
+            );
+        }
         // An automation run's activity is read when its group is open.
         {
             let ctx = ctx2.clone();

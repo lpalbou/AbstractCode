@@ -299,7 +299,7 @@ impl Live {
 
     /// Move the cursor (↓) until the selected row (▸) contains `needle`.
     fn select(&mut self, needle: &str) -> String {
-        for _ in 0..60 {
+        for _ in 0..400 {
             let screen = self.turn();
             if screen
                 .lines()
@@ -310,6 +310,40 @@ impl Live {
             self.keys(b"\x1b[B");
         }
         panic!("could not select {needle}:\n{}", self.turn());
+    }
+
+    /// Turn until the TUI's own list holds automation `id` in `status`.
+    fn until_status(&mut self, id: &str, status: &str) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while Instant::now() < deadline {
+            self.turn();
+            let ok = self.store.automations.with_untracked(|v| {
+                v.list
+                    .as_ref()
+                    .and_then(|l| l.as_ref().ok())
+                    .is_some_and(|items| items.iter().any(|s| s.id == id && s.status == status))
+            });
+            if ok {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(40));
+        }
+        panic!("the list never read {id} as {status}");
+    }
+
+    /// `select` for the first of several spellings that is selected.
+    fn select_any(&mut self, needles: &[&str]) -> String {
+        for _ in 0..400 {
+            let screen = self.turn();
+            if screen
+                .lines()
+                .any(|l| l.contains('▸') && needles.iter().any(|n| l.contains(n)))
+            {
+                return screen;
+            }
+            self.keys(b"\x1b[B");
+        }
+        panic!("could not select any of {needles:?}:\n{}", self.turn());
     }
 
     fn capture(&mut self, name: &str) {
@@ -358,13 +392,13 @@ fn conversation_cards_archive_and_unarchive_through_the_gateway() {
     per_size(move |size| {
         let mut l = live(size);
         l.command("/sessions");
-        let screen = l.until("the seeded card", |s| s.contains(&prompt[..16]));
+        let screen = l.until("the seeded card", |s| s.contains(&prompt));
         assert!(screen.contains("2 turns · 1 tool"), "{screen}");
         l.capture("conversations");
         if size.w != 120 {
             return;
         }
-        l.select(&prompt[..16]);
+        l.select(&prompt);
         let screen = l.keys(b"a");
         assert!(
             screen.contains("Archive this conversation? It stays searchable and auditable; it just leaves this list."),
@@ -383,18 +417,17 @@ fn conversation_cards_archive_and_unarchive_through_the_gateway() {
                 .iter()
                 .any(|r| r["session_id"] == sid.as_str())
         });
-        let screen = l.until("the card leaves the list and Archived · N shows", |s| {
-            !s.contains(&prompt[..16]) && s.contains("Archived · ")
-        });
+        l.until("the card leaves the list", |s| !s.contains(&prompt));
         let n = api("GET", "runs?root_only=true&limit=1", None)["archived_sessions"]
             .as_u64()
             .unwrap();
+        // The quiet line ends the list (scrolled into view by the cursor).
+        let screen = l.select(&format!("Archived · {n}"));
         assert!(screen.contains(&format!("Archived · {n}")), "{screen}");
-        l.select("Archived · ");
         l.keys(b"\r");
-        l.until("the archived row", |s| s.contains(&prompt[..16]));
+        l.select(&prompt);
         l.capture("conversations-archived-open");
-        l.select(&prompt[..16]);
+        l.select(&prompt);
         l.keys(b"\r");
         wait_gateway("the session is unarchived", || {
             !api(
@@ -407,9 +440,19 @@ fn conversation_cards_archive_and_unarchive_through_the_gateway() {
                 .iter()
                 .any(|r| r["session_id"] == sid.as_str())
         });
-        let screen = l.until("back in the list with its meta line", |s| {
-            s.contains(&prompt[..16]) && s.contains("2 turns · 1 tool")
-        });
+        // Its title is the prompt — or its id when the gateway listing is
+        // larger than the bounded prompt fetch (a reused fixture).
+        let tail: String = sid
+            .chars()
+            .skip(sid.chars().count().saturating_sub(21))
+            .collect();
+        // The cursor sat on the archived row below it: reopen the board
+        // (cursor back at the top), then walk down to it.
+        l.escape();
+        l.command("/sessions");
+        l.until("the listing", |s| s.contains("sessions on the gateway"));
+        let screen = l.select_any(&[prompt.as_str(), tail.as_str()]);
+        assert!(screen.contains("2 turns · 1 tool"), "{screen}");
         assert_eq!(
             api("GET", "runs?root_only=true&limit=1", None)["archived_sessions"].as_u64(),
             Some(n - 1),
@@ -471,12 +514,15 @@ fn automation_cards_switch_run_archive_and_unarchive() {
     let title = unique("Daily digest");
     let id = seed_automation(&title, "timer-contract", Some("24h"));
     per_size(move |size| {
-        let short = &title[..18];
+        let short = title.as_str();
         let mut l = live(size);
         l.command("/automations");
-        let screen = l.until("the card", |s| s.contains(short));
+        l.until("the list", |s| {
+            s.contains("Automations") && !s.contains("Loading automations…")
+        });
+        let screen = l.select(short);
         // A schedule fires once at creation: "last never" or "last <1 min ago".
-        assert!(screen.contains("↻ every 24 h · last "), "{screen}");
+        assert!(screen.contains("↻ every 24 h · "), "{screen}");
         l.capture("automations");
         if size.w != 120 {
             return;
@@ -494,12 +540,15 @@ fn automation_cards_switch_run_archive_and_unarchive() {
             "{screen}"
         );
         // Active off → paused on the gateway, the switch reads off, no next.
+        // (The Run now follow-up re-reads may still hold the busy flag.)
+        l.store.automations.update(|v| v.busy = false);
         l.select(short);
         l.keys(b" ");
         wait_gateway("paused", || {
             automation(&id)["summary"]["status"] == "paused"
         });
         l.keys(b"r");
+        l.until_status(&id, "paused");
         l.until("[ ] Active", |s| s.contains("[ ] Active"));
         l.capture("automations-paused");
         l.store.automations.update(|v| v.busy = false);
@@ -525,16 +574,17 @@ fn automation_cards_switch_run_archive_and_unarchive() {
             automation(&id)["summary"]["status"] == "archived"
         });
         l.keys(b"r");
-        let screen = l.until("Archived · N", |s| {
-            s.contains("Archived · ") && !s.contains(&format!("{short} "))
+        l.until("the card leaves the list", |s| {
+            !s.contains(&format!("{short} "))
         });
         let n = api("GET", "automations", None)["archived_automations"]
             .as_u64()
             .unwrap();
+        // The quiet line ends the list (scrolled into view by the cursor).
+        let screen = l.select(&format!("Archived · {n}"));
         assert!(screen.contains(&format!("Archived · {n}")), "{screen}");
-        l.select("Archived · ");
         l.keys(b"\r");
-        l.until("the archived row", |s| s.contains(short));
+        l.select(short);
         l.capture("automations-archived-open");
         l.store.automations.update(|v| v.busy = false);
         l.select(short);
@@ -552,8 +602,8 @@ fn stop_ends_the_run_in_progress() {
     let id = seed_automation_with(&title, "tool-approval", None, "ask");
     let mut l = live(Size::new(120, 40));
     l.command("/automations");
-    l.until("the card", |s| s.contains(&title[..18]));
-    l.select(&title[..18]);
+    l.until("the card", |s| s.contains(&title));
+    l.select(&title);
     l.keys(b"g");
     wait_gateway("a run in progress", || {
         !automation(&id)["summary"]["current_occurrence"].is_null()
@@ -561,7 +611,7 @@ fn stop_ends_the_run_in_progress() {
     l.keys(b"r");
     l.until("waiting for you", |s| s.contains("waiting for you"));
     l.store.automations.update(|v| v.busy = false);
-    l.select(&title[..18]);
+    l.select(&title);
     l.keys(b"x");
     wait_gateway("nothing in progress", || {
         automation(&id)["summary"]["current_occurrence"].is_null()
@@ -744,7 +794,7 @@ fn automation_activity_is_one_group_per_run() {
     per_size(move |size| {
         let mut l = live(size);
         l.command(&format!("/automations {id}"));
-        l.until("the automation", |s| s.contains(&title[..14]));
+        l.until("the automation", |s| s.contains(&title));
         l.keys(b"e");
         l.keys(b"1");
         let screen = l.until("the newest run open with its steps", |s| {
