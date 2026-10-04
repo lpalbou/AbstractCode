@@ -41,7 +41,7 @@ export interface NormalizeWorkflowCatalogOptions {
 /** GET /workspace/policy, as Code uses it (round 9: the folder model lives in the kit WorkspaceChooser). */
 export interface WorkspacePolicy {
   raw: JsonObject;
-  /** The gateway's shared workspace (every conversation gets its own folder in it). */
+  /** The gateway's shared workspace (each conversation works in its own private folder, not in it). */
   sharedWorkspace?: string;
   maxAttachmentBytes?: number;
 }
