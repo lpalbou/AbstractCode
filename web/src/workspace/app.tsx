@@ -1686,7 +1686,7 @@ export function CodeWorkspace() {
             />
           ) : null}
           <AfTopBarActions
-            assistant={{ open: assistantOpen, onToggle: () => { setAssistantOpen(open => !open); setPanelOpen(false); setSidebarOpen(false); }, label: "Code assistant (docs-grounded)" }}
+            docs={{ open: assistantOpen, onToggle: () => { setAssistantOpen(open => !open); setPanelOpen(false); setSidebarOpen(false); }, label: "Docs assistant" }}
             appearance={{ onOpen: () => setAppearanceOpen(true) }}
             about={{ identity: APP_IDENTITY, versions: aboutVersions(gatewayAbout), onOpen: refreshGatewayAbout }}
             connection={{ phase: connection.phase, signingOut: connection.signingOut,

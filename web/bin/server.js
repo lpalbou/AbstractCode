@@ -53,6 +53,8 @@ const MIME_TYPES = {
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
   ".webmanifest": "application/manifest+json",
+  // llms.txt (dist/llms.txt): the gateway reads it for the Docs assistant.
+  ".txt": "text/plain; charset=utf-8",
 };
 
 function sendJson(res, status, payload) {
