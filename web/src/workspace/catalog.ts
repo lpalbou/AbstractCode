@@ -56,8 +56,20 @@ export interface ToolSpec {
   enableGate?: string;
   whyDisabled?: string;
   inputSchema?: JsonSchema;
+  /**
+   * The gateway's command-sandbox state of a process-spawning tool (R12.1):
+   * the row's `sandbox` text verbatim, the answer's `command_sandbox.sentence`
+   * as its explanation. Absent on every tool the gateway does not mark.
+   */
+  sandboxState?: ToolSandboxState;
   raw: JsonObject;
 }
+
+export type ToolSandboxState = {
+  label: string;
+  tooltip?: string;
+  tone: "ok" | "warn" | "danger";
+};
 
 export type SessionState =
   | "waiting"
@@ -440,8 +452,19 @@ export function normalizeWorkspacePolicy(value: unknown): WorkspacePolicy {
   };
 }
 
+/** The state of a tool the gateway marks as process-spawning (`sandboxed` + `sandbox`), with the
+ * answer's `command_sandbox` sentence; undefined for every other tool (no client-side guess). */
+function toolSandboxState(item: JsonObject, commandSandbox: JsonObject | undefined): ToolSandboxState | undefined {
+  const label = text(item.sandbox);
+  if (!label || typeof item.sandboxed !== "boolean") return undefined;
+  const sentence = text(commandSandbox?.sentence);
+  const tone = item.sandboxed ? "ok" : text(commandSandbox?.state) === "unsandboxed" ? "danger" : "warn";
+  return { label, ...(sentence ? { tooltip: sentence } : {}), tone };
+}
+
 export function normalizeToolCatalog(value: unknown): ToolSpec[] {
   const items = responseItems(value, ["items", "tools"]);
+  const commandSandbox = record(record(value)?.command_sandbox);
   const seen = new Set<string>();
   const tools: ToolSpec[] = [];
   for (const rawItem of items) {
@@ -490,6 +513,7 @@ export function normalizeToolCatalog(value: unknown): ToolSpec[] {
         ? { whyDisabled: text(item.why_disabled ?? item.whyDisabled) }
         : {}),
       ...(inputSchema ? { inputSchema } : {}),
+      ...(toolSandboxState(item, commandSandbox) ? { sandboxState: toolSandboxState(item, commandSandbox) } : {}),
       raw: { ...item },
     });
   }

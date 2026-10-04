@@ -1,0 +1,203 @@
+{
+ "_source": "execute_command record: GET /api/gateway/runs/{id}/ledger of a scratch gateway (gateway 68eaaa2, runtime b7c9feb, core 289528d; macOS sandbox-exec; one-off workspace: /Users/ada/home refused, /Users/ada/home/work/project rw, /Users/ada ro), paths rewritten; refused record: the runtime's TOOL_CALLS result with no host sandbox (fail closed); read_file: a tool without a sandbox.",
+ "records": [
+  {
+   "run_id": "fecda8e7-1924-46f7-b142-6be720db8950",
+   "step_id": "8d62b3ff-8f72-42d7-923f-f616f99bad64",
+   "node_id": "tools",
+   "status": "completed",
+   "effect": {
+    "type": "tool_calls",
+    "payload": {
+     "type": "tool_calls",
+     "tool_calls": [
+      {
+       "name": "execute_command",
+       "arguments": {
+        "command": "ls -la /Users/ada/home/Desktop/; ls /Users/ada/home/work/project"
+       },
+       "runtime_call_id": "rtcall_309e0f2707e3fcf18c42e5a481f69427_1",
+       "call_id": "rtcall_309e0f2707e3fcf18c42e5a481f69427_1"
+      }
+     ],
+     "resume_to_node": "end"
+    },
+    "result_key": "_temp.effects.tools"
+   },
+   "result": {
+    "mode": "executed",
+    "results": [
+     {
+      "call_id": "rtcall_309e0f2707e3fcf18c42e5a481f69427_1",
+      "runtime_call_id": "rtcall_309e0f2707e3fcf18c42e5a481f69427_1",
+      "name": "execute_command",
+      "success": true,
+      "output": {
+       "success": true,
+       "error": null,
+       "command": "ls -la /Users/ada/home/Desktop/; ls /Users/ada/home/work/project",
+       "platform": "Darwin",
+       "working_directory": "/srv/gateway/data/workspaces/e04124f4ec82",
+       "duration_s": 0.08096718788146973,
+       "return_code": 0,
+       "stdout": "child-file.txt\n",
+       "stderr": "ls: /Users/ada/home/Desktop/: Operation not permitted\n",
+       "stdout_preview": "child-file.txt\n",
+       "stderr_preview": "ls: /Users/ada/home/Desktop/: Operation not permitted\n",
+       "stdout_truncated": false,
+       "stderr_truncated": false,
+       "rendered": "\ud83d\udda5\ufe0f  Command executed on Darwin\n\ud83d\udcbb Command: ls -la /Users/ada/home/Desktop/; ls /Users/ada/home/work/project\n\ud83d\udcc1 Working directory: /srv/gateway/data/workspaces/e04124f4ec82\n\u23f1\ufe0f  Execution time: 0.08s\n\ud83d\udd22 Return code: 0\nSandbox: macOS sandbox-exec\n\n\ud83d\udce4 STDOUT:\nchild-file.txt\n\n\n\u274c STDERR:\nls: /Users/ada/home/Desktop/: Operation not permitted\n\n\n\u2705 Command completed successfully",
+       "sandbox": {
+        "kind": "macos-sandbox-exec",
+        "label": "macOS sandbox-exec",
+        "posture": "any_except_denied",
+        "default_mode": "rw",
+        "private_workspace": "/srv/gateway/data/workspaces/e04124f4ec82",
+        "tmpdir": "/srv/gateway/data/workspaces/e04124f4ec82/.tmp",
+        "allowed": [
+         {
+          "path": "/Users/ada/home/work/project",
+          "mode": "rw"
+         },
+         {
+          "path": "/Users/ada",
+          "mode": "ro"
+         }
+        ],
+        "refused": [
+         "/Users/ada/home"
+        ],
+        "builtin_refused": 12
+       }
+      },
+      "error": null
+     }
+    ]
+   },
+   "error": null,
+   "started_at": "2026-10-04T21:04:54.724478+00:00",
+   "ended_at": "2026-10-04T21:04:54.724520+00:00",
+   "actor_id": "gateway",
+   "session_id": "fecda8e7-1924-46f7-b142-6be720db8950",
+   "attempt": 1,
+   "idempotency_key": "309e0f2707e3fcf18c42e5a481f69427",
+   "prev_hash": null,
+   "record_hash": null,
+   "signature": null
+  },
+  {
+   "run_id": "fecda8e7-1924-46f7-b142-6be720db8950",
+   "step_id": "refused-step",
+   "node_id": "tools",
+   "status": "completed",
+   "effect": {
+    "type": "tool_calls",
+    "payload": {
+     "type": "tool_calls",
+     "tool_calls": [
+      {
+       "name": "execute_command",
+       "arguments": {
+        "command": "ls /"
+       },
+       "runtime_call_id": "rtcall_refused_1",
+       "call_id": "rtcall_refused_1"
+      }
+     ],
+     "resume_to_node": "end"
+    },
+    "result_key": "_temp.effects.tools"
+   },
+   "result": {
+    "mode": "executed",
+    "results": [
+     {
+      "call_id": "rtcall_refused_1",
+      "runtime_call_id": "rtcall_refused_1",
+      "name": "execute_command",
+      "success": false,
+      "output": {
+       "success": false,
+       "error": "Commands are not sandboxed on this gateway host, so they are refused: install bubblewrap (bwrap); Landlock cannot express \"Allow everything, refuse listed workspaces\". The host can re-enable them with `serve --unsandboxed-commands`.",
+       "sandbox": {
+        "kind": "none",
+        "label": "none",
+        "reason": "install bubblewrap (bwrap); Landlock cannot express \"Allow everything, refuse listed workspaces\"",
+        "posture": "any_except_denied",
+        "default_mode": "rw",
+        "private_workspace": "/srv/gateway/data/workspaces/7f3a",
+        "tmpdir": "/srv/gateway/data/workspaces/7f3a/.tmp",
+        "allowed": [],
+        "refused": [
+         "/Users/ada/home"
+        ],
+        "builtin_refused": 0
+       },
+       "rendered": "Commands are not sandboxed on this gateway host, so they are refused.\nSandbox: none \u2014 commands refused on this host",
+       "command": "ls /",
+       "platform": "Linux",
+       "working_directory": "/srv/gateway/data/workspaces/7f3a"
+      },
+      "error": "Commands are not sandboxed on this gateway host, so they are refused: install bubblewrap (bwrap); Landlock cannot express \"Allow everything, refuse listed workspaces\". The host can re-enable them with `serve --unsandboxed-commands`."
+     }
+    ]
+   },
+   "error": null,
+   "started_at": "2026-10-04T21:04:54.724478+00:00",
+   "ended_at": "2026-10-04T21:04:54.724520+00:00",
+   "actor_id": "gateway",
+   "session_id": "fecda8e7-1924-46f7-b142-6be720db8950",
+   "attempt": 1,
+   "idempotency_key": "309e0f2707e3fcf18c42e5a481f69427",
+   "prev_hash": null,
+   "record_hash": null,
+   "signature": null
+  },
+  {
+   "run_id": "fecda8e7-1924-46f7-b142-6be720db8950",
+   "step_id": "plain-step",
+   "node_id": "tools",
+   "status": "completed",
+   "effect": {
+    "type": "tool_calls",
+    "payload": {
+     "type": "tool_calls",
+     "tool_calls": [
+      {
+       "name": "read_file",
+       "arguments": {
+        "file_path": "/Users/ada/home/work/project/child-file.txt"
+       },
+       "runtime_call_id": "rtcall_plain_1",
+       "call_id": "rtcall_plain_1"
+      }
+     ],
+     "resume_to_node": "end"
+    },
+    "result_key": "_temp.effects.tools"
+   },
+   "result": {
+    "mode": "executed",
+    "results": [
+     {
+      "call_id": "rtcall_plain_1",
+      "runtime_call_id": "rtcall_plain_1",
+      "name": "read_file",
+      "success": true,
+      "output": "child\n"
+     }
+    ]
+   },
+   "error": null,
+   "started_at": "2026-10-04T21:04:54.724478+00:00",
+   "ended_at": "2026-10-04T21:04:54.724520+00:00",
+   "actor_id": "gateway",
+   "session_id": "fecda8e7-1924-46f7-b142-6be720db8950",
+   "attempt": 1,
+   "idempotency_key": "309e0f2707e3fcf18c42e5a481f69427",
+   "prev_hash": null,
+   "record_hash": null,
+   "signature": null
+  }
+ ]
+}

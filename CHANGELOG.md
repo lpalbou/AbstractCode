@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Requires the AbstractGateway round-11 workspace model (`/api/gateway/sessions/{id}/workspaces`, `/api/gateway/workspace/policy/me`, `POST /api/gateway/workspace/effective/me`) and `@abstractframework/ui-kit` 0.8.3.
 
+### Added
+
+- web: the command sandbox (AbstractGateway round 12). **Tools**: the process-spawning tools show the gateway's state on their card (`sandboxed` / `sandbox` of `GET /api/gateway/discovery/tools`, verbatim: **Sandboxed to this run's workspaces**, or the refused / unsandboxed state), with the gateway's `command_sandbox.sentence` in the kit tooltip; no state is ever derived in the app. **Activity** (and the transcript's tool cards): each command call shows one line first in its detail — `Sandbox: macOS sandbox-exec · 4 workspaces enforced` or `Sandbox: none — refused` — and the enforced paths, from the ledger's `output.sandbox`. Needs `@abstractframework/ui-kit` 0.8.5 (tool state badge) and `@abstractframework/panel-chat` 0.4.1 (the sandbox line).
+
 ### Changed
 
 - web: the **Workspace** panel shows THIS conversation's workspaces (the kit `WorkspaceChooser`, session level, the same words as the gateway console, Flow, Observer and the AbstractAssistant): "Gateway: <the admin's eligible workspaces>" on top, **Use my default**, the posture ("Deny everything, allow listed workspaces" / "Allow everything, refuse listed workspaces"), each workspace with Read-only / Read & write / Refused (a mode above the gateway's cap disabled with its tooltip), **Add a workspace path**, and the effective line verbatim. Each change is one `PUT /api/gateway/sessions/{id}/workspaces`: the gateway stores the choice on the session, so every app opening the conversation sees it; **Use my default** sends `{configured: false}`. A refusal shows the gateway's sentence with "Not saved.". **Current workspace session-…** (the private workspace) stays on top.

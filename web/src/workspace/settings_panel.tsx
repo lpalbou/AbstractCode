@@ -236,6 +236,8 @@ export function SettingsContent({
                 .filter((tool) => tool.enabled)
                 .map((tool) => ({
                   ...tool,
+                  // The gateway's command-sandbox state of a process-spawning tool, on its card.
+                  ...(tool.sandboxState ? { state: tool.sandboxState } : {}),
                   default_approval:
                     resolveToolPermissions(tools, value.tools, value.permissions).autoApproveTools.includes(tool.name)
                       ? "approve"

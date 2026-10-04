@@ -13,12 +13,12 @@ Archiving a conversation, the **Archived · N** lines and the gateway's default 
 
 | Panel | What it shows |
 |---|---|
-| Activity | The run as the transcript shows it — model steps, tool calls, approvals — in foldable groups, one per agent iteration, the newest open. For an automation: one group per run (newest first, the latest open); opening a group reads that run's steps from the gateway. |
+| Activity | The run as the transcript shows it — model steps, tool calls, approvals — in foldable groups, one per agent iteration, the newest open. Each command call shows, first in its detail, the sandbox it ran under, from the run ledger: `Sandbox: macOS sandbox-exec · 3 workspaces enforced` (the kind the gateway recorded and the number of workspaces it enforced, listed below with their mode: this run's folder, each allowed workspace Read-only or Read & write, each refused one, and the count of built-in protected folders), or `Sandbox: none — refused` when the host had no sandbox and the command did not run. For an automation: one group per run (newest first, the latest open); opening a group reads that run's steps from the gateway. |
 | Files | The conversation's private workspace: name, size, generated date (relative; the exact time on hover) and a download icon per file. Click a file to preview it. Generated outputs and attachments are listed below, with the same rows. |
 | Model | The shared model picker (route, reasoning, MTP depth), then **Behavior**: iteration limit, context token limit, additional instructions, **Stream replies**. |
 | Workflow | Which workflow runs (**Gateway default** until you pick one), then that workflow's **Inputs** and **Run workflow** / **Back to chat**. For an automation: its definition — workflow, title, task, schedule, context, tool approval, email result (one **Save**). |
 | Workspace | The current conversation workspace (its private workspace: short name, the full path as tooltip) and **Workspaces**: the workspaces THIS conversation uses — the gateway's line on top, **Use my default**, the posture, each workspace with Read & write / Read-only / Refused, **Add a workspace path**, the effective line — and the **My default workspaces** link. For an automation: the workspaces its runs use. |
-| Tools | Permissions and the shared tool policy (which tools, and when each asks you). |
+| Tools | Permissions and the shared tool policy (which tools, and when each asks you). The tools that start processes (`execute_command`, `shell_exec`, `local_helper_start`, `execute_python`) show the gateway's command-sandbox state on their card — **Sandboxed to this run's workspaces**, or the gateway's refused / unsandboxed state — with the gateway's explanation in the tooltip; the app shows what the gateway reports and never decides it. |
 | Skills | The gateway's skills, one switch each. |
 | Voice | Engines, output device and volume, microphone, read aloud and voice latency. |
 
