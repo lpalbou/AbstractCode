@@ -38,11 +38,9 @@ export interface NormalizeWorkflowCatalogOptions {
   includeDeprecated?: boolean;
 }
 
-/** GET /workspace/policy, as Code uses it (round 9: the folder model lives in the kit WorkspaceChooser). */
+/** GET /workspace/policy, as Code uses it (round 11: the workspace model lives in the kit WorkspaceChooser). */
 export interface WorkspacePolicy {
   raw: JsonObject;
-  /** The gateway's shared workspace (each conversation works in its own private folder, not in it). */
-  sharedWorkspace?: string;
   maxAttachmentBytes?: number;
 }
 
@@ -432,14 +430,12 @@ export function resolveRestoredWorkflow(
 export function normalizeWorkspacePolicy(value: unknown): WorkspacePolicy {
   const raw = record(value) ?? {};
   const policy = record(raw.policy) ?? raw;
-  const sharedWorkspace = text(policy.shared_workspace);
   const maxAttachmentBytes = finiteInteger(
     policy.max_attachment_bytes ?? policy.maxAttachmentBytes,
     1,
   );
   return {
     raw: { ...policy },
-    ...(sharedWorkspace ? { sharedWorkspace } : {}),
     ...(maxAttachmentBytes !== undefined ? { maxAttachmentBytes } : {}),
   };
 }

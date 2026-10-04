@@ -133,6 +133,9 @@ describe("the panel as Code shows it", () => {
     );
     expect(html).toContain('id="code-workspace-session"');
     expect(html).toContain("My default workspaces");
+    // The open session reaches the panel (it loads, it does not ask for a conversation).
+    expect(html).not.toContain("Open a conversation to choose its workspaces.");
+    expect(renderToStaticMarkup(<CodeSessionWorkspaces connected />)).toContain("Open a conversation to choose its workspaces.");
     expect(html).not.toMatch(/Access mode|Workspace root|Any folder|workspace_or_allowed/);
     const automation = renderToStaticMarkup(
       <SettingsContent tab="workspace" value={DEFAULT_PREFERENCES} onChange={() => {}} tools={[]} disabled={false} connected automationFolders workspaceRootFixed="/srv/gw/workspaces/automation-1" />,

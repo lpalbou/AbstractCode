@@ -54,7 +54,7 @@ export function WorkspaceFilesContent({
           This conversation
         </button>
         <button aria-pressed={filesMode === "shared"} onClick={() => setFilesMode("shared")}>
-          Shared workspace (admin)
+          Gateway files (admin)
         </button>
       </div>
     ) : null}
@@ -321,7 +321,7 @@ function OccurrenceBody({ occurrence, loadRecords, onOpenRun }: {
   );
 }
 
-/** The gateway operator's shared workspace root (`/files/list|search`,
+/** The gateway operator's files (`/files/list|search`,
  * admin-only). Clicking a file attaches it to the next message. */
 function SharedWorkspaceBrowser({
   policy,
@@ -383,8 +383,8 @@ function SharedWorkspaceBrowser({
       <div className="code-pane-intro">
         <Icon name="terminal" size={17} />
         <div>
-          <strong>Shared workspace (admin)</strong>
-          <span>{directory || "Authorized shared workspace"}</span>
+          <strong>Gateway files (admin)</strong>
+          <span>{directory || "The gateway's files"}</span>
         </div>
         <button className="code-icon-button" aria-label="Refresh files" onClick={() => setRevision((n) => n + 1)} disabled={!enabled}>
           <Icon name="refresh" size={14} />

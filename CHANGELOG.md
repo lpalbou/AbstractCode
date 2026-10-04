@@ -7,11 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Requires the AbstractGateway round-9 workspace model (`/api/gateway/workspace/policy/{account}`) and `@abstractframework/ui-kit` 0.8.1.
+Requires the AbstractGateway round-11 workspace model (`/api/gateway/sessions/{id}/workspaces`, `/api/gateway/workspace/policy/me`, `POST /api/gateway/workspace/effective/me`) and `@abstractframework/ui-kit` 0.8.2.
 
 ### Changed
 
-- web: the **Workspace** panel is the kit `WorkspaceChooser`, the same model and wording as the gateway console and the AbstractAssistant: the gateway's posture ("Deny everything, allow listed workspaces" / "Allow everything, refuse listed workspaces"), the shared workspace (always on, Read & write), the allowed and refused workspaces each with Read & write / Read-only / Refused (lower, never raise), under the second posture Everything else and Add a workspace path, and the gateway's line verbatim. A conversation edits your account's workspaces (`GET/PUT /api/gateway/workspace/policy/me`, one PUT per change, the gateway's refusal shown with "Not saved."); an automation stores its chosen set in `input_data.workspace_allowed_paths` (a new revision), following your account until changed.
+- web: the **Workspace** panel shows THIS conversation's workspaces (the kit `WorkspaceChooser`, session level, the same words as the gateway console, Flow, Observer and the AbstractAssistant): "Gateway: <the admin's eligible workspaces>" on top, **Use my default**, the posture ("Deny everything, allow listed workspaces" / "Allow everything, refuse listed workspaces"), each workspace with Read-only / Read & write / Refused (a mode above the gateway's cap disabled with its tooltip), **Add a workspace path**, and the effective line verbatim. Each change is one `PUT /api/gateway/sessions/{id}/workspaces`: the gateway stores the choice on the session, so every app opening the conversation sees it; **Use my default** sends `{configured: false}`. A refusal shows the gateway's sentence with "Not saved.". **Current workspace session-…** (the private workspace) stays on top.
+- web: **My default workspaces** (under the panel) opens your account's default (`PUT /api/gateway/workspace/policy/me`), what every conversation starts from; **Follow the gateway policy** returns to the gateway's.
+- web: an automation's **Workspace** panel stores its workspaces in its definition as `input_data.workspace` (`{posture, default_mode, folders}`, a new revision; replaces a stored `workspace_allowed_paths` list when you change it); what they mean is the gateway's dry run (`POST /api/gateway/workspace/effective/me`). **Use my default** removes it.
+- web: a gateway refusal answered as `{"detail": {"reason", "message", "path"}}` is shown as its `message` sentence, not as JSON.
+- web: the admin-only Files source is called **Gateway files (admin)** (there is no shared workspace any more).
 
 ### Removed
 

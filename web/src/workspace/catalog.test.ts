@@ -165,15 +165,14 @@ describe("normalizers", () => {
   it("preserves raw workspace policy while exposing UI-safe fields (round 9: shared workspace, no modes)", () => {
     const policy = normalizeWorkspacePolicy({
       policy: {
-        shared_workspace: "/srv/gw/workspaces",
         allowed_folders: ["/data/projects"],
         allow_any_folder: false,
         max_attachment_bytes: 1024,
         future_field: { enabled: true },
       },
     });
-    expect(policy).toMatchObject({ sharedWorkspace: "/srv/gw/workspaces", maxAttachmentBytes: 1024 });
-    expect(Object.keys(policy).sort()).toEqual(["maxAttachmentBytes", "raw", "sharedWorkspace"]);
+    expect(policy).toMatchObject({ maxAttachmentBytes: 1024 });
+    expect(Object.keys(policy).sort()).toEqual(["maxAttachmentBytes", "raw"]);
     expect(policy.raw.future_field).toEqual({ enabled: true });
   });
 
