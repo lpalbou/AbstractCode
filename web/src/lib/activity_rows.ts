@@ -24,6 +24,12 @@
  * Resumes: a `wait` is closed by a separate `resume` record, not by a
  * `completed` record on the waiting step. A resume is therefore not a row of
  * its own; it closes the group whose wait_key it carries.
+ *
+ * Moved on: a `wait_until` (a timer) has no wait_key and the runtime writes no
+ * resume and no completion for it — the run simply continues when the time is
+ * up. A run executes one step at a time, so a later step record of the SAME run
+ * proves its earlier wait ended. Without this a finished run kept a timer row
+ * "waiting" forever (backlog 0993, status-derivation use case).
  */
 
 import { toolPreview } from "@abstractframework/panel-chat";
@@ -888,6 +894,10 @@ export function activity_rows(entries: readonly ActivityEntry[], rootRunId?: str
   const groups = new Map<string, ActivityEntry[]>();
   const order: string[] = [];
   const resumeKeys: string[] = [];
+  // Per run: the stream position of its newest step record (progress, status
+  // and resume records excluded) — "did this run move on after a wait?".
+  const lastStepAt = new Map<string, number>();
+  const position = new Map<ActivityEntry, number>();
   const progressEntries: ActivityEntry[] = [];
 
   for (const entry of entries || []) {
@@ -905,6 +915,8 @@ export function activity_rows(entries: readonly ActivityEntry[], rootRunId?: str
       continue;
     }
     const key = group_key(entry);
+    position.set(entry, position.size);
+    lastStepAt.set(entry.runId, position.size - 1);
     if (!groups.has(key)) {
       groups.set(key, []);
       order.push(key);
@@ -917,7 +929,9 @@ export function activity_rows(entries: readonly ActivityEntry[], rootRunId?: str
     const groupEntries = groups.get(key)!;
     const merged = merge_group(groupEntries);
     const description = describe_record(merged);
-    const wasResumed = wait_keys(groupEntries).some((k) => resumed.has(k));
+    const lastEntry = groupEntries[groupEntries.length - 1];
+    const movedOn = (lastStepAt.get(lastEntry.runId) ?? -1) > (position.get(lastEntry) ?? Infinity);
+    const wasResumed = movedOn || wait_keys(groupEntries).some((k) => resumed.has(k));
     const state = status_label(merged, description.kind, wasResumed);
     return {
       key,

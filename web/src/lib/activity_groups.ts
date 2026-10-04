@@ -13,12 +13,30 @@ export type ActivityGroup = {
   detail: string;
   /** running | waiting | failed | completed (the most urgent of its rows). */
   status: string;
+  /** The status in words. "Waiting for you" only when a row waits on a person
+   * (a question or an approval); a timer or a sub-flow says what it waits for. */
+  statusLabel: string;
   rows: ActivityRow[];
   /** Tool calls in the group (sum over its `tools` rows' entries). */
   toolRows: number;
 };
 
 const URGENCY = ["running", "waiting", "failed", "completed"];
+
+const GROUP_STATUS_LABEL: Record<string, string> = {
+  running: "Running",
+  failed: "Failed",
+  completed: "Done",
+};
+const ON_A_PERSON = new Set(["waiting for you", "approval needed"]);
+
+function groupStatusLabel(status: string, rows: ActivityRow[]): string {
+  if (status !== "waiting") return GROUP_STATUS_LABEL[status] || status;
+  const waiting = rows.filter((row) => row.status === "waiting");
+  if (waiting.some((row) => ON_A_PERSON.has(row.statusLabel))) return "Waiting for you";
+  const label = waiting[waiting.length - 1]?.statusLabel || "waiting";
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
 
 function groupStatus(rows: ActivityRow[]): string {
   for (const status of URGENCY) if (rows.some((row) => row.status === status)) return status;
@@ -38,6 +56,7 @@ export function activity_groups(rows: readonly ActivityRow[]): ActivityGroup[] {
         title: isStep ? `Step ${step}` : "Start",
         detail: isStep ? row.title : "",
         status: "completed",
+        statusLabel: "Done",
         rows: [],
         toolRows: 0,
       };
@@ -46,7 +65,10 @@ export function activity_groups(rows: readonly ActivityRow[]): ActivityGroup[] {
     current.rows.push(row);
     if (row.kind === "tools") current.toolRows += 1;
   }
-  for (const group of groups) group.status = groupStatus(group.rows);
+  for (const group of groups) {
+    group.status = groupStatus(group.rows);
+    group.statusLabel = groupStatusLabel(group.status, group.rows);
+  }
   return groups;
 }
 

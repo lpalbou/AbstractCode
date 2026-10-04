@@ -15,6 +15,7 @@ import {
   type ActivityEntry,
 } from "./activity_rows";
 import { llm_phase_text } from "./llm_phase";
+import { activity_groups } from "./activity_groups";
 
 const PARENT = "39e7393f-8c25-4c89-95a9-57af127e98a7";
 const CHILD = "081d8daa-d898-4a72-9f57-8ebea6ec1dd6";
@@ -508,5 +509,49 @@ describe("progress is progress, not activity", () => {
     const same = attach_progress(rows, []);
     expect(same).toHaveLength(1);
     expect(same[0].progress).toBe("");
+  });
+});
+
+// Backlog 0993 use case (2026-10-04): a finished status-helper run read on its
+// own showed "Start · Waiting for you". Records slimmed from the real ledger of
+// run 592fdfc0 (basic-agent@0.0.4): the timer wait (`wait_until`) has no
+// wait_key and the runtime writes no resume or completion for it; the run just
+// continues to `end` when the time is up.
+describe("a timer wait in a finished run", () => {
+  const RUN = "592fdfc0-d1a1-4668-b327-7bb87d20c3d6";
+  const wait = { type: "wait_until", payload: { type: "wait_until", until: "2026-09-21T23:54:33.975716+00:00", resume_to_node: "end" } };
+  const ledger: ActivityEntry[] = [
+    { run_id: RUN, step_id: "514cd909", node_id: "node-9", status: "started", idempotency_key: "fe3e6d", effect: wait, result: null },
+    { run_id: RUN, step_id: "514cd909", node_id: "node-9", status: "waiting", idempotency_key: "fe3e6d", effect: wait,
+      result: { wait: { reason: "until", wait_key: null, until: "2026-09-21T23:54:33.975716+00:00", resume_to_node: "end" } } },
+    { run_id: RUN, step_id: "73bdcfb6", node_id: "end", status: "completed", idempotency_key: "system", effect: null,
+      result: { completed: true, output: { state: "Done", post_delay: 3, success: true } } },
+  ].map((record, index) => ({ cursor: index + 1, runId: RUN, record }));
+
+  it("is done once the same run wrote a later step", () => {
+    const wait_row = activity_rows(ledger, RUN).find((row) => row.kind === "wait")!;
+    expect(wait_row.status).toBe("completed");
+    const groups = activity_groups(activity_rows(ledger, RUN));
+    expect(groups.map((g) => [g.title, g.status, g.statusLabel])).toEqual([["Start", "completed", "Done"]]);
+  });
+
+  it("still waits while it is the run's newest step, and never says 'for you'", () => {
+    const live = ledger.slice(0, 2);
+    expect(activity_rows(live, RUN).find((row) => row.kind === "wait")!.status).toBe("waiting");
+    const [group] = activity_groups(activity_rows(live, RUN));
+    expect([group.status, group.statusLabel]).toEqual(["waiting", "Waiting"]);
+  });
+
+  it("a later record of ANOTHER run (a child) does not end the wait", () => {
+    const child = { cursor: 9, runId: "child-run", record: { run_id: "child-run", step_id: "c1", node_id: "end", status: "completed", idempotency_key: "system", effect: null, result: { completed: true } } };
+    const rows = activity_rows([...ledger.slice(0, 2), child], RUN);
+    expect(rows.find((row) => row.kind === "wait")!.status).toBe("waiting");
+  });
+
+  it("a question still reads 'Waiting for you'", () => {
+    const ask: ActivityEntry = { cursor: 1, runId: RUN, record: { run_id: RUN, step_id: "a1", node_id: "ask", status: "waiting", idempotency_key: "a1",
+      effect: { type: "ask_user", payload: { prompt: "Which file?" } }, result: { wait: { reason: "user", wait_key: "k1", prompt: "Which file?" } } } };
+    const [group] = activity_groups(activity_rows([ask], RUN));
+    expect([group.status, group.statusLabel]).toEqual(["waiting", "Waiting for you"]);
   });
 });

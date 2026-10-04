@@ -110,13 +110,6 @@ export function activityAttention(records: WorkflowRecord[], runId: string): { c
   return { count: waiting + running, hint: parts.join(" · ") };
 }
 
-const GROUP_STATUS_LABEL: Record<string, string> = {
-  running: "Running",
-  waiting: "Waiting for you",
-  failed: "Failed",
-  completed: "Done",
-};
-
 export function ActivityGroups({ rows }: { rows: ActivityRow[] }) {
   const groups = useMemo(() => activity_groups(rows), [rows]);
   const newest = default_open_group(groups);
@@ -143,7 +136,7 @@ export function ActivityGroups({ rows }: { rows: ActivityRow[] }) {
               <strong>{group.title}</strong>
               {group.detail ? <span className="code-activity-group-detail" title={group.detail}>{group.detail}</span> : <span className="code-activity-group-detail" />}
               <span className={`code-step-dot is-${group.status}`} aria-hidden="true" />
-              <small>{GROUP_STATUS_LABEL[group.status] || group.status}</small>
+              <small>{group.statusLabel}</small>
             </summary>
             {open ? <ActivityGroupBody group={group} /> : null}
           </details>
