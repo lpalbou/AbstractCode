@@ -171,6 +171,8 @@ when the gateway advertises live replies. See
 | `src/preview.rs` | File previews (text, images) for attachments and `/files`. |
 | `src/identity.rs` | The About screen's facts, from the vendored AbstractFramework descriptor. |
 | `src/voice.rs`, `src/voice_host.rs`, `src/ui/voice_view.rs` | Voice: the gateway's voice routes (`/voice/defaults`, `/runs/{id}/voice/tts/stream`, `/runs/{id}/audio/transcribe`), the host-audio bridge (`assets/voice_bridge.py`, AbstractVoice in Python over JSON lines), the `/voice` screen and the status line. Every gateway call and bridge wait runs on a named voice thread; results come back as posted closures. |
+| `src/rail.rs`, `src/conversations.rs`, `src/gateway/rail.rs` | The settings panels and the conversations board (R7.3), pure rules first: an automation definition's run settings read from / written to its `input_data` with the keys a conversation turn writes, the revision line, the Activity groups (one per model step, one per automation run), the conversation card's `Oct 2 · 2 turns · 7 tools`. The lane runs the same routes as Code web on one short-lived thread per action: `/workspace/policy`, `/runs/{id}/ledger`, `/runs?root_only=true&archived_only=true`, `POST /sessions/{id}/archive\|unarchive`, `PATCH /automations/{id}`. |
+| `src/ui/rail_view.rs`, `src/ui/conversations_view.rs`, `src/ui/cards.rs` | `/settings` (the eight panels bound to the conversation or an automation), `/sessions` (the board, Archive / Unarchive), and the wrapping card list both share with `/automations` (nothing cut; a switch's state inked; the selected card kept in view). |
 | `src/runner.rs` | Worker thread: commands, per-run stream threads, terminal detection. |
 | `src/store.rs` | The signal store (UI-thread owned). |
 | `src/ui/` | AbstractTUI views: chrome, transcript pane, modals. |
@@ -191,6 +193,16 @@ when the gateway advertises live replies. See
   in-process host-audio double; `--ignored` runs the real Python bridge in
   `--null-output` mode and a time-to-first-audio probe against a real
   gateway.
+- **Code web parity (R7.3)**: `tests/r7w4_screens.rs` renders every
+  panel, the conversations board, the automation cards and the automation
+  screen at 80×24 and 120×40 from fixtures (no row wider than the screen);
+  `tests/r7w4_live.rs` (`--ignored`) drives them with the real worker
+  against the Code web's hermetic fixture gateway
+  (`web/e2e/gateway_fixture.py`, no model): archive/unarchive a
+  conversation, Active / Run now / Stop / Archive / Unarchive an
+  automation, Edit saving revisions, the panels reading the gateway, and
+  Activity per run — each outcome checked on the gateway. Set
+  `R7W4_GATEWAY_URL` and `R7W4_TOKEN`; a missing variable fails the run.
 - **Live**: `scripts/pty_live_smoke.py` forks the binary under a real
   controlling pty against a live gateway: boot → prompt → approval modal →
   `a` → answer → clean Ctrl+C exit, with filesystem proof of the tool write.

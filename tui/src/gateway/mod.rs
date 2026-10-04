@@ -10,6 +10,7 @@
 pub mod automations;
 pub mod entities;
 pub mod gpu;
+pub mod rail;
 pub mod sse;
 
 use std::io::Read;
@@ -883,9 +884,39 @@ impl GatewayClient {
         // each surviving session's turns, so every count read "1+".
         // Asking for the whole store makes the counts TOTALS and makes
         // absence provable; `has_more` says when it still is not.
+        //
+        // `include_metrics=true` (R7.3): each root run carries
+        // `tool_calls` (its sub-runs included) — the conversation card's
+        // "7 tools" is their sum, the same figure the Code web shows. The
+        // listing also carries `archived_sessions` (the `Archived · N`
+        // line); archived sessions are left out of it by the gateway.
         format!(
-            "/runs?limit={}&root_only=true&include_ledger_len=false",
+            "/runs?limit={}&root_only=true&include_ledger_len=false&include_metrics=true",
             limit.max(1)
+        )
+    }
+
+    /// The ARCHIVED sessions' root runs (`archived_only=true`): the rows
+    /// under the board's `Archived · N` line, each with Unarchive.
+    pub(crate) fn archived_session_listing_path(limit: u32) -> String {
+        format!(
+            "/runs?limit={}&root_only=true&archived_only=true&include_ledger_len=false&include_metrics=true",
+            limit.max(1)
+        )
+    }
+
+    pub fn list_archived_runs(&self, limit: u32) -> GwResult<Value> {
+        self.get_json(&Self::archived_session_listing_path(limit))
+    }
+
+    /// `POST /sessions/{id}/archive` (or `/unarchive`) — the gateway's
+    /// session archive contract: nothing is deleted, the session leaves
+    /// (or comes back to) the listing; its runs are untouched.
+    pub fn set_session_archived(&self, session_id: &str, archived: bool) -> GwResult<Value> {
+        let verb = if archived { "archive" } else { "unarchive" };
+        self.post_json(
+            &format!("/sessions/{}/{verb}", url_encode(session_id)),
+            &serde_json::json!({}),
         )
     }
 
@@ -1490,7 +1521,14 @@ mod tests {
     #[test]
     fn the_session_listing_query_is_exactly_what_the_gateway_accepts() {
         let p = GatewayClient::session_listing_path(200);
-        assert_eq!(p, "/runs?limit=200&root_only=true&include_ledger_len=false");
+        assert_eq!(
+            p,
+            "/runs?limit=200&root_only=true&include_ledger_len=false&include_metrics=true"
+        );
+        assert_eq!(
+            GatewayClient::archived_session_listing_path(200),
+            "/runs?limit=200&root_only=true&archived_only=true&include_ledger_len=false&include_metrics=true"
+        );
         // No session filter: the whole point is discovering sessions
         // this client has never heard of.
         assert!(!p.contains("session_id"));

@@ -396,6 +396,8 @@ pub enum Cmd {
     /// `/automations` lane: every action runs on its own thread
     /// (`gateway::automations`), results land in `store.automations`.
     Automations(crate::gateway::automations::AutoCmd),
+    /// Settings rail + conversations board lane (`gateway::rail`, R7.3).
+    Rail(crate::gateway::rail::RailCmd),
     Shutdown,
 }
 
@@ -757,9 +759,11 @@ pub(crate) fn fold_session_rows(items: &[Value]) -> Vec<crate::store::SessionRow
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
+        let tools = run.get("tool_calls").and_then(Value::as_u64);
         match out.iter_mut().find(|r| r.id == sid) {
             Some(row) => {
                 row.turns += 1;
+                row.tools = row.tools.zip(tools).map(|(a, b)| a + b);
                 if state.rank() < row.state.rank() {
                     row.state = state;
                 }
@@ -780,6 +784,7 @@ pub(crate) fn fold_session_rows(items: &[Value]) -> Vec<crate::store::SessionRow
                 turns: 1,
                 first_run: run_id,
                 prompt: None,
+                tools,
             }),
         }
     }
@@ -957,6 +962,9 @@ impl Runner {
             // Entity lane: every handler spawns its own thread inside
             // gateway::entities (a 30-600s entity read must never starve
             // Probe/Start behind it on this loop).
+            Cmd::Rail(cmd) => {
+                crate::gateway::rail::spawn(&self.client, self.wake.clone(), self.store, cmd)
+            }
             Cmd::Automations(cmd) => {
                 crate::gateway::automations::spawn(
                     &self.client,
@@ -4341,6 +4349,10 @@ pub(crate) fn spawn_load_sessions(
         // complete: an unread signal must not license the strongest
         // claim the board can make ("not on the gateway") — review D7.
         let truncated = v.get("has_more").and_then(Value::as_bool).unwrap_or(true);
+        let archived = v
+            .get("archived_sessions")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
         let mut rows = fold_session_rows(&items);
         // Prompts are fetched in the order the BOARD renders — live
         // sessions first, then newest — not the fold's order. They
@@ -4360,6 +4372,7 @@ pub(crate) fn spawn_load_sessions(
                     rows,
                     truncated,
                     labeled,
+                    archived,
                 })
             });
         }
@@ -4398,7 +4411,7 @@ pub(crate) fn spawn_load_sessions(
 /// One session's OPENING prompt, from its first turn's `input_data`.
 /// `None` on any failure — a session whose prompt we could not read
 /// renders without one, never with a guess.
-fn session_prompt(client: &GatewayClient, run_id: &str) -> Option<String> {
+pub(crate) fn session_prompt(client: &GatewayClient, run_id: &str) -> Option<String> {
     let v = client.input_data(run_id).ok()?;
     // The same shape the attach path reads: `input_data.prompt`, or a
     // bare `prompt` on older gateways.

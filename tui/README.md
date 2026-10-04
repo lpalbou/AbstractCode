@@ -84,12 +84,18 @@ Status: **0.8.0**, pre-alpha. Release history is in
   path; `o` shows the workspace folder in your file manager when the gateway
   is on this machine.
 - **Automations**: `/automations` lists the gateway's automations (the same
-  ones the Assistant and the Observer show) with their state, what runs now and
-  the next run; open one to read its runs, approve its tool calls, pause, run
-  now, stop, revise, archive, browse its folder, or discuss a run as a new
-  chat in place. `/schedule [task]` creates one that runs the current workflow.
+  ones the Assistant, the Observer and Code web show) as cards —
+  `↻ every 24 h · last 3 h ago`, `next in 20 h` and the **Active** switch —
+  with **Run now**, **Stop**, **Edit**, **Archive** and an **Archived · N**
+  line with **Unarchive**; open one to read its runs, approve its tool calls,
+  browse its folder, or discuss a run as a new chat in place. `/schedule
+  [task]` creates one that runs the current workflow.
+- **Settings panels**: `/settings` — Activity, Files, Model, Workflow,
+  Workspace, Tools, Skills, Voice — bound to this conversation, or to an
+  automation's definition (each change saved as a new revision).
 - **Sessions and memory**: one durable session id per conversation, and a
-  `/sessions` picker over your recent ones (named by their first prompt).
+  `/sessions` board over them (`Oct 2 · 2 turns · 7 tools`), with Archive
+  and **Archived · N** / Unarchive — nothing is ever deleted.
   The client carries the live conversation into each run; the gateway
   replays prior turns server-side across restarts (`use_session_history`).
 - **Crash-proof by construction**: quit or crash, relaunch, and you are

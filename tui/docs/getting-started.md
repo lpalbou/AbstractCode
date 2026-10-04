@@ -73,7 +73,7 @@ gateway until you answer.
    id (shown in the header); the gateway replays prior turns into new runs.
    Launching starts a **fresh** session; continuity is explicit — `--resume`
    (or `--continue`) reopens the last session, `--session <id>` opens a named
-   one, and `/sessions` switches in-app. `/new` starts a fresh session
+   one, and `/sessions` switches in-app (and archives). `/new` starts a fresh session
    mid-flight. When you reopen a session whose run is still active, the app
    reattaches to it automatically.
 3. **Pick your agent and route.** `/workflow` starts with **Gateway default →
@@ -241,6 +241,20 @@ reply. Audio plays and records through AbstractVoice on this computer: it
 comes with the framework installer; elsewhere `pip install
 "abstractvoice[audio-io]"` or start with `--voice-python <path>`. Details
 in [api.md](api.md#voice-voice-speak-dictate).
+
+## Settings, conversations and automations
+
+`/settings` opens the settings panels — Activity, Files, Model, Workflow,
+Workspace, Tools, Skills, Voice — like the right rail of AbstractCode in the
+browser: `←`/`→` changes panel, `Enter` changes a row, `d` puts it back to
+**Gateway default**. `/activity` opens the work of this conversation, one
+group per model step. `/sessions` lists your conversations as
+`Oct 2 · 2 turns · 7 tools`; `a` archives one (nothing is deleted — it moves
+under **Archived · N**, where `u` brings it back). In `/automations` each
+card reads `↻ every 24 h · last 3 h ago` and `next in 20 h` with its
+**Active** switch; `g` Run now, `x` Stop, `e` Edit (the same panels, bound to
+the automation: each change is saved as a new revision), `a` Archive. Details
+in [api.md](api.md#settings-panels-settings).
 
 ## Where to next
 

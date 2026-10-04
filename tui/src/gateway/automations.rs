@@ -158,17 +158,32 @@ impl AutomationClient {
 
     /// Every page of the list (v1 has no change cursor: full pages are polled).
     pub fn list_all(&self) -> Result<Vec<auto::Summary>, String> {
+        self.list_pages(auto::list_request).map(|(items, _)| items)
+    }
+
+    /// Every page of a listing + the first page's `archived_automations`.
+    fn list_pages(
+        &self,
+        request: fn(Option<&str>) -> Request,
+    ) -> Result<(Vec<auto::Summary>, u64), String> {
         let mut out = Vec::new();
+        let mut archived = 0;
         let mut cursor: Option<String> = None;
-        for _ in 0..200 {
+        for page_no in 0..200 {
             let v = self
-                .send(&auto::list_request(cursor.as_deref()))
+                .send(&request(cursor.as_deref()))
                 .map_err(|e| auto::api_error_text(&e))?;
+            if page_no == 0 {
+                archived = v
+                    .get("archived_automations")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+            }
             let page = auto::parse_list_page(&v)?;
             out.extend(page.items);
             match page.next_cursor {
                 Some(c) => cursor = Some(c),
-                None => return Ok(out),
+                None => return Ok((out, archived)),
             }
         }
         Err("GET /api/gateway/automations kept returning next_cursor after 200 pages".into())
@@ -222,12 +237,29 @@ pub fn spawn(client: &GatewayClient, wake: WakeHandle, store: Store, cmd: AutoCm
 
 /// Read the list (+ the open automation) and post it.
 fn refresh(client: &AutomationClient, wake: &WakeHandle, store: Store, open: Option<String>) {
-    let list = client.list_all();
+    let list = client.list_pages(auto::list_request);
+    // The archived ones are read only when the gateway counts some: the
+    // `Archived · N` line opens onto them without another round trip.
+    let archived = match &list {
+        Ok((_, n)) if *n > 0 => Some(
+            client
+                .list_pages(auto::archived_list_request)
+                .map(|(items, _)| items),
+        ),
+        Ok(_) => Some(Ok(Vec::new())),
+        Err(_) => None,
+    };
     let detail = open.map(|id| (id.clone(), client.detail(&id)));
     wake.post(move || {
         store.automations.update(|v| {
+            if let Some(a) = archived {
+                v.archived = Some(a);
+            }
             match list {
-                Ok(items) => v.apply_list(items),
+                Ok((items, archived_count)) => {
+                    v.archived_count = archived_count;
+                    v.apply_list(items)
+                }
                 Err(e) => {
                     v.list = Some(Err(e));
                     v.loading = false;
@@ -317,8 +349,10 @@ fn run(client: &AutomationClient, wake: &WakeHandle, store: Store, cmd: AutoCmd)
                 .send(&auto::command_request(&id, &command_id, &command_type))
                 .map(|r| {
                     let dup = r.get("duplicate").and_then(Value::as_bool).unwrap_or(false);
-                    if let Some(state) = auto::active_notice(&command_type, dup) {
-                        return state;
+                    if let Some(state) = auto::Control::from_command_type(&command_type)
+                        .and_then(auto::Control::accepted_notice)
+                    {
+                        return state.to_string();
                     }
                     let verb = command_type
                         .trim_start_matches("automation.")

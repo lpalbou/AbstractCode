@@ -4,7 +4,9 @@ pub mod animation;
 pub mod approval_view;
 pub mod attachments;
 pub mod automations_view;
+pub mod cards;
 pub mod chrome;
+pub mod conversations_view;
 pub mod entity_actions;
 pub mod entity_modals;
 pub mod goal;
@@ -17,6 +19,7 @@ pub mod preview;
 pub mod queue_lane;
 pub mod queue_modal;
 pub mod quit;
+pub mod rail_view;
 pub mod splash;
 pub mod stance;
 pub mod thinking;
@@ -276,6 +279,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     wire_pending_steer(cx, store, ctx.clone());
     goal::wire_goal(cx, store, ctx.clone());
     automations_view::wire_automations(cx, store, ctx.clone());
+    rail_view::wire_rail(cx, store, ctx.clone());
     quit::wire_quit(cx, store, &ctx);
     transcript_view::wire_feed(
         cx,
@@ -1124,7 +1128,7 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
             });
             modals::open_cache(cx, store, ctx);
         }
-        Command::Sessions(None) => modals::open_sessions(cx, store, ctx),
+        Command::Sessions(None) => conversations_view::open_sessions(cx, store, ctx),
         Command::Sessions(Some(id)) => switch_session(store, ctx, &id),
         Command::Cancel => {
             entity_actions::agent_command_notice(store, "/cancel");
@@ -1371,6 +1375,15 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
         Command::Permissions(arg) => set_permissions(store, ctx, arg),
         Command::Workspace => modals::open_workspace(cx, store, ctx),
         Command::Files => modals::open_files(cx, store, ctx),
+        Command::Settings(panel) => match panel.as_deref().map(crate::rail::Panel::parse) {
+            Some(None) => store.notify(format!(
+                "/settings: no panel named “{}” — Activity, Files, Model, Workflow, Workspace, Tools, Skills or Voice",
+                panel.unwrap_or_default()
+            )),
+            Some(p) => rail_view::open_settings(cx, store, ctx, p),
+            None => rail_view::open_settings(cx, store, ctx, None),
+        },
+        Command::Archive => conversations_view::open_archive_current(cx, store, ctx),
         Command::Automations(None) => automations_view::open_automations(cx, store, ctx),
         Command::Automations(Some(id)) => automations_view::open_automation(cx, store, ctx, &id),
         Command::Schedule(task) => automations_view::open_schedule(cx, store, ctx, task),
@@ -1559,7 +1572,7 @@ fn export_transcript(store: Store, rest: &str) {
     ));
 }
 
-fn new_session(store: Store, ctx: &UiCtx) {
+pub(crate) fn new_session(store: Store, ctx: &UiCtx) {
     // A live run keeps executing server-side; cancel it rather than
     // silently orphaning it behind a cleared view.
     if store.phase.get_untracked() != Phase::Idle {
@@ -1898,7 +1911,7 @@ pub fn cycle_permissions(store: Store, ctx: &UiCtx) {
 /// only what this client KNOWS (what it asks for, or that it asks for
 /// nothing) and never invents the server's number. Fabricating a "current
 /// budget" from a client-side table is the 2026-07-17 class exactly.
-fn set_max_iterations(store: Store, ctx: &UiCtx, arg: Option<String>) {
+pub(crate) fn set_max_iterations(store: Store, ctx: &UiCtx, arg: Option<String>) {
     // A ceiling on what we will ASK for. The server clamps or refuses by its
     // own rules; this only stops a fat-fingered `/iterations 100000` from
     // riding out as a serious request.
@@ -1945,7 +1958,7 @@ fn set_max_iterations(store: Store, ctx: &UiCtx, arg: Option<String>) {
     }
 }
 
-fn set_context_window(store: Store, ctx: &UiCtx, arg: Option<String>) {
+pub(crate) fn set_context_window(store: Store, ctx: &UiCtx, arg: Option<String>) {
     use crate::ui::chrome::fmt_tokens;
     match arg {
         None => {

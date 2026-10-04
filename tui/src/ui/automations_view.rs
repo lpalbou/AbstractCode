@@ -28,6 +28,7 @@ use crate::gateway::automations::AutoCmd;
 use crate::runner::Cmd;
 use crate::store::Store;
 use crate::transcript::Item;
+use crate::ui::cards::{draw_cards, hint_bar, note_lines, Card, CardLine, Ink};
 use crate::ui::modals::{
     draw_rows, hint_row, modal_size, open_picker, title_row, wrap_lines, Mark, Picker, RowSpec,
 };
@@ -59,21 +60,14 @@ fn refresh(store: Store, ctx: &UiCtx) {
     );
 }
 
-fn listed(store: Store) -> Vec<Summary> {
-    store.automations.with_untracked(|v| match &v.list {
-        Some(Ok(items)) => auto::visible(items, v.show_archived),
-        _ => Vec::new(),
-    })
-}
-
 /// Send one `automation.*` command for `s`, if the control applies now.
 /// The id is minted once per action and reused only for a transport retry.
-fn command(store: Store, ctx: &UiCtx, s: &Summary, control: Control) {
+pub(crate) fn command(store: Store, ctx: &UiCtx, s: &Summary, control: Control) {
     let busy = store.automations.with_untracked(|v| v.busy);
     if let Err(why) = auto::control_state(s, control, busy) {
         store
             .automations
-            .update(|v| v.error = format!("{}: {why}", control.label()));
+            .update(|v| v.error = format!("{}: {why}", control.button()));
         return;
     }
     let Some(command_type) = control.command_type() else {
@@ -85,11 +79,7 @@ fn command(store: Store, ctx: &UiCtx, s: &Summary, control: Control) {
         command_id = v.ids.id_for(&key, crate::config::mint_session_id);
         v.busy = true;
         v.error.clear();
-        v.notice = match control {
-            Control::Pause => format!("switching Active off for “{}”…", s.title),
-            Control::Resume => format!("switching Active on for “{}”…", s.title),
-            other => format!("{} “{}”…", other.label(), s.title),
-        };
+        v.notice = control.busy_notice().to_string();
     });
     send(
         ctx,
@@ -103,7 +93,7 @@ fn command(store: Store, ctx: &UiCtx, s: &Summary, control: Control) {
 
 /// Space on an automation: flip its Active switch (pause when active,
 /// resume when paused), or say why it cannot change now.
-fn switch_active(store: Store, ctx: &UiCtx, s: &Summary) {
+pub(crate) fn switch_active(store: Store, ctx: &UiCtx, s: &Summary) {
     let busy = store.automations.with_untracked(|v| v.busy);
     match auto::active_switch(s, busy) {
         Ok(_) => command(store, ctx, s, auto::active_command(s)),
@@ -113,16 +103,9 @@ fn switch_active(store: Store, ctx: &UiCtx, s: &Summary) {
     }
 }
 
-/// The Active switch row of one automation (`[x] Active — …`).
+/// The Active switch row of one automation (`[x] Active — …`), the
+/// automation screen's first header row.
 pub(crate) fn active_row(s: &Summary, busy: bool) -> RowSpec {
-    let mark = match auto::active_switch(s, busy) {
-        Ok(on) => Mark::switch(on),
-        // In flight: keep showing the current state, not "unavailable".
-        Err(_) if busy && !s.legacy && (s.status == "active" || s.status == "paused") => {
-            Mark::switch(s.status == "active")
-        }
-        Err(_) => Mark::Unavailable,
-    };
     RowSpec {
         text: format!(
             "{} — {}",
@@ -130,23 +113,39 @@ pub(crate) fn active_row(s: &Summary, busy: bool) -> RowSpec {
             auto::active_detail(s, busy)
         ),
         header: false,
-        checked: Some(mark),
+        checked: Some(active_mark(s, busy)),
         dim: false,
     }
+}
+
+/// The switch's mark: on/off, or unavailable (with the state kept while a
+/// command is in flight).
+fn active_mark(s: &Summary, busy: bool) -> Mark {
+    match auto::active_switch(s, busy) {
+        Ok(on) => Mark::switch(on),
+        // In flight: keep showing the current state, not "unavailable".
+        Err(_) if busy && !s.legacy && (s.status == "active" || s.status == "paused") => {
+            Mark::switch(s.status == "active")
+        }
+        Err(_) => Mark::Unavailable,
+    }
+}
+
+/// `[x] Active` / `[ ] Active` / `[-] Active` — the card's switch.
+pub(crate) fn active_switch_text(s: &Summary, busy: bool) -> String {
+    format!("{}{}", active_mark(s, busy).marker(), auto::active_label())
 }
 
 /// The status lines under a title: notice, error, availability.
 fn status_lines(v: &auto::View) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(Err(why)) = &v.availability {
-        out.push(format!("unavailable: {why}"));
+        out.push(why.clone());
     }
     if !v.error.is_empty() {
-        out.push(format!("error: {}", v.error));
+        out.push(v.error.clone());
     }
-    if v.busy {
-        out.push("working…".into());
-    } else if !v.notice.is_empty() {
+    if !v.notice.is_empty() {
         out.push(v.notice.clone());
     }
     out
@@ -162,6 +161,107 @@ fn arm_poll(mcx: Scope, store: Store, ctx: UiCtx) {
 // The list
 // ---------------------------------------------------------------------------
 
+/// What the cursor is on in the list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ListTarget {
+    Automation(String),
+    /// The `Archived · N` line (Enter opens/closes it).
+    ArchivedLine,
+    /// An archived automation (Enter or `u` unarchives it).
+    Archived(String),
+}
+
+/// The archive question, verbatim from the Code web header.
+pub fn archive_question(title: &str) -> String {
+    format!("Archive “{title}”? It will not run again; its history stays readable.")
+}
+
+/// The list as cards (pure, test-pinned): each automation is its name (+
+/// the "waiting for you" badge), `↻ every 24 h · last 3 h ago`, then
+/// `next in 20 h` with the Active switch at the right; then the quiet
+/// `Archived · N` line and, when open, the archived ones with Unarchive.
+/// `confirm` = the automation whose Archive question is showing.
+pub fn list_cards(v: &auto::View, now: i64, confirm: Option<&str>) -> (Vec<Card>, Vec<ListTarget>) {
+    let mut cards = Vec::new();
+    let mut targets = Vec::new();
+    match &v.list {
+        None => cards.push(Card::note("Loading automations…")),
+        Some(Err(e)) => cards.push(Card::fixed(vec![CardLine::new(
+            format!("The automations could not be read: {e}"),
+            Ink::Error,
+        )])),
+        Some(Ok(items)) => {
+            let shown = auto::visible(items);
+            for s in &shown {
+                let (line1, line2) = auto::card_lines(s, now);
+                let mut lines = vec![CardLine::new(s.title.clone(), Ink::Title)
+                    .right(auto::waiting_badge(s).unwrap_or(""))];
+                lines.push(CardLine::new(line1, Ink::Faint).indent(2));
+                let switch_ink = match active_mark(s, v.busy) {
+                    Mark::On => Ink::On,
+                    Mark::Unavailable => Ink::Faint,
+                    _ => Ink::Text,
+                };
+                lines.push(
+                    CardLine::new(line2, Ink::Faint)
+                        .indent(2)
+                        .right(active_switch_text(s, v.busy))
+                        .right_ink(switch_ink),
+                );
+                if confirm == Some(s.id.as_str()) {
+                    lines.push(CardLine::new(archive_question(&s.title), Ink::Accent).indent(2));
+                    lines.push(CardLine::new("y Archive · n Keep it", Ink::Accent).indent(2));
+                }
+                cards.push(Card::new(lines));
+                targets.push(ListTarget::Automation(s.id.clone()));
+            }
+            if shown.is_empty() {
+                cards.push(Card::note(
+                    "No automations yet. n creates one from the current workflow (/schedule).",
+                ));
+            }
+        }
+    }
+    if let Some(line) = auto::archived_line(v.archived_count) {
+        cards.push(Card::new(vec![CardLine::new(line, Ink::Faint)]));
+        targets.push(ListTarget::ArchivedLine);
+        if v.archived_open {
+            match &v.archived {
+                None => cards.push(Card::note("Loading archived automations…")),
+                Some(Err(e)) => cards.push(Card::fixed(vec![CardLine::new(
+                    format!("Archived automations unavailable: {e}"),
+                    Ink::Error,
+                )
+                .indent(2)])),
+                Some(Ok(items)) => {
+                    for s in items {
+                        cards.push(Card::new(vec![CardLine::new(s.title.clone(), Ink::Faint)
+                            .indent(2)
+                            .right(Control::Unarchive.button())]));
+                        targets.push(ListTarget::Archived(s.id.clone()));
+                    }
+                }
+            }
+        }
+    }
+    (cards, targets)
+}
+
+/// The list screen's key hints.
+pub const LIST_HINTS: &[(&str, &str)] = &[
+    ("↑↓", ""),
+    ("Enter", "opens"),
+    ("space", "Active"),
+    ("g", "Run now"),
+    ("x", "Stop"),
+    ("e", "Edit"),
+    ("a", "Archive"),
+    ("u", "Unarchive"),
+    ("n", "New"),
+    ("r", "Refresh"),
+    ("Esc", "closes"),
+];
+
 /// `/automations` — every automation of the signed-in gateway user.
 pub fn open_automations(cx: Scope, store: Store, ctx: &UiCtx) {
     store.automations.update(|v| {
@@ -171,15 +271,37 @@ pub fn open_automations(cx: Scope, store: Store, ctx: &UiCtx) {
     });
     send(ctx, AutoCmd::Refresh { open: None });
     let ctx2 = ctx.clone();
-    let size = modal_size(160, 30);
+    let size = modal_size(160, 40);
     ctx.open_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
         let cursor = mcx.signal(0usize);
         let confirm_archive = mcx.signal(Option::<String>::None);
         arm_poll(mcx, store, ctx2.clone());
-        let selected = move || listed(store).get(cursor.get_untracked()).cloned();
+        let targets = move || {
+            let now = auto::now_unix();
+            store
+                .automations
+                .with_untracked(|v| list_cards(v, now, None).1)
+        };
+        let target = move || targets().get(cursor.get_untracked()).cloned();
+        let summary_of = move |id: &str| -> Option<Summary> {
+            store.automations.with_untracked(|v| {
+                let live = v.list.as_ref().and_then(|l| l.as_ref().ok());
+                let arch = v.archived.as_ref().and_then(|l| l.as_ref().ok());
+                live.into_iter()
+                    .chain(arch)
+                    .flatten()
+                    .find(|s| s.id == id)
+                    .cloned()
+            })
+        };
+        let selected = move || match target() {
+            Some(ListTarget::Automation(id)) => summary_of(&id),
+            _ => None,
+        };
         let move_cursor = move |delta: i64| {
-            let n = listed(store).len();
+            confirm_archive.set(None);
+            let n = targets().len();
             if n > 0 {
                 cursor.update(|c| *c = (*c as i64 + delta).clamp(0, n as i64 - 1) as usize);
             }
@@ -202,33 +324,62 @@ pub fn open_automations(cx: Scope, store: Store, ctx: &UiCtx) {
                 }
             }
         };
-        let archive = {
+        let archive = move || {
+            let Some(s) = selected() else { return };
+            if let Err(why) = auto::control_state(&s, Control::Archive, false) {
+                store
+                    .automations
+                    .update(|v| v.error = format!("Archive: {why}"));
+            } else {
+                store.automations.update(|v| v.error.clear());
+                confirm_archive.set(Some(s.id.clone()));
+            }
+        };
+        let confirm_yes = {
             let ctx = ctx2.clone();
             move || {
-                let Some(s) = selected() else { return };
-                if confirm_archive.get_untracked().as_deref() == Some(s.id.as_str()) {
-                    confirm_archive.set(None);
+                let Some(id) = confirm_archive.get_untracked() else {
+                    return false;
+                };
+                confirm_archive.set(None);
+                if let Some(s) = summary_of(&id) {
                     command(store, &ctx, &s, Control::Archive);
-                } else if let Err(why) = auto::control_state(&s, Control::Archive, false) {
-                    store.automations.update(|v| v.error = format!("archive: {why}"));
-                } else {
-                    confirm_archive.set(Some(s.id.clone()));
-                    store.automations.update(|v| {
-                        v.error.clear();
-                        v.notice = format!(
-                            "archive “{}”? It stops and is hidden; its history stays readable. Press a again to archive, any move cancels.",
-                            s.title
-                        );
-                    });
+                }
+                true
+            }
+        };
+        let unarchive = {
+            let ctx = ctx2.clone();
+            move || {
+                confirm_archive.set(None);
+                if let Some(ListTarget::Archived(id)) = target() {
+                    if let Some(s) = summary_of(&id) {
+                        command(store, &ctx, &s, Control::Unarchive);
+                    }
                 }
             }
         };
-        let open_selected = {
+        let edit = {
             let ctx = ctx2.clone();
             move || {
+                confirm_archive.set(None);
                 if let Some(s) = selected() {
-                    open_automation(cx, store, &ctx, &s.id);
+                    crate::ui::rail_view::open_automation_settings(cx, store, &ctx, &s.id);
                 }
+            }
+        };
+        let enter = {
+            let ctx = ctx2.clone();
+            let unarchive = unarchive.clone();
+            move || match target() {
+                Some(ListTarget::Automation(id)) => open_automation(cx, store, &ctx, &id),
+                Some(ListTarget::ArchivedLine) => {
+                    store
+                        .automations
+                        .update(|v| v.archived_open = !v.archived_open);
+                }
+                Some(ListTarget::Archived(_)) => unarchive(),
+                None => {}
             }
         };
         let new = {
@@ -237,23 +388,32 @@ pub fn open_automations(cx: Scope, store: Store, ctx: &UiCtx) {
         };
         let key = |c: char| KeyChord::plain(Key::Char(c));
         Element::new()
-            .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
+            .style(LayoutStyle::column().padding(Edges::all(1)))
             .focusable()
             .autofocus()
             .shortcut(KeyChord::plain(Key::Escape), {
                 let ctx = ctx2.clone();
-                move |_| ctx.close_modal()
+                move |_| {
+                    if confirm_archive.get_untracked().is_some() {
+                        confirm_archive.set(None);
+                    } else {
+                        ctx.close_modal()
+                    }
+                }
             })
-            .shortcut(KeyChord::plain(Key::Up), move |_| {
-                confirm_archive.set(None);
-                move_cursor(-1)
+            .shortcut(KeyChord::plain(Key::Up), move |_| move_cursor(-1))
+            .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
+            .shortcut(KeyChord::plain(Key::Enter), move |_| enter())
+            .shortcut(key('y'), move |_| {
+                confirm_yes();
             })
-            .shortcut(KeyChord::plain(Key::Down), move |_| {
-                confirm_archive.set(None);
-                move_cursor(1)
+            .shortcut(key('n'), move |_| {
+                if confirm_archive.get_untracked().is_some() {
+                    confirm_archive.set(None);
+                } else {
+                    new()
+                }
             })
-            .shortcut(KeyChord::plain(Key::Enter), move |_| open_selected())
-            .shortcut(key('n'), move |_| new())
             .shortcut(KeyChord::plain(Key::Char(' ')), {
                 let switch = switch.clone();
                 move |_| switch()
@@ -268,84 +428,34 @@ pub fn open_automations(cx: Scope, store: Store, ctx: &UiCtx) {
                 let act = act.clone();
                 move |_| act(Control::StopCurrent)
             })
+            .shortcut(key('e'), move |_| edit())
             .shortcut(key('a'), move |_| archive())
-            .shortcut(key('h'), move |_| {
-                store.automations.update(|v| v.show_archived = !v.show_archived);
-                cursor.set(0);
-            })
+            .shortcut(key('u'), move |_| unarchive())
             .shortcut(key('r'), {
                 let ctx = ctx2.clone();
                 move |_| refresh(store, &ctx)
             })
-            .child(title_row(
-                &t,
-                "automations — the gateway's, shared by every client (Assistant, Observer, AbstractCode)".into(),
-            ))
+            .child(title_row(&t, "Automations".into()))
             .child(dyn_view(LayoutStyle::column().shrink(0.0), move || {
                 let t2 = abstracttui::app::current_theme().tokens;
-                let mut col = Element::new().style(LayoutStyle::column());
-                for line in store.automations.with(status_lines) {
-                    col = col.child(hint_row(&t2, line));
-                }
-                col.build()
+                note_lines(&t2, &store.automations.with(status_lines), 8)
             }))
             .child(dyn_view(
                 LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)),
                 move || {
                     let now = auto::now_unix();
-                    let cur = cursor.get();
-                    let (rows, selectable) = store.automations.with(|v| list_rows(v, now));
-                    let cur = cur.min(selectable.len().saturating_sub(1));
-                    draw_rows(rows, cur, selectable)
+                    let confirm = confirm_archive.get();
+                    let (cards, targets) = store
+                        .automations
+                        .with(|v| list_cards(v, now, confirm.as_deref()));
+                    let cur = cursor.get().min(targets.len().saturating_sub(1));
+                    draw_cards(cards, cur)
                 },
             ))
-            .child(hint_row(
-                &t,
-                "↑↓ · Enter opens · space switch Active · n new (/schedule) · g run now · x stop current · a archive · h archived · r refresh · Esc closes".into(),
-            ))
-            .child(hint_row(&t, auto::run_now_key_line()))
+            .child(hint_bar(&t, LIST_HINTS, 8))
+            .child(note_lines(&t, &[auto::run_now_key_line()], 8))
             .build()
     });
-}
-
-/// The list rows: one per visible automation (pure, test-pinned).
-pub(crate) fn list_rows(v: &auto::View, now: i64) -> (Vec<RowSpec>, Vec<usize>) {
-    let mut rows = Vec::new();
-    let mut selectable = Vec::new();
-    let text = |s: &str, dim: bool| RowSpec {
-        text: s.to_string(),
-        header: false,
-        checked: None,
-        dim,
-    };
-    match &v.list {
-        None => rows.push(text("asking the gateway…", true)),
-        Some(Err(e)) => rows.push(text(&format!("the list could not be read: {e}"), false)),
-        Some(Ok(items)) => {
-            let shown = auto::visible(items, v.show_archived);
-            for s in &shown {
-                selectable.push(rows.len());
-                // The leading marker is the automation's Active switch.
-                let mut row = text(&auto::row_line(s, now), s.status == "archived");
-                row.checked = active_row(s, v.busy).checked;
-                rows.push(row);
-            }
-            if items.is_empty() {
-                rows.push(text(
-                    "No automations yet. n creates one from this workflow (or /schedule <task>).",
-                    true,
-                ));
-            }
-            let archived = items.iter().filter(|s| s.status == "archived").count();
-            if archived > 0 && !v.show_archived {
-                rows.push(text(
-                    &format!("{archived} archived hidden — h shows them"),
-                    true,
-                ));
-            }
-        }
-    }
-    (rows, selectable)
 }
 
 // ---------------------------------------------------------------------------
@@ -360,18 +470,25 @@ pub enum Target {
     Run(u64),
 }
 
-/// The header lines of one automation (pure, test-pinned).
+/// The header lines of one automation (pure, test-pinned): the Code web
+/// header — `[x] Active · every 24 h · last 3 h ago · next in 14 h` (+ the
+/// "waiting for you" badge), the workspace as a short name — then the
+/// facts the terminal keeps (runs, revision, context, tools, workflow).
 pub fn header_lines(s: &Summary, def: Option<&auto::Definition>, now: i64) -> Vec<String> {
-    let mut out = vec![format!(
-        "{} · {} · {}",
-        auto::status_label(&s.status),
-        auto::trigger_summary(&s.trigger),
-        auto::context_label(&s.context_mode)
-    )];
-    if let Some(cur) = auto::current_label(s) {
-        out.push(format!("now: {cur}"));
+    let mut first = auto::timing_line(s, now);
+    if let Some(badge) = auto::waiting_badge(s) {
+        first.push_str(&format!(" · {badge}"));
     }
-    out.push(format!("next: {}", auto::next_label(s, now)));
+    let mut out = vec![first];
+    if let Some(cur) = auto::current_label(s) {
+        out.push(cur);
+    }
+    if let Some(root) = &s.workspace_root {
+        out.push(format!(
+            "Workspace {} (w browses it)",
+            crate::ui::rail_view::short_name(root)
+        ));
+    }
     let mut facts = vec![format!(
         "{} {}",
         s.occurrence_count,
@@ -381,9 +498,10 @@ pub fn header_lines(s: &Summary, def: Option<&auto::Definition>, now: i64) -> Ve
             "runs"
         }
     )];
-    if let Some(rev) = s.revision {
-        facts.push(format!("revision {rev}"));
+    if let Some(rev) = def.map(|d| d.revision).or(s.revision) {
+        facts.push(format!("Revision {rev}"));
     }
+    facts.push(auto::context_label(&s.context_mode).to_string());
     if let Some(d) = def {
         facts.push(if d.tool_approval == "ask" {
             "tools: ask me before each tool call".into()
@@ -401,10 +519,6 @@ pub fn header_lines(s: &Summary, def: Option<&auto::Definition>, now: i64) -> Ve
         }
     }
     out.push(facts.join(" · "));
-    match &s.workspace_root {
-        Some(root) => out.push(format!("folder: {root} (w browses it)")),
-        None => out.push("folder: the gateway reported none".into()),
-    }
     if s.attention.unseen_count > 0 || s.attention.pending_waits > 0 {
         out.push(format!("attention: {}", auto::attention_label(s)));
     }
@@ -419,6 +533,23 @@ pub fn header_lines(s: &Summary, def: Option<&auto::Definition>, now: i64) -> Ve
     }
     out
 }
+
+/// The automation screen's key hints (the header's buttons first).
+pub const DETAIL_HINTS: &[(&str, &str)] = &[
+    ("g", "Run now"),
+    ("x", "Stop"),
+    ("e", "Edit"),
+    ("a", "Archive"),
+    ("u", "Unarchive"),
+    ("space", "Active"),
+    ("↑↓", ""),
+    ("y/n", "approve/deny"),
+    ("Enter", "answers"),
+    ("d", "Discuss run"),
+    ("w", "folder"),
+    ("r", "Refresh"),
+    ("Esc", "back"),
+];
 
 /// The body rows and their targets: waits that need you, the unseen
 /// attention items, then every loaded run as a chat pair, oldest first.
@@ -775,32 +906,44 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
                 );
             }
         };
+        // Edit opens the settings panels on this automation (the Code web
+        // header's Edit → `openAutomationSettings`): each change there saves
+        // a new revision.
         let revise = {
             let ctx = ctx2.clone();
             move || {
                 let Some(s) = summary() else { return };
                 if let Err(why) = auto::control_state(&s, Control::Revise, false) {
-                    store.automations.update(|v| v.error = format!("revise: {why}"));
+                    store.automations.update(|v| v.error = format!("Edit: {why}"));
                     return;
                 }
-                open_revise(cx, store, &ctx, s);
+                crate::ui::rail_view::open_automation_settings(cx, store, &ctx, &s.id);
             }
         };
-        let archive = {
+        let archive = move || {
+            let Some(s) = summary() else { return };
+            if let Err(why) = auto::control_state(&s, Control::Archive, false) {
+                store.automations.update(|v| v.error = format!("Archive: {why}"));
+            } else {
+                store.automations.update(|v| v.error.clear());
+                confirm_archive.set(true);
+            }
+        };
+        let confirm_yes = {
             let ctx = ctx2.clone();
             move || {
-                let Some(s) = summary() else { return };
-                if let Err(why) = auto::control_state(&s, Control::Archive, false) {
-                    store.automations.update(|v| v.error = format!("archive: {why}"));
-                } else if confirm_archive.get_untracked() {
-                    confirm_archive.set(false);
+                confirm_archive.set(false);
+                if let Some(s) = summary() {
                     command(store, &ctx, &s, Control::Archive);
-                } else {
-                    confirm_archive.set(true);
-                    store.automations.update(|v| {
-                        v.error.clear();
-                        v.notice = "archive? It stops and is hidden; its history stays readable. Press a again to archive, any move cancels.".into();
-                    });
+                }
+            }
+        };
+        let unarchive = {
+            let ctx = ctx2.clone();
+            move || {
+                confirm_archive.set(false);
+                if let Some(s) = summary() {
+                    command(store, &ctx, &s, Control::Unarchive);
                 }
             }
         };
@@ -830,15 +973,36 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
             .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
             .focusable()
             .autofocus()
-            .shortcut(KeyChord::plain(Key::Escape), move |_| back())
+            .shortcut(KeyChord::plain(Key::Escape), move |_| {
+                if confirm_archive.get_untracked() {
+                    confirm_archive.set(false);
+                } else {
+                    back()
+                }
+            })
             .shortcut(KeyChord::plain(Key::Up), move |_| move_cursor(-1))
             .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
             .shortcut(KeyChord::plain(Key::Enter), move |_| enter())
+            // While the Archive question shows, y/n answer IT (inline
+            // confirmation); otherwise they approve/deny a tool call.
             .shortcut(key('y'), {
                 let approve = approve.clone();
-                move |_| approve("approve")
+                move |_| {
+                    if confirm_archive.get_untracked() {
+                        confirm_yes()
+                    } else {
+                        approve("approve")
+                    }
+                }
             })
-            .shortcut(key('n'), move |_| approve("deny"))
+            .shortcut(key('n'), move |_| {
+                if confirm_archive.get_untracked() {
+                    confirm_archive.set(false)
+                } else {
+                    approve("deny")
+                }
+            })
+            .shortcut(key('u'), move |_| unarchive())
             .shortcut(KeyChord::plain(Key::Char(' ')), {
                 let switch = switch.clone();
                 move |_| switch()
@@ -867,8 +1031,8 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
                     v.detail
                         .as_ref()
                         .and_then(|d| d.summary.as_ref())
-                        .map(|s| format!("automation — {}", s.title))
-                        .unwrap_or_else(|| "automation — asking the gateway…".into())
+                        .map(|s| format!("Automations / {}", s.title))
+                        .unwrap_or_else(|| "Automations / Loading automation…".into())
                 });
                 title_row(&t2, title)
             }))
@@ -888,21 +1052,22 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
                     let mut lines = match v.detail.as_ref() {
                         Some(d) => match &d.summary {
                             Some(s) => header_lines(s, d.definition.as_ref(), now),
-                            None => vec!["asking the gateway…".into()],
+                            None => vec!["Loading automation…".into()],
                         },
                         None => Vec::new(),
                     };
+                    if confirm_archive.get() {
+                        if let Some(s) = v.detail.as_ref().and_then(|d| d.summary.as_ref()) {
+                            lines.push(format!("{}  y Archive · n Keep it", archive_question(&s.title)));
+                        }
+                    }
                     if let Some(e) = v.detail.as_ref().map(|d| d.error.clone()).filter(|e| !e.is_empty()) {
                         lines.push(format!("could not read it: {e}"));
                     }
                     lines
                 });
                 lines.extend(store.automations.with(status_lines));
-                let mut col = Element::new().style(LayoutStyle::column());
-                for line in lines {
-                    col = col.child(hint_row(&t2, line));
-                }
-                col.build()
+                note_lines(&t2, &lines, 8)
             }))
             .child(dyn_view(
                 LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)),
@@ -916,11 +1081,8 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
                     draw_rows(rows, cur, selectable)
                 },
             ))
-            .child(hint_row(
-                &t,
-                "↑↓ · space switch Active · y/n approve/deny · Enter answers · d discuss run · g run now · x stop · e revise · a archive · w folder · r refresh · Esc back".into(),
-            ))
-            .child(hint_row(&t, auto::run_now_key_line()))
+            .child(hint_bar(&t, DETAIL_HINTS, 8))
+            .child(note_lines(&t, &[auto::run_now_key_line()], 8))
             .build()
     });
 }
@@ -930,7 +1092,7 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-fn open_text(
+pub(crate) fn open_text(
     cx: Scope,
     ctx: &UiCtx,
     title: String,
@@ -987,142 +1149,6 @@ fn open_text(
     });
 }
 
-// ---------------------------------------------------------------------------
-// Revise: title → interval → context
-// ---------------------------------------------------------------------------
-
-fn open_revise(cx: Scope, store: Store, ctx: &UiCtx, s: Summary) {
-    let form = auto::revise_form_from(&s);
-    let back: Rc<dyn Fn()> = {
-        let ctx = ctx.clone();
-        let id = s.id.clone();
-        Rc::new(move || open_automation(cx, store, &ctx, &id))
-    };
-    let ctx2 = ctx.clone();
-    let s2 = s.clone();
-    let back2 = back.clone();
-    open_text(
-        cx,
-        ctx,
-        format!("revise “{}” — 1/3 title", s.title),
-        vec![
-            format!(
-                "Now: {} — leave empty and press Enter to keep it.",
-                form.title
-            ),
-            "The change applies from the next run; a run in progress keeps what it started with."
-                .into(),
-        ],
-        String::new(),
-        Rc::new(move |title: String| {
-            let mut form = form.clone();
-            if !title.trim().is_empty() {
-                form.title = title;
-            }
-            revise_interval(cx, store, &ctx2, s2.clone(), form, back2.clone());
-        }),
-        back,
-    );
-}
-
-fn revise_interval(
-    cx: Scope,
-    store: Store,
-    ctx: &UiCtx,
-    s: Summary,
-    form: auto::ReviseForm,
-    back: Rc<dyn Fn()>,
-) {
-    let Some(every) = form.every.clone() else {
-        return revise_context(cx, store, ctx, s, form, back);
-    };
-    let ctx2 = ctx.clone();
-    let back2 = back.clone();
-    open_text(
-        cx,
-        ctx,
-        format!("revise “{}” — 2/3 interval (UTC)", s.title),
-        vec![
-            format!("Now: {every} — leave empty and press Enter to keep it."),
-            "A whole number of minutes, hours or days: 30m, 8h, 7d. The rest of the schedule is kept.".into(),
-        ],
-        String::new(),
-        Rc::new(move |text: String| {
-            let mut form = form.clone();
-            if !text.trim().is_empty() {
-                form.every = Some(text.trim().to_string());
-            }
-            revise_context(cx, store, &ctx2, s.clone(), form, back2.clone());
-        }),
-        back,
-    );
-}
-
-fn revise_context(
-    cx: Scope,
-    store: Store,
-    ctx: &UiCtx,
-    s: Summary,
-    form: auto::ReviseForm,
-    back: Rc<dyn Fn()>,
-) {
-    let labels = vec![
-        auto::context_label("independent").to_string(),
-        auto::context_label("growing").to_string(),
-    ];
-    let start = usize::from(form.context == "growing");
-    let ctx2 = ctx.clone();
-    let back2 = back.clone();
-    open_picker(
-        cx,
-        ctx,
-        Picker {
-            title: format!("revise “{}” — 3/3 context", s.title),
-            labels,
-            live: None,
-            start,
-            size: modal_size(80, 2 + 9),
-            hint: Some("Enter sends the revision · Esc goes back".into()),
-            live_hint: None,
-            keys: Vec::new(),
-            on_mount: None,
-            on_selection: None,
-            on_choose: Box::new(move |ix| {
-                let mut form = form.clone();
-                form.context = if ix == 1 { "growing" } else { "independent" }.into();
-                match auto::revise_changes(&s, &form) {
-                    Err(errors) => store.automations.update(|v| v.error = errors.join(" ")),
-                    Ok(None) => store
-                        .automations
-                        .update(|v| v.notice = "nothing changed".into()),
-                    Ok(Some(changes)) => {
-                        let key = format!("revise:{}:{changes}", s.id);
-                        let mut command_id = String::new();
-                        store.automations.update(|v| {
-                            command_id = v.ids.id_for(&key, crate::config::mint_session_id);
-                            v.busy = true;
-                            v.error.clear();
-                        });
-                        send(
-                            &ctx2,
-                            AutoCmd::Revise {
-                                id: s.id.clone(),
-                                command_id,
-                                expected_revision: s.revision,
-                                changes,
-                            },
-                        );
-                    }
-                }
-                back2();
-            }),
-            on_cancel: Some(Box::new(move || back())),
-        },
-    );
-}
-
-// ---------------------------------------------------------------------------
-// /schedule: task → when → context → tools → create
 // ---------------------------------------------------------------------------
 
 /// The last task typed in this conversation (the default task to schedule).

@@ -25,6 +25,13 @@ pub enum Command {
     /// (ask-pin bypass, served-disabled-clamp bypass, empty-batch
     /// auto-approve) die with it.
     Permissions(Option<String>),
+    /// `/settings [panel]` — the settings rail (Activity, Files, Model,
+    /// Workflow, Workspace, Tools, Skills, Voice) bound to this
+    /// conversation; `/activity` opens it on Activity.
+    Settings(Option<String>),
+    /// `/archive` — archive this conversation (the board opens with the
+    /// question asked; nothing is deleted).
+    Archive,
     /// `/automations [id]` — the gateway's automations (every client's):
     /// list, open one, its runs, waits and controls. An id opens it.
     Automations(Option<String>),
@@ -195,6 +202,11 @@ pub fn parse(text: &str) -> Option<Command> {
             let arg = rest[4..].trim().to_string();
             Command::WorkspaceSend(if arg.is_empty() { None } else { Some(arg) })
         }
+        "/settings" | "/panels" | "/rail" => {
+            Command::Settings(if rest.is_empty() { None } else { Some(rest) })
+        }
+        "/activity" => Command::Settings(Some("activity".into())),
+        "/archive" => Command::Archive,
         "/workspace" | "/ws" => Command::Workspace,
         "/files" | "/file" => Command::Files,
         "/automations" | "/automation" | "/autos" => {
@@ -321,6 +333,12 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
         "tool permissions: read|write|all (sticky per session)",
     ),
     ("workspace", "workspace root, access mode, allowed paths"),
+    (
+        "settings",
+        "settings panels: Model, Workflow, Workspace, Tools, Skills, Voice",
+    ),
+    ("activity", "this conversation's work, one group per step"),
+    ("archive", "archive this conversation (asks first)"),
     (
         "files",
         "browse + preview the run's workspace files on the gateway",
@@ -463,6 +481,12 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "/sessions [id]",
         "pick a recent session, or switch straight to an id",
     ),
+    (
+        "/settings [panel]",
+        "settings panels bound to this conversation (Activity Files Model Workflow Workspace Tools Skills Voice)",
+    ),
+    ("/activity", "this conversation's work, one group per step"),
+    ("/archive", "archive this conversation (asks first; Archived · N brings it back)"),
     (
         "/mtp [depth|off|inherit]",
         "multi-token prediction (MTP) for new runs: depth, off or inherit; bare opens the picker; --mtp at launch",

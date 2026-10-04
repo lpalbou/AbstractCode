@@ -12,7 +12,11 @@
 > the agent mid-run, queues follow-up prompts, attaches files to prompts
 > (`/attach`, a file browser, or drag & drop), browses and previews the
 > run's workspace on the gateway host (`/files`), creates and manages
-> gateway automations (`/schedule`, `/automations`), reads replies aloud
+> gateway automations (`/schedule`, `/automations`: cards with the Active
+> switch, Run now / Stop / Edit / Archive, Archived · N with Unarchive),
+> edits the run settings of the conversation or of an automation's
+> definition in eight panels (`/settings`; an automation change is saved as
+> a new revision), archives conversations (`/sessions`, `/archive`), reads replies aloud
 > and dictates through the gateway's voice routes (`/voice`, Ctrl+P,
 > Ctrl+R; host audio via AbstractVoice), and keeps a durable
 > session whose history the gateway replays server-side. It also talks
@@ -35,7 +39,7 @@
   resolution, module map, testing model, known limits.
 - [Reference](docs/api.md): Every CLI option and env var (including
   `--workflow default`, `--stream`, `--mtp`), slash commands
-  (including `/workflow`, `/files`, `/automations`, `/schedule`, `/stream`, `/about`, `/model`, `/mtp`,
+  (including `/settings`, `/activity`, `/archive`, `/sessions`, `/workflow`, `/files`, `/automations`, `/schedule`, `/stream`, `/about`, `/model`, `/mtp`,
   `/workspace send`, `@name`, `/entities`, `/task`, `/end`, `/queue`, `/goal`,
   `/permissions`, `/workspace`, `/attach`, `/export`, `/context`, `/gpu`,
   `/resources`, `/redraw`), key bindings (incl. `Ctrl+L` repaint, `Ctrl+J` newline,

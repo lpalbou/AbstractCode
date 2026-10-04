@@ -72,7 +72,7 @@ abstractcode --help | --version
 | `/theme [id]` | Live-preview theme picker, or set directly |
 | `/workflow` | Pick the agent workflow (`/agent` too). First row: **Gateway default → name @version** — saved as "the gateway default", so the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran |
 | `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` shows the workspace folder itself (never a sub-folder; never a folder that would be launched, such as `.app`) in your file manager, only when the gateway is on this machine and allows it; `r` refreshes |
-| `/automations [id]` | The gateway's automations (`/automation`, `/autos` too), shared with every client: state as text + icon ("Active ▶", "Paused ⏸"), attention, cadence, **now** (only the gateway's `current_occurrence`), **next** (only `next_fire_at`); archived rows hidden until `h`. Each row starts with its **Active** switch (`[x]` runs on its schedule, `[ ]` paused, `[-]` cannot change, with the reason in the automation). Keys: `Enter` opens · `Space` switches Active (`p` too) · `n` new · `g` run now (once now; the next scheduled run keeps its time) · `x` stop current · `a` archive (press twice; hides and stops, history kept) · `r` refresh. In one automation: its header and folder, the waits that need you first (`y`/`n` approve/deny a tool call, `Enter` answers a question or an event), its runs as chat pairs, `d` discuss the selected run (a new chat; this session switches to it), `e` revise (title, interval, context; empty keeps a value), `w` browse its folder, `Esc` back. Re-read every 15 s while open. See [Automations](../../docs/automations.md) |
+| `/automations [id]` | The gateway's automations (`/automation`, `/autos` too), shared with every client, as the Code web's cards: the name (+ **waiting for you** while an approval or a question waits), `↻ every 24 h · last 3 h ago` (`waiting since 5 min` while a run waits on you, `running now` while one runs, `last never` before the first), then `next in 20 h` (absent when nothing is scheduled) with the **Active** switch at the right (`[x]` runs on its schedule, `[ ]` paused, `[-]` cannot change). The quiet **Archived · N** line ends the list (N = the gateway's `archived_automations`; absent at 0): `Enter` opens the archived ones inline, `Enter`/`u` on one unarchives it (it comes back paused). Keys: `Enter` opens · `Space` switches Active (`p` too) · `g` Run now (once now; the next scheduled run keeps its time) · `x` Stop · `e` Edit (the settings panels on its definition, see below) · `a` Archive (asks inline: `y` archives, `n`/`Esc` keeps it) · `u` Unarchive · `n` new · `r` refresh. In one automation: `Automations / <title>`, the Active switch, the timing line `every 24 h · last 3 h ago · next in 14 h`, the workspace as a short name, the waits that need you first (`y`/`n` approve/deny a tool call, `Enter` answers a question or an event), its runs as chat pairs, `d` discuss the selected run (a new chat; this session switches to it), `w` browse its folder, `Esc` back. Re-read every 15 s while open. See [Automations](../../docs/automations.md) |
 | `/schedule [task]` | Create an automation that runs the current workflow (the gateway default is sent as `@default`): the task (default: your last prompt), when (UTC presets, every N m/h/d, or once at `YYYY-MM-DD HH:MM`), context (independent or growing), tools (run without asking, or ask before each tool call). Opens it once the gateway answers |
 | `/workspace send [auto\|always\|never]` | Whether your folder is sent as the workspace: `auto` (default) = only when the gateway is on this machine; `always` = also to a gateway on another machine that sees the same path (a shared mount); `never`. Bare reports what is in force. Saved in `prefs.json` |
 | `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
@@ -90,7 +90,10 @@ abstractcode --help | --version
 | `/resources` | Gateway-host resources (`/host` is an alias): memory (RAM/device meter bars, GPU utilization when the host supports it, the gateway's process RSS, host name), resident models (modality label, tri-state residency — an unreported residency reads `unknown`, never "no" — size, `ctx N` with `*` = calibrated, 🔒 = residency lock, `default`), session prompt caches, totals. Admin actions on the selected model: `u` unload (two-step confirm; a 409 `model_locked` refusal offers `f` force), `k` lock/unlock, `e` context estimate, `r` refresh — keys under "Modal keys" below. Data is fetched at open, on `r`, and after a mutation — never polled; a failed refresh keeps the last snapshot marked STALE. Requires the gateway's declared `host_state` contract (`/discovery/capabilities`) — older gateways get an honest "not supported". Feeds the footer's `mem NN%` segment |
 | `/history [n\|all]` | Stream the PREVIOUS bloc of this session's turns from the gateway ledgers, prepended in full detail. Boot replays only the last bloc (`--replay-turns` sizes it, default 5); a stub line names how many earlier turns exist. **Scrolling to the top of the transcript auto-loads the previous bloc** — the stub becomes a live progress line and holding at the top cascades bloc-by-bloc until the session is fully loaded (Esc returns to the tail and stops the cascade). Failures name their cause — never a silent hole |
 | `/status` | The status card: workflow, route, workspace, session, connection, client phase + run id + last outcome, and a LIVE gateway run-status probe — the one place client view vs server truth is inspectable (wrapper roots legitimately stay `waiting` after your turn concluded) |
-| `/sessions` | Pick a recent session to continue (named by first prompt) |
+| `/sessions` | The conversations board, as the Code web's list: each conversation is its title (the opening prompt, else `Conversation <id>`) with its live state at the right while it wants something, then `Oct 2 · 2 turns · 7 tools` (the day of the newest turn in local time; turns = root runs; tools = the gateway's per-turn `tool_calls` summed, shown when above zero). `Enter` continues one · `a` Archive (asks inline: "Archive this conversation? It stays searchable and auditable; it just leaves this list." `y` archives through `POST /sessions/{id}/archive`, `n`/`Esc` cancels; archiving the open conversation opens the next one, else the previous, else a new one) · the quiet **Archived · N** line (N = the gateway's `archived_sessions`) opens the archived ones inline, `Enter`/`u` unarchives · `n` new conversation · `r` refresh. Nothing is ever deleted |
+| `/archive` | Archive this conversation: the board opens with the question asked (`y` archives, `n` keeps it) |
+| `/settings [panel]` | The settings panels (`/panels`, `/rail` too), see [Settings panels](#settings-panels-settings). `panel` = `activity`, `files`, `model`, `workflow`, `workspace`, `tools`, `skills` or `voice` |
+| `/activity` | The settings panels on **Activity**: this conversation's work in foldable groups, one per model step |
 | `/session [id]` | Show or switch the session id (switching probes for a live run to reattach) |
 | `/details [full\|fold]` | Toggle transcript verbosity (`Ctrl+D`): `fold` (the default) renders each tool call as ONE line — glyph, name, status word (`ok`/`failed`/`running`/…), faint args hint — and thinking as a capped gist; `full` expands the whole card UNCUT (arguments in full on their own rows, the `│`-guttered result body entire, thinking content plus the labeled reasoning channel — nothing shortened). Thinking and every called tool stay visible in BOTH states — the toggle gates detail, never existence; errors always keep their `↳` bodies |
 | `/gating [auto\|wait]` | Approval gating for gating-capable workflows (the multi-agent coder): `auto` runs unattended (skips the workflow's human-approval pauses), `wait` re-gates (the default). Selecting the coder also opens a gated/unattended choice. Rides `input_data.gating_mode`; tool approval is a SEPARATE axis (`/permissions`) |
@@ -346,6 +349,54 @@ computer.
   first use and stays warm. Without AbstractVoice the first voice action
   says so and names each interpreter tried.
 
+### Settings panels (`/settings`)
+
+The Code web's right rail, as one overlay: the open panel on the left, the
+rail on the right edge — **Activity**, **Files**, **Model**, **Workflow**,
+**Workspace**, **Tools**, **Skills**, **Voice**, the web's order and names.
+`←`/`→` (or `Tab`, or `1`–`8`) changes panel · `↑`/`↓` moves · `Enter`
+changes the selected row · `Space` flips a `[x]` switch · `d` puts the row
+back to **Gateway default** · `Esc` closes. A picker or a text field opened
+from a panel comes back to the same panel and row.
+
+The panels follow what is selected:
+
+- **This conversation** (`/settings`): the first line says `Conversation
+  <title>`. Model (`Gateway default: <provider> · <model>.` until you pick a
+  route; Reasoning effort, MTP depth; Behavior: Iteration limit, Context
+  token limit, Stream replies), Workflow, Workspace (`Current workspace`,
+  the gateway's policy — "Managed by your gateway" or "Client scope requests
+  enabled" — allowed access modes, mounts, Access mode), Tools (Permissions
+  and one `[x]` switch per tool; `More tool options` opens `/tools`), Skills
+  (`[x]` per skill), Voice. These are the same settings `/model`,
+  `/workflow`, `/workspace`, `/tools` and `/skills` change — one apply path.
+- **An automation** (`e` in `/automations`): `Automation <title>`,
+  `Revision N` and the save line — "Changes are saved as a new revision and
+  apply from the next run.", then "Saving…", "Saved as revision 4; applies
+  from the next run.", "Not saved: …", or, when someone else saved first,
+  "Not saved: the automation changed elsewhere. The latest revision is
+  shown; make the change again.". Every change is one `PATCH
+  /automations/{id}` with `expected_revision`, writing the same
+  `input_data` keys a conversation turn writes (`provider`/`model` +
+  `_runtime.provider`/`model`, `_runtime.thinking`, `_runtime.speculation`,
+  `_limits.max_iterations`/`max_tokens`, `_runtime.system_prompt_extra`,
+  `tools` + `_runtime.allowed_tools`, `workspace_access_mode`,
+  `workspace_allowed_paths`, `skills`); a value put back to the default is
+  removed, never written as `""`. The Workflow panel holds the definition
+  form: Workflow, Title, Task, Repeat every (UTC), Context (Independent /
+  Growing), Tools (Run without asking / Ask before each tool call). Tools
+  switches between **All tools** and a **Custom allowlist**.
+
+**Activity** groups the work: for the conversation one group per model step
+(`Start`, `Step 1`, `Step 2`, …) with its status (`Running`, `Waiting for
+you`, `Failed`, `Done`), the newest open; for an automation one group per run
+(`Run #3 · 2 h ago · completed`), the latest open, its steps read from that
+run's ledger when the group opens (`Enter` folds and unfolds). **Files**
+opens the conversation's files (`/files`) or the automation's folder.
+**Voice** shows the engines ("Gateway default · supertonic /
+supertonic-3", from the voice module's single `GET /voice/defaults` read),
+Read aloud and Voice latency; `Enter` opens the voice screen (`/voice`).
+
 ### Quitting with a live run
 
 The agent runs on the gateway — quitting this client never stops it.
@@ -418,6 +469,9 @@ recovers it.
 | `/resources` | `↑↓` move (model, cache and totals rows are all reachable; admin keys act on the selected MODEL row) · `u` unload → `y`/`Enter` confirms · `f` force-unload (confirm labeled FORCED) · `n`/`Esc` cancel an armed confirm · `k` lock/unlock residency · `e` context estimate (inline result) · `r` refresh (re-probes capabilities while the contract is unconfirmed) · `Enter`/`Esc` close |
 | `/entities` | `↑↓` browse (the identity card follows) · `Enter` talk (`@name`) · `t` leave a task (title prompt) · `e` end that entity's open visit · `Ctrl+D` show per-section provenance · `Esc` close |
 | `/workspace` | `↑↓` move · `Space` select an access mode / remove an allowed path · type a path + `Enter` adds it (switches to `workspace_or_allowed` when needed) · `Esc` close |
+| `/settings` | `←`/`→`/`Tab`/`1`–`8` panel · `↑↓` move · `Enter` change · `Space` switch · `d` Gateway default · `Esc` close |
+| `/sessions` | `↑↓` move · `Enter` continue / open `Archived · N` / unarchive · `a` Archive → `y` archives, `n`/`Esc` cancels · `u` Unarchive · `n` new conversation · `r` refresh · `Esc` close |
+| `/automations` | `↑↓` move · `Enter` open / open `Archived · N` / unarchive · `Space` Active · `g` Run now · `x` Stop · `e` Edit · `a` Archive → `y`, `n`/`Esc` keeps it · `u` Unarchive · `n` new · `r` refresh · `Esc` close |
 
 ## Transcript vocabulary
 

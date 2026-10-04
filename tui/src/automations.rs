@@ -58,6 +58,10 @@ pub struct LastOccurrence {
     pub status: String,
     pub attempts: u64,
     pub excerpt: String,
+    /// When the occurrence fired / finished (RFC3339) — the timing line's
+    /// "last 3 h ago" reads `finished_at`, else `fired_at`.
+    pub fired_at: Option<String>,
+    pub finished_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +153,10 @@ pub struct Definition {
     pub growing: Map<String, Value>,
     pub max_attempts: Option<u64>,
     pub workspace_root: String,
+    /// The definition's whole `target` (`bundle_ref`, `flow_id`,
+    /// `input_data`) as the gateway returned it: the settings panels read
+    /// the run settings from `input_data` and save a revision of it.
+    pub target: Value,
 }
 
 /// `POST …/discuss` answer: the fork's session, its own writable folder and
@@ -276,6 +284,8 @@ pub fn parse_summary(v: &Value) -> Parse<Summary> {
             status: req_str(l, "status", "last_occurrence")?,
             attempts: l.get("attempts").and_then(Value::as_u64).unwrap_or(1),
             excerpt: opt_str(l, "excerpt").unwrap_or_default(),
+            fired_at: opt_str(l, "fired_at").filter(|s| !s.is_empty()),
+            finished_at: opt_str(l, "finished_at").filter(|s| !s.is_empty()),
         }),
         _ => None,
     };
@@ -402,6 +412,7 @@ pub fn parse_detail(v: &Value) -> Parse<(Definition, Summary)> {
             .and_then(|r| r.get("max_attempts"))
             .and_then(Value::as_u64),
         workspace_root: opt_str(d, "workspace_root").unwrap_or_default(),
+        target: d.get("target").cloned().unwrap_or(Value::Null),
     };
     Ok((definition, summary))
 }
@@ -628,13 +639,149 @@ pub fn row_line(s: &Summary, now: i64) -> String {
     parts.join(" · ")
 }
 
-/// The rows the list shows: archived ones only when asked for.
-pub fn visible(items: &[Summary], show_archived: bool) -> Vec<Summary> {
+/// The rows the list shows: never the archived ones — those live under the
+/// list's `Archived · N` line (the gateway already leaves them out of the
+/// default listing; an older gateway that still includes them is filtered
+/// here so the two lists never overlap).
+pub fn visible(items: &[Summary]) -> Vec<Summary> {
     items
         .iter()
-        .filter(|s| show_archived || s.status != "archived")
+        .filter(|s| s.status != "archived")
         .cloned()
         .collect()
+}
+
+/// `Archived · 6` — the quiet line at the end of a list; `None` at 0 (the
+/// line is absent, like the web sidebar's footer).
+pub fn archived_line(count: u64) -> Option<String> {
+    (count > 0).then(|| format!("Archived · {count}"))
+}
+
+// ---------------------------------------------------------------------------
+// The compact timing line (kit `automations/timing_line.ts`, same rules)
+// ---------------------------------------------------------------------------
+//
+//   card line 1: "↻ every 24 h · last 3 h ago"   (↻ only for a schedule)
+//   card line 2: "next in 20 h"                   (+ the Active switch)
+//   header:      "every 24 h · last 3 h ago · next in 14 h"
+//
+// Deterministic: the caller passes `now` (unix seconds); no year, no seconds.
+
+/// A span as one compact unit, rounded DOWN: "<1 min", "N min" (< 60 min),
+/// "N h" (< 48 h, so a day reads "24 h"), "N d" — the kit's `compactDuration`.
+pub fn compact_duration(secs: i64) -> String {
+    let span = secs.unsigned_abs();
+    if span < 60 {
+        "<1 min".into()
+    } else if span < 3600 {
+        format!("{} min", span / 60)
+    } else if span < 2 * 86_400 {
+        format!("{} h", span / 3600)
+    } else {
+        format!("{} d", span / 86_400)
+    }
+}
+
+/// The trigger in two or three words: "every 24 h", "every hour", "once",
+/// "manual", "on new email" — the kit's `compactCadence`.
+pub fn compact_cadence(t: &Trigger) -> String {
+    match t.source_id.as_str() {
+        "schedule" => match t.config.get("every") {
+            Some(Value::String(every)) => match parse_duration(every) {
+                // Whole minutes of seconds read in minutes (no seconds on screen).
+                Some((n, 's')) if n % 60 == 0 => cadence_words(n / 60, 'm'),
+                Some((n, unit)) => cadence_words(n, unit),
+                None => format!("every {every}"),
+            },
+            _ => "once".into(),
+        },
+        "manual" => "manual".into(),
+        "email.received" if t.source_version == 1 => "on new email".into(),
+        other => other.to_string(),
+    }
+}
+
+fn cadence_words(n: u64, unit: char) -> String {
+    let (one, short) = match unit {
+        's' => ("second", "s"),
+        'm' => ("minute", "min"),
+        'h' => ("hour", "h"),
+        _ => ("day", "d"),
+    };
+    if n == 1 {
+        format!("every {one}")
+    } else {
+        format!("every {n} {short}")
+    }
+}
+
+/// "last 3 h ago" / "last <1 min ago" / "running now" / "last never"; while
+/// an approval or question waits on you, an occurrence in flight is not
+/// running: "waiting since 5 min" (from its fired time), or "" when unknown.
+pub fn last_run_text(s: &Summary, now: i64) -> String {
+    if let Some(cur) = &s.current {
+        if s.attention.pending_waits > 0 {
+            let same = s
+                .last
+                .as_ref()
+                .filter(|l| l.index == cur.index)
+                .and_then(|l| l.fired_at.as_deref())
+                .and_then(unix_secs);
+            return match same {
+                Some(t) => format!("waiting since {}", compact_duration((now - t).max(0))),
+                None => String::new(),
+            };
+        }
+        return "running now".into();
+    }
+    let t = s.last.as_ref().and_then(|l| {
+        l.finished_at
+            .as_deref()
+            .and_then(unix_secs)
+            .or_else(|| l.fired_at.as_deref().and_then(unix_secs))
+    });
+    match t {
+        // A run stamped after `now` (clock skew) reads as just now.
+        Some(t) => format!("last {} ago", compact_duration((now - t).max(0))),
+        None => "last never".into(),
+    }
+}
+
+/// "next in 14 h" / "next due now"; `None` when nothing is scheduled
+/// (paused, manual, archived, finished).
+pub fn next_run_text(s: &Summary, now: i64) -> Option<String> {
+    let t = s.next_fire_at.as_deref().and_then(unix_secs)?;
+    if t - now < 60 {
+        Some("next due now".into())
+    } else {
+        Some(format!("next in {}", compact_duration(t - now)))
+    }
+}
+
+/// The header's one line: cadence · last · next (empty parts omitted).
+pub fn timing_line(s: &Summary, now: i64) -> String {
+    let mut parts = vec![compact_cadence(&s.trigger), last_run_text(s, now)];
+    parts.extend(next_run_text(s, now));
+    parts.retain(|p| !p.is_empty());
+    parts.join(" · ")
+}
+
+/// The card's two lines: `↻ every 24 h · last 3 h ago` (↻ for a schedule
+/// only) and `next in 20 h` (empty when nothing is scheduled).
+pub fn card_lines(s: &Summary, now: i64) -> (String, String) {
+    let mut parts = vec![compact_cadence(&s.trigger), last_run_text(s, now)];
+    parts.retain(|p| !p.is_empty());
+    let mut first = parts.join(" · ");
+    if s.trigger.source_id == "schedule" {
+        first = format!("↻ {first}");
+    }
+    (first, next_run_text(s, now).unwrap_or_default())
+}
+
+/// "waiting for you" — the card/header badge while an approval or a
+/// question is pending.
+pub fn waiting_badge(s: &Summary) -> Option<&'static str> {
+    (s.attention.pending_waits > 0).then_some("waiting for you")
 }
 
 // ---------------------------------------------------------------------------
@@ -650,6 +797,8 @@ pub enum Control {
     Revise,
     Archive,
     Discuss,
+    /// Bring an archived automation back (it returns paused).
+    Unarchive,
 }
 
 impl Control {
@@ -663,6 +812,7 @@ impl Control {
             Control::Revise => "revise",
             Control::Archive => "archive",
             Control::Discuss => "discuss",
+            Control::Unarchive => "unarchive",
         }
     }
 
@@ -674,6 +824,7 @@ impl Control {
             Control::RunNow => Some("automation.run_now"),
             Control::StopCurrent => Some("automation.stop_current"),
             Control::Archive => Some("automation.archive"),
+            Control::Unarchive => Some("automation.unarchive"),
             Control::Revise | Control::Discuss => None,
         }
     }
@@ -687,7 +838,62 @@ impl Control {
             Control::Revise => "revise",
             Control::Archive => "archive",
             Control::Discuss => "discuss",
+            Control::Unarchive => "unarchive",
         }
+    }
+
+    /// The button's short label as every client shows it (the kit's
+    /// `automation_controls.json` `labels`: "Run now", "Stop", "Edit",
+    /// "Archive", "Unarchive").
+    pub fn button(self) -> &'static str {
+        match self {
+            // The Code header's own short label (`HEADER_BUTTONS`).
+            Control::StopCurrent => "Stop",
+            other => spec_str(&["labels", other.capability()]),
+        }
+    }
+
+    /// What the result line says once the gateway accepted the command —
+    /// the NEW state, never the verb (the Code web header's
+    /// `HEADER_NOTICES` and the kit panel's unarchive notice).
+    pub fn accepted_notice(self) -> Option<&'static str> {
+        Some(match self {
+            Control::Pause => "Automation paused.",
+            Control::Resume => "Automation active.",
+            Control::RunNow => "Run requested.",
+            Control::StopCurrent => "Stop requested.",
+            Control::Archive => "Automation archived.",
+            Control::Unarchive => "Unarchived: it is paused until you make it active.",
+            Control::Revise | Control::Discuss => return None,
+        })
+    }
+
+    /// The busy line while the command is in flight (Code web header).
+    pub fn busy_notice(self) -> &'static str {
+        match self {
+            Control::Pause => "Pausing…",
+            Control::Resume => "Activating…",
+            Control::RunNow => "Starting a run…",
+            Control::StopCurrent => "Stopping…",
+            Control::Archive => "Archiving…",
+            Control::Unarchive => "Unarchiving…",
+            Control::Revise => "Saving…",
+            Control::Discuss => "Opening the discussion…",
+        }
+    }
+
+    /// The control a `automation.*` command type belongs to.
+    pub fn from_command_type(command_type: &str) -> Option<Control> {
+        [
+            Control::Pause,
+            Control::Resume,
+            Control::RunNow,
+            Control::StopCurrent,
+            Control::Archive,
+            Control::Unarchive,
+        ]
+        .into_iter()
+        .find(|c| c.command_type() == Some(command_type))
     }
 }
 
@@ -762,6 +968,13 @@ pub fn control_state(s: &Summary, control: Control, busy: bool) -> Result<(), St
     if !caps(control.capability()) {
         return Err("Not permitted for this automation.".into());
     }
+    if control == Control::Unarchive {
+        return if s.status == "archived" {
+            Ok(())
+        } else {
+            Err("Not archived.".into())
+        };
+    }
     if s.status == "archived" {
         return Err("Archived: history is kept, nothing runs.".into());
     }
@@ -793,7 +1006,7 @@ pub fn control_state(s: &Summary, control: Control, busy: bool) -> Result<(), St
             },
         ),
         Control::StopCurrent => (running, "Nothing is running."),
-        Control::Revise | Control::Archive | Control::Discuss => (true, ""),
+        Control::Revise | Control::Archive | Control::Discuss | Control::Unarchive => (true, ""),
     };
     if ok {
         Ok(())
@@ -856,20 +1069,6 @@ pub fn active_detail(s: &Summary, busy: bool) -> String {
         Ok(false) => "paused: scheduled runs are skipped (Run now still works)".into(),
         Err(why) => why,
     }
-}
-
-/// The state sentence after a switch was applied (describes the NEW state).
-pub fn active_notice(command_type: &str, duplicate: bool) -> Option<String> {
-    let state = match command_type {
-        "automation.pause" => "Active is off: scheduled runs are skipped.",
-        "automation.resume" => "Active is on: it runs on its schedule.",
-        _ => return None,
-    };
-    Some(if duplicate {
-        format!("{state} (the gateway answered the retry as a duplicate)")
-    } else {
-        state.to_string()
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1313,6 +1512,20 @@ pub fn list_request(cursor: Option<&str>) -> Request {
     }
 }
 
+/// `GET /api/gateway/automations?status=archived&limit=…[&cursor=…]` — the
+/// archived ones (the web's `Archived · N` list reads the same).
+pub fn archived_list_request(cursor: Option<&str>) -> Request {
+    let mut path = format!("{BASE}?status=archived&limit={PAGE_LIMIT}");
+    if let Some(c) = cursor {
+        path.push_str(&format!("&cursor={}", enc(c)));
+    }
+    Request {
+        method: "GET",
+        path,
+        body: None,
+    }
+}
+
 pub fn detail_request(id: &str) -> Request {
     Request {
         method: "GET",
@@ -1553,7 +1766,14 @@ pub struct View {
     /// `None` until the first answer; `Err` = the last read failed.
     pub list: Option<Result<Vec<Summary>, String>>,
     pub loading: bool,
-    pub show_archived: bool,
+    /// `archived_automations` of the newest list answer (the gateway's
+    /// count, never a client tally).
+    pub archived_count: u64,
+    /// The archived automations (`GET /automations?status=archived`);
+    /// `None` until read.
+    pub archived: Option<Result<Vec<Summary>, String>>,
+    /// The `Archived · N` line is open (its rows show, each with Unarchive).
+    pub archived_open: bool,
     pub detail: Option<Detail>,
     /// An action is in flight (controls are disabled with "Working…").
     pub busy: bool,
@@ -1831,15 +2051,17 @@ mod tests {
             active_switch(&no_resume, false),
             Err("Not permitted for this automation.".into())
         );
+        // The accepted notice names the NEW state (Code web HEADER_NOTICES).
+        let notice = |t: &str| Control::from_command_type(t).and_then(Control::accepted_notice);
+        assert_eq!(notice("automation.pause"), Some("Automation paused."));
+        assert_eq!(notice("automation.resume"), Some("Automation active."));
+        assert_eq!(notice("automation.run_now"), Some("Run requested."));
+        assert_eq!(notice("automation.stop_current"), Some("Stop requested."));
+        assert_eq!(notice("automation.archive"), Some("Automation archived."));
         assert_eq!(
-            active_notice("automation.pause", false).as_deref(),
-            Some("Active is off: scheduled runs are skipped.")
+            notice("automation.unarchive"),
+            Some("Unarchived: it is paused until you make it active.")
         );
-        assert_eq!(
-            active_notice("automation.resume", false).as_deref(),
-            Some("Active is on: it runs on its schedule.")
-        );
-        assert_eq!(active_notice("automation.run_now", false), None);
         assert_eq!(active_label(), "Active");
     }
 

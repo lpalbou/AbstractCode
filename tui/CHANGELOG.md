@@ -8,6 +8,47 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Settings panels** (round 7, parity with Code web's right rail):
+  `/settings [panel]` (`/panels`, `/rail`) opens Activity, Files, Model,
+  Workflow, Workspace, Tools, Skills and Voice in one overlay with the rail
+  on the right edge (`←`/`→`, `Tab` or `1`–`8` changes panel, `Enter`
+  changes a row, `Space` flips a switch, `d` = Gateway default). Bound to
+  this conversation they change its run settings (the same apply path as
+  `/model`, `/workflow`, `/workspace`, `/tools`, `/skills`); bound to an
+  automation (`e` Edit) they edit its definition and each change is saved as
+  a new revision (`PATCH /automations/{id}` with `expected_revision`, the
+  web's `input_data` keys; a value put back to the default is removed), with
+  "Revision N" and the web's save sentences. `/activity` opens the work in
+  foldable groups, one per model step (`Start`, `Step 1`, …; the newest
+  open); for an automation one group per run (`Run #3 · 2 h ago ·
+  completed`), its steps read from that run's ledger.
+- **Archive a conversation**: `a` on the `/sessions` board, or `/archive` for
+  the open one, asks "Archive this conversation? It stays searchable and
+  auditable; it just leaves this list." and archives through `POST
+  /sessions/{id}/archive`; archiving the open conversation opens the next
+  one. **Archived · N** (the gateway's `archived_sessions`) opens the
+  archived conversations inline, each with **Unarchive**.
+- **Unarchive an automation**: the automations list ends with **Archived ·
+  N** (the gateway's `archived_automations`; `GET /automations?status=archived`);
+  `Enter` or `u` sends `automation.unarchive` (it comes back paused).
+
+### Changed
+
+- `/sessions` is the conversations board of Code web: each conversation's
+  title (its opening prompt) and `Oct 2 · 2 turns · 7 tools` (tools = the
+  gateway's per-turn `tool_calls`, `GET /runs?…&include_metrics=true`).
+- `/automations` shows the Code web cards: the name (+ **waiting for you**),
+  `↻ every 24 h · last 3 h ago` (`waiting since …` while a run waits on you),
+  `next in 20 h` with the **Active** switch at the right. Archive asks
+  inline ("Archive “title”? It will not run again; its history stays
+  readable." — `y` archives, `n` keeps it) instead of a second press; `e`
+  is **Edit** (the settings panels) instead of the three-step revise; the
+  `h` "show archived" toggle is gone. Notices name the new state ("Run
+  requested.", "Automation paused.", "Automation archived.").
+- The automation screen's header: `Automations / <title>`, the Active
+  switch, `every 24 h · last 3 h ago · next in 14 h` (+ **waiting for
+  you**), the workspace as a short name.
+
 - **Voice** (round 7, the same gateway routes and wording as Code web's kit
   VoiceSettings). `Ctrl+P` / `/speak` reads the latest reply aloud through
   `POST /runs/{id}/voice/tts/stream`: each sentence-chunked WAV segment goes

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- tui: **settings panels** `/settings` (Activity, Files, Model, Workflow, Workspace, Tools, Skills, Voice) bound to the conversation or to an automation's definition (each change saved as a new revision, "Revision N"); `/activity` groups the work per model step (per run for an automation).
+- tui: **Archive** a conversation from the `/sessions` board or `/archive` (inline confirmation, `POST /sessions/{id}/archive`), **Archived · N** with **Unarchive** for conversations and automations.
 - tui: **voice** — `Ctrl+P` / `/speak` reads the latest reply aloud through the gateway's streaming voice route (sentence-chunked, first audio 0.4–0.9 s measured; `Esc` stops), `Ctrl+R` / `/dictate` dictates into the composer with the gateway's default speech-to-text route (`Transcribing… 4 s · faster-whisper / large-v3`), **Read aloud** after each turn, and a `/voice` screen with the same wording as the kit VoiceSettings ("Gateway default · supertonic / supertonic-3" from `GET /voice/defaults`, output/input device with Tests and a level meter, volume, language, latency). Audio plays and records on this computer through AbstractVoice (`--voice-python <PATH>`); details in tui/docs/api.md.
 
 ### Fixed
@@ -28,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- tui: `/sessions` cards read `Oct 2 · 2 turns · 7 tools`; `/automations` cards read `↻ every 24 h · last 3 h ago` / `next in 20 h` with the **Active** switch, and offer Run now / Stop / Edit / Archive (inline confirmation) like Code web.
 - **TUI assets:** `tui/assets/automation_controls.json` is again byte-identical to the kit's (ui-kit 0.7.0): it gains the Unarchive label and hint, and picks up the kit's current result-email wording.
 
 - web: the sidebar's Automations and Conversations sections are two stacking full-width drawers. Both headers stay visible; with Automations open the Conversations header sits mid-height, Conversations alone fills the rest, and each list scrolls inside its own drawer. Fold state is remembered.

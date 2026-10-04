@@ -162,6 +162,7 @@ impl Harness {
             growing: Default::default(),
             max_attempts: Some(3),
             workspace_root: summary.workspace_root.clone().unwrap_or_default(),
+            target: serde_json::Value::Null,
         };
         let page = auto::parse_occurrence_page(&fixture("occurrences.json")).unwrap();
         self.store
@@ -262,28 +263,35 @@ fn command_types(cmds: Vec<AutoCmd>) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn automation_list_leads_each_row_with_its_active_switch() {
+fn automation_cards_carry_their_active_switch() {
     let mut h = harness(Size::new(160, 40));
     h.command("/automations");
     h.answer_list();
     let screen = h.turn();
-    // Active rows highlighted, the paused one plain, the legacy one unavailable.
-    assert!(screen.contains("[x] AI news monitor"), "{screen}");
-    assert!(screen.contains("[ ] Weekly journal monitor"), "{screen}");
-    assert!(screen.contains("[-] echo"), "{screen}");
+    // Each card: its name, then `↻ cadence · last`, then `next …` with the
+    // `[x] Active` switch at the right — ON highlighted, OFF plain, the
+    // legacy one unavailable (dimmed).
+    for title in ["AI news monitor", "Weekly journal monitor", "echo"] {
+        assert!(screen.contains(title), "{screen}");
+    }
+    // Off the first card (the selection inks its own rows).
+    let screen = h.keys(b"\x1b[B");
     assert_eq!(
-        h.style_at("[x] AI news monitor"),
+        h.style_at("[x] Active"),
         (true, accent()),
         "ON = accent + bold"
     );
-    let (bold, fg) = h.style_at("[ ] Weekly journal monitor");
+    let (bold, fg) = h.style_at("[ ] Active");
     assert!(!bold && fg != accent(), "OFF = plain");
-    let (bold, fg) = h.style_at("[-] echo");
+    let (bold, fg) = h.style_at("[-] Active");
     assert!(
         !bold && fg == Some(abstracttui::app::current_theme().tokens.text_faint),
         "UNAVAILABLE = dimmed"
     );
-    assert!(screen.contains("space switch Active"), "{screen}");
+    assert!(screen.contains("[x] Active"), "{screen}");
+    assert!(screen.contains("[ ] Active"), "{screen}");
+    assert!(screen.contains("[-] Active"), "{screen}");
+    assert!(screen.contains("space Active"), "{screen}");
     assert!(
         !screen.contains("pause/resume"),
         "no verb pair in the hints:\n{screen}"
@@ -301,7 +309,7 @@ fn space_switches_active_pause_when_on_resume_when_off() {
     h.keys(b" ");
     assert_eq!(command_types(h.auto_cmds()), vec!["automation.pause"]);
     let notice = h.store.automations.with_untracked(|v| v.notice.clone());
-    assert_eq!(notice, "switching Active off for “AI news monitor”…");
+    assert_eq!(notice, "Pausing…");
     // Third row: Weekly journal monitor, paused → resume.
     h.store.automations.update(|v| v.busy = false);
     h.keys(b"\x1b[B");
@@ -329,7 +337,7 @@ fn automation_detail_shows_the_active_switch_and_space_switches_it() {
         screen.contains("[ ] Active — paused: scheduled runs are skipped"),
         "{screen}"
     );
-    assert!(screen.contains("space switch Active"), "{screen}");
+    assert!(screen.contains("space Active"), "{screen}");
     assert!(!screen.contains("pause/resume"), "{screen}");
     h.auto_cmds();
     h.keys(b" ");

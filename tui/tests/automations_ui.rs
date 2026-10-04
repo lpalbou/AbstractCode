@@ -161,6 +161,7 @@ impl Harness {
             growing: Default::default(),
             max_attempts: Some(3),
             workspace_root: summary.workspace_root.clone().unwrap(),
+            target: serde_json::Value::Null,
         };
         let page = auto::parse_occurrence_page(&fixture("occurrences.json")).unwrap();
         self.store
@@ -201,40 +202,81 @@ fn the_list_reads_state_now_and_next_from_the_gateway() {
         "/automations reads the list: {cmds:?}"
     );
     let screen = h.turn();
-    assert!(screen.contains("asking the gateway"), "{screen}");
+    assert!(screen.contains("Loading automations…"), "{screen}");
     h.answer_list();
     let screen = h.turn();
-    assert!(screen.contains("Inbox triage · Active ▶ · 2 unseen · 2 waiting for you · every 30 minutes (UTC) · now: Run #7 running"), "{screen}");
+    // The Code web card: the name (+ the waiting badge), then
+    // `↻ cadence · last`, then `next in …` with the Active switch.
+    assert!(screen.contains("Inbox triage"), "{screen}");
+    assert!(screen.contains("waiting for you"), "{screen}");
+    // A run waits on a person: "waiting since", never "running now".
     assert!(
-        screen.contains("Weekly journal monitor · Paused ⏸"),
+        screen.contains("↻ every 30 min · waiting since"),
         "{screen}"
     );
-    assert!(screen.contains("next: none while paused"), "{screen}");
-    assert!(screen.contains("legacy schedule"), "{screen}");
+    assert!(screen.contains("↻ every 8 h · last"), "{screen}");
+    assert!(screen.contains("↻ every 7 d · last"), "{screen}");
+    assert!(screen.contains("[x] Active"), "{screen}");
+    assert!(
+        screen.contains("[ ] Active"),
+        "the paused one is off:\n{screen}"
+    );
+    assert!(
+        screen.contains("[-] Active"),
+        "the legacy one cannot change:\n{screen}"
+    );
+    // Paused: no next part at all.
+    let weekly = screen
+        .lines()
+        .skip_while(|l| !l.contains("Weekly journal monitor"))
+        .take(3)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!weekly.contains("next "), "{weekly}");
 }
 
 #[test]
-fn archived_rows_are_hidden_until_asked() {
+fn archived_automations_live_under_archived_n_with_unarchive() {
     let mut h = harness();
     h.command("/automations");
     let mut page = auto::parse_list_page(&fixture("list.json")).unwrap();
-    page.items[1].status = "archived".into();
-    let archived_title = page.items[1].title.clone();
-    h.store.automations.update(|v| v.apply_list(page.items));
+    // The gateway leaves archived ones out of the listing and counts them.
+    let mut archived = page.items.remove(1);
+    archived.status = "archived".into();
+    archived.capabilities = vec!["unarchive".into(), "discuss".into()];
+    let title = archived.title.clone();
+    let shown = page.items.len();
+    h.store.automations.update(|v| {
+        v.archived_count = 1;
+        v.archived = Some(Ok(vec![archived.clone()]));
+        v.apply_list(page.items);
+    });
     let screen = h.turn();
+    assert!(!screen.contains(&title), "{screen}");
+    assert!(screen.contains("Archived · 1"), "{screen}");
+    assert!(!screen.contains("Show archived"), "{screen}");
+    // Down to the line, Enter opens it inline; the row offers Unarchive.
+    for _ in 0..shown {
+        h.keys(b"\x1b[B");
+    }
+    let screen = h.keys(b"\r");
+    assert!(screen.contains(&title), "{screen}");
+    assert!(screen.contains("Unarchive"), "{screen}");
+    h.auto_cmds();
+    h.keys(b"\x1b[B");
+    h.keys(b"\r");
+    let cmds = h.auto_cmds();
     assert!(
-        !screen.contains(&format!("{archived_title} · ")),
-        "{screen}"
+        matches!(cmds.as_slice(), [AutoCmd::Command { id, command_type, .. }] if *id == archived.id && command_type == "automation.unarchive"),
+        "{cmds:?}"
     );
-    assert!(
-        screen.contains("1 archived hidden — h shows them"),
-        "{screen}"
-    );
-    let screen = h.keys(b"h");
-    assert!(
-        screen.contains(&format!("{archived_title} · Archived")),
-        "{screen}"
-    );
+    // A count of 0 leaves no line at all.
+    h.store.automations.update(|v| {
+        v.busy = false;
+        v.archived_count = 0;
+    });
+    let screen = h.turn();
+    assert!(!screen.contains("Archived ·"), "{screen}");
 }
 
 #[test]
@@ -250,7 +292,7 @@ fn controls_follow_the_shared_rules_and_send_typed_commands() {
         "run now must not be sent while a run is in progress"
     );
     assert!(
-        screen.contains("run now: An occurrence is in progress."),
+        screen.contains("Run now: An occurrence is in progress."),
         "{screen}"
     );
     // Stop current applies.
@@ -278,19 +320,33 @@ fn controls_follow_the_shared_rules_and_send_typed_commands() {
 }
 
 #[test]
-fn archive_needs_a_second_press_and_says_it_keeps_history() {
+fn archive_asks_inline_and_y_confirms() {
     let mut h = harness();
     h.command("/automations");
     h.answer_list();
     h.auto_cmds();
     let screen = h.keys(b"a");
     assert!(h.auto_cmds().is_empty(), "one press only asks");
-    assert!(screen.contains("its history stays readable"), "{screen}");
+    assert!(
+        screen
+            .contains("Archive “Inbox triage”? It will not run again; its history stays readable."),
+        "{screen}"
+    );
+    assert!(screen.contains("y Archive · n Keep it"), "{screen}");
+    // n keeps it.
+    let screen = h.keys(b"n");
+    assert!(h.auto_cmds().is_empty());
+    assert!(!screen.contains("y Archive · n Keep it"), "{screen}");
     h.keys(b"a");
+    h.keys(b"y");
     let cmds = h.auto_cmds();
     assert!(
         matches!(cmds.as_slice(), [AutoCmd::Command { command_type, .. }] if command_type == "automation.archive"),
         "{cmds:?}"
+    );
+    assert_eq!(
+        h.store.automations.with_untracked(|v| v.notice.clone()),
+        "Archiving…"
     );
 }
 
@@ -298,12 +354,16 @@ fn archive_needs_a_second_press_and_says_it_keeps_history() {
 fn one_automation_shows_folder_waits_and_runs_as_chat_pairs() {
     let mut h = harness();
     let screen = open_inbox(&mut h);
-    assert!(screen.contains("automation — Inbox triage"), "{screen}");
-    assert!(screen.contains("now: Run #7 running"), "{screen}");
+    assert!(screen.contains("Automations / Inbox triage"), "{screen}");
+    assert!(screen.contains("Run #7 running"), "{screen}");
+    assert!(screen.contains("every 30 min · waiting since"), "{screen}");
+    assert!(screen.contains("waiting for you"), "{screen}");
+    // The workspace as a short name (never the full path in the header).
     assert!(
-        screen.contains("folder: /srv/abstractgateway/data/workspaces/session-automation-53443dd0"),
+        screen.contains("Workspace session-automation-53443dd0-25c4-5fa8-bdad-e1ac3-db8ae8ce21b3 (w browses it)"),
         "{screen}"
     );
+    assert!(!screen.contains("/srv/abstractgateway"), "{screen}");
     assert!(
         screen.contains("tools: ask me before each tool call"),
         "{screen}"
@@ -616,8 +676,12 @@ fn archive_from_one_automation_also_asks_first() {
     h.auto_cmds();
     let screen = h.keys(b"a");
     assert!(h.auto_cmds().is_empty(), "one press only asks");
-    assert!(screen.contains("its history stays readable"), "{screen}");
-    h.keys(b"a");
+    assert!(
+        screen
+            .contains("Archive “Inbox triage”? It will not run again; its history stays readable."),
+        "{screen}"
+    );
+    h.keys(b"y");
     let cmds = h.auto_cmds();
     assert!(
         matches!(cmds.as_slice(), [AutoCmd::Command { id, command_type, .. }] if id == INBOX && command_type == "automation.archive"),
@@ -625,64 +689,84 @@ fn archive_from_one_automation_also_asks_first() {
     );
 }
 
+/// The rail's queued revisions (`Cmd::Rail(SaveRevision)`), other commands dropped.
+fn saves(h: &mut Harness) -> Vec<(u64, serde_json::Value)> {
+    let mut out = Vec::new();
+    while let Ok(cmd) = h.rx.try_recv() {
+        if let Cmd::Rail(abstractcode::gateway::rail::RailCmd::SaveRevision {
+            expected_revision,
+            changes,
+            ..
+        }) = cmd
+        {
+            out.push((expected_revision, changes));
+        }
+    }
+    out
+}
+
 #[test]
-fn a_refused_revision_stays_readable_on_the_automation() {
+fn edit_opens_the_settings_on_the_automation_and_a_refusal_stays_readable() {
     let mut h = harness();
     open_inbox(&mut h);
     h.auto_cmds();
-    h.keys(b"e"); // 1/3 title
+    let screen = h.keys(b"e");
+    // The rail, bound to this automation, on its Workflow panel.
+    assert!(screen.contains("Automation Inbox triage"), "{screen}");
+    assert!(screen.contains("Revision 3"), "{screen}");
+    assert!(
+        screen.contains("Changes are saved as a new revision and apply from the next run."),
+        "{screen}"
+    );
+    assert!(screen.contains("Repeat every (UTC)"), "{screen}");
+    // Workflow, Title, Repeat every: Enter edits it; an invalid interval.
+    h.keys(b"\x1b[B\x1b[B");
     h.keys(b"\r");
-    // 2/3 interval (empty keeps "30m"): an invalid one.
+    h.keys(b"\x1b[F\x7f\x7f\x7f");
     h.term.push_input(b"6 hours");
     h.turn();
-    h.keys(b"\r");
-    let screen = h.keys(b"\r"); // 3/3 context → back to the automation
+    let screen = h.keys(b"\r");
+    assert!(saves(&mut h).is_empty(), "nothing is sent");
     assert!(
-        h.auto_cmds()
-            .iter()
-            .all(|c| !matches!(c, AutoCmd::Revise { .. })),
-        "nothing is sent"
-    );
-    assert!(screen.contains("automation — Inbox triage"), "{screen}");
-    assert!(
-        screen.contains("Interval must be a whole number of minutes, hours or days"),
+        screen.contains("Not saved: Interval must be a whole number of minutes, hours or days"),
         "{screen}"
     );
 }
 
 #[test]
-fn revise_sends_only_what_changed_and_empty_keeps_the_current_value() {
+fn a_settings_change_is_saved_as_a_new_revision() {
     let mut h = harness();
     open_inbox(&mut h);
     h.auto_cmds();
-    let screen = h.keys(b"e");
-    assert!(
-        screen.contains("Now: Inbox triage — leave empty and press Enter to keep it."),
-        "{screen}"
-    );
-    h.keys(b"\r"); // title kept
+    h.keys(b"e");
+    h.keys(b"\x1b[B\x1b[B");
+    h.keys(b"\r");
+    h.keys(b"\x1b[F\x7f\x7f\x7f");
     h.term.push_input(b"6h");
     h.turn();
-    h.keys(b"\r"); // interval 6h
-    h.keys(b"\r"); // context kept (growing is preselected)
-    let cmds = h.auto_cmds();
-    match cmds.iter().find(|c| matches!(c, AutoCmd::Revise { .. })) {
-        Some(AutoCmd::Revise {
-            id,
-            changes,
-            expected_revision,
-            ..
-        }) => {
-            assert_eq!(id, INBOX);
-            assert_eq!(*expected_revision, Some(1));
+    let screen = h.keys(b"\r");
+    let sent = saves(&mut h);
+    match sent.as_slice() {
+        [(rev, changes)] => {
+            assert_eq!(*rev, 3, "expected_revision is the definition's");
             assert_eq!(changes["trigger"]["config"]["every"], "6h");
             assert!(
                 changes.get("title").is_none() && changes.get("context").is_none(),
-                "{changes}"
+                "only what changed: {changes}"
             );
         }
-        other => panic!("expected a revise, got {other:?} in {cmds:?}"),
+        other => panic!("expected one revision, got {other:?}"),
     }
+    assert!(screen.contains("Saving…"), "{screen}");
+    // The gateway saved it: the panel says so, with the new number.
+    h.store
+        .rail
+        .update(|r| r.save = abstractcode::rail::SaveState::Saved(4));
+    let screen = h.turn();
+    assert!(
+        screen.contains("Saved as revision 4; applies from the next run."),
+        "{screen}"
+    );
 }
 
 #[test]

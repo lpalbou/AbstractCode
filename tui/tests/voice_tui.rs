@@ -1023,15 +1023,29 @@ fn ttfa_probe() {
     let dir = std::env::temp_dir().join(format!("acode-ttfa-{}", std::process::id()));
     let dir_s = dir.to_string_lossy().to_string();
     let py = std::path::PathBuf::from(var("ACODE_TEST_PYTHON"));
-    let host = Arc::new(Host::new(Box::new(move |sink| voice_host::spawn_bridge_with(&py, &["--null-output", &dir_s], sink))));
+    let host = Arc::new(Host::new(Box::new(move |sink| {
+        voice_host::spawn_bridge_with(&py, &["--null-output", &dir_s], sink)
+    })));
     host.ensure().expect("bridge"); // warm, as in a session that already spoke once
-    let client = abstractcode::gateway::GatewayClient::new(&var("ACODE_TTFA_URL"), Some(&var("ACODE_TTFA_TOKEN")));
+    let client = abstractcode::gateway::GatewayClient::new(
+        &var("ACODE_TTFA_URL"),
+        Some(&var("ACODE_TTFA_TOKEN")),
+    );
     let vg = VoiceGateway::new(&client);
     let text = "Hello, this is a short voice probe from the terminal. It has a second sentence, so the stream has more than one segment.";
     let gen = host.next_gen();
     host.claim_speech(gen);
     let t0 = Instant::now();
-    let reply = voice::speak_blocking(&host, &vg, gen, &var("ACODE_TTFA_RUN"), text, &VoicePrefs::default(), &mut |_| {}).expect("spoken");
+    let reply = voice::speak_blocking(
+        &host,
+        &vg,
+        gen,
+        &var("ACODE_TTFA_RUN"),
+        text,
+        &VoicePrefs::default(),
+        &mut |_| {},
+    )
+    .expect("spoken");
     let segments = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
     println!(
         "TTFA {:.3} s · total {:.3} s · segments {segments} · metrics {}",

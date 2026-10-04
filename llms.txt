@@ -32,7 +32,7 @@ Ground rules for reading this repository:
 - [Architecture](docs/architecture.md): the clients, the browser app server, the gateway, the run stream with live reply deltas, the thin-client contract, and repository layout
 - [API and integration points](docs/api.md): the command-line surface, the library surface, and the gateway contract (runs, streams, discovery, workspace files, about)
 - [Workflows](docs/workflows.md): the gateway default agent workflow, selecting a workflow, and the `abstractcode.agent.v1` interface
-- [Automations](docs/automations.md): configurable growing-context budgets and result email; creating, managing, answering and discussing gateway automations from the terminal (`/automations`, `/schedule`) and the browser (the Automations sidebar section)
+- [Automations](docs/automations.md): configurable growing-context budgets and result email; creating, managing, answering and discussing gateway automations from the terminal (`/automations`, `/schedule`, Edit in `/settings`) and the browser (the Automations sidebar section)
 - [Interface events](docs/ui_events.md): the workflow-driven event contract
 - [FAQ](docs/faq.md): recurring questions and current limitations
 - [Troubleshooting](docs/troubleshooting.md): symptom-oriented diagnosis and fixes
@@ -42,7 +42,7 @@ Ground rules for reading this repository:
 
 - [Terminal client README](tui/README.md): features, interface tour, keys, themes
 - [Terminal getting started](tui/docs/getting-started.md): terminal-specific setup
-- [Terminal API](tui/docs/api.md): command-line options, slash commands (`/workflow`, `/files`, `/stream`, `/about`, `/model`, `/mtp`, `/voice`, `/speak`, `/dictate`, …), keys, streamed replies, voice (gateway routes, host audio via AbstractVoice), exit codes
+- [Terminal API](tui/docs/api.md): command-line options, slash commands (`/settings`, `/activity`, `/sessions`, `/archive`, `/automations`, `/workflow`, `/files`, `/stream`, `/about`, `/model`, `/mtp`, `/voice`, `/speak`, `/dictate`, …), keys, the settings panels (bound to the conversation or an automation's definition, revisions), streamed replies, voice (gateway routes, host audio via AbstractVoice), exit codes
 - [Terminal architecture](tui/docs/architecture.md): how the client is built on AbstractTUI — threads, the ledger fold, live replies
 - [Terminal troubleshooting](tui/docs/troubleshooting.md): terminal, rendering, and connection problems
 - [Terminal FAQ](tui/docs/faq.md): durability, workspaces, tokens, steering semantics, voice (which Python, Gateway default, microphone permission)

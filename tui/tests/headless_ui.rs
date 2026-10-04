@@ -197,6 +197,7 @@ fn settle_session_board(h: &mut Harness) {
             rows: Vec::new(),
             truncated: false,
             labeled: 0,
+            archived: 0,
         });
     h.turn();
 }
@@ -2201,6 +2202,7 @@ fn sessions_picker_switches_to_a_recent_session() {
             rows: Vec::new(),
             truncated: false,
             labeled: 0,
+            archived: 0,
         });
     let screen = h.turn();
     assert!(
@@ -2628,6 +2630,7 @@ fn the_sessions_board_shows_gateway_sessions_and_names_its_sources() {
                     turns: 4,
                     first_run: String::new(),
                     prompt: None,
+                    tools: None,
                 },
                 abstractcode::store::SessionRow {
                     id: "acode-test-session".into(),
@@ -2636,10 +2639,12 @@ fn the_sessions_board_shows_gateway_sessions_and_names_its_sources() {
                     turns: 1,
                     first_run: String::new(),
                     prompt: None,
+                    tools: None,
                 },
             ],
             truncated: false,
             labeled: 0,
+            archived: 0,
         });
     let screen = h.turn();
     assert!(
@@ -2760,6 +2765,7 @@ fn the_board_waits_before_it_claims_anything_about_the_gateway() {
             rows: Vec::new(),
             truncated: false,
             labeled: 0,
+            archived: 0,
         });
     let screen = h.turn();
     assert!(
@@ -2794,9 +2800,11 @@ fn a_truncated_listing_never_claims_a_session_is_missing() {
                 turns: 2,
                 first_run: "r1".into(),
                 prompt: Some("a real prompt from the gateway".into()),
+                tools: None,
             }],
             truncated: true,
             labeled: 1,
+            archived: 0,
         });
     let screen = h.turn();
     assert!(
@@ -2838,6 +2846,7 @@ fn the_board_labels_from_the_gateway_and_names_what_it_did_not_fetch() {
         turns,
         first_run: "r".into(),
         prompt: prompt.map(str::to_string),
+        tools: None,
     };
     h.store
         .session_index
@@ -2848,6 +2857,7 @@ fn the_board_labels_from_the_gateway_and_names_what_it_did_not_fetch() {
             ],
             truncated: false,
             labeled: 1,
+            archived: 0,
         });
     let screen = h.turn();
     assert!(
@@ -3093,9 +3103,11 @@ fn a_truncated_session_listing_says_so_on_screen() {
                 turns: 1,
                 first_run: String::new(),
                 prompt: None,
+                tools: None,
             }],
             truncated: true,
             labeled: 1,
+            archived: 0,
         });
     let screen = h.turn();
     assert!(

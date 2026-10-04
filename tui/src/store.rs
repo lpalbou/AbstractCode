@@ -231,6 +231,10 @@ pub struct SessionRow {
     /// `/runs` summary has no such field, and neither does the session
     /// turn list, so it costs one request per session and is bounded).
     pub prompt: Option<String>,
+    /// Tool calls across the session's turns (`include_metrics=true`:
+    /// each root run's `tool_calls`, sub-runs included). `None` when any
+    /// listed turn carried no number — a partial sum is never shown.
+    pub tools: Option<u64>,
 }
 
 /// The gateway's session listing, as a THREE-state fact — the absence
@@ -254,6 +258,9 @@ pub enum SessionIndex {
         /// one glyph to mean "still arriving", "outside the bound" and
         /// "genuinely none" at once (review D3).
         labeled: usize,
+        /// `archived_sessions`: how many sessions the gateway holds as
+        /// archived (left out of `rows`) — the board's `Archived · N`.
+        archived: usize,
     },
     /// The gateway refused or could not be reached; the message is the
     /// evidence-worded one from `GwError`. Local rows still render —
@@ -980,6 +987,9 @@ pub struct Store {
     /// `/automations` + `/schedule`: the list, the open automation, the
     /// in-flight action (`crate::automations::View`).
     pub automations: Signal<crate::automations::View>,
+    /// The settings rail and the conversations board (R7.3): policy,
+    /// voice routes, run activity, archived sessions, save state.
+    pub rail: Signal<crate::rail::RailData>,
     /// The GATEWAY's verdict on whether this terminal is on its machine
     /// (`host.caller_is_this_machine` from `GET /runs/{rid}/workspace`);
     /// `None` until a run's workspace has been read.
@@ -1278,6 +1288,7 @@ impl Store {
             skills_shelf: cx.signal(None),
             files: cx.signal(FilesView::default()),
             automations: cx.signal(crate::automations::View::default()),
+            rail: cx.signal(crate::rail::RailData::default()),
             gateway_same_machine: cx.signal(None),
             send_local_workspace: cx.signal(Default::default()),
             workspace_explicit: cx.signal(false),

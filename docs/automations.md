@@ -97,8 +97,8 @@ them like any other).
 | **Active** switch | `Space` (or `p`) | On: the automation runs on its schedule. Off: paused, no scheduled run; switching it on again continues from the next tick. The switch shows why it cannot change once the automation ended, is archived or is a legacy schedule. |
 | Run now | `g` | One run at once, instead of waiting for the schedule. The schedule does not move: the next scheduled run keeps its time, and if that time comes while this run is still going, the scheduled run starts right after it. It does not count toward a run limit ("stop after this many runs"). Also works while paused (it stays paused). In a Growing automation, later runs see it in their history. Refused while a run is in progress. |
 | Stop current | `x` | Cancels the run in progress. |
-| Revise | `e` | Title, interval (schedules) and context; applies from the next run. In the terminal, a field left empty keeps its current value. |
-| Archive | `a`, then `a` again | The automation stops and is hidden from the list; its history stays readable (the **Archived · N** line at the end of the browser's list, with **Unarchive**; `h` in the terminal). Archiving never deletes anything. |
+| Edit | `e` | Opens the settings panels on the automation's definition (workflow, title, task, interval, context, tool approval; model, reasoning, MTP, limits, instructions; workspace; tools; skills). Each change is saved as a new revision and applies from the next run; the panels show **Revision N**. |
+| Archive | `a`, then `y` | Asks first, inline: "Archive “title”? It will not run again; its history stays readable." The automation stops and leaves the list; its history stays readable under the quiet **Archived · N** line at the end of the list, each with **Unarchive** (`Enter` on the line opens it, `Enter` or `u` on a row unarchives; it comes back paused). Archiving never deletes anything. |
 
 In the browser the switch and the buttons **Run now**, **Stop**, **Edit** and
 **Archive** sit in the automation's header, next to its timing line
