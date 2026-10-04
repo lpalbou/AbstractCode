@@ -1,7 +1,8 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { CodeVoiceSettings, VoiceTools, fetchVoiceDefaults } from "./voice_tools";
+import { readFileSync } from "node:fs";
+import { CodeVoiceSettings, TRANSCRIBE_TIMEOUT_MS, VoiceTools, fetchVoiceDefaults } from "./voice_tools";
 import { MEDIA_NEEDS_HTTPS } from "../lib/secure-context";
 
 describe("gateway voice controls", () => {
@@ -121,5 +122,14 @@ describe("Code's Voice panel names the gateway's routes", () => {
       globalThis.fetch = realFetch;
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("dictation never spins forever", () => {
+  it("bounds a transcription with a timeout that fails as a sentence", () => {
+    const src = readFileSync(new URL("./voice_tools.tsx", import.meta.url), "utf8");
+    expect(TRANSCRIBE_TIMEOUT_MS).toBeGreaterThan(60_000);
+    expect(src).toMatch(/Promise\.race\(\[\s*gateway\.audio_transcribe/);
+    expect(src).toContain("the gateway did not answer within");
   });
 });

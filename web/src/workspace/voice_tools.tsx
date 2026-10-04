@@ -69,6 +69,9 @@ export function CodeVoiceSettings({
   );
 }
 
+/** How long a transcription may take before it is reported as failed. */
+export const TRANSCRIBE_TIMEOUT_MS = 180_000;
+
 /** Optional media stays in the gateway; the browser only records and plays audio. */
 export function useWorkspaceVoice({
   runId,
@@ -149,11 +152,21 @@ export function useWorkspaceVoice({
               file,
             );
             assertCurrent();
-            const response = await gateway.audio_transcribe(runId, {
-              audio_artifact: attachment,
-              request_id: newId(),
-              ...voiceSttRequest(preferences),
-            });
+            // A transcription that never answers ends as a sentence, never a spinner forever.
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const response: any = await Promise.race([
+              gateway.audio_transcribe(runId, {
+                audio_artifact: attachment,
+                request_id: newId(),
+                ...voiceSttRequest(preferences),
+              }),
+              new Promise((_, reject) => {
+                timer = setTimeout(
+                  () => reject(new Error(`the gateway did not answer within ${TRANSCRIBE_TIMEOUT_MS / 1000} s`)),
+                  TRANSCRIBE_TIMEOUT_MS,
+                );
+              }),
+            ]).finally(() => clearTimeout(timer));
             assertCurrent();
             return {
               text: String(response.text || ""),
