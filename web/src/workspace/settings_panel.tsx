@@ -6,7 +6,7 @@ import {
   type SpeculationValue,
   type WorkspaceRequest,
 } from "@abstractframework/ui-kit";
-import { CodeWorkspaceFolders } from "./workspace_folders";
+import { CodeWorkspaceFolders, type RunWorkspace } from "./workspace_folders";
 import type { ToolSpec } from "./catalog";
 import { gateway } from "./transport";
 import { SkillsPicker } from "./skills_picker";
@@ -22,6 +22,8 @@ import {
 /** The Run settings banner saying why settings are locked (switches point their reason at it). */
 export const SETTINGS_LOCKED_ID = "code-settings-locked";
 
+export type { RunWorkspace };
+
 export type RunPreferences = {
   provider: string;
   model: string;
@@ -30,8 +32,8 @@ export type RunPreferences = {
   maxIterations: string;
   maxTokens: string;
   system: string;
-  /** An automation's chosen folders (input_data.workspace_allowed_paths); null = follows the account. Conversations keep null (the account's folders apply). */
-  workspaceFolders: string[] | null;
+  /** An automation's workspaces (input_data.workspace, the run-level payload); null = "Use my default". Conversations keep null: their workspaces live on the session in the gateway. */
+  workspace: RunWorkspace | null;
   tools: ToolPolicySelection;
   toolsCustomized: boolean;
   permissions: PermissionLevel;
@@ -49,7 +51,7 @@ export const DEFAULT_PREFERENCES: RunPreferences = {
   maxIterations: "",
   maxTokens: "",
   system: "",
-  workspaceFolders: null,
+  workspace: null,
   tools: { mode: "all", selected: [], approval: {} },
   toolsCustomized: false,
   permissions: "default",
@@ -77,10 +79,16 @@ export type SettingsContentProps = {
   hideStreamReplies?: boolean;
   /** Replaces the locked notice (e.g. why an automation cannot be edited now). */
   lockedText?: string;
-  /** Workspace tab: connected to a gateway (the folders load from it). */
+  /** Workspace tab: connected to a gateway (the workspaces load from it). */
   connected?: boolean;
-  /** Workspace tab: an automation (its stored folder set) instead of the account's folders. */
+  /** Workspace tab: an automation (its stored workspaces, run level) instead of the conversation's (session level). */
   automationFolders?: boolean;
+  /** Workspace tab: the open conversation's session id (session level). */
+  sessionId?: string;
+  /** Workspace tab: opens "My default workspaces" (account level). */
+  onOpenDefaultWorkspaces?: () => void;
+  /** Workspace tab: bumped when the account default changed. */
+  workspaceRefreshKey?: unknown;
   /** Workspace tab: injected gateway request (tests). */
   workspaceRequest?: WorkspaceRequest;
 };
@@ -91,6 +99,7 @@ export function SettingsContent({
   lockedReasonId = SETTINGS_LOCKED_ID,
   workspaceRootFixed, hideStreamReplies, lockedText,
   connected = false, automationFolders = false, workspaceRequest,
+  sessionId, onOpenDefaultWorkspaces, workspaceRefreshKey,
 }: SettingsContentProps) {
   const update = (patch: Partial<RunPreferences>) => onChange({ ...value, ...patch });
   return <>
@@ -198,13 +207,16 @@ export function SettingsContent({
           <section className="code-settings-section">
             {workspaceRootFixed ? (
               <p className="code-field-help" data-setting="workspace-root-fixed">
-                Runs work in the automation folder <code title={workspaceRootFixed}>{workspaceRootFixed.split(/[\\/]/).filter(Boolean).pop() || workspaceRootFixed}</code>.
+                Runs work in the automation workspace <code title={workspaceRootFixed}>{workspaceRootFixed.split(/[\\/]/).filter(Boolean).pop() || workspaceRootFixed}</code>.
               </p>
             ) : null}
             <CodeWorkspaceFolders
               connected={connected}
               request={workspaceRequest}
-              automation={automationFolders ? { selection: value.workspaceFolders, onChange: (workspaceFolders) => update({ workspaceFolders }) } : undefined}
+              sessionId={sessionId}
+              onOpenDefaults={onOpenDefaultWorkspaces}
+              refreshKey={workspaceRefreshKey}
+              automation={automationFolders ? { value: value.workspace, onChange: (workspace) => update({ workspace }) } : undefined}
             />
           </section>
         ) : tab === "tools" ? (

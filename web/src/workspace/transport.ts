@@ -41,10 +41,13 @@ export async function gatewayRequest<T = any>(
     let detail = raw;
     try {
       const body = JSON.parse(raw);
+      // FastAPI `detail`: a sentence, or {reason, message, path} (e.g. a workspace refusal).
       detail =
         typeof body.detail === "string"
           ? body.detail
-          : JSON.stringify(body.detail || body);
+          : typeof body.detail?.message === "string"
+            ? body.detail.message
+            : JSON.stringify(body.detail || body);
     } catch {
       /* Keep server text. */
     }

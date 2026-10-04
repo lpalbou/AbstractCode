@@ -35,6 +35,7 @@ import {
   type PaneMode,
 } from "./layout";
 import { SidebarDrawer } from "./sidebar_drawer";
+import { CodeDefaultWorkspacesDialog } from "./workspace_folders";
 import { ArchiveConfirm, ArchivedFooter, ConversationsPanel, SidebarLists, useArchivedOpen, useSidebarPanels } from "./sidebar_panels";
 import { ArchivedConversations, archiveSession, nextConversationAfterArchive } from "./archived_conversations";
 import { ConversationCard } from "./sidebar_cards";
@@ -173,6 +174,10 @@ export function CodeWorkspace() {
   });
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  // "My default workspaces" (the account level); a saved change reloads the session panel's default.
+  const [defaultWorkspacesOpen, setDefaultWorkspacesOpen] = useState(false);
+  const [defaultWorkspacesRevision, setDefaultWorkspacesRevision] = useState(0);
+  const bumpDefaultWorkspaces = useCallback(() => setDefaultWorkspacesRevision((n) => n + 1), []);
   // `GET /api/gateway/about`, fetched each time the About dialog opens.
   const [gatewayAbout, setGatewayAbout] = useState<FetchOutcome>();
   const refreshGatewayAbout = useCallback(() => {
@@ -792,6 +797,7 @@ export function CodeWorkspace() {
       delete input.workspace_root;
       delete input.workspace_access_mode;
       delete input.workspace_allowed_paths;
+      delete input.workspace;
       if (input._runtime && typeof input._runtime === "object") delete (input._runtime as Record<string, unknown>).tool_policy;
     }
     return input;
@@ -1224,6 +1230,9 @@ export function CodeWorkspace() {
       streaming={catalog.streaming}
       disabled={automation ? !connection.connected : locked || !connection.connected}
       workspaceRootFixed={automation?.root}
+      sessionId={automation ? undefined : session.sessionId}
+      onOpenDefaultWorkspaces={() => setDefaultWorkspacesOpen(true)}
+      workspaceRefreshKey={defaultWorkspacesRevision}
       hideStreamReplies={Boolean(automation)}
       lockedText={automation ? "Connect to a gateway to edit this automation." : undefined}
     />
@@ -2078,6 +2087,12 @@ export function CodeWorkspace() {
       <GatewayConnectModal {...connection.modalProps} />
       <AppAssistantDrawer key={`assistant:${identity}`} open={assistantOpen} onClose={() => setAssistantOpen(false)} connected={connection.connected} topOffset={drawerTop} />
       <AfAppearanceDialog open={appearanceOpen} onClose={() => setAppearanceOpen(false)} value={appearance} onChange={setAppearance} />
+      <CodeDefaultWorkspacesDialog
+        open={defaultWorkspacesOpen}
+        onClose={() => setDefaultWorkspacesOpen(false)}
+        connected={connection.connected}
+        onChanged={bumpDefaultWorkspaces}
+      />
     </div>
   );
 }

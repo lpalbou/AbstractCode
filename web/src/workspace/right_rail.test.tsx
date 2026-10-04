@@ -113,19 +113,19 @@ describe("automation settings = its definition", () => {
     tools: ["read_file"],
     _runtime: { provider: "lmstudio", model: "qwen", thinking: "high", allowed_tools: ["read_file"], tool_policy: { require_approval_tools: ["read_file"] } },
     _limits: { max_iterations: 7 },
-    workspace_allowed_paths: ["/data/projects"],
+    workspace: { posture: "allowed_only", default_mode: "rw", folders: [{ path: "/data/projects", mode: "ro" }] },
   };
   it("reads the definition with the same keys a conversation turn writes", () => {
     const p = automationRunPreferences(input);
     expect([p.provider, p.model, p.reasoning, p.maxIterations]).toEqual(["lmstudio", "qwen", "high", "7"]);
-    expect(p.workspaceFolders).toEqual(["/data/projects"]);
+    expect(p.workspace).toEqual({ posture: "allowed_only", default_mode: "rw", folders: [{ path: "/data/projects", mode: "ro" }] });
     expect(p.tools).toEqual({ mode: "custom", selected: ["read_file"], approval: { read_file: "ask" } });
     expect(p.toolsCustomized).toBe(true);
   });
   it("an empty definition reads as Gateway default everywhere", () => {
     const p = automationRunPreferences({ prompt: "x" });
     expect([p.provider, p.model, p.reasoning, p.maxIterations, p.maxTokens, p.system]).toEqual(["", "", "", "", "", ""]);
-    expect(p.workspaceFolders).toBeNull();
+    expect(p.workspace).toBeNull();
     expect(p.toolsCustomized).toBe(false);
   });
   it("round-trips without a change (no revision for nothing)", () => {

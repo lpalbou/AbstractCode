@@ -11,14 +11,16 @@
 //   instructions          _runtime.system_prompt_extra
 //   tools                 input.tools + _runtime.allowed_tools (kit withAutomationTools)
 //   approvals             _runtime.tool_policy {auto_approve_tools, require_approval_tools}
-//   workspace folders     workspace_allowed_paths (the chosen set, within the
-//                         account's folders; absent = follows the account;
-//                         the retired workspace_access_mode is removed on save)
+//   workspaces            workspace {posture, default_mode, folders} (R11 run
+//                         level, the same payload a one-off run sends; absent =
+//                         "Use my default"; a chosen payload replaces the R9
+//                         workspace_allowed_paths list; workspace_access_mode is
+//                         removed on save)
 //   skills                input.skills
 // An unset value is REMOVED (never written as ""), so the gateway default
 // applies again — "Gateway default" until overridden.
 import { automationToolSelection, withAutomationTools, type AutomationChanges, type AutomationDefinition, type ToolPolicySelection } from "@abstractframework/ui-kit";
-import { DEFAULT_PREFERENCES, type RunPreferences } from "./settings_panel";
+import { DEFAULT_PREFERENCES, type RunPreferences, type RunWorkspace } from "./settings_panel";
 
 type Json = Record<string, any>;
 
@@ -48,7 +50,7 @@ export function automationRunPreferences(input: Json | undefined): RunPreference
     maxIterations: str(limits.max_iterations),
     maxTokens: str(limits.max_tokens),
     system: str(runtime.system_prompt_extra),
-    workspaceFolders: Array.isArray(data.workspace_allowed_paths) ? strings(data.workspace_allowed_paths) : null,
+    workspace: data.workspace && typeof data.workspace === "object" && !Array.isArray(data.workspace) ? (data.workspace as RunWorkspace) : null,
     tools: selected === null ? { mode: "all", selected: [], approval } : { mode: "custom", selected, approval },
     toolsCustomized: customized,
     permissions: "default",
@@ -93,11 +95,16 @@ export function withAutomationRunPreferences(input: Json | undefined, prefs: Run
   else delete next._runtime;
   if (Object.keys(limits).length) next._limits = limits;
   else delete next._limits;
-  // Round 9: the access mode is gone (the gateway always scopes to the
-  // effective folders); the chosen set is stored as is, [] = shared only.
+  // R11: the automation's workspaces = the run-level payload, stored as is
+  // (the gateway clamps it at each occurrence); null = "Use my default".
+  // A stored R9 list is left to the gateway (it converts it to `workspace` on
+  // the next revision); a chosen payload replaces it. The access mode is retired.
   delete next.workspace_access_mode;
-  if (prefs.workspaceFolders === null) delete next.workspace_allowed_paths;
-  else next.workspace_allowed_paths = [...prefs.workspaceFolders];
+  if (prefs.workspace === null) delete next.workspace;
+  else {
+    next.workspace = { posture: prefs.workspace.posture, default_mode: prefs.workspace.default_mode, folders: prefs.workspace.folders.map((f) => ({ path: f.path, mode: f.mode })) };
+    delete next.workspace_allowed_paths;
+  }
   setOrDelete(next, "skills", prefs.skills);
   next = withAutomationTools(next as any, prefs.toolsCustomized && prefs.tools.mode === "custom" ? prefs.tools.selected : null) as Json;
   return next;
