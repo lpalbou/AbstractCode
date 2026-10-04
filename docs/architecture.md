@@ -10,6 +10,7 @@ the coding agent; both observe and steer a run that lives on
 flowchart LR
     subgraph term["Terminal"]
         tui["Terminal client<br/><code>tui/</code> — Rust<br/>crate <code>abstractcode</code>"]
+        bridge["Voice bridge<br/><code>voice_bridge.py</code><br/>AbstractVoice: speaker + mic"]
     end
     subgraph browser["Browser"]
         spa["Browser client<br/><code>web/src/</code> — React"]
@@ -26,11 +27,18 @@ flowchart LR
     spa -- "same-origin <code>/api/gateway/*</code>" --> proxy
     proxy -- "HTTP + SSE, X-Forwarded-For<br/>= browser socket address" --> gw
     gw --> rt --> core
+    tui -- "JSON lines: play, record" --> bridge
 ```
 
 The terminal client talks to the gateway directly. The browser client talks
 only to its own app server, which exchanges gateway credentials for an
 app-scoped session and forwards every API call and stream to the gateway.
+
+Voice follows the same split. Speech synthesis and transcription run on the
+gateway (its default voice routes unless you override them); the client only
+plays and records. The browser uses its own audio APIs; the terminal starts a
+small Python bridge with AbstractVoice on your computer for the speaker and the
+microphone (see the terminal [voice reference](../tui/docs/api.md#voice-voice-speak-dictate)).
 
 Both clients speak the same surface, so a session is portable between them: a
 run gated on approval in the terminal can be approved in the browser, and a run

@@ -14,7 +14,7 @@ model itself (controller runs, occurrences, triggers, crash safety, the HTTP
 API), see the framework guide:
 [AbstractFramework: Automations](https://github.com/lpalbou/AbstractFramework/blob/main/docs/automations.md).
 
-Browser conversation defaults are configured in the right rail's settings panels (Model, Workflow, Workspace, Tools, Skills). With an automation selected, the same panels edit that automation's definition and saves each change as a new revision ([web](web.md#working-in-the-interface)). Automation creation uses the selected model, tools and workflow inputs at submission. Each automation receives its own workspace and the approval policy chosen in its schedule form. Changes to chat settings after creation do not change a saved automation.
+Browser conversation defaults are configured in the right rail's settings panels (Model, Workflow, Workspace, Tools, Skills). With an automation selected, the same panels edit that automation's definition and save each change as a new revision ([web](web.md#working-in-the-interface)). Automation creation uses the selected model, tools and workflow inputs at submission. Each automation receives its own workspace and the approval policy chosen in its schedule form. Changes to chat settings after creation do not change a saved automation.
 
 In browser creation and **Edit**, the Tools dropdown supports search, selected-tool chips, **All**, and **Clear**. Clear saves an explicit empty list (no tools); **Use workflow default tools** removes the override. Tool availability and the choice to ask before execution are separate settings. Background sidebar refreshes keep existing rows in place.
 
@@ -23,7 +23,8 @@ In browser creation and **Edit**, the Tools dropdown supports search, selected-t
 A gateway that advertises the Automations API
 (`capabilities.contracts.common.automations`), which AbstractGateway 0.6.0 and
 later do. On an older gateway both clients say so and offer no automation
-controls.
+controls. The **Archived · N** line with **Unarchive** needs AbstractGateway
+0.13.0 or later.
 
 ## What every client shows the same way
 
@@ -85,7 +86,7 @@ When your gateway account has a working mailbox (the gateway console's
 
 Without a connected mailbox these options are off and the dialog says
 **"Connect a mailbox first — open My email"**; the link opens the gateway console in a new
-tab. The automation's **Edit** form changes the workflow, task, tools, check interval, **Email result**
+tab. The automation's **Edit** (its **Workflow** panel in the right rail) changes the workflow, task, tools, check interval, **Email result**
 and its recipients; its **Definition** card lists them. The
 terminal client does not create email automations yet (it lists and manages
 them like any other).
@@ -156,8 +157,9 @@ pane beside the runs lists and previews its files.
   their keys.
 - [Browser client](web.md) — the sidebar and the conversation view.
 
-The automation header identifies its own workflow. Conversation workflow, model and tool
-controls are hidden while viewing an automation; use the automation’s **Edit** form.
+The automation header identifies its own workflow. While an automation is selected, the right
+rail's Model, Workflow, Workspace, Tools and Skills panels edit its definition rather than a
+conversation's settings; each change is saved as a new revision (see [web.md](web.md#working-in-the-interface)).
 
 Changing workflows preserves the task, portable agent settings, selected tools and result-email
 recipients. The new workflow supplies its input defaults. If additional required inputs are

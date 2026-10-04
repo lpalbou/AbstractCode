@@ -7,7 +7,7 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.8.0**, pre-alpha. Release history is in
+Status: **0.9.0**, pre-alpha. Release history is in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## What it looks like
@@ -181,6 +181,9 @@ abstractcode doctor                                # reachability · auth · cat
 abstractcode                                       # launch the TUI
 ```
 
+Archiving conversations, **Archived · N** and the gateway-default voice
+wording need AbstractGateway 0.13.0 or later.
+
 `login` verifies against the gateway before saving (flags/env only — it never
 prompts). The store is `~/.abstractcode/gateway.json`.
 
@@ -207,6 +210,7 @@ Inside the app:
   the engines ("Gateway default · supertonic / supertonic-3"), this
   computer's speaker and microphone (each with a Test) and **Read aloud**.
   Audio plays and records through AbstractVoice on this computer
+  (`--voice-python <PATH>` names the Python that has it).
 
 ## Headless one-shots
 

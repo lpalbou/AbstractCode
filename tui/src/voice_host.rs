@@ -517,7 +517,7 @@ fn spawn_python_bridge(sink: EventSink) -> Result<Box<dyn Transport>, String> {
 /// The sentence shown when no interpreter could run the bridge.
 pub fn bridge_missing_sentence(reasons: &[String]) -> String {
     format!(
-        "This computer's speaker and microphone need AbstractVoice (pip install \"abstractvoice[audio-io]\"), or start with --voice-python <path> — tried {}",
+        "This computer's speaker and microphone need AbstractVoice (pip install abstractframework), or start with --voice-python <path> — tried {}",
         reasons.join("; ")
     )
 }

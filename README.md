@@ -30,9 +30,12 @@ from the other.
 You need a reachable AbstractGateway. To run one locally:
 
 ```bash
-pip install abstractgateway
+pip install abstractframework    # or abstractframework[apple] / abstractframework[gpu] for local models
 abstractgateway serve            # binds 0.0.0.0:8080; reach it at http://127.0.0.1:8080
 ```
+
+Archiving conversations, the **Archived · N** lists and the gateway's default
+voice routes need AbstractGateway 0.13.0 or later.
 
 Then start whichever client you prefer:
 
@@ -65,12 +68,22 @@ for credentials, remote gateways, and first-run configuration.
 - **Streamed replies** — watch the answer as the model writes it, when the
   gateway supports live replies (**Stream replies** setting, `/stream`).
 - **Workspace files** — browse and preview the files a run works on, with their
-  absolute path on the gateway host (the **Files** tab, `/files`).
+  absolute path on the gateway host (the **Files** panel, `/files`).
+- **Settings bound to what you selected** — Activity, Files, Model, Workflow,
+  Workspace, Tools, Skills and Voice panels for the selected conversation or
+  automation; **Gateway default** until you override a value (the right rail,
+  `/settings`).
+- **Conversations you can archive** — cards such as `Oct 2 · 2 turns · 7 tools`;
+  **Archive** moves a conversation under **Archived · N**, where **Unarchive**
+  brings it back. Nothing is deleted.
+- **Voice** — dictate into the composer and hear replies read aloud through the
+  gateway's speech routes (the **Voice** panel and the composer microphone,
+  `/voice`, `Ctrl+R`, `Ctrl+P`).
 - **Automations** — run a workflow on a schedule (or, in the browser, when an
-  email arrives, with the result emailed to you), then pause, run now, revise,
-  archive, answer its approvals, browse its folder, and discuss any run as a new
-  conversation (the **Automations** sidebar section, `/automations`,
-  `/schedule`).
+  email arrives, with the result emailed to you), then switch it off with its
+  **Active** switch, run it now, edit it, archive it, answer its approvals,
+  browse its folder, and discuss any run as a new conversation (the
+  **Automations** sidebar section, `/automations`, `/schedule`).
 
 ## Documentation
 

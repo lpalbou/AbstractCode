@@ -15,7 +15,7 @@ Yes. Neither client runs the agent itself. The gateway can run on your own
 machine:
 
 ```bash
-pip install abstractgateway
+pip install abstractframework
 abstractgateway serve
 ```
 
@@ -73,7 +73,7 @@ completes. See [`web.md`](web.md#stream-replies) and the terminal
 
 ## Where are the files the agent writes?
 
-On the gateway host, in the run's workspace. The browser's **Files** tab and the
+On the gateway host, in the run's workspace. The browser's **Files** panel and the
 terminal's `/files` command show its absolute path, the host it is on, and a
 preview of each file.
 

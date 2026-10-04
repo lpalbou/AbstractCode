@@ -238,8 +238,8 @@ shows which engines the gateway uses by default ("Gateway default ·
 supertonic / supertonic-3"), lets you pick this computer's speaker and
 microphone (each with a Test), and switches **Read aloud** for every new
 reply. Audio plays and records through AbstractVoice on this computer: it
-comes with the framework installer; elsewhere `pip install
-"abstractvoice[audio-io]"` or start with `--voice-python <path>`. Details
+comes with `pip install abstractframework` (and the framework installer);
+otherwise start with `--voice-python <path>`. Details
 in [api.md](api.md#voice-voice-speak-dictate).
 
 ## Settings, conversations and automations
@@ -254,7 +254,8 @@ under **Archived · N**, where `u` brings it back). In `/automations` each
 card reads `↻ every 24 h · last 3 h ago` and `next in 20 h` with its
 **Active** switch; `g` Run now, `x` Stop, `e` Edit (the same panels, bound to
 the automation: each change is saved as a new revision), `a` Archive. Details
-in [api.md](api.md#settings-panels-settings).
+in [api.md](api.md#settings-panels-settings). Archiving and **Archived · N**
+need AbstractGateway 0.13.0 or later.
 
 ## Where to next
 

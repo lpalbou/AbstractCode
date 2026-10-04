@@ -105,9 +105,23 @@ reason, and a saved On adds one note to the conversation. A one-line
 without streaming (for example, a call that must return structured output); the
 reply still arrives when the call completes. See [`web.md`](web.md#stream-replies).
 
+## Conversations and voice
+
+**Archive is refused, or no Archived · N line appears.**
+Archiving conversations and the archived lists use the gateway's archive
+routes (`POST /sessions/{id}/archive`, `archived_sessions`,
+`archived_automations`). Update AbstractGateway to 0.13.0 or later; until then
+the refusal is shown under the confirmation and the lists show no
+**Archived · N** line. Nothing is deleted either way.
+
+**Voice does not show the gateway's engines as "Gateway default · provider / model".**
+The clients read the default routes from `GET /api/gateway/voice/defaults`,
+which AbstractGateway 0.13.0 and later provide. Update the gateway, or choose
+an engine with **Change** (`/voice` in the terminal).
+
 ## Workspace files
 
-**The Files tab or `/files` reports HTTP 404.**
+**The Files panel or `/files` reports HTTP 404.**
 The gateway does not offer workspace browsing. Update AbstractGateway; the run
 itself is unaffected.
 

@@ -21,7 +21,7 @@ shape first.
 
 | Page | What it covers |
 |---|---|
-| [`web.md`](web.md) | The right rail (Activity, Files, Settings — bound to the selected conversation or automation), header widgets, workflow selection, files, responsive navigation, streamed replies and narration, approvals, and workspaces |
+| [`web.md`](web.md) | The sidebar drawers and cards, archiving, the right rail (Activity, Files, Model, Workflow, Workspace, Tools, Skills, Voice — bound to the selected conversation or automation), the automation header, file previews, voice, responsive navigation, streamed replies, approvals, and workspaces |
 | [`deployment-web.md`](deployment-web.md) | Hosting it, reverse proxies, forwarded addresses, and the gateway-first deployment model |
 | [`deployment-iphone.md`](deployment-iphone.md) | Safari and progressive web app notes, and how the interface adapts to the phone |
 
@@ -33,7 +33,7 @@ The terminal client keeps its reference documentation beside its source:
 |---|---|
 | [`../tui/README.md`](../tui/README.md) | Features, interface tour, keys, themes |
 | [`../tui/docs/getting-started.md`](../tui/docs/getting-started.md) | Terminal-specific setup |
-| [`../tui/docs/api.md`](../tui/docs/api.md) | Command-line options, slash commands, keys, streamed replies, and exit codes |
+| [`../tui/docs/api.md`](../tui/docs/api.md) | Command-line options, slash commands (including `/settings`, `/sessions`, `/archive`, `/automations` and voice), keys, streamed replies, and exit codes |
 | [`../tui/docs/architecture.md`](../tui/docs/architecture.md) | How the client is built on AbstractTUI: threads, the ledger fold, live replies |
 | [`../tui/docs/troubleshooting.md`](../tui/docs/troubleshooting.md) | Terminal, rendering, and connection problems |
 | [`../tui/docs/faq.md`](../tui/docs/faq.md) | Terminal client questions |

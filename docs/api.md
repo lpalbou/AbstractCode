@@ -39,7 +39,7 @@ The terminal client also builds as a Rust library:
 
 ```toml
 [dependencies]
-abstractcode = "0.5"
+abstractcode = "0.9"
 ```
 
 ```rust
@@ -63,6 +63,9 @@ Both clients use the same endpoints. This is the integration contract:
 | Steer a run | `POST` a guidance command against the live run |
 | Pause / cancel | `POST` the corresponding durable command |
 | Session history | `GET` the session's history bundle for replay |
+| Conversations | `GET` root runs per session (with per-turn tool totals and the `archived_sessions` count); `POST` a session's archive or unarchive |
+| Automations | `GET`, create, `PATCH` (a new revision, guarded by `expected_revision`) and the lifecycle commands — pause, resume, run now, stop, archive, unarchive; `GET` the archived list with its `archived_automations` count |
+| Voice | `GET` the gateway's default voice routes; `POST` a reply's text for streamed speech, and recorded audio for transcription |
 | Discovery | `GET` the available workflows (with the gateway's default agent workflow), providers, models, tools, skills, and capabilities such as live replies |
 | Workspace files | `GET` a run's workspace location, a folder listing, and file content (with `Range`) |
 | About | `GET` the gateway's AbstractFramework and package versions |
@@ -77,7 +80,8 @@ on by the clients:
   reconnects mid-run recovers the full state by replaying the ledger rather
   than by holding state across the gap.
 
-See the gateway's own documentation for exact paths, payload schemas, and
+The archive routes and the default voice routes need AbstractGateway 0.13.0 or
+later. See the gateway's own documentation for exact paths, payload schemas, and
 authentication modes; it owns those definitions, and pinning them here would
 guarantee drift.
 

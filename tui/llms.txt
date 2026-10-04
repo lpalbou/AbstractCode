@@ -39,7 +39,7 @@
   resolution, module map, testing model, known limits.
 - [Reference](docs/api.md): Every CLI option and env var (including
   `--workflow default`, `--stream`, `--mtp`), slash commands
-  (including `/settings`, `/activity`, `/archive`, `/sessions`, `/workflow`, `/files`, `/automations`, `/schedule`, `/stream`, `/about`, `/model`, `/mtp`,
+  (including `/settings`, `/activity`, `/archive`, `/sessions`, `/voice`, `/speak`, `/dictate`, `/workflow`, `/files`, `/automations`, `/schedule`, `/stream`, `/about`, `/model`, `/mtp`,
   `/workspace send`, `@name`, `/entities`, `/task`, `/end`, `/queue`, `/goal`,
   `/permissions`, `/workspace`, `/attach`, `/export`, `/context`, `/gpu`,
   `/resources`, `/redraw`), key bindings (incl. `Ctrl+L` repaint, `Ctrl+J` newline,
@@ -47,11 +47,13 @@
   chords, `?` reference), the type-to-focus rule (typing, pasting or
   dropping a file returns focus to the composer and keeps the input),
   per-modal keys, transcript glyph
-  vocabulary, attachments custody rules, exec exit codes, and prompt-cache
+  vocabulary, attachments custody rules, `--voice-python`, `Ctrl+P` / `Ctrl+R`,
+  exec exit codes, and prompt-cache
   posture (`exec --no-prompt-cache`, its scope, and how to verify the lane).
 - [FAQ](docs/faq.md): Durability, workspace policy and files, token stats,
   steering semantics, queue pause semantics, approval tiers, parallel
-  sessions, the gateway default workflow, prompt-cache A/B.
+  sessions, the gateway default workflow, prompt-cache A/B, voice (which
+  Python, Gateway default, microphone permission).
 - [Troubleshooting](docs/troubleshooting.md): Symptom → cause → fix for
   connection, auth, catalog and default workflow, provider, workspace,
   `/files`, streaming, and rendering issues.
@@ -63,8 +65,8 @@
 ## Project
 
 - [Changelog](CHANGELOG.md): Release history, from 0.1.0 (the first
-  application built on AbstractTUI) through 0.8.0 (on/off rows as `[x]`/`[ ]`/`[-]`
-  switches, the automation Active switch).
+  application built on AbstractTUI) through 0.9.0 (settings panels, conversation and automation cards with
+  Archive / Unarchive, voice through the gateway's routes).
 - [Contributing](CONTRIBUTING.md): Build/test gates, live verification and
   the benchmark smoke mode, the layering rules (signal ownership, pure
   protocol layer, replay-safe fold), which test to write for which change.

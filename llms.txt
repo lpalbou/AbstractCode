@@ -20,6 +20,8 @@ Ground rules for reading this repository:
 - The two clients release independently: tag `v<version>` publishes the crate,
   tag `web-v<version>` publishes the npm package.
 - A reachable AbstractGateway is required. There is no standalone mode.
+  Archiving conversations, the Archived · N lists and the gateway's default
+  voice routes need AbstractGateway 0.13.0 or later.
 - Tools are approval-gated by default; approvals are durable gateway commands,
   so a wait raised in one client is answerable from the other.
 - The authoritative command list is `/help` inside the terminal client, and
@@ -29,13 +31,13 @@ Ground rules for reading this repository:
 
 - [README](README.md): what AbstractCode is, the two clients, and a quick start
 - [Getting started](docs/getting-started.md): running a gateway, installing a client, credentials, first run
-- [Architecture](docs/architecture.md): the clients, the browser app server, the gateway, the run stream with live reply deltas, the thin-client contract, and repository layout
-- [API and integration points](docs/api.md): the command-line surface, the library surface, and the gateway contract (runs, streams, discovery, workspace files, about)
+- [Architecture](docs/architecture.md): the clients, the browser app server, the gateway, the terminal's voice bridge, the run stream with live reply deltas, the thin-client contract, and repository layout
+- [API and integration points](docs/api.md): the command-line surface, the library surface, and the gateway contract (runs, streams, discovery, workspace files, conversations and archiving, automations, voice, about)
 - [Workflows](docs/workflows.md): the gateway default agent workflow, selecting a workflow, and the `abstractcode.agent.v1` interface
 - [Automations](docs/automations.md): configurable growing-context budgets and result email; creating, managing, answering and discussing gateway automations from the terminal (`/automations`, `/schedule`, Edit in `/settings`) and the browser (the Automations sidebar section)
 - [Interface events](docs/ui_events.md): the workflow-driven event contract
 - [FAQ](docs/faq.md): recurring questions and current limitations
-- [Troubleshooting](docs/troubleshooting.md): symptom-oriented diagnosis and fixes
+- [Troubleshooting](docs/troubleshooting.md): symptom-oriented diagnosis and fixes, including archive and voice on an older gateway
 - [Documentation index](docs/README.md): the full documentation map
 
 ## Terminal client
@@ -51,7 +53,7 @@ Ground rules for reading this repository:
 ## Browser client
 
 - [Browser client README](web/README.md): running it, configuration, credential handling
-- [Web overview](docs/web.md): the right rail (Activity, Files with the shared file viewer and audio waveform player, and the settings panels Model, Workflow, Workspace, Tools, Skills, Voice bound to the selected conversation or automation — an automation change saves a new revision), the Archived · N line with Unarchive at the end of each sidebar list, archiving a conversation from its card or header ⋯ (inline confirm, never a delete), the shared About, standard header widgets, workflow selection, conversation files and generated outputs, responsive desktop/tablet/phone navigation, touch and keyboard controls, collapsible Automations / Conversations panels, streamed replies and narration, approvals, and workspace policy
+- [Web overview](docs/web.md): the right rail (Activity, Files with the shared file viewer and audio waveform player, and the settings panels Model, Workflow, Workspace, Tools, Skills, Voice bound to the selected conversation or automation — an automation change saves a new revision), the Archived · N line with Unarchive at the end of each sidebar list, archiving a conversation from its card or header ⋯ (inline confirm, never a delete), the shared About, standard header widgets, workflow selection, conversation files and generated outputs, responsive desktop/tablet/phone navigation, touch and keyboard controls, the two stacking Automations / Conversations drawers with `Oct 2 · 2 turns · 7 tools` conversation cards and two-line automation cards (Active switch), the automation header (Run now, Stop, Edit, Archive), the Voice panel (gateway default routes, output and input devices with Tests) and composer dictation, streamed replies, approvals, and workspace policy
 - [Web deployment](docs/deployment-web.md): hosting it behind HTTPS, reverse proxies, forwarded client addresses
 - [iPhone notes](docs/deployment-iphone.md): Safari and progressive web app behavior, and how the interface adapts to the phone
 

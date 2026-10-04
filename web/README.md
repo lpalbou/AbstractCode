@@ -39,7 +39,10 @@ You can open it from another computer at the gateway's plain http address
 Docs:
 - Web overview: [`../docs/web.md`](../docs/web.md)
 - Deployment: [`../docs/deployment-web.md`](../docs/deployment-web.md)
-  - Voice features (optional): push-to-talk transcription + TTS (see `../docs/web.md`)
+  - Voice (optional): composer dictation, replies read aloud, and the **Voice** panel (see [`../docs/web.md`](../docs/web.md#optional-voice))
+
+Archiving conversations, **Archived · N** and the gateway's default voice
+routes need AbstractGateway 0.13.0 or later.
 
 ## Local dev
 ```bash
@@ -64,8 +67,9 @@ coding agent listed under **Shared** (made available by your gateway's admin)
 or **Mine** (agents you published or imported). The list holds only the
 workflows the gateway says this app can run for you
 (`GET /api/gateway/bundles?executable_for=abstractcode.agent.v1`); there is no
-"show all" switch — ask your admin when a workflow is missing. The **Files** tab shows the conversation's workspace on the gateway
-with previews, **Model → Stream replies** shows replies as the model writes
+"show all" switch — ask your admin when a workflow is missing. The right rail's panels (Activity, Files, Model, Workflow, Workspace, Tools,
+Skills, Voice) apply to the conversation or automation selected in the
+sidebar; **Files** shows the workspace on the gateway with previews, **Model → Stream replies** shows replies as the model writes
 them (on gateways that support it), and **About** shows the app's, the
 framework's and the gateway's versions. Agent tasks use the composer; structured workflows use
 **Inputs**. Questions, tool approvals, and

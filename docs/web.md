@@ -4,6 +4,8 @@ AbstractCode Web is a gateway-authenticated workspace for coding agents and regi
 
 Start with [getting started](getting-started.md). For hosting and authentication, see [web deployment](deployment-web.md).
 
+Archiving a conversation, the **Archived · N** lines and the gateway's default voice routes in **Voice** need AbstractGateway 0.13.0 or later.
+
 ## Working in the interface
 
 - **Conversations** restores gateway sessions and history. Search by conversation text or session ID. The list shows 25 conversations; **Load more conversations** adds the next 25.

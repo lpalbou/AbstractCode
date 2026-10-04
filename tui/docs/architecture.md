@@ -15,7 +15,9 @@ flowchart LR
     W[gateway-runner thread<br/>owns all HTTP]
     S1[ledger stream thread<br/>root run SSE<br/>+ live reply deltas]
     S2[ledger stream threads<br/>subruns SSE]
+    V[voice threads<br/>TTS stream · dictation]
   end
+  BR[voice_bridge.py<br/>Python child process<br/>AbstractVoice: speaker + mic]
   subgraph gw [AbstractGateway]
     API[/api/gateway/*/]
     RUNS[(durable runs<br/>+ ledgers)]
@@ -28,6 +30,9 @@ flowchart LR
   W -- "runs/start · commands · discovery<br/>workspace files · about" --> API
   S1 -- "GET ledger/stream (SSE)<br/>step + llm.delta frames" --> API
   S2 -- "GET ledger/stream (SSE)" --> API
+  V -- "voice/defaults · voice/tts/stream<br/>audio/transcribe" --> API
+  V -- "JSON lines: play segment, record" --> BR
+  V -- "speaking / recording state (post)" --> UI
   API --- RUNS
   RUNS --- AGENT
 ```

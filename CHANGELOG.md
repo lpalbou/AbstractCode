@@ -7,49 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+## [terminal 0.9.0 / web 0.11.0] - 2026-10-04
 
-- tui: **settings panels** `/settings` (Activity, Files, Model, Workflow, Workspace, Tools, Skills, Voice) bound to the conversation or to an automation's definition (each change saved as a new revision, "Revision N"); `/activity` groups the work per model step (per run for an automation).
-- tui: **Archive** a conversation from the `/sessions` board or `/archive` (inline confirmation, `POST /sessions/{id}/archive`), **Archived · N** with **Unarchive** for conversations and automations.
-- tui: **voice** — `Ctrl+P` / `/speak` reads the latest reply aloud through the gateway's streaming voice route (sentence-chunked, first audio 0.4–0.9 s measured; `Esc` stops), `Ctrl+R` / `/dictate` dictates into the composer with the gateway's default speech-to-text route (`Transcribing… 4 s · faster-whisper / large-v3`), **Read aloud** after each turn, and a `/voice` screen with the same wording as the kit VoiceSettings ("Gateway default · supertonic / supertonic-3" from `GET /voice/defaults`, output/input device with Tests and a level meter, volume, language, latency). Audio plays and records on this computer through AbstractVoice (`--voice-python <PATH>`); details in tui/docs/api.md.
-
-### Fixed
-
-- web: the Voice panel showed "Gateway default · openai" for both engines on a gateway routed to supertonic and faster-whisper. It now reads the gateway's `GET /api/gateway/voice/defaults` (kit 0.7.1 `AfVoiceSection` through `CodeVoiceSettings`) and shows "Gateway default · supertonic / supertonic-3" and "· faster-whisper / large-v3".
-- web: dictation that "didn't work": a quick click recorded nothing and failed silently. The mic now starts on a tap and stops on the next tap (or records while held), records from the microphone chosen in Voice, shows "Recording… 3 s" then "Transcribing… 12 s · faster-whisper / large-v3", and says why in a sentence when nothing was heard, the recording was too short or transcription failed.
+Requires AbstractGateway 0.13.0 or later for archiving conversations, the
+**Archived · N** lists and the gateway's default voice routes. The web client
+builds against `@abstractframework/ui-kit` ^0.8.0 and
+`@abstractframework/panel-chat` ^0.3.1.
 
 ### Added
 
-- web: **Archive** a conversation from its card's **⋯** or from the **⋯** next to its title in the header (shared kit `AfMenu`), with an inline confirmation ("Archive this conversation? It stays searchable and auditable; it just leaves this list."). It calls `POST /api/gateway/sessions/{id}/archive` (never a delete); the conversation moves under **Archived · N** with **Unarchive**, and archiving the open conversation opens the next one.
-- web: Voice panel — output device with **Test**, reply volume, microphone with a live level meter and **Test** (3 s recording played back), spoken language (faster transcription) and input level.
-
-### Removed
-
-- web: the header's gear (Settings) button: the rail icons open the panels. There was no keyboard shortcut for it.
-- web: the composer's speaker ("Read latest reply aloud") button: each reply keeps its own speaker; the microphone and **Stop spoken reply** stay.
+- web: **Archive** a conversation from its card's **⋯** or from the **⋯** next to its title in the header, with an inline confirmation ("Archive this conversation? It stays searchable and auditable; it just leaves this list."). It calls `POST /api/gateway/sessions/{id}/archive` (nothing is deleted); the conversation moves under **Archived · N** with **Unarchive**, and archiving the open conversation opens the next one.
+- web: a quiet **Archived · N** line at the end of each sidebar list (automations and conversations) shows the archived items inline, each with **Unarchive**; N is the gateway's count (`archived_automations`, `archived_sessions`), the line is absent at 0 and its open state is remembered.
+- web: the right panel is a vertical rail at the right edge with **Activity**, **Files**, **Model**, **Workflow**, **Workspace**, **Tools**, **Skills** and **Voice**; a click opens the panel beside the rail (docked and resizable from 1024 px, the width remembered; floating below), the open icon folds it back.
+- web: the settings panels follow the selection. A conversation shows its run settings; an automation shows its definition in the same panels, and each change is saved through the gateway as a new revision (`PATCH /automations/{id}` with `expected_revision`), the revision shown on every panel. Everything reads **Gateway default** until overridden. The automation header's **Edit** opens its **Workflow** panel.
+- web: **Voice** panel — Engines ("Gateway default · supertonic / supertonic-3", read from `GET /api/gateway/voice/defaults`, with **Change**), output device with **Test**, reply volume, microphone with a live level meter and **Test** (3 s recorded and played back), spoken language, input level, **Read aloud** and voice latency.
+- web: the automation page has its own header: title, **Active** switch, timing line, **waiting for you** badge, the workspace as a short name with Open folder / Copy path icons, and **Run now**, **Stop**, **Edit**, **Archive** (inline confirmation).
+- tui: **settings panels** — `/settings [panel]` opens Activity, Files, Model, Workflow, Workspace, Tools, Skills and Voice, bound to the conversation or to an automation's definition (each change saved as a new revision, "Revision N"); `/activity` groups the work per model step (per run for an automation).
+- tui: **Archive** a conversation from the `/sessions` board or with `/archive` (inline confirmation, `POST /sessions/{id}/archive`); **Archived · N** with **Unarchive** for conversations and automations.
+- tui: **voice** — `Ctrl+P` / `/speak` reads the latest reply aloud through the gateway's streaming voice route, sentence by sentence (`Esc` stops); `Ctrl+R` / `/dictate` dictates into the composer with the gateway's default speech-to-text route; **Read aloud** speaks each new reply; `/voice` shows the gateway's default routes, output and input devices with Tests and a level meter, volume, language and latency. Audio plays and records on this computer through AbstractVoice (`--voice-python <PATH>`); see `tui/docs/api.md`.
 
 ### Changed
 
-- tui: `/sessions` cards read `Oct 2 · 2 turns · 7 tools`; `/automations` cards read `↻ every 24 h · last 3 h ago` / `next in 20 h` with the **Active** switch, and offer Run now / Stop / Edit / Archive (inline confirmation) like Code web.
-- **TUI assets:** `tui/assets/automation_controls.json` is again byte-identical to the kit's (ui-kit 0.7.0): it gains the Unarchive label and hint, and picks up the kit's current result-email wording.
+- web: the sidebar's Automations and Conversations sections are two stacking full-width drawers. Both headers stay visible; with Automations open the Conversations header sits mid-height, and each list scrolls inside its own drawer. Fold state is remembered.
+- web: conversation cards read the title, then `Oct 2 · 2 turns · 7 tools` (the tool figure only when above zero; the gateway's per-turn total from `GET /runs?include_metrics=true`).
+- web: automation cards show the name on its own line, **waiting for you** while an approval is pending, then two quiet lines: `↻ every 24 h · last 3 h ago` and `next in 20 h` with the **Active** switch right-aligned.
+- web: **Activity** shows model steps, tool calls and approvals in foldable groups, one per iteration (one per run for an automation), the newest open. A finished timer wait no longer reads "Waiting for you"; a group says "Waiting for you" only when a question or an approval waits on you.
+- web: **Files** rows show name, size, generated date and a download icon; a click previews the file in the shared viewer (Markdown, code and JSON, images, PDF, audio in the shared waveform player, text). The workspace path shows once, as a short name with Open folder / Copy path icons.
+- web: composer dictation starts on a tap and stops on the next tap (or records while held), uses the microphone chosen in **Voice**, shows "Recording… 3 s" then "Transcribing… 12 s · faster-whisper / large-v3", and explains in a sentence when nothing was heard, the recording was too short or transcription failed (also after 180 s without an answer).
+- web: **About** is the shared AbstractFramework About: app name and version, AbstractFramework and AbstractGateway versions (from `GET /api/gateway/about`), links and the licence line.
+- web: workspace access modes read in plain words ("This workspace only", "Workspace and allowed paths"); a generated output without a filename reads as its type ("PNG image").
+- web: requires `@abstractframework/ui-kit` ^0.8.0 and `@abstractframework/panel-chat` ^0.3.1.
+- tui: `/sessions` cards read `Oct 2 · 2 turns · 7 tools`; `/automations` cards read `↻ every 24 h · last 3 h ago` / `next in 20 h` with the **Active** switch, and offer Run now / Stop / Edit / Archive (inline confirmation) like the web client.
+- tui: `tui/assets/automation_controls.json` matches the kit's (Unarchive label and hint, result-email wording).
 
-- web: the sidebar's Automations and Conversations sections are two stacking full-width drawers. Both headers stay visible; with Automations open the Conversations header sits mid-height, Conversations alone fills the rest, and each list scrolls inside its own drawer. Fold state is remembered.
-- web: conversation cards read `title` then `Oct 2 · 2 turns · 7 tools` (the tool figure only when above zero); the tool figure is the gateway's per-turn total (`GET /runs?include_metrics=true`, AbstractGateway with sub-run totals).
-- web: automation cards show the name on its own line, **waiting for you** while an approval is pending, then two quiet lines: `↻ every 24 h · last 3 h ago` and `next in 20 h` with the **Active** switch right-aligned on it (`waiting since …` instead of `running now` while a run waits for you).
-- web: the automation page has its own header: title, **Active** switch, timing line, waiting badge, the workspace as a short name with Open folder / Copy path icons, and **Run now**, **Stop**, **Edit**, **Archive** (inline confirmation). Requires `@abstractframework/ui-kit` with `automationTiming` and the panel's `hideHeader`.
+### Fixed
 
-- web: the right panel is a vertical rail drawer (shared `AfRailDrawer`): an icon rail at the right edge with **Activity**, **Files**, **Model**, **Workflow**, **Workspace**, **Tools**, **Skills** and **Voice** (no "Settings" panel, no "Model & behavior"); a click opens the panel beside the rail (docked and resizable from 1024 px, the width remembered; floating below), the open icon folds it back. The horizontal six-tab **Workspace & settings** drawer is gone.
-- web: the settings panels follow the selection. A conversation shows its run settings (Model: the shared model picker with reasoning and MTP, then limits, instructions and Stream replies; Workflow: which workflow — Gateway default by default — and its inputs; Workspace; Tools: the shared tool policy; Skills; Voice). An automation shows its definition in the same panels — its Workflow panel holds the definition form (workflow, title, task, schedule, context, tool approval, email result) — with one shared draft, and each change is saved through the gateway as a new revision (`PATCH /automations/{id}` with `expected_revision`), the revision shown on every panel. The header's **Edit** opens its Workflow panel (`openAutomationSettings`). The "close the drawer and choose Edit" notice is gone. Everything reads **Gateway default** until overridden.
-- web: **Files** rows show name, size, generated date (relative, exact on hover) and a download icon; a click previews the file in the shared viewer (Markdown rendered, code highlighted, JSON, images, PDF, text). The workspace path shows once, as a short name with Open folder / Copy path icons. No "Open" button.
-- web: **Activity** renders model steps, tool calls (the chat's tool cards) and approvals in foldable groups, one per iteration, the newest open; for an automation one group per run, the latest open.
-- web: **Voice** follows the Assistant's layout: Engines (text → speech, speech → text: "Gateway default" + Change), Output device, Read aloud switch (speaks each new reply), Voice latency. TTS requests carry only speech fields; dictation sends the speech-to-text override.
-- web: no **Show archived** switch: a quiet **Archived · N** line at the end of EACH sidebar list (automations and conversations) shows the archived items inline, each with **Unarchive**; N is the gateway's count (`archived_automations`, `archived_sessions`), the line is absent at 0, its open state is remembered. Requires AbstractGateway with the archive contract (`GET /automations?status=archived`, `automation.unarchive`, `GET /runs?root_only=true&archived_only=true`, `POST /sessions/{id}/unarchive`).
-- web: **Activity** no longer shows a finished run as "Start · Waiting for you": a timer wait (`wait_until`, which the runtime ends without a resume record) is done once its run writes a later step, and a group says "Waiting for you" only when a question or an approval waits on you (otherwise what it waits for). Recorded as a status-derivation use case for backlog 0993.
-- web: **About** is the shared kit About: app name and version, AbstractFramework and AbstractGateway versions (from `GET /api/gateway/about`), links and the licence line; no package list.
-- web: **Files** previews audio outputs in the shared waveform player; JSON and code use the shared code viewer.
-- web: requires the unreleased `@abstractframework/ui-kit` 0.7.0 and `@abstractframework/panel-chat` 0.3.1 (local deploy overlays the packs; package.json pins move with the release).
+- web: the Voice panel named the engines "Gateway default · openai" whatever the gateway routed to; it shows the gateway's actual default routes.
 
-- web: workspace access modes read in plain words ("This workspace only", "Workspace and allowed paths"); a generated output without a filename reads as its type ("PNG image"), its id in the tooltip.
+### Removed
+
+- web: the horizontal **Workspace & settings** drawer (replaced by the rail), the sidebar's **Show archived** switch (replaced by **Archived · N**), and the header's gear button (the rail icons open the panels).
+- web: the composer's speaker button; each reply keeps its own speaker, and **Stop spoken reply** stays while a reply plays.
 
 ## [web 0.10.3] - 2026-10-03
 

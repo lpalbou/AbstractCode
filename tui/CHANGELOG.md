@@ -4,11 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.9.0] - 2026-10-04
+
+Archiving conversations, **Archived · N** and the gateway-default voice
+wording need AbstractGateway 0.13.0 or later.
 
 ### Added
 
-- **Settings panels** (round 7, parity with Code web's right rail):
+- **Settings panels** (the terminal counterpart of Code web's right rail):
   `/settings [panel]` (`/panels`, `/rail`) opens Activity, Files, Model,
   Workflow, Workspace, Tools, Skills and Voice in one overlay with the rail
   on the right edge (`←`/`→`, `Tab` or `1`–`8` changes panel, `Enter`
@@ -32,29 +35,11 @@ All notable changes to this project are documented here. The format follows
   N** (the gateway's `archived_automations`; `GET /automations?status=archived`);
   `Enter` or `u` sends `automation.unarchive` (it comes back paused).
 
-### Changed
-
-- `/sessions` is the conversations board of Code web: each conversation's
-  title (its opening prompt) and `Oct 2 · 2 turns · 7 tools` (tools = the
-  gateway's per-turn `tool_calls`, `GET /runs?…&include_metrics=true`).
-- `/automations` shows the Code web cards: the name (+ **waiting for you**),
-  `↻ every 24 h · last 3 h ago` (`waiting since …` while a run waits on you),
-  `next in 20 h` with the **Active** switch at the right. Archive asks
-  inline ("Archive “title”? It will not run again; its history stays
-  readable." — `y` archives, `n` keeps it) instead of a second press; `e`
-  is **Edit** (the settings panels) instead of the three-step revise; the
-  `h` "show archived" toggle is gone. Notices name the new state ("Run
-  requested.", "Automation paused.", "Automation archived.").
-- The automation screen's header: `Automations / <title>`, the Active
-  switch, `every 24 h · last 3 h ago · next in 14 h` (+ **waiting for
-  you**), the workspace as a short name.
-
-- **Voice** (round 7, the same gateway routes and wording as Code web's kit
+- **Voice** (the same gateway routes and wording as Code web's kit
   VoiceSettings). `Ctrl+P` / `/speak` reads the latest reply aloud through
   `POST /runs/{id}/voice/tts/stream`: each sentence-chunked WAV segment goes
   to the speaker as soon as it arrives while the next is synthesised
-  (first audio measured at 0.39–0.72 s on a round-6 gateway, 0.92 s on the
-  local stack); `Esc` or `Ctrl+P` stops at once. `Ctrl+R` / `/dictate`
+  (first audio typically under one second); `Esc` or `Ctrl+P` stops at once. `Ctrl+R` / `/dictate`
   records this computer's microphone, uploads the WAV and transcribes with
   `POST /runs/{id}/audio/transcribe` (the gateway's default route unless
   overridden), showing `Transcribing… 4 s · faster-whisper / large-v3`; the
@@ -71,6 +56,23 @@ All notable changes to this project are documented here. The format follows
   AbstractVoice's `NonBlockingAudioPlayer` on the chosen device, capture is
   PortAudio. No audio engine in this crate; a missing AbstractVoice is one
   sentence naming each interpreter tried.
+
+### Changed
+
+- `/sessions` is the conversations board of Code web: each conversation's
+  title (its opening prompt) and `Oct 2 · 2 turns · 7 tools` (tools = the
+  gateway's per-turn `tool_calls`, `GET /runs?…&include_metrics=true`).
+- `/automations` shows the Code web cards: the name (+ **waiting for you**),
+  `↻ every 24 h · last 3 h ago` (`waiting since …` while a run waits on you),
+  `next in 20 h` with the **Active** switch at the right. Archive asks
+  inline ("Archive “title”? It will not run again; its history stays
+  readable." — `y` archives, `n` keeps it) instead of a second press; `e`
+  is **Edit** (the settings panels) instead of the three-step revise; the
+  `h` "show archived" toggle is removed. Notices name the new state ("Run
+  requested.", "Automation paused.", "Automation archived.").
+- The automation screen's header: `Automations / <title>`, the Active
+  switch, `every 24 h · last 3 h ago · next in 14 h` (+ **waiting for
+  you**), the workspace as a short name.
 
 ## [0.8.0] - 2026-10-01
 

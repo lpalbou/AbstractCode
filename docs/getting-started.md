@@ -6,9 +6,12 @@ The gateway runs the coding agent; the clients connect to it.
 ## 1. Run a gateway
 
 ```bash
-pip install abstractgateway
+pip install abstractframework    # or abstractframework[apple] / abstractframework[gpu] for local models
 abstractgateway serve            # binds 0.0.0.0:8080 by default
 ```
+
+Use AbstractGateway 0.13.0 or later to archive conversations and to see the
+gateway's default voice routes in the clients.
 
 The gateway ships working agent bundles out of the box. Its default agent
 workflow is the shipped `basic-agent` until its operator chooses another, and
@@ -135,8 +138,10 @@ selects the gateway's default workflow explicitly; see
 [`workflows.md`](workflows.md#the-gateway-default).
 
 In the browser, open the rail's **Workflow** panel. Its picker starts with
-**Gateway default**; the **Model** panel (also the gear) holds model, reasoning,
-MTP and **Stream replies** choices.
+**Gateway default**; the **Model** panel holds model, reasoning, MTP and
+**Stream replies** choices. These panels apply to the conversation (or the
+automation) selected in the sidebar; see [`web.md`](web.md#working-in-the-interface).
+In the terminal, `/settings` opens the same panels.
 
 ## Where the files are
 

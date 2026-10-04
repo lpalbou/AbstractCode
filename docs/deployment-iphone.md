@@ -28,11 +28,11 @@ Related:
 ## Notes / constraints
 
 - The interface adapts to iPhone portrait and landscape: navigation opens as a drawer, the right
-  rail's panels (Activity, Files, Settings) float beside the rail, dialogs open as bottom sheets, touch targets are at least 44 px, and the composer stays usable with
+  rail's panels (Activity, Files, Model, Workflow, Workspace, Tools, Skills, Voice) float beside the rail, dialogs open as bottom sheets, touch targets are at least 44 px, and the composer stays usable with
   the keyboard up. See [responsive layout](web.md#responsive-layout).
 
 - iOS aggressively suspends background tabs; long-running workflows should be designed to be resumable (ledger replay).
-- File access is always remote (through the gateway); the phone does not run local tools. The **Files** tab shows the conversation's workspace on the gateway host.
+- File access is always remote (through the gateway); the phone does not run local tools. The **Files** panel shows the conversation's workspace on the gateway host.
 - The Gateway token is exchanged for an app-scoped browser session and is not
   persisted in browser settings.
 - On non-local hosted UI hostnames, the server-configured Gateway URL is
