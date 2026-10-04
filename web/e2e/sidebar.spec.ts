@@ -102,7 +102,7 @@ async function signIn(page: Page): Promise<void> {
   await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(dialog).toBeHidden();
   await openWorkspaceSection(page, "Workflow");
-  await expect(page.getByLabel("Workflow", { exact: true })).toBeEnabled();
+  await expect(page.getByRole("combobox", { name: "Workflow", exact: true })).toBeEnabled();
   await closeWorkspaceDrawer(page);
 }
 
@@ -118,6 +118,10 @@ async function runPromptConversation(page: Page): Promise<void> {
 
 test.describe("AbstractCode sidebar", () => {
   test.describe.configure({ mode: "serial" });
+  // Label hydration may still be in flight through a route when a test ends: never a failure of the next one.
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  });
 
   test("Current workspace preserves the full long path without overflow at desktop, tablet and phone sizes", async ({ page }) => {
     await route(page, []);

@@ -399,7 +399,7 @@ export function CodeWorkspace() {
       ),
     onError: setError,
   });
-  // Read aloud (Settings → Voice): each NEW reply is spoken once, after its
+  // Read aloud (the Voice panel): each NEW reply is spoken once, after its
   // run finished; replies already there when the conversation opened are not.
   const latestReply = [...messages].reverse().find((message) => message.role === "assistant");
   const latestReplyId = latestReply ? String(latestReply.id || latestReply.content) : "";
@@ -2148,7 +2148,7 @@ function EmptyConversation({
           "Discovering your workflows…"
         ) : workflow ? (
           <>
-            Using <strong>{workflow.name}</strong> · Choose a workflow in Settings
+            Using <strong>{workflow.name}</strong> · Choose another in the Workflow panel
           </>
         ) : connected ? (
           "Register a workflow with AbstractGateway to get started."

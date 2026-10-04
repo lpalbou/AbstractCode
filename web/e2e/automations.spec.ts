@@ -54,7 +54,7 @@ async function signIn(page: Page): Promise<void> {
   await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(dialog).toBeHidden();
   await openWorkspaceSection(page, "Workflow");
-  await expect(page.getByLabel("Workflow", { exact: true })).toBeEnabled();
+  await expect(page.getByRole("combobox", { name: "Workflow", exact: true })).toBeEnabled();
   await closeWorkspaceDrawer(page);
 }
 
@@ -141,15 +141,18 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   await expect(page.getByText(/Discussion forked from run #1\. It works in its own workspace .*mounted read-only/)).toBeVisible();
   await capture(page, "automation-discussion");
 
-  // Archive: asks first; then hidden from the list, history kept (Show archived).
+  // Archive: asks first; then hidden from the list, history kept (the `Archived · N` footer, R5).
   await row.locator(".code-card-main").click();
   await main.getByRole("button", { name: "Archive", exact: true }).click();
   await main.locator('[data-action="archive-confirm"]').click();
   await expect(main.locator('.code-auto-header [data-field="result"]')).toHaveText("Automation archived.");
   await expect(row).toHaveCount(0, { timeout: 15_000 });
-  await page.locator('[data-action="show-archived"]').click();
-  await expect(row).toHaveAttribute("data-status", "archived");
-  await row.locator(".code-card-main").click();
+  const archivedFooter = page.locator('.code-archived[data-list="automations"]');
+  await expect(archivedFooter.locator(".code-archived-toggle")).toHaveText(/^Archived · \d+$/);
+  if ((await archivedFooter.locator(".code-archived-toggle").getAttribute("aria-expanded")) !== "true") await archivedFooter.locator(".code-archived-toggle").click();
+  const archivedRow = archivedFooter.locator(".code-archived-row", { hasText: title });
+  await expect(archivedRow.locator('[data-action="unarchive"]')).toBeVisible();
+  await archivedRow.locator(".code-archived-name").click();
   await expect(main.locator('.af-auto-occ[data-index="1"]')).toBeVisible();
   expect(errors).toEqual([]);
 });

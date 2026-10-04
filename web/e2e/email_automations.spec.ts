@@ -56,7 +56,7 @@ async function signIn(page: Page): Promise<void> {
   await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(dialog).toBeHidden();
   await openWorkspaceSection(page, "Workflow");
-  await expect(page.getByLabel("Workflow", { exact: true })).toBeEnabled();
+  await expect(page.getByRole("combobox", { name: "Workflow", exact: true })).toBeEnabled();
   await closeWorkspaceDrawer(page);
 }
 

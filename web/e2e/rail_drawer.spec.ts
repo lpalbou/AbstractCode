@@ -181,6 +181,7 @@ test("files preview in the shared viewer; activity groups; no Open button", asyn
   await workflowPanel.getByRole("combobox", { name: "Workflow", exact: true }).click();
   await page.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Basic agent defaults" }) }).click();
   await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");
+  await expect(workflowPanel.getByText("Loading input schema…")).toHaveCount(0);
   await railTab(page, "Workflow").click();
   await page.locator(".code-conversation .pc-composer textarea").fill("Rail drawer activity check.");
   await page.getByRole("button", { name: "Send", exact: true }).click();
@@ -191,6 +192,10 @@ test("files preview in the shared viewer; activity groups; no Open button", asyn
   const activity = page.locator("#code-rail-panel-activity");
   const groups = activity.locator("details.code-activity-group");
   await expect(groups.first()).toBeVisible();
+  // R5 (backlog 0993 use case): a COMPLETED run never reads "Waiting for you" (nor running) in any group.
+  await expect(page.locator(".code-run-strip").getByText("Completed", { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(activity.locator("details.code-activity-group > summary > small", { hasText: /Waiting for you|Running/ })).toHaveCount(0);
+  await expect(activity.locator("details.code-activity-group.is-waiting, details.code-activity-group.is-running")).toHaveCount(0);
   const count = await groups.count();
   await expect(groups.nth(count - 1)).toHaveAttribute("open", "");
   for (let i = 0; i < count - 1; i++) await expect(groups.nth(i)).not.toHaveAttribute("open", "");
@@ -250,6 +255,26 @@ test("files preview in the shared viewer; activity groups; no Open button", asyn
   await noHorizontalOverflow(page);
 });
 
+test("R5 / backlog 0993: a completed run whose timer never wrote a resume reads Done, never 'Waiting for you'", async ({ page }) => {
+  await signIn(page);
+  const workflow = await openWorkspaceSection(page, "Workflow");
+  await workflow.getByRole("combobox", { name: "Workflow", exact: true }).click();
+  await page.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Short timer" }) }).click();
+  await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");
+  await expect(workflow.getByText("Loading input schema…")).toHaveCount(0);
+  await page.locator(".code-conversation .pc-composer textarea").fill("Timer check.");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.locator(".code-run-strip").getByText("Completed", { exact: true })).toBeVisible({ timeout: 30_000 });
+  const activity = await openWorkspaceSection(page, "Activity");
+  const groups = activity.locator("details.code-activity-group");
+  await expect(groups.first()).toBeVisible();
+  // The timer row is in the Start group (before any model step): it must read done.
+  await expect(activity.locator('details.code-activity-group[data-group="Start"]')).toHaveClass(/is-completed/);
+  await expect(activity.locator("details.code-activity-group > summary > small", { hasText: /Waiting/ })).toHaveCount(0);
+  await expect(activity.locator("details.code-activity-group.is-waiting, details.code-activity-group.is-running")).toHaveCount(0);
+  await shot(page, "activity-timer-completed-desktop");
+});
+
 test("automation selected: every settings panel edits its definition and saves a new revision", async ({ page }) => {
   const created = await api("automations", {
     method: "POST",
@@ -304,5 +329,5 @@ test("automation selected: every settings panel edits its definition and saves a
   const tools = await openWorkspaceSection(page, "Tools");
   await expect(tools.getByTestId("automation-revision")).toHaveText(`Revision ${rev0 + 2}`);
   await shot(page, "settings-automation-desktop");
-  await api(`automations/${encodeURIComponent(id)}/commands`, { method: "POST", body: JSON.stringify({ type: "automation.archive" }) }).catch(() => {});
+  await api(`automations/${encodeURIComponent(id)}/commands`, { method: "POST", body: JSON.stringify({ type: "automation.archive", command_id: `archive-${Date.now()}-${Math.random()}` }) }).catch(() => {});
 });

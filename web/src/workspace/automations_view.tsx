@@ -265,7 +265,7 @@ export function AutomationMain(props: {
   availableTools?: string[];
   enabled: boolean;
   onClose(): void;
-  /** The header's Edit: opens the Settings panel on this automation. */
+  /** The header's Edit: opens the Workflow panel on this automation. */
   onEdit(automationId: string): void;
   nowMs?: number;
 }): React.ReactElement {
@@ -415,7 +415,7 @@ export function NewAutomationDialog(props: {
       workflowPicker={
         props.workflowPickerOptions && (chosenTarget || props.target) ? <AutomationWorkflowPicker
           target={(chosenTarget || props.target)!} options={props.workflowPickerOptions} onChange={setChosenTarget} /> : <p className="code-field-help" data-field="target">
-          {props.target ? `Initially uses ${props.workflowLabel}. Choose the workflow in this form.` : "Choose a workflow in Settings → Model & behavior first."}
+          {props.target ? `Initially uses ${props.workflowLabel}. Choose the workflow in this form.` : "Choose a workflow in the Workflow panel first."}
         </p>
       }
       initialPrompt={props.initialPrompt}

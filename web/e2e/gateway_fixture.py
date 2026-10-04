@@ -268,8 +268,31 @@ def _coding_contract_flow() -> dict[str, Any]:
     }
 
 
+def _timer_flow() -> dict[str, Any]:
+    """A short timer (`wait_until`) between the start and the result, like the shipped status
+    helper's `post_delay`. The runtime writes no resume and no completion for a timer wait: the
+    run simply moves on (backlog 0993 use case; Code's Activity must read it as done)."""
+
+    return {
+        "id": "timer-contract", "name": "Short timer", "interfaces": ["abstractcode.agent.v1"],
+        "nodes": [
+            _node("start", "on_flow_start", outputs=[{"id": "exec-out", "label": "", "type": "execution"}, {"id": "prompt", "label": "Prompt", "type": "string"}]),
+            _node("delay", "wait_until", pin_defaults={"duration": 0.3}),
+            _node("result", "code", extra_data={"codeBody": "return {'answer': 'The timer elapsed. No model was invoked.'}"}),
+            _node("end", "on_flow_end"),
+        ],
+        "edges": [
+            _edge("start", "exec-out", "delay", "exec-in", "e1"),
+            _edge("delay", "exec-out", "result", "exec-in", "e2"),
+            _edge("result", "exec-out", "end", "exec-in", "e3"),
+            _edge("result", "output", "end", "result", "e4"),
+        ],
+        "entryNode": "start",
+    }
+
+
 def _write_bundle(bundles: Path) -> Path:
-    flows = {flow["id"]: flow for flow in (_prompt_flow(), _event_listener_flow(), _event_emitter_flow(), _tool_approval_flow(), _delegated_approval_flow(), _tool_supervision_flow(), _assistant_contract_flow(), _assistant_contract_flow(authored=True), _assistant_contract_flow(authored=True, generic=True), _basic_agent_contract_flow(), _coding_contract_flow())}
+    flows = {flow["id"]: flow for flow in (_prompt_flow(), _event_listener_flow(), _event_emitter_flow(), _tool_approval_flow(), _delegated_approval_flow(), _tool_supervision_flow(), _assistant_contract_flow(), _assistant_contract_flow(authored=True), _assistant_contract_flow(authored=True, generic=True), _basic_agent_contract_flow(), _coding_contract_flow(), _timer_flow())}
     manifest = {
         "bundle_format_version": "1", "bundle_id": BUNDLE_ID, "bundle_version": BUNDLE_VERSION,
         "created_at": "2026-09-20T00:00:00+00:00", "default_entrypoint": "prompt-structured",
@@ -288,6 +311,7 @@ def _write_bundle(bundles: Path) -> Path:
             {"flow_id": "typed-contract", "name": "Typed workflow inputs", "description": "Typed controls with real Assistant input metadata", "interfaces": ["chat", "abstractcode.agent.v1"]},
             {"flow_id": "basic-agent-contract", "name": "Basic agent defaults", "description": "Unchanged shipped basic-agent start pins; deterministic no-model execution", "interfaces": ["abstractcode.agent.v1"]},
             {"flow_id": "coding-contract", "name": "Coding request defaults", "description": "Published coding-agent start pins; deterministic no-model execution", "interfaces": ["abstractcode.coding.v1"]},
+            {"flow_id": "timer-contract", "name": "Short timer", "description": "A 0.3 s wait_until, then a result; no model", "interfaces": ["abstractcode.agent.v1"]},
         ],
         "flows": {flow_id: f"flows/{flow_id}.json" for flow_id in flows}, "artifacts": {}, "assets": {},
         "metadata": {"fixture": True, "network": "loopback-only", "models": "disabled"},

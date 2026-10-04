@@ -13,9 +13,15 @@ export function railTab(page: Page, panel: RailPanelName) {
 export async function openWorkspaceSection(page: Page, section: RailPanelName) {
   if (!RAIL_PANELS.includes(section)) throw new Error(`no rail panel named ${section}`);
   const tab = railTab(page, section);
-  if ((await tab.getAttribute("aria-selected")) !== "true") await tab.click();
   const panel = page.locator(`#code-rail-panel-${section.toLowerCase()}`);
-  await expect(panel).toBeVisible();
+  // A viewport change collapses a floating panel a render later: decide on what is visible, retrying.
+  // It must STAY visible across a short settle (a panel shown just before the collapse would not).
+  await expect(async () => {
+    if (!(await panel.isVisible())) await tab.click();
+    await expect(panel).toBeVisible({ timeout: 1_000 });
+    await page.waitForTimeout(250);
+    await expect(panel).toBeVisible({ timeout: 100 });
+  }).toPass({ timeout: 15_000 });
   return panel;
 }
 

@@ -48,7 +48,7 @@ async function closeOverlays(page) {
 
 async function signIn(page) {
   const dialog = page.getByRole("dialog", { name: "Gateway connection" });
-  const select = page.getByLabel("Workflow", { exact: true });
+  const select = page.getByRole("combobox", { name: "Workflow", exact: true });
   // Either the sign-in dialog shows, or the stored session connects (select enabled).
   const end = Date.now() + 20000;
   for (;;) {
@@ -66,7 +66,7 @@ async function signIn(page) {
   await page.locator("#gateway-session-token").fill(TOKEN);
   await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
   await dialog.waitFor({ state: "hidden", timeout: 15000 });
-  await waitEnabled(page.getByLabel("Workflow", { exact: true }));
+  await waitEnabled(page.getByRole("combobox", { name: "Workflow", exact: true }));
 }
 
 async function waitEnabled(locator, timeout = 20000) {
@@ -105,7 +105,7 @@ async function newConversation(page) {
 }
 
 async function selectWorkflow(page, name) {
-  const select = page.getByLabel("Workflow", { exact: true });
+  const select = page.getByRole("combobox", { name: "Workflow", exact: true });
   await waitEnabled(select);
   const listed = (await select.locator("option").allTextContents()).map((t) => t.trim());
   if (!listed.includes(name)) {

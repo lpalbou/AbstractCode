@@ -5,7 +5,7 @@
 //   Workspace  <short name> [open] [copy]          (never the full path on screen)
 //   Run now · Stop · Edit · Archive                (Archive asks inline; no ellipsis)
 // Every action shows a busy state, then an honest result line (the gateway's error when refused).
-// Edit opens the Settings panel on this automation (the host's `onEdit`).
+// Edit opens the Workflow panel on this automation (the host's `onEdit`).
 import React, { useEffect, useRef, useState } from "react";
 import {
   CONTROL_COMMANDS,
@@ -64,7 +64,7 @@ export function AutomationHeaderBar(props: {
   /** Sends a full command type (`automation.run_now`…); rejects with the gateway's error. */
   onCommand(type: string): Promise<unknown>;
   onToggleActive(): Promise<unknown>;
-  /** Opens the Settings panel on this automation. */
+  /** Opens the Workflow panel on this automation. */
   onEdit(): void;
   /** Shows the automation's folder (its files). */
   onOpenFolder(): void;
