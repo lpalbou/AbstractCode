@@ -5,31 +5,9 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [terminal 0.9.0 / web 0.11.0] - 2026-10-05
 
 Requires the AbstractGateway round-11 workspace model (`/api/gateway/sessions/{id}/workspaces`, `/api/gateway/workspace/policy/me`, `POST /api/gateway/workspace/effective/me`) and `@abstractframework/ui-kit` 0.8.3.
-
-### Added
-
-- web: the command sandbox (AbstractGateway round 12). **Tools**: the process-spawning tools show the gateway's state on their card (`sandboxed` / `sandbox` of `GET /api/gateway/discovery/tools`, verbatim: **Sandboxed to this run's workspaces**, or the refused / unsandboxed state), with the gateway's `command_sandbox.sentence` in the kit tooltip; no state is ever derived in the app. **Activity** (and the transcript's tool cards): each command call shows one line first in its detail — `Sandbox: macOS sandbox-exec · 4 workspaces enforced` or `Sandbox: none — refused` — and the enforced paths, from the ledger's `output.sandbox`. Needs `@abstractframework/ui-kit` 0.8.5 (tool state badge) and `@abstractframework/panel-chat` 0.4.1 (the sandbox line).
-
-### Changed
-
-- Automation settings: the gateway's `workspace: {"configured": false}` (an automation that follows your default workspaces at each run) shows as **Use my default** in the Workspace panel; before, it was read as a stored choice.
-- **New automation**: the kit dialog (ui-kit 0.8.5) has a visible **Workspaces** section after Tools. It holds the run-level chooser, and its value is stored in the definition as `target.input_data.workspace` (absent = **Use my default**). The dialog has no **Advanced** disclosure: **Title and limits** is a visible section. The automation header shows **Workspaces: <summary>** (the gateway's dry-run summary) and a **Change workspaces** icon that opens the rail's Workspace panel on that automation.
-- Fixed: on an automation, choosing **Use my default** in the Workspace panel left the list the gateway had derived from the old choice in the definition. That list narrowed the account default, and the gateway refused the revision. The list now goes with the payload; a list stored without a payload (round 9) stays.
-- web: the **Workspace** panel shows THIS conversation's workspaces (the kit `WorkspaceChooser`, session level, the same words as the gateway console, Flow, Observer and the AbstractAssistant): "Gateway: <the admin's eligible workspaces>" on top, **Use my default**, the posture ("Deny everything, allow listed workspaces" / "Allow everything, refuse listed workspaces"), each workspace with Read-only / Read & write / Refused (a mode above the gateway's cap disabled with its tooltip), **Add a workspace path**, and the effective line verbatim. Each change is one `PUT /api/gateway/sessions/{id}/workspaces`: the gateway stores the choice on the session, so every app opening the conversation sees it; **Use my default** sends `{configured: false}`. A refusal shows the gateway's sentence with "Not saved.". **Current workspace session-…** (the private workspace) stays on top.
-- web: **My default workspaces** (under the panel) opens your account's default (`PUT /api/gateway/workspace/policy/me`), what every conversation starts from; **Follow the gateway policy** returns to the gateway's.
-- web: an automation's **Workspace** panel stores its workspaces in its definition as `input_data.workspace` (`{posture, default_mode, folders}`, a new revision; replaces a stored `workspace_allowed_paths` list when you change it); what they mean is the gateway's dry run (`POST /api/gateway/workspace/effective/me`). **Use my default** removes it.
-- web: a gateway refusal answered as `{"detail": {"reason", "message", "path"}}` is shown as its `message` sentence, not as JSON.
-- web: the admin-only Files source is called **Gateway files (admin)** (there is no shared workspace any more).
-
-### Removed
-
-- web: the access-mode select, the workspace-root field, the "additional allowed paths" text area and the client-scope notice (the gateway no longer has access modes or client scope overrides). Turns no longer send `workspace_access_mode` or `workspace_allowed_paths`; saving an automation's settings removes a stored `workspace_access_mode`.
-- web: the unmounted legacy UI (`src/ui/app.tsx`, never imported by the app) and the old access-mode / allowed-paths / ignored-paths scope fields in `lib/storage.ts`, `lib/gateway_client.ts` and the workflow-input builder.
-
-## [terminal 0.9.0 / web 0.11.0] - 2026-10-04
 
 Requires AbstractGateway 0.13.0 or later for archiving conversations, the
 **Archived · N** lists and the gateway's default voice routes. The web client
@@ -38,6 +16,7 @@ builds against `@abstractframework/ui-kit` ^0.8.0 and
 
 ### Added
 
+- web: the command sandbox (AbstractGateway round 12). **Tools**: the process-spawning tools show the gateway's state on their card (`sandboxed` / `sandbox` of `GET /api/gateway/discovery/tools`, verbatim: **Sandboxed to this run's workspaces**, or the refused / unsandboxed state), with the gateway's `command_sandbox.sentence` in the kit tooltip; no state is ever derived in the app. **Activity** (and the transcript's tool cards): each command call shows one line first in its detail — `Sandbox: macOS sandbox-exec · 4 workspaces enforced` or `Sandbox: none — refused` — and the enforced paths, from the ledger's `output.sandbox`. Needs `@abstractframework/ui-kit` 0.8.5 (tool state badge) and `@abstractframework/panel-chat` 0.4.1 (the sandbox line).
 - web: the **Docs assistant** (book icon in the top bar) is the kit's shared `DocsAssistantDrawer`, the same chat as the gateway console and the other apps: your question on the right, the answer on the left with Markdown, code, JSON and links, copy, attachments, live streaming, an icon-only New conversation and close. It answers from AbstractCode's llms.txt (served by this app at `/llms.txt`, read by the gateway at `docs/corpus?app=code`) through the gateway's docs-qa workflow, replacing the basic-agent run over bundled guide pages.
 - web: **Archive** a conversation from its card's **⋯** or from the **⋯** next to its title in the header, with an inline confirmation ("Archive this conversation? It stays searchable and auditable; it just leaves this list."). It calls `POST /api/gateway/sessions/{id}/archive` (nothing is deleted); the conversation moves under **Archived · N** with **Unarchive**, and archiving the open conversation opens the next one.
 - web: a quiet **Archived · N** line at the end of each sidebar list (automations and conversations) shows the archived items inline, each with **Unarchive**; N is the gateway's count (`archived_automations`, `archived_sessions`), the line is absent at 0 and its open state is remembered.
@@ -51,6 +30,14 @@ builds against `@abstractframework/ui-kit` ^0.8.0 and
 
 ### Changed
 
+- Automation settings: the gateway's `workspace: {"configured": false}` (an automation that follows your default workspaces at each run) shows as **Use my default** in the Workspace panel; before, it was read as a stored choice.
+- **New automation**: the kit dialog (ui-kit 0.8.5) has a visible **Workspaces** section after Tools. It holds the run-level chooser, and its value is stored in the definition as `target.input_data.workspace` (absent = **Use my default**). The dialog has no **Advanced** disclosure: **Title and limits** is a visible section. The automation header shows **Workspaces: <summary>** (the gateway's dry-run summary) and a **Change workspaces** icon that opens the rail's Workspace panel on that automation.
+- Fixed: on an automation, choosing **Use my default** in the Workspace panel left the list the gateway had derived from the old choice in the definition. That list narrowed the account default, and the gateway refused the revision. The list now goes with the payload; a list stored without a payload (round 9) stays.
+- web: the **Workspace** panel shows THIS conversation's workspaces (the kit `WorkspaceChooser`, session level, the same words as the gateway console, Flow, Observer and the AbstractAssistant): "Gateway: <the admin's eligible workspaces>" on top, **Use my default**, the posture ("Deny everything, allow listed workspaces" / "Allow everything, refuse listed workspaces"), each workspace with Read-only / Read & write / Refused (a mode above the gateway's cap disabled with its tooltip), **Add a workspace path**, and the effective line verbatim. Each change is one `PUT /api/gateway/sessions/{id}/workspaces`: the gateway stores the choice on the session, so every app opening the conversation sees it; **Use my default** sends `{configured: false}`. A refusal shows the gateway's sentence with "Not saved.". **Current workspace session-…** (the private workspace) stays on top.
+- web: **My default workspaces** (under the panel) opens your account's default (`PUT /api/gateway/workspace/policy/me`), what every conversation starts from; **Follow the gateway policy** returns to the gateway's.
+- web: an automation's **Workspace** panel stores its workspaces in its definition as `input_data.workspace` (`{posture, default_mode, folders}`, a new revision; replaces a stored `workspace_allowed_paths` list when you change it); what they mean is the gateway's dry run (`POST /api/gateway/workspace/effective/me`). **Use my default** removes it.
+- web: a gateway refusal answered as `{"detail": {"reason", "message", "path"}}` is shown as its `message` sentence, not as JSON.
+- web: the admin-only Files source is called **Gateway files (admin)** (there is no shared workspace any more).
 - web: the sidebar's Automations and Conversations sections are two stacking full-width drawers. Both headers stay visible; with Automations open the Conversations header sits mid-height, and each list scrolls inside its own drawer. Fold state is remembered.
 - web: conversation cards read the title, then `Oct 2 · 2 turns · 7 tools` (the tool figure only when above zero; the gateway's per-turn total from `GET /runs?include_metrics=true`).
 - web: automation cards show the name on its own line, **waiting for you** while an approval is pending, then two quiet lines: `↻ every 24 h · last 3 h ago` and `next in 20 h` with the **Active** switch right-aligned.
@@ -63,14 +50,16 @@ builds against `@abstractframework/ui-kit` ^0.8.0 and
 - tui: `/sessions` cards read `Oct 2 · 2 turns · 7 tools`; `/automations` cards read `↻ every 24 h · last 3 h ago` / `next in 20 h` with the **Active** switch, and offer Run now / Stop / Edit / Archive (inline confirmation) like the web client.
 - tui: `tui/assets/automation_controls.json` matches the kit's (Unarchive label and hint, result-email wording).
 
+### Removed
+
+- web: the access-mode select, the workspace-root field, the "additional allowed paths" text area and the client-scope notice (the gateway no longer has access modes or client scope overrides). Turns no longer send `workspace_access_mode` or `workspace_allowed_paths`; saving an automation's settings removes a stored `workspace_access_mode`.
+- web: the unmounted legacy UI (`src/ui/app.tsx`, never imported by the app) and the old access-mode / allowed-paths / ignored-paths scope fields in `lib/storage.ts`, `lib/gateway_client.ts` and the workflow-input builder.
+- web: the horizontal **Workspace & settings** drawer (replaced by the rail), the sidebar's **Show archived** switch (replaced by **Archived · N**), and the header's gear button (the rail icons open the panels).
+- web: the composer's speaker button; each reply keeps its own speaker, and **Stop spoken reply** stays while a reply plays.
+
 ### Fixed
 
 - web: the Voice panel named the engines "Gateway default · openai" whatever the gateway routed to; it shows the gateway's actual default routes.
-
-### Removed
-
-- web: the horizontal **Workspace & settings** drawer (replaced by the rail), the sidebar's **Show archived** switch (replaced by **Archived · N**), and the header's gear button (the rail icons open the panels).
-- web: the composer's speaker button; each reply keeps its own speaker, and **Stop spoken reply** stays while a reply plays.
 
 ## [web 0.10.3] - 2026-10-03
 
