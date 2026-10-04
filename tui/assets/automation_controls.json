@@ -9,6 +9,7 @@
     "stop_current": "Stop current",
     "revise": "Edit",
     "archive": "Archive",
+    "unarchive": "Unarchive",
     "discuss": "Discuss"
   },
   "hints": {
@@ -19,6 +20,7 @@
     "stop_current": "Cancel the run in progress, or its pending retry.\nIt ends as cancelled, with no failure notice. The schedule continues.",
     "revise": "Change the task, schedule or settings.\nChanges apply from the next run; a run in progress keeps its inputs. A changed schedule restarts from now, so no past time runs.",
     "archive": "Stop it for good: it will not run again.\nA run in progress finishes; the history stays readable.",
+    "unarchive": "Bring it back from the archive, paused: nothing runs until you make it active.\nAn automation that had already finished or failed keeps that status; its history is unchanged.",
     "discuss": "Talk about the results in a separate conversation, seeded with the runs up to this one.\nIt has its own workspace (the automation's files are read-only) and never changes the automation."
   },
   "run_now_next_run_line": "Next scheduled run: {time}.",
@@ -52,11 +54,11 @@
     "max_batch_label": "At most this many emails per run",
     "max_batch_hint": "The rest wait for the next run. Each email is read once by this automation; mail that arrived before it was created, or while it is paused, is not processed.",
     "untrusted_hint": "Incoming mail is data, never instructions: the automation acts only on its task. Link-opening tools (fetch_url, browser_probe) always ask for your approval.",
-    "notify_label": "Email me the result",
-    "notify_hint": "When a run notifies you, or fails for good, the notice is also emailed to you.",
-    "recipients_legend": "May send email without asking to",
+    "notify_label": "Email result",
+    "notify_hint": "Email each completed run’s result to the selected recipients.",
+    "recipients_legend": "Recipients",
     "recipients_self": "Only me (default)",
     "recipients_list": "Me and these addresses",
-    "recipients_hint": "Sending to anyone else waits for your approval. Your recipient policy in My email still applies."
+    "recipients_hint": "Separate multiple addresses with commas."
   }
 }
