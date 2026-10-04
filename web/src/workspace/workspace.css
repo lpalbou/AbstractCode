@@ -2853,7 +2853,6 @@ select option {
 .code-content { position: relative; }
 .code-rail { background: var(--bg-secondary); }
 .code-rail .af-rail__panel-wrap { background: var(--bg-secondary); }
-.code-panel-opener { display: inline-flex; align-items: center; justify-content: center; width: 44px; min-width: 44px; min-height: 44px; padding: 0; flex-shrink: 0; }
 .code-panel-section-title { margin: 0 0 12px; font-size: var(--font-size-base); }
 /* Workflow panel (round 5): the picker, then the workflow's inputs under a quiet heading. */
 .code-workflow-inputs { margin-top: 12px; border-top: 1px solid var(--ui-border-1); padding-top: 12px; }
@@ -3170,3 +3169,54 @@ select option {
 }
 /* The Automation card hosts the kit's Edit form flat (never a card in a card). */
 .code-automation-settings .af-settings-group .af-auto__revise { padding: 0; border: 0; background: transparent; }
+
+/* ===========================================================================
+   Round 6 (DESIGN R6.2): Archive a conversation from the card's "⋯" and the header's "⋯"
+   (the kit's AfMenu), always through one inline confirm. The card "⋯" sits top-right over the
+   card (shown on hover/focus/selection with a mouse, always on touch); the title leaves it room.
+   =========================================================================== */
+.code-session-item { position: relative; margin-bottom: 4px; }
+.code-session-item > .code-session.code-card { margin-bottom: 0; padding-right: 44px; }
+.code-card-menu { position: absolute; top: 6px; right: 6px; } /* never a transform here: it would re-anchor the kit list (position: fixed) */
+.code-card-menu .af-menu__button,
+.code-conversation-menu .af-menu__button { border-color: transparent; background: transparent; color: var(--text-secondary); }
+.code-card-menu .af-menu__button:hover,
+.code-card-menu .af-menu__button[aria-expanded="true"],
+.code-conversation-menu .af-menu__button:hover,
+.code-conversation-menu .af-menu__button[aria-expanded="true"] { color: var(--text-primary); border-color: var(--ui-border-2); }
+@media (hover: hover) and (pointer: fine) {
+  .code-session-item:not(:hover):not(:focus-within):not(.is-confirming):not(:has(> .code-session.is-selected)) .code-card-menu { opacity: 0; }
+}
+.code-topbar > .code-conversation-menu { margin-right: auto; margin-left: -8px; }
+.code-archive-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--ui-border-2);
+  border-radius: 7px;
+  background: var(--ui-surface-2);
+  font-size: var(--font-size-sm);
+}
+.code-archive-confirm > p { flex: 1 1 220px; margin: 0; min-width: 0; color: var(--text-primary); }
+.code-archive-confirm > .code-inline-error { flex-basis: 100%; }
+.code-archive-confirm-actions { display: inline-flex; align-items: center; gap: 12px; flex: none; }
+.code-archive-confirm-yes {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 32px; padding: 4px 12px;
+  border: 1px solid var(--error-border, var(--ui-border-2)); border-radius: var(--radius-md, 6px);
+  background: var(--error-subtle, transparent); color: var(--error); font: inherit; font-weight: 500; cursor: pointer;
+}
+.code-archive-confirm-yes:disabled { opacity: 0.6; cursor: default; }
+.code-session-item > .code-archive-confirm { margin-top: 4px; }
+.code-archive-confirm-bar { flex-shrink: 0; padding: 10px 24px; border-bottom: 1px solid var(--ui-border-1); }
+@media (pointer: coarse) {
+  .code-session-item > .code-session.code-card { padding-right: 52px; }
+  .code-archive-confirm { font-size: max(14px, var(--font-size-body, 14px)); }
+  .code-archive-confirm-yes,
+  .code-archive-confirm-actions .code-subtle-button { min-height: var(--tap-min, 44px); font-size: max(14px, var(--font-size-body, 14px)); }
+}
+@media (max-width: 767.98px) {
+  .code-archive-confirm-bar { padding: 8px 12px; }
+}

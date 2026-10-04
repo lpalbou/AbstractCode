@@ -2,6 +2,7 @@
 // The gateway owns archiving (contract assigned 2026-10-04 to the gateway seat):
 //   - `GET /runs?root_only=true` leaves archived sessions out and carries `archived_sessions: N`;
 //   - `GET /runs?root_only=true&archived_only=true` lists them;
+//   - `POST /sessions/{session_id}/archive` hides one (round 6: the card's and the header's "⋯");
 //   - `POST /sessions/{session_id}/unarchive` brings one back (history is kept either way).
 // This file only reads and forwards; a refusal is shown as the gateway said it.
 import React, { useEffect, useState } from "react";
@@ -13,7 +14,25 @@ import { conversationMetaLine, conversationTitle } from "./sidebar_cards";
 import { LoadingStatus } from "./loading_status";
 
 export const ARCHIVED_RUNS_PATH = "runs?root_only=true&archived_only=true&include_ledger_len=false&include_metrics=true&limit=200";
+export const archiveSessionPath = (sessionId: string) => `sessions/${encodeURIComponent(sessionId)}/archive`;
 export const unarchiveSessionPath = (sessionId: string) => `sessions/${encodeURIComponent(sessionId)}/unarchive`;
+
+/** Archive one conversation through the gateway (POST, never DELETE: nothing is deleted). */
+export async function archiveSession(sessionId: string, request: typeof gatewayRequest = gatewayRequest): Promise<unknown> {
+  return request(gatewayApiPath(archiveSessionPath(sessionId)), { method: "POST", body: "{}" });
+}
+
+/**
+ * The conversation to show after archiving `archivedId` from `list` (the visible order): the
+ * next one, else the previous one, else none (a new conversation).
+ */
+export function nextConversationAfterArchive<T extends { sessionId: string }>(list: readonly T[], archivedId: string): T | null {
+  const at = list.findIndex((item) => item.sessionId === archivedId);
+  const rest = list.filter((item) => item.sessionId !== archivedId);
+  if (!rest.length) return null;
+  if (at < 0) return rest[0];
+  return rest[Math.min(at, rest.length - 1)];
+}
 
 /** `archived_sessions` of the runs list; a list without it has no archived sessions to show. */
 export function archivedSessionCount(runs: unknown): number {

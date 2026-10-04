@@ -62,8 +62,10 @@ test("automations: Archived · N footer, inline list, Unarchive brings it back (
     }),
   });
   const id = created.automation_id;
+  // The count before (a reused fixture gateway already holds archived automations): wait for THIS archive.
+  const before = (await api("automations")).archived_automations || 0;
   await api(`automations/${encodeURIComponent(id)}/commands`, { method: "POST", body: JSON.stringify({ type: "automation.archive", command_id: `archive-${Date.now()}-${Math.random()}` }) });
-  await expect.poll(async () => (await api("automations")).archived_automations).toBeGreaterThan(0);
+  await expect.poll(async () => (await api("automations")).archived_automations).toBeGreaterThan(before);
   const n = (await api("automations")).archived_automations;
 
   await signIn(page);
@@ -125,4 +127,90 @@ test("conversations: Archived · N footer, inline list, Unarchive brings it back
   await expect(list.locator(`.code-session[data-session-id="${sessionId}"]`)).toBeVisible();
   await expect(footer.locator(`.code-archived-row[data-id="${sessionId}"]`)).toHaveCount(0);
   expect((await api("runs?root_only=true&limit=1")).archived_sessions).toBe(n - 1);
+});
+
+// Round 6 (DESIGN R6.2): Archive from the card's "⋯" and from the conversation header's "⋯",
+// inline confirm, POST /sessions/{id}/archive (no DELETE is ever sent), the conversation moves
+// under `Archived · N` (N + 1), the ACTIVE one hands over to the next; Unarchive returns it.
+async function startConversation(page: Page, prompt: string): Promise<string> {
+  await page.getByRole("button", { name: "New conversation", exact: true }).first().click();
+  const workflow = await openWorkspaceSection(page, "Workflow");
+  await workflow.getByRole("combobox", { name: "Workflow", exact: true }).click();
+  await page.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Basic agent defaults" }) }).click();
+  await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");
+  await page.locator(".code-conversation .pc-composer textarea").fill(prompt);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.locator(".pc-chat-item--assistant").first()).toBeVisible();
+  // The new conversation is the selected card once the list knows it.
+  const current = page.locator(".code-conversations .code-session[aria-current='page'][data-session-id]");
+  await expect.poll(async () => {
+    await page.getByRole("button", { name: "Refresh conversations", exact: true }).click();
+    return (await current.count()) ? String(await current.getAttribute("title")) : "";
+  }).toContain(prompt);
+  return String(await current.getAttribute("data-session-id"));
+}
+
+test("archive a conversation from the card ⋯ and from the header ⋯; Unarchive returns it", async ({ page }) => {
+  const methods: string[] = [];
+  page.on("request", (req) => { if (req.url().includes("/sessions/")) methods.push(`${req.method()} ${new URL(req.url()).pathname}`); });
+  await signIn(page);
+  const stamp = Date.now();
+  const first = await startConversation(page, `Card archive ${stamp}`);
+  const second = await startConversation(page, `Header archive ${stamp}`);
+  const third = await startConversation(page, `Stays active ${stamp}`);
+  await page.getByRole("button", { name: "Refresh conversations", exact: true }).click();
+  const list = page.locator(".code-conversations");
+  for (const id of [first, second, third]) await expect(list.locator(`.code-session[data-session-id="${id}"]`)).toBeVisible();
+  const n0 = (await api("runs?root_only=true&limit=1")).archived_sessions || 0;
+
+  // 1) The card ⋯ of a conversation that is NOT active: confirm, Cancel first, then Archive.
+  const item = list.locator(`.code-session-item[data-item-id="${first}"]`);
+  await item.hover();
+  await item.getByRole("button", { name: /^More actions for / }).click();
+  await page.getByRole("menuitem", { name: "Archive", exact: true }).click();
+  const confirm = item.locator(".code-archive-confirm");
+  await expect(confirm).toContainText("Archive this conversation? It stays searchable and auditable; it just leaves this list.");
+  await confirm.locator('[data-action="cancel-archive"]').click();
+  await expect(item.locator(".code-archive-confirm")).toHaveCount(0);
+  expect((await api("runs?root_only=true&limit=1")).archived_sessions || 0).toBe(n0);
+  await item.hover();
+  await item.getByRole("button", { name: /^More actions for / }).click();
+  await page.getByRole("menuitem", { name: "Archive", exact: true }).click();
+  await item.locator('[data-action="confirm-archive"]').click();
+  await expect(list.locator(`.code-session[data-session-id="${first}"]`)).toHaveCount(0);
+  const footer = list.locator('.code-archived[data-list="conversations"]');
+  await expect(footer.locator(".code-archived-toggle")).toHaveText(`Archived · ${n0 + 1}`);
+  // The active conversation did not change.
+  await expect(list.locator(`.code-session[data-session-id="${third}"]`)).toHaveAttribute("aria-current", "page");
+
+  // 2) The header ⋯ on the ACTIVE conversation: it hands over to the next one.
+  await list.locator(`.code-session[data-session-id="${second}"]`).click();
+  await expect(list.locator(`.code-session[data-session-id="${second}"]`)).toHaveAttribute("aria-current", "page");
+  await page.locator(".code-topbar").getByRole("button", { name: "Conversation actions", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Archive", exact: true }).click();
+  const bar = page.locator(".code-archive-confirm-bar .code-archive-confirm");
+  await expect(bar).toContainText("It stays searchable and auditable");
+  await bar.locator('[data-action="confirm-archive"]').click();
+  await expect(bar).toHaveCount(0);
+  await expect(list.locator(`.code-session[data-session-id="${second}"]`)).toHaveCount(0);
+  await expect(footer.locator(".code-archived-toggle")).toHaveText(`Archived · ${n0 + 2}`);
+  await expect(list.locator(".code-session[aria-current='page']")).toHaveCount(1);
+  await expect(list.locator(`.code-session[aria-current='page']`)).not.toHaveAttribute("data-session-id", second);
+  await shot(page, "archived-after-header-archive");
+
+  // Nothing deleted: the gateway still reads both sessions' runs.
+  for (const id of [first, second]) expect(((await api(`runs?session_id=${encodeURIComponent(id)}&limit=5`)).items || []).length).toBeGreaterThan(0);
+  expect(methods.filter((m) => m.startsWith("DELETE"))).toEqual([]);
+  expect(methods.filter((m) => m.endsWith("/archive")).length).toBe(2);
+
+  // 3) Both under Archived · N; Unarchive brings one back without a reload.
+  const toggle = footer.locator(".code-archived-toggle");
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(footer.locator(`.code-archived-row[data-id="${first}"]`)).toBeVisible();
+  await expect(footer.locator(`.code-archived-row[data-id="${second}"]`)).toBeVisible();
+  await footer.locator(`.code-archived-row[data-id="${first}"] [data-action="unarchive"]`).click();
+  await expect(list.locator(`.code-session[data-session-id="${first}"]`)).toBeVisible();
+  await expect(toggle).toHaveText(`Archived · ${n0 + 1}`);
+  await footer.locator(`.code-archived-row[data-id="${second}"] [data-action="unarchive"]`).click();
+  await expect(list.locator(`.code-session[data-session-id="${second}"]`)).toBeVisible();
 });

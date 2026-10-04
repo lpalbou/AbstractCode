@@ -273,7 +273,16 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
     visible.current += CONVERSATIONS_PAGE;
     void loadConversations();
   }, [loadConversations]);
-  return { ...state, refresh, loadMore };
+  /** Archived (round 6): drop it from the shown list and count it now; the list reload confirms. */
+  const forgetSession = useCallback((sessionId: string) => {
+    setState((s) => ({
+      ...s,
+      sessions: s.sessions.filter((item) => item.sessionId !== sessionId),
+      archivedSessions: s.archivedSessions + 1,
+    }));
+    void loadConversations();
+  }, [loadConversations]);
+  return { ...state, refresh, loadMore, forgetSession };
 }
 
 export async function fetchWorkflowSchema(

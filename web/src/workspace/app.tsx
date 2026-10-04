@@ -10,6 +10,7 @@ import React, {
 } from "react";
 import {
   AfAppearanceDialog,
+  AfMenu,
   AfTopBarActions,
   AfSwitch,
   GatewayConnectModal,
@@ -34,8 +35,8 @@ import {
   type PaneMode,
 } from "./layout";
 import { SidebarDrawer } from "./sidebar_drawer";
-import { ArchivedFooter, ConversationsPanel, SidebarLists, useArchivedOpen, useSidebarPanels } from "./sidebar_panels";
-import { ArchivedConversations } from "./archived_conversations";
+import { ArchiveConfirm, ArchivedFooter, ConversationsPanel, SidebarLists, useArchivedOpen, useSidebarPanels } from "./sidebar_panels";
+import { ArchivedConversations, archiveSession, nextConversationAfterArchive } from "./archived_conversations";
 import { ConversationCard } from "./sidebar_cards";
 import {
   WorkflowChat,
@@ -279,8 +280,6 @@ export function CodeWorkspace() {
   // The right panel: the kit's rail drawer (Activity, Files, Model, Workflow, Workspace, Tools, Skills, Voice).
   const [railPanel, setRailPanel, railOverlay] = useRailPanel();
   const panelOpen = railPanel !== null;
-  /** A settings panel (Model … Voice) is open: the header gear shows pressed. */
-  const settingsOpen = railPanel !== null && railPanel !== "activity" && railPanel !== "files";
   /** Legacy "close the panel" call sites: only a FLOATING panel gets out of the way; a docked one stays. */
   const setPanelOpen = (open: boolean) => {
     if (!open && railOverlay) setRailPanel(null);
@@ -1142,6 +1141,47 @@ export function CodeWorkspace() {
       .toLowerCase()
       .includes(search.toLowerCase()),
   );
+  // Round 6 (DESIGN R6.2): archive a conversation from its card's "⋯" or the header's "⋯", always
+  // through the one inline confirm; the gateway hides it (nothing is deleted), the list moves it
+  // under `Archived · N`, and an archived ACTIVE conversation hands over to the next one.
+  const [archiveAsk, setArchiveAsk] = useState<{ sessionId: string; where: "card" | "header" } | null>(null);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [archiveError, setArchiveError] = useState("");
+  const askArchive = (sessionId: string, where: "card" | "header") => {
+    setArchiveError("");
+    setArchiveAsk({ sessionId, where });
+  };
+  const cancelArchive = () => {
+    setArchiveAsk(null);
+    setArchiveError("");
+  };
+  const confirmArchive = async () => {
+    if (!archiveAsk || archiveBusy) return;
+    const { sessionId } = archiveAsk;
+    setArchiveBusy(true);
+    setArchiveError("");
+    try {
+      await archiveSession(sessionId);
+    } catch (e) {
+      setArchiveError(`Not archived: ${formatError(e)}`);
+      setArchiveBusy(false);
+      return;
+    }
+    setArchiveBusy(false);
+    setArchiveAsk(null);
+    if (sessionId === session.sessionId) {
+      const next = nextConversationAfterArchive(filteredSessions, sessionId);
+      if (next) {
+        openConversation(next.sessionId, next.latestRunId);
+      } else {
+        newConversation();
+      }
+    }
+    catalog.forgetSession(sessionId);
+  };
+  const archiveConfirm = (
+    <ArchiveConfirm busy={archiveBusy} error={archiveError} onConfirm={() => void confirmArchive()} onCancel={cancelArchive} />
+  );
   const gatewayName = (() => {
     try {
       return new URL(connection.status?.gateway_url || "").host;
@@ -1576,6 +1616,8 @@ export function CodeWorkspace() {
               onClick={() =>
                 openConversation(item.sessionId, item.latestRunId)
               }
+              onAskArchive={connection.connected ? () => askArchive(item.sessionId, "card") : undefined}
+              confirm={archiveAsk?.where === "card" && archiveAsk.sessionId === item.sessionId ? archiveConfirm : undefined}
             />
           ))}
           {catalog.sessionsLoaded && !filteredSessions.length ? (
@@ -1638,19 +1680,20 @@ export function CodeWorkspace() {
               {automationView ? automationTitle : title}
             </strong>
           </div>
+          {!automationView && currentSession && connection.connected ? (
+            <AfMenu
+              className="code-conversation-menu"
+              label="Conversation actions"
+              title="More actions"
+              items={[{ id: "archive", label: "Archive", danger: true, onSelect: () => askArchive(currentSession.sessionId, "header") }]}
+            />
+          ) : null}
           <AfTopBarActions
             assistant={{ open: assistantOpen, onToggle: () => { setAssistantOpen(open => !open); setPanelOpen(false); setSidebarOpen(false); }, label: "Code assistant (docs-grounded)" }}
             appearance={{ onOpen: () => setAppearanceOpen(true) }}
             about={{ identity: APP_IDENTITY, versions: aboutVersions(gatewayAbout), onOpen: refreshGatewayAbout }}
             connection={{ phase: connection.phase, signingOut: connection.signingOut,
               onConnect: connection.openModal, onDisconnect: () => void connection.signOut() }}
-            extraActions={
-          <button className={`code-panel-opener af-topbar__btn${settingsOpen ? " is-active" : ""}`}
-            aria-label="Settings" title="Settings" aria-expanded={settingsOpen} aria-controls="code-rail-panel-model"
-            onClick={() => { setRailPanel(settingsOpen ? null : "model"); setAssistantOpen(false); setSidebarOpen(false); }}>
-            <Icon name="cog" size={18} />
-          </button>
-            }
           />
         </header>
         <div className="code-content">
@@ -1703,6 +1746,9 @@ export function CodeWorkspace() {
                   </button>
                 )}
               </div>
+            ) : null}
+            {archiveAsk?.where === "header" && archiveAsk.sessionId === session.sessionId ? (
+              <div className="code-archive-confirm-bar">{archiveConfirm}</div>
             ) : null}
             {catalog.errors.length ? (
               <div className="code-discovery-errors" role="status">

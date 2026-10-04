@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- web: **Archive** a conversation from its card's **⋯** or from the **⋯** next to its title in the header (shared kit `AfMenu`), with an inline confirmation ("Archive this conversation? It stays searchable and auditable; it just leaves this list."). It calls `POST /api/gateway/sessions/{id}/archive` (never a delete); the conversation moves under **Archived · N** with **Unarchive**, and archiving the open conversation opens the next one.
+
+### Removed
+
+- web: the header's gear (Settings) button: the rail icons open the panels. There was no keyboard shortcut for it.
+- web: the composer's speaker ("Read latest reply aloud") button: each reply keeps its own speaker; the microphone and **Stop spoken reply** stay.
+
 ### Changed
 
 - **TUI assets:** `tui/assets/automation_controls.json` is again byte-identical to the kit's (ui-kit 0.7.0): it gains the Unarchive label and hint, and picks up the kit's current result-email wording.
@@ -16,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - web: automation cards show the name on its own line, **waiting for you** while an approval is pending, then two quiet lines: `↻ every 24 h · last 3 h ago` and `next in 20 h` with the **Active** switch right-aligned on it (`waiting since …` instead of `running now` while a run waits for you).
 - web: the automation page has its own header: title, **Active** switch, timing line, waiting badge, the workspace as a short name with Open folder / Copy path icons, and **Run now**, **Stop**, **Edit**, **Archive** (inline confirmation). Requires `@abstractframework/ui-kit` with `automationTiming` and the panel's `hideHeader`.
 
-- web: the right panel is a vertical rail drawer (shared `AfRailDrawer`): an icon rail at the right edge with **Activity**, **Files**, **Model**, **Workflow**, **Workspace**, **Tools**, **Skills** and **Voice** (no "Settings" panel, no "Model & behavior"); a click opens the panel beside the rail (docked and resizable from 1024 px, the width remembered; floating below), the open icon folds it back. The horizontal six-tab **Workspace & settings** drawer is gone; the header's usual gear (icon only, tooltip "Settings") opens the Model panel.
+- web: the right panel is a vertical rail drawer (shared `AfRailDrawer`): an icon rail at the right edge with **Activity**, **Files**, **Model**, **Workflow**, **Workspace**, **Tools**, **Skills** and **Voice** (no "Settings" panel, no "Model & behavior"); a click opens the panel beside the rail (docked and resizable from 1024 px, the width remembered; floating below), the open icon folds it back. The horizontal six-tab **Workspace & settings** drawer is gone.
 - web: the settings panels follow the selection. A conversation shows its run settings (Model: the shared model picker with reasoning and MTP, then limits, instructions and Stream replies; Workflow: which workflow — Gateway default by default — and its inputs; Workspace; Tools: the shared tool policy; Skills; Voice). An automation shows its definition in the same panels — its Workflow panel holds the definition form (workflow, title, task, schedule, context, tool approval, email result) — with one shared draft, and each change is saved through the gateway as a new revision (`PATCH /automations/{id}` with `expected_revision`), the revision shown on every panel. The header's **Edit** opens its Workflow panel (`openAutomationSettings`). The "close the drawer and choose Edit" notice is gone. Everything reads **Gateway default** until overridden.
 - web: **Files** rows show name, size, generated date (relative, exact on hover) and a download icon; a click previews the file in the shared viewer (Markdown rendered, code highlighted, JSON, images, PDF, text). The workspace path shows once, as a short name with Open folder / Copy path icons. No "Open" button.
 - web: **Activity** renders model steps, tool calls (the chat's tool cards) and approvals in foldable groups, one per iteration, the newest open; for an automation one group per run, the latest open.

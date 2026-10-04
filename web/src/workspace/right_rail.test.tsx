@@ -19,12 +19,12 @@ function row(kind: ActivityRow["kind"], key: string, status = "completed", title
   return { key, runId: "r1", cursor: 1, kind, title, detail: "", status, statusLabel: status, nodeId: "", stepIds: [], progress: "", progressFinal: false, entries: [], progressEvents: [], merged: {} };
 }
 
-describe("header: the usual gear, icon-only, tooltip Settings", () => {
-  it("is a cog icon button named Settings with a Settings tooltip", () => {
-    const at = appSource.indexOf('className={`code-panel-opener');
-    const button = appSource.slice(at, appSource.indexOf("</button>", at));
-    expect(button).toContain('aria-label="Settings" title="Settings"');
-    expect(button).toMatch(/<Icon name="cog" size=\{18\} \/>\s*$/); // icon only: no text label after it
+describe("header: no gear (round 6 — the rail icons open the panels)", () => {
+  it("the top bar has no Settings/gear button and no extra actions", () => {
+    expect(appSource).not.toContain("code-panel-opener");
+    expect(appSource).not.toContain('aria-label="Settings"');
+    expect(appSource).not.toContain('<Icon name="cog"');
+    expect(appSource).not.toContain("extraActions=");
   });
   it("no sliders icon, no 'Workspace & settings' label anywhere in the app shell", () => {
     expect(appSource).not.toContain('<Icon name="settings"');

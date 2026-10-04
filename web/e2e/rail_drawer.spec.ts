@@ -1,5 +1,5 @@
 // Round 4/5 right panel against the disposable fixture gateway (e2e/gateway_fixture.py):
-// gear-only Settings button; the kit rail drawer (Activity, Files, Model, Workflow,
+// (round 6: no header gear; the rail icons open the panels); the kit rail drawer (Activity, Files, Model, Workflow,
 // Workspace, Tools, Skills, Voice — round 5) at the right edge — docked + resizable from 1024 px, floating below; files previewed in the
 // shared viewer; activity in foldable groups; Settings bound to the selection (an
 // automation's definition is saved as a new revision through the gateway); the
@@ -59,13 +59,11 @@ for (const [name, width, height] of [["desktop", 1440, 960], ["tablet", 834, 111
   test.describe(name, () => {
     test.use({ viewport: { width, height }, hasTouch: name !== "desktop", isMobile: name === "phone" });
 
-    test(`gear Settings, rail at the right edge, panels beside it (${name})`, async ({ page }) => {
+    test(`no header gear, rail at the right edge, panels beside it (${name})`, async ({ page }) => {
       await signIn(page);
-      // D1: the usual gear, icon-only, tooltip "Settings"; no sliders, no "Workspace & settings".
-      const gear = page.locator(".code-topbar .code-panel-opener");
-      await expect(gear).toHaveAttribute("aria-label", "Settings");
-      await expect(gear).toHaveAttribute("title", "Settings");
-      await expect(gear).toHaveText("");
+      // R6.3: no header gear (the rail icons open the panels); no sliders, no "Workspace & settings".
+      await expect(page.locator(".code-topbar .code-panel-opener")).toHaveCount(0);
+      await expect(page.locator(".code-topbar").getByRole("button", { name: "Settings", exact: true })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Workspace & settings" })).toHaveCount(0);
       await expect(page.getByText("Workspace & settings")).toHaveCount(0);
 
@@ -130,12 +128,11 @@ for (const [name, width, height] of [["desktop", 1440, 960], ["tablet", 834, 111
       await expect(page.locator("#code-rail-panel-activity")).toBeHidden();
       await expect(rail).toBeVisible();
 
-      // The gear opens the Model panel; every settings panel is bound to the selected conversation.
-      await gear.click();
+      // The Model rail icon opens the Model panel; every settings panel is bound to the selected conversation.
+      await railTab(page, "Model").click();
       const model = page.locator("#code-rail-panel-model");
       await expect(model).toBeVisible();
       await expect(railTab(page, "Model")).toHaveAttribute("aria-selected", "true");
-      await expect(gear).toHaveAttribute("aria-expanded", "true");
       await expect(model.locator(".code-settings-binding")).toContainText("Conversation");
       await expect(model.getByRole("button", { name: /Gateway default|Workflow default/ }).or(model.getByText(/Gateway default|Workflow default/)).first()).toBeVisible();
       await shot(page, `panel-model-${name}`);
@@ -167,8 +164,8 @@ for (const [name, width, height] of [["desktop", 1440, 960], ["tablet", 834, 111
       await expect(voice.getByRole("switch", { name: /Read aloud/ })).toHaveAttribute("aria-checked", "true");
       await noHorizontalOverflow(page);
       await shot(page, `panel-voice-${name}`);
-      // The gear closes an open settings panel.
-      await gear.click();
+      // The open panel's own rail icon closes it (no header gear since round 6).
+      await railTab(page, "Voice").click();
       await expect(settings).toBeHidden();
     });
   });

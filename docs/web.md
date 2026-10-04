@@ -7,7 +7,7 @@ Start with [getting started](getting-started.md). For hosting and authentication
 ## Working in the interface
 
 - **Conversations** restores gateway sessions and history. Search by conversation text or session ID. The list shows 25 conversations; **Load more conversations** adds the next 25.
-- **The right panel** is a vertical rail at the right edge of the window with one icon per subject — **Activity**, **Files**, **Model**, **Workflow**, **Workspace**, **Tools**, **Skills** and **Voice**. Clicking an icon opens its panel beside the rail; clicking it again (or the panel's collapse arrow) folds the panel back to the icons. The rail always stays. The gear button in the header (tooltip **Settings**) opens the **Model** panel, or folds any open settings panel.
+- **The right panel** is a vertical rail at the right edge of the window with one icon per subject — **Activity**, **Files**, **Model**, **Workflow**, **Workspace**, **Tools**, **Skills** and **Voice**. Clicking an icon opens its panel beside the rail; clicking it again (or the panel's collapse arrow) folds the panel back to the icons. The rail always stays; it is the only way into the panels (the header has no settings button).
 
 | Panel | What it shows |
 |---|---|
@@ -32,7 +32,7 @@ The **Workflow** picker lists workflows authorized by the gateway for `abstractc
 
 The panel width is resizable on wide screens (drag the panel's left edge, or focus it and use the arrow keys) and remembered with the open panel. The upper-right **About** widget is the shared AbstractFramework About: the app name and version, the AbstractFramework and AbstractGateway versions the connected gateway reports (or why one is missing), links (website, source, docs, issues, feedback, contact) and the author/licence line — no package list. See [Responsive layout](#responsive-layout).
 
-The standard upper-right controls remain available: **Code assistant**, **Appearance**, **About**, **Settings** (gear), and gateway connection. The assistant answers questions using the bundled app documentation, in its own gateway session with no tools; it does not inherit the conversation’s settings or attachments. Closing its drawer preserves its conversation.
+The standard upper-right controls remain available: **Code assistant**, **Appearance**, **About** and gateway connection. Next to the conversation's title, **⋯** holds **Archive** (see [Archiving a conversation](#archiving-a-conversation)). The assistant answers questions using the bundled app documentation, in its own gateway session with no tools; it does not inherit the conversation’s settings or attachments. Closing its drawer preserves its conversation.
 
 MTP depth is independent of reasoning. Leave it on **Inherit** to follow workflow and
 execution-host defaults, choose **Off** to send an explicit `false`, or request an advertised
@@ -52,7 +52,7 @@ AbstractCode Web works on phones, tablets, laptop windows and wide screens, and 
 | 768–1023 px | Conversation navigation opens from the menu button. The rail stays at the right edge; its panel floats over the conversation with a dimmed backdrop. |
 | Below 768 px | Same as tablets; the floating panel takes the width left of the rail. |
 
-- **Touch controls.** The rail icons, the gear and every panel button are at least 44 px; the resize edge widens for touch.
+- **Touch controls.** The rail icons, the **⋯** menus and every panel button are at least 44 px; the resize edge widens for touch.
 - **Keyboard.** Up/Down, Home and End move between rail icons; Enter or Space opens one. On a floating panel, Escape folds it and returns focus to its icon. A dialog or dropdown above it handles Escape first. The resize edge takes Left/Right (Shift for bigger steps), Home and End.
 - **On-screen keyboard.** The panel content scrolls within the remaining height.
 - **Appearance.** The upper-right appearance widget contains theme and text-size controls. Rows and paths wrap; nothing scrolls sideways.
@@ -72,6 +72,10 @@ The sidebar holds two stacking drawers, **Automations** above **Conversations**,
 Each list scrolls inside its own drawer. Fold choices are remembered in this browser (`abstractcode.sidebar.panels`). On a short landscape phone screen the whole drawer scrolls instead. The current workspace is shown in the **Workspace** panel and in **Files**.
 
 At the end of each list a quiet line **Archived · N** appears when the gateway reports archived items (N is the gateway's count: `archived_automations` of `GET /automations`, `archived_sessions` of `GET /runs?root_only=true`; no line at 0). Click it to show the archived automations or conversations inline, each with **Unarchive** (an automation comes back paused, with its history; a conversation comes back to the list). Clicking an archived item's name opens it. Whether each line is open is remembered in this browser (`abstractcode.sidebar.archived`). Archived items never appear among the live rows.
+
+#### Archiving a conversation
+
+Every conversation card has a **⋯** (shown on hover or focus with a mouse, always on touch; always on the open conversation), and so does the conversation's title in the header. Choose **Archive** and confirm in place: "Archive this conversation? It stays searchable and auditable; it just leaves this list." The app calls `POST /api/gateway/sessions/{session_id}/archive`; nothing is deleted (runs, ledger and files stay on the gateway, and AbstractObserver keeps showing the runs, marked **Archived**). The conversation leaves the list and appears under **Archived · N**, where **Unarchive** brings it back. Archiving the open conversation opens the next one in the list (or the previous one; a new conversation when it was the last). A refusal from the gateway is shown under the confirmation as a sentence.
 
 A conversation card shows its title on one line, then `Oct 2 · 2 turns · 7 tools`: the date of the latest turn, the number of turns and, when there were any, the tool calls across them. The tool figure comes from the gateway (`GET /api/gateway/runs?include_metrics=true`, each turn's total including its sub-runs); with a gateway that does not report it, the card shows no tool figure.
 
@@ -136,7 +140,7 @@ Credentials are exchanged through the app server for HttpOnly session cookies. G
 
 ## Optional voice
 
-When the gateway advertises configured speech capabilities, a conversation with a run offers hold-to-dictate and read-aloud controls. Hold the microphone button (or Space/Enter while focused), then release to transcribe into the draft. Review the text before sending. Read-aloud supports pause, resume, and stop.
+When the gateway advertises configured speech capabilities, a conversation with a run offers hold-to-dictate in the composer and a speaker button on each reply. Hold the microphone button (or Space/Enter while focused), then release to transcribe into the draft. Review the text before sending. A reply's speaker reads it aloud, with pause and resume; while a reply plays, the composer shows **Stop spoken reply**. The composer has no speaker button of its own.
 
 Recording and playback happen in the browser; transcription and synthesis use the gateway's durable media endpoints. Microphone access requires permission and a secure context (HTTPS or localhost). No speech model runs in the browser.
 

@@ -256,3 +256,49 @@ export function ArchivedRow(props: {
     </li>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Round 6 (DESIGN R6.2): archiving a conversation, from the card's "⋯" or the conversation
+// header's "⋯", always through this one inline confirm. Nothing is deleted, ever: archive hides.
+
+export const ARCHIVE_CONFIRM_TEXT = "Archive this conversation? It stays searchable and auditable; it just leaves this list.";
+
+export function ArchiveConfirm(props: {
+  busy: boolean;
+  /** The gateway's refusal, as a sentence. */
+  error?: string;
+  onConfirm(): void;
+  onCancel(): void;
+  className?: string;
+}): React.ReactElement {
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    confirmRef.current?.focus({ preventScroll: true });
+  }, []);
+  return (
+    <div
+      className={`code-archive-confirm${props.className ? ` ${props.className}` : ""}`}
+      role="group"
+      aria-label="Archive conversation"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !props.busy) {
+          event.preventDefault();
+          event.stopPropagation();
+          props.onCancel();
+        }
+      }}
+    >
+      <p>{ARCHIVE_CONFIRM_TEXT}</p>
+      <span className="code-archive-confirm-actions">
+        <button type="button" ref={confirmRef} className="code-archive-confirm-yes" data-action="confirm-archive" disabled={props.busy} aria-busy={props.busy || undefined} onClick={props.onConfirm}>
+          {props.busy ? <Icon name="loader" size={12} /> : <Icon name="archive" size={12} />}
+          <span>Archive</span>
+        </button>
+        <button type="button" className="code-subtle-button" data-action="cancel-archive" disabled={props.busy} onClick={props.onCancel}>
+          Cancel
+        </button>
+      </span>
+      {props.error ? <p className="code-inline-error" role="alert">{props.error}</p> : null}
+    </div>
+  );
+}

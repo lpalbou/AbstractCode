@@ -51,14 +51,16 @@ describe("conversation card", () => {
         onClick={() => {}}
       />,
     );
-    expect(html).toMatch(/^<button type="button" class="code-session code-card is-selected" aria-current="page" data-session-id="sess_1234567890" title="Fix the build"><span><strong class="code-card-title">Fix the build<\/strong><small class="code-card-meta" data-field="meta">[^<]+ · 2 turns · 7 tools<\/small><\/span><\/button>$/);
+    // Round 6: the card is wrapped with its sibling "⋯" (absent here: no onAskArchive).
+    expect(html).toMatch(/^<div class="code-session-item" data-item-id="sess_1234567890"><button type="button" class="code-session code-card is-selected" aria-current="page" data-session-id="sess_1234567890" title="Fix the build"><span><strong class="code-card-title">Fix the build<\/strong><small class="code-card-meta" data-field="meta">[^<]+ · 2 turns · 7 tools<\/small><\/span><\/button><\/div>$/);
     expect(html).not.toContain("<svg");
   });
 
   it("the title is one ellipsised line; the touch rule keeps card text at 14 px or more", () => {
     const css = readFileSync(new URL("./workspace.css", import.meta.url), "utf8");
     expect(css).toMatch(/\.code-card \.code-card-title \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
-    const touch = css.slice(css.lastIndexOf("@media (pointer: coarse)"));
+    const touchBlocks = css.split("@media (pointer: coarse)").slice(1);
+    const touch = touchBlocks.find((block) => block.includes(".code-card .code-card-title,")) ?? "";
     expect(touch).toMatch(/\.code-card \.code-card-title,\n\s*\.code-card \.code-card-meta,[\s\S]*?font-size: max\(14px/);
   });
 });

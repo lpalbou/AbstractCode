@@ -9,6 +9,7 @@
 //   same line. The card body selects; the switch is a sibling control.
 import React from "react";
 import {
+  AfMenu,
   AfSwitch,
   Icon,
   automationControls,
@@ -41,26 +42,50 @@ export function conversationTitle(item: Pick<SessionSummary, "prompt" | "session
   return item.prompt || `Conversation ${item.sessionId.slice(0, 8)}`;
 }
 
-export function ConversationCard(props: { item: SessionSummary; selected: boolean; onClick(): void }): React.ReactElement {
+/**
+ * A conversation card (round 6): the card body opens the conversation; a sibling "⋯" (the kit's
+ * AfMenu) offers Archive, which asks the host to show the inline confirm (`confirm`, rendered
+ * under the card while it is this card's turn). Nothing is ever deleted: archive hides.
+ */
+export function ConversationCard(props: {
+  item: SessionSummary;
+  selected: boolean;
+  onClick(): void;
+  /** Archive was chosen in the card's "⋯": the host shows its inline confirm. */
+  onAskArchive?(): void;
+  /** The inline confirm, while this card's archive is being asked. */
+  confirm?: React.ReactNode;
+}): React.ReactElement {
   const { item } = props;
   const title = conversationTitle(item);
   return (
-    <button
-      type="button"
-      className={`code-session code-card${props.selected ? " is-selected" : ""}`}
-      aria-current={props.selected ? "page" : undefined}
-      data-session-id={item.sessionId}
-      onClick={props.onClick}
-      title={title}
-    >
-      <span>
-        <strong className="code-card-title">{title}</strong>
-        <small className="code-card-meta" data-field="meta">{conversationMetaLine(item)}</small>
-      </span>
-      {item.state === "running" || item.state === "waiting" ? (
-        <span className={`code-status-dot ${item.state === "running" ? "is-working" : "is-waiting"}`} title={item.state} />
+    <div className={`code-session-item${props.confirm ? " is-confirming" : ""}`} data-item-id={item.sessionId}>
+      <button
+        type="button"
+        className={`code-session code-card${props.selected ? " is-selected" : ""}`}
+        aria-current={props.selected ? "page" : undefined}
+        data-session-id={item.sessionId}
+        onClick={props.onClick}
+        title={title}
+      >
+        <span>
+          <strong className="code-card-title">{title}</strong>
+          <small className="code-card-meta" data-field="meta">{conversationMetaLine(item)}</small>
+        </span>
+        {item.state === "running" || item.state === "waiting" ? (
+          <span className={`code-status-dot ${item.state === "running" ? "is-working" : "is-waiting"}`} title={item.state} />
+        ) : null}
+      </button>
+      {props.onAskArchive ? (
+        <AfMenu
+          className="code-card-menu"
+          label={`More actions for ${title}`}
+          title="More actions"
+          items={[{ id: "archive", label: "Archive", danger: true, onSelect: props.onAskArchive }]}
+        />
       ) : null}
-    </button>
+      {props.confirm}
+    </div>
   );
 }
 
