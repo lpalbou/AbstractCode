@@ -9,7 +9,7 @@
 //   - both open: an even split, the Conversations header pinned mid-height.
 // Each list scrolls inside its own drawer (never clipped under the other header); the bottom
 // block stays pinned. The two open states persist per viewer (localStorage).
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@abstractframework/ui-kit";
 
 export type SidebarPanel = "automations" | "conversations";
@@ -207,16 +207,24 @@ export function ArchivedFooter(props: {
   /** The archived items (rendered only while open). */
   children: React.ReactNode;
 }): React.ReactElement | null {
+  // Opened by a click: bring the inline list into view (the footer sits at the end of a scrolled list).
+  const listRef = useRef<HTMLUListElement>(null);
+  const clicked = useRef(false);
+  useEffect(() => {
+    if (!props.open || !clicked.current) return;
+    clicked.current = false;
+    listRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [props.open]);
   if (!(props.count > 0)) return null;
   const region = `code-archived-${props.list}`;
   return (
     <div className="code-archived" data-list={props.list} data-open={props.open ? "true" : "false"}>
-      <button type="button" className="code-archived-toggle" aria-expanded={props.open} aria-controls={region} onClick={props.onToggle}>
+      <button type="button" className="code-archived-toggle" aria-expanded={props.open} aria-controls={region} onClick={() => { clicked.current = true; props.onToggle(); }}>
         <span>Archived · {props.count}</span>
         <Icon name="chevronDown" size={12} />
       </button>
       {props.open ? (
-        <ul className="code-archived-list" id={region} aria-label={`Archived ${props.list}`}>
+        <ul ref={listRef} className="code-archived-list" id={region} aria-label={`Archived ${props.list}`}>
           {props.children}
         </ul>
       ) : null}

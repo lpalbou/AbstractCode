@@ -109,8 +109,7 @@ export function SettingsContent({
         ) : null}
         {tab === "model" ? (
           <>
-            <section className="code-settings-section">
-              <h3>Model</h3>
+            <section className="code-settings-section" aria-label="Model">
               <ProviderModelPicker
                 defaultModeLabel={
                   workflowDefault ? "Workflow default" : "Gateway default"

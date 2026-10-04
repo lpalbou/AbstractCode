@@ -40,7 +40,24 @@ export function ArchivedConversations(props: {
     const abort = new AbortController();
     setError("");
     void request(gatewayApiPath(ARCHIVED_RUNS_PATH), { signal: abort.signal })
-      .then((runs) => !abort.signal.aborted && setItems(normalizeSessionSummaries(runs)))
+      .then(async (runs) => {
+        if (abort.signal.aborted) return;
+        const first = normalizeSessionSummaries(runs);
+        setItems(first);
+        // Run summaries carry no user input: name each conversation from its first turn's input
+        // (the same authorized endpoint the main list uses); a refused one keeps its fallback name.
+        const values: Record<string, unknown> = {};
+        await Promise.all(
+          first.filter((item) => !item.prompt).slice(0, 50).map(async (item) => {
+            try {
+              values[item.firstRunId] = await request(gatewayApiPath(`runs/${encodeURIComponent(item.firstRunId)}/input_data`), { signal: abort.signal });
+            } catch {
+              /* the fallback name stays */
+            }
+          }),
+        );
+        if (!abort.signal.aborted && Object.keys(values).length) setItems(normalizeSessionSummaries(runs, values));
+      })
       .catch((e) => !abort.signal.aborted && setError(`Archived conversations unavailable: ${formatError(e)}`));
     return () => abort.abort();
   }, [props.enabled, props.revision]); // eslint-disable-line react-hooks/exhaustive-deps

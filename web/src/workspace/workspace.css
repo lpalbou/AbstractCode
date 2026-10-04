@@ -1165,7 +1165,7 @@ select option {
   font-variant-numeric: tabular-nums;
 }
 .code-activity-row summary > small {
-  font-size: calc(9px * var(--font-scale));
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
   white-space: nowrap;
 }
@@ -2404,6 +2404,9 @@ select option {
 .code-archived-unarchive { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-size-xs); }
 .code-archived-row > .code-inline-error { flex-basis: 100%; margin: 0; }
 @media (pointer: coarse) {
+  .code-activity-row summary > small,
+  .code-activity-group > summary > small,
+  .code-files-mode button { font-size: max(14px, var(--font-size-body, 14px)); }
   .code-archived-toggle,
   .code-archived-unarchive { min-height: var(--tap-min, 44px); font-size: max(14px, var(--font-size-body, 14px)); }
   .code-archived-name strong,
