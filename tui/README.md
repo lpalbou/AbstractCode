@@ -195,6 +195,12 @@ Inside the app:
   (server-side) until you answer — even across client restarts
 - `@name` talks with a summoned entity when the gateway hosts them
   (`/entities` lists the roster); `Alt+E` cycles conversation focus
+- `Ctrl+P` reads the latest reply aloud (streamed sentence by sentence from
+  the gateway's voice route; `Esc` stops), `Ctrl+R` dictates into the
+  composer with the gateway's default speech-to-text route, `/voice` shows
+  the engines ("Gateway default · supertonic / supertonic-3"), this
+  computer's speaker and microphone (each with a Test) and **Read aloud**.
+  Audio plays and records through AbstractVoice on this computer
 
 ## Headless one-shots
 
@@ -230,6 +236,9 @@ and does not print it a second time at the end.
 --theme <ID>                      start theme (ABSTRACTTUI_THEME works too)
 --animation <on|off>              launch animation (default: on) — SAVED, so
                                   `--animation off` once disables it for good
+--voice-python <PATH>             the Python with AbstractVoice for spoken replies
+                                  and dictation (default: next to abstractgateway,
+                                  else python3)
 --caps                            print the terminal capability report
 ```
 

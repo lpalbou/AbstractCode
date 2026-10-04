@@ -12,7 +12,9 @@
 > the agent mid-run, queues follow-up prompts, attaches files to prompts
 > (`/attach`, a file browser, or drag & drop), browses and previews the
 > run's workspace on the gateway host (`/files`), creates and manages
-> gateway automations (`/schedule`, `/automations`), and keeps a durable
+> gateway automations (`/schedule`, `/automations`), reads replies aloud
+> and dictates through the gateway's voice routes (`/voice`, Ctrl+P,
+> Ctrl+R; host audio via AbstractVoice), and keeps a durable
 > session whose history the gateway replays server-side. It also talks
 > with gateway-hosted summoned entities (`@name`). One crate, three
 > dependencies (abstracttui, ureq, serde_json). MIT licensed.

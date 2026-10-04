@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Voice** (round 7, the same gateway routes and wording as Code web's kit
+  VoiceSettings). `Ctrl+P` / `/speak` reads the latest reply aloud through
+  `POST /runs/{id}/voice/tts/stream`: each sentence-chunked WAV segment goes
+  to the speaker as soon as it arrives while the next is synthesised
+  (first audio measured at 0.39–0.72 s on a round-6 gateway, 0.92 s on the
+  local stack); `Esc` or `Ctrl+P` stops at once. `Ctrl+R` / `/dictate`
+  records this computer's microphone, uploads the WAV and transcribes with
+  `POST /runs/{id}/audio/transcribe` (the gateway's default route unless
+  overridden), showing `Transcribing… 4 s · faster-whisper / large-v3`; the
+  text lands in the composer. **Read aloud** speaks each new reply.
+- `/voice`: Text → speech and Speech → text read "Gateway default · …" from
+  `GET /api/gateway/voice/defaults` (never the catalog's engine fields;
+  override for this app from the voice catalog), output device + Test,
+  reply volume, input device + Test (3 s with a level meter, played back),
+  spoken language, input level, Read aloud, voice latency. Saved under
+  `voice` in `prefs.json` with the kit's `VoiceClientPreferences` keys.
+- Host audio through AbstractVoice: `assets/voice_bridge.py` (shipped in the
+  crate) runs with `--voice-python <PATH>`, else the Python next to the
+  installed `abstractgateway`/`abstractvoice`, else `python3`; playback is
+  AbstractVoice's `NonBlockingAudioPlayer` on the chosen device, capture is
+  PortAudio. No audio engine in this crate; a missing AbstractVoice is one
+  sentence naming each interpreter tried.
+
 ## [0.8.0] - 2026-10-01
 
 ### Changed

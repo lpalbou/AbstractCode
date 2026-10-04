@@ -170,6 +170,7 @@ when the gateway advertises live replies. See
 | `src/workspace_files.rs` | A run's workspace on the gateway host: location, listing, same-machine rules. |
 | `src/preview.rs` | File previews (text, images) for attachments and `/files`. |
 | `src/identity.rs` | The About screen's facts, from the vendored AbstractFramework descriptor. |
+| `src/voice.rs`, `src/voice_host.rs`, `src/ui/voice_view.rs` | Voice: the gateway's voice routes (`/voice/defaults`, `/runs/{id}/voice/tts/stream`, `/runs/{id}/audio/transcribe`), the host-audio bridge (`assets/voice_bridge.py`, AbstractVoice in Python over JSON lines), the `/voice` screen and the status line. Every gateway call and bridge wait runs on a named voice thread; results come back as posted closures. |
 | `src/runner.rs` | Worker thread: commands, per-run stream threads, terminal detection. |
 | `src/store.rs` | The signal store (UI-thread owned). |
 | `src/ui/` | AbstractTUI views: chrome, transcript pane, modals. |
@@ -185,6 +186,11 @@ when the gateway advertises live replies. See
 - **Headless UI**: `tests/headless_ui.rs` drives the real interface through
   AbstractTUI's capture harness — real input dispatch, real damage, screen
   assertions — no pty.
+- **Voice**: `tests/voice_tui.rs` drives speak / stop / dictate / the
+  `/voice` screen against a fake gateway (local listener) and an
+  in-process host-audio double; `--ignored` runs the real Python bridge in
+  `--null-output` mode and a time-to-first-audio probe against a real
+  gateway.
 - **Live**: `scripts/pty_live_smoke.py` forks the binary under a real
   controlling pty against a live gateway: boot → prompt → approval modal →
   `a` → answer → clean Ctrl+C exit, with filesystem proof of the tool write.

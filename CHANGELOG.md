@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- tui: **voice** — `Ctrl+P` / `/speak` reads the latest reply aloud through the gateway's streaming voice route (sentence-chunked, first audio 0.4–0.9 s measured; `Esc` stops), `Ctrl+R` / `/dictate` dictates into the composer with the gateway's default speech-to-text route (`Transcribing… 4 s · faster-whisper / large-v3`), **Read aloud** after each turn, and a `/voice` screen with the same wording as the kit VoiceSettings ("Gateway default · supertonic / supertonic-3" from `GET /voice/defaults`, output/input device with Tests and a level meter, volume, language, latency). Audio plays and records on this computer through AbstractVoice (`--voice-python <PATH>`); details in tui/docs/api.md.
+
 ### Fixed
 
 - web: the Voice panel showed "Gateway default · openai" for both engines on a gateway routed to supertonic and faster-whisper. It now reads the gateway's `GET /api/gateway/voice/defaults` (kit 0.7.1 `AfVoiceSection` through `CodeVoiceSettings`) and shows "Gateway default · supertonic / supertonic-3" and "· faster-whisper / large-v3".

@@ -733,7 +733,10 @@ pub fn reply_line(r: &SpokenReply) -> String {
 
 /// Speak `text` on the host speaker: stream the gateway's segments into the
 /// bridge while the next ones are synthesised. `on_started` fires once,
-/// when the first audio reaches the player.
+/// when the first audio reaches the player — watched while the HTTP stream
+/// is still waiting for the next segment (the stream is read on its own
+/// scoped thread), so "first audio" is the real moment, not the next
+/// segment's arrival.
 pub fn speak_blocking(
     host: &Host,
     gw: &VoiceGateway,
@@ -743,6 +746,11 @@ pub fn speak_blocking(
     prefs: &VoicePrefs,
     on_started: &mut dyn FnMut(Duration),
 ) -> Result<SpokenReply, String> {
+    enum Msg {
+        Audio(String),
+        Done(Value),
+        Failed(String),
+    }
     let events = host.subscribe(gen);
     let result = (|| {
         host.ensure().map_err(|e| e.to_string())?;
@@ -751,74 +759,82 @@ pub fn speak_blocking(
         let device = prefs.output_device.clone();
         let volume = prefs.volume();
         let cancelled = || !host.is_current_speech(gen);
-        let drain = |first: &mut Option<Duration>,
-                     on_started: &mut dyn FnMut(Duration)|
-         -> Result<(), String> {
-            while let Ok(ev) = events.try_recv() {
-                match ev {
-                    HostEvent::Started { .. } if first.is_none() => {
-                        let d = t0.elapsed();
-                        *first = Some(d);
-                        on_started(d);
-                    }
-                    HostEvent::Error { message, .. } => return Err(message),
-                    HostEvent::Exited(why) => return Err(why),
-                    _ => {}
-                }
-            }
-            Ok(())
-        };
-        let metrics = gw.tts_stream(run_id, text, prefs, &cancelled, &mut |b64| {
-            drain(&mut first, on_started)?;
-            if cancelled() {
-                return Ok(());
-            }
-            host.send(
-                &json!({"op": "play", "gen": gen, "b64": b64, "device": device, "volume": volume}),
-            )
-        })?;
-        if cancelled() {
-            return Ok(SpokenReply {
-                first_audio: first,
-                metrics,
-                stopped: true,
+        let (seg_tx, seg_rx) = std::sync::mpsc::channel::<Msg>();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let tx = seg_tx;
+                let res = gw.tts_stream(run_id, text, prefs, &cancelled, &mut |b64| {
+                    tx.send(Msg::Audio(b64.to_string()))
+                        .map_err(|_| "stopped".to_string())
+                });
+                let _ = tx.send(match res {
+                    Ok(m) => Msg::Done(m),
+                    Err(e) => Msg::Failed(e),
+                });
             });
-        }
-        host.send(&json!({"op": "end", "gen": gen}))?;
-        loop {
-            match events.recv_timeout(Duration::from_millis(200)) {
-                Ok(HostEvent::Started { .. }) if first.is_none() => {
-                    let d = t0.elapsed();
-                    first = Some(d);
-                    on_started(d);
+            let mut metrics: Option<Value> = None;
+            let mut ended = false;
+            loop {
+                // Player events first: Started is noted the moment it lands.
+                loop {
+                    match events.try_recv() {
+                        Ok(HostEvent::Started { .. }) if first.is_none() => {
+                            let d = t0.elapsed();
+                            first = Some(d);
+                            on_started(d);
+                        }
+                        Ok(HostEvent::Done { .. }) if ended => {
+                            return Ok(SpokenReply {
+                                first_audio: first,
+                                metrics: metrics.unwrap_or(Value::Null),
+                                stopped: false,
+                            });
+                        }
+                        Ok(HostEvent::Stopped { .. }) => {
+                            return Ok(SpokenReply {
+                                first_audio: first,
+                                metrics: metrics.unwrap_or(Value::Null),
+                                stopped: true,
+                            });
+                        }
+                        Ok(HostEvent::Error { message, .. }) => return Err(message),
+                        Ok(HostEvent::Exited(why)) => return Err(why),
+                        Ok(_) => {}
+                        Err(_) => break,
+                    }
                 }
-                Ok(HostEvent::Done { .. }) => break,
-                Ok(HostEvent::Stopped { .. }) => {
+                if cancelled() {
                     return Ok(SpokenReply {
                         first_audio: first,
-                        metrics,
+                        metrics: metrics.unwrap_or(Value::Null),
                         stopped: true,
-                    })
+                    });
                 }
-                Ok(HostEvent::Error { message, .. }) => return Err(message),
-                Ok(HostEvent::Exited(why)) => return Err(why),
-                Ok(_) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    if cancelled() {
-                        return Ok(SpokenReply {
-                            first_audio: first,
-                            metrics,
-                            stopped: true,
-                        });
+                if ended {
+                    std::thread::sleep(Duration::from_millis(15));
+                    continue;
+                }
+                match seg_rx.recv_timeout(Duration::from_millis(15)) {
+                    Ok(Msg::Audio(b64)) => {
+                        if !cancelled() {
+                            host.send(&json!({"op": "play", "gen": gen, "b64": b64, "device": device, "volume": volume}))?;
+                        }
+                    }
+                    Ok(Msg::Done(m)) => {
+                        metrics = Some(m);
+                        if cancelled() {
+                            continue;
+                        }
+                        host.send(&json!({"op": "end", "gen": gen}))?;
+                        ended = true;
+                    }
+                    Ok(Msg::Failed(e)) => return Err(e),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        return Err("the speech stream stopped".into())
                     }
                 }
-                Err(_) => return Err("the audio player stopped answering".into()),
             }
-        }
-        Ok(SpokenReply {
-            first_audio: first,
-            metrics,
-            stopped: false,
         })
     })();
     host.unsubscribe(gen);

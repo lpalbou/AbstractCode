@@ -40,6 +40,7 @@ abstractcode --help | --version
 | `--max-tokens <N>` | Declare the model's context window for this session (`262144`, `262k`; `--context`, `--context-window` too) — see `/context` | undeclared |
 | `--attach <PATH>` | exec: upload a file before the run starts and attach it to the prompt (repeatable; exits 1 on failure) | — |
 | `--param <K=V>` | exec: extra `input_data` key for a workflow input pin (repeatable; numbers and booleans parse, else a string; client-owned keys such as `prompt` are refused) | — |
+| `--voice-python <PATH>` | The Python with AbstractVoice that plays spoken replies and records dictation on **this** computer (see [Voice](#voice-voice-speak-dictate)) | the interpreter next to the installed `abstractgateway` (or `abstractvoice`) command, else `python3` |
 | `--no-prompt-cache` | exec: opt the run out of the runtime prompt cache (`_runtime.prompt_cache=false`) | server truth (on) |
 | `--timeout <SECS>` | exec: wall-clock safeguard (`0` = none) | 7200 (2 h) |
 
@@ -65,6 +66,9 @@ abstractcode --help | --version
 | --- | --- |
 | `/help` | Command + key reference modal |
 | `/new` | Fresh session (new durable id, cleared view) |
+| `/voice [read-aloud on\|off]` | Voice settings (see [Voice](#voice-voice-speak-dictate)); `read-aloud on\|off` flips that switch without the screen |
+| `/speak [stop]` | Read the latest reply aloud (`/say` too; `Ctrl+P`); `stop` stops it (so does `Esc`) |
+| `/dictate` | Record from this computer's microphone and put the transcript in the composer (`/mic` too; `Ctrl+R` starts, `Ctrl+R` again transcribes, `Esc` cancels) |
 | `/theme [id]` | Live-preview theme picker, or set directly |
 | `/workflow` | Pick the agent workflow (`/agent` too). First row: **Gateway default → name @version** — saved as "the gateway default", so the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran |
 | `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` shows the workspace folder itself (never a sub-folder; never a folder that would be launched, such as `.app`) in your file manager, only when the gateway is on this machine and allows it; `r` refreshes |
@@ -287,6 +291,61 @@ need a vision-capable route, other binaries are listable-not-readable
 - **Headless**: `exec --attach <path>` (repeatable) uploads before the
   run starts and exits 1 on any failure — nothing spent.
 
+### Voice (`/voice`, `/speak`, `/dictate`)
+
+Same contract and wording as the Voice settings of Code web and every kit
+app (ui-kit 0.7.1 `AfVoiceSection`). Speech is synthesised and transcribed
+on the **gateway**; this client only plays and records audio on this
+computer.
+
+- **Engines.** `Text → speech` and `Speech → text` read
+  `Gateway default · supertonic / supertonic-3` and
+  `Gateway default · faster-whisper / large-v3` from ONE answer,
+  `GET /api/gateway/voice/defaults` (the `output.voice` / `input.voice`
+  capability routes) — never from the voice catalog's engine fields.
+  `not set` = the administrator set no route; `unknown` = the gateway
+  could not be asked ("The gateway's default voice routes could not be
+  read. Requests still use them."). `Enter` on a row offers Gateway default
+  or an override for this app from `GET /voice/voices?compact=true`.
+- **Speaking a reply** (`Ctrl+P`, `/speak`, or **Read aloud** after each
+  turn): `POST /api/gateway/runs/{run_id}/voice/tts/stream` with the text
+  and only the fields you overrode (an empty request = the gateway's
+  route). The gateway splits the text at sentence boundaries and sends each
+  WAV segment as soon as it is synthesised; each segment goes to the
+  speaker while the next one is synthesised. `♪ Preparing speech… · Esc
+  stops` becomes `♪ Speaking… · Esc stops` at the first audio. `Esc` (or
+  `Ctrl+P` again) stops at once and drops the stream, which ends the
+  synthesis on the gateway. A refusal reads as one sentence, e.g.
+  `Reading aloud failed: <the gateway's reason>.`
+- **Dictation** (`Ctrl+R`, `/dictate`): `● Recording… 3 s · Ctrl+R
+  transcribes · Esc cancels`, then `Transcribing… 4 s · faster-whisper /
+  large-v3` (the override, else the gateway default). The 16 kHz WAV is
+  uploaded as a session attachment (`POST /attachments/upload`) and sent to
+  `POST /runs/{run_id}/audio/transcribe` with `provider`/`model` only when
+  overridden and `language` when you named one; the text lands at the end
+  of the draft. Too short, silent ("Nothing was heard. Check the
+  microphone in Settings → Voice (Test), then try again."), no answer
+  within 180 s, or a refusal: one sentence each, never a silent spinner.
+  Dictation needs a conversation (a run id): "Start a conversation to
+  enable dictation."
+- **The screen** (`/voice`): Output device (this computer's speakers, from
+  AbstractVoice) + Test speaker (a short chime), Reply volume (`←`/`→`),
+  Input device + Test microphone (3 s recorded with a live level meter,
+  then played back), Spoken language (naming it skips detection:
+  transcription is faster), Input level, `[x] Read aloud — Speak each new
+  reply.`, Voice latency (`quality_preset`), and the last reply's
+  `first audio 0.41 s · engine on cpu`. Saved in `prefs.json` under `voice`
+  with the kit's `VoiceClientPreferences` keys.
+- **Host audio.** A terminal cannot play or record, and this crate ships no
+  audio engine: the client runs `assets/voice_bridge.py` with the Python
+  that has AbstractVoice (`--voice-python`, else the one next to the
+  installed `abstractgateway`/`abstractvoice` command, else `python3`) and
+  talks to it in JSON lines. Playback is AbstractVoice's
+  `NonBlockingAudioPlayer` on the chosen output; recording is PortAudio
+  capture (AbstractVoice's `audio-io` dependency). The bridge starts on
+  first use and stays warm. Without AbstractVoice the first voice action
+  says so and names each interpreter tried.
+
 ### Quitting with a live run
 
 The agent runs on the gateway — quitting this client never stops it.
@@ -325,6 +384,9 @@ recovers it.
 | `Ctrl+D` | anywhere | Toggle detail view (thinking + tool results vs answers only) |
 | `Alt+E` | anywhere | Cycle conversation focus: agent → entity visit 1 → … → agent. Cycle order is the order conversations were opened — it never changes with how the header paints chips. Option+E on macOS with "Option as Meta/Esc+"; `/focus <name\|agent>` needs no modifier setting. (`Ctrl+E` is move-to-line-end in the composer) |
 | `Ctrl+T` | anywhere | Cycle theme |
+| `Ctrl+P` | anywhere | Read the latest reply aloud; again = stop (`/speak`) |
+| `Ctrl+R` | anywhere | Dictate: start recording; again = transcribe into the composer (`/dictate`) |
+| `Esc` | while speaking / recording | Stop the spoken reply / cancel the recording — that press is consumed (it never clears the draft or arms cancel) |
 | `Ctrl+G` | anywhere | Fold / unfold the `/stance` panel |
 | `Ctrl+L` | anywhere | Force a full-screen repaint (`/redraw`) — recovers from a terminal clear |
 | `Ctrl+O` | while a drop's chips are still pending | Undo the newest file drop: chips out, the pasted path text back in the composer. Expires once the chips ride a run or are removed |

@@ -42,10 +42,10 @@ Ground rules for reading this repository:
 
 - [Terminal client README](tui/README.md): features, interface tour, keys, themes
 - [Terminal getting started](tui/docs/getting-started.md): terminal-specific setup
-- [Terminal API](tui/docs/api.md): command-line options, slash commands (`/workflow`, `/files`, `/stream`, `/about`, `/model`, `/mtp`, …), keys, streamed replies, exit codes
+- [Terminal API](tui/docs/api.md): command-line options, slash commands (`/workflow`, `/files`, `/stream`, `/about`, `/model`, `/mtp`, `/voice`, `/speak`, `/dictate`, …), keys, streamed replies, voice (gateway routes, host audio via AbstractVoice), exit codes
 - [Terminal architecture](tui/docs/architecture.md): how the client is built on AbstractTUI — threads, the ledger fold, live replies
 - [Terminal troubleshooting](tui/docs/troubleshooting.md): terminal, rendering, and connection problems
-- [Terminal FAQ](tui/docs/faq.md): durability, workspaces, tokens, steering semantics
+- [Terminal FAQ](tui/docs/faq.md): durability, workspaces, tokens, steering semantics, voice (which Python, Gateway default, microphone permission)
 - [Orchestration cards](tui/docs/orchestration-cards.md): the coding workflows accepted by `--workflow` and when to choose each
 
 ## Browser client

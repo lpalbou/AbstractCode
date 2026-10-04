@@ -139,3 +139,28 @@ the level) or `ask` (always prompts, even below it — pins gate even at
 Unattended runs should not mutate a machine because nobody was there to say
 no. `--permissions all` is the explicit opt-in; denials carry an explanation the
 model sees, so it finishes as best it can without the tool.
+
+## Voice says it needs AbstractVoice — I have it installed
+
+The terminal client plays and records through the Python that has
+AbstractVoice. It tries `--voice-python <path>` when given, else the
+interpreter next to the installed `abstractgateway` (or `abstractvoice`)
+command, else `python3`; the message names each one it tried and why it
+failed (often `No module named 'abstractvoice'` or a missing
+`sounddevice`). Start once with `--voice-python /path/to/that/python`.
+
+## Why does "Gateway default" say supertonic, not the engine I set in AbstractVoice?
+
+"Gateway default" is the gateway's own route (`output.voice` /
+`input.voice`, `GET /api/gateway/voice/defaults`), the same answer every
+app shows; a request that names no engine runs exactly that route. Pick an
+override in `/voice` (it applies to this app only), or change the route on
+the gateway console.
+
+## The microphone records silence
+
+macOS asks once whether your terminal app may use the microphone; if it
+was refused, allow it in System Settings → Privacy & Security →
+Microphone for that terminal, then use `/voice` → Test microphone (3 s
+recorded with a level meter, then played back).
+

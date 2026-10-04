@@ -1009,3 +1009,36 @@ fn dictation_without_a_conversation_says_what_to_do() {
         "no bridge for a refused dictation"
     );
 }
+
+/// Time to first audio against a REAL gateway, through the real bridge in
+/// `--null-output` mode (the first segment reaching the player; no sound on
+/// the machine). Read-only apart from the gateway's own TTS child run.
+/// `ACODE_TTFA_URL=… ACODE_TTFA_TOKEN=… ACODE_TTFA_RUN=… ACODE_TEST_PYTHON=…
+///  cargo test --test voice_tui ttfa_probe -- --ignored --nocapture`
+#[test]
+#[ignore = "probes a real gateway"]
+fn ttfa_probe() {
+    let _g = serial();
+    let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("{k} is required"));
+    let dir = std::env::temp_dir().join(format!("acode-ttfa-{}", std::process::id()));
+    let dir_s = dir.to_string_lossy().to_string();
+    let py = std::path::PathBuf::from(var("ACODE_TEST_PYTHON"));
+    let host = Arc::new(Host::new(Box::new(move |sink| voice_host::spawn_bridge_with(&py, &["--null-output", &dir_s], sink))));
+    host.ensure().expect("bridge"); // warm, as in a session that already spoke once
+    let client = abstractcode::gateway::GatewayClient::new(&var("ACODE_TTFA_URL"), Some(&var("ACODE_TTFA_TOKEN")));
+    let vg = VoiceGateway::new(&client);
+    let text = "Hello, this is a short voice probe from the terminal. It has a second sentence, so the stream has more than one segment.";
+    let gen = host.next_gen();
+    host.claim_speech(gen);
+    let t0 = Instant::now();
+    let reply = voice::speak_blocking(&host, &vg, gen, &var("ACODE_TTFA_RUN"), text, &VoicePrefs::default(), &mut |_| {}).expect("spoken");
+    let segments = std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
+    println!(
+        "TTFA {:.3} s · total {:.3} s · segments {segments} · metrics {}",
+        reply.first_audio.map(|d| d.as_secs_f64()).unwrap_or(-1.0),
+        t0.elapsed().as_secs_f64(),
+        reply.metrics
+    );
+    host.shutdown();
+    let _ = std::fs::remove_dir_all(&dir);
+}

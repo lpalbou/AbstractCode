@@ -229,6 +229,19 @@ siblings are reused, never duplicated). Session uploads are permanent
 on the gateway: removing a chip before sending is the moment to change
 your mind. Details in [api.md](api.md#attachments-attach-drag--drop-exec---attach).
 
+## Voice
+
+`Ctrl+P` reads the latest reply aloud, sentence by sentence as the
+gateway synthesises it; `Esc` stops it. `Ctrl+R` records from your
+microphone, `Ctrl+R` again transcribes it into the composer. `/voice`
+shows which engines the gateway uses by default ("Gateway default ·
+supertonic / supertonic-3"), lets you pick this computer's speaker and
+microphone (each with a Test), and switches **Read aloud** for every new
+reply. Audio plays and records through AbstractVoice on this computer: it
+comes with the framework installer; elsewhere `pip install
+"abstractvoice[audio-io]"` or start with `--voice-python <path>`. Details
+in [api.md](api.md#voice-voice-speak-dictate).
+
 ## Where to next
 
 - [architecture.md](architecture.md) — how the client works (threading, the
