@@ -398,6 +398,8 @@ pub enum Cmd {
     Automations(crate::gateway::automations::AutoCmd),
     /// Settings rail + conversations board lane (`gateway::rail`, R7.3).
     Rail(crate::gateway::rail::RailCmd),
+    /// Workspace choosers lane (`gateway::workspaces`, R14.4).
+    Workspaces(crate::gateway::workspaces::WsCmd),
     Shutdown,
 }
 
@@ -964,6 +966,9 @@ impl Runner {
             // Probe/Start behind it on this loop).
             Cmd::Rail(cmd) => {
                 crate::gateway::rail::spawn(&self.client, self.wake.clone(), self.store, cmd)
+            }
+            Cmd::Workspaces(cmd) => {
+                crate::gateway::workspaces::spawn(&self.client, self.wake.clone(), self.store, cmd)
             }
             Cmd::Automations(cmd) => {
                 crate::gateway::automations::spawn(

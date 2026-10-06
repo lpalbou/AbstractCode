@@ -1,0 +1,7 @@
+{
+ "detail": {
+  "reason": "workspace_refused",
+  "message": "/Users/ada/home/Desktop is outside the workspaces the gateway allows (Allow everything, refuse listed workspaces (rw) · /Users/ada/home/work (rw) · /Users/ada/home/Pictures (ro) · /Users/ada/home/Desktop (refused)).",
+  "path": "/Users/ada/home/Desktop"
+ }
+}

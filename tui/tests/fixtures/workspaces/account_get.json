@@ -1,0 +1,62 @@
+{
+ "ok": true,
+ "policy": {
+  "account": "default:alice",
+  "configured": false,
+  "posture": "any_except_denied",
+  "default_mode": "rw",
+  "folders": []
+ },
+ "gateway": {
+  "posture": "any_except_denied",
+  "default_mode": "rw",
+  "folders": [
+   {
+    "path": "/Users/ada/home/work",
+    "mode": "rw"
+   },
+   {
+    "path": "/Users/ada/home/Pictures",
+    "mode": "ro"
+   },
+   {
+    "path": "/Users/ada/home/Desktop",
+    "mode": "deny"
+   }
+  ],
+  "builtin_refused": [],
+  "max_attachment_bytes": 26214400,
+  "summary": "Allow everything, refuse listed workspaces (rw) · /Users/ada/home/work (rw) · /Users/ada/home/Pictures (ro) · /Users/ada/home/Desktop (refused)",
+  "builtin_refused_hidden": true
+ },
+ "effective": {
+  "account": "default:alice",
+  "session_id": null,
+  "level": "gateway",
+  "posture": "any_except_denied",
+  "default_mode": "rw",
+  "folders": [
+   {
+    "path": "/Users/ada/home/work",
+    "mode": "rw",
+    "cap": "rw",
+    "source": "gateway"
+   },
+   {
+    "path": "/Users/ada/home/Pictures",
+    "mode": "ro",
+    "cap": "ro",
+    "source": "gateway"
+   },
+   {
+    "path": "/Users/ada/home/Desktop",
+    "mode": "deny",
+    "cap": "deny",
+    "source": "gateway"
+   }
+  ],
+  "summary": "Allow everything, refuse listed workspaces (rw) · /Users/ada/home/work (rw) · /Users/ada/home/Pictures (ro) · /Users/ada/home/Desktop (refused)",
+  "gateway_summary": "Allow everything, refuse listed workspaces (rw) · /Users/ada/home/work (rw) · /Users/ada/home/Pictures (ro) · /Users/ada/home/Desktop (refused)"
+ },
+ "can_edit": true
+}

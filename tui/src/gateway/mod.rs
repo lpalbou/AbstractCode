@@ -12,6 +12,7 @@ pub mod entities;
 pub mod gpu;
 pub mod rail;
 pub mod sse;
+pub mod workspaces;
 
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};

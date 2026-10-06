@@ -1,0 +1,24 @@
+{
+ "account": "default:alice",
+ "session_id": "s-w4-one",
+ "level": "session",
+ "posture": "allowed_only",
+ "default_mode": "rw",
+ "folders": [
+  {
+   "path": "/Users/ada/home/Pictures",
+   "mode": "ro",
+   "cap": "ro",
+   "source": "session"
+  },
+  {
+   "path": "/Users/ada/home/work/project",
+   "mode": "rw",
+   "cap": "rw",
+   "source": "session"
+  }
+ ],
+ "summary": "Deny everything, allow listed workspaces · /Users/ada/home/Pictures (ro) · /Users/ada/home/work/project (rw)",
+ "gateway_summary": "Allow everything, refuse listed workspaces (rw) · /Users/ada/home/work (rw) · /Users/ada/home/Pictures (ro) · /Users/ada/home/Desktop (refused)",
+ "ok": true
+}

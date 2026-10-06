@@ -41,6 +41,7 @@ pub mod protocol;
 pub mod rail;
 pub mod run_input;
 pub mod runner;
+pub mod sandbox_line;
 pub mod signin;
 pub mod speculation;
 pub mod store;
@@ -51,6 +52,7 @@ pub mod ui;
 pub mod voice;
 pub mod voice_host;
 pub mod workspace_files;
+pub mod workspaces;
 
 use std::cell::RefCell;
 use std::rc::Rc;

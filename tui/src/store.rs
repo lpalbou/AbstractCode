@@ -990,6 +990,9 @@ pub struct Store {
     /// The settings rail and the conversations board (R7.3): policy,
     /// voice routes, run activity, archived sessions, save state.
     pub rail: Signal<crate::rail::RailData>,
+    /// The workspace choosers (R14.4): this conversation, my default, an
+    /// automation's dry run, the status under the control last changed.
+    pub workspaces: Signal<crate::workspaces::WsData>,
     /// The GATEWAY's verdict on whether this terminal is on its machine
     /// (`host.caller_is_this_machine` from `GET /runs/{rid}/workspace`);
     /// `None` until a run's workspace has been read.
@@ -1289,6 +1292,7 @@ impl Store {
             files: cx.signal(FilesView::default()),
             automations: cx.signal(crate::automations::View::default()),
             rail: cx.signal(crate::rail::RailData::default()),
+            workspaces: cx.signal(crate::workspaces::WsData::default()),
             gateway_same_machine: cx.signal(None),
             send_local_workspace: cx.signal(Default::default()),
             workspace_explicit: cx.signal(false),

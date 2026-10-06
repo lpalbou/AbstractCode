@@ -1,0 +1,349 @@
+{
+ "command_sandbox": {
+  "state": "sandboxed",
+  "kind": "macos-sandbox-exec",
+  "kinds": {
+   "allowed_only": "macos-sandbox-exec",
+   "any_except_denied": "macos-sandbox-exec"
+  },
+  "line": "Commands sandboxed: macOS sandbox-exec",
+  "sentence": "Every command a run starts is confined by the operating system to that run's workspaces.",
+  "unsandboxed_commands_allowed": false,
+  "configured": true,
+  "flag": "--unsandboxed-commands"
+ },
+ "items": [
+  {
+   "name": "read_file",
+   "description": "Read a text file (line-numbered). Oversized reads return a labeled PARTIAL chunk plus the exact continuation call (start_char).",
+   "when_to_use": "Use to inspect exact file contents. For code, prefer analyze_code first. Prefer bounded reads; if line numbers are unknown, use search_files() first. For huge/minified files, follow the #TRUNCATION notice's start_char continuation.",
+   "parameters": {
+    "file_path": {
+     "type": "string"
+    },
+    "start_line": {
+     "type": "integer",
+     "default": 1
+    },
+    "end_line": {
+     "type": "integer",
+     "default": null
+    },
+    "start_char": {
+     "type": "integer",
+     "default": null
+    }
+   },
+   "required_args": [
+    "file_path"
+   ],
+   "examples": [
+    {
+     "description": "Read entire file (small files; oversized returns a labeled partial chunk)",
+     "arguments": {
+      "file_path": "README.md"
+     }
+    },
+    {
+     "description": "Read specific line range",
+     "arguments": {
+      "file_path": "src/main.py",
+      "start_line": 10,
+      "end_line": 25
+     }
+    },
+    {
+     "description": "Continue a truncated read from a character offset (minified/huge files)",
+     "arguments": {
+      "file_path": "dist/bundle.min.js",
+      "start_char": 120000
+     }
+    }
+   ],
+   "toolset": "files",
+   "enabled": true,
+   "mutating": false,
+   "remote_write_capable": false,
+   "captures_environment": false,
+   "standing_effect": false,
+   "destructive_capable": false,
+   "comms_send": false,
+   "model_controlled_destination": false,
+   "tier": "tier2_world",
+   "approval_default": "auto",
+   "risk_tier": "observe",
+   "risk_rank": 1,
+   "risk_presentation": "observe",
+   "risk_mapping_version": 1,
+   "risk_refiner": null,
+   "grantable": true
+  },
+  {
+   "name": "write_file",
+   "description": "Write full file content (create/overwrite/append). WARNING: mode='w' overwrites the entire file; for small edits, use edit_file().",
+   "when_to_use": "Use to create new files or intentionally overwrite/append full content. For small edits, use edit_file().",
+   "parameters": {
+    "file_path": {
+     "type": "string"
+    },
+    "content": {
+     "type": "string"
+    },
+    "mode": {
+     "type": "string",
+     "default": "w"
+    }
+   },
+   "required_args": [
+    "content",
+    "file_path"
+   ],
+   "tags": [
+    "mutating"
+   ],
+   "examples": [
+    {
+     "description": "Write a simple text file",
+     "arguments": {
+      "file_path": "output.txt",
+      "content": "Hello, world!"
+     }
+    },
+    {
+     "description": "Overwrite an existing config file with complete new content (intentional whole-file rewrite)",
+     "arguments": {
+      "file_path": "config.json",
+      "content": "{\n  \"api_key\": \"test\",\n  \"debug\": true\n}\n",
+      "mode": "w"
+     }
+    },
+    {
+     "description": "Append to existing file",
+     "arguments": {
+      "file_path": "log.txt",
+      "content": "\nNew log entry at 2025-01-01",
+      "mode": "a"
+     }
+    }
+   ],
+   "toolset": "files",
+   "enabled": true,
+   "mutating": true,
+   "remote_write_capable": false,
+   "captures_environment": false,
+   "standing_effect": false,
+   "destructive_capable": false,
+   "comms_send": false,
+   "model_controlled_destination": false,
+   "tier": "tier2_world",
+   "approval_default": "ask",
+   "risk_tier": "act",
+   "risk_rank": 2,
+   "risk_presentation": "act",
+   "risk_mapping_version": 1,
+   "risk_refiner": null,
+   "grantable": true
+  },
+  {
+   "name": "execute_command",
+   "description": "Execute shell commands safely with security controls and platform detection",
+   "when_to_use": "When you need to run system commands, shell scripts, or interact with command-line tools",
+   "parameters": {
+    "command": {
+     "type": "string"
+    },
+    "working_directory": {
+     "type": "string",
+     "default": null
+    },
+    "timeout": {
+     "type": "integer",
+     "default": 300,
+     "description": "Seconds (max 600; values above are clamped). Time limit before the command tree is killed."
+    },
+    "capture_output": {
+     "type": "boolean",
+     "default": true
+    },
+    "require_confirmation": {
+     "type": "boolean",
+     "default": false
+    },
+    "allow_dangerous": {
+     "type": "boolean",
+     "default": false
+    }
+   },
+   "required_args": [
+    "command"
+   ],
+   "tags": [
+    "mutating"
+   ],
+   "examples": [
+    {
+     "description": "List current directory contents",
+     "arguments": {
+      "command": "ls -la"
+     }
+    },
+    {
+     "description": "Search for a pattern in files (grep)",
+     "arguments": {
+      "command": "grep -R \"ActiveContextPolicy\" -n abstractruntime/src/abstractruntime | head"
+     }
+    },
+    {
+     "description": "Safe mode with confirmation",
+     "arguments": {
+      "command": "rm temp_file.txt",
+      "require_confirmation": true
+     }
+    }
+   ],
+   "toolset": "system",
+   "enabled": true,
+   "mutating": true,
+   "remote_write_capable": false,
+   "captures_environment": false,
+   "standing_effect": false,
+   "destructive_capable": true,
+   "comms_send": false,
+   "model_controlled_destination": false,
+   "tier": "tier2_world",
+   "approval_default": "ask",
+   "risk_tier": "destroy",
+   "risk_rank": 4,
+   "risk_presentation": "destroy",
+   "risk_mapping_version": 1,
+   "risk_refiner": null,
+   "grantable": true,
+   "sandboxed": true,
+   "sandbox": "Sandboxed to this run's workspaces"
+  },
+  {
+   "name": "local_helper_start",
+   "description": "Start one long-lived local helper process for this run (dev server, watcher, background helper) with an optional readiness contract; sandboxed to this run's workspaces, auto-cleaned when the run ends.",
+   "when_to_use": "When the task needs a local process that must keep running across tool calls: start a dev server, wait for it to become ready, then inspect or stop it later.",
+   "parameters": {
+    "command": {
+     "type": "string"
+    },
+    "helper_id": {
+     "type": "string",
+     "default": "main"
+    },
+    "working_directory": {
+     "type": "string",
+     "default": null
+    },
+    "ready_port": {
+     "type": "integer",
+     "default": null
+    },
+    "ready_url": {
+     "type": "string",
+     "default": null
+    },
+    "ready_text": {
+     "type": "string",
+     "default": null
+    },
+    "ready_timeout": {
+     "type": "number",
+     "default": 20.0
+    }
+   },
+   "required_args": [
+    "command"
+   ],
+   "tags": [
+    "mutating"
+   ],
+   "toolset": "system",
+   "enabled": true,
+   "tier": "tier2_world",
+   "approval_default": "ask",
+   "risk_tier": "destroy",
+   "risk_rank": 4,
+   "risk_presentation": "unvetted",
+   "risk_mapping_version": 1,
+   "risk_refiner": null,
+   "grantable": true,
+   "sandboxed": true,
+   "sandbox": "Sandboxed to this run's workspaces"
+  },
+  {
+   "name": "shell_exec",
+   "description": "Run a command in a PERSISTENT shell session (cwd/env/venv persist across calls). Sandboxed to this run's workspaces when the host sets a workspace policy; NOT durable (never survives a host restart).",
+   "when_to_use": "Multi-step shell workflows where state must persist: activate a venv then run tools in it, cd and work there, start a background process (`&`) and inspect it later. A 'new shell session' notice in output means prior state is gone.",
+   "parameters": {
+    "command": {
+     "type": "string"
+    },
+    "session_id": {
+     "type": "string",
+     "default": "main"
+    },
+    "working_directory": {
+     "type": "string",
+     "default": null
+    },
+    "timeout": {
+     "type": "number",
+     "default": 120
+    }
+   },
+   "required_args": [
+    "command"
+   ],
+   "tags": [
+    "mutating"
+   ],
+   "examples": [
+    {
+     "description": "Create and use a venv across calls",
+     "arguments": {
+      "command": "python3 -m venv .venv && source .venv/bin/activate && pip install requests"
+     }
+    },
+    {
+     "description": "Next call, same session: venv still active",
+     "arguments": {
+      "command": "python -c 'import requests; print(requests.__version__)'"
+     }
+    },
+    {
+     "description": "Parallel session with its own state",
+     "arguments": {
+      "command": "cd /tmp && ls",
+      "session_id": "scratch"
+     }
+    }
+   ],
+   "toolset": "shell",
+   "enabled": false,
+   "enable_gate": "ABSTRACT_ENABLE_SHELL_TOOLS",
+   "why_disabled": "persistent shell sessions escape per-call cwd confinement; explicit opt-in only (backlog 0220)",
+   "mutating": true,
+   "remote_write_capable": false,
+   "captures_environment": false,
+   "standing_effect": false,
+   "destructive_capable": true,
+   "comms_send": false,
+   "model_controlled_destination": false,
+   "tier": "tier2_world",
+   "approval_default": "ask",
+   "risk_tier": "destroy",
+   "risk_rank": 4,
+   "risk_presentation": "destroy",
+   "risk_mapping_version": 1,
+   "risk_refiner": null,
+   "grantable": true,
+   "sandboxed": true,
+   "sandbox": "Sandboxed to this run's workspaces"
+  }
+ ],
+ "tool_mode": "approval",
+ "_source": "GET /api/gateway/discovery/tools (alice), scratch gateway origin/main 2a28b90 (0.13.0); trimmed to 5 tools"
+}

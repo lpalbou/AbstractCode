@@ -132,46 +132,70 @@ fn run(client: &GatewayClient, wake: &WakeHandle, store: Store, cmd: RailCmd) {
             expected_revision,
             changes,
         } => {
-            let auto_client = AutomationClient::from_gateway(client);
-            let out = auto_client.send(&auto::revise_request(
-                &id,
-                &command_id,
-                Some(expected_revision),
-                changes,
-            ));
-            let state = match &out {
-                Ok(v) => SaveState::Saved(
-                    v.pointer("/definition/revision")
-                        .or_else(|| v.pointer("/summary/revision"))
-                        .and_then(Value::as_u64)
-                        .unwrap_or(expected_revision + 1),
-                ),
-                Err(e) if e.code == "revision_conflict" => SaveState::Conflict,
-                Err(e) => SaveState::Refused(auto::api_error_text(e)),
-            };
-            let transport = matches!(&out, Err(e) if e.is_transport());
-            wake.post(move || {
-                store.rail.update(|r| r.save = state);
-                store.automations.update(|v| v.ids.settle(transport));
-            });
-            // The latest definition either way (a conflict shows the
-            // revision someone else saved). The gateway applies a revision
-            // moments after accepting it, so re-read now and twice more —
-            // the web's +1.5 s / +4 s re-reads.
-            for pause in [0u64, 1500, 2500, 4000] {
-                std::thread::sleep(std::time::Duration::from_millis(pause));
-                let detail = auto_client.detail(&id);
-                let id = id.clone();
-                wake.post(move || {
-                    store.automations.update(|v| {
-                        if let Ok((def, summary, page)) = detail {
-                            v.apply_detail(&id, def, summary, page);
-                        }
-                    })
-                });
-            }
+            let _ = save_revision_now(client, wake, store, &id, &command_id, expected_revision, changes);
         }
     }
+}
+
+/// Save one settings change of an automation as a new revision (`PATCH
+/// /automations/{id}` with `expected_revision`), post the revision line,
+/// then re-read the definition (the web's +1.5 s / +4 s re-reads). Blocking:
+/// call it on a lane thread. `Err` = the sentence shown.
+pub fn save_revision_now(
+    client: &GatewayClient,
+    wake: &WakeHandle,
+    store: Store,
+    id: &str,
+    command_id: &str,
+    expected_revision: u64,
+    changes: Value,
+) -> Result<(), String> {
+    let auto_client = AutomationClient::from_gateway(client);
+    let out = auto_client.send(&auto::revise_request(
+        id,
+        command_id,
+        Some(expected_revision),
+        changes,
+    ));
+    let state = match &out {
+        Ok(v) => SaveState::Saved(
+            v.pointer("/definition/revision")
+                .or_else(|| v.pointer("/summary/revision"))
+                .and_then(Value::as_u64)
+                .unwrap_or(expected_revision + 1),
+        ),
+        Err(e) if e.code == "revision_conflict" => SaveState::Conflict,
+        Err(e) => SaveState::Refused(auto::api_error_text(e)),
+    };
+    let result = match &state {
+        SaveState::Saved(_) => Ok(()),
+        SaveState::Refused(why) => Err(why.clone()),
+        SaveState::Conflict => Err(
+            "The automation changed elsewhere. The latest revision is shown; make the change again.".into(),
+        ),
+        _ => Err(crate::rail::save_line(&state)),
+    };
+    let transport = matches!(&out, Err(e) if e.is_transport());
+    wake.post(move || {
+        store.rail.update(|r| r.save = state);
+        store.automations.update(|v| v.ids.settle(transport));
+    });
+    // The latest definition either way (a conflict shows the revision
+    // someone else saved). The gateway applies a revision moments after
+    // accepting it, so re-read now and twice more.
+    for pause in [0u64, 1500, 2500, 4000] {
+        std::thread::sleep(std::time::Duration::from_millis(pause));
+        let detail = auto_client.detail(id);
+        let id = id.to_string();
+        wake.post(move || {
+            store.automations.update(|v| {
+                if let Ok((def, summary, page)) = detail {
+                    v.apply_detail(&id, def, summary, page);
+                }
+            })
+        });
+    }
+    result
 }
 
 /// Fold a run's ledger (and its sub-runs', as the live transcript does)

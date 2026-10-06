@@ -1,0 +1,18 @@
+{
+ "account": "default:alice",
+ "session_id": null,
+ "level": "run",
+ "posture": "allowed_only",
+ "default_mode": "rw",
+ "folders": [
+  {
+   "path": "/Users/ada/home/work",
+   "mode": "ro",
+   "cap": "rw",
+   "source": "run"
+  }
+ ],
+ "summary": "Deny everything, allow listed workspaces · /Users/ada/home/work (ro)",
+ "gateway_summary": "Allow everything, refuse listed workspaces (rw) · /Users/ada/home/work (rw) · /Users/ada/home/Pictures (ro) · /Users/ada/home/Desktop (refused)",
+ "ok": true
+}
