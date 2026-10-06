@@ -49,6 +49,25 @@ npm run build
 
 `npm ci` rather than `npm install`, so you reproduce CI's dependency tree.
 
+## Lockfile check
+
+`npm run check:lock` (in `web/`) runs `scripts/check_lock.mjs`, and CI runs it before `npm ci`. It
+fails when `package-lock.json` lags `package.json` (the lock's root entry records a different
+dependency spec: `package.json` was edited without `npm install`), and when an
+`@abstractframework/*` dependency (`ui-kit`, `panel-chat`, `app-server`, `monitor-*`) is missing
+from the lock, resolves below the `package.json` floor or to another major.minor, comes from a
+local `file:` tarball, or has a nested copy that differs from the top-level one. Fix it with
+`npm install` (or `npm install @abstractframework/<name>@^<version>` to raise a floor) and commit
+both files.
+
+At release time, `npm run check:lock -- --latest` also fails when npm has a newer patch of an
+`@abstractframework/*` dependency than the lock resolves (needs the network).
+
+```bash
+cd web
+npm run check:lock
+```
+
 ## Releases
 
 The two clients version independently, each under its own tag prefix:

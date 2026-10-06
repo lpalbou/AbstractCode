@@ -35,11 +35,12 @@
     "preview": "vite preview",
     "start": "node ./bin/cli.js",
     "test": "vitest run",
+    "check:lock": "node scripts/check_lock.mjs",
     "test:e2e": "playwright test",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@abstractframework/app-server": "^0.1.11"
+    "@abstractframework/app-server": "^0.1.12"
   },
   "devDependencies": {
     "@abstractframework/monitor-flow": "^0.1.10",

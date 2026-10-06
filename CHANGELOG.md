@@ -5,6 +5,12 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Web: CI: `npm run check:lock` (also a CI step, before `npm ci`) fails when `package-lock.json` lags `package.json` or resolves an `@abstractframework/*` dependency below its floor, in another major.minor or from a local tarball; `--latest` also catches a published patch the lock has not taken. The lock now resolves `@abstractframework/app-server` 0.1.12 (floor `^0.1.12`). See [CONTRIBUTING](CONTRIBUTING.md#lockfile-check).
+
 ## [terminal 0.9.0 / web 0.11.0] - 2026-10-05
 
 Requires the AbstractGateway round-11 workspace model (`/api/gateway/sessions/{id}/workspaces`, `/api/gateway/workspace/policy/me`, `POST /api/gateway/workspace/effective/me`) and `@abstractframework/ui-kit` 0.8.3.
