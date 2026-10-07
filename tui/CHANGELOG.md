@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.9.1] - 2026-10-07
 
 Needs the AbstractGateway round-11 workspace routes and the round-12 command
 sandbox fields (AbstractGateway 0.13.0).
