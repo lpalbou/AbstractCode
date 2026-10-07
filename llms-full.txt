@@ -607,7 +607,9 @@ Related:
 Each gateway has a default agent workflow for the `abstractcode.agent.v1`
 interface, set by its operator (gateway setting
 `agents.default_workflow`). Out of the box it is the shipped `basic-agent`
-bundle. Both clients list it first as **Gateway default → name @version**.
+bundle. Both clients list it first as **Gateway default → name @version**; the web app's
+**Default for new conversations** (your account's choice, kept by the gateway) shows it as
+**Gateway default (name)**, the words the Assistant and the console use.
 
 Choosing it is saved as "the gateway default", not as a copy of the workflow
 id. The client then starts each run with `flow_id: "@default"` and
@@ -1408,7 +1410,7 @@ Archiving a conversation, the **Archived · N** lines and the gateway's default 
 | Activity | The run as the transcript shows it — model steps, tool calls, approvals — in foldable groups, one per agent iteration, the newest open. Each command call shows, first in its detail, the sandbox it ran under, from the run ledger: `Sandbox: macOS sandbox-exec · 3 workspaces enforced` (the kind the gateway recorded and the number of workspaces it enforced, listed below with their mode: this run's folder, each allowed workspace Read-only or Read & write, each refused one, and the count of built-in protected folders), or `Sandbox: none — refused` when the host had no sandbox and the command did not run. For an automation: one group per run (newest first, the latest open); opening a group reads that run's steps from the gateway. |
 | Files | The conversation's private workspace: name, size, generated date (relative; the exact time on hover) and a download icon per file. Click a file to preview it. Generated outputs and attachments are listed below, with the same rows. |
 | Model | The shared model picker (route, reasoning, MTP depth), then **Behavior**: iteration limit, context token limit, additional instructions, **Stream replies**. |
-| Workflow | Which workflow runs (**Gateway default** until you pick one), then that workflow's **Inputs** and **Run workflow** / **Back to chat**. For an automation: its definition — workflow, title, task, schedule, context, tool approval, email result (one **Save**). |
+| Workflow | Which workflow runs in this conversation (**Gateway default** until you pick one), **Default for new conversations** (your account's choice, kept by the gateway), then that workflow's **Inputs** and **Run workflow** / **Back to chat**. For an automation: its definition — workflow, title, task, schedule, context, tool approval, email result (one **Save**). |
 | Workspace | The current conversation workspace (its private workspace: short name, the full path as tooltip) and **Workspaces**: the workspaces THIS conversation uses — the gateway's line on top, **Use my default**, the posture, each workspace with Read & write / Read-only / Refused, **Add a workspace path**, the effective line — and the **My default workspaces** link. For an automation: the workspaces its runs use. |
 | Tools | Permissions and the shared tool policy (which tools, and when each asks you). The tools that start processes (`execute_command`, `shell_exec`, `local_helper_start`, `execute_python`) show the gateway's command-sandbox state on their card — **Sandboxed to this run's workspaces**, or the gateway's refused / unsandboxed state — with the gateway's explanation in the tooltip; the app shows what the gateway reports and never decides it. |
 | Skills | The gateway's skills, one switch each. |
@@ -1418,7 +1420,7 @@ The six settings panels are bound to what is selected in the sidebar. Each start
 
 With an **automation** selected, Model, Workflow, Workspace, Tools and Skills edit its saved definition in place. Typed fields save when you pause, pickers at once, the Workflow form with its **Save**; every change is saved through the gateway as a new revision, the revision shown on every panel updates, and changes apply from the next run. The automation header's **Edit** opens its **Workflow** panel. If someone else changed the automation meanwhile, the save is refused and the latest revision is shown.
 
-The **Workflow** picker lists workflows authorized by the gateway for `abstractcode.agent.v1`. **Gateway default** follows the default the operator configured; selecting a named workflow pins the conversation to that workflow. The choice is remembered for your account. Unset settings preserve workflow defaults. When skills are unavailable, **Skills** shows the gateway's explanation. See [workflows](workflows.md#the-gateway-default).
+The **Workflow** picker lists workflows authorized by the gateway for `abstractcode.agent.v1`. **Gateway default** follows the default the operator configured; selecting a named workflow pins the conversation to that workflow. Below it, **Default for new conversations** is the workflow every new conversation starts with: **Gateway default (name)** first (the gateway's words, the same as the Assistant and the console), then the workflows you may run. It is kept by the gateway for your account (`GET`/`PUT /api/gateway/accounts/me/preferences`, gateway 0.13.1 and later), so the Assistant, the console's Accounts → Preferences and every browser share it; a change applies at once ("Saved.", or "Not saved." and the gateway's sentence). A workflow this browser remembered before is moved to your account once (when your account has none yet) and then forgotten by the browser. With a gateway older than 0.13.1 the row is not shown and the conversation picker's choice is remembered in this browser, as before. Unset settings preserve workflow defaults. When skills are unavailable, **Skills** shows the gateway's explanation. See [workflows](workflows.md#the-gateway-default).
 
 **Files** shows the conversation's private workspace on the gateway, where the agent reads and writes, once, as its short name — the full path is its tooltip — with **Open folder** (only on the gateway's own machine) and **Copy path** icons. Click a file to preview it with the shared viewer: Markdown rendered, code and JSON in the shared code viewer (highlighted; JSON pretty-printed), images and PDFs shown, audio in the shared waveform player (play, pause, seek), other text as text; HTML and SVG show as source. Text previews read at most the first 1 MiB and say so; Markdown images load only from the workspace. The preview header has the file's size and date, **Attach** (adds it to your next message), **Download** and close. Gateway admins also have **Gateway files (admin)**: the gateway's own files, browsed and attached the same way.
 
@@ -3705,6 +3707,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Added
+
+- Web: Workflow → **Default for new conversations**, your account's default workflow kept by the gateway (AbstractGateway 0.13.1+, `GET`/`PUT /api/gateway/accounts/me/preferences`), shared with the Assistant, the console's Accounts → Preferences and every browser. **Gateway default (name)** first, verbatim from the gateway, then the workflows you may run; a change is one PUT at once ("Saved." / "Not saved." + the gateway's sentence); a choice that no longer runs shows the gateway's reason. The conversation picker now changes only this conversation. A workflow this browser remembered is uploaded once when the account has none, then removed from this browser's preferences. With a gateway older than 0.13.1 the row is hidden and the picker's choice stays in this browser, as before.
 
 ### Changed
 

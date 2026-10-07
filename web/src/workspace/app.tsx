@@ -61,6 +61,8 @@ import {
 } from "./use_workspace_catalog";
 import { gateway, gatewayRequest, formatError, newId } from "./transport";
 import { createWorkflowTransport } from "./session_transport";
+import { selectionFromAccountValue, useAccountWorkflow } from "./account_preferences";
+import { AccountWorkflowDefault } from "./account_workflow_default";
 import {
   SettingsContent,
   DEFAULT_PREFERENCES,
@@ -238,6 +240,21 @@ export function CodeWorkspace() {
     () => executableChoices(catalog.executable.data),
     [catalog.executable.data],
   );
+  // Round 14: the workflow for NEW conversations is the account's choice kept by the gateway
+  // (GET/PUT /accounts/me/preferences, shared with the Assistant and the console); a gateway
+  // without that route (older than 0.13.1) keeps it in this browser, as before.
+  const clearDeviceWorkflow = useCallback(
+    () => setPreferences((previous) => ({ ...previous, workflow: GATEWAY_DEFAULT })),
+    [],
+  );
+  const accountWorkflow = useAccountWorkflow(identity, clearDeviceWorkflow);
+  const accountManaged = accountWorkflow.state.status === "ok";
+  const defaultSelection =
+    accountWorkflow.state.status === "ok"
+      ? selectionFromAccountValue(accountWorkflow.state.row.value, visibleChoices)
+      : preferences.workflow;
+  const defaultSelectionRef = useRef(defaultSelection);
+  defaultSelectionRef.current = defaultSelection;
   const defaultWorkflow = useMemo(
     () => gatewayDefaultDefinition(catalog.gatewayDefault, catalog.workflows),
     [catalog.gatewayDefault, catalog.workflows],
@@ -582,13 +599,23 @@ export function CodeWorkspace() {
     if (catalog.loading || !catalog.workflows.length) return;
     const next = reconcileSelection({
       selection,
-      preferred: preferences.workflow,
+      preferred: defaultSelection,
       visible: visibleChoices,
       workflows: catalog.workflows,
       runId: session.runId,
     });
     if (next !== selection) setSelection(next);
-  }, [catalog.loading, catalog.workflows, visibleChoices, selection, preferences.workflow, session.runId]);
+  }, [catalog.loading, catalog.workflows, visibleChoices, selection, defaultSelection, session.runId]);
+  // A fresh conversation (no run yet) starts on the account's default once the gateway's answer
+  // and the workflow list are in, and follows a change of that default.
+  const accountDefaultKey =
+    accountWorkflow.state.status === "ok"
+      ? `${identity}|${accountWorkflow.state.row.value ?? ""}|${visibleChoices.length}`
+      : "";
+  useEffect(() => {
+    if (!accountDefaultKey || session.runId || !visibleChoices.length) return;
+    setSelection(defaultSelectionRef.current);
+  }, [accountDefaultKey]);
   useEffect(() => {
     let alive = true;
     setInputs({});
@@ -688,7 +715,7 @@ export function CodeWorkspace() {
   const newConversation = useCallback(() => {
     const next = { sessionId: newId(), runId: "" };
     setSession(next);
-    setSelection(preferencesRef.current.workflow);
+    setSelection(defaultSelectionRef.current);
     writeRoute(next.sessionId);
     setDraft("");
     setQueue([]);
@@ -1314,7 +1341,9 @@ export function CodeWorkspace() {
               onChange={(value, entry) => {
                 const next = selectionFromPicker(value, entry);
                 setSelection(next);
-                setPreferences((previous) => ({ ...previous, workflow: next }));
+                // The picker is THIS conversation's workflow; with the gateway keeping the account
+                // default (round 14) that default is its own row below, never a side effect.
+                if (!accountManaged) setPreferences((previous) => ({ ...previous, workflow: next }));
               }}
             />
             {selection === GATEWAY_DEFAULT && defaultInterfaceMismatch(defaultWorkflow) ? (
@@ -1334,6 +1363,13 @@ export function CodeWorkspace() {
               </span>
             ) : null}
           </div>
+        {accountWorkflow.state.status === "ok" ? (
+          <AccountWorkflowDefault
+            row={accountWorkflow.state.row}
+            save={accountWorkflow.save}
+            disabled={!connection.connected}
+          />
+        ) : null}
         <div className="code-settings code-workflow-inputs">
           <h3 className="code-settings-heading">Inputs</h3>
           <p className="code-muted">

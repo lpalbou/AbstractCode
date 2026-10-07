@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Web: Workflow → **Default for new conversations**, your account's default workflow kept by the gateway (AbstractGateway 0.13.1+, `GET`/`PUT /api/gateway/accounts/me/preferences`), shared with the Assistant, the console's Accounts → Preferences and every browser. **Gateway default (name)** first, verbatim from the gateway, then the workflows you may run; a change is one PUT at once ("Saved." / "Not saved." + the gateway's sentence); a choice that no longer runs shows the gateway's reason. The conversation picker now changes only this conversation. A workflow this browser remembered is uploaded once when the account has none, then removed from this browser's preferences. With a gateway older than 0.13.1 the row is hidden and the picker's choice stays in this browser, as before.
+
 ### Changed
 
 - Web: CI: `npm run check:lock` (also a CI step, before `npm ci`) fails when `package-lock.json` lags `package.json` or resolves an `@abstractframework/*` dependency below its floor, in another major.minor or from a local tarball; `--latest` also catches a published patch the lock has not taken. The lock now resolves `@abstractframework/app-server` 0.1.12 (floor `^0.1.12`). See [CONTRIBUTING](CONTRIBUTING.md#lockfile-check).

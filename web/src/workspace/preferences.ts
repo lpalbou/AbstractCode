@@ -38,8 +38,13 @@ export function readPreferences(identity: string): RunPreferences {
 }
 
 export function writePreferences(identity: string, value: RunPreferences): void {
+  // Round 14: "workflow" is written only while it holds a choice of this browser (a gateway
+  // older than 0.13.1); the gateway default is the absence of the key, so the one-time move of
+  // the choice to the account (account_preferences.ts) removes it from this browser.
+  const { workflow, ...rest } = value;
+  const stored = workflow && workflow !== "@default" ? value : rest;
   try {
-    localStorage.setItem(preferencesKey(identity), JSON.stringify(value));
+    localStorage.setItem(preferencesKey(identity), JSON.stringify(stored));
   } catch {
     /* In-memory settings remain usable. */
   }

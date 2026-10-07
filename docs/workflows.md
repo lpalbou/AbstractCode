@@ -13,7 +13,9 @@ Related:
 Each gateway has a default agent workflow for the `abstractcode.agent.v1`
 interface, set by its operator (gateway setting
 `agents.default_workflow`). Out of the box it is the shipped `basic-agent`
-bundle. Both clients list it first as **Gateway default → name @version**.
+bundle. Both clients list it first as **Gateway default → name @version**; the web app's
+**Default for new conversations** (your account's choice, kept by the gateway) shows it as
+**Gateway default (name)**, the words the Assistant and the console use.
 
 Choosing it is saved as "the gateway default", not as a copy of the workflow
 id. The client then starts each run with `flow_id: "@default"` and
