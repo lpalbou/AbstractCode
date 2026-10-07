@@ -108,6 +108,7 @@ fn harness(size: Size) -> H {
             status: ToolStatus::Ok,
             result: String::new(),
             error: String::new(),
+            sandbox: None,
         });
         f.push_item(Item::Thinking {
             iteration: 2,
@@ -123,6 +124,7 @@ fn harness(size: Size) -> H {
             status: ToolStatus::Ok,
             result: String::new(),
             error: String::new(),
+            sandbox: None,
         });
     });
     for _ in 0..3 {
@@ -470,8 +472,9 @@ fn every_rail_panel_on_the_conversation() {
                 &[
                     "Current workspace",
                     "parser",
-                    "Managed by your gateway",
-                    "This workspace only · Workspace and allowed paths",
+                    // R14.4: the kit chooser (session level), loading from the gateway.
+                    "Workspaces",
+                    "Loading…",
                 ],
             ),
             ("tools", &["Permissions", "2 / 2 enabled", "[x] read_file"]),
@@ -521,7 +524,7 @@ fn every_rail_panel_on_an_automation() {
             ("workflow", &["Title", "Inbox triage", "Task"]),
             (
                 "workspace",
-                &["Runs work in the automation folder", "Access mode"],
+                &["Runs work in the automation folder", "Workspaces"],
             ),
             (
                 "tools",

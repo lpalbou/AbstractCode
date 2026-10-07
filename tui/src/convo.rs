@@ -428,6 +428,7 @@ fn push_tool_cards(items: &mut Vec<Item>, details: &[ToolDetail]) {
             } else {
                 String::new()
             },
+            sandbox: None,
         });
     }
 }

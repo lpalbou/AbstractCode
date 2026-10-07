@@ -2363,7 +2363,15 @@ pub fn open_tools(cx: Scope, store: Store, ctx: &UiCtx) {
                             .unwrap_or("");
                         selectable.push(rows.len());
                         rows.push(RowSpec {
-                            text: format!("{}{pin}  {}", tool.name, tool.description),
+                            // The gateway's command-sandbox state of a
+                            // process-spawning tool, verbatim (R14.4).
+                            text: match &tool.sandbox {
+                                Some(sb) => format!(
+                                    "{}{pin}  [{}]  {}",
+                                    tool.name, sb.label, tool.description
+                                ),
+                                None => format!("{}{pin}  {}", tool.name, tool.description),
+                            },
                             header: false,
                             checked: Some(Mark::switch(on)),
                             dim: false,

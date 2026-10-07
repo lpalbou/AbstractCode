@@ -203,6 +203,7 @@ mod tests {
             status: crate::transcript::ToolStatus::Ok,
             result: result.into(),
             error: error.into(),
+            sandbox: None,
         }
     }
 

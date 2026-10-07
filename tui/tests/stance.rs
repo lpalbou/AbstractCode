@@ -37,6 +37,7 @@ fn tool(key: &str, name: &str, status: ToolStatus) -> Item {
         status,
         result: String::new(),
         error: String::new(),
+        sandbox: None,
     }
 }
 

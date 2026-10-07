@@ -817,6 +817,19 @@ fn workspace_cards(s: &Snap, is_auto: bool, cards: &mut Vec<Card>, acts: &mut Ve
     acts.extend(more_acts.into_iter().map(Act::Ws));
 }
 
+/// A process-spawning tool's command-sandbox state on its card: the
+/// gateway's words ("Sandboxed to this run's workspaces", "Refused: no
+/// command sandbox on this host", "Not sandboxed: …"), nothing for every
+/// other tool.
+pub fn sandbox_state_line(t: &ToolInfo) -> Option<CardLine> {
+    let sb = t.sandbox.as_ref()?;
+    let ink = match sb.tone {
+        crate::sandbox_line::Tone::Ok => Ink::Accent,
+        crate::sandbox_line::Tone::Warn | crate::sandbox_line::Tone::Danger => Ink::Error,
+    };
+    Some(CardLine::new(sb.label.clone(), ink).indent(4))
+}
+
 fn tools_cards(s: &Snap, is_auto: bool, cards: &mut Vec<Card>, acts: &mut Vec<Act>) {
     let available: Vec<&ToolInfo> = s.tools.iter().filter(|t| !t.served_disabled).collect();
     let gated: Vec<&ToolInfo> = s.tools.iter().filter(|t| t.served_disabled).collect();
@@ -873,6 +886,7 @@ fn tools_cards(s: &Snap, is_auto: bool, cards: &mut Vec<Card>, acts: &mut Vec<Ac
                 if on && custom { Ink::Accent } else { Ink::Text },
             )
             .right(approval)];
+            lines.extend(sandbox_state_line(t));
             if !custom {
                 lines.push(faint("Choose Custom to pick tools one by one."));
             }
@@ -902,15 +916,27 @@ fn tools_cards(s: &Snap, is_auto: bool, cards: &mut Vec<Card>, acts: &mut Vec<Ac
                 .find(|(n, _)| n == &t.name)
                 .map(|(_, v)| if v == "ask" { "Ask" } else { "Approve" })
                 .unwrap_or("");
-            cards.push(Card::new(vec![CardLine::new(
+            let mut lines = vec![CardLine::new(
                 format!("{}{}", if on { "[x] " } else { "[ ] " }, t.name),
                 if on { Ink::Accent } else { Ink::Text },
             )
-            .right(pin)]));
+            .right(pin)];
+            lines.extend(sandbox_state_line(t));
+            cards.push(Card::new(lines));
             acts.push(Act::ToggleTool(t.name.clone()));
         }
         cards.push(Card::new(vec![row("More tool options", "/tools")]));
         acts.push(Act::ToolsModal);
+    }
+    // The command sandbox's sentence (the web's tooltip on the state badge),
+    // once under the tools it explains.
+    if let Some(sentence) = available
+        .iter()
+        .filter_map(|t| t.sandbox.as_ref())
+        .map(|sb| sb.sentence.clone())
+        .find(|s| !s.is_empty())
+    {
+        cards.push(Card::note(sentence));
     }
     if !gated.is_empty() {
         cards.push(Card::note(format!(

@@ -444,6 +444,7 @@ pub fn providers_from_discovery(v: &Value) -> Vec<ProviderInfo> {
 
 pub fn tools_from_discovery(v: &Value) -> Vec<ToolInfo> {
     let mut out = Vec::new();
+    let command_sandbox = v.get("command_sandbox").filter(|c| c.is_object());
     let items = v
         .get("tools")
         .and_then(Value::as_array)
@@ -517,6 +518,7 @@ pub fn tools_from_discovery(v: &Value) -> Vec<ToolInfo> {
             served_disabled,
             enable_gate: str_field("enable_gate").unwrap_or_default(),
             why_disabled: str_field("why_disabled").unwrap_or_default(),
+            sandbox: crate::sandbox_line::tool_state(t, command_sandbox),
         });
     }
     // Group order first (files/web/system read naturally), name within.

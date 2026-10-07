@@ -110,6 +110,10 @@ pub enum Item {
         /// The error in FULL (multi-line preserved). The folded row
         /// one-lines it at render; `/details` shows all of it.
         error: String,
+        /// The command sandbox the call ran under (process-spawning tools:
+        /// the ledger result's `output.sandbox`, R12.1 / R14.4) — one line
+        /// per command in the run views. `None` for every other tool.
+        sandbox: Option<crate::sandbox_line::ToolSandbox>,
     },
     Assistant {
         text: String,
@@ -2360,6 +2364,7 @@ impl Fold {
             status: ToolStatus::Running,
             result: String::new(),
             error: String::new(),
+            sandbox: None,
         });
     }
 
@@ -2414,6 +2419,12 @@ impl Fold {
                 None => value_block(view.output.as_ref()),
             },
         };
+        // The command sandbox the call ran under (R12.1): the ledger
+        // result's `output.sandbox`, formatted like the web's tool detail.
+        let sandbox = view
+            .output
+            .as_ref()
+            .and_then(crate::sandbox_line::tool_sandbox);
         let status = if !view.error.is_empty() || view.success == Some(false) {
             ToolStatus::Failed
         } else {
@@ -2432,6 +2443,7 @@ impl Fold {
                 status: st,
                 result: rp,
                 error,
+                sandbox: sb,
                 ..
             } = item
             {
@@ -2439,6 +2451,7 @@ impl Fold {
                     *st = status;
                     *rp = result;
                     *error = view.error.clone();
+                    *sb = sandbox;
                     return;
                 }
             }
@@ -2452,6 +2465,7 @@ impl Fold {
                     status: st,
                     result: rp,
                     error,
+                    sandbox: sb,
                     ..
                 } = item
                 {
@@ -2461,6 +2475,7 @@ impl Fold {
                         *st = status;
                         *rp = result;
                         *error = view.error.clone();
+                        *sb = sandbox;
                         return;
                     }
                 }
@@ -2478,6 +2493,7 @@ impl Fold {
             status,
             result,
             error: view.error.clone(),
+            sandbox,
         });
     }
 
@@ -2549,6 +2565,7 @@ impl Fold {
                         status: ToolStatus::AwaitingApproval,
                         result: String::new(),
                         error: String::new(),
+                        sandbox: None,
                     });
                 }
             }

@@ -2044,6 +2044,7 @@ fn details_command_immediately_rerenders_mixed_content() {
             status: abstractcode::transcript::ToolStatus::Ok,
             result: "result-plugh-lines".into(),
             error: String::new(),
+            sandbox: None,
         });
         f.push_item(abstractcode::transcript::Item::Tool {
             key: "call:2".into(),
@@ -2053,6 +2054,7 @@ fn details_command_immediately_rerenders_mixed_content() {
             status: abstractcode::transcript::ToolStatus::Failed,
             result: String::new(),
             error: "exploded".into(),
+            sandbox: None,
         });
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "all green".into(),
@@ -2376,6 +2378,7 @@ fn right_click_on_a_tool_row_opens_its_action_menu() {
             status: abstractcode::transcript::ToolStatus::Ok,
             result: "fn main() {}".into(),
             error: String::new(),
+            sandbox: None,
         });
     });
     for _ in 0..4 {
@@ -2439,6 +2442,7 @@ fn a_right_click_with_nothing_to_offer_says_so() {
             status: abstractcode::transcript::ToolStatus::Running,
             result: String::new(),
             error: String::new(),
+            sandbox: None,
         });
     });
     for _ in 0..3 {
@@ -2479,6 +2483,7 @@ fn a_tool_card_names_its_hidden_output_and_expands_on_the_marker() {
             status: abstractcode::transcript::ToolStatus::Ok,
             result: "compiling\nwarning: unused\nFinished in 41s".into(),
             error: String::new(),
+            sandbox: None,
         });
     });
     for _ in 0..3 {
@@ -2562,6 +2567,7 @@ fn a_press_off_the_marker_never_toggles_the_card() {
             status: abstractcode::transcript::ToolStatus::Ok,
             result: "compiling\nFinished".into(),
             error: String::new(),
+            sandbox: None,
         });
     });
     for _ in 0..3 {
@@ -2694,6 +2700,7 @@ fn a_narrow_pane_that_cannot_draw_the_marker_has_no_hidden_control() {
             status: abstractcode::transcript::ToolStatus::Ok,
             result: "one\ntwo\nthree".into(),
             error: String::new(),
+            sandbox: None,
         });
     });
     for _ in 0..3 {
@@ -7594,6 +7601,7 @@ fn export_command_writes_markdown_and_refuses_overwrite() {
             status: abstractcode::transcript::ToolStatus::Ok,
             result: "ok".into(),
             error: String::new(),
+            sandbox: None,
         });
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "done — hello.txt written".into(),
@@ -10617,6 +10625,7 @@ fn gallery_fold(store: &Store) {
             status: ToolStatus::Ok,
             result: "File: /workspace/todel2/js/game.js (468 lines)\n720:     ctx.fillStyle = p.color;\n721:     ctx.beginPath();\n722:     ctx.arc(p.x, p.y, p.size + pulse, 0, Math.PI * 2);\n723:     ctx.fill();\n… (+18 more lines)".into(),
             error: String::new(),
+            sandbox: None,
         });
         f.push_item(Item::Tool {
             key: "call:2".into(),
@@ -10626,6 +10635,7 @@ fn gallery_fold(store: &Store) {
             status: ToolStatus::Ok,
             result: "🖥 Command executed on Darwin\n⏱ Execution time: 0.09s · ✅ return code 0\n📤 Output:\n  301 js/game.js\n  212 js/audio.js\n  164 js/levels.js\n   89 index.html\n  766 total".into(),
             error: String::new(),
+            sandbox: None,
         });
         f.push_item(Item::Thinking {
             iteration: 6,
@@ -10646,6 +10656,7 @@ fn gallery_fold(store: &Store) {
             status: ToolStatus::Ok,
             result: "edited js/game.js: 1 replacement".into(),
             error: String::new(),
+            sandbox: None,
         });
         f.push_item(Item::Tool {
             key: "call:4".into(),
@@ -10655,6 +10666,7 @@ fn gallery_fold(store: &Store) {
             status: ToolStatus::Failed,
             result: String::new(),
             error: "node smoke.js exited 1: TypeError: player.reset is not a function (smoke.js:41)".into(),
+            sandbox: None,
         });
         f.push_item(Item::Thinking {
             iteration: 7,
@@ -10675,6 +10687,7 @@ fn gallery_fold(store: &Store) {
             status: ToolStatus::Ok,
             result: "edited smoke.js: 1 replacement".into(),
             error: String::new(),
+            sandbox: None,
         });
         f.push_item(Item::Tool {
             key: "call:6".into(),
@@ -10684,6 +10697,7 @@ fn gallery_fold(store: &Store) {
             status: ToolStatus::Running,
             result: String::new(),
             error: String::new(),
+            sandbox: None,
         });
         // Design sheet, not a replay: the final answer renders below a
         // still-running row so ONE screen shows both treatments.
@@ -10990,6 +11004,7 @@ fn details_mode_truncates_nothing() {
             status: abstractcode::transcript::ToolStatus::Ok,
             result: result.clone(),
             error: String::new(),
+            sandbox: None,
         });
         // Failed WITH output: both must render (F3).
         f.push_item(Item::Tool {
@@ -11000,6 +11015,7 @@ fn details_mode_truncates_nothing() {
             status: abstractcode::transcript::ToolStatus::Failed,
             result: lines("fail-out", 20, "TAIL-OF-FAILED-OUTPUT"),
             error: tool_error.clone(),
+            sandbox: None,
         });
         f.push_item(Item::Info {
             text: lines("info-line", 30, "TAIL-OF-INFO"),
@@ -11085,6 +11101,7 @@ fn folded_view_stays_a_bounded_labelled_summary() {
             status: abstractcode::transcript::ToolStatus::Failed,
             result: String::new(),
             error: "line one\nline two\nline three\nline four\nline five".into(),
+            sandbox: None,
         });
     });
     for _ in 0..3 {
@@ -11256,6 +11273,7 @@ fn animation_gallery() {
                         },
                         result: "ok".into(),
                         error: String::new(),
+                        sandbox: None,
                     });
                 }
             }

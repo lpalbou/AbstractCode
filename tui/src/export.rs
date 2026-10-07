@@ -725,6 +725,7 @@ mod tests {
             status,
             result: result.into(),
             error: String::new(),
+            sandbox: None,
         }
     }
 
@@ -737,6 +738,7 @@ mod tests {
             status,
             result: result.into(),
             error: error.into(),
+            sandbox: None,
         }
     }
 

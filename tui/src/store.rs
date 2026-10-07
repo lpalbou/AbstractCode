@@ -143,6 +143,11 @@ pub struct ToolInfo {
     pub enable_gate: String,
     /// The gateway's one-line reason for the disablement.
     pub why_disabled: String,
+    /// A process-spawning tool's command-sandbox state (R12.1 / R14.4):
+    /// the row's `sandboxed` + `sandbox` text and the answer's
+    /// `command_sandbox.sentence`, verbatim. `None` on every tool the
+    /// gateway does not mark.
+    pub sandbox: Option<crate::sandbox_line::ToolSandboxState>,
 }
 
 /// What a session's runs say it is doing RIGHT NOW, folded from the

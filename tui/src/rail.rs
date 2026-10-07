@@ -584,11 +584,16 @@ pub fn activity_groups(items: &[Item], live: bool, waiting: bool) -> Vec<Group> 
                 name,
                 args_preview,
                 status,
+                sandbox,
                 ..
             } => {
                 let (line, st, you) = tool_line(name, args_preview, *status);
                 let g = groups.last_mut().expect("Start exists");
                 g.lines.push(line);
+                // The command sandbox, one line per command (R14.4).
+                if let Some(sb) = sandbox {
+                    g.lines.push(format!("  {}", sb.line));
+                }
                 g.status = g.status.min(st);
                 g.waiting_for_you |= you;
             }
@@ -730,6 +735,7 @@ mod tests {
                 status: ToolStatus::Ok,
                 result: String::new(),
                 error: String::new(),
+                sandbox: None,
             },
             Item::Thinking {
                 iteration: 2,
@@ -745,6 +751,7 @@ mod tests {
                 status: ToolStatus::AwaitingApproval,
                 result: String::new(),
                 error: String::new(),
+                sandbox: None,
             },
         ];
         let g = activity_groups(&items, true, false);

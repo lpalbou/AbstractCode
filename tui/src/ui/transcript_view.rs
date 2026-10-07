@@ -458,6 +458,51 @@ impl ToolRow {
 /// (0.2.3) wrap span-true but carry NO width-aware row cap, overflow
 /// marker, or hanging indent — the exact features these previews exist
 /// for (filed as first-app/0283).
+/// The command sandbox of one tool call (R12.1 / R14.4): "Sandbox: macOS
+/// sandbox-exec · 3 workspaces enforced" (or "Sandbox: none — refused"),
+/// then — when `detail` — each enforced path with its mode. Nothing for a
+/// tool whose result carries no sandbox evidence.
+fn sandbox_blocks(
+    t: &TokenSet,
+    sandbox: Option<&crate::sandbox_line::ToolSandbox>,
+    detail: bool,
+) -> Vec<FeedBlock> {
+    let Some(sb) = sandbox else {
+        return Vec::new();
+    };
+    let ink = match sb.state {
+        crate::sandbox_line::SandboxState::Sandboxed => t.text_muted,
+        crate::sandbox_line::SandboxState::Refused => t.warn,
+        crate::sandbox_line::SandboxState::Unsandboxed => t.error,
+    };
+    let mut out = vec![CappedBody::new(&sb.line, ink, 2)
+        .prefix("↳ ")
+        .uncapped(true)
+        .block()];
+    let rows = sb.detail_lines();
+    if detail && !rows.is_empty() {
+        out.push(
+            CappedBody::new(&rows.join("\n"), t.text_faint, rows.len().max(1))
+                .prefix("  ")
+                .uncapped(true)
+                .block(),
+        );
+    }
+    out
+}
+
+/// The repaint key of a tool call's sandbox (its line and paths).
+fn sandbox_key(sandbox: Option<&crate::sandbox_line::ToolSandbox>) -> String {
+    sandbox.map_or(String::new(), |sb| {
+        let mut k = sb.line.clone();
+        for l in sb.detail_lines() {
+            k.push('\n');
+            k.push_str(&l);
+        }
+        k
+    })
+}
+
 struct CappedBody {
     body: String,
     ink: Rgba,
@@ -928,6 +973,7 @@ fn render_item(
             status,
             result,
             error,
+            sandbox,
             ..
         } => {
             // A CALLED TOOL IS ALWAYS SHOWN (operator ruling 2026-07-26)
@@ -980,7 +1026,16 @@ fn render_item(
                         }
                         .block(),
                     ),
-                );
+                )
+                .map(|mut fi| {
+                    // Process-spawning tools: the sandbox it ran under, one
+                    // line per command (R14.4); the enforced paths when the
+                    // row is opened.
+                    for b in sandbox_blocks(t, sandbox.as_ref(), expanded) {
+                        fi = fi.block(b);
+                    }
+                    fi
+                });
             }
             let spans = vec![
                 Span::new(format!("{glyph} "), Style::new().fg(ink)),
@@ -1012,6 +1067,9 @@ fn render_item(
                         .linked(link_root)
                         .block(),
                 );
+            }
+            for b in sandbox_blocks(t, sandbox.as_ref(), true) {
+                fi = fi.block(b);
             }
             if !error.is_empty() {
                 fi = fi.block(
@@ -1157,6 +1215,7 @@ fn fingerprint(item: &Item, store: &Store, expanded: bool) -> u64 {
             status,
             result,
             error,
+            sandbox,
             ..
         } => {
             h.byte(4);
@@ -1166,6 +1225,7 @@ fn fingerprint(item: &Item, store: &Store, expanded: bool) -> u64 {
             h.byte(*status as u8);
             h.body(result);
             h.body(error);
+            h.body(&sandbox_key(sandbox.as_ref()));
             h.byte(u8::from(expanded));
         }
         Item::Assistant { text, final_answer } => {
@@ -2456,6 +2516,7 @@ mod tests {
                 status,
                 result: "out".into(),
                 error: error.into(),
+                sandbox: None,
             };
             let items = vec![
                 Item::User { text: "q".into() },
@@ -2564,6 +2625,7 @@ mod tests {
                 status: ToolStatus::Running,
                 result: "r".into(),
                 error: String::new(),
+                sandbox: None,
             };
             let fp = |i: &Item| fingerprint(i, &store, false);
             let mut m = base.clone();
