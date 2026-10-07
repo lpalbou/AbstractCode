@@ -323,3 +323,123 @@ fn run(client: &GatewayClient, wake: &WakeHandle, store: Store, cmd: WsCmd) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Read, Write};
+
+    const SESSION: &str =
+        include_str!("../../tests/fixtures/workspaces/session_get_configured.json");
+    const ACCOUNT: &str = include_str!("../../tests/fixtures/workspaces/account_get.json");
+    const DRY: &str = include_str!("../../tests/fixtures/workspaces/dryrun_payload.json");
+    const ABOVE_CAP: &str =
+        include_str!("../../tests/fixtures/workspaces/session_put_above_cap.json");
+
+    /// One-request HTTP server: answers `status` + `body`, hands back
+    /// (request line, request body) — what went on the wire.
+    fn server(
+        status: &'static str,
+        body: &'static str,
+    ) -> (String, std::sync::mpsc::Receiver<(String, String)>) {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let url = format!("http://{}", l.local_addr().unwrap());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut sock, _) = l.accept().expect("accept");
+            let mut reader = BufReader::new(sock.try_clone().unwrap());
+            let mut first = String::new();
+            reader.read_line(&mut first).unwrap();
+            let mut len = 0usize;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+                if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    len = v.trim().parse().unwrap_or(0);
+                }
+            }
+            let mut buf = vec![0u8; len];
+            reader.read_exact(&mut buf).unwrap();
+            let _ = tx.send((
+                first.trim_end().to_string(),
+                String::from_utf8(buf).unwrap(),
+            ));
+            let head = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = sock.write_all(head.as_bytes());
+            let _ = sock.write_all(body.as_bytes());
+        });
+        (url, rx)
+    }
+
+    #[test]
+    fn the_session_level_reads_and_writes_the_session_route() {
+        let (url, rx) = server("200 OK", SESSION);
+        let c = GatewayClient::new(&url, Some("t"));
+        ws::as_state(&c.session_workspaces("s 1", None).unwrap()).unwrap();
+        let (line, body) = rx.recv().unwrap();
+        assert_eq!(line, "GET /api/gateway/sessions/s%201/workspaces HTTP/1.1");
+        assert!(body.is_empty());
+
+        let (url, rx) = server("200 OK", SESSION);
+        let c = GatewayClient::new(&url, Some("t"));
+        let payload = json!({"configured": false});
+        c.session_workspaces("s 1", Some(&payload)).unwrap();
+        let (line, body) = rx.recv().unwrap();
+        assert_eq!(line, "PUT /api/gateway/sessions/s%201/workspaces HTTP/1.1");
+        assert_eq!(
+            serde_json::from_str::<Value>(&body).unwrap(),
+            payload,
+            "the full body, once"
+        );
+    }
+
+    #[test]
+    fn the_account_level_reads_and_writes_my_policy() {
+        let (url, rx) = server("200 OK", ACCOUNT);
+        let c = GatewayClient::new(&url, Some("t"));
+        ws::as_state(&c.account_workspaces(None).unwrap()).unwrap();
+        assert_eq!(
+            rx.recv().unwrap().0,
+            "GET /api/gateway/workspace/policy/me HTTP/1.1"
+        );
+
+        let (url, rx) = server("200 OK", ACCOUNT);
+        let c = GatewayClient::new(&url, Some("t"));
+        let payload = json!({"configured": false});
+        c.account_workspaces(Some(&payload)).unwrap();
+        let (line, body) = rx.recv().unwrap();
+        assert_eq!(line, "PUT /api/gateway/workspace/policy/me HTTP/1.1");
+        assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), payload);
+    }
+
+    #[test]
+    fn the_run_level_posts_the_dry_run() {
+        let (url, rx) = server("200 OK", DRY);
+        let c = GatewayClient::new(&url, Some("t"));
+        ws::as_effective(&c.workspace_dry_run(None).unwrap()).unwrap();
+        let (line, body) = rx.recv().unwrap();
+        assert_eq!(line, "POST /api/gateway/workspace/effective/me HTTP/1.1");
+        assert_eq!(
+            serde_json::from_str::<Value>(&body).unwrap(),
+            json!({"workspace": null})
+        );
+    }
+
+    #[test]
+    fn a_refusal_is_the_gateway_sentence() {
+        let (url, _rx) = server("400 Bad Request", ABOVE_CAP);
+        let c = GatewayClient::new(&url, Some("t"));
+        let err = c
+            .session_workspaces("s1", Some(&json!({"configured": false})))
+            .unwrap_err();
+        assert!(
+            err.starts_with("The gateway allows this workspace read-only: "),
+            "{err}"
+        );
+    }
+}
