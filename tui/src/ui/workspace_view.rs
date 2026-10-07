@@ -54,6 +54,8 @@ pub enum WsAct {
     Add,
     /// Opens "My default workspaces" (session level only).
     MyDefault,
+    /// The effective line (reachable so it scrolls into view; Enter does nothing).
+    Summary,
 }
 
 /// One chooser as the screen reads it.
@@ -176,7 +178,7 @@ pub fn ensure_loaded(store: Store, ctx: &UiCtx, host: &Host, hv: &HostView) {
     }
     let in_flight = store
         .workspaces
-        .with_untracked(|w| w.loading.iter().any(|k| *k == key));
+        .with_untracked(|w| w.loading.contains(&key));
     if in_flight {
         return;
     }
@@ -199,7 +201,11 @@ fn faint(text: impl Into<String>) -> CardLine {
 
 fn status_line(data: &WsData, scope: &str, key: &str) -> Option<CardLine> {
     data.status_of(scope, key).map(|s| {
-        CardLine::new(s.text.clone(), if s.error { Ink::Error } else { Ink::Faint }).indent(2)
+        CardLine::new(
+            s.text.clone(),
+            if s.error { Ink::Error } else { Ink::Faint },
+        )
+        .indent(2)
     })
 }
 
@@ -226,15 +232,17 @@ fn options_line(current: Mode, modes: &[Mode], unavailable: &dyn Fn(Mode) -> boo
 pub fn chooser_cards(hv: &HostView, data: &WsData) -> (Vec<Card>, Vec<WsAct>) {
     let mut cards: Vec<Card> = Vec::new();
     let mut acts: Vec<WsAct> = Vec::new();
-    let title = match hv.level {
-        Level::Account => ws::MY_DEFAULT_WORKSPACES,
-        _ => ws::TITLE,
-    };
+    // The kit chooser titles itself "Workspaces" at every level (the account
+    // screen's own title is "My default workspaces").
     cards.push(Card::fixed(vec![
-        CardLine::new(title, Ink::Title),
+        CardLine::new(ws::TITLE, Ink::Title),
         CardLine::new(hv.level.help(), Ink::Faint),
     ]));
-    if let Some(err) = hv.load_error.as_ref().or(hv.unavailable.as_ref().filter(|_| hv.state.is_none())) {
+    if let Some(err) = hv
+        .load_error
+        .as_ref()
+        .or(hv.unavailable.as_ref().filter(|_| hv.state.is_none()))
+    {
         cards.push(Card::fixed(vec![CardLine::new(err.clone(), Ink::Error)]));
         return (cards, acts);
     }
@@ -246,7 +254,11 @@ pub fn chooser_cards(hv: &HostView, data: &WsData) -> (Vec<Card>, Vec<WsAct>) {
     let blocked = hv.unavailable.is_some();
     let busy = data.busy.as_ref().is_some_and(|(s, _)| *s == hv.scope);
     let scope = hv.scope.as_str();
-    let push = |cards: &mut Vec<Card>, acts: &mut Vec<WsAct>, mut lines: Vec<CardLine>, key: &str, act: Option<WsAct>| {
+    let push = |cards: &mut Vec<Card>,
+                acts: &mut Vec<WsAct>,
+                mut lines: Vec<CardLine>,
+                key: &str,
+                act: Option<WsAct>| {
         if let Some(st) = status_line(data, scope, key) {
             lines.push(st);
         }
@@ -258,7 +270,10 @@ pub fn chooser_cards(hv: &HostView, data: &WsData) -> (Vec<Card>, Vec<WsAct>) {
             _ => cards.push(Card::fixed(lines)),
         }
     };
-    cards.push(Card::fixed(vec![CardLine::new(view.gateway_line.clone(), Ink::Faint)]));
+    cards.push(Card::fixed(vec![CardLine::new(
+        view.gateway_line.clone(),
+        Ink::Faint,
+    )]));
     if let Some(reason) = &hv.unavailable {
         cards.push(Card::fixed(vec![CardLine::new(reason.clone(), Ink::Error)]));
     }
@@ -268,7 +283,11 @@ pub fn chooser_cards(hv: &HostView, data: &WsData) -> (Vec<Card>, Vec<WsAct>) {
     // The follow switch.
     let on = view.following;
     let switch = CardLine::new(
-        format!("{} {}", if on { "[x]" } else { "[ ]" }, hv.level.follow_label()),
+        format!(
+            "{} {}",
+            if on { "[x]" } else { "[ ]" },
+            hv.level.follow_label()
+        ),
         if view.locked || blocked {
             Ink::Faint
         } else if on {
@@ -277,11 +296,13 @@ pub fn chooser_cards(hv: &HostView, data: &WsData) -> (Vec<Card>, Vec<WsAct>) {
             Ink::Text
         },
     )
-    .right(if busy && data.busy.as_ref().is_some_and(|(_, k)| k == "follow") {
-        "…"
-    } else {
-        ""
-    });
+    .right(
+        if busy && data.busy.as_ref().is_some_and(|(_, k)| k == "follow") {
+            "…"
+        } else {
+            ""
+        },
+    );
     push(
         &mut cards,
         &mut acts,
@@ -326,14 +347,20 @@ pub fn chooser_cards(hv: &HostView, data: &WsData) -> (Vec<Card>, Vec<WsAct>) {
     };
     let allowed = view.allowed();
     if !allowed.is_empty() {
-        cards.push(Card::fixed(vec![CardLine::new(ws::ALLOWED_TITLE, Ink::Title)]));
+        cards.push(Card::fixed(vec![CardLine::new(
+            ws::ALLOWED_TITLE,
+            Ink::Title,
+        )]));
         for row in &allowed {
             row_card(&mut cards, &mut acts, row);
         }
     }
     let refused = view.refused();
     if !refused.is_empty() {
-        cards.push(Card::fixed(vec![CardLine::new(ws::DENIED_TITLE, Ink::Title)]));
+        cards.push(Card::fixed(vec![CardLine::new(
+            ws::DENIED_TITLE,
+            Ink::Title,
+        )]));
         for row in &refused {
             row_card(&mut cards, &mut acts, row);
         }
@@ -366,16 +393,33 @@ pub fn chooser_cards(hv: &HostView, data: &WsData) -> (Vec<Card>, Vec<WsAct>) {
     if matches!(hv.level, Level::Session | Level::Run) {
         cards.push(Card::note(ws::PRIVATE_NOTE));
     }
-    cards.push(Card::fixed(vec![CardLine::new(view.summary.clone(), Ink::Accent)]));
+    // The effective line, verbatim; the cursor can land on it so it always
+    // scrolls into view (nothing happens on Enter).
+    cards.push(Card::new(vec![CardLine::new(
+        view.summary.clone(),
+        Ink::Accent,
+    )]));
+    acts.push(WsAct::Summary);
     if hv.level == Level::Session {
-        cards.push(Card::new(vec![CardLine::new(ws::MY_DEFAULT_WORKSPACES, Ink::Text).right("Enter opens")]));
+        cards.push(Card::new(vec![CardLine::new(
+            ws::MY_DEFAULT_WORKSPACES,
+            Ink::Text,
+        )
+        .right("Enter opens")]));
         acts.push(WsAct::MyDefault);
     }
     (cards, acts)
 }
 
 /// Send one change of `host` (the full body).
-fn submit(store: Store, ctx: &UiCtx, host: &Host, hv: &HostView, payload: serde_json::Value, key: &str) {
+fn submit(
+    store: Store,
+    ctx: &UiCtx,
+    host: &Host,
+    hv: &HostView,
+    payload: serde_json::Value,
+    key: &str,
+) {
     store.workspaces.update(|w| {
         w.busy = Some((hv.scope.clone(), key.to_string()));
         if w.status.as_ref().is_some_and(|s| s.scope == hv.scope) {
@@ -455,13 +499,25 @@ pub fn current(store: Store, host: &Host) -> HostView {
 }
 
 /// Run one chooser control; `back` reopens the screen it came from.
-pub fn run_ws_act(cx: Scope, store: Store, ctx: &UiCtx, host: &Host, act: WsAct, back: Rc<dyn Fn()>) {
+pub fn run_ws_act(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    host: &Host,
+    act: WsAct,
+    back: Rc<dyn Fn()>,
+) {
+    if act == WsAct::Summary {
+        return;
+    }
     if act == WsAct::MyDefault {
         open_account_screen(cx, store, ctx, back);
         return;
     }
     let hv = current(store, host);
-    let Some(state) = hv.state.clone() else { return };
+    let Some(state) = hv.state.clone() else {
+        return;
+    };
     if hv.unavailable.is_some() || store.workspaces.with_untracked(|w| w.busy.is_some()) {
         return;
     }
@@ -493,12 +549,19 @@ pub fn run_ws_act(cx: Scope, store: Store, ctx: &UiCtx, host: &Host, act: WsAct,
         );
     };
     match act {
-        WsAct::MyDefault => {}
+        WsAct::MyDefault | WsAct::Summary => {}
         WsAct::Follow => {
             if view.locked {
                 return;
             }
-            submit(store, ctx, host, &hv, ws::follow_payload(&state, !view.following), "follow");
+            submit(
+                store,
+                ctx,
+                host,
+                &hv,
+                ws::follow_payload(&state, !view.following),
+                "follow",
+            );
         }
         WsAct::Posture => {
             if view.following || view.locked {
@@ -508,8 +571,12 @@ pub fn run_ws_act(cx: Scope, store: Store, ctx: &UiCtx, host: &Host, act: WsAct,
                 .iter()
                 .map(|p| format!("{} — {}", p.label(), p.help()))
                 .collect();
-            let start = Posture::ALL.iter().position(|p| *p == view.posture).unwrap_or(0);
-            let (ctx2, host2, hv2, policy) = (ctx.clone(), host.clone(), hv.clone(), state.policy.clone());
+            let start = Posture::ALL
+                .iter()
+                .position(|p| *p == view.posture)
+                .unwrap_or(0);
+            let (ctx2, host2, hv2, policy) =
+                (ctx.clone(), host.clone(), hv.clone(), state.policy.clone());
             pick(
                 ws::POSTURE_LABEL.to_string(),
                 labels,
@@ -517,16 +584,26 @@ pub fn run_ws_act(cx: Scope, store: Store, ctx: &UiCtx, host: &Host, act: WsAct,
                 Rc::new(move |ix| {
                     let p = Posture::ALL[ix.min(1)];
                     if p != policy.posture {
-                        submit(store, &ctx2, &host2, &hv2, ws::posture_payload(&policy, p), "posture");
+                        submit(
+                            store,
+                            &ctx2,
+                            &host2,
+                            &hv2,
+                            ws::posture_payload(&policy, p),
+                            "posture",
+                        );
                     }
                 }),
             );
         }
         WsAct::EverythingElse => {
-            let Some((mode, true)) = view.everything_else else { return };
+            let Some((mode, true)) = view.everything_else else {
+                return;
+            };
             let modes = [Mode::Rw, Mode::Ro];
             let start = modes.iter().position(|m| *m == mode).unwrap_or(0);
-            let (ctx2, host2, hv2, policy) = (ctx.clone(), host.clone(), hv.clone(), state.policy.clone());
+            let (ctx2, host2, hv2, policy) =
+                (ctx.clone(), host.clone(), hv.clone(), state.policy.clone());
             pick(
                 format!("{} {}", ws::ACCESS_LABEL, ws::EVERYTHING_ELSE),
                 modes.iter().map(|m| m.label().to_string()).collect(),
@@ -547,7 +624,12 @@ pub fn run_ws_act(cx: Scope, store: Store, ctx: &UiCtx, host: &Host, act: WsAct,
             );
         }
         WsAct::Mode(path) => {
-            let Some(row) = view.rows.iter().find(|r| r.path == path && r.editable).cloned() else {
+            let Some(row) = view
+                .rows
+                .iter()
+                .find(|r| r.path == path && r.editable)
+                .cloned()
+            else {
                 return;
             };
             let mut labels: Vec<String> = Mode::ALL
@@ -559,14 +641,22 @@ pub fn run_ws_act(cx: Scope, store: Store, ctx: &UiCtx, host: &Host, act: WsAct,
                 .collect();
             labels.push(format!("{} {}", ws::REMOVE, row.path));
             let start = Mode::ALL.iter().position(|m| *m == row.mode).unwrap_or(0);
-            let (ctx2, host2, hv2, policy) = (ctx.clone(), host.clone(), hv.clone(), state.policy.clone());
+            let (ctx2, host2, hv2, policy) =
+                (ctx.clone(), host.clone(), hv.clone(), state.policy.clone());
             pick(
                 format!("{} {}", ws::ACCESS_LABEL, row.path),
                 labels,
                 start,
                 Rc::new(move |ix| {
                     if ix >= Mode::ALL.len() {
-                        submit(store, &ctx2, &host2, &hv2, ws::remove_payload(&policy, &row.path), &row.path);
+                        submit(
+                            store,
+                            &ctx2,
+                            &host2,
+                            &hv2,
+                            ws::remove_payload(&policy, &row.path),
+                            &row.path,
+                        );
                         return;
                     }
                     let m = Mode::ALL[ix];
@@ -576,7 +666,14 @@ pub fn run_ws_act(cx: Scope, store: Store, ctx: &UiCtx, host: &Host, act: WsAct,
                         return;
                     }
                     if m != row.mode {
-                        submit(store, &ctx2, &host2, &hv2, ws::mode_payload(&policy, &row.path, m), &row.path);
+                        submit(
+                            store,
+                            &ctx2,
+                            &host2,
+                            &hv2,
+                            ws::mode_payload(&policy, &row.path, m),
+                            &row.path,
+                        );
                     }
                 }),
             );
@@ -585,7 +682,8 @@ pub fn run_ws_act(cx: Scope, store: Store, ctx: &UiCtx, host: &Host, act: WsAct,
             if !view.can_add {
                 return;
             }
-            let (ctx2, host2, hv2, policy) = (ctx.clone(), host.clone(), hv.clone(), state.policy.clone());
+            let (ctx2, host2, hv2, policy) =
+                (ctx.clone(), host.clone(), hv.clone(), state.policy.clone());
             let back2 = back.clone();
             crate::ui::automations_view::open_text(
                 cx,
@@ -595,7 +693,14 @@ pub fn run_ws_act(cx: Scope, store: Store, ctx: &UiCtx, host: &Host, act: WsAct,
                 String::new(),
                 Rc::new(move |path: String| {
                     if !path.trim().is_empty() {
-                        submit(store, &ctx2, &host2, &hv2, ws::add_payload(&policy, &path), "add");
+                        submit(
+                            store,
+                            &ctx2,
+                            &host2,
+                            &hv2,
+                            ws::add_payload(&policy, &path),
+                            "add",
+                        );
                     }
                     back2();
                 }),
@@ -624,7 +729,9 @@ pub fn open_screen(
     let size = modal_size(120, 40);
     ctx.open_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
-        let cursor = mcx.signal(0usize);
+        // With a "Continue" card the cursor starts on it (Enter accepts the
+        // shown workspaces); `usize::MAX` = the last card, clamped on use.
+        let cursor = mcx.signal(if next.is_some() { usize::MAX } else { 0usize });
         // Load what the chooser needs (and re-load after a change elsewhere).
         {
             let ctx = ctx2.clone();
@@ -634,7 +741,9 @@ pub fn open_screen(
                     store.conn.get(),
                     crate::store::Conn::Ok | crate::store::Conn::Unknown
                 );
-                let hv = store.workspaces.with(|w| host_view(&host, w, connected, None));
+                let hv = store
+                    .workspaces
+                    .with(|w| host_view(&host, w, connected, None));
                 ensure_loaded(store, &ctx, &host, &hv);
             });
         }
@@ -643,7 +752,11 @@ pub fn open_screen(
             let next = next.clone();
             Rc::new(move |tracked: bool| -> (Vec<Card>, Vec<Option<WsAct>>) {
                 let connected = matches!(
-                    if tracked { store.conn.get() } else { store.conn.get_untracked() },
+                    if tracked {
+                        store.conn.get()
+                    } else {
+                        store.conn.get_untracked()
+                    },
                     crate::store::Conn::Ok | crate::store::Conn::Unknown
                 );
                 let read = |w: &WsData| {
@@ -657,7 +770,9 @@ pub fn open_screen(
                 };
                 let mut acts: Vec<Option<WsAct>> = acts.into_iter().map(Some).collect();
                 if let Some((label, _)) = &next {
-                    cards.push(Card::new(vec![CardLine::new(label.clone(), Ink::Accent).right("Enter")]));
+                    cards.push(Card::new(vec![
+                        CardLine::new(label.clone(), Ink::Accent).right("Enter")
+                    ]));
                     acts.push(None);
                 }
                 (cards, acts)
@@ -671,7 +786,8 @@ pub fn open_screen(
             let back = back.clone();
             Rc::new(move || {
                 let (_, acts) = cards_of(false);
-                match acts.get(cursor.get_untracked()).cloned() {
+                let at = cursor.get_untracked().min(acts.len().saturating_sub(1));
+                match acts.get(at).cloned() {
                     Some(Some(act)) => {
                         let reopen: Rc<dyn Fn()> = {
                             let ctx = ctx.clone();
@@ -680,7 +796,15 @@ pub fn open_screen(
                             let next = next.clone();
                             let back = back.clone();
                             Rc::new(move || {
-                                open_screen(cx, store, &ctx, host.clone(), title.clone(), next.clone(), back.clone())
+                                open_screen(
+                                    cx,
+                                    store,
+                                    &ctx,
+                                    host.clone(),
+                                    title.clone(),
+                                    next.clone(),
+                                    back.clone(),
+                                )
                             })
                         };
                         run_ws_act(cx, store, &ctx, &host, act, reopen);
@@ -699,7 +823,10 @@ pub fn open_screen(
             move |delta: i64| {
                 let n = cards_of(false).1.len();
                 if n > 0 {
-                    cursor.update(|c| *c = (*c as i64 + delta).clamp(0, n as i64 - 1) as usize);
+                    cursor.update(|c| {
+                        let at = (*c).min(n - 1) as i64;
+                        *c = (at + delta).clamp(0, n as i64 - 1) as usize
+                    });
                 }
             }
         };
@@ -768,7 +895,8 @@ mod tests {
     use super::*;
     use serde_json::Value;
 
-    const SESSION_DEFAULT: &str = include_str!("../../tests/fixtures/workspaces/session_get_default.json");
+    const SESSION_DEFAULT: &str =
+        include_str!("../../tests/fixtures/workspaces/session_get_default.json");
     const SESSION_CONFIGURED: &str =
         include_str!("../../tests/fixtures/workspaces/session_get_configured.json");
     const DRY_DEFAULT: &str = include_str!("../../tests/fixtures/workspaces/dryrun_default.json");
@@ -797,21 +925,35 @@ mod tests {
         let hv = host_view(&Host::Session("s1".into()), &data, true, None);
         let (cards, acts) = chooser_cards(&hv, &data);
         let t = texts(&cards);
-        let at = |needle: &str| t.iter().position(|l| l.starts_with(needle)).unwrap_or_else(|| panic!("{needle} in {t:#?}"));
+        let at = |needle: &str| {
+            t.iter()
+                .position(|l| l.starts_with(needle))
+                .unwrap_or_else(|| panic!("{needle} in {t:#?}"))
+        };
         assert!(at("Workspaces |") < at("Gateway: "));
         assert!(at("Gateway: ") < at("[ ] Use my default"));
         assert!(at("[ ] Use my default") < at("Workspaces agents may use"));
         assert!(at("Workspaces agents may use") < at("Allowed workspaces"));
         assert!(at("Allowed workspaces") < at("Add a workspace path"));
         assert!(at("Add a workspace path") < at("The private workspace of each run"));
-        assert!(at("The private workspace of each run") < at("Deny everything, allow listed workspaces · "));
-        assert!(t.iter().any(|l| l == "The gateway allows this workspace read-only | "));
-        assert!(t.iter().any(|l| l.starts_with("(-) Read & write  (•) Read-only  ( ) Refused")));
+        assert!(
+            at("The private workspace of each run")
+                < at("Deny everything, allow listed workspaces · ")
+        );
+        assert!(t
+            .iter()
+            .any(|l| l == "The gateway allows this workspace read-only | "));
+        assert!(t
+            .iter()
+            .any(|l| l.starts_with("(-) Read & write  (•) Read-only  ( ) Refused")));
         assert_eq!(acts.first(), Some(&WsAct::Follow));
         assert_eq!(acts.last(), Some(&WsAct::MyDefault));
         assert!(acts.contains(&WsAct::Posture));
         assert!(acts.contains(&WsAct::Add));
-        assert_eq!(acts.iter().filter(|a| matches!(a, WsAct::Mode(_))).count(), 2);
+        assert_eq!(
+            acts.iter().filter(|a| matches!(a, WsAct::Mode(_))).count(),
+            2
+        );
     }
 
     #[test]
@@ -822,8 +964,10 @@ mod tests {
         let t = texts(&cards);
         assert!(t.iter().any(|l| l == "[x] Use my default | "));
         assert!(t.iter().any(|l| l.starts_with("Refused workspaces")));
-        assert!(t.iter().any(|l| l.starts_with("Everything else | Read & write")));
-        assert_eq!(acts, vec![WsAct::Follow, WsAct::MyDefault]);
+        assert!(t
+            .iter()
+            .any(|l| l.starts_with("Everything else | Read & write")));
+        assert_eq!(acts, vec![WsAct::Follow, WsAct::Summary, WsAct::MyDefault]);
     }
 
     #[test]
@@ -833,7 +977,9 @@ mod tests {
         data.status = Some(ws::Status {
             scope: "session:s1".into(),
             key: path.clone(),
-            text: ws::refusal("The gateway allows this workspace read-only: /Users/ada/home/Pictures."),
+            text: ws::refusal(
+                "The gateway allows this workspace read-only: /Users/ada/home/Pictures.",
+            ),
             error: true,
         });
         let hv = host_view(&Host::Session("s1".into()), &data, true, None);
@@ -846,36 +992,56 @@ mod tests {
         assert_eq!(card.lines.last().unwrap().ink, Ink::Error);
         let off = host_view(&Host::Session("s1".into()), &data, false, None);
         let (cards, acts) = chooser_cards(&off, &data);
-        assert!(texts(&cards).iter().any(|l| l.starts_with(ws::DISCONNECTED)));
-        assert_eq!(acts, vec![WsAct::MyDefault]);
+        assert!(texts(&cards)
+            .iter()
+            .any(|l| l.starts_with(ws::DISCONNECTED)));
+        assert_eq!(acts, vec![WsAct::Summary, WsAct::MyDefault]);
     }
 
     #[test]
     fn hosts_ask_for_what_they_miss() {
         let data = WsData::default();
         assert_eq!(
-            host_view(&Host::Session("s1".into()), &data, true, None).needs.as_deref(),
+            host_view(&Host::Session("s1".into()), &data, true, None)
+                .needs
+                .as_deref(),
             Some("session:s1")
         );
-        assert_eq!(host_view(&Host::Account, &data, true, None).needs.as_deref(), Some("account"));
         assert_eq!(
-            host_view(&Host::NewAutomation, &data, true, None).needs.as_deref(),
+            host_view(&Host::Account, &data, true, None)
+                .needs
+                .as_deref(),
+            Some("account")
+        );
+        assert_eq!(
+            host_view(&Host::NewAutomation, &data, true, None)
+                .needs
+                .as_deref(),
             Some("run:null")
         );
         let loaded = WsData {
-            run: Some(("null".into(), Ok(ws::as_effective(&v(DRY_DEFAULT)).unwrap()))),
+            run: Some((
+                "null".into(),
+                Ok(ws::as_effective(&v(DRY_DEFAULT)).unwrap()),
+            )),
             ..WsData::default()
         };
         let hv = host_view(&Host::NewAutomation, &loaded, true, None);
         assert!(hv.needs.is_none());
         let (cards, acts) = chooser_cards(&hv, &loaded);
         assert!(texts(&cards).iter().any(|l| l == "[x] Use my default | "));
-        assert_eq!(acts, vec![WsAct::Follow], "the run level has no account link");
+        assert_eq!(
+            acts,
+            vec![WsAct::Follow, WsAct::Summary],
+            "the run level has no account link"
+        );
         let auto = host_view(
             &Host::Automation("a1".into()),
             &loaded,
             true,
-            Some(&serde_json::json!({"workspace": {"posture": "allowed_only", "default_mode": "rw", "folders": []}})),
+            Some(
+                &serde_json::json!({"workspace": {"posture": "allowed_only", "default_mode": "rw", "folders": []}}),
+            ),
         );
         assert!(auto.needs.as_deref().unwrap().starts_with("run:{"));
     }

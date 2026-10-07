@@ -80,7 +80,12 @@ impl GatewayClient {
     /// One workspace request: the parsed answer, or the gateway's sentence
     /// (`detail.message` of a refusal, `detail` of a 403) / the transport
     /// reason.
-    fn workspace_call(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
+    fn workspace_call(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+    ) -> Result<Value, String> {
         let mut req = self.with_auth(
             self.agent
                 .request(method, &self.url(path))
@@ -119,7 +124,11 @@ impl GatewayClient {
     }
 
     /// `GET|PUT /sessions/{id}/workspaces`.
-    pub fn session_workspaces(&self, session_id: &str, payload: Option<&Value>) -> Result<Value, String> {
+    pub fn session_workspaces(
+        &self,
+        session_id: &str,
+        payload: Option<&Value>,
+    ) -> Result<Value, String> {
         let path = format!("/sessions/{}/workspaces", url_encode(session_id));
         match payload {
             Some(p) => self.workspace_call("PUT", &path, Some(p)),
@@ -186,7 +195,11 @@ fn run(client: &GatewayClient, wake: &WakeHandle, store: Store, cmd: WsCmd) {
             let out = client
                 .session_workspaces(&session_id, Some(&payload))
                 .and_then(|v| ws::as_state(&v));
-            let st = status(&scope, &key, &out.as_ref().map(|_| ()).map_err(Clone::clone));
+            let st = status(
+                &scope,
+                &key,
+                &out.as_ref().map(|_| ()).map_err(Clone::clone),
+            );
             wake.post(move || {
                 store.workspaces.update(|w| {
                     if let Ok(state) = out {
@@ -213,7 +226,11 @@ fn run(client: &GatewayClient, wake: &WakeHandle, store: Store, cmd: WsCmd) {
             let out = client
                 .account_workspaces(Some(&payload))
                 .and_then(|v| ws::as_state(&v));
-            let st = status(ACCOUNT_SCOPE, &key, &out.as_ref().map(|_| ()).map_err(Clone::clone));
+            let st = status(
+                ACCOUNT_SCOPE,
+                &key,
+                &out.as_ref().map(|_| ()).map_err(Clone::clone),
+            );
             let changed = out.is_ok();
             wake.post(move || {
                 store.workspaces.update(|w| {

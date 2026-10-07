@@ -1186,7 +1186,7 @@ pub fn open_schedule(cx: Scope, store: Store, ctx: &UiCtx, seed: Option<String>)
     open_text(
         cx,
         ctx,
-        "new automation — 1/4 the task".into(),
+        "new automation — 1/6 the task".into(),
         vec![
             format!("Runs {what} on a schedule, on the gateway (every client sees it)."),
             "The task below is sent as the prompt of every run.".into(),
@@ -1236,7 +1236,7 @@ fn schedule_when(
         cx,
         ctx,
         Picker {
-            title: "new automation — 2/4 when (fixed UTC intervals)".into(),
+            title: "new automation — 2/6 when (fixed UTC intervals)".into(),
             labels,
             live: None,
             start: 4,
@@ -1266,9 +1266,9 @@ fn schedule_when(
                     cx,
                     &ctx2,
                     if once {
-                        "new automation — 2/4 once at (UTC)".into()
+                        "new automation — 2/6 once at (UTC)".into()
                     } else {
-                        "new automation — 2/4 every (UTC)".into()
+                        "new automation — 2/6 every (UTC)".into()
                     },
                     vec![if once {
                         "A date and time read as UTC: YYYY-MM-DD HH:MM".into()
@@ -1321,7 +1321,7 @@ fn schedule_context(
         cx,
         ctx,
         Picker {
-            title: format!("new automation — 3/4 context · {preview}"),
+            title: format!("new automation — 3/6 context · {preview}"),
             labels: vec![
                 auto::context_label("independent").to_string(),
                 auto::context_label("growing").to_string(),
@@ -1357,7 +1357,7 @@ fn schedule_tools(
         cx,
         ctx,
         Picker {
-            title: "new automation — 4/4 tools (Enter creates it)".into(),
+            title: "new automation — 4/6 tools".into(),
             labels: vec![
                 format!(
                     "Run without asking — {}",
@@ -1377,32 +1377,276 @@ fn schedule_tools(
             on_choose: Box::new(move |ix| {
                 let mut form = form.clone();
                 form.tool_approval = if ix == 1 { "ask" } else { "auto" }.into();
-                // One request id per distinct body: a retry of the same body
-                // after a transport failure is answered idempotently.
-                let probe = auto::build_create_request(&form, Some(target.clone()), "");
-                match probe {
-                    Err(errors) => store.notify(format!("not created: {}", errors.join(" "))),
-                    Ok(body) => {
-                        let key = format!("create:{body}");
-                        let mut request_id = String::new();
-                        store.automations.update(|v| {
-                            request_id = v.ids.id_for(&key, crate::config::mint_session_id);
-                            v.busy = true;
-                            v.error.clear();
-                            v.notice = "creating the automation…".into();
-                        });
-                        let mut body = body;
-                        body["request_id"] = serde_json::json!(request_id);
-                        send(&ctx2, AutoCmd::Create { body });
-                        // The list opens now; the new automation opens when
-                        // the gateway answers (`wire_automations`).
-                        open_automations(cx, store, &ctx2);
-                    }
-                }
+                schedule_workspaces(cx, store, &ctx2, form, target.clone());
             }),
             on_cancel: Some(Box::new(move || cancel_ctx.close_modal())),
         },
     );
+}
+
+/// The dialog's visible "Workspaces" section (R13.2 / R14.4): the kit
+/// chooser at the run level, starting from "Use my default"; each change is
+/// dry-run by the gateway (a refusal shows its sentence + "Not saved.").
+fn schedule_workspaces(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    form: auto::CreateForm,
+    target: serde_json::Value,
+) {
+    store.workspaces.update(|w| {
+        w.draft = form.workspace.clone();
+        if w.status
+            .as_ref()
+            .is_some_and(|s| s.scope == crate::gateway::workspaces::RUN_SCOPE)
+        {
+            w.status = None;
+        }
+    });
+    let ctx2 = ctx.clone();
+    let cancel_ctx = ctx.clone();
+    let next: Rc<dyn Fn()> = Rc::new(move || {
+        let mut form = form.clone();
+        form.workspace = store.workspaces.with_untracked(|w| w.draft.clone());
+        schedule_limits(cx, store, &ctx2, form, target.clone(), Vec::new());
+    });
+    crate::ui::workspace_view::open_screen(
+        cx,
+        store,
+        ctx,
+        crate::ui::workspace_view::Host::NewAutomation,
+        format!("new automation — 5/6 {}", crate::workspaces::TITLE),
+        Some((format!("Continue — {LIMITS_TITLE}"), next)),
+        Rc::new(move || cancel_ctx.close_modal()),
+    );
+}
+
+/// The kit dialog's "Title and limits" section, visible (no Advanced).
+pub const LIMITS_TITLE: &str = "Title and limits";
+
+/// One row of the "Title and limits" step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimitRow {
+    Title,
+    Start,
+    Count,
+    Until,
+    Create,
+}
+
+/// Pure: the "Title and limits" step's cards (the kit's labels) and what
+/// each selectable card does.
+pub fn limits_cards(form: &auto::CreateForm, errors: &[String]) -> (Vec<Card>, Vec<LimitRow>) {
+    let mut cards = vec![Card::fixed(vec![CardLine::new(LIMITS_TITLE, Ink::Title)])];
+    let mut acts = Vec::new();
+    let value = |v: &str, empty: &str| -> CardLine {
+        if v.trim().is_empty() {
+            CardLine::new(empty.to_string(), Ink::Faint).indent(2)
+        } else {
+            CardLine::new(v.trim().to_string(), Ink::Text).indent(2)
+        }
+    };
+    cards.push(Card::new(vec![
+        CardLine::new("Title", Ink::Text),
+        value(&form.title, "Defaults to the task's first line"),
+    ]));
+    acts.push(LimitRow::Title);
+    if matches!(form.when, auto::When::Every { .. }) {
+        cards.push(Card::new(vec![
+            CardLine::new("First run at (UTC; empty = now)", Ink::Text),
+            value(&form.start_at, "now"),
+        ]));
+        acts.push(LimitRow::Start);
+        cards.push(Card::new(vec![
+            CardLine::new("Stop after this many runs", Ink::Text),
+            value(&form.count, "no limit"),
+        ]));
+        acts.push(LimitRow::Count);
+        cards.push(Card::new(vec![
+            CardLine::new("Stop at (UTC)", Ink::Text),
+            value(&form.until, "no end"),
+        ]));
+        acts.push(LimitRow::Until);
+    }
+    let preview = auto::schedule_preview(form);
+    if !preview.is_empty() {
+        cards.push(Card::note(preview));
+    }
+    for e in errors {
+        cards.push(Card::fixed(vec![CardLine::new(e.clone(), Ink::Error)]));
+    }
+    cards.push(Card::new(vec![CardLine::new(
+        "Create automation",
+        Ink::Accent,
+    )
+    .right("Enter")]));
+    acts.push(LimitRow::Create);
+    (cards, acts)
+}
+
+const LIMITS_HINTS: &[(&str, &str)] =
+    &[("↑↓", ""), ("Enter", "change / create"), ("Esc", "cancels")];
+
+/// Step 6: "Title and limits", then "Create automation".
+fn schedule_limits(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    form: auto::CreateForm,
+    target: serde_json::Value,
+    errors: Vec<String>,
+) {
+    let ctx2 = ctx.clone();
+    let (cards0, _) = limits_cards(&form, &errors);
+    let rows: i32 = cards0.iter().map(|c| c.lines.len() as i32 + 1).sum();
+    let size = modal_size(100, rows + 8);
+    ctx.open_modal(cx, size, move |mcx| {
+        let t = abstracttui::app::current_theme().tokens;
+        let (_, acts0) = limits_cards(&form, &errors);
+        // The cursor starts on "Create automation" (Enter creates it).
+        let cursor = mcx.signal(acts0.len().saturating_sub(1));
+        let activate = {
+            let ctx = ctx2.clone();
+            let form = form.clone();
+            let target = target.clone();
+            let errors = errors.clone();
+            Rc::new(move || {
+                let (_, acts) = limits_cards(&form, &errors);
+                let Some(row) = acts.get(cursor.get_untracked()).copied() else {
+                    return;
+                };
+                let edit = |title: &str,
+                            info: &str,
+                            initial: String,
+                            apply: fn(&mut auto::CreateForm, String)| {
+                    let (ctx3, form3, target3) = (ctx.clone(), form.clone(), target.clone());
+                    let (ctx4, form4, target4, errors4) =
+                        (ctx.clone(), form.clone(), target.clone(), errors.clone());
+                    open_text(
+                        cx,
+                        &ctx,
+                        format!("new automation — 6/6 {title}"),
+                        vec![info.to_string()],
+                        initial,
+                        Rc::new(move |v: String| {
+                            let mut f = form3.clone();
+                            apply(&mut f, v.trim().to_string());
+                            schedule_limits(cx, store, &ctx3, f, target3.clone(), Vec::new());
+                        }),
+                        Rc::new(move || {
+                            schedule_limits(
+                                cx,
+                                store,
+                                &ctx4,
+                                form4.clone(),
+                                target4.clone(),
+                                errors4.clone(),
+                            )
+                        }),
+                    );
+                };
+                match row {
+                    LimitRow::Title => edit(
+                        "Title",
+                        "Defaults to the task's first line (at most 120 characters).",
+                        form.title.clone(),
+                        |f, v| f.title = v,
+                    ),
+                    LimitRow::Start => edit(
+                        "First run at (UTC; empty = now)",
+                        "A date and time read as UTC: YYYY-MM-DD HH:MM; empty = now.",
+                        form.start_at.clone(),
+                        |f, v| f.start_at = v,
+                    ),
+                    LimitRow::Count => edit(
+                        "Stop after this many runs",
+                        "A whole number of at least 1; empty = no limit.",
+                        form.count.clone(),
+                        |f, v| f.count = v,
+                    ),
+                    LimitRow::Until => edit(
+                        "Stop at (UTC)",
+                        "A date and time read as UTC: YYYY-MM-DD HH:MM; empty = no end.",
+                        form.until.clone(),
+                        |f, v| f.until = v,
+                    ),
+                    LimitRow::Create => create_automation(cx, store, &ctx, &form, &target),
+                }
+            })
+        };
+        let n = acts0.len();
+        let move_cursor = move |delta: i64| {
+            if n > 0 {
+                cursor.update(|c| *c = (*c as i64 + delta).clamp(0, n as i64 - 1) as usize);
+            }
+        };
+        let (form_v, errors_v) = (form.clone(), errors.clone());
+        Element::new()
+            .style(LayoutStyle::column().padding(Edges::all(1)))
+            .focusable()
+            .autofocus()
+            .shortcut(KeyChord::plain(Key::Escape), {
+                let ctx = ctx2.clone();
+                move |_| ctx.close_modal()
+            })
+            .shortcut(KeyChord::plain(Key::Up), move |_| move_cursor(-1))
+            .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
+            .shortcut(KeyChord::plain(Key::Enter), {
+                let a = activate.clone();
+                move |_| a()
+            })
+            .shortcut(KeyChord::plain(Key::Char(' ')), {
+                let a = activate.clone();
+                move |_| a()
+            })
+            .child(title_row(
+                &t,
+                format!("new automation — 6/6 {LIMITS_TITLE} (Enter creates it)"),
+            ))
+            .child(dyn_view(
+                LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)),
+                move || {
+                    let (cards, acts) = limits_cards(&form_v, &errors_v);
+                    draw_cards(cards, cursor.get().min(acts.len().saturating_sub(1)))
+                },
+            ))
+            .child(hint_bar(&t, LIMITS_HINTS, 8))
+            .build()
+    });
+}
+
+/// "Create automation": the exact create body (one request id per
+/// distinct body: a retry of the same body after a transport failure is
+/// answered idempotently), then the list opens.
+fn create_automation(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    form: &auto::CreateForm,
+    target: &serde_json::Value,
+) {
+    match auto::build_create_request(form, Some(target.clone()), "") {
+        Err(errors) => {
+            // Shown on the step itself (the kit lists the reasons above its buttons).
+            schedule_limits(cx, store, ctx, form.clone(), target.clone(), errors);
+        }
+        Ok(body) => {
+            let key = format!("create:{body}");
+            let mut request_id = String::new();
+            store.automations.update(|v| {
+                request_id = v.ids.id_for(&key, crate::config::mint_session_id);
+                v.busy = true;
+                v.error.clear();
+                v.notice = "creating the automation…".into();
+            });
+            let mut body = body;
+            body["request_id"] = serde_json::json!(request_id);
+            send(ctx, AutoCmd::Create { body });
+            // The list opens now; the new automation opens when the
+            // gateway answers (`wire_automations`).
+            open_automations(cx, store, ctx);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

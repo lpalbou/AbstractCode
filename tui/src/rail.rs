@@ -384,7 +384,10 @@ fn apply_workspace(next: &mut Map<String, Value>, value: Option<&crate::workspac
 
 /// The PATCH `changes` that set the automation's workspaces (one revision),
 /// or `None` when nothing would change.
-pub fn workspace_changes(target: &Value, value: Option<&crate::workspaces::RunValue>) -> Option<Value> {
+pub fn workspace_changes(
+    target: &Value,
+    value: Option<&crate::workspaces::RunValue>,
+) -> Option<Value> {
     let before = target.get("input_data").cloned().unwrap_or(json!({}));
     let mut after = obj(Some(&before));
     apply_workspace(&mut after, value);

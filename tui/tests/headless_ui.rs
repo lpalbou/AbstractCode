@@ -4310,13 +4310,21 @@ fn workspace_opens_the_conversation_chooser_read_from_the_gateway() {
     let frame = h.turn();
     assert!(h.ctx.modal_open(), "the rail opened");
     assert!(frame.contains("Workspace"), "{frame}");
-    assert!(frame.contains("Current workspace"), "the private workspace line stays: {frame}");
+    assert!(
+        frame.contains("Current workspace"),
+        "the private workspace line stays: {frame}"
+    );
     let sid = h.store.session_id.get_untracked();
     match h.find_cmd(|c| matches!(c, Cmd::Workspaces(_))) {
-        Some(Cmd::Workspaces(abstractcode::gateway::workspaces::WsCmd::LoadSession { session_id })) => {
+        Some(Cmd::Workspaces(abstractcode::gateway::workspaces::WsCmd::LoadSession {
+            session_id,
+        })) => {
             assert_eq!(session_id, sid, "GET /sessions/{{this session}}/workspaces")
         }
-        other => panic!("expected the session workspaces read, got {:?}", other.map(|_| "cmd")),
+        other => panic!(
+            "expected the session workspaces read, got {:?}",
+            other.map(|_| "cmd")
+        ),
     }
     // No access-mode modal and no allowed-path list anymore.
     assert!(!frame.contains("allowed paths"), "{frame}");

@@ -132,7 +132,15 @@ fn run(client: &GatewayClient, wake: &WakeHandle, store: Store, cmd: RailCmd) {
             expected_revision,
             changes,
         } => {
-            let _ = save_revision_now(client, wake, store, &id, &command_id, expected_revision, changes);
+            let _ = save_revision_now(
+                client,
+                wake,
+                store,
+                &id,
+                &command_id,
+                expected_revision,
+                changes,
+            );
         }
     }
 }

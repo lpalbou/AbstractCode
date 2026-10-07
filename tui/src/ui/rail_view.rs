@@ -817,6 +817,19 @@ fn workspace_cards(s: &Snap, is_auto: bool, cards: &mut Vec<Card>, acts: &mut Ve
     acts.extend(more_acts.into_iter().map(Act::Ws));
 }
 
+/// The command sandbox's sentence (the web's tooltip on the state badge),
+/// once under the tools it explains.
+fn push_sandbox_sentence(tools: &[&ToolInfo], cards: &mut Vec<Card>) {
+    if let Some(sentence) = tools
+        .iter()
+        .filter_map(|t| t.sandbox.as_ref())
+        .map(|sb| sb.sentence.clone())
+        .find(|s| !s.is_empty())
+    {
+        cards.push(Card::note(sentence));
+    }
+}
+
 /// A process-spawning tool's command-sandbox state on its card: the
 /// gateway's words ("Sandboxed to this run's workspaces", "Refused: no
 /// command sandbox on this host", "Not sandboxed: …"), nothing for every
@@ -893,6 +906,7 @@ fn tools_cards(s: &Snap, is_auto: bool, cards: &mut Vec<Card>, acts: &mut Vec<Ac
             cards.push(Card::new(lines));
             acts.push(Act::AToggleTool(t.name.clone()));
         }
+        push_sandbox_sentence(&available, cards);
     } else {
         let tier = crate::tool_policy::Tier::parse_or_default(&s.tier);
         cards.push(Card::new(vec![
@@ -925,18 +939,9 @@ fn tools_cards(s: &Snap, is_auto: bool, cards: &mut Vec<Card>, acts: &mut Vec<Ac
             cards.push(Card::new(lines));
             acts.push(Act::ToggleTool(t.name.clone()));
         }
+        push_sandbox_sentence(&available, cards);
         cards.push(Card::new(vec![row("More tool options", "/tools")]));
         acts.push(Act::ToolsModal);
-    }
-    // The command sandbox's sentence (the web's tooltip on the state badge),
-    // once under the tools it explains.
-    if let Some(sentence) = available
-        .iter()
-        .filter_map(|t| t.sandbox.as_ref())
-        .map(|sb| sb.sentence.clone())
-        .find(|s| !s.is_empty())
-    {
-        cards.push(Card::note(sentence));
     }
     if !gated.is_empty() {
         cards.push(Card::note(format!(
@@ -1085,7 +1090,8 @@ pub fn open_rail(cx: Scope, store: Store, ctx: &UiCtx, binding: Binding, panel: 
                     ),
                     Binding::Automation(id) => (
                         crate::ui::workspace_view::Host::Automation(id.clone()),
-                        crate::ui::workspace_view::automation_input(store, id, true).map(|(i, _)| i),
+                        crate::ui::workspace_view::automation_input(store, id, true)
+                            .map(|(i, _)| i),
                     ),
                 };
                 if matches!(binding, Binding::Automation(_)) && input.is_none() {
@@ -1533,7 +1539,11 @@ fn run_act(
                 Rc::new(move || reopen(cx, store, &ctx, &binding, panel))
             };
             // `d` on the switch = back to the default (the kit's follow ON).
-            let a = if reset { crate::ui::workspace_view::WsAct::Follow } else { a };
+            let a = if reset {
+                crate::ui::workspace_view::WsAct::Follow
+            } else {
+                a
+            };
             if reset {
                 let hv = crate::ui::workspace_view::current(store, &host);
                 if hv.state.as_ref().is_some_and(|st| !st.policy.configured) {

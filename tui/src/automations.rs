@@ -1243,6 +1243,16 @@ pub struct CreateForm {
     /// `auto` | `ask`.
     pub tool_approval: String,
     pub title: String,
+    /// "Title and limits" (repeating schedules only, the kit dialog's
+    /// fields): first run at (UTC; empty = now), stop after this many runs,
+    /// stop at (UTC). Typed as `YYYY-MM-DD HH:MM` / a whole number.
+    pub start_at: String,
+    pub count: String,
+    pub until: String,
+    /// The dialog's Workspaces section (R13.2 / R14.4): the run-level
+    /// payload stored as `target.input_data.workspace`; `None` = "Use my
+    /// default" (nothing sent).
+    pub workspace: Option<crate::workspaces::RunValue>,
 }
 
 impl Default for CreateForm {
@@ -1256,6 +1266,10 @@ impl Default for CreateForm {
             context: "independent".into(),
             tool_approval: "auto".into(),
             title: String::new(),
+            start_at: String::new(),
+            count: String::new(),
+            until: String::new(),
+            workspace: None,
         }
     }
 }
@@ -1316,12 +1330,59 @@ pub fn default_title(prompt: &str) -> String {
 
 /// "Runs every 24 hours (UTC), first run now." — or "" while incomplete.
 pub fn schedule_preview(form: &CreateForm) -> String {
-    match schedule_config(&form.when) {
+    match schedule_config_form(form) {
         Ok(config) => match form.when {
             When::Once { .. } => format!("Runs {}.", schedule_label(&config)),
-            When::Every { .. } => format!("Runs {}, first run now.", schedule_label(&config)),
+            When::Every { .. } => format!(
+                "Runs {}, first run {}.",
+                schedule_label(&config),
+                match config.get("start_at").and_then(Value::as_str) {
+                    Some(at) => format!("at {}", format_utc(at)),
+                    None => "now".into(),
+                }
+            ),
         },
         Err(_) => String::new(),
+    }
+}
+
+/// The schedule config with the dialog's limits (the kit's
+/// `scheduleConfigFrom`: start_at / count / until, repeating schedules only;
+/// the kit's sentences).
+pub fn schedule_config_form(form: &CreateForm) -> Result<Map<String, Value>, String> {
+    let mut config = schedule_config(&form.when)?;
+    if matches!(form.when, When::Once { .. }) {
+        return Ok(config);
+    }
+    let mut errors: Vec<&str> = Vec::new();
+    if !form.start_at.trim().is_empty() {
+        match utc_from_input(&form.start_at) {
+            Some(ts) => {
+                config.insert("start_at".into(), json!(ts));
+            }
+            None => errors.push("First run must be a date and time (UTC)."),
+        }
+    }
+    if !form.count.trim().is_empty() {
+        match form.count.trim().parse::<u64>() {
+            Ok(n) if n >= 1 => {
+                config.insert("count".into(), json!(n));
+            }
+            _ => errors.push("Maximum runs must be a whole number of at least 1."),
+        }
+    }
+    if !form.until.trim().is_empty() {
+        match utc_from_input(&form.until) {
+            Some(ts) => {
+                config.insert("until".into(), json!(ts));
+            }
+            None => errors.push("Stop at must be a date and time (UTC)."),
+        }
+    }
+    if errors.is_empty() {
+        Ok(config)
+    } else {
+        Err(errors.join(" "))
     }
 }
 
@@ -1378,7 +1439,7 @@ pub fn build_create_request(
     if form.tool_approval != "auto" && form.tool_approval != "ask" {
         errors.push("Tools must run without asking or ask each time.".into());
     }
-    let config = match schedule_config(&form.when) {
+    let config = match schedule_config_form(form) {
         Ok(c) => Some(c),
         Err(e) => {
             errors.push(e);
@@ -1398,6 +1459,14 @@ pub fn build_create_request(
         .as_object_mut()
         .expect("input_data is an object")
         .insert("prompt".into(), json!(prompt));
+    if let Some(ws) = &form.workspace {
+        // The Workspaces section's value rides the definition; the gateway
+        // stores it and clamps it to the eligible workspaces at each run.
+        let data = input.as_object_mut().expect("input_data is an object");
+        data.remove("workspace_allowed_paths");
+        data.remove("workspace_access_mode");
+        data.insert("workspace".into(), ws.to_json());
+    }
     Ok(json!({
         "request_id": request_id,
         "title": title,
@@ -2138,6 +2207,7 @@ mod tests {
             context: "growing".into(),
             tool_approval: "ask".into(),
             title: String::new(),
+            ..CreateForm::default()
         };
         let target = Some(json!({"flow_id": "@default", "interface": CODE_AGENT_INTERFACE}));
         let body = build_create_request(&form, target, "rid-1").unwrap();
@@ -2179,6 +2249,79 @@ mod tests {
         };
         let errs = build_create_request(&bad, None, "r").unwrap_err();
         assert_eq!(errs.len(), 3, "{errs:?}");
+    }
+
+    #[test]
+    fn title_and_limits_and_workspaces_ride_the_create_body() {
+        let form = CreateForm {
+            prompt: "check memory".into(),
+            title: "Memory".into(),
+            start_at: "2026-10-08 09:00".into(),
+            count: "3".into(),
+            until: "2026-10-31 18:00".into(),
+            workspace: Some(crate::workspaces::RunValue {
+                posture: crate::workspaces::Posture::AllowedOnly,
+                default_mode: crate::workspaces::Mode::Rw,
+                folders: vec![crate::workspaces::Rule {
+                    path: "/Users/ada/home/work".into(),
+                    mode: crate::workspaces::Mode::Ro,
+                }],
+            }),
+            ..CreateForm::default()
+        };
+        let body = build_create_request(
+            &form,
+            Some(json!({"bundle_ref": "b@1", "flow_id": "f"})),
+            "r",
+        )
+        .unwrap();
+        assert_eq!(body["title"], json!("Memory"));
+        assert_eq!(
+            body["trigger"]["config"],
+            json!({"every": "24h", "start_at": "2026-10-08T09:00:00Z", "count": 3, "until": "2026-10-31T18:00:00Z"})
+        );
+        assert_eq!(
+            body["target"]["input_data"]["workspace"],
+            json!({"posture": "allowed_only", "default_mode": "rw",
+                   "folders": [{"path": "/Users/ada/home/work", "mode": "ro"}]})
+        );
+        assert_eq!(
+            schedule_preview(&form),
+            "Runs every 24 hours (UTC) · 3 runs max · until 2026-10-31 18:00 UTC, first run at 2026-10-08 09:00 UTC."
+        );
+        // Use my default sends nothing workspace-shaped.
+        let plain = build_create_request(
+            &CreateForm {
+                workspace: None,
+                ..form.clone()
+            },
+            Some(json!({"flow_id": "f"})),
+            "r",
+        )
+        .unwrap();
+        assert!(plain["target"]["input_data"].get("workspace").is_none());
+        // The kit's sentences for a bad limit; a once schedule ignores the limits.
+        let bad = CreateForm {
+            count: "0".into(),
+            start_at: "tomorrow".into(),
+            ..form.clone()
+        };
+        let errs = build_create_request(&bad, Some(json!({"flow_id": "f"})), "r").unwrap_err();
+        assert_eq!(
+            errs,
+            vec!["First run must be a date and time (UTC). Maximum runs must be a whole number of at least 1.".to_string()]
+        );
+        let once = CreateForm {
+            when: When::Once {
+                at: "2026-10-09 10:00".into(),
+            },
+            ..bad
+        };
+        let body = build_create_request(&once, Some(json!({"flow_id": "f"})), "r").unwrap();
+        assert_eq!(
+            body["trigger"]["config"],
+            json!({"start_at": "2026-10-09T10:00:00Z"})
+        );
     }
 
     #[test]

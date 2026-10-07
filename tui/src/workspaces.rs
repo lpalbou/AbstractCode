@@ -34,7 +34,8 @@ use serde_json::{json, Map, Value};
 
 pub const TITLE: &str = "Workspaces";
 pub const GATEWAY_TITLE: &str = "Eligible workspaces";
-pub const GATEWAY_HELP: &str = "The workspaces accounts may choose from, and the most each one allows.";
+pub const GATEWAY_HELP: &str =
+    "The workspaces accounts may choose from, and the most each one allows.";
 pub const ACCOUNT_HELP: &str = "The workspaces this account's agents use, among the eligible ones.";
 pub const SESSION_HELP: &str = "The workspaces this conversation uses, among the eligible ones.";
 pub const RUN_HELP: &str = "The workspaces this run uses, among the eligible ones.";
@@ -43,7 +44,8 @@ pub const POSTURE_LABEL: &str = "Workspaces agents may use";
 pub const POSTURE_ALLOWED_ONLY: &str = "Deny everything, allow listed workspaces";
 pub const POSTURE_ALLOWED_ONLY_HELP: &str = "Agents may only work in the listed workspaces.";
 pub const POSTURE_ANY_EXCEPT_DENIED: &str = "Allow everything, refuse listed workspaces";
-pub const POSTURE_ANY_EXCEPT_DENIED_HELP: &str = "Agents may work in any workspace except the refused ones.";
+pub const POSTURE_ANY_EXCEPT_DENIED_HELP: &str =
+    "Agents may work in any workspace except the refused ones.";
 pub const ACCESS_LABEL: &str = "Permission";
 pub const ACCESS_READ: &str = "Read-only";
 pub const ACCESS_READ_WRITE: &str = "Read & write";
@@ -55,7 +57,8 @@ pub const ALLOWED_TITLE: &str = "Allowed workspaces";
 pub const DENIED_TITLE: &str = "Refused workspaces";
 pub const BUILTIN_REFUSED: &str = "Always refused: the gateway's own data and credentials";
 pub const EMPTY_ALLOWED: &str = "No workspace is listed: agents only use their private workspace.";
-pub const PRIVATE_NOTE: &str = "The private workspace of each run is always available, read & write.";
+pub const PRIVATE_NOTE: &str =
+    "The private workspace of each run is always available, read & write.";
 pub const ADD_PLACEHOLDER: &str = "Add a workspace path";
 pub const ADD: &str = "Add";
 pub const CHOOSE: &str = "Choose…";
@@ -353,7 +356,10 @@ pub fn as_policy(answer: &Value) -> Result<Policy, String> {
     if p.contains_key("shared_workspace") || answer.get("shared_workspace").is_some() {
         return Err(OLD_MODEL.into());
     }
-    let posture = p.get("posture").and_then(Value::as_str).and_then(Posture::parse);
+    let posture = p
+        .get("posture")
+        .and_then(Value::as_str)
+        .and_then(Posture::parse);
     let default_mode = access(p.get("default_mode"));
     let folders = rules(p.get("folders"));
     let configured = p.get("configured").and_then(Value::as_bool);
@@ -408,7 +414,10 @@ pub fn as_effective(v: &Value) -> Result<Effective, String> {
         })
         .collect::<Option<Vec<_>>>()
         .ok_or_else(missing)?;
-    let summary = v.get("summary").and_then(Value::as_str).ok_or_else(missing)?;
+    let summary = v
+        .get("summary")
+        .and_then(Value::as_str)
+        .ok_or_else(missing)?;
     let gateway_summary = v
         .get("gateway_summary")
         .and_then(Value::as_str)
@@ -492,7 +501,10 @@ pub struct Row {
 
 impl Row {
     pub fn reason(&self, mode: Mode) -> Option<&'static str> {
-        self.reasons.iter().find(|(m, _)| *m == mode).map(|(_, r)| *r)
+        self.reasons
+            .iter()
+            .find(|(m, _)| *m == mode)
+            .map(|(_, r)| *r)
     }
 }
 
@@ -563,7 +575,11 @@ pub fn view(level: Level, state: &State) -> View {
     } else {
         policy.folders.clone()
     };
-    let posture = if following { eff.posture } else { policy.posture };
+    let posture = if following {
+        eff.posture
+    } else {
+        policy.posture
+    };
     let default_mode = if following {
         eff.default_mode.unwrap_or(policy.default_mode)
     } else {
@@ -724,7 +740,11 @@ pub fn refusal(sentence: &str) -> String {
     } else {
         s
     };
-    let stop = if s.ends_with(['.', '!', '?']) { "" } else { "." };
+    let stop = if s.ends_with(['.', '!', '?']) {
+        ""
+    } else {
+        "."
+    };
     format!("{s}{stop} {NOT_SAVED}")
 }
 
@@ -784,11 +804,13 @@ mod tests {
     use super::*;
 
     const KIT: &str = include_str!("../tests/fixtures/workspaces/kit_workspace_chooser_text.ts");
-    const SESSION_DEFAULT: &str = include_str!("../tests/fixtures/workspaces/session_get_default.json");
+    const SESSION_DEFAULT: &str =
+        include_str!("../tests/fixtures/workspaces/session_get_default.json");
     const SESSION_CONFIGURED: &str =
         include_str!("../tests/fixtures/workspaces/session_get_configured.json");
     const ABOVE_CAP: &str = include_str!("../tests/fixtures/workspaces/session_put_above_cap.json");
-    const OUTSIDE: &str = include_str!("../tests/fixtures/workspaces/session_put_refused_path.json");
+    const OUTSIDE: &str =
+        include_str!("../tests/fixtures/workspaces/session_put_refused_path.json");
     const DRY_PAYLOAD: &str = include_str!("../tests/fixtures/workspaces/dryrun_payload.json");
     const DRY_DEFAULT: &str = include_str!("../tests/fixtures/workspaces/dryrun_default.json");
     const ACCOUNT: &str = include_str!("../tests/fixtures/workspaces/account_get.json");
@@ -847,7 +869,9 @@ mod tests {
         assert!(!view.can_add);
         assert_eq!(view.rows.len(), 3);
         assert!(view.rows.iter().all(|r| !r.editable));
-        assert!(view.gateway_line.starts_with("Gateway: Allow everything, refuse listed workspaces (rw) · "));
+        assert!(view
+            .gateway_line
+            .starts_with("Gateway: Allow everything, refuse listed workspaces (rw) · "));
         assert_eq!(view.summary, s.effective.summary);
         assert_eq!(view.everything_else, Some((Mode::Rw, false)));
     }
@@ -859,13 +883,23 @@ mod tests {
         assert!(!view.following);
         assert_eq!(view.posture, Posture::AllowedOnly);
         assert!(view.everything_else.is_none());
-        let pictures = view.rows.iter().find(|r| r.path.ends_with("/Pictures")).unwrap();
+        let pictures = view
+            .rows
+            .iter()
+            .find(|r| r.path.ends_with("/Pictures"))
+            .unwrap();
         assert_eq!(pictures.cap, Some(Mode::Ro));
         assert_eq!(pictures.allowed, vec![Mode::Ro, Mode::Deny]);
         assert_eq!(pictures.reason(Mode::Rw), Some(CAP_READ_ONLY));
-        let project = view.rows.iter().find(|r| r.path.ends_with("/project")).unwrap();
+        let project = view
+            .rows
+            .iter()
+            .find(|r| r.path.ends_with("/project"))
+            .unwrap();
         assert_eq!(project.allowed, Mode::ALL.to_vec());
-        assert!(view.summary.starts_with("Deny everything, allow listed workspaces · "));
+        assert!(view
+            .summary
+            .starts_with("Deny everything, allow listed workspaces · "));
     }
 
     #[test]
@@ -910,7 +944,10 @@ mod tests {
         assert!(outside.contains("is outside the workspaces the gateway allows"));
         assert_eq!(refusal("No"), "No. Not saved.");
         assert_eq!(refusal(""), "The gateway refused the change. Not saved.");
-        assert_eq!(error_sentence(&json!({"detail": "Only admins."})).unwrap(), "Only admins.");
+        assert_eq!(
+            error_sentence(&json!({"detail": "Only admins."})).unwrap(),
+            "Only admins."
+        );
     }
 
     #[test]
@@ -959,7 +996,9 @@ mod tests {
     #[test]
     fn an_older_model_fails_loudly() {
         let old = json!({"policy": {"shared_workspace": "/x", "posture": "allowed_only"}});
-        assert!(as_policy(&old).unwrap_err().contains("older workspace model"));
+        assert!(as_policy(&old)
+            .unwrap_err()
+            .contains("older workspace model"));
         let no_cap = json!({"posture": "allowed_only", "default_mode": null,
             "folders": [{"path": "/a", "mode": "ro"}], "summary": "s", "gateway_summary": "g"});
         assert!(as_effective(&no_cap).is_err());
@@ -972,6 +1011,9 @@ mod tests {
         assert_eq!(modes_under_cap(None).0, Mode::ALL.to_vec());
         let (allowed, reasons) = modes_under_cap(Some(Mode::Deny));
         assert_eq!(allowed, vec![Mode::Deny]);
-        assert_eq!(reasons, vec![(Mode::Rw, CAP_REFUSED), (Mode::Ro, CAP_REFUSED)]);
+        assert_eq!(
+            reasons,
+            vec![(Mode::Rw, CAP_REFUSED), (Mode::Ro, CAP_REFUSED)]
+        );
     }
 }

@@ -129,6 +129,24 @@ impl Harness {
         self.keys(b"\r")
     }
 
+    /// Answer the run level's dry run ("Use my default") as the lane would.
+    fn answer_dry_run(&mut self) {
+        let v: Value = serde_json::from_slice(
+            &std::fs::read(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/workspaces/dryrun_default.json"
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let e = abstractcode::workspaces::as_effective(&v).unwrap();
+        self.store.workspaces.update(|w| {
+            w.loading.clear();
+            w.run = Some(("null".into(), Ok(e)));
+        });
+        self.turn();
+    }
+
     /// Every automations-lane command queued so far (other commands dropped).
     fn auto_cmds(&mut self) -> Vec<AutoCmd> {
         let mut out = Vec::new();
@@ -576,7 +594,7 @@ fn the_folder_is_browsed_through_the_gateway_workspace_routes() {
 fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     let mut h = harness();
     let screen = h.command("/schedule");
-    assert!(screen.contains("new automation — 1/4 the task"), "{screen}");
+    assert!(screen.contains("new automation — 1/6 the task"), "{screen}");
     assert!(
         screen.contains("The task below is sent as the prompt of every run."),
         "every info line fits:\n{screen}"
@@ -597,7 +615,7 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     // Context: Growing.
     h.keys(b"\x1b[B");
     let screen = h.keys(b"\r");
-    assert!(screen.contains("4/4 tools"), "{screen}");
+    assert!(screen.contains("4/6 tools"), "{screen}");
     assert!(
         screen.contains("Run without asking — tools run without asking"),
         "{screen}"
@@ -608,6 +626,42 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     );
     // Tools: ask each time.
     h.keys(b"\x1b[B");
+    let screen = h.keys(b"\r");
+    // 5/6 Workspaces: the kit chooser at the run level, visible (no
+    // disclosure), read from the gateway's dry run.
+    assert!(
+        screen.contains("new automation — 5/6 Workspaces"),
+        "{screen}"
+    );
+    assert!(screen.contains("Continue — Title and limits"), "{screen}");
+    h.answer_dry_run();
+    let screen = h.turn();
+    assert!(screen.contains("[x] Use my default"), "{screen}");
+    assert!(
+        screen.contains("Gateway: Allow everything, refuse listed workspaces (rw)"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("The workspaces this run uses, among the eligible ones."),
+        "{screen}"
+    );
+    // Continue (the cursor starts on it): 6/6 Title and limits, visible.
+    let screen = h.keys(b"\r");
+    assert!(
+        screen.contains("new automation — 6/6 Title and limits"),
+        "{screen}"
+    );
+    for label in [
+        "Title",
+        "Defaults to the task's first line",
+        "First run at (UTC; empty = now)",
+        "Stop after this many runs",
+        "Stop at (UTC)",
+        "Create automation",
+    ] {
+        assert!(screen.contains(label), "{label}:\n{screen}");
+    }
+    assert!(!screen.contains("Advanced"), "{screen}");
     h.keys(b"\r");
     let cmds = h.auto_cmds();
     let body = match cmds.iter().find(|c| matches!(c, AutoCmd::Create { .. })) {
@@ -652,6 +706,8 @@ fn schedule_with_the_gateway_default_targets_at_default() {
     h.keys(b"\r"); // every 24 hours
     h.keys(b"\r"); // independent
     h.keys(b"\r"); // tools run without asking
+    h.keys(b"\r"); // Workspaces: Continue (Use my default)
+    h.keys(b"\r"); // Title and limits: Create automation
     let body = h
         .auto_cmds()
         .into_iter()
@@ -667,6 +723,74 @@ fn schedule_with_the_gateway_default_targets_at_default() {
     assert_eq!(body["trigger"]["config"], json!({"every": "24h"}));
     assert_eq!(body["context"], json!({"mode": "independent"}));
     assert_eq!(body["policy"], json!({"tool_approval": "auto"}));
+}
+
+#[test]
+fn the_dialog_workspaces_and_limits_ride_the_create_body() {
+    use abstractcode::gateway::workspaces::{RunCommit, WsCmd};
+    let mut h = harness();
+    h.command("/schedule watch the disk");
+    h.keys(b"\r"); // task
+    h.keys(b"\r"); // every 24 hours
+    h.keys(b"\r"); // independent
+    h.keys(b"\r"); // tools run without asking
+    h.answer_dry_run();
+    // Use my default OFF (the first card): one dry run of what applies now.
+    for _ in 0..12 {
+        h.keys(b"\x1b[A");
+    }
+    h.keys(b"\r");
+    let mut change = None;
+    while let Ok(cmd) = h.rx.try_recv() {
+        if let Cmd::Workspaces(WsCmd::RunChange { value, key, commit }) = cmd {
+            change = Some((value, key, commit));
+        }
+    }
+    let (value, key, commit) = change.expect("a run-level change");
+    assert_eq!(key, "follow");
+    assert!(matches!(commit, RunCommit::Draft));
+    let value = value.expect("a payload (Use my default off)");
+    assert_eq!(value.folders.len(), 3, "starts from what applies now");
+    // The gateway accepted it: the lane's answer.
+    h.store.workspaces.update(|w| {
+        w.busy = None;
+        w.draft = Some(value.clone());
+    });
+    h.turn();
+    // Continue, then set a limit, then create.
+    for _ in 0..30 {
+        h.keys(b"\x1b[B");
+    }
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("6/6 Title and limits"), "{screen}");
+    h.keys(b"\x1b[A"); // Stop at (UTC)
+    h.keys(b"\x1b[A"); // Stop after this many runs
+    h.keys(b"\r");
+    h.term.push_input(b"3");
+    h.turn();
+    let screen = h.keys(b"\r");
+    assert!(
+        screen.contains("3 runs max"),
+        "the preview reads the limit:\n{screen}"
+    );
+    h.keys(b"\r"); // Create automation (the cursor is back on it)
+    let body = h
+        .auto_cmds()
+        .into_iter()
+        .find_map(|c| match c {
+            AutoCmd::Create { body } => Some(body),
+            _ => None,
+        })
+        .expect("create");
+    assert_eq!(
+        body["trigger"]["config"],
+        json!({"every": "24h", "count": 3})
+    );
+    assert_eq!(body["target"]["input_data"]["workspace"], value.to_json());
+    assert_eq!(
+        body["target"]["input_data"]["workspace"]["posture"],
+        json!("any_except_denied")
+    );
 }
 
 #[test]
@@ -767,6 +891,72 @@ fn a_settings_change_is_saved_as_a_new_revision() {
         screen.contains("Saved as revision 4; applies from the next run."),
         "{screen}"
     );
+}
+
+#[test]
+fn an_automation_workspaces_change_is_one_revision_after_the_dry_run() {
+    use abstractcode::gateway::workspaces::{RunCommit, WsCmd};
+    let mut h = harness();
+    open_inbox(&mut h);
+    h.auto_cmds();
+    h.store.automations.update(|v| {
+        let def = v.detail.as_mut().unwrap().definition.as_mut().unwrap();
+        def.target = json!({"bundle_ref": "inbox@1.0.0", "flow_id": "triage",
+            "input_data": {"prompt": "triage", "workspace_access_mode": "workspace_or_allowed",
+                           "workspace_allowed_paths": ["/old/list"]}});
+    });
+    h.keys(b"e");
+    h.keys(b"5"); // the Workspace panel
+                  // The panel asks for the dry run of the stored value (none = Use my default).
+    let mut dry = false;
+    while let Ok(cmd) = h.rx.try_recv() {
+        if let Cmd::Workspaces(WsCmd::DryRun { value: None }) = cmd {
+            dry = true;
+        }
+    }
+    assert!(dry, "the chooser reads the gateway's dry run");
+    h.answer_dry_run();
+    let screen = h.turn();
+    assert!(
+        screen.contains("Runs work in the automation folder"),
+        "{screen}"
+    );
+    assert!(screen.contains("[x] Use my default"), "{screen}");
+    assert!(
+        !screen.contains("Access mode"),
+        "the R9 access mode is gone:\n{screen}"
+    );
+    // Use my default OFF: dry run first, then ONE revision carrying the payload.
+    h.keys(b"\r");
+    let mut change = None;
+    while let Ok(cmd) = h.rx.try_recv() {
+        if let Cmd::Workspaces(WsCmd::RunChange { value, commit, .. }) = cmd {
+            change = Some((value, commit));
+        }
+    }
+    match change {
+        Some((
+            Some(value),
+            RunCommit::Revision {
+                id,
+                expected_revision,
+                changes,
+                ..
+            },
+        )) => {
+            assert_eq!(id, INBOX);
+            assert_eq!(expected_revision, 3);
+            let input = &changes["target"]["input_data"];
+            assert_eq!(input["workspace"], value.to_json());
+            assert!(input.get("workspace_access_mode").is_none(), "{input}");
+            assert!(
+                input.get("workspace_allowed_paths").is_none(),
+                "a payload replaces the R9 list: {input}"
+            );
+            assert_eq!(input["prompt"], json!("triage"), "everything else kept");
+        }
+        other => panic!("expected one run-level revision, got {other:?}"),
+    }
 }
 
 #[test]
