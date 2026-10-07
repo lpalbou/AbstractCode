@@ -807,7 +807,7 @@ impl WsData {
         self.runs.retain(|(k, _)| *k != key);
         self.runs.push((key, answer));
         if self.runs.len() > 4 {
-            self.runs.remove(0);
+            let _ = self.runs.remove(0);
         }
     }
 
