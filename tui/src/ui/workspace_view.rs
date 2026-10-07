@@ -106,10 +106,10 @@ pub fn host_view(
     let unavailable = (!connected).then(|| ws::DISCONNECTED.to_string());
     let run = |value: Option<RunValue>| {
         let key = ws::run_value_json(value.as_ref()).to_string();
-        let (state, load_error, needs) = match &data.run {
-            Some((k, Ok(e))) if *k == key => (Some(ws::run_state(value.as_ref(), e)), None, None),
-            Some((k, Err(e))) if *k == key => (None, Some(e.clone()), None),
-            _ => (None, None, Some(format!("run:{key}"))),
+        let (state, load_error, needs) = match data.run_for(&key) {
+            Some(Ok(e)) => (Some(ws::run_state(value.as_ref(), e)), None, None),
+            Some(Err(e)) => (None, Some(e.clone()), None),
+            None => (None, None, Some(format!("run:{key}"))),
         };
         HostView {
             level: Level::Run,
@@ -1020,10 +1020,10 @@ mod tests {
             Some("run:null")
         );
         let loaded = WsData {
-            run: Some((
+            runs: vec![(
                 "null".into(),
                 Ok(ws::as_effective(&v(DRY_DEFAULT)).unwrap()),
-            )),
+            )],
             ..WsData::default()
         };
         let hv = host_view(&Host::NewAutomation, &loaded, true, None);

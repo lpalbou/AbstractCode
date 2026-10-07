@@ -257,7 +257,7 @@ fn run(client: &GatewayClient, wake: &WakeHandle, store: Store, cmd: WsCmd) {
                 store.workspaces.update(|w| {
                     let loading = format!("run:{key}");
                     w.loading.retain(|k| *k != loading);
-                    w.run = Some((key, out));
+                    w.put_run(key, out);
                 })
             });
         }
@@ -284,7 +284,7 @@ fn run(client: &GatewayClient, wake: &WakeHandle, store: Store, cmd: WsCmd) {
                     let st = status(RUN_SCOPE, &key, &Ok(()));
                     wake.post(move || {
                         store.workspaces.update(|w| {
-                            w.run = Some((value_key, Ok(effective)));
+                            w.put_run(value_key, Ok(effective));
                             w.draft = value;
                             w.busy = None;
                             w.status = Some(st);
@@ -312,7 +312,7 @@ fn run(client: &GatewayClient, wake: &WakeHandle, store: Store, cmd: WsCmd) {
                             if st.error {
                                 // The stored value stands: its dry run is re-read by the view.
                             } else {
-                                w.run = Some((value_key, Ok(effective)));
+                                w.put_run(value_key, Ok(effective));
                             }
                             w.busy = None;
                             w.status = Some(st);

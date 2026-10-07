@@ -776,8 +776,10 @@ pub struct WsData {
     pub session: Option<(String, Result<State, String>)>,
     /// `GET /workspace/policy/me`.
     pub account: Option<Result<State, String>>,
-    /// The run level's dry run: (value JSON, effective or load error).
-    pub run: Option<(String, Result<Effective, String>)>,
+    /// The run level's dry runs: (value JSON, effective or load error),
+    /// the newest last (a few kept: a saved change and the definition that
+    /// follows it read the same answer without a second request).
+    pub runs: Vec<(String, Result<Effective, String>)>,
     /// The run level's value while a NEW automation is being made
     /// (`None` = "Use my default").
     pub draft: Option<RunValue>,
@@ -791,6 +793,24 @@ pub struct WsData {
 }
 
 impl WsData {
+    /// The dry run of a value (by its JSON), if read.
+    pub fn run_for(&self, key: &str) -> Option<&Result<Effective, String>> {
+        self.runs
+            .iter()
+            .rev()
+            .find(|(k, _)| k == key)
+            .map(|(_, r)| r)
+    }
+
+    /// Keep a dry run (the newest few).
+    pub fn put_run(&mut self, key: String, answer: Result<Effective, String>) {
+        self.runs.retain(|(k, _)| *k != key);
+        self.runs.push((key, answer));
+        if self.runs.len() > 4 {
+            self.runs.remove(0);
+        }
+    }
+
     /// The status line of `key` in `scope`, if any.
     pub fn status_of(&self, scope: &str, key: &str) -> Option<&Status> {
         self.status

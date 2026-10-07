@@ -142,7 +142,7 @@ impl Harness {
         let e = abstractcode::workspaces::as_effective(&v).unwrap();
         self.store.workspaces.update(|w| {
             w.loading.clear();
-            w.run = Some(("null".into(), Ok(e)));
+            w.put_run("null".into(), Ok(e));
         });
         self.turn();
     }

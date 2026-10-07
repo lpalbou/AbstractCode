@@ -190,19 +190,25 @@ pub fn save_revision_now(
     });
     // The latest definition either way (a conflict shows the revision
     // someone else saved). The gateway applies a revision moments after
-    // accepting it, so re-read now and twice more.
-    for pause in [0u64, 1500, 2500, 4000] {
-        std::thread::sleep(std::time::Duration::from_millis(pause));
-        let detail = auto_client.detail(id);
-        let id = id.to_string();
-        wake.post(move || {
-            store.automations.update(|v| {
-                if let Ok((def, summary, page)) = detail {
-                    v.apply_detail(&id, def, summary, page);
-                }
-            })
-        });
-    }
+    // accepting it, so re-read now and twice more — on their own thread, so
+    // the caller's answer (the revision line, a chooser's "Saved") is not
+    // held for the re-reads.
+    let id = id.to_string();
+    let post = wake.clone();
+    crate::runner::spawn_host_thread("rail-reread", wake.clone(), store, move || {
+        for pause in [0u64, 1500, 2500, 4000] {
+            std::thread::sleep(std::time::Duration::from_millis(pause));
+            let detail = auto_client.detail(&id);
+            let id = id.clone();
+            post.post(move || {
+                store.automations.update(|v| {
+                    if let Ok((def, summary, page)) = detail {
+                        v.apply_detail(&id, def, summary, page);
+                    }
+                })
+            });
+        }
+    });
     result
 }
 

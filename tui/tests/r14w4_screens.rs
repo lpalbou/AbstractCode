@@ -182,7 +182,7 @@ impl H {
         let e = ws::as_effective(&read(WS, fixture)).unwrap();
         self.store.workspaces.update(|w| {
             w.loading.clear();
-            w.run = Some((key.into(), Ok(e)));
+            w.put_run(key.into(), Ok(e));
         });
         self.turn();
     }
