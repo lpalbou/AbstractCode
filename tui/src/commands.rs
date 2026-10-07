@@ -332,7 +332,10 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
         "permissions",
         "tool permissions: read|write|all (sticky per session)",
     ),
-    ("workspace", "this conversation's workspaces (Use my default, Read-only / Read & write / Refused)"),
+    (
+        "workspace",
+        "this conversation's workspaces (Use my default, Read-only / Read & write / Refused)",
+    ),
     (
         "settings",
         "settings panels: Model, Workflow, Workspace, Tools, Skills, Voice",
