@@ -232,9 +232,10 @@ CONFIG (prefs.json — the TUI writes it; headless `exec` reads the SAME file):
                                 auto-approve; above it the TUI prompts and
                                 exec DENIES (naming the rule). /permissions.
   tool_approval.overrides       {{"tool_name": "auto"|"ask"}} per-tool pins.
-  workspace_mode                access mode sent with runs (/workspace).
-  workspace_allowed             extra allowlisted roots sent as
-                                workspace_allowed_paths (/workspace).
+  workspace_mode                access mode sent by `exec` runs.
+  workspace_allowed             extra allowlisted roots sent by `exec` runs as
+                                workspace_allowed_paths (the interactive
+                                terminal uses /workspace instead).
   send_local_workspace          auto | always | never — whether this folder is
                                 sent as the workspace root (auto: only when the
                                 gateway is on this machine; /workspace send).

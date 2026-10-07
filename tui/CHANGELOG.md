@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+Needs the AbstractGateway round-11 workspace routes and the round-12 command
+sandbox fields (AbstractGateway 0.13.0).
+
+### Added
+
+- **Workspaces** (`/workspace`, the Workspace panel): this conversation's
+  workspaces, the chooser and words of AbstractCode in the browser —
+  `Gateway: <eligible workspaces>`, **Use my default**, the posture, each
+  workspace as Read-only / Read & write / Refused (a mode above the
+  gateway's cap shown with its reason), **Add a workspace path** and the
+  effective line. Each change is one `PUT /sessions/{id}/workspaces`; a
+  refusal shows the gateway's sentence and "Not saved.". **My default
+  workspaces** edits your account default (`PUT /workspace/policy/me`).
+- `/schedule` has a **Workspaces** step (the automation's own workspaces,
+  stored as `input_data.workspace`, starting from **Use my default**) and a
+  **Title and limits** step (Title, First run at, Stop after this many runs,
+  Stop at) before **Create automation**.
+- **Command sandbox**: process-spawning tools show the gateway's state on
+  their card (Tools panel, `/tools`); each command in the transcript,
+  `/details` and Activity shows `Sandbox: <kind> · N workspaces enforced` or
+  `Sandbox: none — refused`, with the enforced paths in the detail.
+
+### Changed
+
+- An automation's Workspace panel edits its workspaces with the same chooser
+  (the gateway's dry run, one revision per change); the access mode and
+  allowed-path rows are gone.
+- `/workspace` opens the Workspace panel; the access-mode / allowed-paths
+  modal is gone, and interactive runs send no `workspace_access_mode` or
+  `workspace_allowed_paths` (the gateway applies the conversation's
+  workspaces). Headless `exec` keeps `--workspace-mode` and the prefs keys.
+
 ## [0.9.0] - 2026-10-04
 
 Archiving conversations, **Archived · N** and the gateway-default voice

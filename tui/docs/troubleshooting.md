@@ -105,28 +105,26 @@ lands outside it is refused with exactly that message (a sibling message,
 usually recovers by retrying inside the workspace; repeated refusals mean
 the task genuinely needs a directory the run was not granted.
 
-To inspect or extend the scope, use `/workspace`:
+To see or change which workspaces this conversation uses, open
+`/workspace` (see [api.md](api.md#workspaces-workspace)): turn **Use my
+default** off, then add the workspace with **Add a workspace path** and pick
+Read-only or Read & write. The gateway decides: a workspace outside its
+eligible set, or a mode above its cap, is refused with the gateway's
+sentence and "Not saved.". **My default workspaces** changes what all your
+conversations start from. The root that relative paths anchor to comes from
+`--workspace <PATH>` at launch (see `/workspace send`).
 
-- **root** — where relative paths anchor (`--workspace <PATH>` at launch;
-  defaults to the directory you launched from when the gateway is on this
-  machine; see `/workspace send`).
-- **access mode** — `workspace_only` (root only), `workspace_or_allowed`
-  (root + your allowed paths), `all_except_ignored` (any absolute path —
-  the gateway only honors it when it trusts client scope). Default:
-  server-managed (nothing sent; the gateway decides).
-- **allowed paths** — extra roots sent as `workspace_allowed_paths`;
-  they apply in `workspace_or_allowed` mode.
+Headless `abstractcode exec` still reads `workspace_mode` and
+`workspace_allowed` from `~/.abstractcode/prefs.json`.
 
-Mode + allowed paths persist in `~/.abstractcode/prefs.json`
-(`workspace_mode`, `workspace_allowed`), which headless `exec` reads too
-— configure once, applies everywhere.
+## A command fails with "Operation not permitted"
 
-The GATEWAY enforces the policy server-side. Unless the operator allowed
-client workspace scope (the gateway console's workspace settings, or local
-tool mode),
-client-sent paths are clamped to operator-controlled roots — adding a
-path in `/workspace` widens what the CLIENT asks for, and the server may
-still refuse it.
+Commands run inside the gateway's command sandbox, confined to the run's
+workspaces. The command's line in the transcript (`↳ Sandbox: macOS
+sandbox-exec · N workspaces enforced`) and `/details` list the paths it may
+use; add the folder in `/workspace` to let the next run reach it. `↳ Sandbox:
+none — refused` means the gateway host has no command sandbox, so the
+command did not run.
 
 ## Approval modals keep appearing for harmless tools
 

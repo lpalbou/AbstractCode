@@ -332,7 +332,7 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
         "permissions",
         "tool permissions: read|write|all (sticky per session)",
     ),
-    ("workspace", "workspace root, access mode, allowed paths"),
+    ("workspace", "this conversation's workspaces (Use my default, Read-only / Read & write / Refused)"),
     (
         "settings",
         "settings panels: Model, Workflow, Workspace, Tools, Skills, Voice",
@@ -472,7 +472,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     (
         "/workspace",
-        "workspace root, access mode, allowed paths (what tools may touch)",
+        "this conversation's workspaces (what tools may touch)",
     ),
     ("/skills", "attach gateway skills to your runs"),
     ("/mcp", "show the gateway MCP server registry"),
@@ -658,7 +658,7 @@ pub const HELP_EXTRA: &[(&str, &str)] = &[
     ),
     (
         "workspace",
-        "gateway-managed by default: server policy clamps client paths; /workspace shows and extends the scope (mode + allowed paths persist in prefs.json); /files browses the run's workspace on the gateway host. A remote gateway is not sent this machine's folder unless you pass --workspace or set /workspace send always (auto|always|never)",
+        "the gateway decides: /workspace chooses this conversation's workspaces among the eligible ones (stored on the conversation; My default workspaces for all of them); /files browses the run's workspace on the gateway host. A remote gateway is not sent this machine's folder unless you pass --workspace or set /workspace send always (auto|always|never)",
     ),
 ];
 

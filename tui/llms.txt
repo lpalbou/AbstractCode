@@ -42,7 +42,9 @@
   (including `/settings`, `/activity`, `/archive`, `/sessions`, `/voice`, `/speak`, `/dictate`, `/workflow`, `/files`, `/automations`, `/schedule`, `/stream`, `/about`, `/model`, `/mtp`,
   `/workspace send`, `@name`, `/entities`, `/task`, `/end`, `/queue`, `/goal`,
   `/permissions`, `/workspace`, `/attach`, `/export`, `/context`, `/gpu`,
-  `/resources`, `/redraw`), key bindings (incl. `Ctrl+L` repaint, `Ctrl+J` newline,
+  `/resources`, `/redraw`), the Workspaces chooser (`/workspace`: this
+  conversation, My default workspaces, an automation) and the command
+  sandbox (tool-card state, `Sandbox: …` line per command), key bindings (incl. `Ctrl+L` repaint, `Ctrl+J` newline,
   `Ctrl+O` drop-undo, `Alt+E` conversation focus, the composer's editor
   chords, `?` reference), the type-to-focus rule (typing, pasting or
   dropping a file returns focus to the composer and keeps the input),

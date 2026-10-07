@@ -27,7 +27,7 @@ abstractcode --help | --version
 | `--model <NAME>` | Model override | gateway defaults |
 | `--workspace <PATH>` | Requested workspace root (always sent when given) | current directory when the gateway is on this machine — the gateway's own verdict once a run has started, a loopback URL before that; none for a gateway on another machine (the agent works in a gateway-side session folder). `/workspace send auto\|always\|never` overrides (saved as `send_local_workspace`) |
 | `--no-workspace` | Send no workspace root | — |
-| `--workspace-mode <M>` | Workspace access mode | server default |
+| `--workspace-mode <M>` | Workspace access mode sent by `abstractcode exec` (the interactive terminal uses the conversation's workspaces, `/workspace`) | server default |
 | `--theme <ID>` | Start theme | `ABSTRACTTUI_THEME`, else saved pick |
 | `--animation <on\|off>` | Launch animation; **persisted** to `prefs.json` (`animation`). Also skipped when stdout is not a tty, `NO_COLOR`/`TERM=dumb` is set, or `ABSTRACTTUI_NO_SPLASH` is set | on |
 | `--max-iterations <N>` | Ask the server for a specific iteration budget | none — **this client sets no budget**. Absent the flag the server's own default applies (the same one every client gets); the hard ceiling is the runtime's, enforced at run start |
@@ -73,7 +73,7 @@ abstractcode --help | --version
 | `/workflow` | Pick the agent workflow (`/agent` too). First row: **Gateway default → name @version** — saved as "the gateway default", so the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran |
 | `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` shows the workspace folder itself (never a sub-folder; never a folder that would be launched, such as `.app`) in your file manager, only when the gateway is on this machine and allows it; `r` refreshes |
 | `/automations [id]` | The gateway's automations (`/automation`, `/autos` too), shared with every client, as the Code web's cards: the name (+ **waiting for you** while an approval or a question waits), `↻ every 24 h · last 3 h ago` (`waiting since 5 min` while a run waits on you, `running now` while one runs, `last never` before the first), then `next in 20 h` (absent when nothing is scheduled) with the **Active** switch at the right (`[x]` runs on its schedule, `[ ]` paused, `[-]` cannot change). The quiet **Archived · N** line ends the list (N = the gateway's `archived_automations`; absent at 0): `Enter` opens the archived ones inline, `Enter`/`u` on one unarchives it (it comes back paused). Keys: `Enter` opens · `Space` switches Active (`p` too) · `g` Run now (once now; the next scheduled run keeps its time) · `x` Stop · `e` Edit (the settings panels on its definition, see below) · `a` Archive (asks inline: `y` archives, `n`/`Esc` keeps it) · `u` Unarchive · `n` new · `r` refresh. In one automation: `Automations / <title>`, the Active switch, the timing line `every 24 h · last 3 h ago · next in 14 h`, the workspace as a short name, the waits that need you first (`y`/`n` approve/deny a tool call, `Enter` answers a question or an event), its runs as chat pairs, `d` discuss the selected run (a new chat; this session switches to it), `w` browse its folder, `Esc` back. Re-read every 15 s while open. See [Automations](../../docs/automations.md) |
-| `/schedule [task]` | Create an automation that runs the current workflow (the gateway default is sent as `@default`): the task (default: your last prompt), when (UTC presets, every N m/h/d, or once at `YYYY-MM-DD HH:MM`), context (independent or growing), tools (run without asking, or ask before each tool call). Opens it once the gateway answers |
+| `/schedule [task]` | Create an automation that runs the current workflow (the gateway default is sent as `@default`): the task (default: your last prompt), when (UTC presets, every N m/h/d, or once at `YYYY-MM-DD HH:MM`), context (independent or growing), tools (run without asking, or ask before each tool call), **Workspaces** (the automation's own workspaces, starting from **Use my default**; stored as `input_data.workspace`), then **Title and limits** (Title, First run at (UTC; empty = now), Stop after this many runs, Stop at (UTC)) and **Create automation**. Opens it once the gateway answers |
 | `/workspace send [auto\|always\|never]` | Whether your folder is sent as the workspace: `auto` (default) = only when the gateway is on this machine; `always` = also to a gateway on another machine that sees the same path (a shared mount); `never`. Bare reports what is in force. Saved in `prefs.json` |
 | `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
 | `/model` | Pick provider, then model, from gateway discovery, then the reasoning effort, then MTP (see below). `Esc` at a step keeps the current value |
@@ -83,7 +83,7 @@ abstractcode --help | --version
 | `/iterations [n\|off]` | Iteration budget requested for new runs (`_limits.max_iterations`; `/iters` too). Bare reports what is in force and where it came from; `off` takes the server's own. Applies to the next run; persisted |
 | `/tools` | One switch per gateway tool (`[x]` on, `[ ]` off, `[-] name — reason` when the gateway disables it; `Space` switches; the "on" set = the run's exact allowlist; untouched = workflow defaults). In-modal: `p` cycles a per-tool approval pin, `t` cycles the tier — see the modal keys below |
 | `/permissions [read\|write\|all]` | THE tool-permission surface (bare = report): batches classifying at-or-below the level auto-approve. `read` = proven read-only tools only; `write` adds workspace file mutations; `all` auto-approves everything, **including arbitrary shell and network egress** — deliberate use only. Per-tool `ask` pins and gateway-disabled tools still gate. Sticky per session (`/tools tier` remains a spelling alias) |
-| `/workspace` | Inspect + edit the filesystem scope tools may touch: root (from `--workspace`/cwd), access mode, allowed paths. Mode + paths persist and ride every run |
+| `/workspace` | This conversation's workspaces: the Workspace panel (Use my default, posture, Read-only / Read & write / Refused per workspace, Add a workspace path, the effective line, My default workspaces), see [Workspaces](#workspaces-workspace). Stored on the conversation by the gateway |
 | `/skills` | Attach gateway skills to your runs (`Space` toggles; sent as `input_data.skills`). An empty shelf shows where the shelf is on the gateway host, how it was chosen, and the gateway's warnings |
 | `/mcp` | The gateway's MCP server registry (read-only; their tools appear in `/tools` once declared) |
 | `/cache` | Prompt-cache + context metrics: route, latest call, run, session |
@@ -365,9 +365,10 @@ The panels follow what is selected:
   <title>`. Model (`Gateway default: <provider> · <model>.` until you pick a
   route; Reasoning effort, MTP depth; Behavior: Iteration limit, Context
   token limit, Stream replies), Workflow, Workspace (`Current workspace`,
-  the gateway's policy — "Managed by your gateway" or "Client scope requests
-  enabled" — allowed access modes, mounts, Access mode), Tools (Permissions
-  and one `[x]` switch per tool; `More tool options` opens `/tools`), Skills
+  then this conversation's workspaces — see [Workspaces](#workspaces-workspace)),
+  Tools (Permissions and one `[x]` switch per tool; a process-spawning tool
+  shows the gateway's command-sandbox state under its name, and the
+  gateway's sentence follows the list; `More tool options` opens `/tools`), Skills
   (`[x]` per skill), Voice. These are the same settings `/model`,
   `/workflow`, `/workspace`, `/tools` and `/skills` change — one apply path.
 - **An automation** (`e` in `/automations`): `Automation <title>`,
@@ -382,12 +383,67 @@ The panels follow what is selected:
   `input_data` keys a conversation turn writes (`provider`/`model` +
   `_runtime.provider`/`model`, `_runtime.thinking`, `_runtime.speculation`,
   `_limits.max_iterations`/`max_tokens`, `_runtime.system_prompt_extra`,
-  `tools` + `_runtime.allowed_tools`, `workspace_access_mode`,
-  `workspace_allowed_paths`, `skills`); a value put back to the default is
+  `tools` + `_runtime.allowed_tools`, `workspace`, `skills`); a value put
+  back to the default is
   removed, never written as `""`. The Workflow panel holds the definition
   form: Workflow, Title, Task, Repeat every (UTC), Context (Independent /
   Growing), Tools (Run without asking / Ask before each tool call). Tools
-  switches between **All tools** and a **Custom allowlist**.
+  switches between **All tools** and a **Custom allowlist**. The Workspace
+  panel shows `Runs work in the automation folder`, then the automation's
+  workspaces (the run level, see below).
+
+### Workspaces (`/workspace`)
+
+`/workspace` opens the Workspace panel. Its chooser is the one AbstractCode
+in the browser, the gateway console, Flow, Observer and the AbstractAssistant
+show, with the same words. Top to bottom:
+
+- `Gateway: <the gateway's eligible workspaces>` — the admin's ceiling,
+  verbatim;
+- `[x] Use my default` — on: your account's default workspaces apply; off:
+  this conversation keeps its own rows, starting from what applied;
+- **Workspaces agents may use** — "Deny everything, allow listed
+  workspaces" or "Allow everything, refuse listed workspaces";
+- **Allowed workspaces** / **Refused workspaces** — each path with
+  `(•) Read & write  ( ) Read-only  ( ) Refused`. A mode above the gateway's
+  cap shows `(-)` with the gateway's reason ("The gateway allows this
+  workspace read-only"); `Enter` on a row picks a mode or **Remove**s it;
+- **Everything else** (under "Allow everything, refuse listed workspaces");
+- **Add a workspace path** — the gateway checks the path;
+- the private-workspace note and the effective line, verbatim;
+- **My default workspaces** — your account's default (**Follow the gateway
+  policy** returns to the gateway's).
+
+Each change is one request with the full choice: `PUT
+/api/gateway/sessions/{id}/workspaces` for the conversation (stored on the
+conversation by the gateway, so every app opening it sees the same
+workspaces), `PUT /api/gateway/workspace/policy/me` for your default. A
+refusal shows the gateway's sentence followed by "Not saved." under the
+control, and nothing changes; a change that is accepted shows "Saved". `d`
+on the switch returns to **Use my default**. Runs started from the terminal
+send no workspace list of their own: the gateway applies this conversation's
+workspaces (or your default) when the run starts.
+
+On an automation (its Workspace panel, and the **Workspaces** step of
+`/schedule`), the same chooser edits the automation's own workspaces, stored
+in its definition as `input_data.workspace`; what they mean is the gateway's
+dry run (`POST /api/gateway/workspace/effective/me`). On an existing
+automation each change is saved as one revision; **Use my default** removes
+the stored choice.
+
+### Command sandbox
+
+The gateway confines every process-spawning tool (`execute_command`,
+`shell_exec`, `local_helper_start`, `execute_python`) to the run's
+workspaces. The terminal shows the gateway's own words:
+
+- **Tool cards** (the Tools panel and `/tools`): `Sandboxed to this run's
+  workspaces`, or the refused / unsandboxed state, from `GET
+  /api/gateway/discovery/tools`;
+- **Run views** (the transcript, `/details` and Activity): each command shows
+  one line, `↳ Sandbox: macOS sandbox-exec · 4 workspaces enforced` or
+  `↳ Sandbox: none — refused`; an opened row and `/details` list the enforced
+  paths with their modes, from the run ledger's `output.sandbox`.
 
 **Activity** groups the work: for the conversation one group per model step
 (`Start`, `Step 1`, `Step 2`, …) with its status (`Running`, `Waiting for
@@ -470,7 +526,7 @@ recovers it.
 | `/attach` picker | type to filter · `↑↓` move · `Enter` descend into a folder / attach the file (marked set when non-empty) · `Space` mark files for multi-attach · `Backspace`/`←` parent folder (filter empty) · `Esc` close |
 | `/resources` | `↑↓` move (model, cache and totals rows are all reachable; admin keys act on the selected MODEL row) · `u` unload → `y`/`Enter` confirms · `f` force-unload (confirm labeled FORCED) · `n`/`Esc` cancel an armed confirm · `k` lock/unlock residency · `e` context estimate (inline result) · `r` refresh (re-probes capabilities while the contract is unconfirmed) · `Enter`/`Esc` close |
 | `/entities` | `↑↓` browse (the identity card follows) · `Enter` talk (`@name`) · `t` leave a task (title prompt) · `e` end that entity's open visit · `Ctrl+D` show per-section provenance · `Esc` close |
-| `/workspace` | `↑↓` move · `Space` select an access mode / remove an allowed path · type a path + `Enter` adds it (switches to `workspace_or_allowed` when needed) · `Esc` close |
+| `/workspace` | the Workspace panel: `↑↓` move · `Enter` changes the row (a mode picker, the posture, **Add a workspace path**) · `Space` flips **Use my default** · `d` back to **Use my default** · `Esc` close |
 | `/settings` | `←`/`→`/`Tab`/`1`–`8` panel · `↑↓` move · `Enter` change · `Space` switch · `d` Gateway default · `Esc` close |
 | `/sessions` | `↑↓` move · `Enter` continue / open `Archived · N` / unarchive · `a` Archive → `y` archives, `n`/`Esc` cancels · `u` Unarchive · `n` new conversation · `r` refresh · `Esc` close |
 | `/automations` | `↑↓` move · `Enter` open / open `Archived · N` / unarchive · `Space` Active · `g` Run now · `x` Stop · `e` Edit · `a` Archive → `y`, `n`/`Esc` keeps it · `u` Unarchive · `n` new · `r` refresh · `Esc` close |

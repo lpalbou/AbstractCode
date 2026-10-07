@@ -253,8 +253,13 @@ group per model step. `/sessions` lists your conversations as
 under **Archived · N**, where `u` brings it back). In `/automations` each
 card reads `↻ every 24 h · last 3 h ago` and `next in 20 h` with its
 **Active** switch; `g` Run now, `x` Stop, `e` Edit (the same panels, bound to
-the automation: each change is saved as a new revision), `a` Archive. Details
-in [api.md](api.md#settings-panels-settings). Archiving and **Archived · N**
+the automation: each change is saved as a new revision), `a` Archive.
+`/workspace` opens this conversation's workspaces: **Use my default**, or
+your own rows with Read-only / Read & write / Refused, stored on the
+conversation by the gateway. `/schedule` walks through the task, when,
+context, tools, **Workspaces** and **Title and limits**. Details in
+[api.md](api.md#settings-panels-settings) and
+[api.md](api.md#workspaces-workspace). Archiving and **Archived · N**
 need AbstractGateway 0.13.0 or later.
 
 ## Where to next

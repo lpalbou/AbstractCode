@@ -75,9 +75,17 @@ Status: **0.9.0**, pre-alpha. Release history is in
   level in both directions, and gateway-disabled tools never run. `all`
   auto-approves arbitrary shell commands and network egress: a
   deliberate, eyes-open choice, never the default. Sticky per session.
-- **Workspace scope**: `/workspace` shows where the agent's tools may
-  touch the filesystem (root, access mode, allowed paths) and extends it —
-  the fix for red "Path escapes workspace_root" refusals.
+- **Workspaces**: `/workspace` shows THIS conversation's workspaces, the
+  same chooser and words as AbstractCode in the browser: the gateway's
+  eligible workspaces on top, **Use my default**, the posture, each
+  workspace as Read-only / Read & write / Refused, **Add a workspace path**
+  and the effective line. The gateway stores the choice on the
+  conversation, so every app opening it sees the same workspaces; **My
+  default workspaces** sets what your conversations start from.
+- **Command sandbox**: process-spawning tools show the gateway's state on
+  their card (**Sandboxed to this run's workspaces**), and each command in
+  the transcript and in Activity shows the sandbox it ran under
+  (`Sandbox: macOS sandbox-exec · 4 workspaces enforced`).
 - **Session files**: `/files` browses the run's workspace on the gateway
   host — its full path and which machine it is on, folders with sizes, and a
   preview of any text, Markdown, JSON or image file (`Enter`). `c` copies a

@@ -24,11 +24,10 @@ client). `/resume` continues it. The activity strip shows the paused state,
 including after a restart.
 
 **Where does the agent write files?**
-On the gateway host, under its workspace policy. The default posture is
-server-managed: client-supplied paths are clamped to the gateway's workspace
-root or a managed per-session folder, and the app says so at startup. For
-trusted local setups, the gateway's operator allows client workspace scope in
-the gateway console's workspace settings, and you pass `--workspace`.
+On the gateway host. Each run has a private workspace (read & write), and
+the workspaces this conversation may use are chosen in `/workspace` (or your
+default, **My default workspaces**), within the workspaces the gateway's
+operator made eligible.
 `/files` shows the run's workspace: its absolute path, the host it is on, and
 a preview of each file. A gateway on another machine is not sent your local
 folder unless you run `/workspace send always`.
