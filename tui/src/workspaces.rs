@@ -766,6 +766,8 @@ pub struct WsData {
     pub status: Option<Status>,
     /// Bumped when the account default changed (the session view reloads).
     pub account_tick: u64,
+    /// Loads in flight (`session:<id>`, `account`, `run:<value JSON>`).
+    pub loading: Vec<String>,
 }
 
 impl WsData {

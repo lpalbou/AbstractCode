@@ -25,6 +25,7 @@ pub mod stance;
 pub mod thinking;
 pub mod transcript_view;
 pub mod voice_view;
+pub mod workspace_view;
 
 use queue_lane::{
     buffer_steer, steer_or_buffer, swap_queue_for_session, wire_pending_steer, wire_queue_drain,
@@ -923,10 +924,8 @@ pub(crate) fn agent_start_opts(store: Store, ctx: &UiCtx) -> StartOpts {
                 .collect::<Vec<_>>(),
         )
     };
-    // Workspace scope: the LIVE signals own mode + allowed paths (seeded
-    // from flags/prefs at boot, edited by /workspace); the root stays the
-    // boot resolution (--workspace / cwd).
-    let ws_mode = store.workspace_mode.get_untracked();
+    // Workspace: the root stays the boot resolution (--workspace / cwd);
+    // which workspaces a run may use is the gateway's (session level).
     // Server-side tool policy (facts #1): expand the accepted tier + pins
     // over the CURRENT inventory into name lists the runtime honors with
     // no wait round-trip. The client-side belt (wire_wait_modals) stays as
@@ -962,12 +961,12 @@ pub(crate) fn agent_start_opts(store: Store, ctx: &UiCtx) -> StartOpts {
             None
         },
         workspace_root: effective_workspace_root(store, ctx),
-        workspace_mode: if ws_mode.trim().is_empty() {
-            None
-        } else {
-            Some(ws_mode)
-        },
-        workspace_allowed: store.workspace_allowed.get_untracked(),
+        // R11/R14.4: the conversation's workspaces live on the gateway
+        // (the session level, `/workspace`); the gateway resolves session >
+        // account > gateway at run start. The terminal sends no access mode
+        // and no allowed-path list of its own (the Code web sends none).
+        workspace_mode: None,
+        workspace_allowed: Vec::new(),
         // The SIGNAL, not the UiCtx copy: `--max-iterations` seeds it at boot
         // and `/iterations` edits it, so there is one authority (same rule as
         // `workspace_mode` above). A budget is "explicit" whenever a number is
@@ -1373,7 +1372,10 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
             modals::open_status(cx, store, ctx);
         }
         Command::Permissions(arg) => set_permissions(store, ctx, arg),
-        Command::Workspace => modals::open_workspace(cx, store, ctx),
+        // The conversation's workspaces (session level): the rail's Workspace panel.
+        Command::Workspace => {
+            rail_view::open_settings(cx, store, ctx, Some(crate::rail::Panel::Workspace))
+        }
         Command::Files => modals::open_files(cx, store, ctx),
         Command::Settings(panel) => match panel.as_deref().map(crate::rail::Panel::parse) {
             Some(None) => store.notify(format!(

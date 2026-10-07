@@ -170,9 +170,11 @@ fn run(client: &GatewayClient, wake: &WakeHandle, store: Store, cmd: WsCmd) {
                 .and_then(|v| ws::as_state(&v))
                 .map_err(|e| ws::load_error(&e));
             wake.post(move || {
-                store
-                    .workspaces
-                    .update(|w| w.session = Some((session_id, out)))
+                store.workspaces.update(|w| {
+                    let key = format!("session:{session_id}");
+                    w.loading.retain(|k| *k != key);
+                    w.session = Some((session_id, out));
+                })
             });
         }
         WsCmd::SaveSession {
@@ -200,7 +202,12 @@ fn run(client: &GatewayClient, wake: &WakeHandle, store: Store, cmd: WsCmd) {
                 .account_workspaces(None)
                 .and_then(|v| ws::as_state(&v))
                 .map_err(|e| ws::load_error(&e));
-            wake.post(move || store.workspaces.update(|w| w.account = Some(out)));
+            wake.post(move || {
+                store.workspaces.update(|w| {
+                    w.loading.retain(|k| k != "account");
+                    w.account = Some(out);
+                })
+            });
         }
         WsCmd::SaveAccount { payload, key } => {
             let out = client
@@ -229,7 +236,13 @@ fn run(client: &GatewayClient, wake: &WakeHandle, store: Store, cmd: WsCmd) {
                 .workspace_dry_run(value.as_ref())
                 .and_then(|v| ws::as_effective(&v))
                 .map_err(|e| ws::load_error(&e));
-            wake.post(move || store.workspaces.update(|w| w.run = Some((key, out))));
+            wake.post(move || {
+                store.workspaces.update(|w| {
+                    let loading = format!("run:{key}");
+                    w.loading.retain(|k| *k != loading);
+                    w.run = Some((key, out));
+                })
+            });
         }
         WsCmd::RunChange { value, key, commit } => {
             let value_key = ws::run_value_json(value.as_ref()).to_string();

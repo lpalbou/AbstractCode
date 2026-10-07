@@ -4288,162 +4288,32 @@ fn approval_buttons_are_clickable_with_select_mode_on() {
 }
 
 // ---------------------------------------------------------------------------
-// Workspace scope UX (bug (d), 2026-07-22): /workspace modal + run wiring.
+// Workspaces (R14.4): /workspace = this conversation's workspaces, the
+// session level of the kit chooser, read from the gateway; the terminal
+// sends no access mode / allowed-path list of its own.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn workspace_modal_edits_mode_and_allowed_paths_persistently() {
+fn workspace_opens_the_conversation_chooser_read_from_the_gateway() {
     let mut h = harness();
     h.turn();
     h.type_text("/workspace");
     h.turn();
     h.press_enter();
-    let screen = h.turn();
-    assert!(
-        screen.contains("workspace — mode: server-managed"),
-        "modal opens on the honest default:\n{screen}"
-    );
-    assert!(screen.contains("/tmp/ws"), "root shown:\n{screen}");
-    assert!(
-        screen.contains("GATEWAY enforces workspace policy"),
-        "server-clamp honesty note:\n{screen}"
-    );
-
-    // ↓↓ to workspace_or_allowed, Space selects + persists.
-    h.term.push_input(b"\x1b[B\x1b[B");
-    h.turn();
-    h.type_text(" ");
-    let screen = h.turn();
-    assert!(
-        screen.contains("workspace — mode: workspace_or_allowed"),
-        "mode applied:\n{screen}"
-    );
-    assert_eq!(
-        h.store.workspace_mode.get_untracked(),
-        "workspace_or_allowed"
-    );
-    assert_eq!(
-        h.prefs.borrow().workspace_mode.as_deref(),
-        Some("workspace_or_allowed")
-    );
-
-    // Tab to the path input; typed path lands on Enter + persists.
-    h.term.push_input(b"\t");
-    h.turn();
-    h.type_text("/srv/data");
-    h.turn();
-    h.press_enter();
-    let screen = h.turn();
-    assert!(screen.contains("/srv/data"), "added path listed:\n{screen}");
-    assert_eq!(
-        h.store.workspace_allowed.get_untracked(),
-        vec!["/srv/data".to_string()]
-    );
-    assert_eq!(
-        h.prefs.borrow().workspace_allowed,
-        vec!["/srv/data".to_string()]
-    );
-
-    // Esc closes; the next run start carries the scope.
-    h.press_escape();
-    h.turn();
-    h.turn();
-    h.type_text("do something");
-    h.turn();
-    h.press_enter();
-    h.turn();
-    match h.find_cmd(|c| matches!(c, Cmd::Start { .. })) {
-        Some(Cmd::Start { opts, .. }) => {
-            assert_eq!(opts.workspace_mode.as_deref(), Some("workspace_or_allowed"));
-            assert_eq!(opts.workspace_allowed, vec!["/srv/data".to_string()]);
+    let frame = h.turn();
+    assert!(h.ctx.modal_open(), "the rail opened");
+    assert!(frame.contains("Workspace"), "{frame}");
+    assert!(frame.contains("Current workspace"), "the private workspace line stays: {frame}");
+    let sid = h.store.session_id.get_untracked();
+    match h.find_cmd(|c| matches!(c, Cmd::Workspaces(_))) {
+        Some(Cmd::Workspaces(abstractcode::gateway::workspaces::WsCmd::LoadSession { session_id })) => {
+            assert_eq!(session_id, sid, "GET /sessions/{{this session}}/workspaces")
         }
-        other => panic!("expected Start, got {:?}", other.map(|_| "cmd")),
+        other => panic!("expected the session workspaces read, got {:?}", other.map(|_| "cmd")),
     }
-}
-
-#[test]
-fn adding_an_allowed_path_auto_picks_the_mode_that_uses_it() {
-    let mut h = harness();
-    h.turn();
-    h.type_text("/workspace");
-    h.turn();
-    h.press_enter();
-    h.turn();
-    // Straight to the input (mode untouched = server-managed): adding a
-    // path silently doing nothing would be the dishonest outcome — the
-    // modal switches to workspace_or_allowed and says so.
-    h.term.push_input(b"\t");
-    h.turn();
-    h.type_text("/opt/shared");
-    h.turn();
-    h.press_enter();
-    h.turn();
-    assert_eq!(
-        h.store.workspace_mode.get_untracked(),
-        "workspace_or_allowed",
-        "allowed paths only function in workspace_or_allowed — auto-picked"
-    );
-    assert_eq!(
-        h.store.workspace_allowed.get_untracked(),
-        vec!["/opt/shared".to_string()]
-    );
-}
-
-/// bug (d): a path entry with a trailing slash normalizes to the bare
-/// form (so a later bare add dedups against it), and a relative path is
-/// REFUSED honestly (never silently sent — the gateway resolves paths on
-/// its own host, where a relative path is meaningless).
-#[test]
-fn workspace_path_entry_normalizes_and_refuses_relative() {
-    let mut h = harness();
-    h.turn();
-    h.type_text("/workspace");
-    h.turn();
-    h.press_enter();
-    h.turn();
-    h.term.push_input(b"\t");
-    h.turn();
-    // Trailing slash: stored WITHOUT it.
-    h.type_text("/srv/data/");
-    h.turn();
-    h.press_enter();
-    h.turn();
-    assert_eq!(
-        h.store.workspace_allowed.get_untracked(),
-        vec!["/srv/data".to_string()],
-        "trailing slash normalized off"
-    );
-    // The bare form is now a duplicate (dedup keys on the normal form).
-    h.type_text("/srv/data");
-    h.turn();
-    h.press_enter();
-    h.turn();
-    assert_eq!(
-        h.store.workspace_allowed.get_untracked(),
-        vec!["/srv/data".to_string()],
-        "bare form dedups against the trailing-slash form"
-    );
-    // A relative path is refused — the list is unchanged.
-    h.type_text("relative/dir");
-    h.turn();
-    h.press_enter();
-    h.turn();
-    assert_eq!(
-        h.store.workspace_allowed.get_untracked(),
-        vec!["/srv/data".to_string()],
-        "relative path refused, list unchanged"
-    );
-    // The refusal is honest (a toast notice naming why — the toast is an
-    // async overlay, so assert on the notice queue, not the frame text).
-    assert!(
-        h.store
-            .notices
-            .get_untracked()
-            .iter()
-            .any(|n| n.contains("not absolute")),
-        "the refusal says why: {:?}",
-        h.store.notices.get_untracked()
-    );
+    // No access-mode modal and no allowed-path list anymore.
+    assert!(!frame.contains("allowed paths"), "{frame}");
+    assert!(!frame.contains("workspace_or_allowed"), "{frame}");
 }
 
 // ---------------------------------------------------------------------------
@@ -5862,8 +5732,10 @@ fn goal_runs_carry_the_current_tier_policy_and_shared_start_opts() {
                 vec!["fetch_url".to_string()],
                 "ask pins force-ask on goal runs too"
             );
-            assert_eq!(opts.workspace_mode.as_deref(), Some("workspace_or_allowed"));
-            assert_eq!(opts.workspace_allowed, vec!["/srv/data".to_string()]);
+            // R14.4: the conversation's workspaces are the gateway's (session
+            // level); the old local mode / list never ride a run.
+            assert_eq!(opts.workspace_mode, None);
+            assert!(opts.workspace_allowed.is_empty());
             assert_eq!(opts.skills, vec!["coredoc".to_string()]);
             let input = abstractcode::run_input::build_input_data("ship it", &opts);
             assert!(

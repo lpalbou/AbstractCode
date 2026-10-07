@@ -160,8 +160,9 @@ pub struct RunSettings {
     pub max_iterations: String,
     pub max_tokens: String,
     pub system: String,
-    pub workspace_mode: String,
-    pub allowed_paths: Vec<String>,
+    /// The automation's workspaces (`input_data.workspace`, the R11 run
+    /// level); `None` = "Use my default".
+    pub workspace: Option<crate::workspaces::RunValue>,
     /// `None` = all tools (no allowlist); `Some(list)` = custom allowlist.
     pub tools: Option<Vec<String>>,
     /// Per-tool approval overrides: (name, "approve" | "ask").
@@ -250,8 +251,7 @@ pub fn read_settings(input: &Value) -> RunSettings {
         max_iterations: text(limits.get("max_iterations")),
         max_tokens: text(limits.get("max_tokens")),
         system: text(runtime.get("system_prompt_extra")),
-        workspace_mode: text(data.get("workspace_access_mode")),
-        allowed_paths: strings(data.get("workspace_allowed_paths")),
+        workspace: crate::workspaces::run_value_from(input),
         tools: tool_selection(&data),
         approval,
         skills: strings(data.get("skills")),
@@ -358,23 +358,45 @@ pub fn apply_settings(input: &Value, s: &RunSettings) -> Value {
     } else {
         next.insert("_limits".into(), Value::Object(limits));
     }
-    set_or_delete(
-        &mut next,
-        "workspace_access_mode",
-        Some(json!(s.workspace_mode)),
-    );
-    let allowed = if s.workspace_mode == "workspace_or_allowed" {
-        s.allowed_paths
-            .iter()
-            .map(|p| p.trim().to_string())
-            .filter(|p| !p.is_empty())
-            .collect()
-    } else {
-        Vec::new()
-    };
-    set_or_delete(&mut next, "workspace_allowed_paths", Some(json!(allowed)));
+    apply_workspace(&mut next, s.workspace.as_ref());
     set_or_delete(&mut next, "skills", Some(json!(s.skills)));
     Value::Object(next)
+}
+
+/// The workspaces part of the web's `withAutomationRunPreferences`: the
+/// access mode is retired; a chosen payload replaces the R9 list; "Use my
+/// default" removes the payload (and the list the gateway derived from it).
+fn apply_workspace(next: &mut Map<String, Value>, value: Option<&crate::workspaces::RunValue>) {
+    next.remove("workspace_access_mode");
+    match value {
+        None => {
+            if next.get("workspace").is_some_and(Value::is_object) {
+                next.remove("workspace_allowed_paths");
+            }
+            next.remove("workspace");
+        }
+        Some(v) => {
+            next.insert("workspace".into(), v.to_json());
+            next.remove("workspace_allowed_paths");
+        }
+    }
+}
+
+/// The PATCH `changes` that set the automation's workspaces (one revision),
+/// or `None` when nothing would change.
+pub fn workspace_changes(target: &Value, value: Option<&crate::workspaces::RunValue>) -> Option<Value> {
+    let before = target.get("input_data").cloned().unwrap_or(json!({}));
+    let mut after = obj(Some(&before));
+    apply_workspace(&mut after, value);
+    let after = Value::Object(after);
+    if Value::Object(obj(Some(&before))) == after {
+        return None;
+    }
+    Some(json!({"target": {
+        "bundle_ref": target.get("bundle_ref").cloned().unwrap_or(Value::Null),
+        "flow_id": target.get("flow_id").cloned().unwrap_or(Value::Null),
+        "input_data": after,
+    }}))
 }
 
 /// The PATCH `changes` for new settings — `{target: {bundle_ref, flow_id,
@@ -466,68 +488,6 @@ pub fn speculation_label(v: Option<&Value>) -> String {
             None if v.get("enabled").and_then(Value::as_bool) == Some(false) => "Off".into(),
             None => v.to_string(),
         },
-    }
-}
-
-/// An access mode in words (web `settings_panel.tsx`); unknown ids raw.
-pub fn workspace_mode_label(mode: &str) -> String {
-    match mode {
-        "" => "Gateway default".into(),
-        "workspace_only" => "This workspace only".into(),
-        "workspace_or_allowed" => "Workspace and allowed paths".into(),
-        "all_except_ignored" => "Everything except ignored paths".into(),
-        "unrestricted" => "No restriction".into(),
-        other => other.into(),
-    }
-}
-
-/// `GET /workspace/policy`, as the Workspace panel uses it.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct WorkspacePolicy {
-    pub scope_overrides: bool,
-    pub modes: Vec<String>,
-    pub mounts: Vec<String>,
-}
-
-pub fn parse_workspace_policy(v: &Value) -> WorkspacePolicy {
-    // The route answers `{ok, policy: {...}}`; older gateways answered the
-    // policy object itself.
-    let v = v.get("policy").filter(|p| p.is_object()).unwrap_or(v);
-    WorkspacePolicy {
-        scope_overrides: v
-            .get("client_workspace_scope_overrides")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        modes: strings(v.get("allowed_access_modes")),
-        mounts: v
-            .get("mounts")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(|m| {
-                        ["label", "name", "id"]
-                            .iter()
-                            .find_map(|k| m.get(*k).and_then(Value::as_str))
-                            .map(str::to_string)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
-    }
-}
-
-/// The policy's title and sentence (web Workspace panel).
-pub fn workspace_policy_text(p: &WorkspacePolicy) -> (&'static str, &'static str) {
-    if p.scope_overrides {
-        (
-            "Client scope requests enabled",
-            "You may request a workspace scope. Gateway policy remains authoritative.",
-        )
-    } else {
-        (
-            "Managed by your gateway",
-            "The gateway chooses and restricts the workspace. File browsing and tool execution follow the same policy.",
-        )
     }
 }
 

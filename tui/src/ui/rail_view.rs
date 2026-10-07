@@ -59,7 +59,9 @@ pub enum Act {
     ContextLimit,
     Stream,
     WorkflowPicker,
-    WorkspaceModal,
+    /// A workspace chooser control (session level for the conversation,
+    /// run level for an automation).
+    Ws(crate::ui::workspace_view::WsAct),
     Permissions,
     ToggleTool(String),
     ToolsModal,
@@ -80,8 +82,6 @@ pub enum Act {
     AEvery,
     AContextMode,
     AApproval,
-    AAccessMode,
-    AAllowed,
     AToolsMode,
     AToggleTool(String),
     AToggleSkill(String),
@@ -113,8 +113,10 @@ pub struct Snap {
     pub workflow: Workflow,
     pub workflows: Vec<Workflow>,
     pub workspace_root: Option<String>,
-    pub workspace_mode: String,
-    pub workspace_allowed: Vec<String>,
+    /// This terminal's session (the conversation's workspaces).
+    pub session_id: String,
+    /// The workspace choosers' data (`store.workspaces`).
+    pub ws: crate::workspaces::WsData,
     pub tools: Vec<ToolInfo>,
     pub tools_error: String,
     pub disabled: Vec<String>,
@@ -194,8 +196,8 @@ pub fn snap(store: Store, ctx: &UiCtx, binding: &Binding, tracked: bool) -> Snap
         workflow: rd(store.workflow, tracked),
         workflows: rd(store.workflows, tracked),
         workspace_root: ctx.workspace_root.clone(),
-        workspace_mode: rd(store.workspace_mode, tracked),
-        workspace_allowed: rd(store.workspace_allowed, tracked),
+        session_id: rd(store.session_id, tracked),
+        ws: rd(store.workspaces, tracked),
         tools: rd(store.tools, tracked),
         tools_error: rd(store.tools_error, tracked),
         disabled: rd(store.disabled_tools, tracked),
@@ -778,12 +780,22 @@ fn activity_cards(
     }
 }
 
+/// The chooser this panel shows: the conversation's workspaces (session
+/// level) or the bound automation's (run level).
+pub fn workspace_host(s: &Snap) -> crate::ui::workspace_view::Host {
+    use crate::ui::workspace_view::Host;
+    match &s.binding {
+        Binding::Conversation => Host::Session(s.session_id.clone()),
+        Binding::Automation(id) => Host::Automation(id.clone()),
+    }
+}
+
 fn workspace_cards(s: &Snap, is_auto: bool, cards: &mut Vec<Card>, acts: &mut Vec<Act>) {
-    let policy = match &s.rail.policy {
-        Some(Ok(v)) => Some(rail::parse_workspace_policy(v)),
-        _ => None,
-    };
-    if let Some((summary, _, a)) = auto_settings(s).filter(|_| is_auto) {
+    let host = workspace_host(s);
+    let input = auto_settings(s)
+        .filter(|_| is_auto)
+        .map(|(_, def, _)| def.target.get("input_data").cloned().unwrap_or(json!({})));
+    if let Some((summary, _, _)) = auto_settings(s).filter(|_| is_auto) {
         cards.push(Card::fixed(vec![row(
             "Runs work in the automation folder",
             summary
@@ -792,86 +804,17 @@ fn workspace_cards(s: &Snap, is_auto: bool, cards: &mut Vec<Card>, acts: &mut Ve
                 .map(short_name)
                 .unwrap_or_else(|| "Gateway managed".into()),
         )]));
-        cards.push(Card::new(vec![row(
-            "Access mode",
-            rail::workspace_mode_label(&a.workspace_mode),
+    } else {
+        // The private workspace line stays as it was ("Current workspace session-…").
+        cards.push(Card::fixed(vec![row(
+            "Current workspace",
+            short_name(s.workspace_root.as_deref().unwrap_or("")),
         )]));
-        acts.push(Act::AAccessMode);
-        if a.workspace_mode == "workspace_or_allowed" {
-            cards.push(Card::new(vec![
-                row(
-                    "Additional allowed paths",
-                    if a.allowed_paths.is_empty() {
-                        "none"
-                    } else {
-                        ""
-                    },
-                ),
-                faint(a.allowed_paths.join(", ")),
-            ]));
-            acts.push(Act::AAllowed);
-        }
-        return;
     }
-    cards.push(Card::fixed(vec![row(
-        "Current workspace",
-        short_name(s.workspace_root.as_deref().unwrap_or("")),
-    )]));
-    cards.push(Card::heading("Workspace access"));
-    match (&s.rail.policy, &policy) {
-        (None, _) => cards.push(Card::note("Loading the workspace policy…")),
-        (Some(Err(e)), _) => cards.push(Card::fixed(vec![CardLine::new(
-            format!("The workspace policy could not be read: {e}"),
-            Ink::Error,
-        )])),
-        (_, Some(p)) => {
-            let (title, text) = rail::workspace_policy_text(p);
-            cards.push(Card::fixed(vec![
-                CardLine::new(title, Ink::Text),
-                faint(text),
-            ]));
-            cards.push(Card::fixed(vec![row(
-                "Allowed access modes",
-                if p.modes.is_empty() {
-                    "Gateway default".to_string()
-                } else {
-                    p.modes
-                        .iter()
-                        .map(|m| rail::workspace_mode_label(m))
-                        .collect::<Vec<_>>()
-                        .join(" · ")
-                },
-            )]));
-            cards.push(Card::fixed(vec![row(
-                "Available mounts",
-                if p.mounts.is_empty() {
-                    "Default workspace".to_string()
-                } else {
-                    p.mounts.join(", ")
-                },
-            )]));
-        }
-        _ => {}
-    }
-    cards.push(Card::new(vec![row(
-        "Access mode",
-        rail::workspace_mode_label(&s.workspace_mode),
-    )]));
-    acts.push(Act::WorkspaceModal);
-    if s.workspace_mode == "workspace_or_allowed" {
-        cards.push(Card::new(vec![
-            row(
-                "Additional allowed paths",
-                if s.workspace_allowed.is_empty() {
-                    "none"
-                } else {
-                    ""
-                },
-            ),
-            faint(s.workspace_allowed.join(", ")),
-        ]));
-        acts.push(Act::WorkspaceModal);
-    }
+    let hv = crate::ui::workspace_view::host_view(&host, &s.ws, s.connected, input.as_ref());
+    let (more, more_acts) = crate::ui::workspace_view::chooser_cards(&hv, &s.ws);
+    cards.extend(more);
+    acts.extend(more_acts.into_iter().map(Act::Ws));
 }
 
 fn tools_cards(s: &Snap, is_auto: bool, cards: &mut Vec<Card>, acts: &mut Vec<Act>) {
@@ -1097,6 +1040,36 @@ pub fn open_rail(cx: Scope, store: Store, ctx: &UiCtx, binding: Binding, panel: 
                     ));
                 },
             );
+        }
+        // The Workspace panel's chooser reads the gateway (this
+        // conversation's workspaces, or the automation's dry run) — and
+        // re-reads after a change elsewhere (the account default).
+        {
+            let ctx = ctx2.clone();
+            let binding = binding.clone();
+            mcx.effect(move || {
+                if current.get() != Panel::Workspace {
+                    return;
+                }
+                let connected = matches!(store.conn.get(), Conn::Ok | Conn::Unknown);
+                let (host, input) = match &binding {
+                    Binding::Conversation => (
+                        crate::ui::workspace_view::Host::Session(store.session_id.get()),
+                        None,
+                    ),
+                    Binding::Automation(id) => (
+                        crate::ui::workspace_view::Host::Automation(id.clone()),
+                        crate::ui::workspace_view::automation_input(store, id, true).map(|(i, _)| i),
+                    ),
+                };
+                if matches!(binding, Binding::Automation(_)) && input.is_none() {
+                    return;
+                }
+                let hv = store.workspaces.with(|w| {
+                    crate::ui::workspace_view::host_view(&host, w, connected, input.as_ref())
+                });
+                crate::ui::workspace_view::ensure_loaded(store, &ctx, &host, &hv);
+            });
         }
         // An automation run's activity is read when its group is open.
         {
@@ -1526,9 +1499,22 @@ fn run_act(
             });
             crate::ui::modals::open_workflow_picker(cx, store, ctx);
         }
-        Act::WorkspaceModal => {
-            return_here();
-            crate::ui::modals::open_workspace(cx, store, ctx);
+        Act::Ws(a) => {
+            let host = workspace_host(&s);
+            let back: Rc<dyn Fn()> = {
+                let ctx = ctx.clone();
+                let binding = binding.clone();
+                Rc::new(move || reopen(cx, store, &ctx, &binding, panel))
+            };
+            // `d` on the switch = back to the default (the kit's follow ON).
+            let a = if reset { crate::ui::workspace_view::WsAct::Follow } else { a };
+            if reset {
+                let hv = crate::ui::workspace_view::current(store, &host);
+                if hv.state.as_ref().is_some_and(|st| !st.policy.configured) {
+                    return;
+                }
+            }
+            crate::ui::workspace_view::run_ws_act(cx, store, ctx, &host, a, back);
         }
         Act::Permissions => crate::ui::cycle_permissions(store, ctx),
         Act::ToolsModal => {
@@ -2009,85 +1995,6 @@ fn run_act(
                 ctx,
                 binding,
                 Some(json!({"policy": {"tool_approval": next}})),
-            );
-        }
-        Act::AAccessMode if reset => save_settings(&|a| {
-            a.workspace_mode.clear();
-            a.allowed_paths.clear();
-        }),
-        Act::AAccessMode => {
-            let policy = match &s.rail.policy {
-                Some(Ok(v)) => rail::parse_workspace_policy(v),
-                _ => rail::WorkspacePolicy::default(),
-            };
-            let modes: Vec<String> = if policy.modes.is_empty() {
-                [
-                    "workspace_only",
-                    "workspace_or_allowed",
-                    "all_except_ignored",
-                    "unrestricted",
-                ]
-                .iter()
-                .map(|m| m.to_string())
-                .collect()
-            } else {
-                policy.modes.clone()
-            };
-            let mut labels = vec!["Gateway default".to_string()];
-            labels.extend(modes.iter().map(|m| rail::workspace_mode_label(m)));
-            let ctx2 = ctx.clone();
-            let binding2 = binding.clone();
-            let settings2 = settings.clone();
-            pick_then(
-                "Access mode",
-                labels,
-                0,
-                Rc::new(move |ix| {
-                    let Some((_, def, mut a)) = settings2.clone() else {
-                        return;
-                    };
-                    a.workspace_mode = if ix == 0 {
-                        String::new()
-                    } else {
-                        modes.get(ix - 1).cloned().unwrap_or_default()
-                    };
-                    save_revision(
-                        store,
-                        &ctx2,
-                        &binding2,
-                        rail::settings_changes(&def.target, &a),
-                    );
-                }),
-            );
-        }
-        Act::AAllowed if reset => save_settings(&|a| a.allowed_paths.clear()),
-        Act::AAllowed => {
-            let Some((_, _, a)) = settings.clone() else {
-                return;
-            };
-            let ctx2 = ctx.clone();
-            let binding2 = binding.clone();
-            let settings2 = settings.clone();
-            text_then(
-                "Additional allowed paths",
-                "Paths separated by commas.",
-                a.allowed_paths.join(", "),
-                Rc::new(move |v: String| {
-                    let Some((_, def, mut a)) = settings2.clone() else {
-                        return;
-                    };
-                    a.allowed_paths = v
-                        .split(',')
-                        .map(|p| p.trim().to_string())
-                        .filter(|p| !p.is_empty())
-                        .collect();
-                    save_revision(
-                        store,
-                        &ctx2,
-                        &binding2,
-                        rail::settings_changes(&def.target, &a),
-                    );
-                }),
             );
         }
         Act::AToolsMode => {
