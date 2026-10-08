@@ -698,3 +698,106 @@ fn a_fresh_conversation_starts_on_the_account_default_and_workflow_saves_nothing
     assert!(h.store.workflow.get_untracked().gateway_default);
 }
 
+// -- /sessions search ----------------------------------------------------------------
+
+fn row(id: &str, at: &str, prompt: &str) -> SessionRow {
+    SessionRow {
+        id: id.into(),
+        state: SessionState::Done,
+        last_at: at.into(),
+        turns: 1,
+        first_run: String::new(),
+        prompt: Some(prompt.into()),
+        tools: None,
+    }
+}
+
+fn board(h: &mut H) {
+    h.command("/sessions");
+    h.store.session_index.set(SessionIndex::Loaded {
+        rows: vec![
+            row(
+                "acode-7f3a91",
+                "2026-10-02T10:00:00Z",
+                "Port the tests to rstest",
+            ),
+            row(
+                "acode-c0ffee",
+                "2026-10-01T09:00:00Z",
+                "Summarise the RELEASE notes",
+            ),
+            row(
+                "acode-b1d2e3",
+                "2026-09-30T09:00:00Z",
+                "Fix the release script",
+            ),
+        ],
+        truncated: false,
+        labeled: 3,
+        archived: 2,
+    });
+    h.turn();
+}
+
+#[test]
+fn sessions_search_filters_on_title_and_id_like_the_web() {
+    per_size(|size| {
+        let mut h = harness(size);
+        board(&mut h);
+        let screen = h.shot("sessions-board");
+        assert!(
+            screen.contains("Search conversations"),
+            "the hint names `/`:\n{screen}"
+        );
+        // `/` then typing: case-insensitive on the title.
+        h.keys(b"/");
+        let screen = h.keys(b"release");
+        assert!(screen.contains("Summarise the RELEASE notes"), "{screen}");
+        assert!(screen.contains("Fix the release script"), "{screen}");
+        assert!(!screen.contains("Port the tests"), "{screen}");
+        assert!(
+            flat(&screen).contains("Search conversations: release▏ · 2 of 3"),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("Archived · 2"),
+            "the archived line stays reachable:\n{screen}"
+        );
+        h.shot("sessions-search-title");
+        // Letters type while searching: `a` never asks to archive.
+        assert!(!flat(&screen).contains("Archive this conversation?"));
+        // Backspace narrows back.
+        for _ in 0..7 {
+            h.keys(b"\x7f");
+        }
+        let screen = h.keys(b"C0FFEE");
+        // An id fragment matches a card whose title does not contain it.
+        assert!(screen.contains("Summarise the RELEASE notes"), "{screen}");
+        assert!(!screen.contains("Fix the release script"), "{screen}");
+        h.shot("sessions-search-id");
+        // No match: the web's empty state.
+        let screen = h.keys(b"zz");
+        assert!(
+            screen.contains("No conversations match your search."),
+            "{screen}"
+        );
+        h.shot("sessions-search-empty");
+        // Esc clears the search first, then closes.
+        let screen = h.esc();
+        assert!(screen.contains("Port the tests to rstest"), "{screen}");
+        assert!(!screen.contains("Search conversations:"), "{screen}");
+        let screen = h.esc();
+        assert!(!screen.contains("Conversations"), "closed:\n{screen}");
+    });
+}
+
+#[test]
+fn enter_continues_the_filtered_conversation() {
+    let mut h = harness(Size::new(120, 40));
+    board(&mut h);
+    h.keys(b"/");
+    h.keys(b"rstest");
+    h.cmds();
+    h.keys(b"\r");
+    assert_eq!(h.store.session_id.get_untracked(), "acode-7f3a91");
+}
