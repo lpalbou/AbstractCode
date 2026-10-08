@@ -272,16 +272,16 @@ describe("the sidebar section", () => {
     const timing = (c: string) => [line1(c), line2(c)].filter(Boolean).join(" / ");
     // The operator's line, from the gateway's facts only (NOW = 2026-09-27 06:35 UTC).
     // Run #7 waits for an approval: "waiting since", never "running now" beside the badge.
-    expect(timing(card("Inbox triage"))).toBe("every 30 min · waiting since 4 min / next in 25 min");
+    expect(timing(card("Inbox triage"))).toBe("Every 30 minutes (UTC) · waiting since 4 min / next in 25 min");
     // Line 1 starts with the ↻ icon for a schedule; line 2 holds `next` and the Active switch, in that order.
     expect(card("Inbox triage")).toMatch(/data-field="timing"><svg[^>]*code-card-cadence-icon/);
     expect(card("Inbox triage")).toMatch(/<div class="code-card-line2"><small class="code-card-meta" data-field="next">next in 25 min<\/small><button[^>]*role="switch"/);
     const executing = { ...list()[0], attention: { ...list()[0].attention, pending_waits: 0, unseen_count: 0 } };
     const run = renderToStaticMarkup(<AutomationsSection {...base} state={state([executing])} />);
-    expect(timing(run)).toBe("every 30 min · running now / next in 25 min");
-    expect(timing(card("AI news monitor"))).toBe("every 8 h · last 6 h ago / next in 1 h");
+    expect(timing(run)).toBe("Every 30 minutes (UTC) · running now / next in 25 min");
+    expect(timing(card("AI news monitor"))).toBe("Every 8 hours (UTC) · last 6 h ago / next in 1 h");
     // Nothing scheduled (paused): line 2 keeps only the switch.
-    expect(timing(card("Weekly journal monitor"))).toBe("every 7 d · last 6 d ago");
+    expect(timing(card("Weekly journal monitor"))).toBe(`${"Every 7 days (UTC) \u00b7 12 runs max"} · last 6 d ago`);
     expect(card("Weekly journal monitor")).toContain('data-field="next"></small>');
     // An approval is pending only on Inbox triage (pending_waits 2): the badge there and nowhere else.
     expect(card("Inbox triage")).toContain('data-field="waiting">waiting for you<');

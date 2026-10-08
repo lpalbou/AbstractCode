@@ -94,7 +94,7 @@ describe("automation header (DESIGN §4)", () => {
     expect(html).toMatch(/role="switch"[^>]*data-action="active" aria-checked="true"[\s\S]*?af-switch__label">Active</);
     expect(html).toContain('data-field="waiting">waiting for you<');
     // An approval is pending on run #7: waiting since it fired (06:30), never "running now".
-    expect(html).toContain('data-field="timing">every 30 min · waiting since 4 min · next in 25 min<');
+    expect(html).toContain('data-field="timing">Every 30 minutes (UTC) · waiting since 4 min · next in 25 min<');
     expect(html).not.toContain("running now");
     const news = list().find((s) => s.title === "AI news monitor")!;
     expect(header(news)).not.toContain("waiting for you");
