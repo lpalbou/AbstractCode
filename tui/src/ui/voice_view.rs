@@ -120,7 +120,13 @@ pub fn toggle_speak(store: Store, ctx: &UiCtx) {
 
 /// Speak `text` through the gateway's streaming voice route.
 pub fn speak_text(store: Store, ctx: &UiCtx, text: String) {
-    let run_id = store.run_id.get_untracked();
+    speak_text_for(store, ctx, store.run_id.get_untracked(), text)
+}
+
+/// Speak `text` through the voice route of `run_id` (the conversation's
+/// run, or an automation's: the Code web reads an automation's messages
+/// through the automation's own run, `automations_view.tsx:284-286`).
+pub fn speak_text_for(store: Store, ctx: &UiCtx, run_id: String, text: String) {
     if run_id.is_empty() {
         post_error(
             store,

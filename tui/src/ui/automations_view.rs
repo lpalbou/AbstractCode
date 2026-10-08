@@ -546,6 +546,7 @@ pub const DETAIL_HINTS: &[(&str, &str)] = &[
     ("y/n", "approve/deny"),
     ("Enter", "answers"),
     ("d", "Discuss run"),
+    ("Ctrl+P", "read aloud"),
     ("w", "folder"),
     ("r", "Refresh"),
     ("Esc", "back"),
@@ -663,6 +664,28 @@ pub(crate) fn detail_rows(d: &auto::Detail, width: i32) -> (Vec<RowSpec>, Vec<(u
 
 /// Where the cursor rests before the user moves it (`usize::MAX`): on the
 /// first wait that needs you, else on the newest run.
+/// What Ctrl+P reads in one automation (R17.1): the SELECTED run's reply,
+/// spoken through the automation's run (the web's `runId: automationId`).
+/// `Err` = the sentence to show instead.
+pub fn read_aloud_target(
+    d: &auto::Detail,
+    at: Option<&Target>,
+) -> Result<(String, String), String> {
+    let Some(Target::Run(index)) = at else {
+        return Err("select a run (↑↓) to read its reply aloud".into());
+    };
+    let reply = d
+        .occurrences
+        .iter()
+        .find(|o| o.index == *index)
+        .map(|o| o.answer.trim().to_string())
+        .unwrap_or_default();
+    if reply.is_empty() {
+        return Err("No reply to read aloud yet.".into());
+    }
+    Ok((d.id.clone(), reply))
+}
+
 pub(crate) fn resolve_cursor(cursor: usize, targets: &[Target]) -> usize {
     if cursor != usize::MAX {
         return cursor.min(targets.len().saturating_sub(1));
@@ -1021,6 +1044,29 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
             .shortcut(key('a'), move |_| archive())
             .shortcut(key('d'), move |_| discuss())
             .shortcut(key('w'), move |_| folder())
+            // Ctrl+P reads the selected run's reply aloud (again = stop),
+            // the conversation's read-aloud path on this automation's run.
+            .shortcut(KeyChord::new(Mods::CTRL, Key::Char('p')), {
+                let ctx = ctx2.clone();
+                move |_| {
+                    if crate::ui::voice_view::stop_speaking(store) {
+                        return;
+                    }
+                    let picked = store.automations.with_untracked(|v| {
+                        v.detail.as_ref().map(|d| read_aloud_target(d, at().as_ref()))
+                    });
+                    match picked {
+                        Some(Ok((run_id, text))) => {
+                            store
+                                .automations
+                                .update(|v| v.notice = "Reading the reply aloud — Ctrl+P stops.".into());
+                            crate::ui::voice_view::speak_text_for(store, &ctx, run_id, text)
+                        }
+                        Some(Err(why)) => store.automations.update(|v| v.notice = why),
+                        None => {}
+                    }
+                }
+            })
             .shortcut(key('r'), {
                 let ctx = ctx2.clone();
                 move |_| refresh(store, &ctx)
