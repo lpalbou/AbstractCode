@@ -38,6 +38,7 @@ KIT_FILES = ["AfScheduleDialog.tsx", "email_fields.tsx", "automation_tools_picke
 
 # The dialog's non-table words the terminal shows (kit literals, verbatim).
 DIALOG_WORDS = [
+    "Schedule a task",
     "What",
     "When (UTC)",
     "Context",
