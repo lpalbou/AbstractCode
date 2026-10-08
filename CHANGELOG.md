@@ -11,13 +11,13 @@ Requires AbstractGateway with `schedule@2`, the served schedule fields and `POST
 
 ### Added
 
-- Web: calendar schedules. The schedule dialog's **When** offers **Repeat** (fixed UTC interval, as before), **Daily**, **Weekly** (day chips that show their state), **Monthly** (day 1–31 or the last day) at a time of day, and **Once at**; every schedule is written as `schedule@2`. For Daily, Weekly, Monthly and Once the line under **When** is the gateway's own sentence and the time zone reads "in Europe/Paris (your account's time zone)" with **Change in preferences** (opens Settings → Workflow). An automation's Workflow settings edit its calendar rule, keeping its time zone and limits.
+- Web: calendar schedules. The schedule dialog's **When** offers **Repeat** (fixed UTC interval, as before), **Daily**, **Weekly** (day chips that show their state), **Monthly** (day 1–31 or the last day) at a time of day, and **Once at**; every schedule is written as `schedule@2`. For every schedule (Repeat with its bounds too) the line under **When** is the gateway's own sentence; for Daily, Weekly, Monthly and Once the time zone reads "in Europe/Paris (your account's time zone)" with **Change in preferences** (opens Settings → Workflow). An automation's Workflow settings edit its calendar rule, keeping its time zone and limits.
 - Web: Settings → Workflow → **Time zone**, your account's time zone kept by the gateway (`PUT /api/gateway/accounts/me/preferences` `{time_zone}`): the kit picker over the gateway's IANA list, **Gateway default (<zone>)** first, one PUT at once ("Saved." / "Not saved." + the gateway's sentence).
 - tui: the same calendar schedules in `/schedule` and in an automation's Edit panel — see [tui/CHANGELOG.md](tui/CHANGELOG.md).
 
 ### Changed
 
-- Web: automation rows, the header and Run now's hint show the gateway's served next run (`next_run_local`, cut to "2026-10-09 07:30 Europe/Paris", plus the relative time to `next_run_at`) and a calendar rule's `schedule_rule_text`; the app no longer reads `next_fire_at` or computes a next run.
+- Web: automation rows, the header and Run now's hint show the gateway's served next run (`next_run_local`, cut to "2026-10-09 07:30 Europe/Paris", plus the relative time to `next_run_at`) and every schedule's `schedule_rule_text` (cards read "Every 30 minutes (UTC) · last 3 h ago"); the app no longer reads `next_fire_at` or computes a next run.
 
 ## [terminal 0.9.1 / web 0.11.1] - 2026-10-08
 
