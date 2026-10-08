@@ -1180,3 +1180,171 @@ fn flat(screen: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
+
+/// Every command sent since the last drain: (schedule-preview triggers, revisions).
+fn previews_and_saves(h: &mut Harness) -> (Vec<Value>, Vec<(u64, Value)>) {
+    let (mut previews, mut saved) = (Vec::new(), Vec::new());
+    while let Ok(cmd) = h.rx.try_recv() {
+        match cmd {
+            Cmd::Automations(AutoCmd::Preview { trigger }) => previews.push(trigger),
+            Cmd::Rail(abstractcode::gateway::rail::RailCmd::SaveRevision {
+                expected_revision,
+                changes,
+                ..
+            }) => saved.push((expected_revision, changes)),
+            _ => {}
+        }
+    }
+    (previews, saved)
+}
+
+/// The Edit panels on the schedule@2 daily fixture row ("Morning briefing").
+fn edit_morning_briefing(h: &mut Harness) -> auto::Summary {
+    let list = auto::parse_list_page(&fixture("list.json")).unwrap();
+    let summary = list
+        .items
+        .iter()
+        .find(|s| s.title == "Morning briefing")
+        .unwrap()
+        .clone();
+    h.command("/automations");
+    h.answer_list();
+    for _ in 0..3 {
+        h.keys(b"\x1b[B");
+    }
+    h.keys(b"\r");
+    let definition = auto::Definition {
+        revision: 5,
+        workflow_id: "brief@1.0.0:agent".into(),
+        tool_approval: "auto".into(),
+        growing: Default::default(),
+        max_attempts: Some(3),
+        workspace_root: summary.workspace_root.clone().unwrap(),
+        target: Value::Null,
+    };
+    let s2 = summary.clone();
+    h.store.automations.update(|v| {
+        v.apply_detail(
+            &s2.id,
+            definition,
+            s2.clone(),
+            auto::Page {
+                items: vec![],
+                next_cursor: None,
+            },
+        )
+    });
+    h.turn();
+    h.keys(b"e");
+    summary
+}
+
+#[test]
+fn edit_a_calendar_rule_keeps_its_time_zone_and_shows_the_gateways_line() {
+    let mut h = harness();
+    edit_morning_briefing(&mut h);
+    let (previews, _) = previews_and_saves(&mut h);
+    let trigger = previews
+        .last()
+        .cloned()
+        .expect("the panel asks the gateway to word the stored rule");
+    assert_eq!(
+        trigger,
+        json!({"source_id": "schedule", "source_version": 2,
+               "config": {"kind": "daily", "at": "08:00", "time_zone": "Europe/Paris"}})
+    );
+    let screen = h.turn();
+    assert!(
+        screen.contains("When") && screen.contains("Daily"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("Time of day") && screen.contains("08:00"),
+        "{screen}"
+    );
+    assert!(screen.contains("Checking the schedule…"), "{screen}");
+    let sentence = "Runs every day at 08:00 (Europe/Paris), first run Mon 28 Sep 08:00.";
+    h.store.automations.update(|v| {
+        v.apply_preview(
+            &trigger,
+            auto::PreviewState::Ready(
+                auto::parse_schedule_preview(&json!({
+                    "trigger": trigger, "time_zone": "Europe/Paris",
+                    "schedule_rule_text": "Every day at 08:00 (Europe/Paris)",
+                    "schedule_text": "Every day at 08:00 (Europe/Paris) · next Mon 28 Sep 08:00",
+                    "next_run_at": "2026-09-28T06:00:00+00:00",
+                    "next_run_local": "2026-09-28T08:00:00+02:00",
+                    "first_run_sentence": sentence
+                }))
+                .unwrap(),
+            ),
+        )
+    });
+    let screen = h.turn();
+    assert!(
+        screen.contains("in Europe/Paris (this automation's time zone)"),
+        "{screen}"
+    );
+    assert!(screen.contains(sentence), "{screen}");
+    // When (row 3: Workflow, Title, When) → Weekly: ONE revision with the
+    // rule and the binding's own zone.
+    h.keys(b"\x1b[B\x1b[B");
+    let screen = h.keys(b"\r");
+    assert!(
+        screen.contains("Weekly") && screen.contains("Monthly"),
+        "{screen}"
+    );
+    h.keys(b"\x1b[B");
+    h.keys(b"\r");
+    let (_, saved) = previews_and_saves(&mut h);
+    match saved.as_slice() {
+        [(rev, changes)] => {
+            assert_eq!(*rev, 5);
+            assert_eq!(
+                changes,
+                &json!({"trigger": {"source_id": "schedule", "source_version": 2,
+                    "config": {"kind": "weekly", "days": ["mon"], "at": "08:00", "time_zone": "Europe/Paris"}}})
+            );
+        }
+        other => panic!("expected one revision, got {other:?}"),
+    }
+}
+
+#[test]
+fn edit_a_calendar_time_sends_only_a_changed_rule() {
+    let mut h = harness();
+    edit_morning_briefing(&mut h);
+    previews_and_saves(&mut h);
+    // Time of day (row 4).
+    h.keys(b"\x1b[B\x1b[B\x1b[B");
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("Time of day"), "{screen}");
+    // The same time: nothing is sent.
+    h.keys(b"\r");
+    let (_, saved) = previews_and_saves(&mut h);
+    assert!(saved.is_empty(), "{saved:?}");
+    // 07:30: the rule changes, the zone stays (the panel reopens on the same row).
+    h.keys(b"\r");
+    h.keys(b"\x1b[F\x7f\x7f\x7f\x7f\x7f");
+    h.term.push_input(b"07:30");
+    h.turn();
+    h.keys(b"\r");
+    let (_, saved) = previews_and_saves(&mut h);
+    assert_eq!(saved.len(), 1, "{saved:?}");
+    assert_eq!(
+        saved[0].1["trigger"]["config"],
+        json!({"kind": "daily", "at": "07:30", "time_zone": "Europe/Paris"})
+    );
+    // A malformed time is refused with the kit's sentence, nothing sent.
+    h.keys(b"\r");
+    h.keys(b"\x1b[F\x7f\x7f\x7f\x7f\x7f");
+    h.term.push_input(b"7h30");
+    h.turn();
+    let screen = h.keys(b"\r");
+    let (_, saved) = previews_and_saves(&mut h);
+    assert!(saved.is_empty(), "{saved:?}");
+    assert!(
+        flat(&screen).contains("Pick the time of day (HH:MM)."),
+        "{screen}"
+    );
+}

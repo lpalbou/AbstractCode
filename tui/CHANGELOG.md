@@ -23,6 +23,13 @@ served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
   **Stop at** apply to the calendar rules too.
 - The one-automation screen's Run now line adds `Next scheduled run: <date>
   <time> <zone>.` from the gateway.
+- Edit (`e`, the Workflow panel) on a Daily / Weekly / Monthly automation
+  edits its rule with the same words: **When** (Daily / Weekly / Monthly),
+  the `[x] Mon` day toggles, **on day** 1–31 or **last**, **Time of day**;
+  under it `in <zone> (this automation's time zone)` and the gateway's
+  `first_run_sentence` for the stored rule. A change is one revision whose
+  `changes.trigger` is the rule plus the automation's own `time_zone`
+  (kept, never edited here); an unchanged rule sends nothing.
 
 ### Changed
 

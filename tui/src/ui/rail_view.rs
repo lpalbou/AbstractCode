@@ -80,6 +80,12 @@ pub enum Act {
     ATitle,
     ATask,
     AEvery,
+    /// A calendar rule (schedule@2 Daily / Weekly / Monthly): its kind,
+    /// one weekday toggle, the day of the month, the time of day.
+    ACalKind,
+    ACalDay(String),
+    ACalMonthDay,
+    ACalAt,
     AContextMode,
     AApproval,
     AToolsMode,
@@ -134,6 +140,9 @@ pub struct Snap {
     pub voice_prefs: crate::voice::VoicePrefs,
     /// The bound automation: (summary, definition, occurrences, error).
     pub auto: Option<BoundAutomation>,
+    /// The gateway's schedule-preview answers (`View::preview`): the Edit
+    /// panel's line under a calendar rule.
+    pub auto_preview: Option<(String, auto::PreviewState)>,
 }
 
 fn rd<T: Clone + 'static>(s: Signal<T>, tracked: bool) -> T {
@@ -217,7 +226,38 @@ pub fn snap(store: Store, ctx: &UiCtx, binding: &Binding, tracked: bool) -> Snap
             let _ = rd(store.voice.tick, tracked);
             crate::ui::voice_view::prefs(ctx)
         },
+        auto_preview: if matches!(binding, Binding::Automation(_)) {
+            if tracked {
+                store.automations.with(|v| v.preview.clone())
+            } else {
+                store.automations.with_untracked(|v| v.preview.clone())
+            }
+        } else {
+            None
+        },
         auto,
+    }
+}
+
+/// The calendar rule the Edit panel shows, and the trigger the gateway is
+/// asked to word (the rule + the binding's own time zone).
+pub fn calendar_edit(summary: &Summary) -> Option<(auto::When, Value)> {
+    let when = auto::revise_form_from(summary).calendar?;
+    let trigger = auto::revise_calendar_trigger(summary, &when).ok()?;
+    Some((when, trigger))
+}
+
+/// The line under a calendar rule: "in <zone> (this automation's time
+/// zone)" and the gateway's `first_run_sentence` (or "Checking the
+/// schedule…", or its refusal).
+pub fn calendar_preview_lines(state: Option<&auto::PreviewState>) -> Vec<String> {
+    match state {
+        Some(auto::PreviewState::Ready(p)) => vec![
+            auto::time_zone_line_automation(&p.time_zone),
+            p.first_run_sentence.clone(),
+        ],
+        Some(auto::PreviewState::Failed(e)) => vec![e.clone()],
+        _ => vec![auto::schedule_text("describing").to_string()],
     }
 }
 
@@ -482,7 +522,76 @@ pub fn panel_cards(
                         Act::ATask,
                     );
                 }
+                let calendar = calendar_edit(&summary);
                 match summary.trigger.config.get("every").and_then(Value::as_str) {
+                    _ if calendar.is_some() => {
+                        let (when, trigger) = calendar.clone().expect("checked");
+                        let kind_key = match &when {
+                            auto::When::Weekly { .. } => "kind_weekly",
+                            auto::When::Monthly { .. } => "kind_monthly",
+                            _ => "kind_daily",
+                        };
+                        push(
+                            &mut cards,
+                            Card::new(vec![row(
+                                auto::schedule_text("legend"),
+                                auto::schedule_text(kind_key),
+                            )]),
+                            Act::ACalKind,
+                        );
+                        let at = match &when {
+                            auto::When::Daily { at }
+                            | auto::When::Weekly { at, .. }
+                            | auto::When::Monthly { at, .. } => at.clone(),
+                            _ => String::new(),
+                        };
+                        if let auto::When::Weekly { days, .. } = &when {
+                            for d in auto::CALENDAR_DAYS {
+                                let on = days.iter().any(|x| x == d);
+                                push(
+                                    &mut cards,
+                                    Card::new(vec![CardLine::new(
+                                        format!(
+                                            "{} {}",
+                                            if on { "[x]" } else { "[ ]" },
+                                            auto::day_label(d)
+                                        ),
+                                        Ink::Text,
+                                    )
+                                    .indent(2)]),
+                                    Act::ACalDay(d.to_string()),
+                                );
+                            }
+                        }
+                        if let auto::When::Monthly { day, .. } = &when {
+                            push(
+                                &mut cards,
+                                Card::new(vec![row(
+                                    auto::schedule_text("day_label"),
+                                    if day == "last" {
+                                        auto::schedule_text("last_day").to_string()
+                                    } else {
+                                        day.clone()
+                                    },
+                                )]),
+                                Act::ACalMonthDay,
+                            );
+                        }
+                        push(
+                            &mut cards,
+                            Card::new(vec![row(auto::schedule_text("time_label"), at)]),
+                            Act::ACalAt,
+                        );
+                        let key = trigger.to_string();
+                        let state = s
+                            .auto_preview
+                            .as_ref()
+                            .filter(|(k, _)| *k == key)
+                            .map(|(_, st)| st);
+                        for line in calendar_preview_lines(state) {
+                            push(&mut cards, Card::note(line), Act::None);
+                        }
+                    }
                     Some(every) if summary.trigger.source_id == "schedule" => push(
                         &mut cards,
                         Card::new(vec![row("Repeat every (UTC)", auto::interval_label(every))]),
@@ -1057,6 +1166,25 @@ pub fn open_rail(cx: Scope, store: Store, ctx: &UiCtx, binding: Binding, panel: 
         });
         let open = mcx.signal(Vec::<(String, bool)>::new());
         let binding2 = binding.clone();
+        // A calendar rule: the gateway words the rule the Edit panel shows
+        // (asked again whenever the stored rule changes).
+        if let Binding::Automation(id) = &binding {
+            let ctx = ctx2.clone();
+            let id = id.clone();
+            mcx.effect(move || {
+                let trigger = store.automations.with(|v| {
+                    v.detail
+                        .as_ref()
+                        .filter(|d| d.id == id)
+                        .and_then(|d| d.summary.as_ref())
+                        .and_then(calendar_edit)
+                        .map(|(_, t)| t)
+                });
+                if let Some(t) = trigger {
+                    crate::ui::automations_view::ask_preview(store, &ctx, &t);
+                }
+            });
+        }
         // Bound to an automation: re-read its definition while the panels
         // are open (owned by the modal scope — nothing ticks once closed).
         if let Binding::Automation(id) = &binding {
@@ -1954,6 +2082,124 @@ fn run_act(
                     }
                 }),
             );
+        }
+        Act::ACalKind | Act::ACalDay(_) | Act::ACalMonthDay | Act::ACalAt => {
+            let Some((summary, _, _)) = settings.clone() else {
+                return;
+            };
+            let Some((when, _)) = calendar_edit(&summary) else {
+                return;
+            };
+            // One changed rule = one revision (the rule + the binding's zone).
+            let save_rule = {
+                let ctx = ctx.clone();
+                let binding = binding.clone();
+                let summary = summary.clone();
+                Rc::new(move |next: auto::When| {
+                    let mut f = auto::revise_form_from(&summary);
+                    f.calendar = Some(next);
+                    match auto::revise_changes(&summary, &f) {
+                        Ok(ch) => save_revision(store, &ctx, &binding, ch),
+                        Err(errors) => store
+                            .rail
+                            .update(|r| r.save = SaveState::Refused(errors.join(" "))),
+                    }
+                })
+            };
+            match act {
+                Act::ACalKind => {
+                    let kinds = ["daily", "weekly", "monthly"];
+                    let labels = kinds
+                        .iter()
+                        .map(|k| auto::schedule_text(&format!("kind_{k}")).to_string())
+                        .collect();
+                    let start = match &when {
+                        auto::When::Weekly { .. } => 1,
+                        auto::When::Monthly { .. } => 2,
+                        _ => 0,
+                    };
+                    let when2 = when.clone();
+                    pick_then(
+                        auto::schedule_text("legend"),
+                        labels,
+                        start,
+                        Rc::new(move |ix| {
+                            save_rule(auto::calendar_when_of(kinds[ix.min(2)], &when2))
+                        }),
+                    );
+                }
+                Act::ACalDay(day) => {
+                    if let auto::When::Weekly { days, at } = &when {
+                        let has = days.contains(&day);
+                        let days = auto::CALENDAR_DAYS
+                            .iter()
+                            .filter(|d| {
+                                if **d == day {
+                                    !has
+                                } else {
+                                    days.iter().any(|x| x == *d)
+                                }
+                            })
+                            .map(|d| d.to_string())
+                            .collect();
+                        save_rule(auto::When::Weekly {
+                            days,
+                            at: at.clone(),
+                        });
+                    }
+                }
+                Act::ACalMonthDay => {
+                    let labels = crate::ui::automations_view::month_day_rows();
+                    let start = match &when {
+                        auto::When::Monthly { day, .. } if day == "last" => 31,
+                        auto::When::Monthly { day, .. } => {
+                            day.parse::<usize>().unwrap_or(1).saturating_sub(1)
+                        }
+                        _ => 0,
+                    };
+                    let when2 = when.clone();
+                    pick_then(
+                        auto::schedule_text("day_label"),
+                        labels,
+                        start,
+                        Rc::new(move |ix| {
+                            if let auto::When::Monthly { at, .. } = &when2 {
+                                let day = if ix >= 31 {
+                                    "last".to_string()
+                                } else {
+                                    (ix + 1).to_string()
+                                };
+                                save_rule(auto::When::Monthly {
+                                    day,
+                                    at: at.clone(),
+                                });
+                            }
+                        }),
+                    );
+                }
+                _ => {
+                    let at = match &when {
+                        auto::When::Daily { at }
+                        | auto::When::Weekly { at, .. }
+                        | auto::When::Monthly { at, .. } => at.clone(),
+                        _ => String::new(),
+                    };
+                    let when2 = when.clone();
+                    text_then(
+                        auto::schedule_text("time_label"),
+                        "HH:MM",
+                        at,
+                        Rc::new(move |v: String| {
+                            let at = v.trim().to_string();
+                            save_rule(match when2.clone() {
+                                auto::When::Weekly { days, .. } => auto::When::Weekly { days, at },
+                                auto::When::Monthly { day, .. } => auto::When::Monthly { day, at },
+                                _ => auto::When::Daily { at },
+                            })
+                        }),
+                    );
+                }
+            }
         }
         Act::ATask => {
             let Some((_, def, _)) = settings.clone() else {

@@ -1338,6 +1338,88 @@ pub fn time_zone_line(time_zone: &str) -> String {
     schedule_text("time_zone_line").replace("{time_zone}", time_zone)
 }
 
+/// "in Europe/Paris (this automation's time zone)" (an existing automation).
+pub fn time_zone_line_automation(time_zone: &str) -> String {
+    schedule_text("time_zone_line_automation").replace("{time_zone}", time_zone)
+}
+
+/// The calendar rule of a stored `schedule@2` config (Daily / Weekly /
+/// Monthly), as the form's `When`; `None` for any other config.
+pub fn calendar_when_from(config: &Map<String, Value>) -> Option<When> {
+    let at = config
+        .get("at")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    match config.get("kind").and_then(Value::as_str)? {
+        "daily" => Some(When::Daily { at }),
+        "weekly" => Some(When::Weekly {
+            days: config
+                .get("days")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            at,
+        }),
+        "monthly" => Some(When::Monthly {
+            day: match config.get("day") {
+                Some(Value::String(d)) => d.clone(),
+                Some(Value::Number(n)) => n.to_string(),
+                _ => String::new(),
+            },
+            at,
+        }),
+        _ => None,
+    }
+}
+
+/// The rule of `kind` ("daily" | "weekly" | "monthly") keeping the time
+/// (and days / day) already chosen — the kit's `calendarWhenOf`.
+pub fn calendar_when_of(kind: &str, previous: &When) -> When {
+    let (at, days, day) = match previous {
+        When::Daily { at } => (at.clone(), None, None),
+        When::Weekly { days, at } => (at.clone(), Some(days.clone()), None),
+        When::Monthly { day, at } => (at.clone(), None, Some(day.clone())),
+        _ => (String::new(), None, None),
+    };
+    let at = if at.is_empty() {
+        "08:00".to_string()
+    } else {
+        at
+    };
+    match kind {
+        "weekly" => When::Weekly {
+            days: days
+                .filter(|d| !d.is_empty())
+                .unwrap_or_else(|| vec!["mon".into()]),
+            at,
+        },
+        "monthly" => When::Monthly {
+            day: day.unwrap_or_else(|| "1".into()),
+            at,
+        },
+        _ => When::Daily { at },
+    }
+}
+
+/// The trigger an Edit of a calendar rule writes: the rule's config plus
+/// the binding's own `time_zone` (kept; the form never edits it) — the
+/// kit's `reviseChanges`. Also the trigger the Edit panel previews.
+pub fn revise_calendar_trigger(s: &Summary, when: &When) -> Result<Value, String> {
+    let mut config = schedule_config(when)?;
+    if let Some(zone) = s.trigger.config.get("time_zone").and_then(Value::as_str) {
+        config.insert("time_zone".into(), json!(zone));
+    }
+    Ok(
+        json!({"source_id": s.trigger.source_id, "source_version": s.trigger.source_version, "config": config}),
+    )
+}
+
 /// When the automation runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum When {
@@ -1743,6 +1825,9 @@ pub struct ReviseForm {
     pub title: String,
     /// `None` for a trigger without an interval.
     pub every: Option<String>,
+    /// The calendar rule of a `schedule@2` Daily / Weekly / Monthly
+    /// automation (`None` for any other trigger).
+    pub calendar: Option<When>,
     pub context: String,
 }
 
@@ -1756,9 +1841,15 @@ pub fn revise_form_from(s: &Summary) -> ReviseForm {
     } else {
         None
     };
+    let calendar = if is_schedule_v2(&s.trigger) {
+        calendar_when_from(&s.trigger.config)
+    } else {
+        None
+    };
     ReviseForm {
         title: s.title.clone(),
         every,
+        calendar,
         context: s.context_mode.clone(),
     }
 }
@@ -1791,6 +1882,17 @@ pub fn revise_changes(s: &Summary, form: &ReviseForm) -> Result<Option<Value>, V
                     "trigger".into(),
                     json!({"source_id": s.trigger.source_id, "source_version": s.trigger.source_version, "config": config}),
                 );
+            }
+        }
+    }
+    // A changed calendar rule: the rule + the binding's own time zone.
+    if let (Some(when), Some(prev)) = (&form.calendar, &before.calendar) {
+        if when != prev {
+            match revise_calendar_trigger(s, when) {
+                Ok(trigger) => {
+                    changes.insert("trigger".into(), trigger);
+                }
+                Err(e) => errors.push(e),
             }
         }
     }
@@ -2617,6 +2719,71 @@ mod tests {
                 })
                 .when
                 .is_served()
+        );
+    }
+
+    #[test]
+    fn revising_a_calendar_rule_keeps_the_bindings_time_zone() {
+        let mut s = summary("active", false, ALL);
+        s.trigger = Trigger {
+            source_id: "schedule".into(),
+            source_version: 2,
+            config: json!({"kind": "monthly", "day": 31, "at": "08:00", "time_zone": "America/Los_Angeles",
+                           "start_at": "2026-09-01T00:00:00Z", "anchor": "2026-09-01T00:00:00Z"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        };
+        let before = revise_form_from(&s);
+        assert_eq!(
+            before.calendar,
+            Some(When::Monthly {
+                day: "31".into(),
+                at: "08:00".into()
+            })
+        );
+        assert_eq!(revise_changes(&s, &before), Ok(None));
+        let mut f = before.clone();
+        f.calendar = Some(When::Monthly {
+            day: "last".into(),
+            at: "08:00".into(),
+        });
+        let c = revise_changes(&s, &f).unwrap().unwrap();
+        assert_eq!(
+            c,
+            json!({"trigger": {"source_id": "schedule", "source_version": 2,
+                "config": {"kind": "monthly", "day": "last", "at": "08:00", "time_zone": "America/Los_Angeles"}}})
+        );
+        f.calendar = Some(calendar_when_of(
+            "weekly",
+            &When::Monthly {
+                day: "31".into(),
+                at: "06:15".into(),
+            },
+        ));
+        assert_eq!(
+            f.calendar,
+            Some(When::Weekly {
+                days: vec!["mon".into()],
+                at: "06:15".into()
+            })
+        );
+        f.calendar = Some(When::Weekly {
+            days: vec![],
+            at: "06:15".into(),
+        });
+        assert_eq!(
+            revise_changes(&s, &f),
+            Err(vec![schedule_text("error_days").to_string()])
+        );
+        // A schedule@1 / Repeat row has no calendar rule to edit.
+        assert_eq!(
+            revise_form_from(&summary("active", false, ALL)).calendar,
+            None
+        );
+        assert_eq!(
+            time_zone_line_automation("UTC"),
+            "in UTC (this automation's time zone)"
         );
     }
 

@@ -1568,7 +1568,7 @@ fn schedule_once(
 }
 
 /// Ask the gateway to word `trigger` (once per distinct trigger).
-fn ask_preview(store: Store, ctx: &UiCtx, trigger: &serde_json::Value) {
+pub(crate) fn ask_preview(store: Store, ctx: &UiCtx, trigger: &serde_json::Value) {
     let key = trigger.to_string();
     let asked = store
         .automations

@@ -371,6 +371,12 @@ The panels follow what is selected:
   gateway's sentence follows the list; `More tool options` opens `/tools`), Skills
   (`[x]` per skill), Voice. These are the same settings `/model`,
   `/workflow`, `/workspace`, `/tools` and `/skills` change — one apply path.
+- **An automation's calendar rule** (Workflow panel of a Daily / Weekly /
+  Monthly automation): **When** (Daily / Weekly / Monthly), the `[x] Mon`
+  day toggles, **on day** 1–31 or **last**, **Time of day**, then
+  `in <zone> (this automation's time zone)` and the gateway's sentence for
+  the stored rule (schedule-preview). Each change is one revision: the rule
+  plus the automation's own time zone, which the terminal never edits.
 - **An automation** (`e` in `/automations`): `Automation <title>`,
   `Revision N` and the save line — "Changes are saved as a new revision and
   apply from the next run.", then "Saving…", "Saved as revision 4; applies
