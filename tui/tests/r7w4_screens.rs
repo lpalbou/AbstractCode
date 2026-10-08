@@ -240,11 +240,11 @@ impl H {
         self.store
             .voice
             .defaults
-            .set(abstractcode::voice::DefaultsState::Loaded(
+            .set(abstractcode::voice::DefaultsState::Loaded(Box::new(
                 abstractcode::voice::VoiceDefaults::from_json(&json!({
                     "tts": {"configured": true, "provider": "supertonic", "model": "supertonic-3"},
                     "stt": {"configured": true, "provider": "faster-whisper", "model": "large-v3"}})),
-            ));
+            )));
         self.turn();
     }
 }

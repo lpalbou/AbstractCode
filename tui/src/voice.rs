@@ -250,6 +250,9 @@ pub struct RouteDefault {
     pub model: String,
     pub voice: String,
     pub note: String,
+    /// The gateway's served one-line hint for this route (`hint.sentence`, e.g. speech input
+    /// on Apple silicon: mlx-whisper runs the model on the GPU). Shown verbatim.
+    pub hint: String,
 }
 
 /// The body of `GET /api/gateway/voice/defaults`.
@@ -279,6 +282,13 @@ impl VoiceDefaults {
                     model: s("model"),
                     voice: s("voice"),
                     note: s("note"),
+                    hint: r
+                        .get("hint")
+                        .and_then(|h| h.get("sentence"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string(),
                 }
             })
         };
@@ -403,14 +413,15 @@ pub enum Devices {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DefaultsState {
     Unknown,
-    Loaded(VoiceDefaults),
+    /// Boxed: the served routes (with their hints) dwarf the other variants.
+    Loaded(Box<VoiceDefaults>),
     Failed(String),
 }
 
 impl DefaultsState {
     pub fn value(&self) -> Option<&VoiceDefaults> {
         match self {
-            DefaultsState::Loaded(d) => Some(d),
+            DefaultsState::Loaded(d) => Some(d.as_ref()),
             _ => None,
         }
     }
@@ -972,6 +983,22 @@ pub fn play_file_blocking(host: &Host, path: &str, prefs: &VoicePrefs) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_served_route_hint_is_read_verbatim() {
+        let d = VoiceDefaults::from_json(&json!({
+            "stt": {"configured": true, "provider": "faster-whisper", "model": "large-v3",
+                    "hint": {"code": "apple_gpu_engine", "sentence": " Runs on the processor: mlx-whisper runs large-v3 on this Mac's GPU. ", "route": null}}
+        }));
+        assert_eq!(
+            d.stt.as_ref().unwrap().hint,
+            "Runs on the processor: mlx-whisper runs large-v3 on this Mac's GPU."
+        );
+        let none = VoiceDefaults::from_json(
+            &json!({"stt": {"configured": true, "provider": "faster-whisper"}}),
+        );
+        assert_eq!(none.stt.unwrap().hint, "");
+    }
 
     #[test]
     fn default_summary_matches_the_kit_wording() {

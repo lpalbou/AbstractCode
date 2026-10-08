@@ -931,9 +931,9 @@ fn transcribing_line_is_shown_while_the_gateway_works() {
     let mut h = harness(&gw.url);
     h.with_reply("ready");
     // Defaults known first (the voice screen fetches them), then dictate.
-    h.store.voice.defaults.set(abstractcode::voice::DefaultsState::Loaded(abstractcode::voice::VoiceDefaults::from_json(
+    h.store.voice.defaults.set(abstractcode::voice::DefaultsState::Loaded(Box::new(abstractcode::voice::VoiceDefaults::from_json(
         &json!({"stt": {"configured": true, "provider": "faster-whisper", "model": "large-v3"}}),
-    )));
+    ))));
     h.store
         .voice
         .dictation
@@ -1152,5 +1152,37 @@ fn h_wait_requests(gw: &FakeGateway, needle: &str) -> Vec<(String, String, Strin
         }
         assert!(Instant::now() < deadline, "no request to {needle}");
         std::thread::sleep(Duration::from_millis(15));
+    }
+}
+
+#[test]
+fn voice_screen_shows_the_gateways_served_speech_input_hint() {
+    // Round 16: the gateway serves a one-line hint for a stored speech-input route (on Apple
+    // silicon, mlx-whisper runs the model on the GPU); the screen shows it verbatim.
+    let _g = serial();
+    let sentence = "Runs on the processor: faster-whisper has no Apple GPU backend. mlx-whisper runs large-v3 on this Mac's GPU.";
+    let gw = serve(GatewayScript {
+        defaults: json!({
+            "tts": {"route": "output.voice", "configured": true, "provider": "supertonic", "model": "supertonic-3", "voice": "M3"},
+            "stt": {"route": "input.voice", "configured": true, "provider": "faster-whisper", "model": "large-v3",
+                    "hint": {"code": "apple_gpu_engine", "sentence": sentence,
+                             "route": {"key": "input.voice", "provider": "mlx-whisper", "model": "large-v3"}}}
+        }),
+        ..GatewayScript::default()
+    });
+    let (_host, _log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("ok");
+    h.type_text("/voice\r");
+    let s = h.until("the served hint on the voice screen", |s| {
+        s.contains("Apple GPU backend")
+    });
+    assert!(
+        s.contains("Speech → text     Gateway default · faster-whisper / large-v3"),
+        "{s}"
+    );
+    // Wrapped, never cut: every word of the sentence is on screen, in order.
+    for line in abstracttui::text::wrap(sentence, 80) {
+        assert!(s.contains(line.trim_end()), "missing {line:?}:\n{s}");
     }
 }

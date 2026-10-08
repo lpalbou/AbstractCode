@@ -67,6 +67,7 @@ served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
 - The automation definition panel (Edit → Workflow) changes **Stop after this
   many runs** / **Stop at (UTC)**, the email check interval, **Email result**
   and **Recipients**; each change is one revision, a refusal stays readable.
+- The Voice screen shows the gateway's served speech-input hint under the engine lines (for example, on Apple silicon: mlx-whisper runs the model on the GPU), wrapped, never cut.
 
 ### Changed
 

@@ -81,7 +81,7 @@ pub fn load_defaults(store: Store, ctx: &UiCtx) {
     let wake = abstracttui::reactive::wake_handle();
     spawn("voice-defaults", move || {
         let state = match gw.defaults() {
-            Ok(d) => DefaultsState::Loaded(d),
+            Ok(d) => DefaultsState::Loaded(Box::new(d)),
             Err(e) => DefaultsState::Failed(e),
         };
         wake.post(move || store.voice.defaults.set(state));
@@ -572,6 +572,13 @@ fn settings_rows(store: Store, p: &VoicePrefs) -> Vec<(String, Row)> {
         for e in [d.tts.as_ref(), d.stt.as_ref()].into_iter().flatten() {
             if !e.configured && !e.note.is_empty() {
                 rows.push((format!("  {}", e.note), Row::None));
+            }
+            if e.configured && !e.hint.is_empty() {
+                // The gateway's served sentence, verbatim (round 16), wrapped to the picker
+                // so no part of it is cut off.
+                for line in text::wrap(&e.hint, 80) {
+                    rows.push((format!("  {line}"), Row::None));
+                }
             }
         }
     }
