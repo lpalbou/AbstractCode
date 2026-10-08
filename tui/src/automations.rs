@@ -1378,33 +1378,61 @@ pub fn calendar_when_from(config: &Map<String, Value>) -> Option<When> {
     }
 }
 
-/// The rule of `kind` ("daily" | "weekly" | "monthly") keeping the time
-/// (and days / day) already chosen — the kit's `calendarWhenOf`.
-pub fn calendar_when_of(kind: &str, previous: &When) -> When {
-    let (at, days, day) = match previous {
-        When::Daily { at } => (at.clone(), None, None),
-        When::Weekly { days, at } => (at.clone(), Some(days.clone()), None),
-        When::Monthly { day, at } => (at.clone(), None, Some(day.clone())),
-        _ => (String::new(), None, None),
-    };
-    let at = if at.is_empty() {
-        "08:00".to_string()
-    } else {
-        at
-    };
-    match kind {
-        "weekly" => When::Weekly {
-            days: days
-                .filter(|d| !d.is_empty())
-                .unwrap_or_else(|| vec!["mon".into()]),
-            at,
-        },
-        "monthly" => When::Monthly {
-            day: day.unwrap_or_else(|| "1".into()),
-            at,
-        },
-        _ => When::Daily { at },
+/// What a person picked for a calendar rule, kept across kind switches
+/// (the kit's `CalendarRuleState`): the time, the weekly days and the
+/// monthly day survive Weekly → Monthly → Weekly. An emptied day set stays
+/// empty (it is refused when saved, never silently refilled).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CalendarRuleState {
+    pub at: String,
+    pub days: Option<Vec<String>>,
+    pub day: Option<String>,
+}
+
+impl CalendarRuleState {
+    /// Take what `when` says (its time, and its days or its day).
+    pub fn absorb(&mut self, when: &When) {
+        match when {
+            When::Daily { at } => self.at = at.clone(),
+            When::Weekly { days, at } => {
+                self.at = at.clone();
+                self.days = Some(days.clone());
+            }
+            When::Monthly { day, at } => {
+                self.at = at.clone();
+                self.day = Some(day.clone());
+            }
+            _ => {}
+        }
     }
+    /// The rule of `kind` ("daily" | "weekly" | "monthly") from this state;
+    /// never-picked fields take the defaults (08:00, Monday, day 1).
+    pub fn rule(&self, kind: &str) -> When {
+        let at = if self.at.is_empty() {
+            "08:00".to_string()
+        } else {
+            self.at.clone()
+        };
+        match kind {
+            "weekly" => When::Weekly {
+                days: self.days.clone().unwrap_or_else(|| vec!["mon".into()]),
+                at,
+            },
+            "monthly" => When::Monthly {
+                day: self.day.clone().unwrap_or_else(|| "1".into()),
+                at,
+            },
+            _ => When::Daily { at },
+        }
+    }
+}
+
+/// The rule of `kind` keeping what `previous` says (the kit's
+/// `calendarWhenOf`); use a `CalendarRuleState` to keep it across switches.
+pub fn calendar_when_of(kind: &str, previous: &When) -> When {
+    let mut state = CalendarRuleState::default();
+    state.absorb(previous);
+    state.rule(kind)
 }
 
 /// The trigger an Edit of a calendar rule writes: the rule's config plus
@@ -2239,9 +2267,35 @@ pub struct View {
     /// The `/schedule` When step's served line (schedule-preview), keyed by
     /// the trigger JSON it describes (a stale answer never replaces a newer ask).
     pub preview: Option<(String, PreviewState)>,
+    /// Per automation id: the calendar rule picked in the Edit panel, kept
+    /// across kind switches (each switch is saved as its own revision).
+    pub calendar_rules: Vec<(String, CalendarRuleState)>,
 }
 
 impl View {
+    /// The Edit panel's remembered rule for `id`, brought up to date with
+    /// the stored `current` rule.
+    pub fn calendar_state(&self, id: &str, current: &When) -> CalendarRuleState {
+        let mut st = self
+            .calendar_rules
+            .iter()
+            .find(|(k, _)| k == id)
+            .map(|(_, st)| st.clone())
+            .unwrap_or_default();
+        st.absorb(current);
+        st
+    }
+    /// Remember what was just picked for `id`.
+    pub fn remember_calendar(&mut self, id: &str, when: &When) {
+        match self.calendar_rules.iter_mut().find(|(k, _)| k == id) {
+            Some((_, st)) => st.absorb(when),
+            None => {
+                let mut st = CalendarRuleState::default();
+                st.absorb(when);
+                self.calendar_rules.push((id.to_string(), st));
+            }
+        }
+    }
     /// The served line for `trigger`, if it is the one last asked.
     pub fn preview_for(&self, trigger: &Value) -> Option<&PreviewState> {
         let key = trigger.to_string();
@@ -2812,6 +2866,46 @@ mod tests {
             revise_changes(&s, &f).unwrap().unwrap()["trigger"]["config"],
             json!({"kind": "daily", "at": "07:30", "time_zone": "Europe/Paris",
                    "count": 10, "until": "2026-12-31T18:00:00+00:00"})
+        );
+    }
+
+    #[test]
+    fn picked_days_survive_kind_switches() {
+        let mut v = View::default();
+        let weekly = When::Weekly {
+            days: vec!["mon".into(), "fri".into()],
+            at: "07:30".into(),
+        };
+        v.remember_calendar("a", &weekly);
+        let monthly = v.calendar_state("a", &weekly).rule("monthly");
+        assert_eq!(
+            monthly,
+            When::Monthly {
+                day: "1".into(),
+                at: "07:30".into()
+            }
+        );
+        v.remember_calendar("a", &monthly);
+        assert_eq!(v.calendar_state("a", &monthly).rule("weekly"), weekly);
+        // An emptied day set stays empty (refused when saved, never refilled).
+        let empty = When::Weekly {
+            days: vec![],
+            at: "07:30".into(),
+        };
+        v.remember_calendar("a", &empty);
+        assert_eq!(
+            v.calendar_state("a", &When::Daily { at: "07:30".into() })
+                .rule("weekly"),
+            empty
+        );
+        // Another automation starts from its own stored rule.
+        assert_eq!(
+            v.calendar_state("b", &When::Daily { at: "09:00".into() })
+                .rule("weekly"),
+            When::Weekly {
+                days: vec!["mon".into()],
+                at: "09:00".into()
+            }
         );
     }
 

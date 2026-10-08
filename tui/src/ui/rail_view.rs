@@ -2096,6 +2096,10 @@ fn run_act(
                 let binding = binding.clone();
                 let summary = summary.clone();
                 Rc::new(move |next: auto::When| {
+                    // Kept across kind switches (Weekly → Monthly → Weekly keeps the days).
+                    store
+                        .automations
+                        .update(|v| v.remember_calendar(&summary.id, &next));
                     let mut f = auto::revise_form_from(&summary);
                     f.calendar = Some(next);
                     match auto::revise_changes(&summary, &f) {
@@ -2118,14 +2122,14 @@ fn run_act(
                         auto::When::Monthly { .. } => 2,
                         _ => 0,
                     };
-                    let when2 = when.clone();
+                    let state = store
+                        .automations
+                        .with_untracked(|v| v.calendar_state(&summary.id, &when));
                     pick_then(
                         auto::schedule_text("legend"),
                         labels,
                         start,
-                        Rc::new(move |ix| {
-                            save_rule(auto::calendar_when_of(kinds[ix.min(2)], &when2))
-                        }),
+                        Rc::new(move |ix| save_rule(state.rule(kinds[ix.min(2)]))),
                     );
                 }
                 Act::ACalDay(day) => {

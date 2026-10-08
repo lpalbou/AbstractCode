@@ -1348,3 +1348,70 @@ fn edit_a_calendar_time_sends_only_a_changed_rule() {
         "{screen}"
     );
 }
+
+/// The gateway saved `changes`: the bound automation now carries that trigger.
+fn gateway_applies(h: &mut Harness, id: &str, changes: &Value) {
+    let config = changes["trigger"]["config"].as_object().unwrap().clone();
+    h.store.automations.update(|v| {
+        if let Some(d) = v.detail.as_mut().filter(|d| d.id == id) {
+            if let Some(s) = d.summary.as_mut() {
+                s.trigger.config = config.clone();
+            }
+        }
+    });
+    h.turn();
+}
+
+fn one_save(h: &mut Harness) -> Value {
+    let (_, saved) = previews_and_saves(h);
+    assert_eq!(saved.len(), 1, "{saved:?}");
+    saved[0].1.clone()
+}
+
+#[test]
+fn edit_weekly_days_survive_monthly_and_back() {
+    let mut h = harness();
+    let s = edit_morning_briefing(&mut h);
+    previews_and_saves(&mut h);
+    // When (row 2) → Weekly.
+    h.keys(b"\x1b[B\x1b[B");
+    h.keys(b"\r");
+    h.keys(b"\x1b[B");
+    h.keys(b"\r");
+    let c = one_save(&mut h);
+    assert_eq!(c["trigger"]["config"]["days"], json!(["mon"]));
+    gateway_applies(&mut h, &s.id, &c);
+    // Fri (rows: Workflow, Title, When, Mon … Sun): from When, 5 down.
+    for _ in 0..5 {
+        h.keys(b"\x1b[B");
+    }
+    let screen = h.keys(b"\r");
+    let c = one_save(&mut h);
+    assert_eq!(
+        c["trigger"]["config"]["days"],
+        json!(["mon", "fri"]),
+        "{screen}"
+    );
+    gateway_applies(&mut h, &s.id, &c);
+    // Back to When → Monthly.
+    for _ in 0..5 {
+        h.keys(b"\x1b[A");
+    }
+    h.keys(b"\r");
+    h.keys(b"\x1b[B");
+    h.keys(b"\r");
+    let c = one_save(&mut h);
+    assert_eq!(c["trigger"]["config"]["kind"], "monthly");
+    assert!(c["trigger"]["config"].get("days").is_none());
+    gateway_applies(&mut h, &s.id, &c);
+    // When → Weekly again: Mon and Fri, not a fresh Monday.
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("Monthly"), "{screen}");
+    h.keys(b"\x1b[A");
+    h.keys(b"\r");
+    let c = one_save(&mut h);
+    assert_eq!(
+        c["trigger"]["config"],
+        json!({"kind": "weekly", "days": ["mon", "fri"], "at": "08:00", "time_zone": "Europe/Paris"})
+    );
+}
