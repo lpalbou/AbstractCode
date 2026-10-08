@@ -93,6 +93,12 @@ served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
   (previously `{prompt}` only). A test compares the POST body with one built
   by the web's own functions (`scripts/web_schedule_body.ts`).
 
+### Fixed
+
+- The release build no longer shows the engine's startup notices as toasts
+  ("engine: caps: truecolor" at every launch); they remain in debug builds.
+
+
 ## [0.9.1] - 2026-10-08
 
 Needs the AbstractGateway round-11 workspace routes and the round-12 command
