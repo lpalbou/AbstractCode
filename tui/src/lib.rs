@@ -19,6 +19,7 @@
 //! - [`cli`], [`exec`]: argument parsing, doctor/login, headless one-shots.
 //! - [`export`]: `/export` renderers (archival markdown + SFT JSONL).
 
+pub mod account_prefs;
 pub mod attention;
 pub mod automations;
 pub mod cli;

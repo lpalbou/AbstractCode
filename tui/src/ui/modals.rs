@@ -1041,10 +1041,16 @@ pub fn open_workflow_picker(cx: Scope, store: Store, ctx: &UiCtx) {
             live: Some(Rc::new(move || workflow_picker_rows(store, true))),
             start,
             size,
-            hint: Some(
+            hint: Some(if crate::ui::account_workflow::managed(store) {
+                // R17.1: the picker is THIS conversation's workflow.
+                format!(
+                    "This conversation's workflow. {}: /settings → Workflow",
+                    crate::account_prefs::LABEL
+                )
+            } else {
                 "Gateway default: the gateway decides which workflow runs — a change there applies to your next turn"
-                    .into(),
-            ),
+                    .into()
+            }),
             live_hint: None,
             keys: Vec::new(),
             on_mount: None,
@@ -1055,9 +1061,15 @@ pub fn open_workflow_picker(cx: Scope, store: Store, ctx: &UiCtx) {
                 let picked = if ix == 0 {
                     match store.gateway_default_workflow.get_untracked() {
                         Some(d) => {
-                            crate::ui::persist_prefs(&choose_ctx, |p| {
-                                p.set_gateway_default_workflow()
-                            });
+                            // With the gateway keeping the account default
+                            // (R17.1) this picks THIS conversation's
+                            // workflow only; that default is its own row in
+                            // /settings → Workflow, never a side effect.
+                            if !crate::ui::account_workflow::managed(store) {
+                                crate::ui::persist_prefs(&choose_ctx, |p| {
+                                    p.set_gateway_default_workflow()
+                                });
+                            }
                             Some(d)
                         }
                         None => {
@@ -1079,7 +1091,10 @@ pub fn open_workflow_picker(cx: Scope, store: Store, ctx: &UiCtx) {
                             .nth(ix - 1)
                             .cloned()
                     });
-                    if let Some(w) = &w {
+                    if let Some(w) = w
+                        .as_ref()
+                        .filter(|_| !crate::ui::account_workflow::managed(store))
+                    {
                         crate::ui::persist_prefs(&choose_ctx, |p| {
                             p.set_explicit_workflow(&w.bundle_id, &w.flow_id)
                         });

@@ -998,6 +998,9 @@ pub struct Store {
     /// The workspace choosers (R14.4): this conversation, my default, an
     /// automation's dry run, the status under the control last changed.
     pub workspaces: Signal<crate::workspaces::WsData>,
+    /// The account's default workflow for new conversations (R17.1:
+    /// `GET/PUT /accounts/me/preferences`), the row's busy/note state.
+    pub account_workflow: Signal<crate::account_prefs::View>,
     /// Which automations run in Ask mode (`definition.tool_approval`),
     /// read once per revision for the ambient attention poll (R17.1).
     pub automation_ask: Signal<crate::attention::AskModes>,
@@ -1301,6 +1304,7 @@ impl Store {
             automations: cx.signal(crate::automations::View::default()),
             rail: cx.signal(crate::rail::RailData::default()),
             workspaces: cx.signal(crate::workspaces::WsData::default()),
+            account_workflow: cx.signal(crate::account_prefs::View::default()),
             automation_ask: cx.signal(crate::attention::AskModes::default()),
             gateway_same_machine: cx.signal(None),
             send_local_workspace: cx.signal(Default::default()),

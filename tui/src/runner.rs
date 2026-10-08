@@ -400,6 +400,8 @@ pub enum Cmd {
     Rail(crate::gateway::rail::RailCmd),
     /// Workspace choosers lane (`gateway::workspaces`, R14.4).
     Workspaces(crate::gateway::workspaces::WsCmd),
+    /// The account's default workflow (`gateway::preferences`, R17.1).
+    AccountPrefs(crate::gateway::preferences::PrefCmd),
     /// The ambient automation attention read (`gateway::automations`,
     /// R17.1): the list + the definitions whose revision changed.
     AutomationAttention {
@@ -974,6 +976,9 @@ impl Runner {
             }
             Cmd::Workspaces(cmd) => {
                 crate::gateway::workspaces::spawn(&self.client, self.wake.clone(), self.store, cmd)
+            }
+            Cmd::AccountPrefs(cmd) => {
+                crate::gateway::preferences::spawn(&self.client, self.wake.clone(), self.store, cmd)
             }
             Cmd::AutomationAttention { known } => {
                 crate::gateway::automations::spawn_attention(

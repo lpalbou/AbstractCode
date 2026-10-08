@@ -1,5 +1,6 @@
 //! Root view composition + orchestration (timers, toasts, modals).
 
+pub mod account_workflow;
 pub mod animation;
 pub mod approval_view;
 pub mod attachments;
@@ -282,6 +283,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     goal::wire_goal(cx, store, ctx.clone());
     automations_view::wire_automations(cx, store, ctx.clone());
     attention_chip::wire(cx, store, ctx.clone());
+    account_workflow::wire(cx, store, ctx.clone());
     rail_view::wire_rail(cx, store, ctx.clone());
     quit::wire_quit(cx, store, &ctx);
     transcript_view::wire_feed(
@@ -1598,6 +1600,8 @@ pub(crate) fn new_session(store: Store, ctx: &UiCtx) {
         p.touch_session(&sid, None);
     });
     reset_session_state(store, ctx, &old_sid, &sid, format!("new session {sid}"));
+    // A new conversation starts on the account's default (R17.1).
+    account_workflow::apply_to_fresh(store);
 }
 
 /// The session-boundary reset shared by `/new` and `/sessions` — ONE

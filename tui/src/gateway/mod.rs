@@ -10,6 +10,7 @@
 pub mod automations;
 pub mod entities;
 pub mod gpu;
+pub mod preferences;
 pub mod rail;
 pub mod sse;
 pub mod workspaces;

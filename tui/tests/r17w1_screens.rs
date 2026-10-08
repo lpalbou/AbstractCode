@@ -18,14 +18,17 @@ use abstracttui::prelude::*;
 use abstracttui::testing::CaptureTerm;
 use serde_json::Value;
 
+use abstractcode::account_prefs::{self as ap, State};
 use abstractcode::automations as auto;
 use abstractcode::config::Prefs;
 use abstractcode::gateway::automations::AutoCmd;
+use abstractcode::gateway::preferences::PrefCmd;
 use abstractcode::runner::Cmd;
 use abstractcode::store::{Conn, SessionIndex, SessionRow, SessionState, Store, Workflow};
 use abstractcode::ui::{self, UiCtx};
 
 const AUTOS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/automations");
+const PREFS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/account_prefs");
 const INBOX: &str = "53443dd0-25c4-5fa8-bdad-e1ac3fdfff8e";
 const NEWS: &str = "fddce731-4abf-54d3-81b9-15856efbfd7a";
 const SESSION: &str = "acode-r17-session";
@@ -176,6 +179,14 @@ impl H {
         abstracttui::reactive::wake_handle()
             .post(move || store.automations.update(|v| v.apply_list(page.items)));
         self.turn();
+        self.turn();
+    }
+    fn answer_prefs(&mut self, fixture: &str) {
+        let row = ap::row(&read(PREFS, fixture)).unwrap();
+        self.store.account_workflow.update(|v| {
+            v.state = State::Ok(row);
+            v.busy = false;
+        });
         self.turn();
     }
     fn status_line(&mut self) -> String {
@@ -486,5 +497,204 @@ fn the_poll_sends_the_known_revisions_so_definitions_are_read_once() {
         })
         .expect("a poll");
     assert!(known.contains(&(INBOX.to_string(), 1)) && known.contains(&(NEWS.to_string(), 1)));
+}
+
+// -- Default for new conversations -------------------------------------------------
+
+#[test]
+fn the_workflow_panel_reads_and_writes_the_account_default() {
+    per_size(|size| {
+        let mut h = harness(size);
+        h.connect();
+        let cmds = h.cmds();
+        assert!(
+            cmds.iter()
+                .any(|c| matches!(c, Cmd::AccountPrefs(PrefCmd::Load { device: None }))),
+            "read at the reachable edge (no device choice to upload): {cmds:?}"
+        );
+        h.answer_prefs("get_default.json");
+        let screen = h.command("/settings workflow");
+        let f = flat(&screen);
+        assert!(f.contains("Default for new conversations"), "{screen}");
+        assert!(
+            f.contains("Gateway default (Basic agent)"),
+            "verbatim from the route:\n{screen}"
+        );
+        assert!(f.contains(&squash(ap::HELP)), "{screen}");
+        h.shot("workflow-panel-account-default");
+
+        // Enter on the row: the gateway's default first, then its choices.
+        h.keys(b"\x1b[B");
+        let screen = h.keys(b"\r");
+        assert!(
+            screen.contains("Default for new conversations —"),
+            "{screen}"
+        );
+        let pos = |s: &str, n: &str| s.find(n).unwrap_or_else(|| panic!("{n} missing:\n{s}"));
+        assert!(
+            pos(&screen, "Gateway default (Basic agent)") < pos(&screen, "Coding agent (chat)")
+        );
+        h.shot("workflow-panel-account-default-picker");
+        h.cmds();
+        for _ in 0..3 {
+            h.keys(b"\x1b[B");
+        }
+        let screen = h.keys(b"\r");
+        let saves: Vec<_> = h
+            .cmds()
+            .into_iter()
+            .filter(|c| matches!(c, Cmd::AccountPrefs(PrefCmd::Save { .. })))
+            .collect();
+        assert_eq!(saves.len(), 1, "ONE PUT per change");
+        assert!(matches!(
+            &saves[0],
+            Cmd::AccountPrefs(PrefCmd::Save { value: Some(v) }) if v == "coding-agent:coder"
+        ));
+        assert!(flat(&screen).contains("Saving…"), "{screen}");
+
+        // Refused: the gateway's sentence after "Not saved."; the previous
+        // value still shown (no optimistic flip).
+        let refused = read(PREFS, "put_refused_400.json");
+        let sentence = refused["detail"]["message"].as_str().unwrap().to_string();
+        h.store.account_workflow.update(|v| {
+            v.busy = false;
+            v.note = Some(ap::change_note(&Err(sentence.clone())));
+        });
+        let screen = h.turn();
+        let f = flat(&screen);
+        assert!(
+            f.contains(&squash(&format!("Not saved. {sentence}"))),
+            "{screen}"
+        );
+        assert!(f.contains("Gateway default (Basic agent)"), "{screen}");
+        h.shot("workflow-panel-account-default-refused");
+
+        // Saved: the new value, "Saved.".
+        h.answer_prefs("put_coder.json");
+        h.store
+            .account_workflow
+            .update(|v| v.note = Some(ap::change_note(&Ok(()))));
+        let f = flat(&h.turn());
+        assert!(
+            f.contains("Coding agent (chat)") && f.contains("Saved."),
+            "{f}"
+        );
+    });
+}
+
+#[test]
+fn d_puts_the_account_default_back_to_the_gateway_default() {
+    let mut h = harness(Size::new(120, 40));
+    h.connect();
+    h.answer_prefs("put_coder.json");
+    h.command("/settings workflow");
+    h.keys(b"\x1b[B");
+    h.cmds();
+    h.keys(b"d");
+    let cmds = h.cmds();
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Cmd::AccountPrefs(PrefCmd::Save { value: None }))),
+        "{cmds:?}"
+    );
+}
+
+#[test]
+fn an_older_gateway_keeps_the_device_choice_and_says_so() {
+    per_size(|size| {
+        let mut h = harness(size);
+        h.connect();
+        h.store
+            .account_workflow
+            .update(|v| v.state = State::Unsupported);
+        let screen = h.command("/settings workflow");
+        assert!(flat(&screen).contains(&squash(ap::UNSUPPORTED)), "{screen}");
+        h.shot("workflow-panel-older-gateway");
+    });
+}
+
+#[test]
+fn the_device_choice_is_offered_once_then_removed_here() {
+    let mut h = harness(Size::new(80, 24));
+    h.prefs
+        .borrow_mut()
+        .set_explicit_workflow("coding-agent", "coder");
+    h.connect();
+    let cmds = h.cmds();
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Cmd::AccountPrefs(PrefCmd::Load { device: Some(d) }) if d == "coding-agent:coder"
+        )),
+        "{cmds:?}"
+    );
+    // The lane settled the migration → the old choice leaves this computer.
+    h.answer_prefs("put_coder.json");
+    h.store.account_workflow.update(|v| v.clear_device = true);
+    h.turn();
+    assert!(h.prefs.borrow().uses_gateway_default_workflow());
+    // A later reachable edge offers nothing.
+    h.store.conn.set(Conn::Down("gone".into(), true));
+    h.turn();
+    h.connect();
+    let cmds = h.cmds();
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Cmd::AccountPrefs(PrefCmd::Load { device: None }))),
+        "{cmds:?}"
+    );
+}
+
+#[test]
+fn a_fresh_conversation_starts_on_the_account_default_and_workflow_saves_nothing_here() {
+    let mut h = harness(Size::new(80, 24));
+    let basic = Workflow {
+        bundle_id: "basic-agent".into(),
+        flow_id: "81795ea9".into(),
+        name: "Basic agent".into(),
+        gateway_default: true,
+        ..Workflow::default()
+    };
+    let coder = Workflow {
+        bundle_id: "coding-agent".into(),
+        flow_id: "coder".into(),
+        name: "Coding agent (chat)".into(),
+        ..Workflow::default()
+    };
+    h.store.gateway_default_workflow.set(Some(basic.clone()));
+    h.store.workflows.set(vec![
+        Workflow {
+            gateway_default: false,
+            ..basic.clone()
+        },
+        coder.clone(),
+    ]);
+    h.store.workflow.set(basic.clone());
+    h.connect();
+    h.answer_prefs("put_coder.json");
+    let w = h.store.workflow.get_untracked();
+    assert_eq!(
+        (w.bundle_id.as_str(), w.flow_id.as_str()),
+        ("coding-agent", "coder")
+    );
+
+    // /workflow picks THIS conversation's workflow; nothing saved here.
+    let before = h.prefs.borrow().workflow_preference();
+    let screen = h.command("/workflow");
+    assert!(
+        flat(&screen).contains("This conversation's workflow."),
+        "{screen}"
+    );
+    for _ in 0..4 {
+        h.keys(b"\x1b[A");
+    }
+    h.keys(b"\r"); // the first row = Gateway default
+    assert_eq!(h.prefs.borrow().workflow_preference(), before);
+    assert!(h.store.workflow.get_untracked().gateway_default);
+
+    // A run started: a change of the default no longer moves it.
+    h.store.run_id.set("run-1".into());
+    h.answer_prefs("get_default.json");
+    assert!(h.store.workflow.get_untracked().gateway_default);
 }
 

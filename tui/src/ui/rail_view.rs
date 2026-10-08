@@ -59,6 +59,9 @@ pub enum Act {
     ContextLimit,
     Stream,
     WorkflowPicker,
+    /// "Default for new conversations" — the account's choice kept by the
+    /// gateway (R17.1): Enter picks, `d` = the gateway default.
+    AccountDefault,
     /// A workspace chooser control (session level for the conversation,
     /// run level for an automation).
     Ws(crate::ui::workspace_view::WsAct),
@@ -134,6 +137,8 @@ pub struct Snap {
     pub voice_prefs: crate::voice::VoicePrefs,
     /// The bound automation: (summary, definition, occurrences, error).
     pub auto: Option<BoundAutomation>,
+    /// The account's default workflow row (R17.1).
+    pub account: crate::account_prefs::View,
 }
 
 fn rd<T: Clone + 'static>(s: Signal<T>, tracked: bool) -> T {
@@ -218,6 +223,39 @@ pub fn snap(store: Store, ctx: &UiCtx, binding: &Binding, tracked: bool) -> Snap
             crate::ui::voice_view::prefs(ctx)
         },
         auto,
+        account: rd(store.account_workflow, tracked),
+    }
+}
+
+/// "Default for new conversations" (R17.1, the Code web's row): shown when
+/// the gateway keeps it (an older gateway: nothing, the choice stays on
+/// this computer). Value = the gateway's label verbatim; the help sentence
+/// or a broken choice's reason; "Saved." / "Not saved. <sentence>".
+fn account_default_card(s: &Snap, cards: &mut Vec<Card>, acts: &mut Vec<Act>) {
+    use crate::account_prefs::{self as ap, State};
+    match &s.account.state {
+        State::Ok(r) => {
+            let value = if s.account.busy {
+                "Saving…".to_string()
+            } else {
+                r.current_label()
+            };
+            let mut lines = vec![row(ap::LABEL, value), faint(r.note())];
+            if let Some((error, text)) = &s.account.note {
+                lines.push(
+                    CardLine::new(text.clone(), if *error { Ink::Error } else { Ink::Faint })
+                        .indent(2),
+                );
+            }
+            cards.push(Card::new(lines));
+            acts.push(Act::AccountDefault);
+        }
+        State::Error(e) => cards.push(Card::fixed(vec![
+            row(ap::LABEL, ""),
+            CardLine::new(e.clone(), Ink::Error).indent(2),
+        ])),
+        State::Unsupported => cards.push(Card::note(ap::UNSUPPORTED)),
+        State::Unknown | State::Loading => {}
     }
 }
 
@@ -550,6 +588,7 @@ pub fn panel_cards(
                     lines.push(faint(w.description.clone()));
                 }
                 push(&mut cards, Card::new(lines), Act::WorkflowPicker);
+                account_default_card(s, &mut cards, &mut acts);
             }
         }
         Panel::Workspace => workspace_cards(s, is_auto, &mut cards, &mut acts),
@@ -1530,6 +1569,32 @@ fn run_act(
                 preferred_flow: None,
             });
             crate::ui::modals::open_workflow_picker(cx, store, ctx);
+        }
+        // R17.1: one PUT per change ("Saved." / "Not saved. <sentence>").
+        Act::AccountDefault if reset => crate::ui::account_workflow::save(store, ctx, None),
+        Act::AccountDefault => {
+            let Some(r) = s.account.row().cloned() else {
+                return;
+            };
+            if s.account.busy {
+                return;
+            }
+            let options = r.options();
+            let start = options.iter().position(|(v, _)| *v == r.value).unwrap_or(0);
+            let labels = options.iter().map(|(_, l)| l.clone()).collect();
+            let ctx2 = ctx.clone();
+            pick_then(
+                crate::account_prefs::LABEL,
+                labels,
+                start,
+                Rc::new(move |ix| {
+                    if let Some((v, _)) = options.get(ix) {
+                        if *v != r.value {
+                            crate::ui::account_workflow::save(store, &ctx2, v.clone());
+                        }
+                    }
+                }),
+            );
         }
         Act::Ws(a) => {
             let host = workspace_host(&s);
