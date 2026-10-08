@@ -134,15 +134,16 @@ fn by_title(title: &str) -> auto::Summary {
 #[test]
 fn every_list_row_parses_and_reads_state_from_the_gateway() {
     let rows = summaries();
-    assert_eq!(rows.len(), 4);
+    assert_eq!(rows.len(), 5);
     let inbox = by_title("Inbox triage");
-    // In progress = `current_occurrence`; next = `next_fire_at` (also while running).
+    // In progress = `current_occurrence`; next = the served `next_run_at` /
+    // `next_run_local` (also while running), cut — never computed.
     assert_eq!(
         auto::current_label(&inbox).as_deref(),
         Some("Run #7 running")
     );
     let now = auto::now_unix();
-    assert!(auto::next_label(&inbox, now).starts_with("2026-09-27 07:00 UTC ("));
+    assert!(auto::next_label(&inbox, now).starts_with("2026-09-27 09:00 Europe/Paris ("));
     assert_eq!(
         auto::attention_label(&inbox),
         "2 unseen · 2 waiting for you"
@@ -179,6 +180,18 @@ fn every_list_row_parses_and_reads_state_from_the_gateway() {
         Ok(())
     );
 
+    // The schedule@2 daily row: the served rule on the card, the served next run.
+    let daily = by_title("Morning briefing");
+    assert_eq!(daily.trigger.source_version, 2);
+    let (line1, _) = auto::card_lines(&daily, now);
+    assert!(
+        line1.starts_with("↻ Every day at 08:00 (Europe/Paris) · last "),
+        "{line1}"
+    );
+    assert!(auto::next_label(&daily, now).starts_with("2026-09-28 08:00 Europe/Paris ("));
+    assert!(auto::row_line(&daily, now)
+        .contains(" · Every day at 08:00 (Europe/Paris) · next: 2026-09-28 08:00 Europe/Paris ("));
+
     let legacy = rows.iter().find(|s| s.legacy).unwrap();
     assert!(legacy.current.is_none());
     for c in [
@@ -189,6 +202,57 @@ fn every_list_row_parses_and_reads_state_from_the_gateway() {
     ] {
         assert!(auto::control_state(legacy, c, false).is_err());
     }
+}
+
+/// A summary without the served schedule fields is a broken R16.1 seam: it
+/// fails loudly instead of showing a next run or a sentence made up here.
+#[test]
+fn a_row_without_the_served_schedule_fields_is_refused() {
+    let mut v = load("list.json");
+    v["items"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("schedule_rule_text");
+    let err = auto::parse_list_page(&v).unwrap_err();
+    assert!(err.contains("schedule_rule_text"), "{err}");
+}
+
+/// The vendored wording (`assets/automation_controls.json`) is BYTE-IDENTICAL
+/// to the ui-kit's canonical file: its SHA-256 is pinned in
+/// `assets/automation_controls.sha256` (the kit's own `shasum -a 256` line).
+#[test]
+fn vendored_controls_wording_is_byte_identical_to_the_kit() {
+    let assets = concat!(env!("CARGO_MANIFEST_DIR"), "/assets");
+    let json = std::fs::read(format!("{assets}/automation_controls.json")).unwrap();
+    let pinned = std::fs::read_to_string(format!("{assets}/automation_controls.sha256")).unwrap();
+    assert_eq!(
+        pinned,
+        format!("{}  automation_controls.json\n", sha256_hex(&json)),
+        "assets/automation_controls.json drifted from the canonical ui-kit copy"
+    );
+    // The When step's words come from this file (the `schedule` block).
+    let spec: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    for key in [
+        "kind_every",
+        "kind_daily",
+        "kind_weekly",
+        "kind_monthly",
+        "kind_once",
+        "time_zone_line",
+        "time_zone_hint",
+        "describing",
+        "error_at",
+        "error_days",
+        "error_day",
+        "error_once",
+    ] {
+        assert_eq!(
+            spec["schedule"][key].as_str(),
+            Some(auto::schedule_text(key)),
+            "{key}"
+        );
+    }
+    assert_eq!(auto::day_label("mon"), "Mon");
 }
 
 #[test]

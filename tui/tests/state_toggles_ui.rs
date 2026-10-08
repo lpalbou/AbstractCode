@@ -315,7 +315,12 @@ fn space_switches_active_pause_when_on_resume_when_off() {
     h.keys(b"\x1b[B");
     h.keys(b" ");
     assert_eq!(command_types(h.auto_cmds()), vec!["automation.resume"]);
-    // Fourth row: the legacy one cannot change; it says why and sends nothing.
+    // Fourth row: Morning briefing (schedule@2 daily), active → pause.
+    h.store.automations.update(|v| v.busy = false);
+    h.keys(b"\x1b[B");
+    h.keys(b" ");
+    assert_eq!(command_types(h.auto_cmds()), vec!["automation.pause"]);
+    // Fifth row: the legacy one cannot change; it says why and sends nothing.
     h.store.automations.update(|v| v.busy = false);
     h.keys(b"\x1b[B");
     let screen = h.keys(b" ");

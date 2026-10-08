@@ -3,7 +3,9 @@
 //! Same behaviour and contract as the Observer, the Assistant and the
 //! ui-kit panel (`crate::automations` holds the shared rules):
 //! - the list: state as text + icon ("Active ▶"), cadence, what runs NOW
-//!   (only `current_occurrence`), the NEXT run (only `next_fire_at`),
+//!   (only `current_occurrence`), the NEXT run (only the served
+//!   `next_run_at` / `next_run_local`; a calendar rule reads as the served
+//!   `schedule_rule_text`),
 //!   attention; archived rows hidden until asked (`h`);
 //! - one automation: its header (the folder is `workspace_root`, browsed
 //!   through the gateway's workspace routes with `w`), the waits that need
@@ -12,8 +14,11 @@
 //!   current, revise, archive — which hides and stops, never deletes);
 //! - Discuss (`d`) forks the automation at the selected run and SWITCHES
 //!   this terminal to the new chat, in place (one session pool);
-//! - `/schedule` creates one from the current workflow in four steps
-//!   (task, when, context, tools) with the same body as every client.
+//! - `/schedule` creates one from the current workflow in six steps
+//!   (task, when, context, tools, workspaces, title and limits) with the
+//!   same `schedule@2` body as every client; When = Repeat · Daily · Weekly
+//!   · Monthly · Once at…, the last four worded by the gateway
+//!   (schedule-preview's `first_run_sentence` + the time-zone line).
 //!
 //! Nothing here executes anything: every action is a gateway route, sent
 //! through `Cmd::Automations` (one thread per action) and read back.
@@ -1082,7 +1087,20 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
                 },
             ))
             .child(hint_bar(&t, DETAIL_HINTS, 8))
-            .child(note_lines(&t, &[auto::run_now_key_line()], 8))
+            .child(dyn_view(LayoutStyle::column().shrink(0.0), move || {
+                // The kit's Run now line + "Next scheduled run: <served next run>."
+                let t2 = abstracttui::app::current_theme().tokens;
+                let mut lines = vec![auto::run_now_key_line()];
+                if let Some(next) = store.automations.with(|v| {
+                    v.detail
+                        .as_ref()
+                        .and_then(|d| d.summary.as_ref())
+                        .and_then(auto::run_now_next_line)
+                }) {
+                    lines.push(next);
+                }
+                note_lines(&t2, &lines, 8)
+            }))
             .build()
     });
 }
@@ -1217,6 +1235,20 @@ pub const WHEN_PRESETS: [(&str, &str, char); 6] = [
     ("every 7 days", "7", 'd'),
 ];
 
+/// The When step's rows after the presets: a typed interval, then the
+/// calendar kinds and Once (labels from the vendored `schedule` wording).
+pub fn when_labels() -> Vec<String> {
+    let mut labels: Vec<String> = WHEN_PRESETS
+        .iter()
+        .map(|(l, _, _)| format!("{l} (UTC)"))
+        .collect();
+    labels.push("every … (type an interval: 90m, 12h, 3d)".into());
+    for key in ["kind_daily", "kind_weekly", "kind_monthly", "kind_once"] {
+        labels.push(auto::schedule_text(key).to_string());
+    }
+    labels
+}
+
 fn schedule_when(
     cx: Scope,
     store: Store,
@@ -1224,24 +1256,23 @@ fn schedule_when(
     form: auto::CreateForm,
     target: serde_json::Value,
 ) {
-    let mut labels: Vec<String> = WHEN_PRESETS
-        .iter()
-        .map(|(l, _, _)| format!("{l} (UTC)"))
-        .collect();
-    labels.push("every … (type an interval: 90m, 12h, 3d)".into());
-    labels.push("once, at a date and time (UTC)".into());
+    let labels = when_labels();
     let ctx2 = ctx.clone();
     let cancel_ctx = ctx.clone();
+    let rows = labels.len() as i32;
     open_picker(
         cx,
         ctx,
         Picker {
-            title: "new automation — 2/6 when (fixed UTC intervals)".into(),
+            title: "new automation — 2/6 when".into(),
             labels,
             live: None,
             start: 4,
-            size: modal_size(80, 8 + 9),
-            hint: Some("Enter chooses · Esc cancels".into()),
+            size: modal_size(80, rows + 9),
+            hint: Some(format!(
+                "Enter chooses · Esc cancels · {}",
+                auto::schedule_text("time_zone_hint")
+            )),
             live_hint: None,
             keys: Vec::new(),
             on_mount: None,
@@ -1256,55 +1287,393 @@ fn schedule_when(
                     };
                     return schedule_context(cx, store, &ctx2, form, target);
                 }
-                let once = ix == WHEN_PRESETS.len() + 1;
-                let ctx3 = ctx2.clone();
-                let cancel: Rc<dyn Fn()> = {
-                    let ctx = ctx2.clone();
-                    Rc::new(move || ctx.close_modal())
-                };
-                open_text(
-                    cx,
-                    &ctx2,
-                    if once {
-                        "new automation — 2/6 once at (UTC)".into()
-                    } else {
-                        "new automation — 2/6 every (UTC)".into()
-                    },
-                    vec![if once {
-                        "A date and time read as UTC: YYYY-MM-DD HH:MM".into()
-                    } else {
-                        "A whole number followed by m, h or d: 90m, 12h, 3d.".into()
-                    }],
-                    String::new(),
-                    Rc::new(move |text: String| {
-                        let mut form = form.clone();
-                        let text = text.trim().to_string();
-                        form.when = if once {
-                            auto::When::Once { at: text }
-                        } else {
-                            let unit = text.chars().last().unwrap_or('h');
-                            auto::When::Every {
-                                amount: text[..text.len().saturating_sub(unit.len_utf8())]
-                                    .to_string(),
-                                unit,
-                            }
+                let k = ix - WHEN_PRESETS.len();
+                match k {
+                    0 => schedule_every_text(cx, store, &ctx2, form, target),
+                    1 => {
+                        form.when = auto::When::Daily { at: String::new() };
+                        schedule_at(cx, store, &ctx2, form, target)
+                    }
+                    2 => {
+                        form.when = auto::When::Weekly {
+                            days: vec!["mon".into()],
+                            at: String::new(),
                         };
-                        if auto::schedule_preview(&form).is_empty() {
-                            store.notify(if once {
-                                "that is not a date and time (UTC) — write YYYY-MM-DD HH:MM"
-                            } else {
-                                "that is not an interval — write a whole number and m, h or d (90m, 12h, 3d)"
-                            });
-                            return;
-                        }
-                        schedule_context(cx, store, &ctx3, form, target.clone());
-                    }),
-                    cancel,
-                );
+                        schedule_days(cx, store, &ctx2, form, target)
+                    }
+                    3 => {
+                        form.when = auto::When::Monthly {
+                            day: "1".into(),
+                            at: String::new(),
+                        };
+                        schedule_month_day(cx, store, &ctx2, form, target)
+                    }
+                    _ => schedule_once(cx, store, &ctx2, form, target),
+                }
             }),
             on_cancel: Some(Box::new(move || cancel_ctx.close_modal())),
         },
     );
+}
+
+fn close_cb(ctx: &UiCtx) -> Rc<dyn Fn()> {
+    let ctx = ctx.clone();
+    Rc::new(move || ctx.close_modal())
+}
+
+/// Repeat with a typed interval (`90m`, `12h`, `3d`).
+fn schedule_every_text(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    form: auto::CreateForm,
+    target: serde_json::Value,
+) {
+    let ctx3 = ctx.clone();
+    open_text(
+        cx,
+        ctx,
+        "new automation — 2/6 every (UTC)".into(),
+        vec!["A whole number followed by m, h or d: 90m, 12h, 3d.".into()],
+        String::new(),
+        Rc::new(move |text: String| {
+            let mut form = form.clone();
+            let text = text.trim().to_string();
+            let unit = text.chars().last().unwrap_or('h');
+            form.when = auto::When::Every {
+                amount: text[..text.len().saturating_sub(unit.len_utf8())].to_string(),
+                unit,
+            };
+            if auto::schedule_preview(&form).is_empty() {
+                store.notify(
+                    "that is not an interval — write a whole number and m, h or d (90m, 12h, 3d)",
+                );
+                return;
+            }
+            schedule_context(cx, store, &ctx3, form, target.clone());
+        }),
+        close_cb(ctx),
+    );
+}
+
+/// The kind's label for step titles ("Daily", "Weekly", "Monthly", "Once at…").
+fn kind_label(when: &auto::When) -> &'static str {
+    auto::schedule_text(match when {
+        auto::When::Every { .. } => "kind_every",
+        auto::When::Daily { .. } => "kind_daily",
+        auto::When::Weekly { .. } => "kind_weekly",
+        auto::When::Monthly { .. } => "kind_monthly",
+        auto::When::Once { .. } => "kind_once",
+    })
+}
+
+/// The weekly day toggles: `[x] Mon` rows (state shown by the mark, not by
+/// colour) and a last row that continues to the time.
+pub fn day_rows(days: &[String]) -> Vec<String> {
+    let mut rows: Vec<String> = auto::CALENDAR_DAYS
+        .iter()
+        .map(|d| {
+            let on = days.iter().any(|x| x == d);
+            format!("{} {}", if on { "[x]" } else { "[ ]" }, auto::day_label(d))
+        })
+        .collect();
+    rows.push(format!(
+        "Continue — {} HH:MM",
+        auto::schedule_text("at_label")
+    ));
+    rows
+}
+
+fn schedule_days(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    form: auto::CreateForm,
+    target: serde_json::Value,
+) {
+    let auto::When::Weekly { days, .. } = &form.when else {
+        return;
+    };
+    let labels = day_rows(days);
+    let ctx2 = ctx.clone();
+    open_picker(
+        cx,
+        ctx,
+        Picker {
+            title: format!(
+                "new automation — 2/6 {} · {}",
+                kind_label(&form.when),
+                auto::schedule_text("days_legend")
+            ),
+            labels,
+            live: None,
+            start: 0,
+            size: modal_size(60, 8 + 9),
+            hint: Some("Enter switches a day / continues · Esc cancels".into()),
+            live_hint: None,
+            keys: Vec::new(),
+            on_mount: None,
+            on_selection: None,
+            on_choose: Box::new(move |ix| {
+                let mut form = form.clone();
+                let auto::When::Weekly { days, at } = form.when.clone() else {
+                    return;
+                };
+                if let Some(day) = auto::CALENDAR_DAYS.get(ix) {
+                    let mut days = days;
+                    if let Some(pos) = days.iter().position(|x| x == day) {
+                        days.remove(pos);
+                    } else {
+                        days.push(day.to_string());
+                    }
+                    form.when = auto::When::Weekly { days, at };
+                    return schedule_days(cx, store, &ctx2, form, target.clone());
+                }
+                if days.is_empty() {
+                    store.notify(auto::schedule_text("error_days"));
+                    return;
+                }
+                schedule_at(cx, store, &ctx2, form, target.clone())
+            }),
+            on_cancel: Some(Box::new({
+                let ctx = ctx.clone();
+                move || ctx.close_modal()
+            })),
+        },
+    );
+}
+
+/// The monthly day: 1–31, then "last" (a day the month lacks runs on its last day).
+pub fn month_day_rows() -> Vec<String> {
+    let mut rows: Vec<String> = (1..=31).map(|d| d.to_string()).collect();
+    rows.push(auto::schedule_text("last_day").to_string());
+    rows
+}
+
+fn schedule_month_day(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    form: auto::CreateForm,
+    target: serde_json::Value,
+) {
+    let ctx2 = ctx.clone();
+    open_picker(
+        cx,
+        ctx,
+        Picker {
+            title: format!(
+                "new automation — 2/6 {} · {}",
+                kind_label(&form.when),
+                auto::schedule_text("day_label")
+            ),
+            labels: month_day_rows(),
+            live: None,
+            start: 0,
+            size: modal_size(60, 32 + 9),
+            hint: Some(format!(
+                "Enter chooses · Esc cancels · {}",
+                auto::schedule_text("time_zone_hint")
+            )),
+            live_hint: None,
+            keys: Vec::new(),
+            on_mount: None,
+            on_selection: None,
+            on_choose: Box::new(move |ix| {
+                let mut form = form.clone();
+                let day = if ix >= 31 {
+                    "last".to_string()
+                } else {
+                    (ix + 1).to_string()
+                };
+                if let auto::When::Monthly { at, .. } = form.when.clone() {
+                    form.when = auto::When::Monthly { day, at };
+                }
+                schedule_at(cx, store, &ctx2, form, target.clone())
+            }),
+            on_cancel: Some(Box::new({
+                let ctx = ctx.clone();
+                move || ctx.close_modal()
+            })),
+        },
+    );
+}
+
+/// The time of day (`HH:MM`) of a calendar rule.
+fn schedule_at(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    form: auto::CreateForm,
+    target: serde_json::Value,
+) {
+    let ctx3 = ctx.clone();
+    open_text(
+        cx,
+        ctx,
+        format!(
+            "new automation — 2/6 {} {}",
+            kind_label(&form.when),
+            auto::schedule_text("at_label")
+        ),
+        vec![
+            format!("{}: HH:MM", auto::schedule_text("time_label")),
+            auto::schedule_text("time_zone_hint").to_string(),
+        ],
+        "08:00".into(),
+        Rc::new(move |text: String| {
+            let mut form = form.clone();
+            let at = text.trim().to_string();
+            if !auto::is_wall_time(&at) {
+                store.notify(auto::schedule_text("error_at"));
+                return;
+            }
+            form.when = match form.when.clone() {
+                auto::When::Daily { .. } => auto::When::Daily { at },
+                auto::When::Weekly { days, .. } => auto::When::Weekly { days, at },
+                auto::When::Monthly { day, .. } => auto::When::Monthly { day, at },
+                other => other,
+            };
+            schedule_served(cx, store, &ctx3, form, target.clone());
+        }),
+        close_cb(ctx),
+    );
+}
+
+/// Once at a wall time in the account's time zone.
+fn schedule_once(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    form: auto::CreateForm,
+    target: serde_json::Value,
+) {
+    let ctx3 = ctx.clone();
+    open_text(
+        cx,
+        ctx,
+        format!("new automation — 2/6 {}", auto::schedule_text("once_label")),
+        vec![
+            "YYYY-MM-DD HH:MM".into(),
+            auto::schedule_text("time_zone_hint").to_string(),
+        ],
+        String::new(),
+        Rc::new(move |text: String| {
+            let mut form = form.clone();
+            if auto::wall_datetime(&text).is_none() {
+                store.notify(auto::schedule_text("error_once"));
+                return;
+            }
+            form.when = auto::When::Once {
+                at: text.trim().to_string(),
+            };
+            schedule_served(cx, store, &ctx3, form, target.clone());
+        }),
+        close_cb(ctx),
+    );
+}
+
+/// Ask the gateway to word `trigger` (once per distinct trigger).
+fn ask_preview(store: Store, ctx: &UiCtx, trigger: &serde_json::Value) {
+    let key = trigger.to_string();
+    let asked = store
+        .automations
+        .with_untracked(|v| v.preview.as_ref().is_some_and(|(k, _)| *k == key));
+    if asked {
+        return;
+    }
+    store
+        .automations
+        .update(|v| v.preview = Some((key, auto::PreviewState::Loading)));
+    send(
+        ctx,
+        AutoCmd::Preview {
+            trigger: trigger.clone(),
+        },
+    );
+}
+
+/// The served line of a form (Once / calendar): `first_run_sentence` once
+/// the gateway answered; "" for Repeat (its line is `schedule_preview`).
+fn served_sentence(store: Store, form: &auto::CreateForm) -> String {
+    if !form.when.is_served() {
+        return auto::schedule_preview(form);
+    }
+    let Ok(trigger) = auto::schedule_trigger(form) else {
+        return String::new();
+    };
+    store
+        .automations
+        .with_untracked(|v| match v.preview_for(&trigger) {
+            Some(auto::PreviewState::Ready(p)) => p.first_run_sentence.clone(),
+            _ => String::new(),
+        })
+}
+
+/// The When step's result for Once / Daily / Weekly / Monthly: the gateway's
+/// own words (the time-zone line + `first_run_sentence`), or its refusal.
+fn schedule_served(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    form: auto::CreateForm,
+    target: serde_json::Value,
+) {
+    let trigger = match auto::schedule_trigger(&form) {
+        Ok(t) => t,
+        Err(e) => {
+            store.notify(&e);
+            return;
+        }
+    };
+    ask_preview(store, ctx, &trigger);
+    let ctx2 = ctx.clone();
+    let title = format!("new automation — 2/6 when · {}", kind_label(&form.when));
+    ctx.open_modal(cx, modal_size(100, 12), move |mcx| {
+        let _ = mcx;
+        let t = abstracttui::app::current_theme().tokens;
+        let next = {
+            let (ctx, form, target, trigger) =
+                (ctx2.clone(), form.clone(), target.clone(), trigger.clone());
+            move || {
+                let state = store
+                    .automations
+                    .with_untracked(|v| v.preview_for(&trigger).cloned());
+                match state {
+                    Some(auto::PreviewState::Ready(_)) => {
+                        schedule_context(cx, store, &ctx, form.clone(), target.clone())
+                    }
+                    Some(auto::PreviewState::Failed(e)) => store.notify(&e),
+                    _ => store.notify(auto::schedule_text("describing")),
+                }
+            }
+        };
+        let trigger_v = trigger.clone();
+        Element::new()
+            .style(LayoutStyle::column().padding(Edges::all(1)))
+            .focusable()
+            .autofocus()
+            .shortcut(KeyChord::plain(Key::Escape), {
+                let ctx = ctx2.clone();
+                move |_| ctx.close_modal()
+            })
+            .shortcut(KeyChord::plain(Key::Enter), move |_| next())
+            .child(title_row(&t, title.clone()))
+            .child(dyn_view(LayoutStyle::column().grow(1.0), move || {
+                let t2 = abstracttui::app::current_theme().tokens;
+                let lines = store.automations.with(|v| {
+                    auto::preview_lines(
+                        v.preview_for(&trigger_v)
+                            .unwrap_or(&auto::PreviewState::Loading),
+                    )
+                });
+                // Wrap to the modal (about 96 cells), not the whole terminal.
+                let vw = abstracttui::app::current_viewport().w;
+                note_lines(&t2, &lines, (vw - 92).max(8))
+            }))
+            .child(hint_row(&t, "Enter continues · Esc goes back".into()))
+            .build()
+    });
 }
 
 fn schedule_context(
@@ -1316,7 +1685,7 @@ fn schedule_context(
 ) {
     let ctx2 = ctx.clone();
     let cancel_ctx = ctx.clone();
-    let preview = auto::schedule_preview(&form);
+    let preview = served_sentence(store, &form);
     open_picker(
         cx,
         ctx,
@@ -1435,8 +1804,13 @@ pub enum LimitRow {
 }
 
 /// Pure: the "Title and limits" step's cards (the kit's labels) and what
-/// each selectable card does.
-pub fn limits_cards(form: &auto::CreateForm, errors: &[String]) -> (Vec<Card>, Vec<LimitRow>) {
+/// each selectable card does. `served` = the gateway's preview of the form's
+/// trigger (Once / calendar rules show ITS lines; Repeat its own sentence).
+pub fn limits_cards(
+    form: &auto::CreateForm,
+    errors: &[String],
+    served: Option<&auto::PreviewState>,
+) -> (Vec<Card>, Vec<LimitRow>) {
     let mut cards = vec![Card::fixed(vec![CardLine::new(LIMITS_TITLE, Ink::Title)])];
     let mut acts = Vec::new();
     let value = |v: &str, empty: &str| -> CardLine {
@@ -1451,12 +1825,15 @@ pub fn limits_cards(form: &auto::CreateForm, errors: &[String]) -> (Vec<Card>, V
         value(&form.title, "Defaults to the task's first line"),
     ]));
     acts.push(LimitRow::Title);
-    if matches!(form.when, auto::When::Every { .. }) {
+    let repeat = matches!(form.when, auto::When::Every { .. });
+    if repeat {
         cards.push(Card::new(vec![
             CardLine::new("First run at (UTC; empty = now)", Ink::Text),
             value(&form.start_at, "now"),
         ]));
         acts.push(LimitRow::Start);
+    }
+    if repeat || form.when.is_calendar() {
         cards.push(Card::new(vec![
             CardLine::new("Stop after this many runs", Ink::Text),
             value(&form.count, "no limit"),
@@ -1468,9 +1845,15 @@ pub fn limits_cards(form: &auto::CreateForm, errors: &[String]) -> (Vec<Card>, V
         ]));
         acts.push(LimitRow::Until);
     }
-    let preview = auto::schedule_preview(form);
-    if !preview.is_empty() {
-        cards.push(Card::note(preview));
+    if form.when.is_served() {
+        for line in auto::preview_lines(served.unwrap_or(&auto::PreviewState::Loading)) {
+            cards.push(Card::note(line));
+        }
+    } else {
+        let preview = auto::schedule_preview(form);
+        if !preview.is_empty() {
+            cards.push(Card::note(preview));
+        }
     }
     for e in errors {
         cards.push(Card::fixed(vec![CardLine::new(e.clone(), Ink::Error)]));
@@ -1497,12 +1880,20 @@ fn schedule_limits(
     errors: Vec<String>,
 ) {
     let ctx2 = ctx.clone();
-    let (cards0, _) = limits_cards(&form, &errors);
+    // Max runs / stop at change a calendar trigger: the gateway words the new one.
+    let trigger = auto::schedule_trigger(&form).ok();
+    if let (true, Some(tr)) = (form.when.is_served(), &trigger) {
+        ask_preview(store, ctx, tr);
+    }
+    let served_now = move |v: &auto::View| -> Option<auto::PreviewState> {
+        trigger.as_ref().and_then(|tr| v.preview_for(tr).cloned())
+    };
+    let (cards0, _) = limits_cards(&form, &errors, None);
     let rows: i32 = cards0.iter().map(|c| c.lines.len() as i32 + 1).sum();
     let size = modal_size(100, rows + 8);
     ctx.open_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
-        let (_, acts0) = limits_cards(&form, &errors);
+        let (_, acts0) = limits_cards(&form, &errors, None);
         // The cursor starts on "Create automation" (Enter creates it).
         let cursor = mcx.signal(acts0.len().saturating_sub(1));
         let activate = {
@@ -1511,7 +1902,7 @@ fn schedule_limits(
             let target = target.clone();
             let errors = errors.clone();
             Rc::new(move || {
-                let (_, acts) = limits_cards(&form, &errors);
+                let (_, acts) = limits_cards(&form, &errors, None);
                 let Some(row) = acts.get(cursor.get_untracked()).copied() else {
                     return;
                 };
@@ -1606,7 +1997,8 @@ fn schedule_limits(
             .child(dyn_view(
                 LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)),
                 move || {
-                    let (cards, acts) = limits_cards(&form_v, &errors_v);
+                    let served = store.automations.with(|v| served_now(v));
+                    let (cards, acts) = limits_cards(&form_v, &errors_v, served.as_ref());
                     draw_cards(cards, cursor.get().min(acts.len().saturating_sub(1)))
                 },
             ))

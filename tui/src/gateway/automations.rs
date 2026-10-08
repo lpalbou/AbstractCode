@@ -69,6 +69,10 @@ pub enum AutoCmd {
         wait: Box<Wait>,
         payload: Value,
     },
+    /// `/schedule`'s When step: the gateway's words for a trigger (nothing stored).
+    Preview {
+        trigger: Value,
+    },
 }
 
 #[derive(Clone)]
@@ -465,6 +469,20 @@ fn run(client: &AutomationClient, wake: &WakeHandle, store: Store, cmd: AutoCmd)
                         v.ack_failed()
                     }
                 })
+            });
+        }
+        AutoCmd::Preview { trigger } => {
+            let state = match client.send(&auto::preview_request(trigger.clone())) {
+                Ok(v) => match auto::parse_schedule_preview(&v) {
+                    Ok(p) => auto::PreviewState::Ready(p),
+                    Err(e) => auto::PreviewState::Failed(e),
+                },
+                Err(e) => auto::PreviewState::Failed(auto::api_error_text(&e)),
+            };
+            wake.post(move || {
+                store
+                    .automations
+                    .update(|v| v.apply_preview(&trigger, state))
             });
         }
         AutoCmd::Answer {

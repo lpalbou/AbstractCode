@@ -414,7 +414,7 @@ fn the_automations_list_reads_like_the_web_cards() {
         h.shot("automations-archive-confirm");
         h.keys(b"n");
         // The quiet Archived · N line ends the list (scrolled into view).
-        for _ in 0..4 {
+        for _ in 0..5 {
             h.keys(b"\x1b[B");
         }
         let screen = h.keys(b"\r");

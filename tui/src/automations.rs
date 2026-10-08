@@ -4,14 +4,17 @@
 //! (`@abstractframework/ui-kit`, `src/automations/panel_core.ts`) and of the
 //! Assistant's `core/automations.py`: the gateway's wire shapes parsed into
 //! typed rows, the labels every client prints (cadence, "Active ▶", "Run #7
-//! running", "next 2026-09-27 07:00 UTC (in 25 min)"), which controls apply,
+//! running", "next 2026-09-27 09:00 Europe/Paris (in 25 min)"), which controls apply,
 //! occurrences as chat pairs, the exact `POST /api/gateway/automations` and
 //! `PATCH` bodies, the typed wait answers and the error sentences.
 //!
 //! Two framework rules are structural here, never inferred:
 //! - a run is in progress only when the gateway says so in
 //!   `current_occurrence` (never from `last_occurrence` or the rows);
-//! - the next run comes only from `next_fire_at` (no client arithmetic).
+//! - the next run comes only from the gateway's served `next_run_at` /
+//!   `next_run_local` (round 16, R16.1): no client arithmetic, no zone math —
+//!   the local wall time is CUT from the served string; a calendar rule reads
+//!   as the served `schedule_rule_text`, never a sentence built here.
 //!
 //! Everything reads STRUCTURE (statuses, `notify` objects, wait kinds,
 //! config fields) — never model prose. The canonical wire examples are the
@@ -108,7 +111,16 @@ pub struct Summary {
     pub trigger: Trigger,
     pub context_mode: String,
     pub workspace_root: Option<String>,
-    pub next_fire_at: Option<String>,
+    /// Served (R16.1): the next run in UTC (absent when none).
+    pub next_run_at: Option<String>,
+    /// Served: the same instant as ISO with the offset of `time_zone`.
+    pub next_run_local: Option<String>,
+    /// Served: the schedule's IANA zone (the owner's for non-v2 triggers).
+    pub time_zone: String,
+    /// Served: the rule + " · next Thu 9 Oct 08:00" when a next run exists.
+    pub schedule_text: String,
+    /// Served: the rule alone ("Every day at 08:00 (Europe/Paris)").
+    pub schedule_rule_text: String,
     pub current: Option<CurrentOccurrence>,
     pub occurrence_count: u64,
     pub last: Option<LastOccurrence>,
@@ -299,7 +311,12 @@ pub fn parse_summary(v: &Value) -> Parse<Summary> {
         trigger: parse_trigger(v, what)?,
         context_mode: opt_str(v, "context_mode").unwrap_or_default(),
         workspace_root: opt_str(v, "workspace_root").filter(|s| !s.is_empty()),
-        next_fire_at: opt_str(v, "next_fire_at").filter(|s| !s.is_empty()),
+        next_run_at: opt_str(v, "next_run_at").filter(|s| !s.is_empty()),
+        next_run_local: opt_str(v, "next_run_local").filter(|s| !s.is_empty()),
+        // Served on every row by R16.1 gateways: a missing one is a broken seam, said loudly.
+        time_zone: req_str(v, "time_zone", what)?,
+        schedule_text: req_str(v, "schedule_text", what)?,
+        schedule_rule_text: req_str(v, "schedule_rule_text", what)?,
         current,
         occurrence_count: v
             .get("occurrence_count")
@@ -428,7 +445,7 @@ pub fn parse_discuss(v: &Value) -> Parse<DiscussResponse> {
 }
 
 // ---------------------------------------------------------------------------
-// Time (UTC only: schedules carry no time zone)
+// Time (occurrence stamps in UTC; the next run is served, see `served_local`)
 // ---------------------------------------------------------------------------
 
 fn unix_secs(ts: &str) -> Option<i64> {
@@ -459,7 +476,7 @@ pub fn format_utc(ts: &str) -> String {
     }
 }
 
-/// "in 25 min", "in 3 h 5 min", "in 2 d 4 h", "due now" — from `next_fire_at` only.
+/// "in 25 min", "in 3 h 5 min", "in 2 d 4 h", "due now" — from the served `next_run_at` only.
 pub fn relative_in(ts: &str, now: i64) -> String {
     let Some(t) = unix_secs(ts) else {
         return String::new();
@@ -547,6 +564,55 @@ pub fn schedule_label(config: &Map<String, Value>) -> String {
     parts.join(" · ")
 }
 
+/// The served `next_run_local` ("2026-10-09T08:00:00+02:00", already in the
+/// automation's zone) as "2026-10-09 08:00 Europe/Paris": the date and wall
+/// time are CUT from the gateway's string — no clock or zone arithmetic.
+pub fn served_local(next_run_local: &str, time_zone: &str) -> String {
+    let b = next_run_local.as_bytes();
+    let shaped = b.len() >= 16
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[10] == b'T'
+        && b[13] == b':'
+        && [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15]
+            .iter()
+            .all(|&i| b[i].is_ascii_digit());
+    if !shaped {
+        return next_run_local.to_string();
+    }
+    let mut out = format!("{} {}", &next_run_local[..10], &next_run_local[11..16]);
+    if !time_zone.is_empty() {
+        out.push(' ');
+        out.push_str(time_zone);
+    }
+    out
+}
+
+/// A `schedule@2` trigger (any kind): the gateway words it.
+pub fn is_schedule_v2(t: &Trigger) -> bool {
+    t.source_id == "schedule" && t.source_version == SCHEDULE_VERSION
+}
+
+/// The served rule verbatim; an empty one (a broken gateway seam) reads as
+/// the literal "schedule@2", never as a sentence made up here.
+pub fn served_rule(s: &Summary) -> String {
+    if s.schedule_rule_text.is_empty() {
+        "schedule@2".into()
+    } else {
+        s.schedule_rule_text.clone()
+    }
+}
+
+/// The trigger in words for one row: `schedule@1` keeps its fixed-interval
+/// UTC wording; a `schedule@2` row (every kind) is the served rule.
+pub fn summary_trigger_text(s: &Summary) -> String {
+    if is_schedule_v2(&s.trigger) {
+        served_rule(s)
+    } else {
+        trigger_summary(&s.trigger)
+    }
+}
+
 pub fn trigger_summary(t: &Trigger) -> String {
     match (t.source_id.as_str(), t.source_version) {
         ("schedule", 1) => schedule_label(&t.config),
@@ -596,14 +662,27 @@ pub fn current_label(s: &Summary) -> Option<String> {
     })
 }
 
-/// "2026-09-27 07:00 UTC (in 25 min)" from `next_fire_at` only;
-/// "none while paused" / "none scheduled" otherwise.
+/// "2026-09-27 09:00 Europe/Paris (in 25 min)" from the served
+/// `next_run_local` + `next_run_at` only; "none while paused" / "none
+/// scheduled" otherwise.
 pub fn next_label(s: &Summary, now: i64) -> String {
-    match &s.next_fire_at {
-        Some(ts) => format!("{} ({})", format_utc(ts), relative_in(ts, now)),
-        None if s.status == "paused" => "none while paused".into(),
-        None => "none scheduled".into(),
+    match (&s.next_run_at, &s.next_run_local) {
+        (Some(at), Some(local)) => format!(
+            "{} ({})",
+            served_local(local, &s.time_zone),
+            relative_in(at, now)
+        ),
+        _ if s.status == "paused" => "none while paused".into(),
+        _ => "none scheduled".into(),
     }
+}
+
+/// The kit's run-now line with the served next run: "Next scheduled run:
+/// 2026-09-27 09:00 Europe/Paris." (`run_now_next_run_line`); `None` when
+/// nothing is scheduled.
+pub fn run_now_next_line(s: &Summary) -> Option<String> {
+    let local = s.next_run_local.as_deref()?;
+    Some(spec_str(&["run_now_next_run_line"]).replace("{time}", &served_local(local, &s.time_zone)))
 }
 
 /// "2 unseen · 1 waiting for you" / "nothing new".
@@ -631,7 +710,7 @@ pub fn row_line(s: &Summary, now: i64) -> String {
     if s.attention.unseen_count > 0 || s.attention.pending_waits > 0 {
         parts.push(attention_label(s));
     }
-    parts.push(trigger_summary(&s.trigger));
+    parts.push(summary_trigger_text(s));
     if let Some(cur) = current_label(s) {
         parts.push(format!("now: {cur}"));
     }
@@ -747,10 +826,10 @@ pub fn last_run_text(s: &Summary, now: i64) -> String {
     }
 }
 
-/// "next in 14 h" / "next due now"; `None` when nothing is scheduled
-/// (paused, manual, archived, finished).
+/// "next in 14 h" / "next due now" from the served `next_run_at`; `None`
+/// when nothing is scheduled (paused, manual, archived, finished).
 pub fn next_run_text(s: &Summary, now: i64) -> Option<String> {
-    let t = s.next_fire_at.as_deref().and_then(unix_secs)?;
+    let t = s.next_run_at.as_deref().and_then(unix_secs)?;
     if t - now < 60 {
         Some("next due now".into())
     } else {
@@ -758,9 +837,20 @@ pub fn next_run_text(s: &Summary, now: i64) -> Option<String> {
     }
 }
 
+/// The cadence of one row: the compact Repeat words when the trigger has an
+/// interval (`schedule@1`, or `schedule@2` `kind: "every"`), else — for any
+/// other `schedule@2` rule — the served `schedule_rule_text` verbatim.
+pub fn summary_cadence(s: &Summary) -> String {
+    if is_schedule_v2(&s.trigger) && !s.trigger.config.get("every").is_some_and(Value::is_string) {
+        served_rule(s)
+    } else {
+        compact_cadence(&s.trigger)
+    }
+}
+
 /// The header's one line: cadence · last · next (empty parts omitted).
 pub fn timing_line(s: &Summary, now: i64) -> String {
-    let mut parts = vec![compact_cadence(&s.trigger), last_run_text(s, now)];
+    let mut parts = vec![summary_cadence(s), last_run_text(s, now)];
     parts.extend(next_run_text(s, now));
     parts.retain(|p| !p.is_empty());
     parts.join(" · ")
@@ -769,7 +859,7 @@ pub fn timing_line(s: &Summary, now: i64) -> String {
 /// The card's two lines: `↻ every 24 h · last 3 h ago` (↻ for a schedule
 /// only) and `next in 20 h` (empty when nothing is scheduled).
 pub fn card_lines(s: &Summary, now: i64) -> (String, String) {
-    let mut parts = vec![compact_cadence(&s.trigger), last_run_text(s, now)];
+    let mut parts = vec![summary_cadence(s), last_run_text(s, now)];
     parts.retain(|p| !p.is_empty());
     let mut first = parts.join(" · ");
     if s.trigger.source_id == "schedule" {
@@ -1224,13 +1314,89 @@ pub fn resume_command(command_id: &str, w: &Wait, payload: Value) -> Value {
 // Create / revise
 // ---------------------------------------------------------------------------
 
+/// Clients write `schedule@2` (round 16, "R16.1 API — FINAL"); `schedule@1`
+/// rows keep reading as before.
+pub const SCHEDULE_VERSION: u64 = 2;
+
+/// The weekdays of a weekly rule, Monday first (the wire's order).
+pub const CALENDAR_DAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+/// One string of the vendored `schedule` wording block (the kit's
+/// `SCHEDULE_TEXT`): "Daily", "Once at…", "in {time_zone} (your account's
+/// time zone)", …
+pub fn schedule_text(key: &str) -> &'static str {
+    spec_str(&["schedule", key])
+}
+
+/// A weekday chip's label ("Mon") from the vendored wording.
+pub fn day_label(day: &str) -> &'static str {
+    spec_str(&["schedule", "days", day])
+}
+
+/// "in Europe/Paris (your account's time zone)".
+pub fn time_zone_line(time_zone: &str) -> String {
+    schedule_text("time_zone_line").replace("{time_zone}", time_zone)
+}
+
 /// When the automation runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum When {
-    /// Every `amount` `unit` (m|h|d), from now or from `start_at`.
+    /// Repeat: every `amount` `unit` (m|h|d), a fixed UTC interval, from now
+    /// or from `start_at`.
     Every { amount: String, unit: char },
-    /// Once at a UTC date and time (`YYYY-MM-DD HH:MM`).
+    /// Daily at `HH:MM` in the account's time zone.
+    Daily { at: String },
+    /// Weekly on `days` (wire names, any order) at `HH:MM`.
+    Weekly { days: Vec<String>, at: String },
+    /// Monthly on `day` ("1".."31" or "last") at `HH:MM`.
+    Monthly { day: String, at: String },
+    /// Once at a wall time `YYYY-MM-DD HH:MM` in the account's time zone.
     Once { at: String },
+}
+
+impl When {
+    /// Once / Daily / Weekly / Monthly depend on the time zone: their line
+    /// is the gateway's `first_run_sentence` (schedule-preview), never ours.
+    pub fn is_served(&self) -> bool {
+        !matches!(self, When::Every { .. })
+    }
+    /// Daily / Weekly / Monthly (a wall-clock rule).
+    pub fn is_calendar(&self) -> bool {
+        matches!(
+            self,
+            When::Daily { .. } | When::Weekly { .. } | When::Monthly { .. }
+        )
+    }
+}
+
+/// `HH:MM`, 00:00–23:59 (a fixed format, read structurally).
+pub fn is_wall_time(at: &str) -> bool {
+    let b = at.as_bytes();
+    b.len() == 5
+        && b[2] == b':'
+        && [0, 1, 3, 4].iter().all(|&i| b[i].is_ascii_digit())
+        && (b[0] - b'0') * 10 + (b[1] - b'0') < 24
+        && b[3] < b'6'
+}
+
+/// `YYYY-MM-DD HH:MM` (or with `T`) → the wire's `YYYY-MM-DDTHH:MM`, or None.
+pub fn wall_datetime(value: &str) -> Option<String> {
+    let v = value.trim();
+    let b = v.as_bytes();
+    if b.len() != 16 || !matches!(b[10], b'T' | b' ') || b[4] != b'-' || b[7] != b'-' {
+        return None;
+    }
+    if ![0, 1, 2, 3, 5, 6, 8, 9]
+        .iter()
+        .all(|&i| b[i].is_ascii_digit())
+    {
+        return None;
+    }
+    let (m, d) = (&v[5..7], &v[8..10]);
+    if !("01"..="12").contains(&m) || !("01"..="31").contains(&d) || !is_wall_time(&v[11..16]) {
+        return None;
+    }
+    Some(format!("{}T{}", &v[..10], &v[11..16]))
 }
 
 /// The create form (raw strings, as typed).
@@ -1243,9 +1409,10 @@ pub struct CreateForm {
     /// `auto` | `ask`.
     pub tool_approval: String,
     pub title: String,
-    /// "Title and limits" (repeating schedules only, the kit dialog's
-    /// fields): first run at (UTC; empty = now), stop after this many runs,
-    /// stop at (UTC). Typed as `YYYY-MM-DD HH:MM` / a whole number.
+    /// "Title and limits" (the kit dialog's fields): first run at (UTC;
+    /// empty = now; Repeat only), stop after this many runs and stop at (UTC)
+    /// (Repeat and the calendar rules). Typed as `YYYY-MM-DD HH:MM` / a
+    /// whole number.
     pub start_at: String,
     pub count: String,
     pub until: String,
@@ -1328,34 +1495,43 @@ pub fn default_title(prompt: &str) -> String {
     }
 }
 
-/// "Runs every 24 hours (UTC), first run now." — or "" while incomplete.
+/// Repeat: "Runs every 24 hours (UTC), first run now." (the kit's sentence
+/// family, unchanged) — or "" while incomplete. Once / Daily / Weekly /
+/// Monthly return "": their line is the gateway's `first_run_sentence`.
 pub fn schedule_preview(form: &CreateForm) -> String {
+    if form.when.is_served() {
+        return String::new();
+    }
     match schedule_config_form(form) {
-        Ok(config) => match form.when {
-            When::Once { .. } => format!("Runs {}.", schedule_label(&config)),
-            When::Every { .. } => format!(
-                "Runs {}, first run {}.",
-                schedule_label(&config),
-                match config.get("start_at").and_then(Value::as_str) {
-                    Some(at) => format!("at {}", format_utc(at)),
-                    None => "now".into(),
-                }
-            ),
-        },
+        Ok(config) => format!(
+            "Runs {}, first run {}.",
+            schedule_label(&config),
+            match config.get("start_at").and_then(Value::as_str) {
+                Some(at) => format!("at {}", format_utc(at)),
+                None => "now".into(),
+            }
+        ),
         Err(_) => String::new(),
     }
 }
 
+/// The `schedule@2` trigger of a form, or the reason it is incomplete.
+pub fn schedule_trigger(form: &CreateForm) -> Result<Value, String> {
+    let config = schedule_config_form(form)?;
+    Ok(json!({"source_id": "schedule", "source_version": SCHEDULE_VERSION, "config": config}))
+}
+
 /// The schedule config with the dialog's limits (the kit's
-/// `scheduleConfigFrom`: start_at / count / until, repeating schedules only;
-/// the kit's sentences).
+/// `scheduleConfigFrom`): start_at for Repeat; count / until for Repeat and
+/// the calendar rules; Once carries none. No `time_zone`: the gateway fills
+/// the owner's account zone.
 pub fn schedule_config_form(form: &CreateForm) -> Result<Map<String, Value>, String> {
     let mut config = schedule_config(&form.when)?;
     if matches!(form.when, When::Once { .. }) {
         return Ok(config);
     }
     let mut errors: Vec<&str> = Vec::new();
-    if !form.start_at.trim().is_empty() {
+    if !form.start_at.trim().is_empty() && matches!(form.when, When::Every { .. }) {
         match utc_from_input(&form.start_at) {
             Some(ts) => {
                 config.insert("start_at".into(), json!(ts));
@@ -1388,14 +1564,21 @@ pub fn schedule_config_form(form: &CreateForm) -> Result<Map<String, Value>, Str
 
 fn schedule_config(when: &When) -> Result<Map<String, Value>, String> {
     let mut config = Map::new();
+    let wall = |at: &str| -> Result<String, String> {
+        let at = at.trim();
+        if is_wall_time(at) {
+            Ok(at.to_string())
+        } else {
+            Err(schedule_text("error_at").into())
+        }
+    };
     match when {
-        When::Once { at } => match utc_from_input(at) {
-            Some(ts) => {
-                config.insert("start_at".into(), json!(ts));
+        When::Once { at } => match wall_datetime(at) {
+            Some(at) => {
+                config.insert("kind".into(), json!("once"));
+                config.insert("at".into(), json!(at));
             }
-            None => {
-                return Err("Pick the date and time (UTC) to run once, as YYYY-MM-DD HH:MM.".into())
-            }
+            None => return Err(schedule_text("error_once").into()),
         },
         When::Every { amount, unit } => {
             let n = amount.trim();
@@ -1405,10 +1588,87 @@ fn schedule_config(when: &When) -> Result<Map<String, Value>, String> {
                         .into(),
                 );
             }
+            config.insert("kind".into(), json!("every"));
             config.insert("every".into(), json!(format!("{n}{unit}")));
+        }
+        When::Daily { at } => {
+            let at = wall(at)?;
+            config.insert("kind".into(), json!("daily"));
+            config.insert("at".into(), json!(at));
+        }
+        When::Weekly { days, at } => {
+            // Monday-first, de-duplicated (the gateway normalizes the same way).
+            let picked: Vec<&str> = CALENDAR_DAYS
+                .iter()
+                .copied()
+                .filter(|d| days.iter().any(|x| x == d))
+                .collect();
+            if picked.is_empty() {
+                return Err(schedule_text("error_days").into());
+            }
+            let at = wall(at)?;
+            config.insert("kind".into(), json!("weekly"));
+            config.insert("days".into(), json!(picked));
+            config.insert("at".into(), json!(at));
+        }
+        When::Monthly { day, at } => {
+            let day = day.trim();
+            let value = if day == "last" {
+                json!("last")
+            } else {
+                match day.parse::<u64>() {
+                    Ok(n) if (1..=31).contains(&n) && !day.starts_with('0') => json!(n),
+                    _ => return Err(schedule_text("error_day").into()),
+                }
+            };
+            let at = wall(at)?;
+            config.insert("kind".into(), json!("monthly"));
+            config.insert("day".into(), value);
+            config.insert("at".into(), json!(at));
         }
     }
     Ok(config)
+}
+
+/// `POST /api/gateway/automations/schedule-preview` (nothing stored): the
+/// normalized trigger, the zone, the gateway's words and the first run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SchedulePreview {
+    pub time_zone: String,
+    pub schedule_rule_text: String,
+    pub first_run_sentence: String,
+    pub next_run_at: Option<String>,
+    pub next_run_local: Option<String>,
+}
+
+pub fn parse_schedule_preview(v: &Value) -> Parse<SchedulePreview> {
+    let what = "schedule preview";
+    Ok(SchedulePreview {
+        time_zone: req_str(v, "time_zone", what)?,
+        schedule_rule_text: req_str(v, "schedule_rule_text", what)?,
+        first_run_sentence: req_str(v, "first_run_sentence", what)?,
+        next_run_at: opt_str(v, "next_run_at").filter(|s| !s.is_empty()),
+        next_run_local: opt_str(v, "next_run_local").filter(|s| !s.is_empty()),
+    })
+}
+
+/// Where the When step's served line stands, keyed by the trigger it describes.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PreviewState {
+    Loading,
+    Ready(SchedulePreview),
+    Failed(String),
+}
+
+/// The served lines of a preview: the time-zone line (when ready) and the
+/// sentence — `first_run_sentence`, "Checking the schedule…", or the
+/// gateway's refusal.
+pub fn preview_lines(state: &PreviewState) -> Vec<String> {
+    match state {
+        PreviewState::Loading => vec![schedule_text("describing").to_string()],
+        PreviewState::Ready(p) => vec![time_zone_line(&p.time_zone), p.first_run_sentence.clone()],
+        PreviewState::Failed(e) => vec![e.clone()],
+    }
 }
 
 /// The exact `POST /api/gateway/automations` body, or the reasons it cannot be built.
@@ -1471,7 +1731,7 @@ pub fn build_create_request(
         "request_id": request_id,
         "title": title,
         "target": target,
-        "trigger": {"source_id": "schedule", "source_version": 1, "config": config.expect("checked above")},
+        "trigger": {"source_id": "schedule", "source_version": SCHEDULE_VERSION, "config": config.expect("checked above")},
         "context": {"mode": form.context},
         "policy": {"tool_approval": form.tool_approval},
     }))
@@ -1612,6 +1872,15 @@ pub fn occurrences_request(id: &str, cursor: Option<&str>) -> Request {
         method: "GET",
         path,
         body: None,
+    }
+}
+
+/// `POST /api/gateway/automations/schedule-preview {trigger}`.
+pub fn preview_request(trigger: Value) -> Request {
+    Request {
+        method: "POST",
+        path: "/api/gateway/automations/schedule-preview".into(),
+        body: Some(json!({ "trigger": trigger })),
     }
 }
 
@@ -1859,6 +2128,27 @@ pub struct View {
     pub discussion: Option<(u64, DiscussResponse)>,
     /// An automation the gateway just created: the UI opens it once.
     pub created: Option<String>,
+    /// The `/schedule` When step's served line (schedule-preview), keyed by
+    /// the trigger JSON it describes (a stale answer never replaces a newer ask).
+    pub preview: Option<(String, PreviewState)>,
+}
+
+impl View {
+    /// The served line for `trigger`, if it is the one last asked.
+    pub fn preview_for(&self, trigger: &Value) -> Option<&PreviewState> {
+        let key = trigger.to_string();
+        self.preview
+            .as_ref()
+            .filter(|(k, _)| *k == key)
+            .map(|(_, st)| st)
+    }
+    /// An answer arrived: kept only when it is for the latest ask.
+    pub fn apply_preview(&mut self, trigger: &Value, state: PreviewState) {
+        let key = trigger.to_string();
+        if self.preview.as_ref().is_some_and(|(k, _)| *k == key) {
+            self.preview = Some((key, state));
+        }
+    }
 }
 
 impl View {
@@ -1988,7 +2278,11 @@ mod tests {
             },
             context_mode: "independent".into(),
             workspace_root: None,
-            next_fire_at: None,
+            next_run_at: None,
+            next_run_local: None,
+            time_zone: "Europe/Paris".into(),
+            schedule_text: "Every 8 hours (UTC)".into(),
+            schedule_rule_text: "Every 8 hours (UTC)".into(),
             current: current.then(|| CurrentOccurrence {
                 index: 3,
                 run_id: "r3".into(),
@@ -2186,14 +2480,238 @@ mod tests {
     }
 
     #[test]
-    fn next_comes_from_next_fire_at_only() {
+    fn next_comes_from_the_served_values_only() {
         let mut s = summary("active", true, ALL);
         assert_eq!(next_label(&s, 0), "none scheduled");
-        s.next_fire_at = Some("2026-09-27T07:00:00Z".into());
+        assert_eq!(run_now_next_line(&s), None);
+        s.next_run_at = Some("2026-09-27T07:00:00Z".into());
+        s.next_run_local = Some("2026-09-27T09:00:00+02:00".into());
         let now = unix_secs("2026-09-27T06:35:00Z").unwrap();
-        assert_eq!(next_label(&s, now), "2026-09-27 07:00 UTC (in 25 min)");
+        assert_eq!(
+            next_label(&s, now),
+            "2026-09-27 09:00 Europe/Paris (in 25 min)"
+        );
+        assert_eq!(
+            run_now_next_line(&s).as_deref(),
+            Some("Next scheduled run: 2026-09-27 09:00 Europe/Paris.")
+        );
+        assert_eq!(next_run_text(&s, now).as_deref(), Some("next in 25 min"));
+        // The served local string is CUT, never re-derived: a gateway that
+        // serves another wall time is shown as served.
+        s.next_run_local = Some("2026-09-27T23:59:00-07:00".into());
+        s.time_zone = "America/Los_Angeles".into();
+        assert_eq!(
+            next_label(&s, now),
+            "2026-09-27 23:59 America/Los_Angeles (in 25 min)"
+        );
+        // Without the served `next_run_at` there is no next run, whatever the rest says.
+        s.next_run_at = None;
+        assert_eq!(next_run_text(&s, now), None);
         let p = summary("paused", false, ALL);
         assert_eq!(next_label(&p, now), "none while paused");
+        assert_eq!(served_local("garbage", "UTC"), "garbage");
+    }
+
+    #[test]
+    fn calendar_rows_read_the_served_rule() {
+        let mut s = summary("active", false, ALL);
+        s.trigger = Trigger {
+            source_id: "schedule".into(),
+            source_version: 2,
+            config: json!({"kind": "daily", "at": "08:00", "time_zone": "Europe/Paris"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        };
+        s.schedule_rule_text = "Every day at 08:00 (Europe/Paris)".into();
+        assert_eq!(summary_cadence(&s), "Every day at 08:00 (Europe/Paris)");
+        assert_eq!(
+            summary_trigger_text(&s),
+            "Every day at 08:00 (Europe/Paris)"
+        );
+        // A broken seam reads as the literal, never a sentence made up here.
+        s.schedule_rule_text.clear();
+        assert_eq!(summary_cadence(&s), "schedule@2");
+        // schedule@2 Repeat keeps the compact interval words.
+        s.trigger.config = json!({"kind": "every", "every": "24h"})
+            .as_object()
+            .unwrap()
+            .clone();
+        assert_eq!(summary_cadence(&s), "every 24 h");
+    }
+
+    fn form_with(when: When) -> CreateForm {
+        CreateForm {
+            prompt: "brief me".into(),
+            when,
+            ..CreateForm::default()
+        }
+    }
+
+    #[test]
+    fn every_when_kind_writes_schedule_v2() {
+        let target = || Some(json!({"flow_id": "f"}));
+        let cfg = |when: When| {
+            build_create_request(&form_with(when), target(), "r").unwrap()["trigger"].clone()
+        };
+        assert_eq!(
+            cfg(When::Daily { at: "08:00".into() }),
+            json!({"source_id": "schedule", "source_version": 2, "config": {"kind": "daily", "at": "08:00"}})
+        );
+        assert_eq!(
+            cfg(When::Weekly {
+                days: vec!["fri".into(), "mon".into(), "fri".into()],
+                at: "07:30".into()
+            })["config"],
+            json!({"kind": "weekly", "days": ["mon", "fri"], "at": "07:30"})
+        );
+        assert_eq!(
+            cfg(When::Monthly {
+                day: "31".into(),
+                at: "08:00".into()
+            })["config"],
+            json!({"kind": "monthly", "day": 31, "at": "08:00"})
+        );
+        assert_eq!(
+            cfg(When::Monthly {
+                day: "last".into(),
+                at: "23:59".into()
+            })["config"],
+            json!({"kind": "monthly", "day": "last", "at": "23:59"})
+        );
+        assert_eq!(
+            cfg(When::Once {
+                at: "2026-10-09 10:00".into()
+            })["config"],
+            json!({"kind": "once", "at": "2026-10-09T10:00"})
+        );
+        assert_eq!(
+            cfg(When::Every {
+                amount: "24".into(),
+                unit: 'h'
+            })["config"],
+            json!({"kind": "every", "every": "24h"})
+        );
+        // No time zone on the wire: the gateway fills the owner's.
+        assert!(cfg(When::Daily { at: "08:00".into() })["config"]
+            .get("time_zone")
+            .is_none());
+        // Calendar rules carry max runs / stop at; never a first-run time.
+        let f = CreateForm {
+            count: "3".into(),
+            until: "2026-12-31 18:00".into(),
+            start_at: "2026-10-08 09:00".into(),
+            ..form_with(When::Daily { at: "08:00".into() })
+        };
+        assert_eq!(
+            build_create_request(&f, target(), "r").unwrap()["trigger"]["config"],
+            json!({"kind": "daily", "at": "08:00", "count": 3, "until": "2026-12-31T18:00:00Z"})
+        );
+        // Their line is the gateway's: nothing composed locally.
+        assert_eq!(schedule_preview(&f), "");
+        assert!(
+            f.when.is_served()
+                && !form_with(When::Every {
+                    amount: "1".into(),
+                    unit: 'h'
+                })
+                .when
+                .is_served()
+        );
+    }
+
+    #[test]
+    fn when_errors_are_the_kits_sentences() {
+        let target = || Some(json!({"flow_id": "f"}));
+        let err = |when: When| build_create_request(&form_with(when), target(), "r").unwrap_err();
+        assert_eq!(
+            err(When::Daily { at: "24:00".into() }),
+            vec![schedule_text("error_at").to_string()]
+        );
+        assert_eq!(
+            err(When::Daily { at: "8:00".into() }),
+            vec!["Pick the time of day (HH:MM).".to_string()]
+        );
+        assert_eq!(
+            err(When::Weekly {
+                days: vec![],
+                at: "08:00".into()
+            }),
+            vec![schedule_text("error_days").to_string()]
+        );
+        assert_eq!(
+            err(When::Monthly {
+                day: "32".into(),
+                at: "08:00".into()
+            }),
+            vec![schedule_text("error_day").to_string()]
+        );
+        assert_eq!(
+            err(When::Monthly {
+                day: "0".into(),
+                at: "08:00".into()
+            }),
+            vec![schedule_text("error_day").to_string()]
+        );
+        assert_eq!(
+            err(When::Once {
+                at: "tomorrow".into()
+            }),
+            vec![schedule_text("error_once").to_string()]
+        );
+        assert_eq!(
+            err(When::Once {
+                at: "2026-13-01 10:00".into()
+            }),
+            vec![schedule_text("error_once").to_string()]
+        );
+    }
+
+    #[test]
+    fn preview_answer_and_request() {
+        let r = preview_request(
+            json!({"source_id": "schedule", "source_version": 2, "config": {"kind": "daily", "at": "08:00"}}),
+        );
+        assert_eq!(r.method, "POST");
+        assert_eq!(r.path, "/api/gateway/automations/schedule-preview");
+        assert_eq!(
+            r.body.as_ref().unwrap()["trigger"]["config"]["kind"],
+            "daily"
+        );
+        let answer = json!({
+            "trigger": {"source_id": "schedule", "source_version": 2, "config": {"kind": "daily", "at": "08:00", "time_zone": "Europe/Paris"}},
+            "time_zone": "Europe/Paris",
+            "schedule_rule_text": "Every day at 08:00 (Europe/Paris)",
+            "schedule_text": "Every day at 08:00 (Europe/Paris) · next Fri 9 Oct 08:00",
+            "next_run_at": "2026-10-09T06:00:00+00:00",
+            "next_run_local": "2026-10-09T08:00:00+02:00",
+            "first_run_sentence": "Runs every day at 08:00 (Europe/Paris), first run Fri 9 Oct 08:00."
+        });
+        let p = parse_schedule_preview(&answer).unwrap();
+        assert_eq!(
+            preview_lines(&PreviewState::Ready(p)),
+            vec![
+                "in Europe/Paris (your account's time zone)".to_string(),
+                "Runs every day at 08:00 (Europe/Paris), first run Fri 9 Oct 08:00.".to_string()
+            ]
+        );
+        assert_eq!(
+            preview_lines(&PreviewState::Loading),
+            vec!["Checking the schedule…".to_string()]
+        );
+        assert!(parse_schedule_preview(&json!({"time_zone": "UTC"})).is_err());
+        // A stale answer never replaces the newer ask.
+        let a = json!({"k": 1});
+        let b = json!({"k": 2});
+        let mut v = View {
+            preview: Some((b.to_string(), PreviewState::Loading)),
+            ..View::default()
+        };
+        v.apply_preview(&a, PreviewState::Failed("old".into()));
+        assert_eq!(v.preview_for(&b), Some(&PreviewState::Loading));
+        assert_eq!(v.preview_for(&a), None);
+        v.apply_preview(&b, PreviewState::Failed("no".into()));
+        assert_eq!(v.preview_for(&b), Some(&PreviewState::Failed("no".into())));
     }
 
     #[test]
@@ -2218,7 +2736,7 @@ mod tests {
                 "title": "check memory",
                 "target": {"flow_id": "@default", "interface": "abstractcode.agent.v1",
                            "input_data": {"prompt": "check memory\nsecond line"}},
-                "trigger": {"source_id": "schedule", "source_version": 1, "config": {"every": "5m"}},
+                "trigger": {"source_id": "schedule", "source_version": 2, "config": {"kind": "every", "every": "5m"}},
                 "context": {"mode": "growing"},
                 "policy": {"tool_approval": "ask"},
             })
@@ -2237,7 +2755,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             body["trigger"]["config"],
-            json!({"start_at": "2026-10-01T08:30:00Z"})
+            json!({"kind": "once", "at": "2026-10-01T08:30"})
         );
         let bad = CreateForm {
             prompt: " ".into(),
@@ -2278,7 +2796,7 @@ mod tests {
         assert_eq!(body["title"], json!("Memory"));
         assert_eq!(
             body["trigger"]["config"],
-            json!({"every": "24h", "start_at": "2026-10-08T09:00:00Z", "count": 3, "until": "2026-10-31T18:00:00Z"})
+            json!({"kind": "every", "every": "24h", "start_at": "2026-10-08T09:00:00Z", "count": 3, "until": "2026-10-31T18:00:00Z"})
         );
         assert_eq!(
             body["target"]["input_data"]["workspace"],
@@ -2320,7 +2838,7 @@ mod tests {
         let body = build_create_request(&once, Some(json!({"flow_id": "f"})), "r").unwrap();
         assert_eq!(
             body["trigger"]["config"],
-            json!({"start_at": "2026-10-09T10:00:00Z"})
+            json!({"kind": "once", "at": "2026-10-09T10:00"})
         );
     }
 

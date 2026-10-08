@@ -604,7 +604,10 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     // Every When row is visible (the panel fits its rows).
     assert!(
         screen.contains("every 5 minutes (UTC)")
-            && screen.contains("once, at a date and time (UTC)"),
+            && screen.contains("Daily")
+            && screen.contains("Weekly")
+            && screen.contains("Monthly")
+            && screen.contains("Once at…"),
         "{screen}"
     );
     // When: presets start at "every 24 hours"; go up to "every 5 minutes".
@@ -677,7 +680,7 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
             "title": "report the free memory of this computer",
             "target": {"bundle_ref": "basic-agent@9.9.9", "flow_id": "agent",
                        "input_data": {"prompt": "report the free memory of this computer"}},
-            "trigger": {"source_id": "schedule", "source_version": 1, "config": {"every": "5m"}},
+            "trigger": {"source_id": "schedule", "source_version": 2, "config": {"kind": "every", "every": "5m"}},
             "context": {"mode": "growing"},
             "policy": {"tool_approval": "ask"},
         })
@@ -720,7 +723,10 @@ fn schedule_with_the_gateway_default_targets_at_default() {
         body["target"],
         json!({"flow_id": "@default", "interface": "abstractcode.agent.v1", "input_data": {"prompt": "watch the disk"}})
     );
-    assert_eq!(body["trigger"]["config"], json!({"every": "24h"}));
+    assert_eq!(
+        body["trigger"]["config"],
+        json!({"kind": "every", "every": "24h"})
+    );
     assert_eq!(body["context"], json!({"mode": "independent"}));
     assert_eq!(body["policy"], json!({"tool_approval": "auto"}));
 }
@@ -784,7 +790,7 @@ fn the_dialog_workspaces_and_limits_ride_the_create_body() {
         .expect("create");
     assert_eq!(
         body["trigger"]["config"],
-        json!({"every": "24h", "count": 3})
+        json!({"kind": "every", "every": "24h", "count": 3})
     );
     assert_eq!(body["target"]["input_data"]["workspace"], value.to_json());
     assert_eq!(
@@ -991,4 +997,186 @@ fn run_now_says_the_shared_one_line_on_both_screens() {
     let mut h = harness();
     let screen = open_inbox(&mut h);
     assert!(screen.contains(line), "one automation: {screen}");
+}
+
+// ---------------------------------------------------------------------------
+// Round 16 (R16.1): calendar rules in /schedule's When step
+// ---------------------------------------------------------------------------
+
+fn served_preview(trigger: &Value, sentence: &str) -> auto::PreviewState {
+    auto::PreviewState::Ready(
+        auto::parse_schedule_preview(&json!({
+            "trigger": trigger,
+            "time_zone": "Europe/Paris",
+            "schedule_rule_text": "served rule",
+            "schedule_text": "served rule · next Fri 9 Oct 08:00",
+            "next_run_at": "2026-10-09T06:00:00+00:00",
+            "next_run_local": "2026-10-09T08:00:00+02:00",
+            "first_run_sentence": sentence,
+        }))
+        .unwrap(),
+    )
+}
+
+fn preview_asked(h: &mut Harness) -> Value {
+    h.auto_cmds()
+        .into_iter()
+        .find_map(|c| match c {
+            AutoCmd::Preview { trigger } => Some(trigger),
+            _ => None,
+        })
+        .expect("the When step asks the gateway's schedule-preview")
+}
+
+/// From the When picker (cursor on "every 24 hours", row 4) to row `ix`.
+fn pick_when(h: &mut Harness, ix: usize) -> String {
+    h.command("/schedule brief me");
+    h.keys(b"\r"); // the task
+    for _ in 4..ix {
+        h.keys(b"\x1b[B");
+    }
+    h.keys(b"\r")
+}
+
+#[test]
+fn schedule_daily_shows_the_gateways_words_and_writes_schedule_v2() {
+    let mut h = harness();
+    let screen = pick_when(&mut h, 7);
+    assert!(screen.contains("2/6 Daily at"), "{screen}");
+    assert!(screen.contains("Time of day: HH:MM"), "{screen}");
+    let screen = h.keys(b"\r"); // 08:00 (the default)
+    let trigger = preview_asked(&mut h);
+    assert_eq!(
+        trigger,
+        json!({"source_id": "schedule", "source_version": 2, "config": {"kind": "daily", "at": "08:00"}})
+    );
+    assert!(screen.contains("Checking the schedule…"), "{screen}");
+    // Not ready yet: Enter waits (it never invents a sentence).
+    h.keys(b"\r");
+    assert!(h.turn().contains("2/6 when · Daily"));
+    let sentence = "Runs every day at 08:00 (Europe/Paris), first run Fri 9 Oct 08:00.";
+    h.store
+        .automations
+        .update(|v| v.apply_preview(&trigger, served_preview(&trigger, sentence)));
+    let screen = h.turn();
+    assert!(
+        screen.contains("in Europe/Paris (your account's time zone)"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains(sentence),
+        "the served sentence verbatim:\n{screen}"
+    );
+    let screen = h.keys(b"\r");
+    assert!(
+        screen.contains("3/6 context · Runs every day at 08:00 (Europe/Paris)"),
+        "{screen}"
+    );
+    h.keys(b"\r"); // independent
+    h.keys(b"\r"); // tools run without asking
+    let screen = h.keys(b"\r"); // Workspaces: Continue
+    assert!(screen.contains("6/6 Title and limits"), "{screen}");
+    assert!(screen.contains(sentence), "{screen}");
+    assert!(screen.contains("Stop after this many runs"), "{screen}");
+    assert!(
+        !screen.contains("First run at"),
+        "a calendar rule has no first-run time:\n{screen}"
+    );
+    h.keys(b"\r"); // Create automation
+    let body = h
+        .auto_cmds()
+        .into_iter()
+        .find_map(|c| match c {
+            AutoCmd::Create { body } => Some(body),
+            _ => None,
+        })
+        .expect("create");
+    assert_eq!(body["trigger"], trigger);
+}
+
+#[test]
+fn schedule_weekly_days_are_state_showing_toggles() {
+    let mut h = harness();
+    let screen = pick_when(&mut h, 8);
+    assert!(screen.contains("2/6 Weekly · On"), "{screen}");
+    assert!(
+        screen.contains("[x] Mon") && screen.contains("[ ] Tue"),
+        "{screen}"
+    );
+    h.keys(b"\x1b[B");
+    let screen = h.keys(b"\r"); // Tue on
+    assert!(
+        screen.contains("[x] Mon") && screen.contains("[x] Tue"),
+        "{screen}"
+    );
+    let screen = h.keys(b"\r"); // Mon off (the cursor starts on Mon again)
+    assert!(
+        screen.contains("[ ] Mon") && screen.contains("[x] Tue"),
+        "{screen}"
+    );
+    for _ in 0..7 {
+        h.keys(b"\x1b[B");
+    }
+    let screen = h.keys(b"\r"); // Continue — at HH:MM
+    assert!(screen.contains("2/6 Weekly at"), "{screen}");
+    h.keys(b"\r");
+    assert_eq!(
+        preview_asked(&mut h)["config"],
+        json!({"kind": "weekly", "days": ["tue"], "at": "08:00"})
+    );
+}
+
+#[test]
+fn schedule_monthly_last_day_and_once_send_their_rules() {
+    let mut h = harness();
+    let screen = pick_when(&mut h, 9);
+    assert!(screen.contains("2/6 Monthly · on day"), "{screen}");
+    for _ in 0..31 {
+        h.keys(b"\x1b[B");
+    }
+    h.keys(b"\r"); // last
+    h.keys(b"\r"); // 08:00
+    assert_eq!(
+        preview_asked(&mut h)["config"],
+        json!({"kind": "monthly", "day": "last", "at": "08:00"})
+    );
+
+    let mut h = harness();
+    let screen = pick_when(&mut h, 10);
+    assert!(screen.contains("2/6 Run once at"), "{screen}");
+    h.term.push_input(b"2026-10-09 10:00");
+    h.turn();
+    h.keys(b"\r");
+    assert_eq!(
+        preview_asked(&mut h)["config"],
+        json!({"kind": "once", "at": "2026-10-09T10:00"})
+    );
+}
+
+#[test]
+fn a_refused_rule_shows_the_gateways_sentence_and_does_not_continue() {
+    let mut h = harness();
+    pick_when(&mut h, 7);
+    h.keys(b"\r");
+    let trigger = preview_asked(&mut h);
+    let refusal = "The automation definition is not valid. Unknown time zone 'Mars/Olympus'. (field trigger.config.time_zone)";
+    h.store
+        .automations
+        .update(|v| v.apply_preview(&trigger, auto::PreviewState::Failed(refusal.into())));
+    let screen = h.turn();
+    assert!(flat(&screen).contains(refusal), "{screen}");
+    let screen = h.keys(b"\r");
+    assert!(!screen.contains("3/6 context"), "{screen}");
+}
+
+/// The screen as one line (wrapped text joined, box glyphs and runs of blanks collapsed).
+fn flat(screen: &str) -> String {
+    screen
+        .lines()
+        .map(|l| l.trim_matches(|c: char| c.is_whitespace() || c == '█' || c == '│'))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
