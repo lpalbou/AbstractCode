@@ -1556,3 +1556,35 @@ fn create_automation(cx: Scope, store: Store, ctx: &UiCtx, d: &Draft) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_picked_workflow_starts_from_its_own_tools() {
+        let schema = json!({"properties": {"tools": {"default": ["read_file", "web_search"]}}});
+        let mut d = Draft {
+            form: CreateForm::default(),
+            conv_target: Some(
+                json!({"flow_id": "@default", "interface": auto::CODE_AGENT_INTERFACE}),
+            ),
+            conv_label: String::new(),
+            conv_schema: None,
+            picked: None,
+            conv: Conversation::default(),
+            tools_set: false,
+        };
+        assert_eq!(
+            first_tools(&d, Some(&schema)),
+            Some(vec!["read_file".to_string(), "web_search".to_string()])
+        );
+        d.picked = Some(Picked {
+            label: "ReAct agent @0.1.0".into(),
+            target: json!({"bundle_ref": "react-agent@0.1.0", "flow_id": "react"}),
+            schema: Ok(("react-agent".into(), "0.1.0".into(), "react".into())),
+        });
+        assert_eq!(first_tools(&d, Some(&schema)), None);
+    }
+}

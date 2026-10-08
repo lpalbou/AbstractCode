@@ -2643,6 +2643,53 @@ mod tests {
     }
 
     #[test]
+    fn nothing_email_shaped_rides_when_email_result_is_off() {
+        let form = CreateForm {
+            prompt: "x".into(),
+            ..CreateForm::default()
+        };
+        let body = build_create_request(&form, Some(json!({"flow_id": "f"})), true, "r").unwrap();
+        assert!(body.get("notify").is_none(), "{body}");
+        let on = CreateForm {
+            notify_email: true,
+            ..form.clone()
+        };
+        let body = build_create_request(&on, Some(json!({"flow_id": "f"})), true, "r").unwrap();
+        assert_eq!(body["notify"], json!({"channels": ["console", "email"]}));
+        // Not usable: the switch's value is never sent.
+        let body = build_create_request(&on, Some(json!({"flow_id": "f"})), false, "r").unwrap();
+        assert!(body.get("notify").is_none(), "{body}");
+    }
+
+    #[test]
+    fn an_email_trigger_interval_is_at_least_60_seconds() {
+        let mut s = summary("active", false, ALL);
+        s.trigger = Trigger {
+            source_id: "email.received".into(),
+            source_version: 1,
+            config: serde_json::from_value(
+                json!({"every": "1h", "start_at": "2026-10-08T16:40:00Z"}),
+            )
+            .unwrap(),
+        };
+        let mut f = revise_form_from(&s);
+        f.every = Some("59s".into());
+        assert_eq!(
+            revise_changes(&s, &f),
+            Err(vec![
+                "The check interval is at least 60 seconds.".to_string()
+            ])
+        );
+        f.every = Some("60s".into());
+        let c = revise_changes(&s, &f).unwrap().unwrap();
+        assert_eq!(
+            c["trigger"]["config"],
+            json!({"every": "60s"}),
+            "start_at dropped"
+        );
+    }
+
+    #[test]
     fn revise_sends_only_changes() {
         let s = summary("active", false, ALL);
         assert_eq!(revise_changes(&s, &revise_form_from(&s)), Ok(None));
