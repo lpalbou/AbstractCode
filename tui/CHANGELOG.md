@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- The Voice screen shows the gateway's served speech-input hint under the engine lines (for example, on Apple silicon: mlx-whisper runs the model on the GPU), wrapped, never cut.
+
 ## [0.9.1] - 2026-10-08
 
 Needs the AbstractGateway round-11 workspace routes and the round-12 command
