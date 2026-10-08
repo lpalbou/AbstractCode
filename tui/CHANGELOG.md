@@ -4,6 +4,42 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+Needs AbstractGateway with round-16 calendar schedules (`schedule@2`, the
+served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
+`schedule_rule_text` on every automation, `POST /automations/schedule-preview`).
+
+### Added
+
+- `/schedule`'s **when** step: **Repeat** (the UTC presets and every N m/h/d,
+  unchanged), **Daily** at `HH:MM`, **Weekly** (the days as `[x] Mon`
+  toggles, then `HH:MM`), **Monthly** on day 1–31 or **last** at `HH:MM`,
+  **Once at…** `YYYY-MM-DD HH:MM`. Daily, Weekly, Monthly and Once run on
+  your account's time zone: the step shows `in <zone> (your account's time
+  zone)` and the gateway's own sentence (`Runs every day at 08:00
+  (Europe/Paris), first run Fri 9 Oct 08:00.`) or its refusal, and goes on
+  only once the gateway accepted the rule. **Stop after this many runs** and
+  **Stop at** apply to the calendar rules too.
+- The one-automation screen's Run now line adds `Next scheduled run: <date>
+  <time> <zone>.` from the gateway.
+
+### Changed
+
+- Every `/schedule` kind is sent as `schedule@2` (`{kind: "every", every}`,
+  `{kind: "once", at}`, `{kind: "daily"|"weekly"|"monthly", …}`); the time
+  zone is left to the gateway (your account's).
+- Cards, the list rows and the header read the gateway's served schedule:
+  a calendar automation's cadence is its `schedule_rule_text`
+  (`↻ Every day at 08:00 (Europe/Paris)`), the next run comes only from
+  `next_run_at` / `next_run_local` (the date and time are cut from the
+  served string, shown in the automation's zone). `next_fire_at` is no
+  longer read; a row without the served fields is refused with the field's
+  name.
+- The When step's words come from the ui-kit's `automation_controls.json`
+  `schedule` block, vendored byte-identical and pinned by its SHA-256
+  (`assets/automation_controls.sha256`).
+
 ## [0.9.1] - 2026-10-08
 
 Needs the AbstractGateway round-11 workspace routes and the round-12 command

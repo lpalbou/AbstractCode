@@ -588,3 +588,93 @@ fn every_rail_panel_on_an_automation() {
         );
     });
 }
+
+/// Round 16 (R16.1) captures at three widths (wide / medium / narrow): the
+/// list with a `schedule@2` daily card (served rule, served next run), the
+/// When step's calendar kinds, the weekly `[x]` day toggles, the gateway's
+/// preview (time-zone line + `first_run_sentence`) and Title and limits.
+/// `R7W4_CAPTURE_DIR=<dir>` writes them as text.
+#[test]
+fn r16_calendar_when_and_served_cards_fit_every_width() {
+    for size in [Size::new(160, 44), Size::new(104, 36), Size::new(48, 30)] {
+        std::thread::spawn(move || {
+            let mut h = harness(size);
+            h.command("/automations");
+            h.answer_automations(false);
+            let screen = h.shot("r16-automations-list");
+            assert!(flat(&screen).contains("Morning briefing"), "{screen}");
+            assert!(screen.contains("Every day at"), "{screen}");
+            let mut h = harness(size);
+            h.command(&format!("/automations {INBOX}"));
+            h.answer_detail();
+            let screen = h.shot("r16-automation-detail");
+            // The key-hint notes sit under the runs; a 30-row phone-width
+            // terminal gives them no room (as before round 16).
+            if size.w >= 104 {
+                assert!(
+                    flat(&screen).contains("Next scheduled run: 2026-09-27 09:00 Europe/Paris."),
+                    "{screen}"
+                );
+            }
+            let mut h = harness(size);
+            h.store.workflow.update(|w| w.gateway_default = true);
+            h.command("/schedule morning briefing");
+            h.keys(b"\r");
+            let screen = h.shot("r16-when-kinds");
+            assert!(screen.contains("Weekly") && screen.contains("Once at…"), "{screen}");
+            for _ in 0..4 {
+                h.keys(b"\x1b[B");
+            }
+            h.keys(b"\r"); // Weekly
+            h.keys(b"\x1b[B");
+            h.keys(b"\r"); // + Tue
+            let screen = h.shot("r16-weekly-days");
+            assert!(screen.contains("[x] Mon") && screen.contains("[x] Tue"), "{screen}");
+            for _ in 0..7 {
+                h.keys(b"\x1b[B");
+            }
+            h.keys(b"\r"); // Continue
+            h.keys(b"\r"); // 08:00
+            let mut trigger = None;
+            while let Ok(cmd) = h.rx.try_recv() {
+                if let Cmd::Automations(abstractcode::gateway::automations::AutoCmd::Preview {
+                    trigger: t,
+                }) = cmd
+                {
+                    trigger = Some(t);
+                }
+            }
+            let trigger = trigger.expect("schedule-preview asked");
+            let answer = json!({
+                "trigger": trigger,
+                "time_zone": "Europe/Paris",
+                "schedule_rule_text": "Every Mon and Tue at 08:00 (Europe/Paris)",
+                "schedule_text": "Every Mon and Tue at 08:00 (Europe/Paris) · next Mon 12 Oct 08:00",
+                "next_run_at": "2026-10-12T06:00:00+00:00",
+                "next_run_local": "2026-10-12T08:00:00+02:00",
+                "first_run_sentence": "Runs every Mon and Tue at 08:00 (Europe/Paris), first run Mon 12 Oct 08:00."
+            });
+            let p = auto::parse_schedule_preview(&answer).unwrap();
+            h.store
+                .automations
+                .update(|v| v.apply_preview(&trigger, auto::PreviewState::Ready(p)));
+            let screen = h.shot("r16-when-served-preview");
+            assert!(
+                flat(&screen).contains("in Europe/Paris (your account's time zone)"),
+                "{screen}"
+            );
+            h.keys(b"\r"); // context
+            h.keys(b"\r"); // independent
+            h.keys(b"\r"); // tools
+            let screen = h.keys(b"\r"); // workspaces → Title and limits
+            let _ = screen;
+            let screen = h.shot("r16-title-and-limits");
+            assert!(
+                flat(&screen).contains("first run Mon 12 Oct 08:00."),
+                "{screen}"
+            );
+        })
+        .join()
+        .unwrap_or_else(|e| std::panic::resume_unwind(e));
+    }
+}

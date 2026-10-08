@@ -256,8 +256,12 @@ card reads `↻ every 24 h · last 3 h ago` and `next in 20 h` with its
 the automation: each change is saved as a new revision), `a` Archive.
 `/workspace` opens this conversation's workspaces: **Use my default**, or
 your own rows with Read-only / Read & write / Refused, stored on the
-conversation by the gateway. `/schedule` walks through the task, when,
-context, tools, **Workspaces** and **Title and limits**. Details in
+conversation by the gateway. `/schedule` walks through the task, when
+(**Repeat** every N minutes/hours/days in UTC, **Daily**, **Weekly**,
+**Monthly**, **Once at…** — the last four on your account's time zone, with
+the gateway's own sentence and first run), context, tools, **Workspaces** and
+**Title and limits**. A calendar automation's card reads the gateway's words,
+e.g. `↻ Every day at 08:00 (Europe/Paris)`. Details in
 [api.md](api.md#settings-panels-settings) and
 [api.md](api.md#workspaces-workspace). Archiving and **Archived · N**
 need AbstractGateway 0.13.0 or later.

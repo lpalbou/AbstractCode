@@ -1269,10 +1269,7 @@ fn schedule_when(
             live: None,
             start: 4,
             size: modal_size(80, rows + 9),
-            hint: Some(format!(
-                "Enter chooses · Esc cancels · {}",
-                auto::schedule_text("time_zone_hint")
-            )),
+            hint: Some("Enter chooses · Esc cancels".into()),
             live_hint: None,
             keys: Vec::new(),
             on_mount: None,
@@ -1471,10 +1468,7 @@ fn schedule_month_day(
             live: None,
             start: 0,
             size: modal_size(60, 32 + 9),
-            hint: Some(format!(
-                "Enter chooses · Esc cancels · {}",
-                auto::schedule_text("time_zone_hint")
-            )),
+            hint: Some("Enter chooses · Esc cancels".into()),
             live_hint: None,
             keys: Vec::new(),
             on_mount: None,

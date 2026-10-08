@@ -12,7 +12,8 @@
 > the agent mid-run, queues follow-up prompts, attaches files to prompts
 > (`/attach`, a file browser, or drag & drop), browses and previews the
 > run's workspace on the gateway host (`/files`), creates and manages
-> gateway automations (`/schedule`, `/automations`: cards with the Active
+> gateway automations (`/schedule` with Repeat / Daily / Weekly / Monthly /
+> Once at, worded and scheduled by the gateway; `/automations`: cards with the Active
 > switch, Run now / Stop / Edit / Archive, Archived · N with Unarchive),
 > edits the run settings of the conversation or of an automation's
 > definition in eight panels (`/settings`; an automation change is saved as

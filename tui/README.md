@@ -97,7 +97,9 @@ Status: **0.9.1**, pre-alpha. Release history is in
   with **Run now**, **Stop**, **Edit**, **Archive** and an **Archived · N**
   line with **Unarchive**; open one to read its runs, approve its tool calls,
   browse its folder, or discuss a run as a new chat in place. `/schedule
-  [task]` creates one that runs the current workflow.
+  [task]` creates one that runs the current workflow: Repeat (UTC
+  interval), Daily, Weekly, Monthly or Once at, the calendar rules on your
+  account's time zone and worded by the gateway.
 - **Settings panels**: `/settings` — Activity, Files, Model, Workflow,
   Workspace, Tools, Skills, Voice — bound to this conversation, or to an
   automation's definition (each change saved as a new revision).
