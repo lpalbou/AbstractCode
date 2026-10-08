@@ -1078,6 +1078,7 @@ fn answer_inbox_detail(h: &mut Harness) -> String {
         max_attempts: Some(3),
         workspace_root: summary.workspace_root.clone().unwrap_or_default(),
         target: json!({"bundle_ref": "inbox@1.0.0", "flow_id": "triage", "input_data": {}}),
+        notify: serde_json::Value::Null,
     };
     let page = auto::parse_occurrence_page(&read("occurrences.json")).unwrap();
     let id2 = id.clone();

@@ -77,9 +77,9 @@ pub const WHEN_PRESETS: [(&str, &str, char); 6] = [
     ("every 7 days", "7", 'd'),
 ];
 
-/// The step title: "New automation — 2/7 When (UTC)".
+/// The step title: "Schedule a task — 2/7 When (UTC)".
 pub fn step_title(n: usize) -> String {
-    format!("New automation — {n}/{} {}", STEPS.len(), STEPS[n - 1])
+    format!("Schedule a task — {n}/{} {}", STEPS.len(), STEPS[n - 1])
 }
 
 /// A workflow's (bundle, version, flow) — the key of its input schema.

@@ -666,7 +666,7 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
         "the dialog reads the email status, the workflows and the schema: {cmds:?}"
     );
     h.answer_prepare("me_email_not_connected.json");
-    assert!(screen.contains("New automation — 1/7 What"), "{screen}");
+    assert!(screen.contains("Schedule a task — 1/7 What"), "{screen}");
     let screen = h.turn();
     for label in [
         "Workflow",
@@ -680,7 +680,7 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     // 2/7 When: Repeat, Once at…, the email option disabled with the kit's notice.
     let screen = h.keys(b"\r");
     assert!(
-        screen.contains("New automation — 2/7 When (UTC)"),
+        screen.contains("Schedule a task — 2/7 When (UTC)"),
         "{screen}"
     );
     for label in [
@@ -741,7 +741,7 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     // 5/7 Workspaces.
     let screen = h.keys(b"\r");
     assert!(
-        screen.contains("New automation — 5/7 Workspaces"),
+        screen.contains("Schedule a task — 5/7 Workspaces"),
         "{screen}"
     );
     assert!(screen.contains("Continue — Mailbox"), "{screen}");
@@ -758,7 +758,7 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     // 7/7 Title and limits.
     let screen = h.keys(b"\r");
     assert!(
-        screen.contains("New automation — 7/7 Title and limits"),
+        screen.contains("Schedule a task — 7/7 Title and limits"),
         "{screen}"
     );
     for label in [

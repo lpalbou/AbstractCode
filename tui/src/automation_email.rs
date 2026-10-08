@@ -684,6 +684,34 @@ mod tests {
     }
 
     #[test]
+    fn the_shortest_check_interval_is_60_seconds() {
+        // The form offers minutes, hours and days: the shortest typed
+        // interval is 1 minute, and the no-model default is exactly 60 s.
+        let no_model = EmailTriggerForm {
+            uses_model: false,
+            ..EmailTriggerForm::default()
+        };
+        let (config, errors) = email_trigger_config_from(&no_model);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(config["every"], json!("60s"));
+        let one = EmailTriggerForm {
+            every: "1m".into(),
+            ..EmailTriggerForm::default()
+        };
+        assert!(email_trigger_config_from(&one).1.is_empty());
+        assert_eq!(MIN_EVERY_SECONDS, 60, "the kit's EMAIL_MIN_EVERY_SECONDS");
+        // Seconds cannot be typed (the kit's units): "59s" is not an interval.
+        let secs = EmailTriggerForm {
+            every: "59s".into(),
+            ..EmailTriggerForm::default()
+        };
+        assert_eq!(
+            email_trigger_config_from(&secs).1,
+            vec!["The check interval must be a whole number of at least 1.".to_string()]
+        );
+    }
+
+    #[test]
     fn recipients_and_notify_are_the_kits() {
         assert_eq!(
             allowed_recipients_from(&RecipientsForm::default()),
