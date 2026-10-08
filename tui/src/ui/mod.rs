@@ -3,6 +3,7 @@
 pub mod animation;
 pub mod approval_view;
 pub mod attachments;
+pub mod attention_chip;
 pub mod automations_view;
 pub mod cards;
 pub mod chrome;
@@ -280,6 +281,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     wire_pending_steer(cx, store, ctx.clone());
     goal::wire_goal(cx, store, ctx.clone());
     automations_view::wire_automations(cx, store, ctx.clone());
+    attention_chip::wire(cx, store, ctx.clone());
     rail_view::wire_rail(cx, store, ctx.clone());
     quit::wire_quit(cx, store, &ctx);
     transcript_view::wire_feed(
@@ -672,7 +674,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                         placeholder,
                         on_submit.clone(),
                     ))
-                    .child(chrome::status_bar(&t, store, &ctx))
+                    .child(chrome::status_bar(cx, &t, store, &ctx))
                     .build()
             }
         }))
@@ -728,7 +730,11 @@ fn submit(
         if let Some(wait) = pending {
             ctx.dismissed_wait.borrow_mut().take();
             open_wait_modal(cx, store, ctx, wait);
+            return;
         }
+        // R17.1: else it opens the automation that waits for you (the
+        // status line's "Automations · N waiting"); nothing waits = nothing.
+        attention_chip::open_waiting(cx, store, ctx);
         return;
     }
     match commands::parse(&text) {

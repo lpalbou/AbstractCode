@@ -235,6 +235,90 @@ pub fn spawn(client: &GatewayClient, wake: WakeHandle, store: Store, cmd: AutoCm
         });
 }
 
+/// The ambient attention read (R17.1, `crate::attention`): every list page,
+/// then whether each active automation asks before each tool call — the
+/// row's `policy.tool_approval` when the list carries it, else its
+/// definition, read once per revision (`known` = already read). A failed
+/// list read is posted like the overlay's (the chip then shows nothing,
+/// never a stale count); a failed definition read counts as "does not ask"
+/// for that revision (no re-read every poll).
+pub fn spawn_attention(
+    client: &GatewayClient,
+    wake: WakeHandle,
+    store: Store,
+    known: Vec<(String, u64)>,
+) {
+    let client = AutomationClient::from_gateway(client);
+    crate::runner::spawn_host_thread("attention", wake.clone(), store, move || {
+        let list = client.list_with_policy();
+        let (items, listed_policy) = match list {
+            Ok(v) => v,
+            Err(e) => {
+                wake.post(move || {
+                    store.automations.update(|v| {
+                        v.list = Some(Err(e));
+                    })
+                });
+                return;
+            }
+        };
+        let read: Vec<(String, u64, bool)> = crate::attention::to_read(&items, &known)
+            .into_iter()
+            .map(|(id, rev)| {
+                if let Some((_, asks)) = listed_policy.iter().find(|(i, _)| *i == id) {
+                    return (id, rev, *asks);
+                }
+                let asks = client
+                    .send(&auto::detail_request(&id))
+                    .ok()
+                    .and_then(|d| auto::parse_detail(&d).ok())
+                    .is_some_and(|(def, _)| def.tool_approval == "ask");
+                (id, rev, asks)
+            })
+            .collect();
+        wake.post(move || {
+            store.automation_ask.update(|a| a.merge(read, &items));
+            store.automations.update(|v| v.apply_list(items));
+        });
+    });
+}
+
+impl AutomationClient {
+    /// Every list page (like `list_all`) + `(id, asks)` for the rows that
+    /// carry `policy.tool_approval`.
+    #[allow(clippy::type_complexity)]
+    fn list_with_policy(&self) -> Result<(Vec<auto::Summary>, Vec<(String, bool)>), String> {
+        let mut out = Vec::new();
+        let mut policy = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..200 {
+            let v = self
+                .send(&auto::list_request(cursor.as_deref()))
+                .map_err(|e| auto::api_error_text(&e))?;
+            for row in v
+                .get("items")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if let (Some(id), Some(ta)) = (
+                    row.get("automation_id").and_then(Value::as_str),
+                    row.pointer("/policy/tool_approval").and_then(Value::as_str),
+                ) {
+                    policy.push((id.to_string(), ta == "ask"));
+                }
+            }
+            let page = auto::parse_list_page(&v)?;
+            out.extend(page.items);
+            match page.next_cursor {
+                Some(c) => cursor = Some(c),
+                None => return Ok((out, policy)),
+            }
+        }
+        Err("GET /api/gateway/automations kept returning next_cursor after 200 pages".into())
+    }
+}
+
 /// Read the list (+ the open automation) and post it.
 fn refresh(client: &AutomationClient, wake: &WakeHandle, store: Store, open: Option<String>) {
     let list = client.list_pages(auto::list_request);

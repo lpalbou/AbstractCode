@@ -998,6 +998,9 @@ pub struct Store {
     /// The workspace choosers (R14.4): this conversation, my default, an
     /// automation's dry run, the status under the control last changed.
     pub workspaces: Signal<crate::workspaces::WsData>,
+    /// Which automations run in Ask mode (`definition.tool_approval`),
+    /// read once per revision for the ambient attention poll (R17.1).
+    pub automation_ask: Signal<crate::attention::AskModes>,
     /// The GATEWAY's verdict on whether this terminal is on its machine
     /// (`host.caller_is_this_machine` from `GET /runs/{rid}/workspace`);
     /// `None` until a run's workspace has been read.
@@ -1298,6 +1301,7 @@ impl Store {
             automations: cx.signal(crate::automations::View::default()),
             rail: cx.signal(crate::rail::RailData::default()),
             workspaces: cx.signal(crate::workspaces::WsData::default()),
+            automation_ask: cx.signal(crate::attention::AskModes::default()),
             gateway_same_machine: cx.signal(None),
             send_local_workspace: cx.signal(Default::default()),
             workspace_explicit: cx.signal(false),
