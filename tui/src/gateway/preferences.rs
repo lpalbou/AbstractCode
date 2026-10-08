@@ -152,16 +152,7 @@ fn run(client: &GatewayClient, wake: &WakeHandle, store: Store, cmd: PrefCmd) {
                 .account_preferences(Some(&ap::put_body(value.as_deref())))
                 .map_err(|e| e.sentence)
                 .and_then(|v| ap::row(&v));
-            let note = ap::change_note(&out.as_ref().map(|_| ()).map_err(Clone::clone));
-            wake.post(move || {
-                store.account_workflow.update(|v| {
-                    if let Ok(row) = out {
-                        v.state = State::Ok(row);
-                    }
-                    v.busy = false;
-                    v.note = Some(note);
-                })
-            });
+            wake.post(move || store.account_workflow.update(|v| v.apply_save(out)));
         }
     }
 }

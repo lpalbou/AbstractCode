@@ -243,6 +243,17 @@ impl View {
             _ => None,
         }
     }
+
+    /// A change answered: the new row on success; on a refusal the shown
+    /// value stays (no optimistic flip) and the note says why.
+    pub fn apply_save(&mut self, out: Result<Row, String>) {
+        let note = change_note(&out.as_ref().map(|_| ()).map_err(Clone::clone));
+        if let Ok(row) = out {
+            self.state = State::Ok(row);
+        }
+        self.busy = false;
+        self.note = Some(note);
+    }
 }
 
 /// The note of a change: "Saved." or "Not saved. <sentence>" (the web's).
@@ -361,6 +372,33 @@ mod tests {
             )
         );
         assert_eq!(LABEL, "Default for new conversations");
+    }
+
+    #[test]
+    fn a_refusal_keeps_the_shown_value_a_success_shows_the_new_one() {
+        let mut v = View {
+            state: State::Ok(row(&parse(GET)).unwrap()),
+            busy: true,
+            ..View::default()
+        };
+        v.apply_save(Err("workflow bundle 'x' is not on this gateway.".into()));
+        assert_eq!(v.row().unwrap().value, None, "no optimistic flip");
+        assert!(!v.busy);
+        assert_eq!(
+            v.note,
+            Some((
+                true,
+                "Not saved. workflow bundle 'x' is not on this gateway.".into()
+            ))
+        );
+        v.busy = true;
+        v.apply_save(row(&parse(PUT_OK)));
+        assert_eq!(
+            v.row().unwrap().value.as_deref(),
+            Some("coding-agent:coder")
+        );
+        assert_eq!(v.note, Some((false, "Saved.".into())));
+        assert!(!v.busy);
     }
 
     #[test]

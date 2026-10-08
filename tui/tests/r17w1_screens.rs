@@ -288,13 +288,15 @@ fn the_chip_is_the_web_headers_sum_and_opens_the_waiting_automation() {
 
         // Inbox triage: 2 waits + 2 unseen; the others 0 → 4 (web: Σ pending + unseen).
         let mut list = read(AUTOS, "list.json");
-        // Put attention on a second row too: the sum is over ALL rows.
+        // Row 0: 2 waits, no unseen; row 1: 1 unseen — the sum is over ALL
+        // rows, and the one with a WAIT is opened even though it has no unseen.
+        list["items"][0]["attention"]["unseen_count"] = 0.into();
         list["items"][1]["attention"]["unseen_count"] = 1.into();
         let n = web_sum(&list);
-        assert_eq!(n, 5);
+        assert_eq!(n, 3);
         h.answer_list(&list);
         let line = h.status_line();
-        assert!(line.contains("Automations · 5 waiting"), "{line}");
+        assert!(line.contains("Automations · 3 waiting"), "{line}");
         h.shot("chip-status-line");
 
         // Enter on an empty prompt opens the detail of the one WITH A WAIT
@@ -678,19 +680,38 @@ fn a_fresh_conversation_starts_on_the_account_default_and_workflow_saves_nothing
         ("coding-agent", "coder")
     );
 
-    // /workflow picks THIS conversation's workflow; nothing saved here.
+    // /workflow picks THIS conversation's workflow; nothing saved here —
+    // neither an explicit pick nor the Gateway default row.
     let before = h.prefs.borrow().workflow_preference();
+    assert_eq!(before, (None, None));
     let screen = h.command("/workflow");
     assert!(
         flat(&screen).contains("This conversation's workflow."),
         "{screen}"
     );
+    h.keys(b"\x1b[A");
+    h.keys(b"\r"); // the row above the current one = Basic agent (explicit)
+    let w = h.store.workflow.get_untracked();
+    assert!(!w.gateway_default && w.bundle_id == "basic-agent", "{w:?}");
+    assert_eq!(
+        h.prefs.borrow().workflow_preference(),
+        before,
+        "an explicit pick saves nothing here"
+    );
+    h.prefs
+        .borrow_mut()
+        .set_explicit_workflow("coding-agent", "coder");
+    h.command("/workflow");
     for _ in 0..4 {
         h.keys(b"\x1b[A");
     }
     h.keys(b"\r"); // the first row = Gateway default
-    assert_eq!(h.prefs.borrow().workflow_preference(), before);
     assert!(h.store.workflow.get_untracked().gateway_default);
+    assert_eq!(
+        h.prefs.borrow().workflow_preference(),
+        (Some("coding-agent".into()), Some("coder".into())),
+        "the Gateway default row saves nothing here either"
+    );
 
     // A run started: a change of the default no longer moves it.
     h.store.run_id.set("run-1".into());
