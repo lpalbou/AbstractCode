@@ -372,6 +372,24 @@ mod tests {
     }
 
     #[test]
+    fn the_routes_are_pinned() {
+        assert_eq!(
+            path(IFACE),
+            "/api/gateway/bundles?executable_for=abstractcode.agent.v1"
+        );
+        assert_eq!(
+            crate::schedule_input::input_schema_path("basic-agent", "81795ea9", "0.0.5"),
+            "/api/gateway/bundles/basic-agent/flows/81795ea9/input_schema?bundle_version=0.0.5"
+        );
+        assert_eq!(
+            crate::schedule_input::flow_source_path("basic-agent", "81795ea9", "0.0.5"),
+            "/api/gateway/bundles/basic-agent/flows/81795ea9?bundle_version=0.0.5"
+        );
+        let r = crate::gateway::automations::email_status_request();
+        assert_eq!((r.method, r.path.as_str()), ("GET", "/api/gateway/me/email"));
+    }
+
+    #[test]
     fn unavailable_default_names_its_reason() {
         let mut v: Value = serde_json::from_str(LIST).unwrap();
         v.as_object_mut().unwrap().remove("default_agent_workflows");
