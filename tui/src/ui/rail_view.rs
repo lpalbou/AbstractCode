@@ -594,7 +594,11 @@ pub fn panel_cards(
                     }
                     Some(every) if summary.trigger.source_id == "schedule" => push(
                         &mut cards,
-                        Card::new(vec![row("Repeat every (UTC)", auto::interval_label(every))]),
+                        // The value as typed (`8h`) + the gateway's own words for the rule.
+                        Card::new(vec![
+                            row("Repeat every (UTC)", every.to_string()),
+                            faint(auto::served_rule(&summary)),
+                        ]),
                         Act::AEvery,
                     ),
                     _ => push(

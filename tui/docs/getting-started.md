@@ -251,7 +251,7 @@ browser: `←`/`→` changes panel, `Enter` changes a row, `d` puts it back to
 group per model step. `/sessions` lists your conversations as
 `Oct 2 · 2 turns · 7 tools`; `a` archives one (nothing is deleted — it moves
 under **Archived · N**, where `u` brings it back). In `/automations` each
-card reads `↻ every 24 h · last 3 h ago` and `next in 20 h` with its
+card reads the gateway's words, `↻ Every 24 hours (UTC) · last 3 h ago`, and `next in 20 h` with its
 **Active** switch; `g` Run now, `x` Stop, `e` Edit (the same panels, bound to
 the automation: each change is saved as a new revision), `a` Archive.
 `/workspace` opens this conversation's workspaces: **Use my default**, or

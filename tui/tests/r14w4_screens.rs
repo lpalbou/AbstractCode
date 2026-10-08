@@ -509,6 +509,26 @@ fn the_new_automation_dialog_has_visible_workspaces_and_title_and_limits() {
         h.command("/schedule");
         h.keys(b"\r"); // the task
         h.keys(b"\r"); // every 24 hours
+                       // The gateway words Repeat too (schedule-preview), then Enter goes on.
+        let trigger = h
+            .cmds()
+            .into_iter()
+            .find_map(|c| match c {
+                Cmd::Automations(abstractcode::gateway::automations::AutoCmd::Preview {
+                    trigger,
+                }) => Some(trigger),
+                _ => None,
+            })
+            .expect("schedule-preview asked for Repeat");
+        let answer = json!({"trigger": trigger, "time_zone": "Europe/Paris",
+            "schedule_rule_text": "Every 24 hours (UTC)", "schedule_text": "Every 24 hours (UTC)",
+            "first_run_sentence": "Runs every 24 hours (UTC), first run now."});
+        let p = auto::parse_schedule_preview(&answer).unwrap();
+        h.store
+            .automations
+            .update(|v| v.apply_preview(&trigger, auto::PreviewState::Ready(p)));
+        h.turn();
+        h.keys(b"\r"); // the gateway's line: continue
         h.keys(b"\r"); // independent
         let screen = h.keys(b"\r"); // run without asking
         assert!(screen.contains("5/6 Workspaces"), "{screen}");

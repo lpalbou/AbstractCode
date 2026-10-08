@@ -93,7 +93,7 @@ Status: **0.9.1**, pre-alpha. Release history is in
   is on this machine.
 - **Automations**: `/automations` lists the gateway's automations (the same
   ones the Assistant, the Observer and Code web show) as cards —
-  `↻ every 24 h · last 3 h ago`, `next in 20 h` and the **Active** switch —
+  `↻ Every 24 hours (UTC) · last 3 h ago` (the gateway's words), `next in 20 h` and the **Active** switch —
   with **Run now**, **Stop**, **Edit**, **Archive** and an **Archived · N**
   line with **Unarchive**; open one to read its runs, approve its tool calls,
   browse its folder, or discuss a run as a new chat in place. `/schedule

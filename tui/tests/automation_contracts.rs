@@ -166,7 +166,7 @@ fn every_list_row_parses_and_reads_state_from_the_gateway() {
         .unwrap()
         .contains("session-automation-53443dd0"));
     let row = auto::row_line(&inbox, now);
-    assert!(row.starts_with("Inbox triage · Active ▶ · 2 unseen · 2 waiting for you · every 30 minutes (UTC) · now: Run #7 running · next: "), "{row}");
+    assert!(row.starts_with("Inbox triage · Active ▶ · 2 unseen · 2 waiting for you · Every 30 minutes (UTC) · now: Run #7 running · next: "), "{row}");
 
     let paused = by_title("Weekly journal monitor");
     assert_eq!(auto::status_label(&paused.status), "Paused ⏸");

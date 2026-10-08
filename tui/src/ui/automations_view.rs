@@ -1282,7 +1282,7 @@ fn schedule_when(
                         amount: n.to_string(),
                         unit: *u,
                     };
-                    return schedule_context(cx, store, &ctx2, form, target);
+                    return schedule_served(cx, store, &ctx2, form, target);
                 }
                 let k = ix - WHEN_PRESETS.len();
                 match k {
@@ -1341,13 +1341,13 @@ fn schedule_every_text(
                 amount: text[..text.len().saturating_sub(unit.len_utf8())].to_string(),
                 unit,
             };
-            if auto::schedule_preview(&form).is_empty() {
+            if auto::schedule_config_form(&form).is_err() {
                 store.notify(
                     "that is not an interval — write a whole number and m, h or d (90m, 12h, 3d)",
                 );
                 return;
             }
-            schedule_context(cx, store, &ctx3, form, target.clone());
+            schedule_served(cx, store, &ctx3, form, target.clone());
         }),
         close_cb(ctx),
     );
@@ -1587,12 +1587,9 @@ pub(crate) fn ask_preview(store: Store, ctx: &UiCtx, trigger: &serde_json::Value
     );
 }
 
-/// The served line of a form (Once / calendar): `first_run_sentence` once
-/// the gateway answered; "" for Repeat (its line is `schedule_preview`).
+/// The served line of a form (every kind): `first_run_sentence` once the
+/// gateway answered, "" before.
 fn served_sentence(store: Store, form: &auto::CreateForm) -> String {
-    if !form.when.is_served() {
-        return auto::schedule_preview(form);
-    }
     let Ok(trigger) = auto::schedule_trigger(form) else {
         return String::new();
     };
@@ -1643,6 +1640,7 @@ fn schedule_served(
             }
         };
         let trigger_v = trigger.clone();
+        let with_zone = form.when.uses_time_zone();
         Element::new()
             .style(LayoutStyle::column().padding(Edges::all(1)))
             .focusable()
@@ -1659,6 +1657,7 @@ fn schedule_served(
                     auto::preview_lines(
                         v.preview_for(&trigger_v)
                             .unwrap_or(&auto::PreviewState::Loading),
+                        with_zone,
                     )
                 });
                 // Wrap to the modal (about 96 cells), not the whole terminal.
@@ -1839,15 +1838,11 @@ pub fn limits_cards(
         ]));
         acts.push(LimitRow::Until);
     }
-    if form.when.is_served() {
-        for line in auto::preview_lines(served.unwrap_or(&auto::PreviewState::Loading)) {
-            cards.push(Card::note(line));
-        }
-    } else {
-        let preview = auto::schedule_preview(form);
-        if !preview.is_empty() {
-            cards.push(Card::note(preview));
-        }
+    for line in auto::preview_lines(
+        served.unwrap_or(&auto::PreviewState::Loading),
+        form.when.uses_time_zone(),
+    ) {
+        cards.push(Card::note(line));
     }
     for e in errors {
         cards.push(Card::fixed(vec![CardLine::new(e.clone(), Ink::Error)]));

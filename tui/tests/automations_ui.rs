@@ -229,11 +229,15 @@ fn the_list_reads_state_now_and_next_from_the_gateway() {
     assert!(screen.contains("waiting for you"), "{screen}");
     // A run waits on a person: "waiting since", never "running now".
     assert!(
-        screen.contains("↻ every 30 min · waiting since"),
+        screen.contains("↻ Every 30 minutes (UTC) · waiting since"),
         "{screen}"
     );
-    assert!(screen.contains("↻ every 8 h · last"), "{screen}");
-    assert!(screen.contains("↻ every 7 d · last"), "{screen}");
+    // Every schedule row reads the gateway's words, bounds included.
+    assert!(screen.contains("↻ Every 8 hours (UTC) · last"), "{screen}");
+    assert!(
+        screen.contains("↻ Every 7 days (UTC) · 12 runs max · last"),
+        "{screen}"
+    );
     assert!(screen.contains("[x] Active"), "{screen}");
     assert!(
         screen.contains("[ ] Active"),
@@ -374,7 +378,10 @@ fn one_automation_shows_folder_waits_and_runs_as_chat_pairs() {
     let screen = open_inbox(&mut h);
     assert!(screen.contains("Automations / Inbox triage"), "{screen}");
     assert!(screen.contains("Run #7 running"), "{screen}");
-    assert!(screen.contains("every 30 min · waiting since"), "{screen}");
+    assert!(
+        screen.contains("Every 30 minutes (UTC) · waiting since"),
+        "{screen}"
+    );
     assert!(screen.contains("waiting for you"), "{screen}");
     // The workspace as a short name (never the full path in the header).
     assert!(
@@ -615,6 +622,18 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
         h.keys(b"\x1b[A");
     }
     h.keys(b"\r");
+    // Repeat's line is the gateway's too (no account time-zone line).
+    let screen = answer_preview(&mut h, "Runs every 5 minutes (UTC), first run now.");
+    assert!(
+        screen.contains("Runs every 5 minutes (UTC), first run now."),
+        "{screen}"
+    );
+    assert!(!screen.contains("your account's time zone"), "{screen}");
+    let screen = h.keys(b"\r");
+    assert!(
+        screen.contains("3/6 context · Runs every 5 minutes (UTC), first run now."),
+        "{screen}"
+    );
     // Context: Growing.
     h.keys(b"\x1b[B");
     let screen = h.keys(b"\r");
@@ -707,6 +726,8 @@ fn schedule_with_the_gateway_default_targets_at_default() {
     h.command("/schedule watch the disk");
     h.keys(b"\r"); // task (seeded from the argument)
     h.keys(b"\r"); // every 24 hours
+    answer_preview(&mut h, "Runs every 24 hours (UTC), first run now.");
+    h.keys(b"\r"); // the gateway's line: continue
     h.keys(b"\r"); // independent
     h.keys(b"\r"); // tools run without asking
     h.keys(b"\r"); // Workspaces: Continue (Use my default)
@@ -738,6 +759,8 @@ fn the_dialog_workspaces_and_limits_ride_the_create_body() {
     h.command("/schedule watch the disk");
     h.keys(b"\r"); // task
     h.keys(b"\r"); // every 24 hours
+    answer_preview(&mut h, "Runs every 24 hours (UTC), first run now.");
+    h.keys(b"\r"); // the gateway's line: continue
     h.keys(b"\r"); // independent
     h.keys(b"\r"); // tools run without asking
     h.answer_dry_run();
@@ -774,7 +797,12 @@ fn the_dialog_workspaces_and_limits_ride_the_create_body() {
     h.keys(b"\r");
     h.term.push_input(b"3");
     h.turn();
-    let screen = h.keys(b"\r");
+    h.keys(b"\r");
+    // The new limit changes the trigger: the gateway words it again.
+    let screen = answer_preview(
+        &mut h,
+        "Runs every 24 hours (UTC) · 3 runs max, first run now.",
+    );
     assert!(
         screen.contains("3 runs max"),
         "the preview reads the limit:\n{screen}"
@@ -1414,4 +1442,13 @@ fn edit_weekly_days_survive_monthly_and_back() {
         c["trigger"]["config"],
         json!({"kind": "weekly", "days": ["mon", "fri"], "at": "08:00", "time_zone": "Europe/Paris"})
     );
+}
+
+/// The gateway answers the latest schedule-preview with `sentence`.
+fn answer_preview(h: &mut Harness, sentence: &str) -> String {
+    let trigger = preview_asked(h);
+    h.store
+        .automations
+        .update(|v| v.apply_preview(&trigger, served_preview(&trigger, sentence)));
+    h.turn()
 }

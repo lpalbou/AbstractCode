@@ -19,8 +19,10 @@ served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
   your account's time zone: the step shows `in <zone> (your account's time
   zone)` and the gateway's own sentence (`Runs every day at 08:00
   (Europe/Paris), first run Fri 9 Oct 08:00.`) or its refusal, and goes on
-  only once the gateway accepted the rule. **Stop after this many runs** and
-  **Stop at** apply to the calendar rules too.
+  only once the gateway accepted the rule. Repeat's line is the gateway's
+  too (`Runs every 24 hours (UTC), first run now.`, no time-zone line).
+  **Stop after this many runs** and **Stop at** apply to the calendar rules
+  too.
 - The one-automation screen's Run now line adds `Next scheduled run: <date>
   <time> <zone>.` from the gateway.
 - Edit (`e`, the Workflow panel) on a Daily / Weekly / Monthly automation
@@ -39,9 +41,12 @@ served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
 - Every `/schedule` kind is sent as `schedule@2` (`{kind: "every", every}`,
   `{kind: "once", at}`, `{kind: "daily"|"weekly"|"monthly", …}`); the time
   zone is left to the gateway (your account's).
-- Cards, the list rows and the header read the gateway's served schedule:
-  a calendar automation's cadence is its `schedule_rule_text`
-  (`↻ Every day at 08:00 (Europe/Paris)`), the next run comes only from
+- Cards, the list rows, the header and the Edit panel read the gateway's
+  served schedule: every schedule (Repeat with its bounds included, old
+  `schedule@1` rows too) is its `schedule_rule_text` verbatim
+  (`↻ Every 24 hours (UTC)`, `↻ Every day at 08:00 (Europe/Paris)`; a
+  missing one shows `schedule@<version>`) — the terminal no longer words a
+  schedule itself (`every 24 h` is gone), the next run comes only from
   `next_run_at` / `next_run_local` (the date and time are cut from the
   served string, shown in the automation's zone). `next_fire_at` is no
   longer read; a row without the served fields is refused with the field's

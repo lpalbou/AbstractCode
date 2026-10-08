@@ -525,45 +525,6 @@ pub fn is_duration(every: &str) -> bool {
     parse_duration(every).is_some()
 }
 
-/// "every 8 hours" / "every hour" — fixed UTC intervals, never calendar wording.
-pub fn interval_label(every: &str) -> String {
-    let Some((n, unit)) = parse_duration(every) else {
-        return format!("every {every}");
-    };
-    let (one, many) = match unit {
-        's' => ("second", "seconds"),
-        'm' => ("minute", "minutes"),
-        'h' => ("hour", "hours"),
-        _ => ("day", "days"),
-    };
-    if n == 1 {
-        format!("every {one}")
-    } else {
-        format!("every {n} {many}")
-    }
-}
-
-/// `schedule@1` config → "every 8 hours (UTC)", "once at 2026-09-27 08:00 UTC", + bounds.
-pub fn schedule_label(config: &Map<String, Value>) -> String {
-    let Some(every) = config.get("every").and_then(Value::as_str) else {
-        return match config.get("start_at").and_then(Value::as_str) {
-            Some(start) => format!("once at {}", format_utc(start)),
-            None => "once, now".into(),
-        };
-    };
-    let mut parts = vec![format!("{} (UTC)", interval_label(every))];
-    if let Some(count) = config.get("count").and_then(Value::as_u64) {
-        parts.push(format!(
-            "{count} {} max",
-            if count == 1 { "run" } else { "runs" }
-        ));
-    }
-    if let Some(until) = config.get("until").and_then(Value::as_str) {
-        parts.push(format!("until {}", format_utc(until)));
-    }
-    parts.join(" · ")
-}
-
 /// The served `next_run_local` ("2026-10-09T08:00:00+02:00", already in the
 /// automation's zone) as "2026-10-09 08:00 Europe/Paris": the date and wall
 /// time are CUT from the gateway's string — no clock or zone arithmetic.
@@ -593,29 +554,32 @@ pub fn is_schedule_v2(t: &Trigger) -> bool {
     t.source_id == "schedule" && t.source_version == SCHEDULE_VERSION
 }
 
-/// The served rule verbatim; an empty one (a broken gateway seam) reads as
-/// the literal "schedule@2", never as a sentence made up here.
+/// The served rule verbatim (`schedule_rule_text`, every schedule row:
+/// `schedule@1` and `schedule@2`, Repeat with its bounds included); an empty
+/// one (a broken gateway seam) reads as the literal "schedule@<version>",
+/// never as a sentence made up here.
 pub fn served_rule(s: &Summary) -> String {
     if s.schedule_rule_text.is_empty() {
-        "schedule@2".into()
+        format!("schedule@{}", s.trigger.source_version)
     } else {
         s.schedule_rule_text.clone()
     }
 }
 
-/// The trigger in words for one row: `schedule@1` keeps its fixed-interval
-/// UTC wording; a `schedule@2` row (every kind) is the served rule.
+/// The trigger in words for one row: any schedule is the served rule; the
+/// other sources keep their fixed words.
 pub fn summary_trigger_text(s: &Summary) -> String {
-    if is_schedule_v2(&s.trigger) {
+    if s.trigger.source_id == "schedule" {
         served_rule(s)
     } else {
         trigger_summary(&s.trigger)
     }
 }
 
+/// A non-schedule trigger in words ("manual runs only"); a schedule is
+/// never worded here (see `served_rule`).
 pub fn trigger_summary(t: &Trigger) -> String {
     match (t.source_id.as_str(), t.source_version) {
-        ("schedule", 1) => schedule_label(&t.config),
         ("manual", 1) => "manual runs only".into(),
         _ => format!("{}@{}", t.source_id, t.source_version),
     }
@@ -761,36 +725,13 @@ pub fn compact_duration(secs: i64) -> String {
     }
 }
 
-/// The trigger in two or three words: "every 24 h", "every hour", "once",
-/// "manual", "on new email" — the kit's `compactCadence`.
+/// A non-schedule trigger in a word or two: "manual", "on new email" —
+/// the kit's `compactCadence` (a schedule reads as its served rule).
 pub fn compact_cadence(t: &Trigger) -> String {
     match t.source_id.as_str() {
-        "schedule" => match t.config.get("every") {
-            Some(Value::String(every)) => match parse_duration(every) {
-                // Whole minutes of seconds read in minutes (no seconds on screen).
-                Some((n, 's')) if n % 60 == 0 => cadence_words(n / 60, 'm'),
-                Some((n, unit)) => cadence_words(n, unit),
-                None => format!("every {every}"),
-            },
-            _ => "once".into(),
-        },
         "manual" => "manual".into(),
         "email.received" if t.source_version == 1 => "on new email".into(),
         other => other.to_string(),
-    }
-}
-
-fn cadence_words(n: u64, unit: char) -> String {
-    let (one, short) = match unit {
-        's' => ("second", "s"),
-        'm' => ("minute", "min"),
-        'h' => ("hour", "h"),
-        _ => ("day", "d"),
-    };
-    if n == 1 {
-        format!("every {one}")
-    } else {
-        format!("every {n} {short}")
     }
 }
 
@@ -837,11 +778,10 @@ pub fn next_run_text(s: &Summary, now: i64) -> Option<String> {
     }
 }
 
-/// The cadence of one row: the compact Repeat words when the trigger has an
-/// interval (`schedule@1`, or `schedule@2` `kind: "every"`), else — for any
-/// other `schedule@2` rule — the served `schedule_rule_text` verbatim.
+/// The cadence of one row: any schedule (Repeat included) is the served
+/// `schedule_rule_text` verbatim; other sources keep their word.
 pub fn summary_cadence(s: &Summary) -> String {
-    if is_schedule_v2(&s.trigger) && !s.trigger.config.get("every").is_some_and(Value::is_string) {
+    if s.trigger.source_id == "schedule" {
         served_rule(s)
     } else {
         compact_cadence(&s.trigger)
@@ -1471,9 +1411,14 @@ pub enum When {
 }
 
 impl When {
-    /// Once / Daily / Weekly / Monthly depend on the time zone: their line
-    /// is the gateway's `first_run_sentence` (schedule-preview), never ours.
+    /// Every kind's line is the gateway's `first_run_sentence`
+    /// (schedule-preview), never one composed here.
     pub fn is_served(&self) -> bool {
+        true
+    }
+    /// Once / Daily / Weekly / Monthly run on the account's time zone (the
+    /// line names it); Repeat is a fixed UTC interval (no zone line).
+    pub fn uses_time_zone(&self) -> bool {
         !matches!(self, When::Every { .. })
     }
     /// Daily / Weekly / Monthly (a wall-clock rule).
@@ -1608,26 +1553,6 @@ pub fn default_title(prompt: &str) -> String {
         t
     } else {
         first
-    }
-}
-
-/// Repeat: "Runs every 24 hours (UTC), first run now." (the kit's sentence
-/// family, unchanged) — or "" while incomplete. Once / Daily / Weekly /
-/// Monthly return "": their line is the gateway's `first_run_sentence`.
-pub fn schedule_preview(form: &CreateForm) -> String {
-    if form.when.is_served() {
-        return String::new();
-    }
-    match schedule_config_form(form) {
-        Ok(config) => format!(
-            "Runs {}, first run {}.",
-            schedule_label(&config),
-            match config.get("start_at").and_then(Value::as_str) {
-                Some(at) => format!("at {}", format_utc(at)),
-                None => "now".into(),
-            }
-        ),
-        Err(_) => String::new(),
     }
 }
 
@@ -1776,13 +1701,16 @@ pub enum PreviewState {
     Failed(String),
 }
 
-/// The served lines of a preview: the time-zone line (when ready) and the
-/// sentence — `first_run_sentence`, "Checking the schedule…", or the
-/// gateway's refusal.
-pub fn preview_lines(state: &PreviewState) -> Vec<String> {
+/// The served lines of a preview: the time-zone line (when ready and
+/// `with_zone` — not for Repeat, a fixed UTC interval) and the sentence —
+/// `first_run_sentence`, "Checking the schedule…", or the gateway's refusal.
+pub fn preview_lines(state: &PreviewState, with_zone: bool) -> Vec<String> {
     match state {
         PreviewState::Loading => vec![schedule_text("describing").to_string()],
-        PreviewState::Ready(p) => vec![time_zone_line(&p.time_zone), p.first_run_sentence.clone()],
+        PreviewState::Ready(p) if with_zone => {
+            vec![time_zone_line(&p.time_zone), p.first_run_sentence.clone()]
+        }
+        PreviewState::Ready(p) => vec![p.first_run_sentence.clone()],
         PreviewState::Failed(e) => vec![e.clone()],
     }
 }
@@ -2622,8 +2550,6 @@ mod tests {
     fn labels_and_time() {
         assert_eq!(status_label("active"), "Active ▶");
         assert_eq!(status_label("paused"), "Paused ⏸");
-        assert_eq!(interval_label("1h"), "every hour");
-        assert_eq!(interval_label("30m"), "every 30 minutes");
         assert_eq!(
             format_utc("2026-09-27T08:00:00.412307+00:00"),
             "2026-09-27 08:00 UTC"
@@ -2694,12 +2620,23 @@ mod tests {
         // A broken seam reads as the literal, never a sentence made up here.
         s.schedule_rule_text.clear();
         assert_eq!(summary_cadence(&s), "schedule@2");
-        // schedule@2 Repeat keeps the compact interval words.
+        // Repeat too reads the served words (never a local "every 24 h").
         s.trigger.config = json!({"kind": "every", "every": "24h"})
             .as_object()
             .unwrap()
             .clone();
-        assert_eq!(summary_cadence(&s), "every 24 h");
+        s.schedule_rule_text = "Every 24 hours (UTC) · 3 runs max".into();
+        assert_eq!(summary_cadence(&s), "Every 24 hours (UTC) · 3 runs max");
+        assert_eq!(
+            summary_trigger_text(&s),
+            "Every 24 hours (UTC) · 3 runs max"
+        );
+        // schedule@1 rows as well; a missing value names the version.
+        s.trigger.source_version = 1;
+        assert_eq!(summary_cadence(&s), "Every 24 hours (UTC) · 3 runs max");
+        s.schedule_rule_text.clear();
+        assert_eq!(summary_cadence(&s), "schedule@1");
+        assert_eq!(summary_trigger_text(&s), "schedule@1");
     }
 
     fn form_with(when: When) -> CreateForm {
@@ -2769,17 +2706,13 @@ mod tests {
             build_create_request(&f, target(), "r").unwrap()["trigger"]["config"],
             json!({"kind": "daily", "at": "08:00", "count": 3, "until": "2026-12-31T18:00:00Z"})
         );
-        // Their line is the gateway's: nothing composed locally.
-        assert_eq!(schedule_preview(&f), "");
-        assert!(
-            f.when.is_served()
-                && !form_with(When::Every {
-                    amount: "1".into(),
-                    unit: 'h'
-                })
-                .when
-                .is_served()
-        );
+        // Every kind's line is the gateway's; Repeat names no account zone.
+        let repeat = form_with(When::Every {
+            amount: "1".into(),
+            unit: 'h',
+        });
+        assert!(f.when.is_served() && repeat.when.is_served());
+        assert!(f.when.uses_time_zone() && !repeat.when.uses_time_zone());
     }
 
     #[test]
@@ -2978,14 +2911,19 @@ mod tests {
         });
         let p = parse_schedule_preview(&answer).unwrap();
         assert_eq!(
-            preview_lines(&PreviewState::Ready(p)),
+            preview_lines(&PreviewState::Ready(p.clone()), false),
+            vec!["Runs every day at 08:00 (Europe/Paris), first run Fri 9 Oct 08:00.".to_string()],
+            "Repeat names no account time zone"
+        );
+        assert_eq!(
+            preview_lines(&PreviewState::Ready(p), true),
             vec![
                 "in Europe/Paris (your account's time zone)".to_string(),
                 "Runs every day at 08:00 (Europe/Paris), first run Fri 9 Oct 08:00.".to_string()
             ]
         );
         assert_eq!(
-            preview_lines(&PreviewState::Loading),
+            preview_lines(&PreviewState::Loading, true),
             vec!["Checking the schedule…".to_string()]
         );
         assert!(parse_schedule_preview(&json!({"time_zone": "UTC"})).is_err());
@@ -3091,10 +3029,6 @@ mod tests {
             body["target"]["input_data"]["workspace"],
             json!({"posture": "allowed_only", "default_mode": "rw",
                    "folders": [{"path": "/Users/ada/home/work", "mode": "ro"}]})
-        );
-        assert_eq!(
-            schedule_preview(&form),
-            "Runs every 24 hours (UTC) · 3 runs max · until 2026-10-31 18:00 UTC, first run at 2026-10-08 09:00 UTC."
         );
         // Use my default sends nothing workspace-shaped.
         let plain = build_create_request(

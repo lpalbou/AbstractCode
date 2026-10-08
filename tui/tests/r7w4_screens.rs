@@ -401,7 +401,7 @@ fn the_automations_list_reads_like_the_web_cards() {
         h.command("/automations");
         h.answer_automations(true);
         let screen = h.shot("automations");
-        assert!(screen.contains("↻ every 8 h · last"), "{screen}");
+        assert!(screen.contains("↻ Every 8 hours (UTC) · last"), "{screen}");
         assert!(screen.contains("[x] Active"), "{screen}");
         assert!(screen.contains("e Edit"), "{screen}");
         let screen = h.keys(b"a");
@@ -434,7 +434,10 @@ fn the_automation_screen_has_the_web_header() {
         let screen = h.shot("automation-detail");
         assert!(screen.contains("Automations / Inbox triage"), "{screen}");
         assert!(screen.contains("[x] Active"), "{screen}");
-        assert!(screen.contains("every 30 min · waiting since"), "{screen}");
+        assert!(
+            flat(&screen).contains("Every 30 minutes (UTC) · waiting since"),
+            "{screen}"
+        );
         assert!(screen.contains("g Run now"), "{screen}");
         assert!(screen.contains("x Stop"), "{screen}");
     });
@@ -551,7 +554,7 @@ fn every_rail_panel_on_an_automation() {
                     h.keys(b"\x1b[B");
                 }
                 let screen = h.turn();
-                for n in ["Repeat every (UTC)", "Context", "Ask before each tool call"] {
+                for n in ["Every 30 minutes (UTC)", "Context", "Ask before each tool call"] {
                     assert!(
                         flat(&screen).contains(n),
                         "{n:?} at {}x{}:\n{screen}",
@@ -602,8 +605,11 @@ fn r16_calendar_when_and_served_cards_fit_every_width() {
             h.command("/automations");
             h.answer_automations(false);
             let screen = h.shot("r16-automations-list");
-            assert!(flat(&screen).contains("Morning briefing"), "{screen}");
-            assert!(screen.contains("Every day at"), "{screen}");
+            assert!(flat(&screen).contains("Every 30 minutes (UTC)"), "{screen}");
+            if size.w >= 104 {
+                assert!(flat(&screen).contains("Morning briefing"), "{screen}");
+                assert!(screen.contains("Every day at"), "{screen}");
+            }
             let mut h = harness(size);
             h.command(&format!("/automations {INBOX}"));
             h.answer_detail();
