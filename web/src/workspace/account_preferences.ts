@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { gatewayApiPath } from "@abstractframework/ui-kit";
+import { gatewayApiPath, type TimeZonePreference } from "@abstractframework/ui-kit";
 import type { WorkflowDefinition } from "./catalog";
 import { readPreferences } from "./preferences";
 import { gatewayRequest } from "./transport";
@@ -25,7 +25,23 @@ export type AccountWorkflowState =
   | { status: "loading" }
   | { status: "unsupported" }
   | { status: "error"; message: string }
-  | { status: "ok"; row: AccountWorkflowRow };
+  | { status: "ok"; row: AccountWorkflowRow; timeZone: TimeZonePreference };
+
+/** The `time_zone` block of the answer (round 16, R16.1 A2), checked: a missing block or field is
+ * said, never guessed — the IANA list is the gateway's, never the browser's. */
+export function accountTimeZone(answer: unknown): TimeZonePreference {
+  const block = record(record(answer)?.time_zone);
+  if (!block || !Array.isArray(block.choices) || typeof block.gateway_default !== "string" || typeof block.effective !== "string")
+    throw new Error("The gateway's account preferences answer has no time_zone block (choices, gateway_default, effective).");
+  return {
+    value: typeof block.value === "string" && block.value ? block.value : null,
+    gateway_default: block.gateway_default,
+    effective: block.effective,
+    label: typeof block.label === "string" ? block.label : "Time zone",
+    help: typeof block.help === "string" ? block.help : "",
+    choices: (block.choices as unknown[]).map(String),
+  };
+}
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -112,8 +128,11 @@ export async function loadAccountWorkflow(
   onDeviceCleared: () => void,
 ): Promise<AccountWorkflowState> {
   let row: AccountWorkflowRow;
+  let timeZone: TimeZonePreference;
   try {
-    row = accountWorkflowRow(await request(ACCOUNT_PREFERENCES_PATH));
+    const answer = await request(ACCOUNT_PREFERENCES_PATH);
+    row = accountWorkflowRow(answer);
+    timeZone = accountTimeZone(answer);
   } catch (reason) {
     return status(reason) === 404 ? { status: "unsupported" } : { status: "error", message: errorText(reason) };
   }
@@ -123,12 +142,12 @@ export async function loadAccountWorkflow(
       const value = accountValueFromSelection(device);
       if (value) {
         try {
-          row = accountWorkflowRow(
-            await request(ACCOUNT_PREFERENCES_PATH, {
-              method: "PUT",
-              body: JSON.stringify({ default_workflow: { [CODE_AGENT_INTERFACE]: value } }),
-            }),
-          );
+          const answer = await request(ACCOUNT_PREFERENCES_PATH, {
+            method: "PUT",
+            body: JSON.stringify({ default_workflow: { [CODE_AGENT_INTERFACE]: value } }),
+          });
+          row = accountWorkflowRow(answer);
+          timeZone = accountTimeZone(answer);
         } catch (reason) {
           clear = status(reason) === 400; // refused: the old choice no longer runs
         }
@@ -136,7 +155,7 @@ export async function loadAccountWorkflow(
     }
     if (clear) onDeviceCleared();
   }
-  return { status: "ok", row };
+  return { status: "ok", row, timeZone };
 }
 
 /** Read / write the account's default workflow for AbstractCode (loadAccountWorkflow runs the
@@ -159,15 +178,15 @@ export function useAccountWorkflow(identity: string, onDeviceCleared: () => void
     };
   }, [identity]);
   /** One PUT; resolves with the new row, rejects with the gateway's sentence. */
-  const save = useCallback(async (value: string | null) => {
-    const row = accountWorkflowRow(
-      await gatewayRequest(ACCOUNT_PREFERENCES_PATH, {
-        method: "PUT",
-        body: JSON.stringify({ default_workflow: { [CODE_AGENT_INTERFACE]: value } }),
-      }),
-    );
-    setState({ status: "ok", row });
-    return row;
+  const put = useCallback(async (changes: Record<string, unknown>) => {
+    const answer = await gatewayRequest(ACCOUNT_PREFERENCES_PATH, { method: "PUT", body: JSON.stringify(changes) });
+    const row = accountWorkflowRow(answer);
+    const timeZone = accountTimeZone(answer);
+    setState({ status: "ok", row, timeZone });
+    return { row, timeZone };
   }, []);
-  return { state, save };
+  const save = useCallback(async (value: string | null) => (await put({ default_workflow: { [CODE_AGENT_INTERFACE]: value } })).row, [put]);
+  /** The account's time zone (null = the gateway default): one PUT, at once (round 16). */
+  const saveTimeZone = useCallback(async (value: string | null) => (await put({ time_zone: value })).timeZone, [put]);
+  return { state, save, saveTimeZone };
 }

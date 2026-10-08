@@ -63,6 +63,7 @@ import { gateway, gatewayRequest, formatError, newId } from "./transport";
 import { createWorkflowTransport } from "./session_transport";
 import { selectionFromAccountValue, useAccountWorkflow } from "./account_preferences";
 import { AccountWorkflowDefault } from "./account_workflow_default";
+import { AccountTimeZone } from "./account_time_zone";
 import {
   SettingsContent,
   DEFAULT_PREFERENCES,
@@ -1364,11 +1365,14 @@ export function CodeWorkspace() {
             ) : null}
           </div>
         {accountWorkflow.state.status === "ok" ? (
-          <AccountWorkflowDefault
-            row={accountWorkflow.state.row}
-            save={accountWorkflow.save}
-            disabled={!connection.connected}
-          />
+          <>
+            <AccountWorkflowDefault
+              row={accountWorkflow.state.row}
+              save={accountWorkflow.save}
+              disabled={!connection.connected}
+            />
+            <AccountTimeZone block={accountWorkflow.state.timeZone} save={accountWorkflow.saveTimeZone} disabled={!connection.connected} />
+          </>
         ) : null}
         <div className="code-settings code-workflow-inputs">
           <h3 className="code-settings-heading">Inputs</h3>
@@ -1439,6 +1443,7 @@ export function CodeWorkspace() {
     ),
     () =>
       automationDetail?.definition && automationSettings ? (
+        <>
         <AutomationDefinitionForm
           summary={automationDetail.summary}
           definition={automationDetail.definition}
@@ -1448,9 +1453,14 @@ export function CodeWorkspace() {
           emailStatus={automationsState.emailStatus}
           onOpenMyEmail={automationHost.openMyEmail}
           onRevise={(changes, expected) => automations.revise(automationDetail.automationId, changes, expected)}
+          previewSchedule={automations.previewSchedule}
           prepareTarget={prepareAutomationTargetForCode}
           workflowPickerOptions={{ interfaceId: CODE_AGENT_INTERFACE, workflows: { ...catalog.executable, reload: () => void catalog.refresh() } }}
         />
+        {accountWorkflow.state.status === "ok" ? (
+          <AccountTimeZone block={accountWorkflow.state.timeZone} save={accountWorkflow.saveTimeZone} disabled={!connection.connected} />
+        ) : null}
+        </>
       ) : null,
   );
   const workspacePanel = settingsPanel(
@@ -2096,6 +2106,11 @@ export function CodeWorkspace() {
         workflowPickerOptions={{ interfaceId: CODE_AGENT_INTERFACE, workflows: { ...catalog.executable, reload: () => void catalog.refresh() } }}
         open={newAutomationOpen}
         onClose={() => setNewAutomationOpen(false)}
+        onOpenPreferences={() => {
+          // The time zone is chosen in Settings → Workflow (the dialog only shows it).
+          setNewAutomationOpen(false);
+          openPanel("workflow");
+        }}
         target={automationTarget(selection, workflow)}
         availableTools={catalog.tools.filter(t => t.enabled).map(t => t.name)}
         initialTools={automationToolSelection(preferences.toolsCustomized ? { ...inputs, tools: toolPermissions.enabledTools } : inputs)}

@@ -193,6 +193,7 @@ export function automationPanelProps(ctl: AutomationsController, host: Automatio
     occurrences: d.occurrences,
     triggerSources: ctl.state.triggerSources,
     busy: ctl.state.busy,
+    previewSchedule: ctl.previewSchedule,
     ...(ctl.state.error ? { error: ctl.state.error } : {}),
     // The panel mints one id per user action and reuses it on a transport
     // retry: forward it so the gateway answers the retry idempotently.
@@ -400,6 +401,8 @@ export function NewAutomationDialog(props: {
   onCreated(id: string): void;
   /** Opens the gateway console's My email ("Email isn't set up — open My email"). */
   onOpenMyEmail?: () => void;
+  /** Opens Settings → Workflow, where the account's time zone is chosen (the dialog only shows it). */
+  onOpenPreferences?: () => void;
   /** Signed in to the gateway (the Workspaces section reads the gateway's dry run). */
   connected?: boolean;
 }): React.ReactElement | null {
@@ -434,6 +437,8 @@ export function NewAutomationDialog(props: {
       workspaces={<CodeWorkspaceFolders connected={props.connected !== false} automation={{ value: workspace, onChange: setWorkspace }} idPrefix="code-new-automation-workspace" />}
       emailStatus={props.ctl.state.emailStatus}
       onOpenMyEmail={props.onOpenMyEmail}
+      previewSchedule={props.ctl.previewSchedule}
+      onOpenPreferences={props.onOpenPreferences}
       busy={props.ctl.state.busy || preparing}
       error={error}
       onSubmit={async (body) => {

@@ -31,10 +31,16 @@ const byTitle = (title: string) => list().find((s) => s.title === title)!;
 const NOW = Date.parse("2026-09-27T06:35:00Z");
 
 describe("automation rows", () => {
-  it("read what runs now from current_occurrence and the next run from next_fire_at", () => {
+  it("read what runs now from current_occurrence and the next run from the SERVED next_run_at/next_run_local (R16.1)", () => {
     const inbox = automationRowView(byTitle("Inbox triage"), NOW);
     expect(inbox.current).toBe("Run #7 running");
-    expect(inbox.next).toBe("2026-09-27 07:00 UTC (in 25 min)");
+    expect(inbox.next).toBe("2026-09-27 09:00 Europe/Paris (in 25 min)");
+    // A changed gateway value changes the row; next_fire_at alone is never read (nothing computed here).
+    expect(automationRowView({ ...byTitle("Inbox triage"), next_run_at: "2026-09-27T08:05:00+00:00", next_run_local: "2026-09-27T10:05:00+02:00" }, NOW).next).toBe("2026-09-27 10:05 Europe/Paris (in 1 h 30 min)");
+    expect(automationRowView({ ...byTitle("Inbox triage"), next_run_at: undefined, next_run_local: undefined }, NOW).next).toBe("none scheduled");
+    const brief = automationRowView(byTitle("Morning briefing"), NOW);
+    expect(brief.cadence).toBe("Every day at 08:00 (Europe/Paris)");
+    expect(brief.next).toBe("2026-09-28 08:00 Europe/Paris (in 23 h 25 min)");
     expect(inbox.attention).toBe("2 unseen · 2 waiting for you");
     const paused = automationRowView(byTitle("Weekly journal monitor"), NOW);
     expect(paused.current).toBeNull();
@@ -157,6 +163,10 @@ function stubClient(overrides: Partial<AutomationsClient> = {}): AutomationsClie
       return { attention_cursor: c };
     }),
     listAttention: vi.fn(async () => ({ items: [], next_cursor: null })),
+    previewSchedule: vi.fn(async (trigger: any) => {
+      calls.push(`preview ${JSON.stringify(trigger.config)}`);
+      return { trigger, time_zone: "Europe/Paris", schedule_rule_text: "Every day at 08:00 (Europe/Paris)", schedule_text: "Every day at 08:00 (Europe/Paris) · next Mon 28 Sep 08:00", next_run_at: "2026-09-28T06:00:00+00:00", next_run_local: "2026-09-28T08:00:00+02:00", first_run_sentence: "Runs every day at 08:00 (Europe/Paris), first run Mon 28 Sep 08:00." };
+    }),
     getMyEmail: vi.fn(async () => {
       calls.push("me/email");
       return { configured: true, enabled: true, admin_enabled: true, effective_enabled: true };
@@ -167,12 +177,24 @@ function stubClient(overrides: Partial<AutomationsClient> = {}): AutomationsClie
 }
 
 describe("the controller", () => {
+  it("R16.1: previewSchedule is the gateway's schedule-preview, and the panel (Edit form) gets it", async () => {
+    const client = stubClient();
+    const ctl = new AutomationsController(client, vi.fn(), []);
+    const trigger = { source_id: "schedule", source_version: 2, config: { kind: "daily", at: "08:00" } };
+    expect((await ctl.previewSchedule(trigger)).first_run_sentence).toBe("Runs every day at 08:00 (Europe/Paris), first run Mon 28 Sep 08:00.");
+    expect(client.calls).toEqual(['preview {"kind":"daily","at":"08:00"}']);
+    await ctl.refresh();
+    await ctl.select(INBOX);
+    const p = automationPanelProps(ctl, { openWorkspace() {}, openConversation() {}, openRun() {} } as any)!;
+    expect(p.previewSchedule).toBe(ctl.previewSchedule);
+  });
+
   it("reads every page, opens one automation, and re-reads after a command", async () => {
     const client = stubClient();
     const ctl = new AutomationsController(client, vi.fn(), []);
     await ctl.refresh();
     expect(client.calls.slice(0, 2)).toEqual(["list ", "list p2"]);
-    expect(ctl.state.items).toHaveLength(4);
+    expect(ctl.state.items).toHaveLength(5);
     await ctl.select(INBOX);
     expect(ctl.state.detail?.summary.title).toBe("Inbox triage");
     expect(ctl.state.detail?.occurrences.map((o) => o.index)[0]).toBe(7);

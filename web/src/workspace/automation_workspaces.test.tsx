@@ -48,7 +48,8 @@ describe("New automation: the kit dialog's Workspaces section (R13.2)", () => {
   });
 
   it("uses ui-kit >= 0.8.4: the dialog has the Workspaces slot (one heading) and no Advanced disclosure", () => {
-    const [maj, min, pat] = String(kitPkg.version).split(".").map(Number);
+    // A local overlay is a prerelease ("0.8.7-dev.2"): compare the release triple.
+    const [maj, min, pat] = String(kitPkg.version).split("-")[0].split(".").map(Number);
     expect(maj * 1e6 + min * 1e3 + pat).toBeGreaterThanOrEqual(8004);
     expect(kitDialog).toContain('role: "group"');
     expect(kitDialog).toContain("Title and limits");

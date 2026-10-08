@@ -5,10 +5,10 @@ import { NewAutomationDialog } from "./automations_view";
 import { buildWorkflowInput, type WorkflowDefinition } from "./catalog";
 import type { AutomationsController } from "./automations";
 
-const captured = vi.hoisted(() => ({ submit: undefined as undefined | ((body: any) => Promise<any>) }));
+const captured = vi.hoisted(() => ({ submit: undefined as undefined | ((body: any) => Promise<any>), props: undefined as any }));
 vi.mock("@abstractframework/ui-kit", async (original) => ({
   ...await original<typeof import("@abstractframework/ui-kit")>(),
-  AfScheduleDialog: (props: any) => { captured.submit = props.onSubmit; return null; },
+  AfScheduleDialog: (props: any) => { captured.submit = props.onSubmit; captured.props = props; return null; },
 }));
 
 const workflow: WorkflowDefinition = {
@@ -53,5 +53,19 @@ describe("automation submission uses the current workflow input builder", () => 
     expect(restored.context.task).toBe("Old conversation");
     expect(onCreated).toHaveBeenCalledWith("new-automation");
     expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("R16.1: the schedule dialog's When is served by the gateway", () => {
+  it("passes the controller's previewSchedule (POST schedule-preview) and the preferences opener", async () => {
+    const previewSchedule = vi.fn(async (trigger: any) => ({ trigger, time_zone: "Europe/Paris", schedule_rule_text: "Every day at 08:00 (Europe/Paris)", schedule_text: "x", next_run_at: null, next_run_local: null, first_run_sentence: "Runs every day at 08:00 (Europe/Paris), first run Fri 9 Oct 08:00." }));
+    const ctl = { state: { busy: false }, previewSchedule } as unknown as AutomationsController;
+    const onOpenPreferences = vi.fn();
+    renderToStaticMarkup(<NewAutomationDialog open target={null} workflowLabel="Agent" ctl={ctl} onCreated={() => undefined} onClose={() => undefined} onOpenPreferences={onOpenPreferences} />);
+    expect(captured.props.previewSchedule).toBe(previewSchedule);
+    expect(captured.props.onOpenPreferences).toBe(onOpenPreferences);
+    const trigger = { source_id: "schedule", source_version: 2, config: { kind: "daily", at: "08:00" } };
+    expect((await captured.props.previewSchedule(trigger)).first_run_sentence).toBe("Runs every day at 08:00 (Europe/Paris), first run Fri 9 Oct 08:00.");
+    expect(previewSchedule).toHaveBeenCalledWith(trigger);
   });
 });

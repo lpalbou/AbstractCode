@@ -12,7 +12,9 @@
  * - the create target from the toolbar's workflow choice (the gateway
  *   default agent as `@default` + interface);
  * - the list rows (state as text + icon, what runs NOW only from
- *   `current_occurrence`, the NEXT run only from `next_fire_at`);
+ *   `current_occurrence`, the NEXT run only from the gateway's served
+ *   `next_run_at` / `next_run_local` via the kit's `nextRunLabel` — round 16:
+ *   this app never computes when an automation runs next);
  * - the page controller (full-page polling, commands, discuss, seen, waits).
  *
  * Structure only: nothing here reads model prose.
@@ -25,9 +27,8 @@ import {
   automationControls,
   createAutomationsClient,
   currentOccurrenceLabel,
-  formatUtc,
   isApiError,
-  relativeIn,
+  nextRunLabel,
   triggerSummary,
   type ApiError,
   type AutomationChanges,
@@ -43,6 +44,8 @@ import {
   type OccurrenceRow,
   type TriggerSourceEntry,
   type MyEmailStatus,
+  type SchedulePreview,
+  type TriggerSpec,
 } from "@abstractframework/ui-kit";
 
 import { csrfHeaders, gatewayRequest } from "./transport";
@@ -121,9 +124,9 @@ export function automationRowView(s: AutomationSummary, nowMs: number = Date.now
   return {
     id: s.automation_id,
     title: s.title,
-    cadence: triggerSummary(s.trigger),
+    cadence: triggerSummary(s.trigger, s),
     current: currentOccurrenceLabel(s),
-    next: s.next_fire_at ? `${formatUtc(s.next_fire_at)} (${relativeIn(s.next_fire_at, nowMs)})` : s.status === "paused" ? "none while paused" : "none scheduled",
+    next: nextRunLabel(s, nowMs),
     attention: needs ? attentionLabel(s) : null,
     legacy: s.legacy === true || s.capabilities.includes("legacy"),
   };
@@ -305,6 +308,12 @@ export class AutomationsController {
       this.set({ archived: this.state.archived ?? [], listError: toApiError(e) });
     }
   }
+
+  /**
+   * `POST /automations/schedule-preview` (round 16): the gateway's words, next run and time zone
+   * for a trigger, nothing stored — the schedule dialog and the Edit form show them verbatim.
+   */
+  readonly previewSchedule = (trigger: TriggerSpec): Promise<SchedulePreview> => this.client.previewSchedule(trigger);
 
   /** `GET /me/email` → `state.emailStatus` (null when it cannot be read; never an automations error). */
   async loadEmailStatus(): Promise<void> {

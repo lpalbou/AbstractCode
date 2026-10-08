@@ -3248,3 +3248,6 @@ select option {
   overflow-wrap: anywhere;
   padding-top: 4px;
 }
+
+/* Round 16 (R16.1 A2): the account time zone (kit AfTimeZonePicker) under the default workflow. */
+.code-account-time-zone { margin-top: 12px; }

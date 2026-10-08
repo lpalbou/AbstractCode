@@ -22,6 +22,7 @@ import {
   type AutomationWorkflowPickerOptions,
   type CommandReceipt,
   type MyEmailStatus,
+  type PreviewSchedule,
   type ReviseForm,
 } from "@abstractframework/ui-kit";
 import type { RunPreferences } from "./settings_panel";
@@ -171,6 +172,8 @@ export type AutomationDefinitionFormProps = {
   /** Checks a NEW workflow target against its input schema (the form's workflow picker). */
   prepareTarget?: (target: AutomationTarget) => Promise<AutomationTarget>;
   workflowPickerOptions?: AutomationWorkflowPickerOptions;
+  /** The gateway's schedule preview (a calendar rule's line and next run are served, never computed here). */
+  previewSchedule: PreviewSchedule;
 };
 
 /** The automation's Workflow panel: the kit's Edit form (title, task, schedule, workflow, results), one Save. */
@@ -191,6 +194,7 @@ export function AutomationDefinitionForm(p: AutomationDefinitionFormProps): Reac
         emailStatus={p.emailStatus}
         onOpenMyEmail={p.onOpenMyEmail}
         workflowPickerOptions={p.workflowPickerOptions}
+        previewSchedule={p.previewSchedule}
         onSubmit={(form: ReviseForm) => {
           const changes = reviseChanges(p.summary, form, p.definition);
           if (changes === null) {
