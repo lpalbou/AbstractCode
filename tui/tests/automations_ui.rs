@@ -1270,6 +1270,141 @@ fn a_settings_change_is_saved_as_a_new_revision() {
 }
 
 #[test]
+fn the_definition_panel_edits_the_limits_as_one_revision() {
+    let mut h = harness();
+    open_inbox(&mut h);
+    h.auto_cmds();
+    h.keys(b"e");
+    assert!(
+        h.auto_cmds()
+            .iter()
+            .any(|c| matches!(c, AutoCmd::EmailStatus)),
+        "the Mailbox rows read the account's email status"
+    );
+    let mut screen = String::new();
+    for _ in 0..5 {
+        screen = h.keys(b"\x1b[B");
+    }
+    assert!(screen.contains("Stop after this many runs"), "{screen}");
+    assert!(screen.contains("no limit"), "{screen}");
+    h.keys(b"\r");
+    h.term.push_input(b"5");
+    h.turn();
+    h.keys(b"\r");
+    let sent = saves(&mut h);
+    match sent.as_slice() {
+        [(3, changes)] => assert_eq!(
+            changes,
+            &json!({"trigger": {"source_id": "schedule", "source_version": 1, "config": {
+                "start_at": "2026-09-27T04:00:00.412307+00:00",
+                "anchor": "2026-09-27T04:00:00.412307+00:00",
+                "every": "30m", "count": 5}}})
+        ),
+        other => panic!("expected one revision, got {other:?}"),
+    }
+    // Stop at: a bad value is the kit's sentence, nothing sent.
+    h.keys(b"\x1b[B");
+    h.keys(b"\r");
+    h.term.push_input(b"next week");
+    h.turn();
+    let screen = h.keys(b"\r");
+    assert!(saves(&mut h).is_empty());
+    assert!(
+        screen.contains("Stop at must be a date and time (UTC)."),
+        "{screen}"
+    );
+    h.keys(b"\r");
+    h.term.push_input(b"2026-12-31 18:00");
+    h.turn();
+    h.keys(b"\r");
+    match saves(&mut h).as_slice() {
+        [(3, changes)] => {
+            assert_eq!(
+                changes["trigger"]["config"]["until"],
+                json!("2026-12-31T18:00:00Z")
+            );
+            assert_eq!(changes["trigger"]["config"]["every"], json!("30m"));
+        }
+        other => panic!("expected one revision, got {other:?}"),
+    }
+}
+
+#[test]
+fn the_definition_panel_edits_the_email_options() {
+    let mut h = harness();
+    open_inbox(&mut h);
+    h.auto_cmds();
+    h.keys(b"e");
+    // Not usable: the kit's notice; the switch refuses with its sentence.
+    h.store.automations.update(|v| {
+        v.email = abstractcode::automation_email::EmailStatus::parse(&schedule_fixture(
+            "me_email_not_connected.json",
+        ))
+        .ok()
+    });
+    let mut screen = String::new();
+    for _ in 0..7 {
+        screen = h.keys(b"\x1b[B");
+    }
+    assert!(screen.contains("Mailbox"), "{screen}");
+    assert!(
+        screen.contains("Connect a mailbox first — open My email"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("[-] Email result — Connect a mailbox first."),
+        "{screen}"
+    );
+    let screen = h.keys(b" ");
+    assert!(saves(&mut h).is_empty());
+    assert!(screen.contains("Connect a mailbox first."), "{screen}");
+    // Usable: Email result on = one revision with `notify`.
+    h.store.automations.update(|v| {
+        v.email = abstractcode::automation_email::EmailStatus::parse(&schedule_fixture(
+            "me_email_connected.json",
+        ))
+        .ok()
+    });
+    let screen = h.turn();
+    assert!(screen.contains("[ ] Email result"), "{screen}");
+    h.keys(b" ");
+    match saves(&mut h).as_slice() {
+        [(3, changes)] => assert_eq!(
+            changes,
+            &json!({"notify": {"channels": ["console", "email"]}})
+        ),
+        other => panic!("expected one revision, got {other:?}"),
+    }
+    // The gateway stored it: the recipients row appears; "Me and these addresses".
+    h.store.automations.update(|v| {
+        v.detail
+            .as_mut()
+            .unwrap()
+            .definition
+            .as_mut()
+            .unwrap()
+            .notify = json!({"channels": ["console", "email"]});
+    });
+    let screen = h.turn();
+    assert!(screen.contains("[x] Email result"), "{screen}");
+    assert!(screen.contains("Only me"), "{screen}");
+    h.keys(b"\x1b[B");
+    h.keys(b"\r");
+    h.keys(b"\x1b[B");
+    h.keys(b"\r");
+    h.term.push_input(b"boss@example.test");
+    h.turn();
+    h.keys(b"\r");
+    match saves(&mut h).as_slice() {
+        [(3, changes)] => assert_eq!(
+            changes,
+            &json!({"notify": {"channels": ["console", "email"], "recipients": ["self", "boss@example.test"]}})
+        ),
+        other => panic!("expected one revision, got {other:?}"),
+    }
+}
+
+#[test]
 fn an_automation_workspaces_change_is_one_revision_after_the_dry_run() {
     use abstractcode::gateway::workspaces::{RunCommit, WsCmd};
     let mut h = harness();

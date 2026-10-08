@@ -548,13 +548,25 @@ fn every_rail_panel_on_an_automation() {
             h.shot(&format!("rail-automation-{name}"));
             if *name == "workflow" {
                 // The rest of the definition form, scrolled into view.
-                for _ in 0..5 {
-                    h.keys(b"\x1b[B");
+                // (R17.2 added the limits and Mailbox rows below Tools: the
+                // rows are read while walking down.)
+                let mut seen = String::new();
+                let mut screen = String::new();
+                for _ in 0..9 {
+                    screen = h.keys(b"\x1b[B");
+                    seen.push_str(&flat(&screen));
                 }
-                let screen = h.turn();
-                for n in ["Repeat every (UTC)", "Context", "Ask before each tool call"] {
+                for n in [
+                    "Repeat every (UTC)",
+                    "Context",
+                    "Ask before each tool call",
+                    "Stop after this many runs",
+                    "Stop at (UTC)",
+                    "Mailbox",
+                    "Email result",
+                ] {
                     assert!(
-                        flat(&screen).contains(n),
+                        seen.contains(n),
                         "{n:?} at {}x{}:\n{screen}",
                         size.w,
                         size.h

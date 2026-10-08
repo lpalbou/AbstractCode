@@ -85,6 +85,12 @@ pub enum Act {
     AEvery,
     AContextMode,
     AApproval,
+    /// "Stop after this many runs" / "Stop at (UTC)" (repeating schedules).
+    ACount,
+    AUntil,
+    /// "Email result" (the Mailbox switch) and its recipients.
+    ANotify,
+    ARecipients,
     AToolsMode,
     AToggleTool(String),
     AToggleSkill(String),
@@ -139,6 +145,8 @@ pub struct Snap {
     pub auto: Option<BoundAutomation>,
     /// The account's default workflow row (R17.1).
     pub account: crate::account_prefs::View,
+    /// `GET /me/email` (the Mailbox rows; `None` = unknown, not usable).
+    pub email: Option<crate::automation_email::EmailStatus>,
 }
 
 fn rd<T: Clone + 'static>(s: Signal<T>, tracked: bool) -> T {
@@ -224,6 +232,7 @@ pub fn snap(store: Store, ctx: &UiCtx, binding: &Binding, tracked: bool) -> Snap
         },
         auto,
         account: rd(store.account_workflow, tracked),
+        email: rd(store.automations, tracked).email,
     }
 }
 
@@ -272,6 +281,100 @@ fn or_default(v: &str, default: &str) -> String {
         default.into()
     } else {
         v.into()
+    }
+}
+
+/// The definition panel's limits ("Stop after this many runs", "Stop at
+/// (UTC)": repeating schedules) and Mailbox rows ("Email result", the
+/// recipients — offered while `GET /me/email` says email is usable; the
+/// kit's notice otherwise, the current state still shown).
+fn definition_limits_and_mailbox(
+    s: &Snap,
+    summary: &Summary,
+    def: &Definition,
+    cards: &mut Vec<Card>,
+    acts: &mut Vec<Act>,
+) {
+    use crate::automation_email as email;
+    let form = auto::revise_form_with(summary, Some(def));
+    let mut push = |card: Card, act: Act| {
+        if card.selectable {
+            acts.push(act);
+        }
+        cards.push(card);
+    };
+    if let (Some(count), Some(until)) = (&form.count, &form.until) {
+        push(
+            Card::new(vec![row(
+                "Stop after this many runs",
+                if count.is_empty() {
+                    "no limit".to_string()
+                } else {
+                    count.clone()
+                },
+            )]),
+            Act::ACount,
+        );
+        push(
+            Card::new(vec![row(
+                "Stop at (UTC)",
+                if until.is_empty() {
+                    "no end".to_string()
+                } else {
+                    format!("{until} UTC")
+                },
+            )]),
+            Act::AUntil,
+        );
+    }
+    push(Card::heading("Mailbox"), Act::None);
+    let usable = email::EmailStatus::usable(s.email.as_ref());
+    let on = form.notify_email.unwrap_or(false);
+    let recipients = email::notify_recipients(&def.notify);
+    if usable {
+        push(
+            Card::new(vec![CardLine::new(
+                format!(
+                    "{}{}",
+                    if on { "[x] " } else { "[ ] " },
+                    email::NOTIFY_LABEL
+                ),
+                if on { Ink::On } else { Ink::Text },
+            )]),
+            Act::ANotify,
+        );
+        push(Card::note(email::notify_help()), Act::None);
+        if on {
+            push(
+                Card::new(vec![
+                    row(
+                        email::RECIPIENTS_LEGEND,
+                        email::recipients_label(&recipients),
+                    ),
+                    faint(email::RECIPIENTS_HINT),
+                ]),
+                Act::ARecipients,
+            );
+        }
+    } else {
+        push(
+            Card::fixed(vec![CardLine::new(
+                email::setup_notice(s.email.as_ref()),
+                Ink::Faint,
+            )]),
+            Act::None,
+        );
+        push(
+            Card::new(vec![CardLine::new(
+                format!(
+                    "{}{} — Connect a mailbox first.",
+                    if on { "[x] " } else { "[-] " },
+                    email::NOTIFY_LABEL
+                ),
+                Ink::Faint,
+            )]),
+            Act::ANotify,
+        );
     }
 }
 
@@ -520,10 +623,22 @@ pub fn panel_cards(
                         Act::ATask,
                     );
                 }
+                let email_trigger = crate::automation_email::is_email_trigger(
+                    &summary.trigger.source_id,
+                    summary.trigger.source_version,
+                );
                 match summary.trigger.config.get("every").and_then(Value::as_str) {
                     Some(every) if summary.trigger.source_id == "schedule" => push(
                         &mut cards,
                         Card::new(vec![row("Repeat every (UTC)", auto::interval_label(every))]),
+                        Act::AEvery,
+                    ),
+                    Some(every) if email_trigger => push(
+                        &mut cards,
+                        Card::new(vec![row(
+                            crate::automation_email::EVERY_LABEL,
+                            auto::interval_label(every),
+                        )]),
                         Act::AEvery,
                     ),
                     _ => push(
@@ -531,6 +646,15 @@ pub fn panel_cards(
                         Card::note("This trigger has no interval to change."),
                         Act::None,
                     ),
+                }
+                if email_trigger {
+                    push(
+                        &mut cards,
+                        Card::note(crate::automation_email::email_trigger_label(
+                            &summary.trigger.config,
+                        )),
+                        Act::None,
+                    );
                 }
                 push(
                     &mut cards,
@@ -571,6 +695,7 @@ pub fn panel_cards(
                     ]),
                     Act::AApproval,
                 );
+                definition_limits_and_mailbox(s, &summary, &def, &mut cards, &mut acts);
             } else {
                 let w = &s.workflow;
                 let value = if w.gateway_default {
@@ -1099,6 +1224,10 @@ pub fn open_rail(cx: Scope, store: Store, ctx: &UiCtx, binding: Binding, panel: 
         // Bound to an automation: re-read its definition while the panels
         // are open (owned by the modal scope — nothing ticks once closed).
         if let Binding::Automation(id) = &binding {
+            // The Mailbox rows read the account's email status.
+            ctx2.send(Cmd::Automations(
+                crate::gateway::automations::AutoCmd::EmailStatus,
+            ));
             let ctx = ctx2.clone();
             let id = id.clone();
             let _ = abstracttui::reactive::interval(
@@ -1988,8 +2117,18 @@ fn run_act(
                 return;
             };
             let form = auto::revise_form_from(&summary);
+            let email_trigger = crate::automation_email::is_email_trigger(
+                &summary.trigger.source_id,
+                summary.trigger.source_version,
+            );
             let (title, info, initial) = if act == Act::ATitle {
                 ("Title", "At most 120 characters.", form.title.clone())
+            } else if email_trigger {
+                (
+                    crate::automation_email::EVERY_LABEL,
+                    "A whole number of minutes, hours or days (e.g. 30m, 8h, 7d). The shortest interval is 60 s.",
+                    form.every.clone().unwrap_or_default(),
+                )
             } else {
                 (
                     "Repeat every (UTC)",
@@ -2018,6 +2157,144 @@ fn run_act(
                             .update(|r| r.save = SaveState::Refused(errors.join(" "))),
                     }
                 }),
+            );
+        }
+        Act::ACount | Act::AUntil => {
+            let Some((summary, def, _)) = settings.clone() else {
+                return;
+            };
+            let form = auto::revise_form_with(&summary, Some(&def));
+            let is_count = act == Act::ACount;
+            let (title, info, initial) = if is_count {
+                (
+                    "Stop after this many runs",
+                    "A whole number of at least 1; empty = no limit.",
+                    form.count.clone().unwrap_or_default(),
+                )
+            } else {
+                (
+                    "Stop at (UTC)",
+                    "A date and time read as UTC: YYYY-MM-DD HH:MM; empty = no end.",
+                    form.until.clone().unwrap_or_default(),
+                )
+            };
+            let ctx2 = ctx.clone();
+            let binding2 = binding.clone();
+            text_then(
+                title,
+                info,
+                initial,
+                Rc::new(move |v: String| {
+                    let mut f = auto::revise_form_with(&summary, Some(&def));
+                    if is_count {
+                        f.count = Some(v.trim().to_string());
+                    } else {
+                        f.until = Some(v.trim().to_string());
+                    }
+                    match auto::revise_changes_with(&summary, Some(&def), &f) {
+                        Ok(ch) => save_revision(store, &ctx2, &binding2, ch),
+                        Err(errors) => store
+                            .rail
+                            .update(|r| r.save = SaveState::Refused(errors.join(" "))),
+                    }
+                }),
+            );
+        }
+        Act::ANotify => {
+            let Some((summary, def, _)) = settings.clone() else {
+                return;
+            };
+            if !crate::automation_email::EmailStatus::usable(s.email.as_ref()) {
+                store
+                    .rail
+                    .update(|r| r.save = SaveState::Refused("Connect a mailbox first.".into()));
+                return;
+            }
+            let mut f = auto::revise_form_with(&summary, Some(&def));
+            f.notify_email = Some(!f.notify_email.unwrap_or(false));
+            match auto::revise_changes_with(&summary, Some(&def), &f) {
+                Ok(ch) => save_revision(store, ctx, binding, ch),
+                Err(errors) => store
+                    .rail
+                    .update(|r| r.save = SaveState::Refused(errors.join(" "))),
+            }
+        }
+        Act::ARecipients => {
+            use crate::automation_email as email;
+            let Some((summary, def, _)) = settings.clone() else {
+                return;
+            };
+            let form = auto::revise_form_with(&summary, Some(&def));
+            let list = form.recipients.clone().unwrap_or_default();
+            let ctx2 = ctx.clone();
+            let binding2 = binding.clone();
+            let save = Rc::new(move |recipients: email::RecipientsForm| {
+                let mut f = auto::revise_form_with(&summary, Some(&def));
+                f.notify_email = Some(true);
+                f.recipients = Some(recipients);
+                match auto::revise_changes_with(&summary, Some(&def), &f) {
+                    Ok(ch) => save_revision(store, &ctx2, &binding2, ch),
+                    Err(errors) => store
+                        .rail
+                        .update(|r| r.save = SaveState::Refused(errors.join(" "))),
+                }
+            });
+            let ctx3 = ctx.clone();
+            let binding3 = binding.clone();
+            let ctx4 = ctx.clone();
+            let binding4 = binding.clone();
+            open_picker(
+                cx,
+                ctx,
+                Picker {
+                    title: format!(
+                        "{} — ↑↓ · Enter chooses · Esc back",
+                        email::RECIPIENTS_LEGEND
+                    ),
+                    labels: vec![
+                        email::RECIPIENTS_SELF.to_string(),
+                        email::RECIPIENTS_LIST.to_string(),
+                    ],
+                    live: None,
+                    start: usize::from(list.list),
+                    size: modal_size(90, 8),
+                    hint: Some(email::RECIPIENTS_HINT.to_string()),
+                    live_hint: None,
+                    keys: Vec::new(),
+                    on_mount: None,
+                    on_selection: None,
+                    on_choose: Box::new(move |ix| {
+                        let back: Rc<dyn Fn()> = {
+                            let ctx = ctx3.clone();
+                            let binding = binding3.clone();
+                            Rc::new(move || reopen(cx, store, &ctx, &binding, panel))
+                        };
+                        if ix == 0 {
+                            save(email::RecipientsForm::default());
+                            back();
+                            return;
+                        }
+                        // "Me and these addresses": the addresses, then one revision.
+                        let save = save.clone();
+                        let back2 = back.clone();
+                        crate::ui::automations_view::open_text(
+                            cx,
+                            &ctx3,
+                            email::RECIPIENTS_LIST.to_string(),
+                            vec![email::RECIPIENTS_HINT.to_string()],
+                            list.addresses.clone(),
+                            Rc::new(move |v: String| {
+                                save(email::RecipientsForm {
+                                    list: true,
+                                    addresses: v,
+                                });
+                                back2();
+                            }),
+                            back,
+                        );
+                    }),
+                    on_cancel: Some(Box::new(move || reopen(cx, store, &ctx4, &binding4, panel))),
+                },
             );
         }
         Act::ATask => {
