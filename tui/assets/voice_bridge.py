@@ -2,7 +2,7 @@
 
 The terminal client cannot play or record audio itself, so it runs this script
 with the Python that has AbstractVoice installed and talks to it over stdin /
-stdout, one JSON object per line. The bridge has no speech engine: synthesis and
+stdout, one JSON object per line. The bridge has no speech engine; synthesis and
 transcription run on the gateway (`/voice/tts/stream`, `/audio/transcribe`);
 this script only moves audio between those endpoints and the host devices,
 through AbstractVoice's own helpers:

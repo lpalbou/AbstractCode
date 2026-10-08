@@ -2601,18 +2601,34 @@ fn wire_gpu_cadence(cx: Scope, store: Store) {
     });
 }
 
-/// Surface the engine's startup-notices lane (capability fallbacks; in
-/// debug builds also the zero-collapse layout diagnostic) as toasts —
-/// unrendered notices only flush to stderr after teardown, which is the
-/// one place a developer is no longer looking.
+/// The toast for one engine startup notice (capability summary, capability
+/// fallbacks, the zero-collapse layout diagnostic): engine diagnostics are
+/// for developers, never for users — a debug build (`debug` = true) toasts
+/// them, a release build shows nothing (`None`).
+pub fn engine_notice_toast(notice: &str, debug: bool) -> Option<String> {
+    if debug {
+        Some(format!("engine: {notice}"))
+    } else {
+        None
+    }
+}
+
+/// Surface the engine's startup-notices lane as toasts in DEBUG builds only
+/// (unrendered notices only flush to stderr after teardown, which is the one
+/// place a developer is no longer looking); a release build never wires it.
 fn wire_startup_notices(cx: Scope, store: Store) {
+    if !cfg!(debug_assertions) {
+        return;
+    }
     let notices = abstracttui::app::use_startup_notices(cx);
     let seen = Rc::new(Cell::new(0usize));
     cx.effect(move || {
         let list = notices.get();
         let start = seen.replace(list.len());
         for notice in list.iter().skip(start) {
-            store.notify(format!("engine: {notice}"));
+            if let Some(toast) = engine_notice_toast(notice, cfg!(debug_assertions)) {
+                store.notify(toast);
+            }
         }
     });
 }
@@ -2789,7 +2805,20 @@ fn auto_approve_wait(store: Store, ctx: &UiCtx, wait: &PendingWait, why: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use std::sync::mpsc;
+
+    #[test]
+    fn engine_notices_toast_only_in_debug_builds() {
+        // The release path (debug = false): no toast, whatever the engine says.
+        assert_eq!(engine_notice_toast("caps: truecolor", false), None);
+        assert_eq!(engine_notice_toast("layout: child #0 …", false), None);
+        // A debug build keeps the developer diagnostic.
+        assert_eq!(
+            engine_notice_toast("caps: truecolor", true).as_deref(),
+            Some("engine: caps: truecolor")
+        );
+    }
 
     /// The composer hint teaches the BEST newline chord per terminal
     /// (0295): Shift+Enter only where the kitty keyboard protocol is
