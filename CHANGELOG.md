@@ -5,6 +5,15 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- tui: the status line shows **Automations · N waiting** while an automation waits for you — N is the Code web's Automations header badge (`attention.pending_waits + attention.unseen_count` summed over `GET /api/gateway/automations`). `Enter` on an empty prompt, or a click on it, opens the automation that waits (a pending approval or question first, else unseen results). It is read at start and when the gateway comes back, then every 15 s only while something waits or an active automation asks before each tool call; otherwise nothing polls.
+- tui: Workflow → **Default for new conversations**, your account's default workflow kept by the gateway (`GET`/`PUT /api/gateway/accounts/me/preferences`), the same row as the web: **Gateway default (name)** first, verbatim from the gateway, then the workflows you may run; one PUT per change ("Saved." / "Not saved." + the gateway's sentence; the previous choice stays shown on a refusal). A fresh conversation, `/new` and `abstractcode exec` without `--workflow` start on it; `/workflow` then changes only this conversation. The workflow this computer remembered is uploaded once when the account has none, then removed here. With a gateway older than 0.13.1 the panel says so and `/workflow` keeps saving the choice on this computer, as before.
+- tui: `/sessions` **Search conversations** — `/` then typing filters the cards on the title and the id, like the web; `Esc` clears the search before closing.
+- tui: `Ctrl+P` in an automation (`/automations <id>`) reads the selected run's reply aloud through the automation's run, like the web; again = stop.
+
 ## [terminal 0.9.1 / web 0.11.1] - 2026-10-08
 
 ### Added

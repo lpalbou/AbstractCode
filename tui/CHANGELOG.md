@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Automations · N waiting** in the status line while an automation waits
+  for you (N = the Code web's Automations badge: `attention.pending_waits +
+  attention.unseen_count` summed over `GET /automations`). `Enter` on an
+  empty prompt or a click opens the automation that waits. Read at start
+  and when the gateway comes back, then every 15 s only while something
+  waits or an active automation asks before each tool call.
+- **Default for new conversations** (the Workflow panel): your account's
+  default workflow kept by the gateway (`GET`/`PUT
+  /accounts/me/preferences`), with the gateway's **Gateway default (name)**
+  first; one PUT per change, "Saved." / "Not saved." + the gateway's
+  sentence. New conversations, `/new` and `exec` without `--workflow` start
+  on it; `/workflow` changes only this conversation. This computer's old
+  choice is uploaded once, then removed. An older gateway keeps the old
+  behaviour and says so on the panel.
+- `/sessions` **Search conversations** (`/`): filters on title + id; `Esc`
+  clears it before closing.
+- `Ctrl+P` inside an automation reads the selected run's reply aloud.
+
 ## [0.9.1] - 2026-10-08
 
 Needs the AbstractGateway round-11 workspace routes and the round-12 command

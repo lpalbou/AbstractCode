@@ -96,14 +96,17 @@ Status: **0.9.1**, pre-alpha. Release history is in
   `↻ every 24 h · last 3 h ago`, `next in 20 h` and the **Active** switch —
   with **Run now**, **Stop**, **Edit**, **Archive** and an **Archived · N**
   line with **Unarchive**; open one to read its runs, approve its tool calls,
-  browse its folder, or discuss a run as a new chat in place. `/schedule
-  [task]` creates one that runs the current workflow.
+  browse its folder, discuss a run as a new chat in place, or hear a run's
+  reply (`Ctrl+P`). `/schedule [task]` creates one that runs the current
+  workflow. While one waits for you, the status line says **Automations ·
+  N waiting** — `Enter` on an empty prompt opens it.
 - **Settings panels**: `/settings` — Activity, Files, Model, Workflow,
   Workspace, Tools, Skills, Voice — bound to this conversation, or to an
   automation's definition (each change saved as a new revision).
 - **Sessions and memory**: one durable session id per conversation, and a
-  `/sessions` board over them (`Oct 2 · 2 turns · 7 tools`), with Archive
-  and **Archived · N** / Unarchive — nothing is ever deleted.
+  `/sessions` board over them (`Oct 2 · 2 turns · 7 tools`), with
+  **Search conversations** (`/`, title + id), Archive and **Archived · N** /
+  Unarchive — nothing is ever deleted.
   The client carries the live conversation into each run; the gateway
   replays prior turns server-side across restarts (`use_session_history`).
 - **Crash-proof by construction**: quit or crash, relaunch, and you are
@@ -201,7 +204,10 @@ Inside the app:
 - `/workflow` picks the agent: the first row, **Gateway default**, runs the
   workflow your gateway's operator set (a change there applies to your next
   turn); below it, every catalog entrypoint implementing
-  `abstractcode.agent.v1`. `/model` picks provider + model, then the
+  `abstractcode.agent.v1`. The workflow NEW conversations start on is your
+  account's **Default for new conversations** (`/settings workflow`), kept
+  by the gateway and shared with the Assistant and the browser.
+  `/model` picks provider + model, then the
   reasoning effort, then MTP (multi-token prediction — also `/mtp`), `/theme` restyles
 - `/stream` chooses whether replies stream in as the model writes them
   (gateway default, on, off); a streamed reply shows under the transcript
