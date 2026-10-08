@@ -32,13 +32,19 @@ controls. The **Archived · N** line with **Unarchive** needs AbstractGateway
 |---|---|
 | State, as a word then an icon: **Active ▶**, **Paused ⏸**, **Completed ✓**, **Failed ✕**, **Archived ▪** | the automation's `status` |
 | **Now:** "Run #7 running", "Run #7 starting", "Run #7 waiting to retry" | only the gateway's `current_occurrence` |
-| **Next:** "2026-09-27 07:00 UTC (in 25 min)", "none while paused" | only the gateway's `next_fire_at` |
+| **When:** "every 8 hours (UTC)" for Repeat; "Every Mon and Fri at 07:30 (Europe/Paris)" for a calendar or once rule | the gateway's `schedule_rule_text`, verbatim (Repeat keeps the shared fixed-interval words) |
+| **Next:** "2026-10-09 07:30 Europe/Paris (in 12 h)", "none while paused" | only the gateway's `next_run_local` (date and time cut from it) and `next_run_at` (the relative part); neither client computes a next run |
 | The automation's folder | the gateway's `workspace_root`, browsed through the gateway's workspace routes |
 | Attention: "2 unseen · 1 waiting for you" | the gateway's attention items and pending waits |
 
-Schedules are fixed UTC intervals (every N minutes, hours or days) or a single
-run at a UTC date and time. Controls that do not apply are disabled, with the
-reason.
+Schedules are **Repeat** (a fixed UTC interval: every N minutes, hours or days),
+**Daily**, **Weekly** (on the days you pick) or **Monthly** (day 1 to 31, or the
+last day) at a time of day, or **Once at** a date and time. Daily, weekly, monthly
+and one-time rules run on your account's time zone (Settings → Workflow → **Time
+zone** in the browser, or the console's Accounts → Preferences), at the same wall-clock
+time across daylight-saving changes; a day the month does not have runs on its last
+day. The gateway words every rule and computes every next run. Controls that do not
+apply are disabled, with the reason.
 
 ## Creating an automation
 
@@ -53,7 +59,7 @@ conversation workflow. Choosing a different automation workflow leaves the conve
 
 | Choice | Options |
 |---|---|
-| When (UTC) | every 5 or 30 minutes, every hour, 8 hours, 24 hours or 7 days, every N minutes/hours/days, or once at a date and time. The first run starts at once. |
+| When | **Repeat** every 5 or 30 minutes, every hour, 8 hours, 24 hours or 7 days, or every N minutes/hours/days (UTC; the first run starts at once); **Daily** at HH:MM; **Weekly** on the days you pick at HH:MM; **Monthly** on day 1–31 or the last day at HH:MM; **Once at** a date and time. For the last four the line under **When** is the gateway's own sentence ("Runs every Mon and Fri at 07:30 (Europe/Paris), first run Fri 9 Oct 07:30.") with "in Europe/Paris (your account's time zone)"; the zone changes only in your account preferences (**Change in preferences** opens Settings → Workflow). |
 | Context | **Independent** — each run starts fresh. **Growing** — each run is the next turn of one conversation and sees the previous runs, within the gateway's history window. |
 | Tools | **Run without asking** — tools run without asking (you approve them now by creating this automation). **Ask me before each tool call** — every tool call waits for your approval. Questions a workflow asks always wait for you. |
 | Email (browser) | **When an email arrives** (a When choice), **Email result** and **Recipients** — see [Email automations](#email-automations-browser). |

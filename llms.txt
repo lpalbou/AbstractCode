@@ -34,7 +34,7 @@ Ground rules for reading this repository:
 - [Architecture](docs/architecture.md): the clients, the browser app server, the gateway, the terminal's voice bridge, the run stream with live reply deltas, the thin-client contract, and repository layout
 - [API and integration points](docs/api.md): the command-line surface, the library surface, and the gateway contract (runs, streams, discovery, workspace files, conversations and archiving, automations, voice, about)
 - [Workflows](docs/workflows.md): the gateway default agent workflow, selecting a workflow, and the `abstractcode.agent.v1` interface
-- [Automations](docs/automations.md): configurable growing-context budgets and result email; creating, managing, answering and discussing gateway automations from the terminal (`/automations`, `/schedule`, Edit in `/settings`) and the browser (the Automations sidebar section)
+- [Automations](docs/automations.md): Repeat, Daily, Weekly, Monthly and Once schedules on the account's time zone (the gateway words each rule and computes each next run); configurable growing-context budgets and result email; creating, managing, answering and discussing gateway automations from the terminal (`/automations`, `/schedule`, Edit in `/settings`) and the browser (the Automations sidebar section)
 - [Interface events](docs/ui_events.md): the workflow-driven event contract
 - [FAQ](docs/faq.md): recurring questions and current limitations
 - [Troubleshooting](docs/troubleshooting.md): symptom-oriented diagnosis and fixes, including archive and voice on an older gateway
