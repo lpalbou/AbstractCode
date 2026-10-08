@@ -822,3 +822,38 @@ fn enter_continues_the_filtered_conversation() {
     h.keys(b"\r");
     assert_eq!(h.store.session_id.get_untracked(), "acode-7f3a91");
 }
+
+// -- wording: verbatim from the Code web in this repository ------------------------
+
+/// The terminal's sentences are the Code web's, byte for byte: read from
+/// `web/src/workspace/` (a missing file fails — the seam is never skipped).
+#[test]
+fn the_wording_is_the_code_webs() {
+    let web = concat!(env!("CARGO_MANIFEST_DIR"), "/../web/src/workspace");
+    let read = |name: &str| {
+        std::fs::read_to_string(format!("{web}/{name}"))
+            .unwrap_or_else(|e| panic!("the Code web source {name} is missing: {e}"))
+    };
+    let row = read("account_workflow_default.tsx");
+    for s in [ap::LABEL, ap::HELP, ap::SAVED] {
+        assert!(row.contains(s), "{s:?} is not the web's wording");
+    }
+    assert!(
+        row.contains("`Not saved. ${"),
+        "the web's refusal order: Not saved. <sentence>"
+    );
+    assert!(row.contains("(no longer runs)"));
+    let app = read("app.tsx");
+    for s in [
+        abstractcode::conversations::SEARCH_LABEL,
+        abstractcode::conversations::NO_MATCH,
+    ] {
+        assert!(app.contains(s), "{s:?} is not the web's wording");
+    }
+    // The match rule itself: `${item.prompt || ""} ${item.sessionId}` lower-cased.
+    assert!(app.contains("`${item.prompt || \"\"} ${item.sessionId}`"));
+    let header = read("automations_view.tsx");
+    assert!(header.contains(
+        "st.items.reduce((n, s) => n + s.attention.pending_waits + s.attention.unseen_count, 0)"
+    ));
+}
