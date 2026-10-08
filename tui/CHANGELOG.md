@@ -25,6 +25,26 @@ All notable changes to this project are documented here. The format follows
 - `/sessions` **Search conversations** (`/`): filters on title + id; `Esc`
   clears it before closing.
 - `Ctrl+P` inside an automation reads the selected run's reply aloud.
+- `/schedule` — the Code web's dialog in seven steps, with its words:
+  **What** (the workflow: the conversation's, or any workflow you may run —
+  `GET /bundles?executable_for=abstractcode.agent.v1`, **Gateway default**
+  first — and the task), **When (UTC)** (Repeat, Once at…, **When an email
+  arrives**), **Context** (+ **Max growing context (tokens)**), **Tools** (the
+  `/tools` rows, starting from the conversation's tools; **Use workflow
+  default tools**), **Workspaces**, **Mailbox** (**Email result**,
+  **Recipients**) and **Title and limits**. Email choices only when
+  `GET /api/gateway/me/email` says the mailbox is usable.
+- The automation definition panel (Edit → Workflow) changes **Stop after this
+  many runs** / **Stop at (UTC)**, the email check interval, **Email result**
+  and **Recipients**; each change is one revision, a refusal stays readable.
+
+### Changed
+
+- A new automation's `target.input_data` is the web's: the workflow's input
+  schema defaults + the conversation's provider/model, reasoning, stream,
+  limits, tools and skills, validated against the schema before the POST
+  (previously `{prompt}` only). A test compares the POST body with one built
+  by the web's own functions (`scripts/web_schedule_body.ts`).
 
 ## [0.9.1] - 2026-10-08
 

@@ -79,8 +79,8 @@ for credentials, remote gateways, and first-run configuration.
 - **Voice** — dictate into the composer and hear replies read aloud through the
   gateway's speech routes (the **Voice** panel and the composer microphone,
   `/voice`, `Ctrl+R`, `Ctrl+P`).
-- **Automations** — run a workflow on a schedule (or, in the browser, when an
-  email arrives, with the result emailed to you), then switch it off with its
+- **Automations** — run a workflow on a schedule (or when an email arrives,
+  with the result emailed to you), then switch it off with its
   **Active** switch, run it now, edit it, archive it, answer its approvals,
   browse its folder, and discuss any run as a new conversation (the
   **Automations** sidebar section, `/automations`, `/schedule`).

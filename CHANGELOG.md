@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - tui: Workflow → **Default for new conversations**, your account's default workflow kept by the gateway (`GET`/`PUT /api/gateway/accounts/me/preferences`), the same row as the web: **Gateway default (name)** first, verbatim from the gateway, then the workflows you may run; one PUT per change ("Saved." / "Not saved." + the gateway's sentence; the previous choice stays shown on a refusal). A fresh conversation, `/new` and `abstractcode exec` without `--workflow` start on it; `/workflow` then changes only this conversation. The workflow this computer remembered is uploaded once when the account has none, then removed here. With a gateway older than 0.13.1 the panel says so and `/workflow` keeps saving the choice on this computer, as before.
 - tui: `/sessions` **Search conversations** — `/` then typing filters the cards on the title and the id, like the web; `Esc` clears the search before closing.
 - tui: `Ctrl+P` in an automation (`/automations <id>`) reads the selected run's reply aloud through the automation's run, like the web; again = stop.
+- tui: `/schedule` is the Code web's dialog in seven steps with its words — **What** (a workflow picker on `GET /bundles?executable_for=abstractcode.agent.v1`, **Gateway default** first, and the task), **When (UTC)** (Repeat, Once at…, **When an email arrives** with the kit's filters, check interval and batch size), **Context** (+ **Max growing context (tokens)**), **Tools** (the `/tools` rows, starting from the conversation's tools), **Workspaces**, **Mailbox** (**Email result**, **Recipients**) and **Title and limits**. The email choices are offered only when `GET /api/gateway/me/email` says the mailbox is usable ("Connect a mailbox first — open My email" otherwise).
+- tui: an automation's **Edit** (Workflow panel) changes **Stop after this many runs** / **Stop at (UTC)**, an email automation's check interval, **Email result** and its **Recipients** — one revision each.
+
+### Changed
+
+- tui: an automation created in the terminal carries the workflow's real inputs, built like the web's: the workflow's input schema defaults, then the conversation's provider/model, reasoning, stream setting, iteration and token limits, tools and skills (never its workspace or approval policy), checked against the schema before the POST (the check's sentence otherwise). Before, only the task was sent.
 
 ## [terminal 0.9.1 / web 0.11.1] - 2026-10-08
 

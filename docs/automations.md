@@ -56,11 +56,18 @@ conversation workflow. Choosing a different automation workflow leaves the conve
 | When (UTC) | every 5 or 30 minutes, every hour, 8 hours, 24 hours or 7 days, every N minutes/hours/days, or once at a date and time. The first run starts at once. |
 | Context | **Independent** — each run starts fresh. **Growing** — each run is the next turn of one conversation and sees the previous runs, within the gateway's history window. |
 | Tools | **Run without asking** — tools run without asking (you approve them now by creating this automation). **Ask me before each tool call** — every tool call waits for your approval. Questions a workflow asks always wait for you. |
-| Email (browser) | **When an email arrives** (a When choice), **Email result** and **Recipients** — see [Email automations](#email-automations-browser). |
+| Email | **When an email arrives** (a When choice), **Email result** and **Recipients** — see [Email automations](#email-automations). |
 
-**Terminal.** `/schedule [task]` opens four steps: the task (default: your
-last prompt, or the text after `/schedule`), when, context, tools. Enter on
-the last step creates it and opens it.
+**Terminal.** `/schedule [task]` shows the browser dialog's sections as seven
+steps, with the same words: **What** (the workflow — the conversation's, or
+any workflow you may run with **Gateway default** first — and the task:
+default your last prompt, or the text after `/schedule`), **When (UTC)**,
+**Context**, **Tools** (the `/tools` rows, starting from the conversation's
+tools), **Workspaces**, **Mailbox** and **Title and limits**. The cursor
+starts on **Continue**, so Enter, Enter, … creates it with the defaults and
+opens it. The run input is built as in the browser (the workflow's input
+defaults plus the conversation's model, tools and skills, checked against the
+workflow's inputs before anything is sent).
 
 **Browser.** Select **+** in the **Automations** section of the sidebar. The
 dialog lets you choose the workflow it runs. Every section is visible (no
@@ -86,10 +93,10 @@ The automation's header shows its workspaces in one line, **Workspaces:
 verbatim). The pencil next to it (**Change workspaces**) opens the right rail's
 **Workspace** panel on that automation: each change there is one new revision.
 
-### Email automations (browser)
+### Email automations
 
 When your gateway account has a working mailbox (the gateway console's
-**My email**, in its Users tab), the browser dialog also offers:
+**My email**, in its Users tab), the dialog (browser and terminal) also offers:
 
 - **When an email arrives** — the automation runs on new mail in your inbox
   instead of on a schedule. Optional filters: from these addresses, from these
@@ -107,9 +114,10 @@ When your gateway account has a working mailbox (the gateway console's
 Without a connected mailbox these options are off and the dialog says
 **"Connect a mailbox first — open My email"**; the link opens the gateway console in a new
 tab. The automation's **Edit** (its **Workflow** panel in the right rail) changes the workflow, task, tools, check interval, **Email result**
-and its recipients; its **Definition** card lists them. The
-terminal client does not create email automations yet (it lists and manages
-them like any other).
+and its recipients; its **Definition** card lists them. In the terminal,
+**Edit** (`e`) opens the **Workflow** panel on the automation: **Check for new
+mail every**, **Stop after this many runs** / **Stop at (UTC)** (repeating
+schedules), **Email result** and **Recipients**, each change one revision.
 
 ## Managing an automation
 

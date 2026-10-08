@@ -97,8 +97,12 @@ Status: **0.9.1**, pre-alpha. Release history is in
   with **Run now**, **Stop**, **Edit**, **Archive** and an **Archived · N**
   line with **Unarchive**; open one to read its runs, approve its tool calls,
   browse its folder, discuss a run as a new chat in place, or hear a run's
-  reply (`Ctrl+P`). `/schedule [task]` creates one that runs the current
-  workflow. While one waits for you, the status line says **Automations ·
+  reply (`Ctrl+P`). `/schedule [task]` creates one with the Code web's
+  dialog: the workflow (the conversation's, or any workflow you may run),
+  the task, when (repeat, once, or **When an email arrives**), context,
+  tools, workspaces, **Mailbox** (**Email result**) and title and limits —
+  with this conversation's model, tools and skills as the run input. An
+  automation's **Edit** also changes its run limits and email options. While one waits for you, the status line says **Automations ·
   N waiting** — `Enter` on an empty prompt opens it.
 - **Settings panels**: `/settings` — Activity, Files, Model, Workflow,
   Workspace, Tools, Skills, Voice — bound to this conversation, or to an

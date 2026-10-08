@@ -262,8 +262,10 @@ for you (an approval, a question, a result you have not seen), the status
 line says **Automations · N waiting**; `Enter` on an empty prompt opens it.
 `/workspace` opens this conversation's workspaces: **Use my default**, or
 your own rows with Read-only / Read & write / Refused, stored on the
-conversation by the gateway. `/schedule` walks through the task, when,
-context, tools, **Workspaces** and **Title and limits**. Details in
+conversation by the gateway. `/schedule` walks through the Code web's seven
+sections: **What** (workflow and task), **When (UTC)** (including **When an
+email arrives** when your mailbox is connected), **Context**, **Tools**,
+**Workspaces**, **Mailbox** and **Title and limits**. Details in
 [api.md](api.md#settings-panels-settings) and
 [api.md](api.md#workspaces-workspace). Archiving and **Archived · N**
 need AbstractGateway 0.13.0 or later.
