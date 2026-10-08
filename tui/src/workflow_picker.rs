@@ -386,7 +386,10 @@ mod tests {
             "/api/gateway/bundles/basic-agent/flows/81795ea9?bundle_version=0.0.5"
         );
         let r = crate::gateway::automations::email_status_request();
-        assert_eq!((r.method, r.path.as_str()), ("GET", "/api/gateway/me/email"));
+        assert_eq!(
+            (r.method, r.path.as_str()),
+            ("GET", "/api/gateway/me/email")
+        );
     }
 
     #[test]
