@@ -69,6 +69,29 @@ pub enum AutoCmd {
         wait: Box<Wait>,
         payload: Value,
     },
+    /// `/schedule` opens: the account's email status, the executable
+    /// workflows for the picker, and the conversation workflow's input
+    /// schema (bundle, version, flow).
+    Prepare {
+        schema: Option<(String, String, String)>,
+    },
+    /// The account's email status only (the definition panel's Mailbox rows).
+    EmailStatus,
+    /// One workflow's input schema (a pick in `/schedule`).
+    Schema {
+        bundle: String,
+        version: String,
+        flow: String,
+    },
+}
+
+/// `GET /api/gateway/me/email`.
+pub fn email_status_request() -> Request {
+    Request {
+        method: "GET",
+        path: "/api/gateway/me/email".into(),
+        body: None,
+    }
 }
 
 #[derive(Clone)]
@@ -144,6 +167,67 @@ impl AutomationClient {
                 field: None,
             }),
         }
+    }
+
+    /// `GET /me/email` → the dialog's email gate (`None` when it cannot be
+    /// read: unknown is not usable, never an automations error).
+    pub fn email_status(&self) -> Option<crate::automation_email::EmailStatus> {
+        self.send(&email_status_request())
+            .ok()
+            .and_then(|v| crate::automation_email::EmailStatus::parse(&v).ok())
+    }
+
+    /// The executable workflows for the picker (the kit's parser: a
+    /// gateway that ignores the contract is an error, shown as such).
+    pub fn executable(&self) -> Result<crate::workflow_picker::Executable, String> {
+        let r = Request {
+            method: "GET",
+            path: crate::workflow_picker::path(auto::CODE_AGENT_INTERFACE),
+            body: None,
+        };
+        let v = self.send(&r).map_err(|e| auto::api_error_text(&e))?;
+        crate::workflow_picker::parse(&v, auto::CODE_AGENT_INTERFACE)
+    }
+
+    /// One workflow's input schema, as the web's `fetchWorkflowSchema` reads
+    /// it: the `input_schema` route, normalised; an older v1 descriptor with
+    /// required pins reconciled with its VisualFlow.
+    pub fn schema(&self, bundle: &str, version: &str, flow: &str) -> Result<Value, String> {
+        use crate::schedule_input as si;
+        let get = |path: String| {
+            self.send(&Request {
+                method: "GET",
+                path,
+                body: None,
+            })
+            .map_err(|e| auto::api_error_text(&e))
+        };
+        let raw = get(si::input_schema_path(bundle, flow, version))?;
+        let schema = si::normalize_input_schema(&raw).ok_or_else(|| {
+            "This workflow does not report its input requirements. Choose another workflow."
+                .to_string()
+        })?;
+        if !si::needs_visualflow(&raw, &schema) {
+            return Ok(schema);
+        }
+        let version = if version.is_empty() {
+            raw.get("bundle_version")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string()
+        } else {
+            version.to_string()
+        };
+        if version.is_empty() {
+            return Err(
+                "The Gateway did not identify the workflow version. Refresh workflows and retry."
+                    .into(),
+            );
+        }
+        si::assert_selection(&raw, bundle, &version, flow)?;
+        let source = get(si::flow_source_path(bundle, flow, &version))?;
+        si::assert_selection(&source, bundle, &version, flow)?;
+        si::reconcile_visualflow_schema(&schema, source.get("flow").unwrap_or(&Value::Null))
     }
 
     fn capability(&self) -> Result<(), String> {
@@ -571,7 +655,40 @@ fn run(client: &AutomationClient, wake: &WakeHandle, store: Store, cmd: AutoCmd)
                 follow_up(client, wake, store, Some(id));
             }
         }
+        AutoCmd::Prepare { schema } => {
+            let email = client.email_status();
+            let executable = client.executable();
+            wake.post(move || {
+                store.automations.update(|v| {
+                    v.email = email;
+                    v.executable = Some(executable);
+                })
+            });
+            if let Some(key) = schema {
+                post_schema(client, wake, store, key);
+            }
+        }
+        AutoCmd::EmailStatus => {
+            let email = client.email_status();
+            wake.post(move || store.automations.update(|v| v.email = email));
+        }
+        AutoCmd::Schema {
+            bundle,
+            version,
+            flow,
+        } => post_schema(client, wake, store, (bundle, version, flow)),
     }
+}
+
+fn post_schema(
+    client: &AutomationClient,
+    wake: &WakeHandle,
+    store: Store,
+    (bundle, version, flow): (String, String, String),
+) {
+    let answer = client.schema(&bundle, &version, &flow);
+    let key = auto::schema_key(&bundle, &version, &flow);
+    wake.post(move || store.automations.update(|v| v.put_schema(key, answer)));
 }
 
 fn follow_up(client: &AutomationClient, wake: &WakeHandle, store: Store, open: Option<String>) {

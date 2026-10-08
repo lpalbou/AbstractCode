@@ -2045,6 +2045,91 @@ fn draw_rows_pinned(
         .build()
 }
 
+/// One row of the `/tools` list: the toolset headings, then each tool —
+/// a served-disabled row visible with its gate (never grantable), a pin
+/// marker, the gateway's command-sandbox label verbatim (R14.4), the
+/// description. `name` = the tool a selectable row toggles. Shared by
+/// `/tools` and `/schedule`'s Tools step (R17.2): one row vocabulary.
+pub(crate) struct ToolRow {
+    pub(crate) spec: RowSpec,
+    pub(crate) name: Option<String>,
+    pub(crate) grantable: bool,
+}
+
+pub(crate) fn tool_rows(
+    tools: &[crate::store::ToolInfo],
+    on: &dyn Fn(&str) -> bool,
+    overrides: &[(String, String)],
+) -> Vec<ToolRow> {
+    let mut rows = Vec::new();
+    let mut last_group = String::from("\u{0}");
+    for tool in tools {
+        if tool.toolset != last_group {
+            last_group = tool.toolset.clone();
+            let label = if last_group.is_empty() {
+                "other".to_string()
+            } else {
+                last_group.clone()
+            };
+            rows.push(ToolRow {
+                spec: RowSpec {
+                    text: label,
+                    header: true,
+                    checked: None,
+                    dim: false,
+                },
+                name: None,
+                grantable: false,
+            });
+        }
+        // Served-disabled rows (full-catalog surfacing): visible with
+        // their gate, no checkbox — the row is a server fact, not a
+        // grantable selection. Still cursor-reachable so Space/p teach
+        // the gate through the refusal notice.
+        if tool.served_disabled {
+            let gate = gate_suffix(&tool.enable_gate);
+            rows.push(ToolRow {
+                spec: RowSpec {
+                    text: format!("{} — disabled on this gateway{gate}", tool.name),
+                    header: false,
+                    checked: Some(Mark::Unavailable),
+                    dim: true,
+                },
+                name: Some(tool.name.clone()),
+                grantable: false,
+            });
+            continue;
+        }
+        // Pin marker (item 4): a pinned tool shows its decision so the
+        // override is legible at a glance.
+        let pin = overrides
+            .iter()
+            .find(|(n, _)| *n == tool.name)
+            .map(|(_, d)| match d.as_str() {
+                "auto" => "  [pin:auto]",
+                "ask" => "  [pin:ask]",
+                _ => "",
+            })
+            .unwrap_or("");
+        rows.push(ToolRow {
+            spec: RowSpec {
+                // The gateway's command-sandbox state of a process-spawning
+                // tool, verbatim (R14.4).
+                text: match &tool.sandbox {
+                    Some(sb) => format!("{}{pin}  [{}]  {}", tool.name, sb.label, tool.description),
+                    None => format!("{}{pin}  {}", tool.name, tool.description),
+                },
+                header: false,
+                checked: Some(Mark::switch(on(&tool.name))),
+                dim: false,
+            },
+            name: Some(tool.name.clone()),
+            grantable: true,
+        });
+    }
+    rows
+}
+
 /// `/tools` — enable/disable gateway tools for this client's runs.
 /// Untouched = the workflow's own defaults; once customized, the CHECKED
 /// set is exactly the allowlist sent with every run (`input_data.tools`).
@@ -2329,68 +2414,11 @@ pub fn open_tools(cx: Scope, store: Store, ctx: &UiCtx) {
                     let cur = cursor.get();
                     let mut rows = Vec::new();
                     let mut selectable = Vec::new();
-                    let mut last_group = String::from("\u{0}");
-                    for tool in &tools {
-                        if tool.toolset != last_group {
-                            last_group = tool.toolset.clone();
-                            let label = if last_group.is_empty() {
-                                "other".to_string()
-                            } else {
-                                last_group.clone()
-                            };
-                            rows.push(RowSpec {
-                                text: label,
-                                header: true,
-                                checked: None,
-                                dim: false,
-                            });
-                        }
-                        // Served-disabled rows (full-catalog surfacing):
-                        // visible with their gate, no checkbox — the row
-                        // is a server fact, not a grantable selection.
-                        // Still cursor-reachable so Space/p teach the
-                        // gate through the refusal notice.
-                        if tool.served_disabled {
-                            let gate = gate_suffix(&tool.enable_gate);
+                    for row in tool_rows(&tools, &|n| !disabled.iter().any(|d| d == n), &overrides) {
+                        if row.name.is_some() {
                             selectable.push(rows.len());
-                            rows.push(RowSpec {
-                                text: format!(
-                                    "{} — disabled on this gateway{gate}",
-                                    tool.name
-                                ),
-                                header: false,
-                                checked: Some(Mark::Unavailable),
-                                dim: true,
-                            });
-                            continue;
                         }
-                        let on = !disabled.contains(&tool.name);
-                        // Pin marker (item 4): a pinned tool shows its
-                        // decision so the override is legible at a glance.
-                        let pin = overrides
-                            .iter()
-                            .find(|(n, _)| *n == tool.name)
-                            .map(|(_, d)| match d.as_str() {
-                                "auto" => "  [pin:auto]",
-                                "ask" => "  [pin:ask]",
-                                _ => "",
-                            })
-                            .unwrap_or("");
-                        selectable.push(rows.len());
-                        rows.push(RowSpec {
-                            // The gateway's command-sandbox state of a
-                            // process-spawning tool, verbatim (R14.4).
-                            text: match &tool.sandbox {
-                                Some(sb) => format!(
-                                    "{}{pin}  [{}]  {}",
-                                    tool.name, sb.label, tool.description
-                                ),
-                                None => format!("{}{pin}  {}", tool.name, tool.description),
-                            },
-                            header: false,
-                            checked: Some(Mark::switch(on)),
-                            dim: false,
-                        });
+                        rows.push(row.spec);
                     }
                     if rows.is_empty() {
                         rows.push(RowSpec {

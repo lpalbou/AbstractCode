@@ -180,6 +180,7 @@ impl Harness {
             max_attempts: Some(3),
             workspace_root: summary.workspace_root.clone().unwrap(),
             target: serde_json::Value::Null,
+            notify: serde_json::Value::Null,
         };
         let page = auto::parse_occurrence_page(&fixture("occurrences.json")).unwrap();
         self.store
@@ -590,65 +591,174 @@ fn the_folder_is_browsed_through_the_gateway_workspace_routes() {
     );
 }
 
+const SCHEDULE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/schedule");
+
+fn schedule_fixture(name: &str) -> Value {
+    serde_json::from_slice(&std::fs::read(format!("{SCHEDULE}/{name}")).unwrap()).unwrap()
+}
+
+impl Harness {
+    /// Answer `/schedule`'s Prepare as the lane would: the email status
+    /// (`me_email_*.json`), the executable workflows, and the conversation
+    /// workflow's schema (basic-agent's recorded schema).
+    fn answer_prepare(&mut self, email: &str) {
+        let status =
+            abstractcode::automation_email::EmailStatus::parse(&schedule_fixture(email)).ok();
+        let exec = abstractcode::workflow_picker::parse(
+            &schedule_fixture("bundles_executable_code_agent.json"),
+            auto::CODE_AGENT_INTERFACE,
+        );
+        let schema = abstractcode::schedule_input::normalize_input_schema(&schedule_fixture(
+            "input_schema_basic_agent.json",
+        ))
+        .unwrap();
+        self.store.automations.update(|v| {
+            v.email = status;
+            v.executable = Some(exec);
+            v.put_schema(
+                auto::schema_key("basic-agent", "9.9.9", "agent"),
+                Ok(schema),
+            );
+        });
+        self.turn();
+    }
+
+    fn created(&mut self) -> Value {
+        self.auto_cmds()
+            .into_iter()
+            .find_map(|c| match c {
+                AutoCmd::Create { body } => Some(body),
+                _ => None,
+            })
+            .expect("create")
+    }
+
+    fn up(&mut self, n: usize) -> String {
+        let mut screen = String::new();
+        for _ in 0..n {
+            screen = self.keys(b"\x1b[A");
+        }
+        screen
+    }
+}
+
+const BASIC_TOOLS: [&str; 9] = [
+    "edit_file",
+    "analyze_code",
+    "execute_command",
+    "fetch_url",
+    "list_files",
+    "read_file",
+    "search_files",
+    "web_search",
+    "write_file",
+];
+
 #[test]
 fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     let mut h = harness();
     let screen = h.command("/schedule");
-    assert!(screen.contains("new automation — 1/6 the task"), "{screen}");
+    let cmds = h.auto_cmds();
     assert!(
-        screen.contains("The task below is sent as the prompt of every run."),
-        "every info line fits:\n{screen}"
+        cmds.iter()
+            .any(|c| matches!(c, AutoCmd::Prepare { schema: Some((b, v, f)) }
+            if b == "basic-agent" && v == "9.9.9" && f == "agent")),
+        "the dialog reads the email status, the workflows and the schema: {cmds:?}"
     );
-    // The task defaults to the conversation's last prompt.
-    let screen = h.keys(b"\r");
-    // Every When row is visible (the panel fits its rows).
-    assert!(
-        screen.contains("every 5 minutes (UTC)")
-            && screen.contains("once, at a date and time (UTC)"),
-        "{screen}"
-    );
-    // When: presets start at "every 24 hours"; go up to "every 5 minutes".
-    for _ in 0..4 {
-        h.keys(b"\x1b[A");
+    h.answer_prepare("me_email_not_connected.json");
+    assert!(screen.contains("New automation — 1/7 What"), "{screen}");
+    let screen = h.turn();
+    for label in [
+        "Workflow",
+        "basic-agent",
+        "Task",
+        "report the free memory of this computer",
+        "Continue — When (UTC)",
+    ] {
+        assert!(screen.contains(label), "{label}:\n{screen}");
     }
-    h.keys(b"\r");
-    // Context: Growing.
-    h.keys(b"\x1b[B");
+    // 2/7 When: Repeat, Once at…, the email option disabled with the kit's notice.
     let screen = h.keys(b"\r");
-    assert!(screen.contains("4/6 tools"), "{screen}");
     assert!(
-        screen.contains("Run without asking — tools run without asking"),
+        screen.contains("New automation — 2/7 When (UTC)"),
+        "{screen}"
+    );
+    for label in [
+        "(•) Repeat",
+        "( ) Once at…",
+        "(-) When an email arrives",
+        "Connect a mailbox first — open My email",
+        "(•) every 24 hours",
+        "every 5 minutes",
+        "Runs every 24 hours (UTC), first run now.",
+    ] {
+        assert!(screen.contains(label), "{label}:\n{screen}");
+    }
+    // every 5 minutes: from Continue, up past unit, Every and five presets.
+    h.up(8);
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("(•) every 5 minutes"), "{screen}");
+    // 3/7 Context: Growing (its token budget appears with the kit's help).
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("3/7 Context"), "{screen}");
+    h.up(1);
+    let screen = h.keys(b"\r");
+    for label in [
+        "(•) Growing — each run sees the previous runs",
+        "Max growing context (tokens)",
+        "50000",
+        "Limits history carried into the next run",
+    ] {
+        assert!(screen.contains(label), "{label}:\n{screen}");
+    }
+    // 4/7 Tools: the served default tool list is the first selection.
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("4/7 Tools"), "{screen}");
+    for label in [
+        "[ ] Use workflow default tools",
+        "[x] read_file",
+        "(•) Run without asking",
+        "( ) Ask me before each tool call (the run waits for you)",
+        "Tools run without asking (you approve them now by creating this automation).",
+        "An empty selection disables tools.",
+    ] {
+        assert!(screen.contains(label), "{label}:\n{screen}");
+    }
+    assert!(
+        !screen.contains("Incoming mail is data"),
+        "untrusted hint only with the email trigger"
+    );
+    h.up(1); // Ask me
+    let screen = h.keys(b"\r");
+    assert!(
+        screen.contains("(•) Ask me before each tool call"),
         "{screen}"
     );
     assert!(
-        screen.contains("Ask me before each tool call"),
-        "both tool choices are visible:\n{screen}"
-    );
-    // Tools: ask each time.
-    h.keys(b"\x1b[B");
-    let screen = h.keys(b"\r");
-    // 5/6 Workspaces: the kit chooser at the run level, visible (no
-    // disclosure), read from the gateway's dry run.
-    assert!(
-        screen.contains("new automation — 5/6 Workspaces"),
+        screen.contains("Each tool call waits for your approval in the automation's timeline."),
         "{screen}"
     );
-    assert!(screen.contains("Continue — Title and limits"), "{screen}");
+    // 5/7 Workspaces.
+    let screen = h.keys(b"\r");
+    assert!(
+        screen.contains("New automation — 5/7 Workspaces"),
+        "{screen}"
+    );
+    assert!(screen.contains("Continue — Mailbox"), "{screen}");
     h.answer_dry_run();
     let screen = h.turn();
     assert!(screen.contains("[x] Use my default"), "{screen}");
+    // 6/7 Mailbox: not usable → the notice and the unavailable switch.
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("6/7 Mailbox"), "{screen}");
     assert!(
-        screen.contains("Gateway: Allow everything, refuse listed workspaces (rw)"),
+        screen.contains("[-] Email result — Connect a mailbox first."),
         "{screen}"
     );
-    assert!(
-        screen.contains("The workspaces this run uses, among the eligible ones."),
-        "{screen}"
-    );
-    // Continue (the cursor starts on it): 6/6 Title and limits, visible.
+    // 7/7 Title and limits.
     let screen = h.keys(b"\r");
     assert!(
-        screen.contains("new automation — 6/6 Title and limits"),
+        screen.contains("New automation — 7/7 Title and limits"),
         "{screen}"
     );
     for label in [
@@ -663,24 +773,39 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     }
     assert!(!screen.contains("Advanced"), "{screen}");
     h.keys(b"\r");
-    let cmds = h.auto_cmds();
-    let body = match cmds.iter().find(|c| matches!(c, AutoCmd::Create { .. })) {
-        Some(AutoCmd::Create { body }) => body.clone(),
-        other => panic!("expected a create, got {other:?} in {cmds:?}"),
-    };
+    let body = h.created();
     let rid = body["request_id"].as_str().unwrap().to_string();
     assert!(!rid.is_empty());
+    let input = &body["target"]["input_data"];
+    assert_eq!(body["target"]["bundle_ref"], json!("basic-agent@9.9.9"));
+    assert_eq!(body["target"]["flow_id"], json!("agent"));
     assert_eq!(
-        body,
-        json!({
-            "request_id": rid,
-            "title": "report the free memory of this computer",
-            "target": {"bundle_ref": "basic-agent@9.9.9", "flow_id": "agent",
-                       "input_data": {"prompt": "report the free memory of this computer"}},
-            "trigger": {"source_id": "schedule", "source_version": 1, "config": {"every": "5m"}},
-            "context": {"mode": "growing"},
-            "policy": {"tool_approval": "ask"},
-        })
+        input["prompt"],
+        json!("report the free memory of this computer")
+    );
+    assert_eq!(
+        input["context"],
+        json!({"task": "report the free memory of this computer"})
+    );
+    assert_eq!(input["use_session_history"], json!(true));
+    assert_eq!(input["use_context"], json!(false));
+    assert_eq!(input["max_iterations"], json!(20), "a schema default");
+    assert_eq!(input["tools"], json!(BASIC_TOOLS));
+    assert_eq!(input["_runtime"]["allowed_tools"], json!(BASIC_TOOLS));
+    assert!(input.get("workspace_root").is_none());
+    assert_eq!(
+        body["title"],
+        json!("report the free memory of this computer")
+    );
+    assert_eq!(
+        body["trigger"],
+        json!({"source_id": "schedule", "source_version": 1, "config": {"every": "5m"}})
+    );
+    assert_eq!(body["context"], json!({"mode": "growing"}));
+    assert_eq!(body["policy"], json!({"tool_approval": "ask"}));
+    assert!(
+        body.get("notify").is_none(),
+        "nothing email-shaped without a usable mailbox"
     );
     // The gateway answers: the new automation opens.
     h.store.automations.update(|v| {
@@ -702,23 +827,17 @@ fn schedule_with_the_gateway_default_targets_at_default() {
     let mut h = harness();
     h.store.workflow.update(|w| w.gateway_default = true);
     h.command("/schedule watch the disk");
-    h.keys(b"\r"); // task (seeded from the argument)
-    h.keys(b"\r"); // every 24 hours
-    h.keys(b"\r"); // independent
-    h.keys(b"\r"); // tools run without asking
-    h.keys(b"\r"); // Workspaces: Continue (Use my default)
+    h.answer_prepare("me_email_not_connected.json");
+    for _ in 0..6 {
+        h.keys(b"\r"); // What, When, Context, Tools, Workspaces, Mailbox
+    }
     h.keys(b"\r"); // Title and limits: Create automation
-    let body = h
-        .auto_cmds()
-        .into_iter()
-        .find_map(|c| match c {
-            AutoCmd::Create { body } => Some(body),
-            _ => None,
-        })
-        .expect("create");
+    let body = h.created();
+    assert_eq!(body["target"]["flow_id"], json!("@default"));
+    assert_eq!(body["target"]["interface"], json!("abstractcode.agent.v1"));
     assert_eq!(
-        body["target"],
-        json!({"flow_id": "@default", "interface": "abstractcode.agent.v1", "input_data": {"prompt": "watch the disk"}})
+        body["target"]["input_data"]["prompt"],
+        json!("watch the disk")
     );
     assert_eq!(body["trigger"]["config"], json!({"every": "24h"}));
     assert_eq!(body["context"], json!({"mode": "independent"}));
@@ -730,10 +849,11 @@ fn the_dialog_workspaces_and_limits_ride_the_create_body() {
     use abstractcode::gateway::workspaces::{RunCommit, WsCmd};
     let mut h = harness();
     h.command("/schedule watch the disk");
-    h.keys(b"\r"); // task
+    h.answer_prepare("me_email_not_connected.json");
+    h.keys(b"\r"); // What
     h.keys(b"\r"); // every 24 hours
     h.keys(b"\r"); // independent
-    h.keys(b"\r"); // tools run without asking
+    h.keys(b"\r"); // tools
     h.answer_dry_run();
     // Use my default OFF (the first card): one dry run of what applies now.
     for _ in 0..12 {
@@ -757,12 +877,14 @@ fn the_dialog_workspaces_and_limits_ride_the_create_body() {
         w.draft = Some(value.clone());
     });
     h.turn();
-    // Continue, then set a limit, then create.
+    // Continue, Mailbox, then set a limit, then create.
     for _ in 0..30 {
         h.keys(b"\x1b[B");
     }
     let screen = h.keys(b"\r");
-    assert!(screen.contains("6/6 Title and limits"), "{screen}");
+    assert!(screen.contains("6/7 Mailbox"), "{screen}");
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("7/7 Title and limits"), "{screen}");
     h.keys(b"\x1b[A"); // Stop at (UTC)
     h.keys(b"\x1b[A"); // Stop after this many runs
     h.keys(b"\r");
@@ -774,14 +896,7 @@ fn the_dialog_workspaces_and_limits_ride_the_create_body() {
         "the preview reads the limit:\n{screen}"
     );
     h.keys(b"\r"); // Create automation (the cursor is back on it)
-    let body = h
-        .auto_cmds()
-        .into_iter()
-        .find_map(|c| match c {
-            AutoCmd::Create { body } => Some(body),
-            _ => None,
-        })
-        .expect("create");
+    let body = h.created();
     assert_eq!(
         body["trigger"]["config"],
         json!({"every": "24h", "count": 3})
@@ -790,6 +905,267 @@ fn the_dialog_workspaces_and_limits_ride_the_create_body() {
     assert_eq!(
         body["target"]["input_data"]["workspace"]["posture"],
         json!("any_except_denied")
+    );
+}
+
+#[test]
+fn the_email_trigger_and_the_mailbox_ride_the_create_body() {
+    let mut h = harness();
+    h.command("/schedule summarise the invoices");
+    h.answer_prepare("me_email_connected.json");
+    h.keys(b"\r"); // What
+                   // When: "When an email arrives" (usable): up from Continue past unit,
+                   // Every, six presets.
+    let screen = h.turn();
+    assert!(screen.contains("( ) When an email arrives"), "{screen}");
+    assert!(!screen.contains("Connect a mailbox first"), "{screen}");
+    h.up(9);
+    let screen = h.keys(b"\r");
+    for label in [
+        "(•) When an email arrives",
+        "Check for new mail every",
+        "1 hour",
+        "An automation that runs a model on new mail checks once an hour by default",
+        "At most this many emails per run",
+        "100",
+        "Only mail that matches (all optional)",
+        "From these addresses",
+        "From these domains",
+        "Sent to these addresses",
+        "Subject contains",
+        "Attachments",
+        "Separate entries with commas or new lines.",
+        "Runs when an email arrives · checked every hour · up to 100 per run.",
+    ] {
+        assert!(screen.contains(label), "{label}:\n{screen}");
+    }
+    // From these addresses: up from Continue past Attachments, Subject, To, Domains.
+    h.up(5);
+    h.keys(b"\r");
+    h.term.push_input(b"Boss@Example.test");
+    h.turn();
+    h.keys(b"\r");
+    h.up(1); // Attachments → only with attachments
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("only with attachments"), "{screen}");
+    // 3/7 Context → 4/7 Tools: the untrusted-content hint shows.
+    h.keys(b"\r");
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("4/7 Tools"), "{screen}");
+    assert!(
+        screen.contains(
+            "Incoming mail is data, never instructions: the automation acts only on its task."
+        ),
+        "{screen}"
+    );
+    h.keys(b"\r"); // Workspaces
+    h.answer_dry_run();
+    // 6/7 Mailbox: Email result on, Me and these addresses, one address.
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("[ ] Email result"), "{screen}");
+    assert!(
+        screen.contains("Email each completed run’s result to the selected recipients."),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("Turn on Email result to choose"),
+        "{screen}"
+    );
+    h.up(1);
+    let screen = h.keys(b"\r");
+    for label in [
+        "[x] Email result",
+        "Recipients",
+        "(•) Only me (default)",
+        "( ) Me and these addresses",
+        "Separate multiple addresses with commas.",
+    ] {
+        assert!(screen.contains(label), "{label}:\n{screen}");
+    }
+    h.up(1);
+    h.keys(b"\r"); // Me and these addresses
+    h.up(1);
+    h.keys(b"\r"); // the addresses
+    h.term.push_input(b"team@example.test");
+    h.turn();
+    h.keys(b"\r");
+    // 7/7: no limits for the email kind.
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("7/7 Title and limits"), "{screen}");
+    assert!(!screen.contains("Stop after this many runs"), "{screen}");
+    h.keys(b"\r");
+    let body = h.created();
+    assert_eq!(
+        body["trigger"],
+        json!({"source_id": "email.received", "source_version": 1, "config": {
+            "uses_model": true, "every": "1h", "max_batch": 100,
+            "filter": {"from_in": ["boss@example.test"], "has_attachment": true}}})
+    );
+    assert_eq!(
+        body["notify"],
+        json!({"channels": ["console", "email"], "recipients": ["self", "team@example.test"]})
+    );
+}
+
+#[test]
+fn an_unusable_mailbox_keeps_the_email_option_disabled() {
+    let mut h = harness();
+    h.command("/schedule watch the disk");
+    h.answer_prepare("me_email_admin_disabled.json");
+    let screen = h.keys(b"\r");
+    assert!(
+        screen.contains("Connect a mailbox first — open My email (Your admin turned mailboxes off for your account.)"),
+        "{screen}"
+    );
+    h.up(9);
+    let screen = h.keys(b"\r");
+    assert!(
+        screen.contains("(•) Repeat"),
+        "choosing the disabled option changes nothing:\n{screen}"
+    );
+    assert!(!screen.contains("Check for new mail every"), "{screen}");
+}
+
+#[test]
+fn a_missing_required_input_stops_the_create_with_the_validators_sentence() {
+    let mut h = harness();
+    h.command("/schedule watch the disk");
+    h.answer_prepare("me_email_not_connected.json");
+    // The conversation's workflow requires a pin nobody sets.
+    let schema = json!({"properties": {"topic": {"type": "string", "title": "Topic"}, "prompt": {"type": "string"}}, "required": ["topic"]});
+    h.store.automations.update(|v| {
+        v.put_schema(
+            auto::schema_key("basic-agent", "9.9.9", "agent"),
+            Ok(schema),
+        )
+    });
+    for _ in 0..6 {
+        h.keys(b"\r");
+    }
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("Topic is required."), "{screen}");
+    assert!(
+        !h.auto_cmds()
+            .iter()
+            .any(|c| matches!(c, AutoCmd::Create { .. })),
+        "no POST when the inputs are invalid"
+    );
+}
+
+#[test]
+fn the_workflow_picker_lists_the_executable_set_with_the_gateway_default_first() {
+    let mut h = harness();
+    h.command("/schedule check the build");
+    h.answer_prepare("me_email_not_connected.json");
+    h.up(2); // Workflow
+    let screen = h.keys(b"\r");
+    assert!(
+        screen.contains("Gateway default — Basic agent @0.0.5"),
+        "{screen}"
+    );
+    assert!(screen.contains("ReAct agent  @0.1.0 · Shared"), "{screen}");
+    let gd = screen.find("Gateway default —").unwrap();
+    let basic = screen.find("Basic agent  @0.0.5").unwrap();
+    assert!(gd < basic, "Gateway default first:\n{screen}");
+    // Pick ReAct agent (type-ahead is not offered: walk to it).
+    let rows = abstractcode::ui::schedule_view::picker_labels(
+        &abstractcode::workflow_picker::parse(
+            &schedule_fixture("bundles_executable_code_agent.json"),
+            auto::CODE_AGENT_INTERFACE,
+        )
+        .unwrap(),
+    );
+    let react = rows
+        .iter()
+        .position(|r| r.starts_with("ReAct agent"))
+        .unwrap();
+    // The picker starts on Gateway default (the conversation's workflow is
+    // not in the executable set).
+    for _ in 0..react {
+        h.keys(b"\x1b[B");
+    }
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("ReAct agent @0.1.0"), "{screen}");
+    let cmds = h.auto_cmds();
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, AutoCmd::Schema { bundle, version, flow }
+            if bundle == "react-agent" && version == "0.1.0" && flow == "react")),
+        "{cmds:?}"
+    );
+    let schema = abstractcode::schedule_input::normalize_input_schema(&schedule_fixture(
+        "input_schema_react_agent.json",
+    ))
+    .unwrap();
+    h.store.automations.update(|v| {
+        v.put_schema(
+            auto::schema_key("react-agent", "0.1.0", "react"),
+            Ok(schema),
+        )
+    });
+    h.keys(b"\r"); // What → When
+    h.keys(b"\r"); // When → Context
+    let screen = h.keys(b"\r"); // Context → Tools
+    assert!(
+        screen.contains("[x] Use workflow default tools"),
+        "a picked workflow keeps its own tools:\n{screen}"
+    );
+    h.keys(b"\r"); // Tools → Workspaces
+    h.keys(b"\r"); // Workspaces → Mailbox
+    h.keys(b"\r"); // Mailbox → Title and limits
+    h.keys(b"\r"); // Create
+    let body = h.created();
+    assert_eq!(body["target"]["bundle_ref"], json!("react-agent@0.1.0"));
+    assert_eq!(body["target"]["flow_id"], json!("react"));
+    assert!(body["target"]["input_data"].get("tools").is_none());
+    assert_eq!(
+        body["target"]["input_data"]["prompt"],
+        json!("check the build")
+    );
+}
+
+#[test]
+fn the_tools_step_starts_from_the_conversations_choice() {
+    let mut h = harness();
+    let tool = |name: &str, toolset: &str| abstractcode::store::ToolInfo {
+        name: name.into(),
+        toolset: toolset.into(),
+        description: format!("{name} tool"),
+        ..Default::default()
+    };
+    h.store.tools.set(vec![
+        tool("read_file", "files"),
+        tool("write_file", "files"),
+        tool("web_search", "web"),
+    ]);
+    h.store.disabled_tools.set(vec!["write_file".into()]);
+    h.command("/schedule watch the disk");
+    h.answer_prepare("me_email_not_connected.json");
+    h.keys(b"\r");
+    h.keys(b"\r");
+    let screen = h.keys(b"\r");
+    // The /tools rows: toolset headings, then each tool with its switch.
+    for label in [
+        "files",
+        "[x] read_file  read_file tool",
+        "[ ] write_file",
+        "[x] web_search",
+        "web",
+    ] {
+        assert!(screen.contains(label), "{label}:\n{screen}");
+    }
+    // Uncheck web_search: up from Continue past consent? (note), Ask, Auto, hint (note).
+    h.up(3);
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("[ ] web_search"), "{screen}");
+    for _ in 0..4 {
+        h.keys(b"\r");
+    }
+    let body = h.created();
+    assert_eq!(body["target"]["input_data"]["tools"], json!(["read_file"]));
+    assert_eq!(
+        body["target"]["input_data"]["_runtime"]["allowed_tools"],
+        json!(["read_file"])
     );
 }
 

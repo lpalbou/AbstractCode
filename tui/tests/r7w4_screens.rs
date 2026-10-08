@@ -200,6 +200,7 @@ impl H {
                                           "_runtime": {"provider": "lmstudio", "model": "qwen3-8b", "thinking": "high"},
                                           "_limits": {"max_iterations": 12},
                                           "skills": ["pdf"]}}),
+            notify: serde_json::Value::Null,
         };
         let page = auto::parse_occurrence_page(&fixture("occurrences.json")).unwrap();
         self.store

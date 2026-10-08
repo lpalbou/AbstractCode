@@ -21,6 +21,7 @@
 
 pub mod account_prefs;
 pub mod attention;
+pub mod automation_email;
 pub mod automations;
 pub mod cli;
 pub mod commands;
@@ -44,6 +45,7 @@ pub mod rail;
 pub mod run_input;
 pub mod runner;
 pub mod sandbox_line;
+pub mod schedule_input;
 pub mod signin;
 pub mod speculation;
 pub mod store;
@@ -53,6 +55,7 @@ pub mod transcript;
 pub mod ui;
 pub mod voice;
 pub mod voice_host;
+pub mod workflow_picker;
 pub mod workspace_files;
 pub mod workspaces;
 

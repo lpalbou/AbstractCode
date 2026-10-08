@@ -450,6 +450,7 @@ fn open_automation_workspace(h: &mut H) -> String {
             "input_data": {"prompt": "List the new emails that need a reply today.",
                            "workspace": {"posture": "allowed_only", "default_mode": "rw",
                                          "folders": [{"path": "/Users/ada/home/work", "mode": "ro"}]}}}),
+        notify: serde_json::Value::Null,
     };
     let page = auto::parse_occurrence_page(&read(AUTOS, "occurrences.json")).unwrap();
     h.store
@@ -507,24 +508,25 @@ fn the_new_automation_dialog_has_visible_workspaces_and_title_and_limits() {
             })
         });
         h.command("/schedule");
-        h.keys(b"\r"); // the task
+        h.keys(b"\r"); // What (the task)
         h.keys(b"\r"); // every 24 hours
         h.keys(b"\r"); // independent
         let screen = h.keys(b"\r"); // run without asking
-        assert!(screen.contains("5/6 Workspaces"), "{screen}");
+        assert!(screen.contains("5/7 Workspaces"), "{screen}");
         h.answer_dry_run("null", "dryrun_default.json");
         let screen = h.shot("schedule-5-workspaces");
-        h.assert_rows(&screen, &["Continue — Title and limits"]);
+        h.assert_rows(&screen, &["Continue — Mailbox"]);
         let screen = h.scroll_top();
         h.shot("schedule-5-workspaces-top");
         h.assert_rows(&screen, &["[x] Use my default", "Gateway: "]);
         h.scroll_end();
+        h.keys(b"\r"); // 6/7 Mailbox (R17.2) → Continue
         let screen = h.keys(b"\r");
-        h.shot("schedule-6-title-and-limits");
+        h.shot("schedule-7-title-and-limits");
         h.assert_rows(
             &screen,
             &[
-                "6/6 Title and limits",
+                "7/7 Title and limits",
                 "Defaults to the task's first line",
                 "First run at (UTC; empty = now)",
                 "Stop after this many runs",

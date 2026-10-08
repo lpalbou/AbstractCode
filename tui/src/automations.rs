@@ -157,6 +157,9 @@ pub struct Definition {
     /// `input_data`) as the gateway returned it: the settings panels read
     /// the run settings from `input_data` and save a revision of it.
     pub target: Value,
+    /// The definition's `notify` (`{channels, recipients?}`; `null` = the
+    /// default, in the console): "Email result" and its recipients.
+    pub notify: Value,
 }
 
 /// `POST …/discuss` answer: the fork's session, its own writable folder and
@@ -413,6 +416,7 @@ pub fn parse_detail(v: &Value) -> Parse<(Definition, Summary)> {
             .and_then(Value::as_u64),
         workspace_root: opt_str(d, "workspace_root").unwrap_or_default(),
         target: d.get("target").cloned().unwrap_or(Value::Null),
+        notify: d.get("notify").cloned().unwrap_or(Value::Null),
     };
     Ok((definition, summary))
 }
@@ -503,6 +507,19 @@ fn parse_duration(every: &str) -> Option<(u64, char)> {
     digits.parse().ok().map(|n| (n, unit))
 }
 
+/// An interval in seconds (`None` when it is not one).
+pub fn duration_seconds(every: &str) -> Option<u64> {
+    let (n, unit) = parse_duration(every)?;
+    Some(
+        n * match unit {
+            's' => 1,
+            'm' => 60,
+            'h' => 3600,
+            _ => 86_400,
+        },
+    )
+}
+
 /// True for the contract's `^[1-9][0-9]*[smhd]$` interval.
 pub fn is_duration(every: &str) -> bool {
     parse_duration(every).is_some()
@@ -551,6 +568,7 @@ pub fn trigger_summary(t: &Trigger) -> String {
     match (t.source_id.as_str(), t.source_version) {
         ("schedule", 1) => schedule_label(&t.config),
         ("manual", 1) => "manual runs only".into(),
+        ("email.received", 1) => crate::automation_email::email_trigger_label(&t.config),
         _ => format!("{}@{}", t.source_id, t.source_version),
     }
 }
@@ -1224,24 +1242,46 @@ pub fn resume_command(command_id: &str, w: &Wait, payload: Value) -> Value {
 // Create / revise
 // ---------------------------------------------------------------------------
 
-/// When the automation runs.
+/// When the automation runs (the kit dialog's "When (UTC)" kinds).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum When {
-    /// Every `amount` `unit` (m|h|d), from now or from `start_at`.
+    /// "Repeat": every `amount` `unit` (m|h|d), from now or from `start_at`.
     Every { amount: String, unit: char },
-    /// Once at a UTC date and time (`YYYY-MM-DD HH:MM`).
+    /// "Once at…": a UTC date and time (`YYYY-MM-DD HH:MM`).
     Once { at: String },
+    /// "When an email arrives" (`email.received@1`, from `CreateForm::email`);
+    /// offered only while the account's email is usable.
+    Email,
 }
+
+/// The kit's default growing-context budget (`DEFAULT_GROWING_MAX_TOKENS`).
+pub const DEFAULT_GROWING_MAX_TOKENS: u64 = 50_000;
+/// The kit's `GROWING_CONTEXT_HELP`, verbatim.
+pub const GROWING_CONTEXT_HELP: &str = "Limits history carried into the next run, keeping recent whole turns. The newest turn is kept even if oversized. New messages and tool results can grow context beyond this budget.";
+/// The kit's label of the growing budget field.
+pub const GROWING_MAX_TOKENS_LABEL: &str = "Max growing context (tokens)";
+const GROWING_MAX_TOKENS_ERROR: &str =
+    "Max growing context must be a positive whole number of tokens.";
 
 /// The create form (raw strings, as typed).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateForm {
     pub prompt: String,
     pub when: When,
+    /// The "When an email arrives" fields (used when `when` is `Email`).
+    pub email: crate::automation_email::EmailTriggerForm,
     /// `independent` | `growing`.
     pub context: String,
+    /// "Max growing context (tokens)" (growing only; default 50000).
+    pub growing_max_tokens: String,
     /// `auto` | `ask`.
     pub tool_approval: String,
+    /// The Tools section's selection: `None` = "Use workflow default tools";
+    /// `Some(list)` = exactly these (`[]` disables tools).
+    pub tools: Option<Vec<String>>,
+    /// The Mailbox section: "Email result" and its recipients.
+    pub notify_email: bool,
+    pub recipients: crate::automation_email::RecipientsForm,
     pub title: String,
     /// "Title and limits" (repeating schedules only, the kit dialog's
     /// fields): first run at (UTC; empty = now), stop after this many runs,
@@ -1263,8 +1303,13 @@ impl Default for CreateForm {
                 amount: "24".into(),
                 unit: 'h',
             },
+            email: crate::automation_email::EmailTriggerForm::default(),
             context: "independent".into(),
+            growing_max_tokens: DEFAULT_GROWING_MAX_TOKENS.to_string(),
             tool_approval: "auto".into(),
+            tools: None,
+            notify_email: false,
+            recipients: crate::automation_email::RecipientsForm::default(),
             title: String::new(),
             start_at: String::new(),
             count: String::new(),
@@ -1328,11 +1373,22 @@ pub fn default_title(prompt: &str) -> String {
     }
 }
 
-/// "Runs every 24 hours (UTC), first run now." — or "" while incomplete.
+/// The line under When: "Runs every 24 hours (UTC), first run now." (the
+/// email kind: "Runs when an email arrives · … ."), or "" while incomplete.
 pub fn schedule_preview(form: &CreateForm) -> String {
+    if matches!(form.when, When::Email) {
+        let (config, errors) = crate::automation_email::email_trigger_config_from(&form.email);
+        return if errors.is_empty() {
+            format!(
+                "Runs {}.",
+                crate::automation_email::email_trigger_label(&config)
+            )
+        } else {
+            String::new()
+        };
+    }
     match schedule_config_form(form) {
         Ok(config) => match form.when {
-            When::Once { .. } => format!("Runs {}.", schedule_label(&config)),
             When::Every { .. } => format!(
                 "Runs {}, first run {}.",
                 schedule_label(&config),
@@ -1341,26 +1397,53 @@ pub fn schedule_preview(form: &CreateForm) -> String {
                     None => "now".into(),
                 }
             ),
+            _ => format!("Runs {}.", schedule_label(&config)),
         },
         Err(_) => String::new(),
     }
 }
 
+/// The kit's line when the preview is empty.
+pub fn incomplete_line(form: &CreateForm) -> &'static str {
+    if matches!(form.when, When::Email) {
+        "Incomplete email trigger."
+    } else {
+        "Incomplete schedule."
+    }
+}
+
 /// The schedule config with the dialog's limits (the kit's
 /// `scheduleConfigFrom`: start_at / count / until, repeating schedules only;
-/// the kit's sentences).
-pub fn schedule_config_form(form: &CreateForm) -> Result<Map<String, Value>, String> {
-    let mut config = schedule_config(&form.when)?;
-    if matches!(form.when, When::Once { .. }) {
-        return Ok(config);
+/// the kit's sentences, one per problem).
+pub fn schedule_config_form(form: &CreateForm) -> Result<Map<String, Value>, Vec<String>> {
+    let mut config = Map::new();
+    let mut errors: Vec<String> = Vec::new();
+    match &form.when {
+        When::Email => return Err(vec!["Not a schedule.".into()]),
+        When::Once { at } => {
+            return match utc_from_input(at) {
+                Some(ts) => {
+                    config.insert("start_at".into(), json!(ts));
+                    Ok(config)
+                }
+                None => Err(vec!["Pick the date and time (UTC) to run once.".into()]),
+            }
+        }
+        When::Every { amount, unit } => {
+            let n = amount.trim();
+            if !matches!(unit, 'm' | 'h' | 'd') || !is_duration(&format!("{n}{unit}")) {
+                errors.push("The interval must be a whole number of at least 1.".into());
+            } else {
+                config.insert("every".into(), json!(format!("{n}{unit}")));
+            }
+        }
     }
-    let mut errors: Vec<&str> = Vec::new();
     if !form.start_at.trim().is_empty() {
         match utc_from_input(&form.start_at) {
             Some(ts) => {
                 config.insert("start_at".into(), json!(ts));
             }
-            None => errors.push("First run must be a date and time (UTC)."),
+            None => errors.push("First run must be a date and time (UTC).".into()),
         }
     }
     if !form.count.trim().is_empty() {
@@ -1368,7 +1451,7 @@ pub fn schedule_config_form(form: &CreateForm) -> Result<Map<String, Value>, Str
             Ok(n) if n >= 1 => {
                 config.insert("count".into(), json!(n));
             }
-            _ => errors.push("Maximum runs must be a whole number of at least 1."),
+            _ => errors.push("Maximum runs must be a whole number of at least 1.".into()),
         }
     }
     if !form.until.trim().is_empty() {
@@ -1376,50 +1459,43 @@ pub fn schedule_config_form(form: &CreateForm) -> Result<Map<String, Value>, Str
             Some(ts) => {
                 config.insert("until".into(), json!(ts));
             }
-            None => errors.push("Stop at must be a date and time (UTC)."),
+            None => errors.push("Stop at must be a date and time (UTC).".into()),
         }
     }
     if errors.is_empty() {
         Ok(config)
     } else {
-        Err(errors.join(" "))
+        Err(errors)
     }
 }
 
-fn schedule_config(when: &When) -> Result<Map<String, Value>, String> {
-    let mut config = Map::new();
-    match when {
-        When::Once { at } => match utc_from_input(at) {
-            Some(ts) => {
-                config.insert("start_at".into(), json!(ts));
-            }
-            None => {
-                return Err("Pick the date and time (UTC) to run once, as YYYY-MM-DD HH:MM.".into())
-            }
-        },
-        When::Every { amount, unit } => {
-            let n = amount.trim();
-            if !matches!(unit, 'm' | 'h' | 'd') || !is_duration(&format!("{n}{unit}")) {
-                return Err(
-                    "The interval must be a whole number of minutes, hours or days (at least 1)."
-                        .into(),
-                );
-            }
-            config.insert("every".into(), json!(format!("{n}{unit}")));
-        }
+/// `{mode}` + `growing.max_tokens` only when it differs from the default
+/// (the kit's `automationContext`).
+pub fn automation_context(mode: &str, max_tokens: u64) -> Value {
+    if max_tokens != DEFAULT_GROWING_MAX_TOKENS {
+        json!({"mode": mode, "growing": {"max_tokens": max_tokens}})
+    } else {
+        json!({"mode": mode})
     }
-    Ok(config)
 }
 
-/// The exact `POST /api/gateway/automations` body, or the reasons it cannot be built.
+/// The exact `POST /api/gateway/automations` body as the kit's
+/// `buildCreateRequest` (+ the dialog's tool selection) shapes it, or the
+/// reasons it cannot be built — in the kit's order and words. `email_usable`
+/// = `GET /me/email` says the account can be used now: without it nothing
+/// email-shaped is sent (an email choice falls back to Repeat, like the
+/// kit's `shownKind`). The target's `input_data` gets the task (`prompt`);
+/// the host replaces it with the workflow's real inputs
+/// ([`schedule_body`]).
 pub fn build_create_request(
     form: &CreateForm,
     target: Option<Value>,
+    email_usable: bool,
     request_id: &str,
 ) -> Result<Value, Vec<String>> {
     let mut errors = Vec::new();
     if target.is_none() {
-        errors.push("Choose a workflow first (/workflow).".to_string());
+        errors.push("Choose what to run.".to_string());
     }
     let prompt = form.prompt.trim().to_string();
     if prompt.is_empty() {
@@ -1433,19 +1509,58 @@ pub fn build_create_request(
     if title.chars().count() > 120 {
         errors.push("Title is at most 120 characters.".into());
     }
-    if form.context != "independent" && form.context != "growing" {
+    let email = matches!(form.when, When::Email) && email_usable;
+    // An email choice made while the account was usable falls back to Repeat
+    // (with the default interval) when it stops being usable.
+    let fallback;
+    let shown: &CreateForm = if matches!(form.when, When::Email) && !email_usable {
+        fallback = CreateForm {
+            when: When::Every {
+                amount: "24".into(),
+                unit: 'h',
+            },
+            ..form.clone()
+        };
+        &fallback
+    } else {
+        form
+    };
+    let mut config = Map::new();
+    if email {
+        let (c, e) = crate::automation_email::email_trigger_config_from(&form.email);
+        config = c;
+        errors.extend(e);
+    } else {
+        match schedule_config_form(shown) {
+            Ok(c) => config = c,
+            Err(e) => errors.extend(e),
+        }
+    }
+    let recipients = if email_usable && form.notify_email && form.recipients.list {
+        let (list, e) = crate::automation_email::allowed_recipients_from(&form.recipients);
+        errors.extend(e);
+        Some(list)
+    } else {
+        None
+    };
+    let growing = form.context == "growing";
+    let max_tokens = if growing {
+        match form.growing_max_tokens.trim().parse::<u64>() {
+            Ok(n) if n > 0 && n <= 9_007_199_254_740_991 => n,
+            _ => {
+                errors.push(GROWING_MAX_TOKENS_ERROR.into());
+                0
+            }
+        }
+    } else {
+        DEFAULT_GROWING_MAX_TOKENS
+    };
+    if form.context != "independent" && !growing {
         errors.push("Context must be Independent or Growing.".into());
     }
     if form.tool_approval != "auto" && form.tool_approval != "ask" {
         errors.push("Tools must run without asking or ask each time.".into());
     }
-    let config = match schedule_config_form(form) {
-        Ok(c) => Some(c),
-        Err(e) => {
-            errors.push(e);
-            None
-        }
-    };
     if !errors.is_empty() {
         return Err(errors);
     }
@@ -1459,35 +1574,86 @@ pub fn build_create_request(
         .as_object_mut()
         .expect("input_data is an object")
         .insert("prompt".into(), json!(prompt));
-    if let Some(ws) = &form.workspace {
-        // The Workspaces section's value rides the definition; the gateway
-        // stores it and clamps it to the eligible workspaces at each run.
-        let data = input.as_object_mut().expect("input_data is an object");
-        data.remove("workspace_allowed_paths");
-        data.remove("workspace_access_mode");
-        data.insert("workspace".into(), ws.to_json());
-    }
-    Ok(json!({
+    let input = crate::schedule_input::with_automation_tools(input, form.tools.as_deref());
+    target["input_data"] = input;
+    let trigger = if email {
+        json!({"source_id": crate::automation_email::SOURCE_ID,
+               "source_version": crate::automation_email::SOURCE_VERSION, "config": config})
+    } else {
+        json!({"source_id": "schedule", "source_version": 1, "config": config})
+    };
+    let mut body = json!({
         "request_id": request_id,
         "title": title,
         "target": target,
-        "trigger": {"source_id": "schedule", "source_version": 1, "config": config.expect("checked above")},
-        "context": {"mode": form.context},
+        "trigger": trigger,
+        "context": automation_context(&form.context, max_tokens),
         "policy": {"tool_approval": form.tool_approval},
-    }))
+    });
+    if email_usable && form.notify_email {
+        let list = recipients.unwrap_or_else(|| vec!["self".to_string()]);
+        body["notify"] = crate::automation_email::notify_for(true, &list);
+    }
+    Ok(body)
 }
 
-/// The revise form: title, interval (schedules only), context.
+/// The whole create body as the Code web sends it: the kit's body
+/// ([`build_create_request`]) whose `target.input_data` is replaced by the
+/// workflow's real inputs (`built`, from
+/// [`crate::schedule_input::automation_input`]) with the dialog's tool
+/// selection and the Workspaces section's value applied
+/// ([`crate::schedule_input::finish_input`]).
+pub fn schedule_body(
+    form: &CreateForm,
+    target: Option<Value>,
+    email_usable: bool,
+    built: &Value,
+    request_id: &str,
+) -> Result<Value, Vec<String>> {
+    let mut body = build_create_request(form, target, email_usable, request_id)?;
+    body["target"]["input_data"] =
+        crate::schedule_input::finish_input(built, form.tools.as_deref(), form.workspace.as_ref());
+    Ok(body)
+}
+
+/// The Edit form (the definition panel): title, interval, context, the
+/// limits (repeating schedules) and the Mailbox options.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviseForm {
     pub title: String,
     /// `None` for a trigger without an interval.
     pub every: Option<String>,
     pub context: String,
+    /// "Stop after this many runs" ("" = no limit); `None` when the trigger
+    /// is not a repeating schedule.
+    pub count: Option<String>,
+    /// "Stop at (UTC)" (`YYYY-MM-DD HH:MM`, "" = no end); `None` when the
+    /// trigger is not a repeating schedule.
+    pub until: Option<String>,
+    /// "Email result"; `None` without a definition.
+    pub notify_email: Option<bool>,
+    pub recipients: Option<crate::automation_email::RecipientsForm>,
 }
 
+/// `2026-10-31T18:00:00+00:00` → `2026-10-31 18:00` (the typed form).
+fn typed_utc(ts: &str) -> String {
+    let t = ts.trim();
+    if t.len() >= 16 && t.as_bytes()[10] == b'T' {
+        format!("{} {}", &t[..10], &t[11..16])
+    } else {
+        t.to_string()
+    }
+}
+
+/// The form of a summary (+ its definition's `notify` when known).
 pub fn revise_form_from(s: &Summary) -> ReviseForm {
-    let every = if s.trigger.source_id == "schedule" {
+    revise_form_with(s, None)
+}
+
+pub fn revise_form_with(s: &Summary, def: Option<&Definition>) -> ReviseForm {
+    let email =
+        crate::automation_email::is_email_trigger(&s.trigger.source_id, s.trigger.source_version);
+    let every = if s.trigger.source_id == "schedule" || email {
         s.trigger
             .config
             .get("every")
@@ -1496,16 +1662,43 @@ pub fn revise_form_from(s: &Summary) -> ReviseForm {
     } else {
         None
     };
+    let repeating = s.trigger.source_id == "schedule" && every.is_some();
+    let config_text = |key: &str| -> String {
+        match s.trigger.config.get(key) {
+            Some(Value::Number(n)) => n.to_string(),
+            Some(Value::String(v)) => typed_utc(v),
+            _ => String::new(),
+        }
+    };
     ReviseForm {
         title: s.title.clone(),
         every,
         context: s.context_mode.clone(),
+        count: repeating.then(|| config_text("count")),
+        until: repeating.then(|| config_text("until")),
+        notify_email: def.map(|d| crate::automation_email::notify_emails(&d.notify)),
+        recipients: def.map(|d| {
+            crate::automation_email::recipients_form_from(
+                &crate::automation_email::notify_recipients(&d.notify),
+            )
+        }),
     }
 }
 
-/// Only the fields that changed (`Ok(None)` when nothing did). A new interval
-/// keeps the rest of the schedule config (the server re-anchors it).
+/// Only the fields that changed (`Ok(None)` when nothing did) — the kit's
+/// `reviseChanges` shapes: a new interval keeps the rest of the trigger
+/// config (an email trigger drops its old `start_at` so it never re-reads
+/// mail); the limits ride `trigger.config` (`count` / `until`; empty
+/// removes the limit); "Email result" and its recipients send `notify`.
 pub fn revise_changes(s: &Summary, form: &ReviseForm) -> Result<Option<Value>, Vec<String>> {
+    revise_changes_with(s, None, form)
+}
+
+pub fn revise_changes_with(
+    s: &Summary,
+    def: Option<&Definition>,
+    form: &ReviseForm,
+) -> Result<Option<Value>, Vec<String>> {
     let mut errors = Vec::new();
     let mut changes = Map::new();
     let title = form.title.trim();
@@ -1516,7 +1709,11 @@ pub fn revise_changes(s: &Summary, form: &ReviseForm) -> Result<Option<Value>, V
     } else if title != s.title {
         changes.insert("title".into(), json!(title));
     }
-    let before = revise_form_from(s);
+    let before = revise_form_with(s, def);
+    let email =
+        crate::automation_email::is_email_trigger(&s.trigger.source_id, s.trigger.source_version);
+    let mut config = s.trigger.config.clone();
+    let mut trigger_changed = false;
     if let Some(every) = form.every.as_deref().map(str::trim) {
         if Some(every) != before.every.as_deref() {
             if !is_duration(every) {
@@ -1524,21 +1721,94 @@ pub fn revise_changes(s: &Summary, form: &ReviseForm) -> Result<Option<Value>, V
                     "Interval must be a whole number of minutes, hours or days (e.g. 30m, 8h, 7d)."
                         .into(),
                 );
+            } else if email
+                && duration_seconds(every).unwrap_or(0) < crate::automation_email::MIN_EVERY_SECONDS
+            {
+                errors.push("The check interval is at least 60 seconds.".into());
             } else {
-                let mut config = s.trigger.config.clone();
                 config.insert("every".into(), json!(every));
-                changes.insert(
-                    "trigger".into(),
-                    json!({"source_id": s.trigger.source_id, "source_version": s.trigger.source_version, "config": config}),
-                );
+                if email {
+                    config.remove("start_at");
+                }
+                trigger_changed = true;
             }
         }
+    }
+    if let (Some(count), Some(prev)) = (
+        form.count.as_deref().map(str::trim),
+        before.count.as_deref(),
+    ) {
+        if count != prev {
+            if count.is_empty() {
+                config.remove("count");
+                trigger_changed = true;
+            } else {
+                match count.parse::<u64>() {
+                    Ok(n) if n >= 1 => {
+                        config.insert("count".into(), json!(n));
+                        trigger_changed = true;
+                    }
+                    _ => errors.push("Maximum runs must be a whole number of at least 1.".into()),
+                }
+            }
+        }
+    }
+    if let (Some(until), Some(prev)) = (
+        form.until.as_deref().map(str::trim),
+        before.until.as_deref(),
+    ) {
+        if until != prev {
+            if until.is_empty() {
+                config.remove("until");
+                trigger_changed = true;
+            } else {
+                match utc_from_input(until) {
+                    Some(ts) => {
+                        config.insert("until".into(), json!(ts));
+                        trigger_changed = true;
+                    }
+                    None => errors.push("Stop at must be a date and time (UTC).".into()),
+                }
+            }
+        }
+    }
+    if trigger_changed {
+        changes.insert(
+            "trigger".into(),
+            json!({"source_id": s.trigger.source_id, "source_version": s.trigger.source_version, "config": config}),
+        );
     }
     if form.context != s.context_mode {
         if form.context != "independent" && form.context != "growing" {
             errors.push("Context must be Independent or Growing.".into());
         } else {
-            changes.insert("context".into(), json!({"mode": form.context}));
+            changes.insert(
+                "context".into(),
+                automation_context(
+                    &form.context,
+                    def.and_then(|d| d.growing.get("max_tokens"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(DEFAULT_GROWING_MAX_TOKENS),
+                ),
+            );
+        }
+    }
+    if def.is_some() {
+        if let Some(on) = form.notify_email {
+            use crate::automation_email::{allowed_recipients_from, notify_for, RecipientsForm};
+            let prev_form = before.recipients.clone().unwrap_or_default();
+            let next_form = if on {
+                form.recipients.clone().unwrap_or_default()
+            } else {
+                prev_form.clone()
+            };
+            let (next, e) = allowed_recipients_from(&next_form);
+            let (prev, _) = allowed_recipients_from(&RecipientsForm { ..prev_form });
+            if !e.is_empty() {
+                errors.extend(e);
+            } else if Some(on) != before.notify_email || next != prev {
+                changes.insert("notify".into(), notify_for(on, &next));
+            }
         }
     }
     if !errors.is_empty() {
@@ -1859,9 +2129,40 @@ pub struct View {
     pub discussion: Option<(u64, DiscussResponse)>,
     /// An automation the gateway just created: the UI opens it once.
     pub created: Option<String>,
+    /// `GET /api/gateway/me/email`, read when `/schedule` or an Edit opens
+    /// (`None` = unknown: not read yet or the call failed — not usable).
+    pub email: Option<crate::automation_email::EmailStatus>,
+    /// `/schedule`'s "What" picker: `GET /bundles?executable_for=…`.
+    pub executable: Option<Result<crate::workflow_picker::Executable, String>>,
+    /// Input schemas read for `/schedule` (key `bundle@version:flow`):
+    /// the normalised schema, or the sentence why it could not be read.
+    pub schemas: Vec<(String, Result<Value, String>)>,
+}
+
+/// The `schemas` key of a workflow.
+pub fn schema_key(bundle: &str, version: &str, flow: &str) -> String {
+    format!("{bundle}@{version}:{flow}")
 }
 
 impl View {
+    /// The schema read for `key`, if any (`Err` = why it could not be read).
+    pub fn schema(&self, key: &str) -> Option<&Result<Value, String>> {
+        self.schemas
+            .iter()
+            .rev()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v)
+    }
+
+    /// Keep a schema answer (the newest few).
+    pub fn put_schema(&mut self, key: String, answer: Result<Value, String>) {
+        self.schemas.retain(|(k, _)| *k != key);
+        self.schemas.push((key, answer));
+        if self.schemas.len() > 8 {
+            let _ = self.schemas.remove(0);
+        }
+    }
+
     /// The list answered: keep the open automation's summary in step.
     pub fn apply_list(&mut self, items: Vec<Summary>) {
         self.retry_failed_ack();
@@ -2210,7 +2511,7 @@ mod tests {
             ..CreateForm::default()
         };
         let target = Some(json!({"flow_id": "@default", "interface": CODE_AGENT_INTERFACE}));
-        let body = build_create_request(&form, target, "rid-1").unwrap();
+        let body = build_create_request(&form, target, false, "rid-1").unwrap();
         assert_eq!(
             body,
             json!({
@@ -2232,6 +2533,7 @@ mod tests {
         let body = build_create_request(
             &once,
             Some(json!({"bundle_ref": "b@1", "flow_id": "f"})),
+            false,
             "r",
         )
         .unwrap();
@@ -2247,8 +2549,15 @@ mod tests {
             },
             ..CreateForm::default()
         };
-        let errs = build_create_request(&bad, None, "r").unwrap_err();
-        assert_eq!(errs.len(), 3, "{errs:?}");
+        let errs = build_create_request(&bad, None, false, "r").unwrap_err();
+        assert_eq!(
+            errs,
+            vec![
+                "Choose what to run.".to_string(),
+                "Write the task to run.".into(),
+                "The interval must be a whole number of at least 1.".into(),
+            ]
+        );
     }
 
     #[test]
@@ -2269,9 +2578,12 @@ mod tests {
             }),
             ..CreateForm::default()
         };
-        let body = build_create_request(
+        let built = json!({"prompt": "check memory", "workspace_root": "/tmp/x"});
+        let body = schedule_body(
             &form,
             Some(json!({"bundle_ref": "b@1", "flow_id": "f"})),
+            false,
+            &built,
             "r",
         )
         .unwrap();
@@ -2290,12 +2602,14 @@ mod tests {
             "Runs every 24 hours (UTC) · 3 runs max · until 2026-10-31 18:00 UTC, first run at 2026-10-08 09:00 UTC."
         );
         // Use my default sends nothing workspace-shaped.
-        let plain = build_create_request(
+        let plain = schedule_body(
             &CreateForm {
                 workspace: None,
                 ..form.clone()
             },
             Some(json!({"flow_id": "f"})),
+            false,
+            &built,
             "r",
         )
         .unwrap();
@@ -2306,10 +2620,14 @@ mod tests {
             start_at: "tomorrow".into(),
             ..form.clone()
         };
-        let errs = build_create_request(&bad, Some(json!({"flow_id": "f"})), "r").unwrap_err();
+        let errs =
+            build_create_request(&bad, Some(json!({"flow_id": "f"})), false, "r").unwrap_err();
         assert_eq!(
             errs,
-            vec!["First run must be a date and time (UTC). Maximum runs must be a whole number of at least 1.".to_string()]
+            vec![
+                "First run must be a date and time (UTC).".to_string(),
+                "Maximum runs must be a whole number of at least 1.".into()
+            ]
         );
         let once = CreateForm {
             when: When::Once {
@@ -2317,7 +2635,7 @@ mod tests {
             },
             ..bad
         };
-        let body = build_create_request(&once, Some(json!({"flow_id": "f"})), "r").unwrap();
+        let body = build_create_request(&once, Some(json!({"flow_id": "f"})), false, "r").unwrap();
         assert_eq!(
             body["trigger"]["config"],
             json!({"start_at": "2026-10-09T10:00:00Z"})

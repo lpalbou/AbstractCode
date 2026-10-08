@@ -22,6 +22,7 @@ pub mod queue_lane;
 pub mod queue_modal;
 pub mod quit;
 pub mod rail_view;
+pub mod schedule_view;
 pub mod splash;
 pub mod stance;
 pub mod thinking;
@@ -894,12 +895,11 @@ fn stream_run_value(store: Store) -> Option<bool> {
     crate::streaming::run_input_value(pref, deltas)
 }
 
-/// The run infrastructure every start shares (provider/model, workspace
-/// scope, tool selection + policy, skills) — used by plain prompts and
-/// `/goal` runs (which add goal params on top).
-pub(crate) fn agent_start_opts(store: Store, ctx: &UiCtx) -> StartOpts {
-    // Tool selection: untouched = the workflow's own defaults (send
-    // nothing); customized = the checked set is the run's exact allowlist.
+/// The conversation's tool choice (`/tools`): `None` = untouched (the
+/// workflow's own defaults; send nothing); `Some(list)` = the checked set,
+/// the run's exact allowlist. Shared by every run start and by
+/// `/schedule` (the automation's Tools section starts from it).
+pub fn conversation_tools(store: Store) -> Option<Vec<String>> {
     // Only disabled names that EXIST in the inventory count — a stale name
     // from another gateway must not silently flip the run into explicit-
     // allowlist mode (adversary finding 6).
@@ -915,23 +915,28 @@ pub(crate) fn agent_start_opts(store: Store, ctx: &UiCtx) -> StartOpts {
     // baked pin). A served-disabled row cannot run either way; only a
     // user choice about a grantable row means "customized".
     let effective_disabled = crate::store::Store::effective_user_disabled(&inventory, &disabled);
-    let tools = if effective_disabled == 0 {
-        None
-    } else {
-        Some(
-            inventory
-                .iter()
-                // Served-disabled rows (full-catalog surfacing: the
-                // gateway serves gate-disabled tools `enabled:false` so
-                // their existence is visible) are NEVER granted: an
-                // explicit allowlist naming a disabled tool would claim
-                // a grant the gateway cannot honor.
-                .filter(|t| !t.served_disabled)
-                .map(|t| t.name.clone())
-                .filter(|n| !disabled.contains(n))
-                .collect::<Vec<_>>(),
-        )
-    };
+    if effective_disabled == 0 {
+        return None;
+    }
+    Some(
+        inventory
+            .iter()
+            // Served-disabled rows (full-catalog surfacing: the gateway
+            // serves gate-disabled tools `enabled:false` so their existence
+            // is visible) are NEVER granted: an explicit allowlist naming a
+            // disabled tool would claim a grant the gateway cannot honor.
+            .filter(|t| !t.served_disabled)
+            .map(|t| t.name.clone())
+            .filter(|n| !disabled.contains(n))
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// The run infrastructure every start shares (provider/model, workspace
+/// scope, tool selection + policy, skills) — used by plain prompts and
+/// `/goal` runs (which add goal params on top).
+pub(crate) fn agent_start_opts(store: Store, ctx: &UiCtx) -> StartOpts {
+    let tools = conversation_tools(store);
     // Workspace: the root stays the boot resolution (--workspace / cwd);
     // which workspaces a run may use is the gateway's (session level).
     // Server-side tool policy (facts #1): expand the accepted tier + pins

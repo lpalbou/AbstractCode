@@ -1,0 +1,95 @@
+{
+    "schema": "email_settings_v1",
+    "configured": false,
+    "enabled": true,
+    "agent_tools": {
+        "on": false,
+        "available": false,
+        "unavailable_reason": "Connect a mailbox first.",
+        "active": false,
+        "enabled": false,
+        "admin_available": true,
+        "reason": "Connect a mailbox first."
+    },
+    "address": "",
+    "display_name": "",
+    "username": "",
+    "auth_kind": "",
+    "imap": null,
+    "smtp": null,
+    "oauth": null,
+    "can_read": false,
+    "can_send": false,
+    "secret_set": false,
+    "secret_storage": "",
+    "secret_warning": "",
+    "policy": {
+        "mode": "allowlist",
+        "entries": [],
+        "always_allow": [],
+        "always_deny": [],
+        "default": true,
+        "self_addresses": []
+    },
+    "limits": {
+        "per_hour": 100,
+        "per_day": 1000,
+        "source": "default",
+        "used_last_hour": 0,
+        "used_last_day": 0
+    },
+    "registered_address": "",
+    "registered_address_stored": "",
+    "status": {
+        "last_test": "",
+        "last_ok": "",
+        "last_error": null,
+        "legs": {}
+    },
+    "source": "gateway user settings",
+    "legacy_import": {},
+    "admin_enabled": true,
+    "effective_enabled": false,
+    "account_ref": "default:alice:default",
+    "email_available": true,
+    "email_address": "",
+    "mailbox": {
+        "state": "not_connected",
+        "address": null,
+        "provider": null,
+        "reason": null
+    },
+    "send_capable": false,
+    "oauth_providers": [
+        {
+            "id": "google",
+            "available": false,
+            "reason": "No Google sign-in client on this gateway: add one under Sign-in app, or ask your admin."
+        },
+        {
+            "id": "microsoft",
+            "available": false,
+            "reason": "No Microsoft sign-in client on this gateway: add one under Sign-in app, or ask your admin."
+        }
+    ],
+    "notifications": {
+        "job_failed": true,
+        "approval_needed": true
+    },
+    "notifications_unavailable_reason": "Connect a mailbox first.",
+    "watcher": {
+        "state": "not connected",
+        "interval_s": 60.0,
+        "last_poll": "2026-10-08T16:43:01+00:00",
+        "last_ok": "",
+        "last_error": null,
+        "next_poll_after": "",
+        "cursor": null,
+        "unprocessable": [],
+        "received": 0
+    },
+    "store": {
+        "kind": "gateway",
+        "label": "Your email account on this gateway, stored in your own data home."
+    }
+}

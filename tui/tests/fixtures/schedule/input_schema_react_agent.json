@@ -1,0 +1,63 @@
+{
+    "bundle_id": "react-agent",
+    "bundle_version": "0.1.0",
+    "bundle_ref": "react-agent@0.1.0",
+    "flow_id": "react",
+    "workflow_id": "react-agent@0.1.0:react",
+    "native_loop_factory": "react",
+    "version": 1,
+    "inputs": [
+        {
+            "id": "prompt",
+            "label": "Prompt",
+            "type": "string",
+            "required": true,
+            "schema": {
+                "type": "string",
+                "title": "Prompt"
+            }
+        },
+        {
+            "id": "provider",
+            "label": "Provider",
+            "type": "string",
+            "required": false,
+            "schema": {
+                "type": "string",
+                "title": "Provider"
+            }
+        },
+        {
+            "id": "model",
+            "label": "Model",
+            "type": "string",
+            "required": false,
+            "schema": {
+                "type": "string",
+                "title": "Model"
+            }
+        }
+    ],
+    "defaults": {},
+    "input_data_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "title": "Prompt"
+            },
+            "provider": {
+                "type": "string",
+                "title": "Provider"
+            },
+            "model": {
+                "type": "string",
+                "title": "Model"
+            }
+        },
+        "required": [
+            "prompt"
+        ]
+    }
+}
