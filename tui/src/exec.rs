@@ -411,7 +411,16 @@ pub fn run(args: &Args) -> i32 {
     let prefs = config::Prefs::load();
     let (pref_bundle, pref_flow) = match args.workflow.as_deref() {
         Some(raw) => crate::cli::workflow_ref_preference(raw),
-        None => prefs.workflow_preference(),
+        // R17.1: the account's "Default for new conversations" when the
+        // gateway keeps one (the interactive client uploads this
+        // computer's old choice once and removes it); else the saved pick.
+        None => match client.account_workflow_row() {
+            Ok(Some(row)) if row.value.is_some() => match row.workflow() {
+                Some((b, f)) => (Some(b), Some(f)),
+                None => (None, None),
+            },
+            _ => prefs.workflow_preference(),
+        },
     };
     let explicit_ref = args
         .workflow

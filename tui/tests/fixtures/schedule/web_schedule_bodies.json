@@ -1,0 +1,372 @@
+{
+  "custom": {
+    "body": {
+      "context": {
+        "growing": {
+          "max_tokens": 20000
+        },
+        "mode": "growing"
+      },
+      "notify": {
+        "channels": [
+          "console",
+          "email"
+        ],
+        "recipients": [
+          "self",
+          "boss@example.test"
+        ]
+      },
+      "policy": {
+        "tool_approval": "ask"
+      },
+      "request_id": "rid-parity",
+      "target": {
+        "bundle_ref": "basic-agent@0.0.5",
+        "flow_id": "81795ea9",
+        "input_data": {
+          "_limits": {
+            "max_iterations": 30,
+            "max_tokens": 65536
+          },
+          "_runtime": {
+            "allowed_tools": [
+              "analyze_code",
+              "list_files",
+              "read_file",
+              "search_files"
+            ],
+            "model": "gpt-5-mini",
+            "provider": "openai",
+            "stream": false
+          },
+          "context": {
+            "task": "Summarise the invoices that arrived"
+          },
+          "max_iterations": 30,
+          "model": "gpt-5-mini",
+          "prompt": "Summarise the invoices that arrived",
+          "provider": "openai",
+          "seed": -1,
+          "temperature": 0.7,
+          "tools": [
+            "analyze_code",
+            "list_files",
+            "read_file",
+            "search_files"
+          ],
+          "use_context": false,
+          "use_session_history": true
+        }
+      },
+      "title": "Invoice digest",
+      "trigger": {
+        "config": {
+          "every": "2h",
+          "filter": {
+            "from_in": [
+              "billing@example.test",
+              "ap@vendor.test"
+            ],
+            "has_attachment": true,
+            "subject_contains": "invoice"
+          },
+          "max_batch": 20,
+          "uses_model": true
+        },
+        "source_id": "email.received",
+        "source_version": 1
+      }
+    },
+    "case": {
+      "conversation": {
+        "customizedTools": [
+          "edit_file",
+          "analyze_code",
+          "execute_command",
+          "list_files",
+          "read_file",
+          "search_files",
+          "write_file"
+        ],
+        "maxIterations": 30,
+        "maxTokens": 65536,
+        "model": "gpt-5-mini",
+        "provider": "openai",
+        "reasoning": "",
+        "skills": [],
+        "stream": "off"
+      },
+      "conversationTarget": {
+        "bundle_ref": "basic-agent@0.0.5",
+        "flow_id": "81795ea9"
+      },
+      "dialog": {
+        "context": "growing",
+        "count": null,
+        "email": {
+          "every": {
+            "amount": 2,
+            "unit": "h"
+          },
+          "fromDomainIn": "",
+          "fromIn": "Billing@Example.test, ap@vendor.test",
+          "hasAttachment": "yes",
+          "maxBatch": 20,
+          "subjectContains": "invoice",
+          "toIn": ""
+        },
+        "emailUsable": true,
+        "growingMaxTokens": 20000,
+        "notifyEmail": true,
+        "prompt": "Summarise the invoices that arrived",
+        "recipients": {
+          "addresses": "boss@example.test",
+          "mode": "list"
+        },
+        "startAt": "",
+        "title": "Invoice digest",
+        "toolApproval": "ask",
+        "tools": [
+          "analyze_code",
+          "list_files",
+          "read_file",
+          "search_files"
+        ],
+        "until": "",
+        "when": {
+          "kind": "email"
+        },
+        "workspace": null
+      },
+      "name": "custom",
+      "schema": "input_schema_basic_agent.json"
+    }
+  },
+  "inherit": {
+    "body": {
+      "context": {
+        "mode": "independent"
+      },
+      "policy": {
+        "tool_approval": "auto"
+      },
+      "request_id": "rid-parity",
+      "target": {
+        "flow_id": "@default",
+        "input_data": {
+          "_runtime": {
+            "allowed_tools": [
+              "edit_file",
+              "analyze_code",
+              "execute_command",
+              "fetch_url",
+              "list_files",
+              "read_file",
+              "search_files",
+              "web_search",
+              "write_file"
+            ],
+            "model": "qwen3-4b",
+            "provider": "lmstudio",
+            "stream": true,
+            "thinking": "high"
+          },
+          "context": {
+            "task": "Report the free memory of this computer\nand warn above 90%"
+          },
+          "max_iterations": 20,
+          "model": "qwen3-4b",
+          "prompt": "Report the free memory of this computer\nand warn above 90%",
+          "provider": "lmstudio",
+          "seed": -1,
+          "skills": [
+            "coredoc"
+          ],
+          "temperature": 0.7,
+          "tools": [
+            "edit_file",
+            "analyze_code",
+            "execute_command",
+            "fetch_url",
+            "list_files",
+            "read_file",
+            "search_files",
+            "web_search",
+            "write_file"
+          ],
+          "use_context": false,
+          "use_session_history": true,
+          "workspace": {
+            "default_mode": "rw",
+            "folders": [
+              {
+                "mode": "ro",
+                "path": "/Users/ada/home/work"
+              }
+            ],
+            "posture": "allowed_only"
+          }
+        },
+        "interface": "abstractcode.agent.v1"
+      },
+      "title": "Report the free memory of this computer",
+      "trigger": {
+        "config": {
+          "every": "24h",
+          "kind": "every"
+        },
+        "source_id": "schedule",
+        "source_version": 2
+      }
+    },
+    "case": {
+      "conversation": {
+        "customizedTools": null,
+        "maxIterations": 0,
+        "maxTokens": 0,
+        "model": "qwen3-4b",
+        "provider": "lmstudio",
+        "reasoning": "high",
+        "skills": [
+          "coredoc"
+        ],
+        "stream": "on"
+      },
+      "conversationTarget": {
+        "flow_id": "@default",
+        "interface": "abstractcode.agent.v1"
+      },
+      "dialog": {
+        "context": "independent",
+        "count": null,
+        "emailUsable": false,
+        "growingMaxTokens": 50000,
+        "notifyEmail": false,
+        "prompt": "Report the free memory of this computer\nand warn above 90%",
+        "recipients": {
+          "addresses": "",
+          "mode": "self"
+        },
+        "startAt": "",
+        "title": "",
+        "toolApproval": "auto",
+        "tools": "initial",
+        "until": "",
+        "when": {
+          "amount": 24,
+          "kind": "every",
+          "unit": "h"
+        },
+        "workspace": {
+          "default_mode": "rw",
+          "folders": [
+            {
+              "mode": "ro",
+              "path": "/Users/ada/home/work"
+            }
+          ],
+          "posture": "allowed_only"
+        }
+      },
+      "name": "inherit",
+      "schema": "input_schema_basic_agent.json"
+    }
+  },
+  "picked": {
+    "body": {
+      "context": {
+        "mode": "independent"
+      },
+      "notify": {
+        "channels": [
+          "console",
+          "email"
+        ]
+      },
+      "policy": {
+        "tool_approval": "auto"
+      },
+      "request_id": "rid-parity",
+      "target": {
+        "bundle_ref": "react-agent@0.1.0",
+        "flow_id": "react",
+        "input_data": {
+          "_runtime": {
+            "thinking": "medium"
+          },
+          "context": {
+            "task": "Check the build"
+          },
+          "prompt": "Check the build",
+          "skills": [
+            "coredoc",
+            "release"
+          ],
+          "use_context": false,
+          "use_session_history": true
+        }
+      },
+      "title": "Check the build",
+      "trigger": {
+        "config": {
+          "count": 5,
+          "every": "8h",
+          "kind": "every",
+          "start_at": "2026-11-01T08:00:00Z",
+          "until": "2026-12-01T18:30:00Z"
+        },
+        "source_id": "schedule",
+        "source_version": 2
+      }
+    },
+    "case": {
+      "conversation": {
+        "customizedTools": null,
+        "maxIterations": 0,
+        "maxTokens": 0,
+        "model": "",
+        "provider": "",
+        "reasoning": "medium",
+        "skills": [
+          "coredoc",
+          "release"
+        ],
+        "stream": "gateway_default"
+      },
+      "conversationTarget": {
+        "bundle_ref": "basic-agent@0.0.5",
+        "flow_id": "81795ea9"
+      },
+      "dialog": {
+        "context": "independent",
+        "count": 5,
+        "emailUsable": true,
+        "growingMaxTokens": 50000,
+        "notifyEmail": true,
+        "prompt": "Check the build",
+        "recipients": {
+          "addresses": "",
+          "mode": "self"
+        },
+        "startAt": "2026-11-01 08:00",
+        "title": "",
+        "toolApproval": "auto",
+        "tools": "initial",
+        "until": "2026-12-01 18:30",
+        "when": {
+          "amount": 8,
+          "kind": "every",
+          "unit": "h"
+        },
+        "workspace": null
+      },
+      "name": "picked",
+      "picked": {
+        "bundle_ref": "react-agent@0.1.0",
+        "flow_id": "react"
+      },
+      "schema": "input_schema_react_agent.json"
+    }
+  }
+}

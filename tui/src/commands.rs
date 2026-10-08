@@ -637,7 +637,14 @@ pub const HELP_EXTRA: &[(&str, &str)] = &[
         "move focus (composer / transcript / modal fields) — outside a modal, typing / pasting / dropping a file returns focus to the composer and keeps what arrived (a dropped file becomes a chip, as always)",
     ),
     ("Ctrl+T", "cycle theme"),
-    ("Ctrl+P", "read the latest reply aloud / stop it (/speak)"),
+    (
+        "Ctrl+P",
+        "read the latest reply aloud / stop it (/speak); in one automation: the selected run's reply",
+    ),
+    (
+        "Enter",
+        "on an empty composer while the status line shows \"Automations · N waiting\": open the automation that waits for you",
+    ),
     ("Ctrl+R", "dictate: start recording, press again to transcribe (/dictate)"),
     (
         "select text",

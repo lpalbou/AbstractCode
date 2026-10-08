@@ -200,6 +200,7 @@ impl H {
                                           "_runtime": {"provider": "lmstudio", "model": "qwen3-8b", "thinking": "high"},
                                           "_limits": {"max_iterations": 12},
                                           "skills": ["pdf"]}}),
+            notify: serde_json::Value::Null,
         };
         let page = auto::parse_occurrence_page(&fixture("occurrences.json")).unwrap();
         self.store
@@ -550,13 +551,26 @@ fn every_rail_panel_on_an_automation() {
             h.shot(&format!("rail-automation-{name}"));
             if *name == "workflow" {
                 // The rest of the definition form, scrolled into view.
-                for _ in 0..5 {
-                    h.keys(b"\x1b[B");
+                // (R17.2 added the limits and Mailbox rows below Tools: the
+                // rows are read while walking down.)
+                let mut seen = String::new();
+                let mut screen = String::new();
+                for _ in 0..9 {
+                    screen = h.keys(b"\x1b[B");
+                    seen.push_str(&flat(&screen));
                 }
-                let screen = h.turn();
-                for n in ["Every 30 minutes (UTC)", "Context", "Ask before each tool call"] {
+                for n in [
+                    "Repeat every (UTC)",
+                    "Every 30 minutes (UTC)",
+                    "Context",
+                    "Ask before each tool call",
+                    "Stop after this many runs",
+                    "Stop at (UTC)",
+                    "Mailbox",
+                    "Email result",
+                ] {
                     assert!(
-                        flat(&screen).contains(n),
+                        seen.contains(n),
                         "{n:?} at {}x{}:\n{screen}",
                         size.w,
                         size.h
@@ -625,22 +639,26 @@ fn r16_calendar_when_and_served_cards_fit_every_width() {
             let mut h = harness(size);
             h.store.workflow.update(|w| w.gateway_default = true);
             h.command("/schedule morning briefing");
-            h.keys(b"\r");
+            h.keys(b"\r"); // What: Continue
             let screen = h.shot("r16-when-kinds");
-            assert!(screen.contains("Weekly") && screen.contains("Once at…"), "{screen}");
-            for _ in 0..4 {
-                h.keys(b"\x1b[B");
+            assert!(screen.contains("Once at…"), "{screen}");
+            // From Continue (the 15th selectable card under Repeat) up to Weekly
+            // (on a 30-row terminal the list scrolls to it).
+            let mut screen = String::new();
+            for _ in 0..12 {
+                screen = h.keys(b"\x1b[A");
             }
-            h.keys(b"\r"); // Weekly
-            h.keys(b"\x1b[B");
+            assert!(screen.contains("( ) Weekly"), "{screen}");
+            h.keys(b"\r"); // Weekly (Mon picked)
+            for _ in 0..7 {
+                h.keys(b"\x1b[A");
+            }
             h.keys(b"\r"); // + Tue
             let screen = h.shot("r16-weekly-days");
-            assert!(screen.contains("[x] Mon") && screen.contains("[x] Tue"), "{screen}");
-            for _ in 0..7 {
-                h.keys(b"\x1b[B");
+            assert!(screen.contains("[x] Tue"), "{screen}");
+            if size.h >= 36 {
+                assert!(screen.contains("[x] Mon"), "{screen}");
             }
-            h.keys(b"\r"); // Continue
-            h.keys(b"\r"); // 08:00
             let mut trigger = None;
             while let Ok(cmd) = h.rx.try_recv() {
                 if let Cmd::Automations(abstractcode::gateway::automations::AutoCmd::Preview {
@@ -651,6 +669,10 @@ fn r16_calendar_when_and_served_cards_fit_every_width() {
                 }
             }
             let trigger = trigger.expect("schedule-preview asked");
+            assert_eq!(
+                trigger["config"],
+                json!({"kind": "weekly", "days": ["mon", "tue"], "at": "08:00"})
+            );
             let answer = json!({
                 "trigger": trigger,
                 "time_zone": "Europe/Paris",
@@ -669,11 +691,12 @@ fn r16_calendar_when_and_served_cards_fit_every_width() {
                 flat(&screen).contains("in Europe/Paris (your account's time zone)"),
                 "{screen}"
             );
-            h.keys(b"\r"); // context
-            h.keys(b"\r"); // independent
-            h.keys(b"\r"); // tools
-            let screen = h.keys(b"\r"); // workspaces → Title and limits
-            let _ = screen;
+            h.keys(b"\r"); // When: Continue
+            h.keys(b"\r"); // Context: Continue
+            h.keys(b"\r"); // Tools: Continue
+            h.keys(b"\r"); // Workspaces: Continue
+            let screen = h.keys(b"\r"); // Mailbox → Title and limits
+            assert!(screen.contains("7/7 Title and limits"), "{screen}");
             let screen = h.shot("r16-title-and-limits");
             assert!(
                 flat(&screen).contains("first run Mon 12 Oct 08:00."),

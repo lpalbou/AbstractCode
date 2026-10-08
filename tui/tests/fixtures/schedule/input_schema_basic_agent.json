@@ -1,0 +1,256 @@
+{
+    "bundle_id": "basic-agent",
+    "bundle_version": "0.0.5",
+    "bundle_ref": "basic-agent@0.0.5",
+    "flow_id": "81795ea9",
+    "workflow_id": "basic-agent@0.0.5:81795ea9",
+    "version": 1,
+    "inputs": [
+        {
+            "id": "use_context",
+            "label": "use_context",
+            "type": "boolean",
+            "required": false,
+            "default": false,
+            "schema": {
+                "type": "boolean",
+                "x-abstract-type": "boolean",
+                "default": false
+            }
+        },
+        {
+            "id": "memory",
+            "label": "memory",
+            "type": "memory",
+            "required": false,
+            "schema": {
+                "x-abstract-type": "memory"
+            }
+        },
+        {
+            "id": "context",
+            "label": "context",
+            "type": "object",
+            "required": false,
+            "schema": {
+                "type": "object",
+                "x-abstract-type": "object"
+            }
+        },
+        {
+            "id": "provider",
+            "label": "provider",
+            "type": "provider",
+            "required": false,
+            "schema": {
+                "type": "string",
+                "x-abstract-type": "provider"
+            }
+        },
+        {
+            "id": "model",
+            "label": "model",
+            "type": "model",
+            "required": false,
+            "schema": {
+                "type": "string",
+                "x-abstract-type": "model"
+            }
+        },
+        {
+            "id": "system",
+            "label": "system",
+            "type": "string",
+            "required": false,
+            "schema": {
+                "type": "string",
+                "x-abstract-type": "string"
+            }
+        },
+        {
+            "id": "prompt",
+            "label": "prompt",
+            "type": "string",
+            "required": false,
+            "schema": {
+                "type": "string",
+                "x-abstract-type": "string"
+            }
+        },
+        {
+            "id": "tools",
+            "label": "tools",
+            "type": "tools",
+            "required": false,
+            "default": [
+                "edit_file",
+                "analyze_code",
+                "execute_command",
+                "fetch_url",
+                "list_files",
+                "read_file",
+                "search_files",
+                "web_search",
+                "write_file"
+            ],
+            "schema": {
+                "x-abstract-type": "tools",
+                "default": [
+                    "edit_file",
+                    "analyze_code",
+                    "execute_command",
+                    "fetch_url",
+                    "list_files",
+                    "read_file",
+                    "search_files",
+                    "web_search",
+                    "write_file"
+                ]
+            }
+        },
+        {
+            "id": "max_iterations",
+            "label": "max_iterations",
+            "type": "number",
+            "required": false,
+            "default": 20,
+            "schema": {
+                "type": "number",
+                "x-abstract-type": "number",
+                "default": 20
+            }
+        },
+        {
+            "id": "max_in_tokens",
+            "label": "max_in_tokens",
+            "type": "number",
+            "required": false,
+            "schema": {
+                "type": "number",
+                "x-abstract-type": "number"
+            }
+        },
+        {
+            "id": "temperature",
+            "label": "temperature",
+            "type": "number",
+            "required": false,
+            "default": 0.7,
+            "schema": {
+                "type": "number",
+                "x-abstract-type": "number",
+                "default": 0.7
+            }
+        },
+        {
+            "id": "seed",
+            "label": "seed",
+            "type": "number",
+            "required": false,
+            "default": -1,
+            "schema": {
+                "type": "number",
+                "x-abstract-type": "number",
+                "default": -1
+            }
+        },
+        {
+            "id": "resp_schema",
+            "label": "resp_schema",
+            "type": "object",
+            "required": false,
+            "schema": {
+                "type": "object",
+                "x-abstract-type": "object"
+            }
+        }
+    ],
+    "defaults": {
+        "use_context": false,
+        "tools": [
+            "edit_file",
+            "analyze_code",
+            "execute_command",
+            "fetch_url",
+            "list_files",
+            "read_file",
+            "search_files",
+            "web_search",
+            "write_file"
+        ],
+        "max_iterations": 20,
+        "temperature": 0.7,
+        "seed": -1
+    },
+    "input_data_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+            "use_context": {
+                "type": "boolean",
+                "x-abstract-type": "boolean",
+                "default": false
+            },
+            "memory": {
+                "x-abstract-type": "memory"
+            },
+            "context": {
+                "type": "object",
+                "x-abstract-type": "object"
+            },
+            "provider": {
+                "type": "string",
+                "x-abstract-type": "provider"
+            },
+            "model": {
+                "type": "string",
+                "x-abstract-type": "model"
+            },
+            "system": {
+                "type": "string",
+                "x-abstract-type": "string"
+            },
+            "prompt": {
+                "type": "string",
+                "x-abstract-type": "string"
+            },
+            "tools": {
+                "x-abstract-type": "tools",
+                "default": [
+                    "edit_file",
+                    "analyze_code",
+                    "execute_command",
+                    "fetch_url",
+                    "list_files",
+                    "read_file",
+                    "search_files",
+                    "web_search",
+                    "write_file"
+                ]
+            },
+            "max_iterations": {
+                "type": "number",
+                "x-abstract-type": "number",
+                "default": 20
+            },
+            "max_in_tokens": {
+                "type": "number",
+                "x-abstract-type": "number"
+            },
+            "temperature": {
+                "type": "number",
+                "x-abstract-type": "number",
+                "default": 0.7
+            },
+            "seed": {
+                "type": "number",
+                "x-abstract-type": "number",
+                "default": -1
+            },
+            "resp_schema": {
+                "type": "object",
+                "x-abstract-type": "object"
+            }
+        }
+    }
+}

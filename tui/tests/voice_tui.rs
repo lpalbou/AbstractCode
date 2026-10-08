@@ -1056,3 +1056,101 @@ fn ttfa_probe() {
     host.shutdown();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// -- R17.1: read aloud inside an automation --------------------------------------
+
+/// The recorded automation detail (`tests/fixtures/automations`), applied
+/// as the automations lane posts it.
+fn answer_inbox_detail(h: &mut Harness) -> String {
+    use abstractcode::automations as auto;
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/automations");
+    let read = |n: &str| -> Value {
+        serde_json::from_slice(&std::fs::read(format!("{dir}/{n}")).unwrap()).unwrap()
+    };
+    let list = auto::parse_list_page(&read("list.json")).unwrap();
+    let summary = list.items.into_iter().next().unwrap();
+    let id = summary.id.clone();
+    let definition = auto::Definition {
+        revision: 1,
+        workflow_id: "inbox@1.0.0:triage".into(),
+        tool_approval: "ask".into(),
+        growing: Default::default(),
+        max_attempts: Some(3),
+        workspace_root: summary.workspace_root.clone().unwrap_or_default(),
+        target: json!({"bundle_ref": "inbox@1.0.0", "flow_id": "triage", "input_data": {}}),
+        notify: serde_json::Value::Null,
+    };
+    let page = auto::parse_occurrence_page(&read("occurrences.json")).unwrap();
+    let id2 = id.clone();
+    h.store
+        .automations
+        .update(|v| v.apply_detail(&id2, definition, summary, page));
+    h.turn();
+    id
+}
+
+#[test]
+fn ctrl_p_in_an_automation_reads_the_selected_runs_reply() {
+    let _g = serial();
+    let gw = serve(GatewayScript {
+        segment_delay: Duration::from_millis(300),
+        segments: vec![1, 2, 3, 4, 5, 6],
+        ..Default::default()
+    });
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("The conversation's own reply.");
+    let id = "53443dd0-25c4-5fa8-bdad-e1ac3fdfff8e";
+    h.type_text(&format!("/automations {id}\r"));
+    h.turn();
+    assert_eq!(answer_inbox_detail(&mut h), id);
+    // At rest the cursor is on the wait (not a run): it says so, nothing spoken.
+    h.term.push_input(&[0x10]);
+    h.until("the select-a-run notice", |s| {
+        s.contains("select a run (↑↓) to read its reply aloud")
+    });
+    assert!(gw.requests("/voice/tts/stream").is_empty());
+    // The newest run (#7, still waiting) has no reply yet.
+    for _ in 0..30 {
+        h.term.push_input(b"\x1b[B");
+        h.turn();
+    }
+    h.term.push_input(&[0x10]);
+    h.until("no reply yet", |s| {
+        s.contains("No reply to read aloud yet.")
+    });
+    assert!(gw.requests("/voice/tts/stream").is_empty());
+    // Run #6: its reply, through the AUTOMATION's run (the web's runId).
+    h.term.push_input(b"\x1b[A");
+    h.turn();
+    h.term.push_input(&[0x10]);
+    h.until("reading", |s| {
+        s.contains("Reading the reply aloud — Ctrl+P stops.")
+    });
+    let reqs = h_wait_requests(&gw, &format!("/runs/{id}/voice/tts/stream"));
+    let body: Value = serde_json::from_str(&reqs[0].2).unwrap();
+    assert_eq!(
+        body.get("text"),
+        Some(&json!("1 new newsletter; nothing needs a reply.")),
+        "the selected run's reply, never the conversation's"
+    );
+    assert!(gw.requests("/runs/run-ui/").is_empty());
+    // Ctrl+P again stops.
+    h.until("playing", |_| !played(&log).is_empty());
+    h.term.push_input(&[0x10]);
+    h.turn();
+    h.until("stopped", |_| ops(&log).contains(&"stop".to_string()));
+}
+
+/// The requests matching `needle`, waiting for the voice thread to send one.
+fn h_wait_requests(gw: &FakeGateway, needle: &str) -> Vec<(String, String, String)> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let r = gw.requests(needle);
+        if !r.is_empty() {
+            return r;
+        }
+        assert!(Instant::now() < deadline, "no request to {needle}");
+        std::thread::sleep(Duration::from_millis(15));
+    }
+}

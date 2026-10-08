@@ -163,6 +163,7 @@ impl Harness {
             max_attempts: Some(3),
             workspace_root: summary.workspace_root.clone().unwrap_or_default(),
             target: serde_json::Value::Null,
+            notify: serde_json::Value::Null,
         };
         let page = auto::parse_occurrence_page(&fixture("occurrences.json")).unwrap();
         self.store

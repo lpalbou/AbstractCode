@@ -12,6 +12,19 @@
 pub const ARCHIVE_QUESTION: &str =
     "Archive this conversation? It stays searchable and auditable; it just leaves this list.";
 
+/// The search field's label and its empty state, verbatim from the Code web.
+pub const SEARCH_LABEL: &str = "Search conversations";
+pub const NO_MATCH: &str = "No conversations match your search.";
+
+/// Whether a conversation matches the search, the Code web's rule
+/// (`app.tsx:1169`): `${prompt} ${sessionId}` lower-cased contains the
+/// lower-cased query (`label` = the opening prompt; empty query = all).
+pub fn matches_search(label: &str, id: &str, query: &str) -> bool {
+    format!("{label} {id}")
+        .to_lowercase()
+        .contains(&query.to_lowercase())
+}
+
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];

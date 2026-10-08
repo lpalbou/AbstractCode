@@ -1,0 +1,841 @@
+{
+    "items": [
+        {
+            "bundle_id": "basic-agent",
+            "bundle_version": "0.0.5",
+            "bundle_ref": "basic-agent@0.0.5",
+            "registry_scope": "private",
+            "source": "shipped",
+            "owner": {
+                "kind": "gateway",
+                "user_id": null
+            },
+            "shipped": true,
+            "available": true,
+            "archived": false,
+            "description": "Chat agent: answers a prompt in one agent loop that can use tools and memory, and returns the reply.",
+            "description_edited": false,
+            "version_channel": "published",
+            "is_draft": false,
+            "is_published": true,
+            "latest_published_version": "0.0.5",
+            "latest_any_version": "0.0.5",
+            "created_at": "2026-09-22T01:37:42.113903+00:00",
+            "metadata": {},
+            "automation_defaults": {},
+            "default_entrypoint": "81795ea9",
+            "entrypoints": [
+                {
+                    "flow_id": "81795ea9",
+                    "name": "Basic agent",
+                    "description": "Chat agent: answers a prompt in one agent loop that can use tools and memory, and returns the reply.",
+                    "interfaces": [
+                        "abstractcode.agent.v1"
+                    ],
+                    "workflow_id": "basic-agent@0.0.5:81795ea9",
+                    "is_agent_default": true,
+                    "agent_default_interfaces": [
+                        "abstractcode.agent.v1"
+                    ],
+                    "deprecated": false,
+                    "deprecated_at": null,
+                    "deprecated_reason": null
+                }
+            ],
+            "actions": {
+                "can_run": true,
+                "can_upload": true,
+                "can_remove": false,
+                "can_archive": false,
+                "can_set_availability": false,
+                "can_edit_description": false,
+                "can_deprecate": true,
+                "catalog_promote_endpoint": "/api/gateway/admin/workflow-catalog/promote"
+            }
+        },
+        {
+            "bundle_id": "codeact-agent",
+            "bundle_version": "0.1.0",
+            "bundle_ref": "codeact-agent@0.1.0",
+            "registry_scope": "private",
+            "source": "shipped",
+            "owner": {
+                "kind": "gateway",
+                "user_id": null
+            },
+            "shipped": true,
+            "available": true,
+            "archived": false,
+            "description": "Chat agent (CodeAct): works on the prompt mainly by writing and running Python code, then returns the reply.",
+            "description_edited": false,
+            "version_channel": "published",
+            "is_draft": false,
+            "is_published": true,
+            "latest_published_version": "0.1.0",
+            "latest_any_version": "0.1.0",
+            "created_at": "2026-07-28T06:04:19.989168+00:00",
+            "metadata": {
+                "native_loop_factory": "codeact",
+                "loop_family": "codeact",
+                "publisher": {
+                    "host": "abstractgateway.scripts",
+                    "published_at": "2026-07-28T06:04:19.989168+00:00"
+                }
+            },
+            "automation_defaults": {},
+            "default_entrypoint": "codeact",
+            "entrypoints": [
+                {
+                    "flow_id": "codeact",
+                    "name": "CodeAct agent",
+                    "description": "Chat agent (CodeAct): works on the prompt mainly by writing and running Python code, then returns the reply.",
+                    "interfaces": [
+                        "abstractcode.agent.v1"
+                    ],
+                    "workflow_id": "codeact-agent@0.1.0:codeact",
+                    "is_agent_default": false,
+                    "agent_default_interfaces": [],
+                    "deprecated": false,
+                    "deprecated_at": null,
+                    "deprecated_reason": null
+                }
+            ],
+            "actions": {
+                "can_run": true,
+                "can_upload": true,
+                "can_remove": false,
+                "can_archive": false,
+                "can_set_availability": false,
+                "can_edit_description": false,
+                "can_deprecate": true,
+                "catalog_promote_endpoint": "/api/gateway/admin/workflow-catalog/promote"
+            }
+        },
+        {
+            "bundle_id": "coding-agent",
+            "bundle_version": "0.2.8",
+            "bundle_ref": "coding-agent@0.2.8",
+            "registry_scope": "private",
+            "source": "shipped",
+            "owner": {
+                "kind": "gateway",
+                "user_id": null
+            },
+            "shipped": true,
+            "available": true,
+            "archived": false,
+            "description": "Takes a build request and a workspace, writes the code, and runs build and run checks each round until they pass; returns a report.",
+            "description_edited": false,
+            "version_channel": "published",
+            "is_draft": false,
+            "is_published": true,
+            "latest_published_version": "0.2.8",
+            "latest_any_version": "0.2.8",
+            "created_at": "2026-09-28T03:38:34.169695+00:00",
+            "metadata": {
+                "family": "coding-agent",
+                "purpose": "recursive coding agent with deterministic delivery/integration gates + independent build/execute/match verification (fail-closed executes) and specific-failure reprompting; dual-interface (coding.v1 strict entrypoint + agent.v1 chat entrypoint with inferred gates)",
+                "outputs": [
+                    "report",
+                    "passed",
+                    "delivered",
+                    "success",
+                    "rounds_used",
+                    "open_failures",
+                    "artifacts"
+                ],
+                "steering": {
+                    "channel": "inject_guidance",
+                    "var": "_runtime.inbox",
+                    "applied": "at every round boundary, deduped by the run-owned cg.steer_seen watermark, folded into the builder prompt"
+                },
+                "progress_line": "coding round N of M"
+            },
+            "automation_defaults": {},
+            "default_entrypoint": "coding-agent",
+            "entrypoints": [
+                {
+                    "flow_id": "coder",
+                    "name": "Coding agent (chat)",
+                    "description": "Chat version of the coding agent: builds what the prompt asks in the session workspace, checks it each round, and replies with a report.",
+                    "interfaces": [
+                        "abstractcode.agent.v1"
+                    ],
+                    "workflow_id": "coding-agent@0.2.8:coder",
+                    "is_agent_default": false,
+                    "agent_default_interfaces": [],
+                    "deprecated": false,
+                    "deprecated_at": null,
+                    "deprecated_reason": null
+                }
+            ],
+            "actions": {
+                "can_run": true,
+                "can_upload": true,
+                "can_remove": false,
+                "can_archive": false,
+                "can_set_availability": false,
+                "can_edit_description": false,
+                "can_deprecate": true,
+                "catalog_promote_endpoint": "/api/gateway/admin/workflow-catalog/promote"
+            }
+        },
+        {
+            "bundle_id": "deep-research",
+            "bundle_version": "0.1.8",
+            "bundle_ref": "deep-research@0.1.8",
+            "registry_scope": "private",
+            "source": "shipped",
+            "owner": {
+                "kind": "gateway",
+                "user_id": null
+            },
+            "shipped": true,
+            "available": true,
+            "archived": false,
+            "description": "Takes a research question, searches the web, has three critics review the draft, and writes a cited report (Markdown, PDF, DOCX).",
+            "description_edited": false,
+            "version_channel": "published",
+            "is_draft": false,
+            "is_published": true,
+            "latest_published_version": "0.1.8",
+            "latest_any_version": "0.1.8",
+            "created_at": "2026-09-26T02:59:03.477179+00:00",
+            "metadata": {
+                "family": "deep-research",
+                "purpose": "production research with adversarial review and document export",
+                "source_of_truth": {
+                    "process": "VisualFlow",
+                    "execution": "AbstractRuntime",
+                    "lifecycle": "AbstractGateway catalog",
+                    "routing": "AbstractCore capability defaults plus run overrides"
+                },
+                "control_policy": {
+                    "user_budget_control": "effort",
+                    "effort_values": [
+                        "quick",
+                        "standard",
+                        "thorough"
+                    ],
+                    "outer_loop": "review_gated_while_with_effort_budget",
+                    "per_pass_agent_cap": "derived_settings.max_iterations",
+                    "deadline_minutes": "derived_settings.deadline_minutes_prompt_guidance",
+                    "max_sources": "derived_settings.max_sources_prompt_guidance"
+                },
+                "default_model_profile": {
+                    "default": "Gateway/AbstractCore defaults when provider/model are blank",
+                    "override_pins": [
+                        "provider",
+                        "model"
+                    ],
+                    "role_policy": "planner, researcher, critics, and writer use the same optional override"
+                },
+                "outputs": [
+                    "markdown_report",
+                    "pdf_report",
+                    "docx_report",
+                    "research_run_manifest_v1",
+                    "research_source_ledger_v1",
+                    "claim_evidence_matrix_v1",
+                    "iteration_log_v1"
+                ],
+                "tool_policy": {
+                    "research_agents": [
+                        "web_search",
+                        "fetch_url",
+                        "skim_websearch",
+                        "skim_url",
+                        "read_file",
+                        "skim_files"
+                    ],
+                    "review_agents": [],
+                    "export": "deterministic write_file/write_pdf/write_docx nodes"
+                }
+            },
+            "automation_defaults": {},
+            "default_entrypoint": "deep-research",
+            "entrypoints": [
+                {
+                    "flow_id": "deep-research",
+                    "name": "Deep research",
+                    "description": "Takes a research question, searches the web, has three critics review the draft, and writes a cited report (Markdown, PDF, DOCX).",
+                    "interfaces": [
+                        "abstractcode.agent.v1",
+                        "abstractresearch.deep.v1"
+                    ],
+                    "workflow_id": "deep-research@0.1.8:deep-research",
+                    "is_agent_default": true,
+                    "agent_default_interfaces": [
+                        "abstractresearch.deep.v1"
+                    ],
+                    "deprecated": false,
+                    "deprecated_at": null,
+                    "deprecated_reason": null
+                }
+            ],
+            "actions": {
+                "can_run": true,
+                "can_upload": true,
+                "can_remove": false,
+                "can_archive": false,
+                "can_set_availability": false,
+                "can_edit_description": false,
+                "can_deprecate": true,
+                "catalog_promote_endpoint": "/api/gateway/admin/workflow-catalog/promote"
+            }
+        },
+        {
+            "bundle_id": "memact-agent",
+            "bundle_version": "0.1.0",
+            "bundle_ref": "memact-agent@0.1.0",
+            "registry_scope": "private",
+            "source": "shipped",
+            "owner": {
+                "kind": "gateway",
+                "user_id": null
+            },
+            "shipped": true,
+            "available": true,
+            "archived": false,
+            "description": "Chat agent (MemAct): keeps a long-term memory that it reads and updates on each turn, can call tools, and returns the reply.",
+            "description_edited": false,
+            "version_channel": "published",
+            "is_draft": false,
+            "is_published": true,
+            "latest_published_version": "0.1.0",
+            "latest_any_version": "0.1.0",
+            "created_at": "2026-07-28T06:04:21.831056+00:00",
+            "metadata": {
+                "native_loop_factory": "memact",
+                "loop_family": "memact",
+                "publisher": {
+                    "host": "abstractgateway.scripts",
+                    "published_at": "2026-07-28T06:04:21.831056+00:00"
+                }
+            },
+            "automation_defaults": {},
+            "default_entrypoint": "memact",
+            "entrypoints": [
+                {
+                    "flow_id": "memact",
+                    "name": "MemAct agent",
+                    "description": "Chat agent (MemAct): keeps a long-term memory that it reads and updates on each turn, can call tools, and returns the reply.",
+                    "interfaces": [
+                        "abstractcode.agent.v1"
+                    ],
+                    "workflow_id": "memact-agent@0.1.0:memact",
+                    "is_agent_default": false,
+                    "agent_default_interfaces": [],
+                    "deprecated": false,
+                    "deprecated_at": null,
+                    "deprecated_reason": null
+                }
+            ],
+            "actions": {
+                "can_run": true,
+                "can_upload": true,
+                "can_remove": false,
+                "can_archive": false,
+                "can_set_availability": false,
+                "can_edit_description": false,
+                "can_deprecate": true,
+                "catalog_promote_endpoint": "/api/gateway/admin/workflow-catalog/promote"
+            }
+        },
+        {
+            "bundle_id": "meta-baseline",
+            "bundle_version": "0.1.1",
+            "bundle_ref": "meta-baseline@0.1.1",
+            "registry_scope": "private",
+            "source": "shipped",
+            "owner": {
+                "kind": "gateway",
+                "user_id": null
+            },
+            "shipped": true,
+            "available": true,
+            "archived": false,
+            "description": "Answers the prompt with one direct LLM call; the baseline the other deliberation workflows are compared against.",
+            "description_edited": false,
+            "version_channel": "published",
+            "is_draft": false,
+            "is_published": true,
+            "latest_published_version": "0.1.1",
+            "latest_any_version": "0.1.1",
+            "created_at": "2026-07-20T13:29:01.166723+00:00",
+            "metadata": {
+                "family": "meta-intelligence",
+                "purpose": "co-orchestrated deliberation pattern benchmarkable 1:1 against an isolated LLM call via abstractcode.agent.v1"
+            },
+            "automation_defaults": {},
+            "default_entrypoint": "meta-baseline",
+            "entrypoints": [
+                {
+                    "flow_id": "meta-baseline",
+                    "name": "Single call (baseline)",
+                    "description": "Answers the prompt with one direct LLM call; the baseline the other deliberation workflows are compared against.",
+                    "interfaces": [
+                        "abstractcode.agent.v1",
+                        "abstractmeta.intelligence.v1"
+                    ],
+                    "workflow_id": "meta-baseline@0.1.1:meta-baseline",
+                    "is_agent_default": true,
+                    "agent_default_interfaces": [
+                        "abstractmeta.intelligence.v1"
+                    ],
+                    "deprecated": false,
+                    "deprecated_at": null,
+                    "deprecated_reason": null
+                }
+            ],
+            "actions": {
+                "can_run": true,
+                "can_upload": true,
+                "can_remove": false,
+                "can_archive": false,
+                "can_set_availability": false,
+                "can_edit_description": false,
+                "can_deprecate": true,
+                "catalog_promote_endpoint": "/api/gateway/admin/workflow-catalog/promote"
+            }
+        },
+        {
+            "bundle_id": "meta-consensus",
+            "bundle_version": "0.1.1",
+            "bundle_ref": "meta-consensus@0.1.1",
+            "registry_scope": "private",
+            "source": "shipped",
+            "owner": {
+                "kind": "gateway",
+                "user_id": null
+            },
+            "shipped": true,
+            "available": true,
+            "archived": false,
+            "description": "Gets two independent answers (two temperatures or two models) and merges them into one, keeping agreements and resolving differences.",
+            "description_edited": false,
+            "version_channel": "published",
+            "is_draft": false,
+            "is_published": true,
+            "latest_published_version": "0.1.1",
+            "latest_any_version": "0.1.1",
+            "created_at": "2026-07-20T13:29:01.124395+00:00",
+            "metadata": {
+                "family": "meta-intelligence",
+                "purpose": "co-orchestrated deliberation pattern benchmarkable 1:1 against an isolated LLM call via abstractcode.agent.v1"
+            },
+            "automation_defaults": {},
+            "default_entrypoint": "meta-consensus",
+            "entrypoints": [
+                {
+                    "flow_id": "meta-consensus",
+                    "name": "Consensus",
+                    "description": "Gets two independent answers (two temperatures or two models) and merges them into one, keeping agreements and resolving differences.",
+                    "interfaces": [
+                        "abstractcode.agent.v1",
+                        "abstractmeta.intelligence.v1"
+                    ],
+                    "workflow_id": "meta-consensus@0.1.1:meta-consensus",
+                    "is_agent_default": false,
+                    "agent_default_interfaces": [],
+                    "deprecated": false,
+                    "deprecated_at": null,
+                    "deprecated_reason": null
+                }
+            ],
+            "actions": {
+                "can_run": true,
+                "can_upload": true,
+                "can_remove": false,
+                "can_archive": false,
+                "can_set_availability": false,
+                "can_edit_description": false,
+                "can_deprecate": true,
+                "catalog_promote_endpoint": "/api/gateway/admin/workflow-catalog/promote"
+            }
+        },
+        {
+            "bundle_id": "meta-debate",
+            "bundle_version": "0.1.1",
+            "bundle_ref": "meta-debate@0.1.1",
+            "registry_scope": "private",
+            "source": "shipped",
+            "owner": {
+                "kind": "gateway",
+                "user_id": null
+            },
+            "shipped": true,
+            "available": true,
+            "archived": false,
+            "description": "One model answers, a challenger attacks the answer, then the first model concedes or rebuts each point and writes the final answer.",
+            "description_edited": false,
+            "version_channel": "published",
+            "is_draft": false,
+            "is_published": true,
+            "latest_published_version": "0.1.1",
+            "latest_any_version": "0.1.1",
+            "created_at": "2026-07-20T13:29:01.127354+00:00",
+            "metadata": {
+                "family": "meta-intelligence",
+                "purpose": "co-orchestrated deliberation pattern benchmarkable 1:1 against an isolated LLM call via abstractcode.agent.v1"
+            },
+            "automation_defaults": {},
+            "default_entrypoint": "meta-debate",
+            "entrypoints": [
+                {
+                    "flow_id": "meta-debate",
+                    "name": "Debate",
+                    "description": "One model answers, a challenger attacks the answer, then the first model concedes or rebuts each point and writes the final answer.",
+                    "interfaces": [
+                        "abstractcode.agent.v1",
+                        "abstractmeta.intelligence.v1"
+                    ],
+                    "workflow_id": "meta-debate@0.1.1:meta-debate",
+                    "is_agent_default": false,
+                    "agent_default_interfaces": [],
+                    "deprecated": false,
+                    "deprecated_at": null,
+                    "deprecated_reason": null
+                }
+            ],
+            "actions": {
+                "can_run": true,
+                "can_upload": true,
+                "can_remove": false,
+                "can_archive": false,
+                "can_set_availability": false,
+                "can_edit_description": false,
+                "can_deprecate": true,
+                "catalog_promote_endpoint": "/api/gateway/admin/workflow-catalog/promote"
+            }
+        },
+        {
+            "bundle_id": "meta-deliberate",
+            "bundle_version": "0.1.1",
+            "bundle_ref": "meta-deliberate@0.1.1",
+            "registry_scope": "private",
+            "source": "shipped",
+            "owner": {
+                "kind": "gateway",
+                "user_id": null
+            },
+            "shipped": true,
+            "available": true,
+            "archived": false,
+            "description": "Plans the question (steps, pitfalls, checklist), answers following the plan, then checks the answer against the checklist and fixes it.",
+            "description_edited": false,
+            "version_channel": "published",
+            "is_draft": false,
+            "is_published": true,
+            "latest_published_version": "0.1.1",
+            "latest_any_version": "0.1.1",
+            "created_at": "2026-07-20T13:29:01.154986+00:00",
+            "metadata": {
+                "family": "meta-intelligence",
+                "purpose": "co-orchestrated deliberation pattern benchmarkable 1:1 against an isolated LLM call via abstractcode.agent.v1"
+            },
+            "automation_defaults": {},
+            "default_entrypoint": "meta-deliberate",
+            "entrypoints": [
+                {
+                    "flow_id": "meta-deliberate",
+                    "name": "Plan, answer, verify",
+                    "description": "Plans the question (steps, pitfalls, checklist), answers following the plan, then checks the answer against the checklist and fixes it.",
+                    "interfaces": [
+                        "abstractcode.agent.v1",
+                        "abstractmeta.intelligence.v1"
+                    ],
+                    "workflow_id": "meta-deliberate@0.1.1:meta-deliberate",
+                    "is_agent_default": false,
+                    "agent_default_interfaces": [],
+                    "deprecated": false,
+                    "deprecated_at": null,
+                    "deprecated_reason": null
+                }
+            ],
+            "actions": {
+                "can_run": true,
+                "can_upload": true,
+                "can_remove": false,
+                "can_archive": false,
+                "can_set_availability": false,
+                "can_edit_description": false,
+                "can_deprecate": true,
+                "catalog_promote_endpoint": "/api/gateway/admin/workflow-catalog/promote"
+            }
+        },
+        {
+            "bundle_id": "meta-perspectives",
+            "bundle_version": "0.1.1",
+            "bundle_ref": "meta-perspectives@0.1.1",
+            "registry_scope": "private",
+            "source": "shipped",
+            "owner": {
+                "kind": "gateway",
+                "user_id": null
+            },
+            "shipped": true,
+            "available": true,
+            "archived": false,
+            "description": "Picks three angles on the question, answers from each separately, then combines them into one answer that names where they disagree.",
+            "description_edited": false,
+            "version_channel": "published",
+            "is_draft": false,
+            "is_published": true,
+            "latest_published_version": "0.1.1",
+            "latest_any_version": "0.1.1",
+            "created_at": "2026-07-20T13:29:01.132894+00:00",
+            "metadata": {
+                "family": "meta-intelligence",
+                "purpose": "co-orchestrated deliberation pattern benchmarkable 1:1 against an isolated LLM call via abstractcode.agent.v1"
+            },
+            "automation_defaults": {},
+            "default_entrypoint": "meta-perspectives",
+            "entrypoints": [
+                {
+                    "flow_id": "meta-perspectives",
+                    "name": "Three perspectives",
+                    "description": "Picks three angles on the question, answers from each separately, then combines them into one answer that names where they disagree.",
+                    "interfaces": [
+                        "abstractcode.agent.v1",
+                        "abstractmeta.intelligence.v1"
+                    ],
+                    "workflow_id": "meta-perspectives@0.1.1:meta-perspectives",
+                    "is_agent_default": false,
+                    "agent_default_interfaces": [],
+                    "deprecated": false,
+                    "deprecated_at": null,
+                    "deprecated_reason": null
+                }
+            ],
+            "actions": {
+                "can_run": true,
+                "can_upload": true,
+                "can_remove": false,
+                "can_archive": false,
+                "can_set_availability": false,
+                "can_edit_description": false,
+                "can_deprecate": true,
+                "catalog_promote_endpoint": "/api/gateway/admin/workflow-catalog/promote"
+            }
+        },
+        {
+            "bundle_id": "meta-reflect",
+            "bundle_version": "0.1.1",
+            "bundle_ref": "meta-reflect@0.1.1",
+            "registry_scope": "private",
+            "source": "shipped",
+            "owner": {
+                "kind": "gateway",
+                "user_id": null
+            },
+            "shipped": true,
+            "available": true,
+            "archived": false,
+            "description": "Drafts an answer, questions its own reasoning (assumptions, weak steps, missed cases), then writes a revised final answer.",
+            "description_edited": false,
+            "version_channel": "published",
+            "is_draft": false,
+            "is_published": true,
+            "latest_published_version": "0.1.1",
+            "latest_any_version": "0.1.1",
+            "created_at": "2026-07-20T13:29:01.129598+00:00",
+            "metadata": {
+                "family": "meta-intelligence",
+                "purpose": "co-orchestrated deliberation pattern benchmarkable 1:1 against an isolated LLM call via abstractcode.agent.v1"
+            },
+            "automation_defaults": {},
+            "default_entrypoint": "meta-reflect",
+            "entrypoints": [
+                {
+                    "flow_id": "meta-reflect",
+                    "name": "Reflect and revise",
+                    "description": "Drafts an answer, questions its own reasoning (assumptions, weak steps, missed cases), then writes a revised final answer.",
+                    "interfaces": [
+                        "abstractcode.agent.v1",
+                        "abstractmeta.intelligence.v1"
+                    ],
+                    "workflow_id": "meta-reflect@0.1.1:meta-reflect",
+                    "is_agent_default": false,
+                    "agent_default_interfaces": [],
+                    "deprecated": false,
+                    "deprecated_at": null,
+                    "deprecated_reason": null
+                }
+            ],
+            "actions": {
+                "can_run": true,
+                "can_upload": true,
+                "can_remove": false,
+                "can_archive": false,
+                "can_set_availability": false,
+                "can_edit_description": false,
+                "can_deprecate": true,
+                "catalog_promote_endpoint": "/api/gateway/admin/workflow-catalog/promote"
+            }
+        },
+        {
+            "bundle_id": "react-agent",
+            "bundle_version": "0.1.0",
+            "bundle_ref": "react-agent@0.1.0",
+            "registry_scope": "private",
+            "source": "shipped",
+            "owner": {
+                "kind": "gateway",
+                "user_id": null
+            },
+            "shipped": true,
+            "available": true,
+            "archived": false,
+            "description": "Chat agent (ReAct): reasons step by step and calls tools until it can answer the prompt, then returns the reply.",
+            "description_edited": false,
+            "version_channel": "published",
+            "is_draft": false,
+            "is_published": true,
+            "latest_published_version": "0.1.0",
+            "latest_any_version": "0.1.0",
+            "created_at": "2026-07-28T05:48:25.626490+00:00",
+            "metadata": {
+                "native_loop_factory": "react",
+                "loop_family": "react",
+                "publisher": {
+                    "host": "abstractgateway.scripts",
+                    "published_at": "2026-07-28T05:48:25.626490+00:00"
+                }
+            },
+            "automation_defaults": {},
+            "default_entrypoint": "react",
+            "entrypoints": [
+                {
+                    "flow_id": "react",
+                    "name": "ReAct agent",
+                    "description": "Chat agent (ReAct): reasons step by step and calls tools until it can answer the prompt, then returns the reply.",
+                    "interfaces": [
+                        "abstractcode.agent.v1"
+                    ],
+                    "workflow_id": "react-agent@0.1.0:react",
+                    "is_agent_default": false,
+                    "agent_default_interfaces": [],
+                    "deprecated": false,
+                    "deprecated_at": null,
+                    "deprecated_reason": null
+                }
+            ],
+            "actions": {
+                "can_run": true,
+                "can_upload": true,
+                "can_remove": false,
+                "can_archive": false,
+                "can_set_availability": false,
+                "can_edit_description": false,
+                "can_deprecate": true,
+                "catalog_promote_endpoint": "/api/gateway/admin/workflow-catalog/promote"
+            }
+        }
+    ],
+    "interfaces": {
+        "abstractcode.agent.v1": {
+            "label": "AbstractCode \u2014 chat agent",
+            "help": "The agent AbstractCode chats and automations run when they ask for \"an agent\": a prompt in, a reply out.",
+            "known": true
+        },
+        "abstractmeta.intelligence.v1": {
+            "label": "Meta-reasoning agents",
+            "help": "Answers one prompt through several model calls (debate, consensus, reflection, ...) so the result can be compared with a single call. Declared by the meta-* workflows; no app asks for it by default.",
+            "known": true
+        },
+        "abstractresearch.deep.v1": {
+            "label": "Deep research",
+            "help": "Searches the web and writes a cited research report. Declared by the deep-research workflow; no app asks for it by default.",
+            "known": true
+        }
+    },
+    "executable_for": "abstractcode.agent.v1",
+    "default_bundle_id": null,
+    "default_agent_workflows": {
+        "abstractcode.agent.v1": {
+            "bundle_id": "basic-agent",
+            "bundle_version": "0.0.5",
+            "flow_id": "81795ea9",
+            "registry_scope": "private",
+            "workflow_id": "basic-agent@0.0.5:81795ea9",
+            "name": "Basic agent",
+            "source": "default"
+        },
+        "abstractassistant.agent.v1": {
+            "bundle_id": "abstractassistant-orchestrator",
+            "bundle_version": "0.0.0",
+            "flow_id": "d5d4e5a1",
+            "registry_scope": "private",
+            "workflow_id": "abstractassistant-orchestrator@0.0.0:d5d4e5a1",
+            "name": "AbstractAssistant Orchestrator",
+            "source": "default"
+        },
+        "abstractbatch.mapreduce.v1": {
+            "bundle_id": "map-reduce",
+            "bundle_version": "0.1.0",
+            "flow_id": "map-reduce",
+            "registry_scope": "private",
+            "workflow_id": "map-reduce@0.1.0:map-reduce",
+            "name": "Map-reduce",
+            "source": "default"
+        },
+        "abstractcode.coding.v1": {
+            "bundle_id": "coding-agent",
+            "bundle_version": "0.2.8",
+            "flow_id": "coding-agent",
+            "registry_scope": "private",
+            "workflow_id": "coding-agent@0.2.8:coding-agent",
+            "name": "Coding agent",
+            "source": "default"
+        },
+        "abstractextract.structured.v1": {
+            "bundle_id": "structured-extract",
+            "bundle_version": "0.1.0",
+            "flow_id": "structured-extract",
+            "registry_scope": "private",
+            "workflow_id": "structured-extract@0.1.0:structured-extract",
+            "name": "Structured extraction",
+            "source": "default"
+        },
+        "abstractmeta.intelligence.v1": {
+            "bundle_id": "meta-baseline",
+            "bundle_version": "0.1.1",
+            "flow_id": "meta-baseline",
+            "registry_scope": "private",
+            "workflow_id": "meta-baseline@0.1.1:meta-baseline",
+            "name": "Single call (baseline)",
+            "source": "default"
+        },
+        "abstractresearch.coscientist.v1": {
+            "bundle_id": "co-scientist",
+            "bundle_version": "0.2.1",
+            "flow_id": "co-scientist",
+            "registry_scope": "private",
+            "workflow_id": "co-scientist@0.2.1:co-scientist",
+            "name": "Co-scientist",
+            "source": "default"
+        },
+        "abstractresearch.deep.v1": {
+            "bundle_id": "deep-research",
+            "bundle_version": "0.1.8",
+            "flow_id": "deep-research",
+            "registry_scope": "private",
+            "workflow_id": "deep-research@0.1.8:deep-research",
+            "name": "Deep research",
+            "source": "default"
+        },
+        "abstractreview.adversarial.v1": {
+            "bundle_id": "adversarial-review",
+            "bundle_version": "0.1.0",
+            "flow_id": "adversarial-review",
+            "registry_scope": "private",
+            "workflow_id": "adversarial-review@0.1.0:adversarial-review",
+            "name": "Adversarial review",
+            "source": "default"
+        }
+    },
+    "default_agent_workflows_unavailable": {},
+    "skipped": [],
+    "skipped_count": 0
+}

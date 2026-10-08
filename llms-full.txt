@@ -91,8 +91,8 @@ for credentials, remote gateways, and first-run configuration.
 - **Voice** — dictate into the composer and hear replies read aloud through the
   gateway's speech routes (the **Voice** panel and the composer microphone,
   `/voice`, `Ctrl+R`, `Ctrl+P`).
-- **Automations** — run a workflow on a schedule (or, in the browser, when an
-  email arrives, with the result emailed to you), then switch it off with its
+- **Automations** — run a workflow on a schedule (or when an email arrives,
+  with the result emailed to you), then switch it off with its
   **Active** switch, run it now, edit it, archive it, answer its approvals,
   browse its folder, and discuss any run as a new conversation (the
   **Automations** sidebar section, `/automations`, `/schedule`).
@@ -787,11 +787,20 @@ conversation workflow. Choosing a different automation workflow leaves the conve
 | When | **Repeat** every 5 or 30 minutes, every hour, 8 hours, 24 hours or 7 days, or every N minutes/hours/days (UTC; the first run starts at once); **Daily** at HH:MM; **Weekly** on the days you pick at HH:MM; **Monthly** on day 1–31 or the last day at HH:MM; **Once at** a date and time. For every schedule the line under **When** is the gateway's own sentence ("Runs every 24 hours (UTC), first run now." for Repeat); for the last four it reads, for example, ("Runs every Mon and Fri at 07:30 (Europe/Paris), first run Fri 9 Oct 07:30.") with "in Europe/Paris (your account's time zone)"; the zone changes only in your account preferences (**Change in preferences** opens Settings → Workflow). |
 | Context | **Independent** — each run starts fresh. **Growing** — each run is the next turn of one conversation and sees the previous runs, within the gateway's history window. |
 | Tools | **Run without asking** — tools run without asking (you approve them now by creating this automation). **Ask me before each tool call** — every tool call waits for your approval. Questions a workflow asks always wait for you. |
-| Email (browser) | **When an email arrives** (a When choice), **Email result** and **Recipients** — see [Email automations](#email-automations-browser). |
+| Email | **When an email arrives** (a When choice), **Email result** and **Recipients** — see [Email automations](#email-automations). |
 
-**Terminal.** `/schedule [task]` opens four steps: the task (default: your
-last prompt, or the text after `/schedule`), when, context, tools. Enter on
-the last step creates it and opens it.
+**Terminal.** `/schedule [task]` shows the browser dialog's sections as seven
+steps, with the same words: **What** (the workflow — the conversation's, or
+any workflow you may run with **Gateway default** first — and the task:
+default your last prompt, or the text after `/schedule`), **When** (Repeat,
+Daily, Weekly with `[x] Mon` day toggles, Monthly, Once at… — the gateway's
+sentence under it, as in the browser — or **When an email arrives**),
+**Context**, **Tools** (the `/tools` rows, starting from the conversation's
+tools), **Workspaces**, **Mailbox** and **Title and limits**. The cursor
+starts on **Continue**, so Enter, Enter, … creates it with the defaults and
+opens it. The run input is built as in the browser (the workflow's input
+defaults plus the conversation's model, tools and skills, checked against the
+workflow's inputs before anything is sent).
 
 **Browser.** Select **+** in the **Automations** section of the sidebar. The
 dialog lets you choose the workflow it runs. Every section is visible (no
@@ -817,10 +826,10 @@ The automation's header shows its workspaces in one line, **Workspaces:
 verbatim). The pencil next to it (**Change workspaces**) opens the right rail's
 **Workspace** panel on that automation: each change there is one new revision.
 
-### Email automations (browser)
+### Email automations
 
 When your gateway account has a working mailbox (the gateway console's
-**My email**, in its Users tab), the browser dialog also offers:
+**My email**, in its Users tab), the dialog (browser and terminal) also offers:
 
 - **When an email arrives** — the automation runs on new mail in your inbox
   instead of on a schedule. Optional filters: from these addresses, from these
@@ -838,9 +847,10 @@ When your gateway account has a working mailbox (the gateway console's
 Without a connected mailbox these options are off and the dialog says
 **"Connect a mailbox first — open My email"**; the link opens the gateway console in a new
 tab. The automation's **Edit** (its **Workflow** panel in the right rail) changes the workflow, task, tools, check interval, **Email result**
-and its recipients; its **Definition** card lists them. The
-terminal client does not create email automations yet (it lists and manages
-them like any other).
+and its recipients; its **Definition** card lists them. In the terminal,
+**Edit** (`e`) opens the **Workflow** panel on the automation: **Check for new
+mail every**, **Stop after this many runs** / **Stop at (UTC)** (repeating
+schedules), **Email result** and **Recipients**, each change one revision.
 
 ## Managing an automation
 
@@ -1803,19 +1813,27 @@ Status: **0.9.1**, pre-alpha. Release history is in
   is on this machine.
 - **Automations**: `/automations` lists the gateway's automations (the same
   ones the Assistant, the Observer and Code web show) as cards —
-  `↻ every 24 h · last 3 h ago`, `next in 20 h` and the **Active** switch —
+  `↻ Every 24 hours (UTC) · last 3 h ago` (the gateway's words), `next in 20 h` and the **Active** switch —
   with **Run now**, **Stop**, **Edit**, **Archive** and an **Archived · N**
   line with **Unarchive**; open one to read its runs, approve its tool calls,
-  browse its folder, or discuss a run as a new chat in place. `/schedule
-  [task]` creates one that runs the current workflow: Repeat (UTC
-  interval), Daily, Weekly, Monthly or Once at, the calendar rules on your
-  account's time zone and worded by the gateway.
+  browse its folder, discuss a run as a new chat in place, or hear a run's
+  reply (`Ctrl+P`). `/schedule [task]` creates one with the Code web's
+  dialog: the workflow (the conversation's, or any workflow you may run),
+  the task, when (Repeat in UTC, Daily, Weekly, Monthly or Once at — the
+  calendar rules on your account's time zone and worded by the gateway —
+  or **When an email arrives**), context, tools, workspaces, **Mailbox**
+  (**Email result**) and title and limits — with this conversation's model,
+  tools and skills as the run input. An automation's **Edit** also changes
+  its calendar rule, run limits and email options. While one waits for you,
+  the status line says **Automations · N waiting** — `Enter` on an empty
+  prompt opens it.
 - **Settings panels**: `/settings` — Activity, Files, Model, Workflow,
   Workspace, Tools, Skills, Voice — bound to this conversation, or to an
   automation's definition (each change saved as a new revision).
 - **Sessions and memory**: one durable session id per conversation, and a
-  `/sessions` board over them (`Oct 2 · 2 turns · 7 tools`), with Archive
-  and **Archived · N** / Unarchive — nothing is ever deleted.
+  `/sessions` board over them (`Oct 2 · 2 turns · 7 tools`), with
+  **Search conversations** (`/`, title + id), Archive and **Archived · N** /
+  Unarchive — nothing is ever deleted.
   The client carries the live conversation into each run; the gateway
   replays prior turns server-side across restarts (`use_session_history`).
 - **Crash-proof by construction**: quit or crash, relaunch, and you are
@@ -1913,7 +1931,10 @@ Inside the app:
 - `/workflow` picks the agent: the first row, **Gateway default**, runs the
   workflow your gateway's operator set (a change there applies to your next
   turn); below it, every catalog entrypoint implementing
-  `abstractcode.agent.v1`. `/model` picks provider + model, then the
+  `abstractcode.agent.v1`. The workflow NEW conversations start on is your
+  account's **Default for new conversations** (`/settings workflow`), kept
+  by the gateway and shared with the Assistant and the browser.
+  `/model` picks provider + model, then the
   reasoning effort, then MTP (multi-token prediction — also `/mtp`), `/theme` restyles
 - `/stream` chooses whether replies stream in as the model writes them
   (gateway default, on, off); a streamed reply shows under the transcript
@@ -2281,20 +2302,28 @@ in [api.md](api.md#voice-voice-speak-dictate).
 Workspace, Tools, Skills, Voice — like the right rail of AbstractCode in the
 browser: `←`/`→` changes panel, `Enter` changes a row, `d` puts it back to
 **Gateway default**. `/activity` opens the work of this conversation, one
-group per model step. `/sessions` lists your conversations as
-`Oct 2 · 2 turns · 7 tools`; `a` archives one (nothing is deleted — it moves
+group per model step. The Workflow panel also holds **Default for new
+conversations**: your account's choice, kept by the gateway for the
+Assistant, the browser and this terminal (first choice **Gateway default
+(<name>)**, as the gateway words it). `/sessions` lists your conversations as
+`Oct 2 · 2 turns · 7 tools`; `/` searches them by title or id; `a` archives one (nothing is deleted — it moves
 under **Archived · N**, where `u` brings it back). In `/automations` each
-card reads `↻ every 24 h · last 3 h ago` and `next in 20 h` with its
+card reads the gateway's words, `↻ Every 24 hours (UTC) · last 3 h ago`, and `next in 20 h` with its
 **Active** switch; `g` Run now, `x` Stop, `e` Edit (the same panels, bound to
-the automation: each change is saved as a new revision), `a` Archive.
+the automation: each change is saved as a new revision), `a` Archive; inside
+one, `Ctrl+P` reads the selected run's reply aloud. When an automation waits
+for you (an approval, a question, a result you have not seen), the status
+line says **Automations · N waiting**; `Enter` on an empty prompt opens it.
 `/workspace` opens this conversation's workspaces: **Use my default**, or
 your own rows with Read-only / Read & write / Refused, stored on the
-conversation by the gateway. `/schedule` walks through the task, when
-(**Repeat** every N minutes/hours/days in UTC, **Daily**, **Weekly**,
-**Monthly**, **Once at…** — the last four on your account's time zone, with
-the gateway's own sentence and first run), context, tools, **Workspaces** and
-**Title and limits**. A calendar automation's card reads the gateway's words,
-e.g. `↻ Every day at 08:00 (Europe/Paris)`. Details in
+conversation by the gateway. `/schedule` walks through the Code web's seven
+sections: **What** (workflow and task), **When** (**Repeat** every N
+minutes/hours/days in UTC, **Daily**, **Weekly**, **Monthly**, **Once at…** —
+the last four on your account's time zone, with the gateway's own sentence and
+first run — or **When an email arrives** when your mailbox is connected),
+**Context**, **Tools**, **Workspaces**, **Mailbox** and **Title and limits**.
+A calendar automation's card reads the gateway's words, e.g.
+`↻ Every day at 08:00 (Europe/Paris)`. Details in
 [api.md](api.md#settings-panels-settings) and
 [api.md](api.md#workspaces-workspace). Archiving and **Archived · N**
 need AbstractGateway 0.13.0 or later.
@@ -2383,10 +2412,10 @@ abstractcode --help | --version
 | `/speak [stop]` | Read the latest reply aloud (`/say` too; `Ctrl+P`); `stop` stops it (so does `Esc`) |
 | `/dictate` | Record from this computer's microphone and put the transcript in the composer (`/mic` too; `Ctrl+R` starts, `Ctrl+R` again transcribes, `Esc` cancels) |
 | `/theme [id]` | Live-preview theme picker, or set directly |
-| `/workflow` | Pick the agent workflow (`/agent` too). First row: **Gateway default → name @version** — saved as "the gateway default", so the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran |
+| `/workflow` | Pick the agent workflow (`/agent` too). First row: **Gateway default → name @version** — the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran. When the gateway keeps your account's **Default for new conversations** (AbstractGateway 0.13.1+; see [Settings panels](#settings-panels-settings)), this picks THIS conversation's workflow only and saves nothing on this computer; with an older gateway the pick is also saved on this computer for new conversations, as before |
 | `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` shows the workspace folder itself (never a sub-folder; never a folder that would be launched, such as `.app`) in your file manager, only when the gateway is on this machine and allows it; `r` refreshes |
-| `/automations [id]` | The gateway's automations (`/automation`, `/autos` too), shared with every client, as the Code web's cards: the name (+ **waiting for you** while an approval or a question waits), `↻ every 24 h · last 3 h ago` (`waiting since 5 min` while a run waits on you, `running now` while one runs, `last never` before the first), then `next in 20 h` (absent when nothing is scheduled) with the **Active** switch; a Daily / Weekly / Monthly / Once automation reads the gateway's own words for its rule (`↻ Every day at 08:00 (Europe/Paris) · last …`, the served `schedule_rule_text`), and every next run is the gateway's (`next_run_at`; the one-automation screen's Run now line adds `Next scheduled run: 2026-10-09 08:00 Europe/Paris.`, cut from the served `next_run_local` — the terminal never computes a next run or a time zone) at the right (`[x]` runs on its schedule, `[ ]` paused, `[-]` cannot change). The quiet **Archived · N** line ends the list (N = the gateway's `archived_automations`; absent at 0): `Enter` opens the archived ones inline, `Enter`/`u` on one unarchives it (it comes back paused). Keys: `Enter` opens · `Space` switches Active (`p` too) · `g` Run now (once now; the next scheduled run keeps its time) · `x` Stop · `e` Edit (the settings panels on its definition, see below) · `a` Archive (asks inline: `y` archives, `n`/`Esc` keeps it) · `u` Unarchive · `n` new · `r` refresh. In one automation: `Automations / <title>`, the Active switch, the timing line `every 24 h · last 3 h ago · next in 14 h`, the workspace as a short name, the waits that need you first (`y`/`n` approve/deny a tool call, `Enter` answers a question or an event), its runs as chat pairs, `d` discuss the selected run (a new chat; this session switches to it), `w` browse its folder, `Esc` back. Re-read every 15 s while open. See [Automations](../../docs/automations.md) |
-| `/schedule [task]` | Create an automation that runs the current workflow (the gateway default is sent as `@default`): the task (default: your last prompt), when — **Repeat** (UTC presets, or every N m/h/d: a fixed interval in UTC), **Daily** at `HH:MM`, **Weekly** (the days as `[x] Mon` toggles, then `HH:MM`), **Monthly** on day 1–31 or **last** at `HH:MM` (a day the month does not have runs on its last day), **Once at…** `YYYY-MM-DD HH:MM`; Daily, Weekly, Monthly and Once run on your account's time zone, and the step shows the gateway's answer to `POST /api/gateway/automations/schedule-preview` — `in Europe/Paris (your account's time zone)` and its sentence, e.g. `Runs every day at 08:00 (Europe/Paris), first run Fri 9 Oct 08:00.`, or its refusal (Enter continues only once the gateway accepted the rule); every kind is sent as `schedule@2`, context (independent or growing), tools (run without asking, or ask before each tool call), **Workspaces** (the automation's own workspaces, starting from **Use my default**; stored as `input_data.workspace`), then **Title and limits** (Title, First run at (UTC; empty = now; Repeat only), Stop after this many runs and Stop at (UTC) (Repeat, Daily, Weekly, Monthly)) and **Create automation**. The words of the When step are the ui-kit's (`assets/automation_controls.json`, `schedule` block, byte-identical). Opens it once the gateway answers |
+| `/automations [id]` | The gateway's automations (`/automation`, `/autos` too), shared with every client, as the Code web's cards: the name (+ **waiting for you** while an approval or a question waits), `↻ Every 24 hours (UTC) · last 3 h ago` (the schedule is always the gateway's own sentence, `schedule_rule_text` — Repeat with its bounds too, e.g. `Every 7 days (UTC) · 12 runs max`; a missing one shows `schedule@<version>`) (`waiting since 5 min` while a run waits on you, `running now` while one runs, `last never` before the first), then `next in 20 h` (absent when nothing is scheduled) with the **Active** switch; a Daily / Weekly / Monthly / Once automation reads the same way (`↻ Every day at 08:00 (Europe/Paris) · last …`), and every next run is the gateway's (`next_run_at`; the one-automation screen's Run now line adds `Next scheduled run: 2026-10-09 08:00 Europe/Paris.`, cut from the served `next_run_local` — the terminal never computes a next run or a time zone) at the right (`[x]` runs on its schedule, `[ ]` paused, `[-]` cannot change). The quiet **Archived · N** line ends the list (N = the gateway's `archived_automations`; absent at 0): `Enter` opens the archived ones inline, `Enter`/`u` on one unarchives it (it comes back paused). Keys: `Enter` opens · `Space` switches Active (`p` too) · `g` Run now (once now; the next scheduled run keeps its time) · `x` Stop · `e` Edit (the settings panels on its definition, see below) · `a` Archive (asks inline: `y` archives, `n`/`Esc` keeps it) · `u` Unarchive · `n` new · `r` refresh. In one automation: `Automations / <title>`, the Active switch, the timing line `Every 24 hours (UTC) · last 3 h ago · next in 14 h`, the workspace as a short name, the waits that need you first (`y`/`n` approve/deny a tool call, `Enter` answers a question or an event), its runs as chat pairs, `d` discuss the selected run (a new chat; this session switches to it), `Ctrl+P` reads the selected run's reply aloud (again = stop; spoken through the automation's run, like the Code web), `w` browse its folder, `Esc` back. Re-read every 15 s while open. Outside `/automations`, the status line shows **Automations · N waiting** (see [Status surfaces](#status-surfaces)). See [Automations](../../docs/automations.md) |
+| `/schedule [task]` | Create an automation — the Code web's dialog in seven steps, in its words: **1/7 What** (the **Workflow**: the conversation's own to start with; `Enter` lists the workflows you may run, `GET /bundles?executable_for=abstractcode.agent.v1`, **Gateway default — <what it resolves to>** first; and the **Task**, default: your last prompt), **2/7 When** (**Repeat** with the UTC presets or every N minutes/hours/days — a fixed interval in UTC; **Daily**, **Weekly** (the days as `[x] Mon` toggles), **Monthly** (**on day** 1–31 or **last**; a day the month does not have runs on its last day), each with **Time of day** `HH:MM`; **Once at…** (`Run once at` `YYYY-MM-DD HH:MM`) — Daily, Weekly, Monthly and Once run on your account's time zone; or **When an email arrives** with its check interval, batch size and filters — offered only when `GET /api/gateway/me/email` says your mailbox is usable, otherwise disabled with "Connect a mailbox first — open My email"). Every schedule kind (Repeat too) shows the gateway's answer to `POST /api/gateway/automations/schedule-preview` — its sentence, e.g. `Runs every 24 hours (UTC), first run now.` or `Runs every day at 08:00 (Europe/Paris), first run Fri 9 Oct 08:00.` (the calendar kinds and Once add `in Europe/Paris (your account's time zone)`; Repeat does not), "Checking the schedule…" while it answers, or its refusal (which stops **Continue**); every schedule kind is sent as `schedule@2`; the words are the ui-kit's (`assets/automation_controls.json`, `schedule` block, byte-identical), **3/7 Context** (Independent / Growing + **Max growing context (tokens)**), **4/7 Tools** (the `/tools` rows, starting from this conversation's tools — its own selection, or the workflow's default list; **Use workflow default tools** for another workflow — then **Run without asking** / **Ask me before each tool call (the run waits for you)**), **5/7 Workspaces** (starting from **Use my default**; `input_data.workspace`), **6/7 Mailbox** (**Email result**, **Recipients**), **7/7 Title and limits** (Title; First run at (UTC; empty = now) for Repeat; Stop after this many runs and Stop at (UTC) for Repeat, Daily, Weekly and Monthly; the gateway's line for the rule with its limits) and **Create automation**. The run input is the web's: the workflow's input schema defaults, then this conversation's provider/model, reasoning, stream setting, iteration and token limits, tools and skills (never its workspace or approval policy), checked against the schema before anything is sent — a problem shows the check's sentence (e.g. "Topic is required.") on the last step. `↑↓` move, `Enter`/`Space` change a row or continue, `Esc` cancels; the cursor starts on **Continue**. Opens the automation once the gateway answers |
 | `/workspace send [auto\|always\|never]` | Whether your folder is sent as the workspace: `auto` (default) = only when the gateway is on this machine; `always` = also to a gateway on another machine that sees the same path (a shared mount); `never`. Bare reports what is in force. Saved in `prefs.json` |
 | `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
 | `/model` | Pick provider, then model, from gateway discovery, then the reasoning effort, then MTP (see below). `Esc` at a step keeps the current value |
@@ -2403,7 +2432,7 @@ abstractcode --help | --version
 | `/resources` | Gateway-host resources (`/host` is an alias): memory (RAM/device meter bars, GPU utilization when the host supports it, the gateway's process RSS, host name), resident models (modality label, tri-state residency — an unreported residency reads `unknown`, never "no" — size, `ctx N` with `*` = calibrated, 🔒 = residency lock, `default`), session prompt caches, totals. Admin actions on the selected model: `u` unload (two-step confirm; a 409 `model_locked` refusal offers `f` force), `k` lock/unlock, `e` context estimate, `r` refresh — keys under "Modal keys" below. Data is fetched at open, on `r`, and after a mutation — never polled; a failed refresh keeps the last snapshot marked STALE. Requires the gateway's declared `host_state` contract (`/discovery/capabilities`) — older gateways get an honest "not supported". Feeds the footer's `mem NN%` segment |
 | `/history [n\|all]` | Stream the PREVIOUS bloc of this session's turns from the gateway ledgers, prepended in full detail. Boot replays only the last bloc (`--replay-turns` sizes it, default 5); a stub line names how many earlier turns exist. **Scrolling to the top of the transcript auto-loads the previous bloc** — the stub becomes a live progress line and holding at the top cascades bloc-by-bloc until the session is fully loaded (Esc returns to the tail and stops the cascade). Failures name their cause — never a silent hole |
 | `/status` | The status card: workflow, route, workspace, session, connection, client phase + run id + last outcome, and a LIVE gateway run-status probe — the one place client view vs server truth is inspectable (wrapper roots legitimately stay `waiting` after your turn concluded) |
-| `/sessions` | The conversations board, as the Code web's list: each conversation is its title (the opening prompt, else `Conversation <id>`) with its live state at the right while it wants something, then `Oct 2 · 2 turns · 7 tools` (the day of the newest turn in local time; turns = root runs; tools = the gateway's per-turn `tool_calls` summed, shown when above zero). `Enter` continues one · `a` Archive (asks inline: "Archive this conversation? It stays searchable and auditable; it just leaves this list." `y` archives through `POST /sessions/{id}/archive`, `n`/`Esc` cancels; archiving the open conversation opens the next one, else the previous, else a new one) · the quiet **Archived · N** line (N = the gateway's `archived_sessions`) opens the archived ones inline, `Enter`/`u` unarchives · `n` new conversation · `r` refresh. Nothing is ever deleted |
+| `/sessions` | The conversations board, as the Code web's list: each conversation is its title (the opening prompt, else `Conversation <id>`) with its live state at the right while it wants something, then `Oct 2 · 2 turns · 7 tools` (the day of the newest turn in local time; turns = root runs; tools = the gateway's per-turn `tool_calls` summed, shown when above zero). `Enter` continues one · `a` Archive (asks inline: "Archive this conversation? It stays searchable and auditable; it just leaves this list." `y` archives through `POST /sessions/{id}/archive`, `n`/`Esc` cancels; archiving the open conversation opens the next one, else the previous, else a new one) · the quiet **Archived · N** line (N = the gateway's `archived_sessions`) opens the archived ones inline, `Enter`/`u` unarchives · `n` new conversation · `r` refresh · `/` **Search conversations**: typing filters the cards on the title and the id, like the Code web (the opening prompt and the session id, case-insensitive; `<query> · N of M`, "No conversations match your search."); letters type into the search while it is open, `Backspace` narrows back, `Enter` continues the selected one, `Esc` clears the search before closing. Nothing is ever deleted |
 | `/archive` | Archive this conversation: the board opens with the question asked (`y` archives, `n` keeps it) |
 | `/settings [panel]` | The settings panels (`/panels`, `/rail` too), see [Settings panels](#settings-panels-settings). `panel` = `activity`, `files`, `model`, `workflow`, `workspace`, `tools`, `skills` or `voice` |
 | `/activity` | The settings panels on **Activity**: this conversation's work in foldable groups, one per model step |
@@ -2677,7 +2706,8 @@ The panels follow what is selected:
 - **This conversation** (`/settings`): the first line says `Conversation
   <title>`. Model (`Gateway default: <provider> · <model>.` until you pick a
   route; Reasoning effort, MTP depth; Behavior: Iteration limit, Context
-  token limit, Stream replies), Workflow, Workspace (`Current workspace`,
+  token limit, Stream replies), Workflow (this conversation's workflow, then
+  **Default for new conversations** — see below), Workspace (`Current workspace`,
   then this conversation's workspaces — see [Workspaces](#workspaces-workspace)),
   Tools (Permissions and one `[x]` switch per tool; a process-spawning tool
   shows the gateway's command-sandbox state under its name, and the
@@ -2706,11 +2736,40 @@ The panels follow what is selected:
   `tools` + `_runtime.allowed_tools`, `workspace`, `skills`); a value put
   back to the default is
   removed, never written as `""`. The Workflow panel holds the definition
-  form: Workflow, Title, Task, Repeat every (UTC), Context (Independent /
-  Growing), Tools (Run without asking / Ask before each tool call). Tools
+  form: Workflow, Title, Task, Repeat every (UTC) (an email automation:
+  **Check for new mail every**, never under 60 s), Context (Independent /
+  Growing), Tools (Run without asking / Ask before each tool call), then for a
+  repeating schedule **Stop after this many runs** and **Stop at (UTC)**
+  (empty = no limit; one revision with `trigger.config` `count` / `until`),
+  and **Mailbox**: **Email result** (`[x]`/`[ ]`; one revision with `notify`)
+  and **Recipients** (**Only me (default)** / **Me and these addresses**).
+  Without a usable mailbox (`GET /api/gateway/me/email`) the Mailbox shows
+  "Connect a mailbox first — open My email" and the switch reads `[-] Email
+  result — Connect a mailbox first.`. A refusal (the form's sentence or the
+  gateway's) stays on the revision line. Tools
   switches between **All tools** and a **Custom allowlist**. The Workspace
   panel shows `Runs work in the automation folder`, then the automation's
   workspaces (the run level, see below).
+
+**Default for new conversations** (the conversation's Workflow panel): the
+workflow your ACCOUNT's new conversations start on, kept by the gateway
+(`GET`/`PUT /api/gateway/accounts/me/preferences`, `default_workflow` of
+`abstractcode.agent.v1`) and shared with the Assistant, AbstractCode in the
+browser and the console's Accounts → Preferences. The first choice is the
+gateway's own label, verbatim — **Gateway default (Basic agent)** — then the
+workflows you may run. `Enter` picks, `d` puts it back to the gateway
+default; each change is ONE `PUT` at once: "Saved.", or "Not saved." and the
+gateway's sentence (the previous choice stays shown). Under the row: "Kept
+by the gateway for your account: the Assistant and every browser use the
+same choice. This conversation's workflow is picked above.", or the
+gateway's reason when the saved choice no longer runs. A fresh conversation
+and `/new` start on it; `abstractcode exec` without `--workflow` uses it too.
+The workflow this computer remembered from before is uploaded once when
+your account has none, then removed here (also when the gateway refuses
+it; kept when the gateway cannot be reached). A gateway older than 0.13.1
+has no such route: the panel says "This gateway does not keep a default for
+your account (it needs a newer gateway): /workflow saves your choice on this
+computer, as before."
 
 ### Workspaces (`/workspace`)
 
@@ -2813,7 +2872,8 @@ recovers it.
 | `Ctrl+D` | anywhere | Toggle detail view (thinking + tool results vs answers only) |
 | `Alt+E` | anywhere | Cycle conversation focus: agent → entity visit 1 → … → agent. Cycle order is the order conversations were opened — it never changes with how the header paints chips. Option+E on macOS with "Option as Meta/Esc+"; `/focus <name\|agent>` needs no modifier setting. (`Ctrl+E` is move-to-line-end in the composer) |
 | `Ctrl+T` | anywhere | Cycle theme |
-| `Ctrl+P` | anywhere | Read the latest reply aloud; again = stop (`/speak`) |
+| `Ctrl+P` | anywhere | Read the latest reply aloud; again = stop (`/speak`). In one automation (`/automations <id>`): the selected run's reply |
+| `Enter` | empty composer, status line shows **Automations · N waiting** | Open the automation that waits for you (a pending approval or question first, else unseen results); a click on the chip does the same |
 | `Ctrl+R` | anywhere | Dictate: start recording; again = transcribe into the composer (`/dictate`) |
 | `Esc` | while speaking / recording | Stop the spoken reply / cancel the recording — that press is consumed (it never clears the draft or arms cancel) |
 | `Ctrl+G` | anywhere | Fold / unfold the `/stance` panel |
@@ -2848,7 +2908,7 @@ recovers it.
 | `/entities` | `↑↓` browse (the identity card follows) · `Enter` talk (`@name`) · `t` leave a task (title prompt) · `e` end that entity's open visit · `Ctrl+D` show per-section provenance · `Esc` close |
 | `/workspace` | the Workspace panel: `↑↓` move · `Enter` changes the row (a mode picker, the posture, **Add a workspace path**) · `Space` flips **Use my default** · `d` back to **Use my default** · `Esc` close |
 | `/settings` | `←`/`→`/`Tab`/`1`–`8` panel · `↑↓` move · `Enter` change · `Space` switch · `d` Gateway default · `Esc` close |
-| `/sessions` | `↑↓` move · `Enter` continue / open `Archived · N` / unarchive · `a` Archive → `y` archives, `n`/`Esc` cancels · `u` Unarchive · `n` new conversation · `r` refresh · `Esc` close |
+| `/sessions` | `↑↓` move · `Enter` continue / open `Archived · N` / unarchive · `a` Archive → `y` archives, `n`/`Esc` cancels · `u` Unarchive · `n` new conversation · `r` refresh · `/` search (typing filters on title + id; `Backspace`; `Esc` clears it) · `Esc` close |
 | `/automations` | `↑↓` move · `Enter` open / open `Archived · N` / unarchive · `Space` Active · `g` Run now · `x` Stop · `e` Edit · `a` Archive → `y`, `n`/`Esc` keeps it · `u` Unarchive · `n` new · `r` refresh · `Esc` close |
 
 ## Transcript vocabulary
@@ -2956,7 +3016,14 @@ exhausted budget and a stuck-loop stop both arrive as
   when reported) · tool count · per-cycle output sparkline. When idle:
   session totals + last context size; a fresh session shows its session
   line instead of a blank row.
-- **Status bar**: the persistent instrument row — `ctx used[/window] tk
+- **Status bar**: the persistent instrument row — first, while an
+  automation waits for you, **Automations · N waiting** (N = the
+  automations' `attention.pending_waits + attention.unseen_count` summed,
+  the badge on the Code web's Automations header; absent at 0; `Enter` on
+  an empty prompt or a click opens the automation that waits). It is read
+  at start and when the gateway comes back, then every 15 s ONLY while
+  something waits or an active automation asks before each tool call
+  (otherwise nothing polls; `/automations` refreshes it) — then `ctx used[/window] tk
   ([%,] declared)` (the window comes from `/context`/`--max-tokens`;
   warn ink ≥75%, error ≥90%; no declaration = the honest absolute) ·
   session tokens (`N↑ N↓ tk session` when the provider reports the
@@ -3800,10 +3867,17 @@ Requires AbstractGateway with `schedule@2`, the served schedule fields and `POST
 - Web: calendar schedules. The schedule dialog's **When** offers **Repeat** (fixed UTC interval, as before), **Daily**, **Weekly** (day chips that show their state), **Monthly** (day 1–31 or the last day) at a time of day, and **Once at**; every schedule is written as `schedule@2`. For every schedule (Repeat with its bounds too) the line under **When** is the gateway's own sentence; for Daily, Weekly, Monthly and Once the time zone reads "in Europe/Paris (your account's time zone)" with **Change in preferences** (opens Settings → Workflow). An automation's Workflow settings edit its calendar rule, keeping its time zone and limits.
 - Web: Settings → Workflow → **Time zone**, your account's time zone kept by the gateway (`PUT /api/gateway/accounts/me/preferences` `{time_zone}`): the kit picker over the gateway's IANA list, **Gateway default (<zone>)** first, one PUT at once ("Saved." / "Not saved." + the gateway's sentence).
 - tui: the same calendar schedules in `/schedule` and in an automation's Edit panel — see [tui/CHANGELOG.md](tui/CHANGELOG.md).
+- tui: the status line shows **Automations · N waiting** while an automation waits for you — N is the Code web's Automations header badge (`attention.pending_waits + attention.unseen_count` summed over `GET /api/gateway/automations`). `Enter` on an empty prompt, or a click on it, opens the automation that waits (a pending approval or question first, else unseen results). It is read at start and when the gateway comes back, then every 15 s only while something waits or an active automation asks before each tool call; otherwise nothing polls.
+- tui: Workflow → **Default for new conversations**, your account's default workflow kept by the gateway (`GET`/`PUT /api/gateway/accounts/me/preferences`), the same row as the web: **Gateway default (name)** first, verbatim from the gateway, then the workflows you may run; one PUT per change ("Saved." / "Not saved." + the gateway's sentence; the previous choice stays shown on a refusal). A fresh conversation, `/new` and `abstractcode exec` without `--workflow` start on it; `/workflow` then changes only this conversation. The workflow this computer remembered is uploaded once when the account has none, then removed here. With a gateway older than 0.13.1 the panel says so and `/workflow` keeps saving the choice on this computer, as before.
+- tui: `/sessions` **Search conversations** — `/` then typing filters the cards on the title and the id, like the web; `Esc` clears the search before closing.
+- tui: `Ctrl+P` in an automation (`/automations <id>`) reads the selected run's reply aloud through the automation's run, like the web; again = stop.
+- tui: `/schedule` is the Code web's dialog in seven steps with its words — **What** (a workflow picker on `GET /bundles?executable_for=abstractcode.agent.v1`, **Gateway default** first, and the task), **When** (Repeat, Daily, Weekly, Monthly, Once at… — each worded by the gateway — or **When an email arrives** with the kit's filters, check interval and batch size), **Context** (+ **Max growing context (tokens)**), **Tools** (the `/tools` rows, starting from the conversation's tools), **Workspaces**, **Mailbox** (**Email result**, **Recipients**) and **Title and limits**. The email choices are offered only when `GET /api/gateway/me/email` says the mailbox is usable ("Connect a mailbox first — open My email" otherwise).
+- tui: an automation's **Edit** (Workflow panel) changes **Stop after this many runs** / **Stop at (UTC)**, an email automation's check interval, **Email result** and its **Recipients** — one revision each.
 
 ### Changed
 
 - Web: automation rows, the header and Run now's hint show the gateway's served next run (`next_run_local`, cut to "2026-10-09 07:30 Europe/Paris", plus the relative time to `next_run_at`) and every schedule's `schedule_rule_text` (cards read "Every 30 minutes (UTC) · last 3 h ago"); the app no longer reads `next_fire_at` or computes a next run.
+- tui: an automation created in the terminal carries the workflow's real inputs, built like the web's: the workflow's input schema defaults, then the conversation's provider/model, reasoning, stream setting, iteration and token limits, tools and skills (never its workspace or approval policy), checked against the schema before the POST (the check's sentence otherwise). Before, only the task was sent.
 
 ## [terminal 0.9.1 / web 0.11.1] - 2026-10-08
 

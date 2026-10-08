@@ -1,5 +1,8 @@
 //! Fixed chrome: header, activity strip, composer, status bar.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use abstracttui::prelude::*;
 use abstracttui::text;
 use abstracttui::widgets::Sparkline;
@@ -1173,9 +1176,10 @@ pub(crate) fn mem_segment(state: &crate::store::HostState) -> Option<(String, u8
 /// permanent dead weight (it truncated itself at 120 cols carrying
 /// zero facts). Segments render when KNOWN; absence is omission, never
 /// a fabricated zero.
-pub fn status_bar(t: &TokenSet, store: Store, ctx: &UiCtx) -> View {
+pub fn status_bar(cx: Scope, t: &TokenSet, store: Store, ctx: &UiCtx) -> View {
     let tokens = *t;
     let gateway = ctx.gateway_label.clone();
+    let ctx = ctx.clone();
     dyn_view(LayoutStyle::line(1), move || {
         let t = tokens;
         let conn = store.conn.get();
@@ -1184,6 +1188,18 @@ pub fn status_bar(t: &TokenSet, store: Store, ctx: &UiCtx) -> View {
         // Facts, left to right. Each is (text, ink-class): 0 normal
         // (muted), 1 warn, 2 error — the ctx meter is the only graded one.
         let mut segs: Vec<(String, u8)> = Vec::new();
+        // R17.1: "Automations · N waiting" FIRST (it needs you; segments
+        // drop right-to-left, so it is the last to go). Enter on an empty
+        // prompt or a click on it opens the automation that waits.
+        let chip = crate::ui::attention_chip::chip_text(store);
+        if let Some(c) = &chip {
+            segs.push((c.clone(), 3));
+        }
+        // Where the chip was painted (x from, x to) — the click target.
+        let chip_span: Rc<Cell<(i32, i32)>> = Rc::new(Cell::new((0, 0)));
+        let chip_span_draw = chip_span.clone();
+        let pressed = Rc::new(Cell::new(false));
+        let ctx_click = ctx.clone();
         let last_ctx = store.fold.with(|f| f.stats.last_input_tokens);
         if let Some(seg) = ctx_meter(last_ctx, store.context_window.get()) {
             segs.push(seg);
@@ -1229,6 +1245,29 @@ pub fn status_bar(t: &TokenSet, store: Store, ctx: &UiCtx) -> View {
         }
         Element::new()
             .style(LayoutStyle::line(1))
+            .on(abstracttui::ui::Phase::Bubble, move |ectx, ev| {
+                let abstracttui::ui::UiEvent::Mouse(m) = ev else {
+                    return;
+                };
+                let (x0, x1) = chip_span.get();
+                let on_chip = x1 > x0 && m.pos.x >= x0 && m.pos.x < x1;
+                match m.kind {
+                    abstracttui::ui::MouseKind::Down(abstracttui::ui::MouseButton::Left)
+                        if on_chip =>
+                    {
+                        pressed.set(true);
+                        ectx.stop_propagation();
+                    }
+                    abstracttui::ui::MouseKind::Up(abstracttui::ui::MouseButton::Left) => {
+                        let clicks = pressed.replace(false) && on_chip;
+                        if clicks {
+                            ectx.stop_propagation();
+                            crate::ui::attention_chip::open_waiting(cx, store, &ctx_click);
+                        }
+                    }
+                    _ => {}
+                }
+            })
             .draw(move |canvas, rect| {
                 canvas.fill(rect, ' ', t.text, t.surface);
                 // Right side measured FIRST so the facts yield to it
@@ -1263,11 +1302,16 @@ pub fn status_bar(t: &TokenSet, store: Store, ctx: &UiCtx) -> View {
                         x += canvas.print(Point::new(x, rect.y), "  ·  ", t.text_faint, t.surface);
                     }
                     let ink = match sev {
+                        3 => t.accent,
                         2 => t.error,
                         1 => t.warn,
                         _ => t.text_muted,
                     };
+                    let from = x;
                     x += canvas.print(Point::new(x, rect.y), seg, ink, t.surface);
+                    if *sev == 3 {
+                        chip_span_draw.set((from, x));
+                    }
                 }
                 // The keys pointer — the whole legend lives behind it.
                 if fit > segs.len() {

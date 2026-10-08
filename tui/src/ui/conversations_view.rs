@@ -117,6 +117,7 @@ pub fn board_cards(
     confirm: Option<&str>,
     frame: usize,
     offset_secs: i64,
+    query: &str,
 ) -> (Vec<Card>, Vec<BoardTarget>) {
     let mut cards = Vec::new();
     let mut targets = Vec::new();
@@ -135,7 +136,12 @@ pub fn board_cards(
             ..
         }
     );
-    let picks = board_picks(index, local);
+    // R17.1: the search filters the conversations (title + id, the web's
+    // rule); the `Archived · N` line below stays reachable.
+    let picks: Vec<SessionPick> = board_picks(index, local)
+        .into_iter()
+        .filter(|p| conv::matches_search(&p.label, &p.id, query))
+        .collect();
     for p in &picks {
         let marker = if p.id == current { "● " } else { "" };
         let right = match (p.state, gone) {
@@ -168,7 +174,9 @@ pub fn board_cards(
         cards.push(Card::new(lines));
         targets.push(BoardTarget::Session(p.id.clone()));
     }
-    if picks.is_empty() {
+    if picks.is_empty() && !query.is_empty() {
+        cards.push(Card::note(conv::NO_MATCH));
+    } else if picks.is_empty() {
         cards.push(Card::note(match index {
             SessionIndex::Loaded { .. } => {
                 "Your conversations will live here. Pick up where you left off, on any device."
@@ -228,6 +236,7 @@ pub fn board_cards(
 pub const BOARD_HINTS: &[(&str, &str)] = &[
     ("↑↓", ""),
     ("Enter", "continues"),
+    ("/", "Search conversations"),
     ("a", "Archive"),
     ("u", "Unarchive"),
     ("n", "New conversation"),
@@ -286,6 +295,10 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
         let cursor = mcx.signal(0usize);
         let confirm = mcx.signal(ask.clone());
         let frame = mcx.signal(0u64);
+        // R17.1 search: `/` starts typing into it; the query filters the
+        // cards (title + id); Esc clears it before closing.
+        let query = mcx.signal(String::new());
+        let searching = mcx.signal(false);
         // The waiting glyph ticks only while the listing is in flight and
         // only while this board is open (the zero-wakeup idle rule).
         {
@@ -332,6 +345,11 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
                         .with_untracked(|r| (r.archived.clone(), r.archived_open))
                 };
                 let now = crate::automations::now_unix();
+                let q = if tracked {
+                    query.get()
+                } else {
+                    query.get_untracked()
+                };
                 board_cards(
                     &index,
                     &archived,
@@ -341,6 +359,7 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
                     confirm_id.as_deref(),
                     if tracked { frame.get() } else { 0 } as usize,
                     conv::local_offset_secs(now),
+                    &q,
                 )
             }
         };
@@ -445,11 +464,48 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
             .style(LayoutStyle::column().padding(Edges::all(1)))
             .focusable()
             .autofocus()
+            // Typing into the search (capture phase: before the letter
+            // keys a/y/u/n/r, which act on the list while not searching).
+            .on(abstracttui::ui::Phase::Capture, move |ectx, ev| {
+                if !searching.get_untracked() {
+                    return;
+                }
+                let abstracttui::ui::UiEvent::Key(k) = ev else {
+                    return;
+                };
+                if k.mods.contains(Mods::CTRL) || k.mods.contains(Mods::ALT) {
+                    return;
+                }
+                match k.key {
+                    Key::Char(ch) => {
+                        query.update(|q| q.push(ch));
+                        cursor.set(0);
+                        confirm.set(None);
+                        ectx.stop_propagation();
+                    }
+                    Key::Backspace => {
+                        query.update(|q| {
+                            q.pop();
+                        });
+                        cursor.set(0);
+                        ectx.stop_propagation();
+                    }
+                    _ => {}
+                }
+            })
+            .shortcut(KeyChord::plain(Key::Char('/')), move |_| {
+                confirm.set(None);
+                searching.set(true);
+            })
             .shortcut(KeyChord::plain(Key::Escape), {
                 let ctx = ctx2.clone();
                 move |_| {
                     if confirm.get_untracked().is_some() {
                         confirm.set(None)
+                    } else if searching.get_untracked() || !query.get_untracked().is_empty() {
+                        searching.set(false);
+                        query.set(String::new());
+                        cursor.set(0);
                     } else {
                         ctx.close_modal()
                     }
@@ -484,6 +540,31 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
                 let t2 = abstracttui::app::current_theme().tokens;
                 let err = store.rail.with(|r| r.board_error.clone());
                 note_lines(&t2, &[board_hint(&store.session_index.get()), err], 8)
+            }))
+            .child(dyn_view(LayoutStyle::column().shrink(0.0), {
+                let local = local.clone();
+                move || {
+                    let t2 = abstracttui::app::current_theme().tokens;
+                    let q = query.get();
+                    // Only while searching (the hint bar names `/` otherwise).
+                    if !searching.get() && q.is_empty() {
+                        return note_lines(&t2, &[], 8);
+                    }
+                    let line = {
+                        let all = board_picks(&store.session_index.get(), &local);
+                        let shown = all
+                            .iter()
+                            .filter(|p| conv::matches_search(&p.label, &p.id, &q))
+                            .count();
+                        let caret = if searching.get() { "▏" } else { "" };
+                        format!(
+                            "{}: {q}{caret} · {shown} of {}",
+                            conv::SEARCH_LABEL,
+                            all.len()
+                        )
+                    };
+                    note_lines(&t2, &[line], 8)
+                }
             }))
             .child(dyn_view(
                 LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)),

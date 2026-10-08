@@ -1,8 +1,10 @@
 //! Root view composition + orchestration (timers, toasts, modals).
 
+pub mod account_workflow;
 pub mod animation;
 pub mod approval_view;
 pub mod attachments;
+pub mod attention_chip;
 pub mod automations_view;
 pub mod cards;
 pub mod chrome;
@@ -20,6 +22,7 @@ pub mod queue_lane;
 pub mod queue_modal;
 pub mod quit;
 pub mod rail_view;
+pub mod schedule_view;
 pub mod splash;
 pub mod stance;
 pub mod thinking;
@@ -280,6 +283,8 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     wire_pending_steer(cx, store, ctx.clone());
     goal::wire_goal(cx, store, ctx.clone());
     automations_view::wire_automations(cx, store, ctx.clone());
+    attention_chip::wire(cx, store, ctx.clone());
+    account_workflow::wire(cx, store, ctx.clone());
     rail_view::wire_rail(cx, store, ctx.clone());
     quit::wire_quit(cx, store, &ctx);
     transcript_view::wire_feed(
@@ -672,7 +677,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                         placeholder,
                         on_submit.clone(),
                     ))
-                    .child(chrome::status_bar(&t, store, &ctx))
+                    .child(chrome::status_bar(cx, &t, store, &ctx))
                     .build()
             }
         }))
@@ -728,7 +733,11 @@ fn submit(
         if let Some(wait) = pending {
             ctx.dismissed_wait.borrow_mut().take();
             open_wait_modal(cx, store, ctx, wait);
+            return;
         }
+        // R17.1: else it opens the automation that waits for you (the
+        // status line's "Automations · N waiting"); nothing waits = nothing.
+        attention_chip::open_waiting(cx, store, ctx);
         return;
     }
     match commands::parse(&text) {
@@ -886,12 +895,11 @@ fn stream_run_value(store: Store) -> Option<bool> {
     crate::streaming::run_input_value(pref, deltas)
 }
 
-/// The run infrastructure every start shares (provider/model, workspace
-/// scope, tool selection + policy, skills) — used by plain prompts and
-/// `/goal` runs (which add goal params on top).
-pub(crate) fn agent_start_opts(store: Store, ctx: &UiCtx) -> StartOpts {
-    // Tool selection: untouched = the workflow's own defaults (send
-    // nothing); customized = the checked set is the run's exact allowlist.
+/// The conversation's tool choice (`/tools`): `None` = untouched (the
+/// workflow's own defaults; send nothing); `Some(list)` = the checked set,
+/// the run's exact allowlist. Shared by every run start and by
+/// `/schedule` (the automation's Tools section starts from it).
+pub fn conversation_tools(store: Store) -> Option<Vec<String>> {
     // Only disabled names that EXIST in the inventory count — a stale name
     // from another gateway must not silently flip the run into explicit-
     // allowlist mode (adversary finding 6).
@@ -907,23 +915,28 @@ pub(crate) fn agent_start_opts(store: Store, ctx: &UiCtx) -> StartOpts {
     // baked pin). A served-disabled row cannot run either way; only a
     // user choice about a grantable row means "customized".
     let effective_disabled = crate::store::Store::effective_user_disabled(&inventory, &disabled);
-    let tools = if effective_disabled == 0 {
-        None
-    } else {
-        Some(
-            inventory
-                .iter()
-                // Served-disabled rows (full-catalog surfacing: the
-                // gateway serves gate-disabled tools `enabled:false` so
-                // their existence is visible) are NEVER granted: an
-                // explicit allowlist naming a disabled tool would claim
-                // a grant the gateway cannot honor.
-                .filter(|t| !t.served_disabled)
-                .map(|t| t.name.clone())
-                .filter(|n| !disabled.contains(n))
-                .collect::<Vec<_>>(),
-        )
-    };
+    if effective_disabled == 0 {
+        return None;
+    }
+    Some(
+        inventory
+            .iter()
+            // Served-disabled rows (full-catalog surfacing: the gateway
+            // serves gate-disabled tools `enabled:false` so their existence
+            // is visible) are NEVER granted: an explicit allowlist naming a
+            // disabled tool would claim a grant the gateway cannot honor.
+            .filter(|t| !t.served_disabled)
+            .map(|t| t.name.clone())
+            .filter(|n| !disabled.contains(n))
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// The run infrastructure every start shares (provider/model, workspace
+/// scope, tool selection + policy, skills) — used by plain prompts and
+/// `/goal` runs (which add goal params on top).
+pub(crate) fn agent_start_opts(store: Store, ctx: &UiCtx) -> StartOpts {
+    let tools = conversation_tools(store);
     // Workspace: the root stays the boot resolution (--workspace / cwd);
     // which workspaces a run may use is the gateway's (session level).
     // Server-side tool policy (facts #1): expand the accepted tier + pins
@@ -1592,6 +1605,8 @@ pub(crate) fn new_session(store: Store, ctx: &UiCtx) {
         p.touch_session(&sid, None);
     });
     reset_session_state(store, ctx, &old_sid, &sid, format!("new session {sid}"));
+    // A new conversation starts on the account's default (R17.1).
+    account_workflow::apply_to_fresh(store);
 }
 
 /// The session-boundary reset shared by `/new` and `/sessions` — ONE

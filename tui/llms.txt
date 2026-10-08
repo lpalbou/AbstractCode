@@ -13,11 +13,14 @@
 > (`/attach`, a file browser, or drag & drop), browses and previews the
 > run's workspace on the gateway host (`/files`), creates and manages
 > gateway automations (`/schedule` with Repeat / Daily / Weekly / Monthly /
-> Once at, worded and scheduled by the gateway; `/automations`: cards with the Active
-> switch, Run now / Stop / Edit / Archive, Archived · N with Unarchive),
-> edits the run settings of the conversation or of an automation's
+> Once at, worded and scheduled by the gateway, or When an email arrives;
+> `/automations`: cards with the Active switch, Run now / Stop / Edit /
+> Archive, Archived · N with Unarchive; "Automations · N waiting" in the
+> status line while one waits for you), keeps your account's default
+> workflow on the gateway ("Default for new conversations"), edits the run
+> settings of the conversation or of an automation's
 > definition in eight panels (`/settings`; an automation change is saved as
-> a new revision), archives conversations (`/sessions`, `/archive`), reads replies aloud
+> a new revision), searches and archives conversations (`/sessions`, `/archive`), reads replies aloud
 > and dictates through the gateway's voice routes (`/voice`, Ctrl+P,
 > Ctrl+R; host audio via AbstractVoice), and keeps a durable
 > session whose history the gateway replays server-side. It also talks

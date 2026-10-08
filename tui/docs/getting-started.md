@@ -248,20 +248,28 @@ in [api.md](api.md#voice-voice-speak-dictate).
 Workspace, Tools, Skills, Voice — like the right rail of AbstractCode in the
 browser: `←`/`→` changes panel, `Enter` changes a row, `d` puts it back to
 **Gateway default**. `/activity` opens the work of this conversation, one
-group per model step. `/sessions` lists your conversations as
-`Oct 2 · 2 turns · 7 tools`; `a` archives one (nothing is deleted — it moves
+group per model step. The Workflow panel also holds **Default for new
+conversations**: your account's choice, kept by the gateway for the
+Assistant, the browser and this terminal (first choice **Gateway default
+(<name>)**, as the gateway words it). `/sessions` lists your conversations as
+`Oct 2 · 2 turns · 7 tools`; `/` searches them by title or id; `a` archives one (nothing is deleted — it moves
 under **Archived · N**, where `u` brings it back). In `/automations` each
 card reads the gateway's words, `↻ Every 24 hours (UTC) · last 3 h ago`, and `next in 20 h` with its
 **Active** switch; `g` Run now, `x` Stop, `e` Edit (the same panels, bound to
-the automation: each change is saved as a new revision), `a` Archive.
+the automation: each change is saved as a new revision), `a` Archive; inside
+one, `Ctrl+P` reads the selected run's reply aloud. When an automation waits
+for you (an approval, a question, a result you have not seen), the status
+line says **Automations · N waiting**; `Enter` on an empty prompt opens it.
 `/workspace` opens this conversation's workspaces: **Use my default**, or
 your own rows with Read-only / Read & write / Refused, stored on the
-conversation by the gateway. `/schedule` walks through the task, when
-(**Repeat** every N minutes/hours/days in UTC, **Daily**, **Weekly**,
-**Monthly**, **Once at…** — the last four on your account's time zone, with
-the gateway's own sentence and first run), context, tools, **Workspaces** and
-**Title and limits**. A calendar automation's card reads the gateway's words,
-e.g. `↻ Every day at 08:00 (Europe/Paris)`. Details in
+conversation by the gateway. `/schedule` walks through the Code web's seven
+sections: **What** (workflow and task), **When** (**Repeat** every N
+minutes/hours/days in UTC, **Daily**, **Weekly**, **Monthly**, **Once at…** —
+the last four on your account's time zone, with the gateway's own sentence and
+first run — or **When an email arrives** when your mailbox is connected),
+**Context**, **Tools**, **Workspaces**, **Mailbox** and **Title and limits**.
+A calendar automation's card reads the gateway's words, e.g.
+`↻ Every day at 08:00 (Europe/Paris)`. Details in
 [api.md](api.md#settings-panels-settings) and
 [api.md](api.md#workspaces-workspace). Archiving and **Archived · N**
 need AbstractGateway 0.13.0 or later.

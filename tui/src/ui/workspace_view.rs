@@ -872,7 +872,7 @@ pub fn open_screen(
 fn title_for(host: &Host) -> String {
     match host {
         Host::Account => ws::MY_DEFAULT_WORKSPACES.to_string(),
-        Host::NewAutomation => format!("new automation — 5/6 {}", ws::TITLE),
+        Host::NewAutomation => crate::ui::schedule_view::step_title(5),
         _ => ws::TITLE.to_string(),
     }
 }
