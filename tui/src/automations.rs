@@ -1408,12 +1408,18 @@ pub fn calendar_when_of(kind: &str, previous: &When) -> When {
 }
 
 /// The trigger an Edit of a calendar rule writes: the rule's config plus
-/// the binding's own `time_zone` (kept; the form never edits it) — the
+/// the binding's own `time_zone`, `count` and `until` (kept; the form never
+/// edits them; `start_at` is not carried — the gateway re-anchors) — the
 /// kit's `reviseChanges`. Also the trigger the Edit panel previews.
 pub fn revise_calendar_trigger(s: &Summary, when: &When) -> Result<Value, String> {
     let mut config = schedule_config(when)?;
     if let Some(zone) = s.trigger.config.get("time_zone").and_then(Value::as_str) {
         config.insert("time_zone".into(), json!(zone));
+    }
+    for key in ["count", "until"] {
+        if let Some(v) = s.trigger.config.get(key).filter(|v| !v.is_null()) {
+            config.insert(key.into(), v.clone());
+        }
     }
     Ok(
         json!({"source_id": s.trigger.source_id, "source_version": s.trigger.source_version, "config": config}),
@@ -2784,6 +2790,28 @@ mod tests {
         assert_eq!(
             time_zone_line_automation("UTC"),
             "in UTC (this automation's time zone)"
+        );
+    }
+
+    #[test]
+    fn revising_a_calendar_rule_keeps_the_bindings_limits() {
+        let mut s = summary("active", false, ALL);
+        s.trigger = Trigger {
+            source_id: "schedule".into(),
+            source_version: 2,
+            config: json!({"kind": "daily", "at": "08:00", "time_zone": "Europe/Paris",
+                           "count": 10, "until": "2026-12-31T18:00:00+00:00",
+                           "start_at": "2026-09-01T00:00:00Z", "anchor": "2026-09-01T00:00:00Z"})
+            .as_object()
+            .unwrap()
+            .clone(),
+        };
+        let mut f = revise_form_from(&s);
+        f.calendar = Some(When::Daily { at: "07:30".into() });
+        assert_eq!(
+            revise_changes(&s, &f).unwrap().unwrap()["trigger"]["config"],
+            json!({"kind": "daily", "at": "07:30", "time_zone": "Europe/Paris",
+                   "count": 10, "until": "2026-12-31T18:00:00+00:00"})
         );
     }
 

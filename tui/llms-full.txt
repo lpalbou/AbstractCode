@@ -1219,7 +1219,8 @@ The panels follow what is selected:
   day toggles, **on day** 1–31 or **last**, **Time of day**, then
   `in <zone> (this automation's time zone)` and the gateway's sentence for
   the stored rule (schedule-preview). Each change is one revision: the rule
-  plus the automation's own time zone, which the terminal never edits.
+  plus the automation's own time zone, max runs and stop time, which the
+  terminal never edits.
 - **An automation** (`e` in `/automations`): `Automation <title>`,
   `Revision N` and the save line — "Changes are saved as a new revision and
   apply from the next run.", then "Saving…", "Saved as revision 4; applies
@@ -2344,8 +2345,9 @@ served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
   the `[x] Mon` day toggles, **on day** 1–31 or **last**, **Time of day**;
   under it `in <zone> (this automation's time zone)` and the gateway's
   `first_run_sentence` for the stored rule. A change is one revision whose
-  `changes.trigger` is the rule plus the automation's own `time_zone`
-  (kept, never edited here); an unchanged rule sends nothing.
+  `changes.trigger` is the rule plus the automation's own `time_zone`,
+  `count` and `until` (kept, never edited here; `start_at` is re-anchored by
+  the gateway); an unchanged rule sends nothing.
 
 ### Changed
 

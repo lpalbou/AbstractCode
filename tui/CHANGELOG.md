@@ -28,8 +28,9 @@ served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
   the `[x] Mon` day toggles, **on day** 1–31 or **last**, **Time of day**;
   under it `in <zone> (this automation's time zone)` and the gateway's
   `first_run_sentence` for the stored rule. A change is one revision whose
-  `changes.trigger` is the rule plus the automation's own `time_zone`
-  (kept, never edited here); an unchanged rule sends nothing.
+  `changes.trigger` is the rule plus the automation's own `time_zone`,
+  `count` and `until` (kept, never edited here; `start_at` is re-anchored by
+  the gateway); an unchanged rule sends nothing.
 
 ### Changed
 

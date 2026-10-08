@@ -376,7 +376,8 @@ The panels follow what is selected:
   day toggles, **on day** 1–31 or **last**, **Time of day**, then
   `in <zone> (this automation's time zone)` and the gateway's sentence for
   the stored rule (schedule-preview). Each change is one revision: the rule
-  plus the automation's own time zone, which the terminal never edits.
+  plus the automation's own time zone, max runs and stop time, which the
+  terminal never edits.
 - **An automation** (`e` in `/automations`): `Automation <title>`,
   `Revision N` and the save line — "Changes are saved as a new revision and
   apply from the next run.", then "Saving…", "Saved as revision 4; applies
