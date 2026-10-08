@@ -1056,3 +1056,31 @@ fn ttfa_probe() {
     host.shutdown();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+
+#[test]
+fn voice_screen_shows_the_gateways_served_speech_input_hint() {
+    // Round 16: the gateway serves a one-line hint for a stored speech-input route (on Apple
+    // silicon, mlx-whisper runs the model on the GPU); the screen shows it verbatim.
+    let _g = serial();
+    let sentence = "Runs on the processor: faster-whisper has no Apple GPU backend. mlx-whisper runs large-v3 on this Mac's GPU.";
+    let gw = serve(GatewayScript {
+        defaults: json!({
+            "tts": {"route": "output.voice", "configured": true, "provider": "supertonic", "model": "supertonic-3", "voice": "M3"},
+            "stt": {"route": "input.voice", "configured": true, "provider": "faster-whisper", "model": "large-v3",
+                    "hint": {"code": "apple_gpu_engine", "sentence": sentence,
+                             "route": {"key": "input.voice", "provider": "mlx-whisper", "model": "large-v3"}}}
+        }),
+        ..GatewayScript::default()
+    });
+    let (_host, _log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("ok");
+    h.type_text("/voice\r");
+    let s = h.until("the served hint on the voice screen", |s| s.contains("Apple GPU backend"));
+    assert!(s.contains("Speech → text     Gateway default · faster-whisper / large-v3"), "{s}");
+    // Wrapped, never cut: every word of the sentence is on screen, in order.
+    for line in abstracttui::text::wrap(sentence, 80) {
+        assert!(s.contains(line.trim_end()), "missing {line:?}:\n{s}");
+    }
+}

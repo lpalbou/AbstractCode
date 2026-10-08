@@ -567,6 +567,13 @@ fn settings_rows(store: Store, p: &VoicePrefs) -> Vec<(String, Row)> {
             if !e.configured && !e.note.is_empty() {
                 rows.push((format!("  {}", e.note), Row::None));
             }
+            if e.configured && !e.hint.is_empty() {
+                // The gateway's served sentence, verbatim (round 16), wrapped to the picker
+                // so no part of it is cut off.
+                for line in text::wrap(&e.hint, 80) {
+                    rows.push((format!("  {line}"), Row::None));
+                }
+            }
         }
     }
     rows.push(("Output".into(), Row::None));
