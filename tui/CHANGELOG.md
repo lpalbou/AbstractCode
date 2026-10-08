@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.9.2] - 2026-10-09
 
 Needs AbstractGateway with round-16 calendar schedules (`schedule@2`, the
 served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
