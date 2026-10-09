@@ -1,10 +1,12 @@
-//! `/schedule` — the kit's AfScheduleDialog in the terminal (R17.2): seven
+//! `/automation` ("New automation"; `/schedule` until 0.9.2) — the kit's
+//! AfScheduleDialog in the terminal (R17.2): seven
 //! visible steps, the kit's sections in the kit's order and words (no
 //! "Advanced"):
 //!
 //! 1. What — the workflow ("Gateway default" first; the executable
 //!    workflows of `GET /bundles?executable_for=abstractcode.agent.v1`) and
-//!    the task;
+//!    the task (a multiline editor: the composer's `TextArea`, Enter and
+//!    Ctrl+J insert a newline, a "Continue" button keeps it);
 //! 2. When — Repeat (presets, every N minutes/hours/days, a fixed UTC
 //!    interval), Daily / Weekly ([x] day toggles) / Monthly (1–31 or last)
 //!    at a time of day, Once at… (a wall time in the account's time zone),
@@ -14,8 +16,12 @@
 //!    (`POST …/schedule-preview` → `first_run_sentence`, + the time-zone
 //!    line for the wall-clock kinds); all are written as `schedule@2`;
 //! 3. Context — Independent / Growing (+ "Max growing context (tokens)");
-//! 4. Tools — the `/tools` rows (initialised from the conversation's tool
-//!    choice; "Use workflow default tools") + Run without asking / Ask me;
+//! 4. Tools — "Use workflow default tools", "Select all" / "Unselect all",
+//!    each toolset's header with a tri-state box (`[x]` all, `[ ]` none,
+//!    `[~]` some) and the `/tools` rows; every tool starts DESELECTED
+//!    (operator ruling 2026-10-09) + Run without asking / Ask me. Its own
+//!    scrolling list: the wheel scrolls, a click toggles a line, Space
+//!    toggles the focused line and the focus stays on it;
 //! 5. Workspaces — the kit chooser at the run level;
 //! 6. Mailbox — "Email result" and its recipients;
 //! 7. Title and limits — then "Create automation".
@@ -27,9 +33,11 @@
 //! the workspaces. A refusal (the kit's, the validator's or the gateway's
 //! sentence) shows on the last step.
 //!
-//! Each step is a card list: ↑↓ move, Enter (or Space) changes the selected
-//! row or continues; Esc cancels. The cursor starts on "Continue", so
-//! Enter-Enter-… creates with the defaults.
+//! Each step is a card list: ↑↓ (PgUp/PgDn, Home/End) move, Enter (or
+//! Space) changes the selected row or continues; Esc cancels. A step
+//! starts with the cursor on "Continue", so Enter-Enter-… creates with the
+//! defaults; a change keeps the cursor on the row changed (End goes back
+//! to Continue).
 
 use std::rc::Rc;
 
@@ -81,9 +89,14 @@ pub const WHEN_PRESETS: [(&str, &str, char); 6] = [
     ("every 7 days", "7", 'd'),
 ];
 
-/// The step title: "Schedule a task — 2/7 When".
+/// The dialog's name: the Code web's words for creating an automation
+/// (the sidebar's "New automation" button, `web/src/workspace/
+/// automations_view.tsx`), verbatim.
+pub const DIALOG_TITLE: &str = "New automation";
+
+/// The step title: "New automation — 2/7 When".
 pub fn step_title(n: usize) -> String {
-    format!("Schedule a task — {n}/{} {}", STEPS.len(), STEPS[n - 1])
+    format!("{DIALOG_TITLE} — {n}/{} {}", STEPS.len(), STEPS[n - 1])
 }
 
 /// A workflow's (bundle, version, flow) — the key of its input schema.
@@ -198,7 +211,7 @@ fn last_prompt(store: Store) -> String {
     })
 }
 
-/// `/schedule [task]`.
+/// `/automation [task]` (and its old name `/schedule`).
 pub fn open_schedule(cx: Scope, store: Store, ctx: &UiCtx, seed: Option<String>) {
     let workflow = store.workflow.get_untracked();
     let conv_schema = conv_schema_key(&workflow);
@@ -229,7 +242,7 @@ pub fn open_schedule(cx: Scope, store: Store, ctx: &UiCtx, seed: Option<String>)
         tools_set: false,
         rule: auto::CalendarRuleState::default(),
     };
-    step_what(cx, store, ctx, draft, Vec::new());
+    step_what(cx, store, ctx, draft, Vec::new(), None);
 }
 
 // ---------------------------------------------------------------------------
@@ -239,27 +252,38 @@ pub fn open_schedule(cx: Scope, store: Store, ctx: &UiCtx, seed: Option<String>)
 const STEP_HINTS: &[(&str, &str)] = &[
     ("↑↓", ""),
     ("Enter", "change / continue"),
+    ("End", "Continue"),
     ("Esc", "cancels"),
 ];
 
 type Build<A> = Rc<dyn Fn() -> (Vec<Card>, Vec<A>)>;
 
+/// Where the cursor starts: on `focus` (the row the user just changed —
+/// a change reopens the step, and the cursor stays where it was) or, on a
+/// step's first visit, on the LAST selectable card (Continue / Create
+/// automation), so Enter-Enter-… creates with the defaults.
+pub fn start_cursor<A: PartialEq>(acts: &[A], focus: Option<&A>) -> usize {
+    focus
+        .and_then(|f| acts.iter().position(|a| a == f))
+        .unwrap_or(acts.len().saturating_sub(1))
+}
+
 /// Open one step: `build` gives the cards and what each selectable card
 /// does (re-read on every frame, so live answers render); `act` runs the
-/// selected card's action. The cursor starts on the LAST selectable card
-/// (Continue / Create automation).
-fn step<A: Clone + 'static>(
+/// selected card's action. The cursor starts at [`start_cursor`].
+fn step<A: Clone + PartialEq + 'static>(
     cx: Scope,
     ctx: &UiCtx,
     title: String,
     build: Build<A>,
     act: Rc<dyn Fn(A)>,
+    focus: Option<A>,
 ) {
     let (cards0, acts0) = build();
     let rows: i32 = cards0.iter().map(|c| c.lines.len() as i32 + 1).sum();
     let size = modal_size(100, rows + 8);
     let ctx2 = ctx.clone();
-    let start = acts0.len().saturating_sub(1);
+    let start = start_cursor(&acts0, focus.as_ref());
     ctx.open_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
         let cursor = mcx.signal(start);
@@ -300,6 +324,22 @@ fn step<A: Clone + 'static>(
             .shortcut(KeyChord::plain(Key::Down), {
                 let mv = mv.clone();
                 move |_| mv(1)
+            })
+            .shortcut(KeyChord::plain(Key::PageUp), {
+                let mv = mv.clone();
+                move |_| mv(-10)
+            })
+            .shortcut(KeyChord::plain(Key::PageDown), {
+                let mv = mv.clone();
+                move |_| mv(10)
+            })
+            .shortcut(KeyChord::plain(Key::Home), {
+                let mv = mv.clone();
+                move |_| mv(-(i32::MAX as i64))
+            })
+            .shortcut(KeyChord::plain(Key::End), {
+                let mv = mv.clone();
+                move |_| mv(i32::MAX as i64)
             })
             .shortcut(KeyChord::plain(Key::Enter), {
                 let a = activate.clone();
@@ -383,6 +423,82 @@ fn edit_text(
     );
 }
 
+/// The Task editor's line under its title.
+pub const TASK_INFO: &str = "What every run is asked to do (sent as the prompt of every run).";
+/// The kit's task placeholder.
+pub const TASK_PLACEHOLDER: &str =
+    "e.g. Check the price of ACME shares and notify me if it moved more than 2%.";
+/// The Task editor's keys: Enter and Ctrl+J insert a newline (a task is
+/// a multiline text — Enter never leaves a multiline field), Continue
+/// keeps it.
+pub const TASK_HINTS: &[(&str, &str)] = &[
+    ("Enter / Ctrl+J", "newline"),
+    ("Home/End", "line start/end"),
+    ("Tab", "Continue"),
+    ("Esc", "goes back"),
+];
+
+/// The Task editor: the main composer's multiline widget (`TextArea`:
+/// soft wrap, internal scroll, Home/End per line, Ctrl+J newline) with
+/// Enter inserting a newline too, and a visible "Continue" button (Tab
+/// reaches it; a click presses it). Esc goes back without keeping.
+pub fn open_task_editor(
+    cx: Scope,
+    ctx: &UiCtx,
+    title: String,
+    info: &'static str,
+    initial: String,
+    apply: Rc<dyn Fn(String)>,
+    back: Rc<dyn Fn()>,
+) {
+    let size = modal_size(100, 24);
+    let max_rows = (size.h - 9).max(3);
+    ctx.open_modal(cx, size, move |mcx| {
+        let t = abstracttui::app::current_theme().tokens;
+        let state = abstracttui::widgets::TextAreaState::new(mcx);
+        state.set_text(initial.clone());
+        let keep = {
+            let (state, apply) = (state.clone(), apply.clone());
+            move || apply(state.text())
+        };
+        let area = abstracttui::widgets::TextArea::new()
+            .state(&state)
+            .placeholder(TASK_PLACEHOLDER)
+            .placeholder_while_focused(true)
+            .submit_policy(abstracttui::widgets::SubmitPolicy::EnterInserts)
+            .rows(3.min(max_rows), max_rows)
+            .element(mcx, &t)
+            .autofocus()
+            .build();
+        Element::new()
+            .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
+            .shortcut(KeyChord::plain(Key::Escape), {
+                let back = back.clone();
+                move |_| back()
+            })
+            .child(title_row(&t, title.clone()))
+            .child(crate::ui::cards::note_lines(&t, &[info.to_string()], 8))
+            .child(
+                Element::new()
+                    .style(LayoutStyle::column().grow(1.0).basis(Dimension::Cells(0)))
+                    .child(area)
+                    .build(),
+            )
+            .child(
+                Element::new()
+                    .style(LayoutStyle::row().gap(2).shrink(0.0))
+                    .child(
+                        Button::new(format!("Continue — {}", STEPS[1]))
+                            .on_click(keep)
+                            .view(mcx),
+                    )
+                    .build(),
+            )
+            .child(hint_bar(&t, TASK_HINTS, 8))
+            .build()
+    });
+}
+
 // ---------------------------------------------------------------------------
 // 1 · What
 // ---------------------------------------------------------------------------
@@ -426,7 +542,14 @@ pub fn what_cards(
     (cards, acts)
 }
 
-fn step_what(cx: Scope, store: Store, ctx: &UiCtx, d: Draft, errors: Vec<String>) {
+fn step_what(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    d: Draft,
+    errors: Vec<String>,
+    focus: Option<WhatAct>,
+) {
     let d0 = d.clone();
     let build: Build<WhatAct> = Rc::new(move || {
         let exec = store.automations.with(|v| v.executable.clone());
@@ -438,18 +561,20 @@ fn step_what(cx: Scope, store: Store, ctx: &UiCtx, d: Draft, errors: Vec<String>
         WhatAct::Task => {
             let (c3, d3) = (ctx2.clone(), d.clone());
             let (c4, d4) = (ctx2.clone(), d.clone());
-            edit_text(
+            open_task_editor(
                 cx,
                 &ctx2,
                 format!("{} · Task", step_title(1)),
-                "What every run is asked to do (sent as the prompt of every run).",
+                TASK_INFO,
                 d.form.prompt.clone(),
                 Rc::new(move |v: String| {
                     let mut d = d3.clone();
                     d.form.prompt = v;
-                    step_what(cx, store, &c3, d, Vec::new());
+                    step_what(cx, store, &c3, d, Vec::new(), Some(WhatAct::Task));
                 }),
-                Rc::new(move || step_what(cx, store, &c4, d4.clone(), Vec::new())),
+                Rc::new(move || {
+                    step_what(cx, store, &c4, d4.clone(), Vec::new(), Some(WhatAct::Task))
+                }),
             );
         }
         WhatAct::Next => {
@@ -461,13 +586,13 @@ fn step_what(cx: Scope, store: Store, ctx: &UiCtx, d: Draft, errors: Vec<String>
                 errors.push("Write the task to run.".into());
             }
             if errors.is_empty() {
-                step_when(cx, store, &ctx2, d.clone());
+                step_when(cx, store, &ctx2, d.clone(), None);
             } else {
-                step_what(cx, store, &ctx2, d.clone(), errors);
+                step_what(cx, store, &ctx2, d.clone(), errors, None);
             }
         }
     });
-    step(cx, ctx, step_title(1), build, act);
+    step(cx, ctx, step_title(1), build, act, focus);
 }
 
 /// The picker's rows (the kit's workflowPickerRows): "Gateway default —
@@ -587,13 +712,23 @@ fn pick_workflow(cx: Scope, store: Store, ctx: &UiCtx, d: Draft) {
                         target: wp::target_of(row, auto::CODE_AGENT_INTERFACE),
                         schema,
                     });
-                    // Another workflow owns its own tools: "Use workflow default tools".
-                    d.form.tools = None;
+                    // Another workflow: the Tools section starts again from
+                    // its first value (every tool deselected).
+                    d.form.tools = default_tools();
                     d.tools_set = true;
                 }
-                step_what(cx, store, &ctx2, d, Vec::new());
+                step_what(cx, store, &ctx2, d, Vec::new(), Some(WhatAct::Workflow));
             }),
-            on_cancel: Some(Box::new(move || step_what(cx, store, &ctx3, d3.clone(), Vec::new()))),
+            on_cancel: Some(Box::new(move || {
+                step_what(
+                    cx,
+                    store,
+                    &ctx3,
+                    d3.clone(),
+                    Vec::new(),
+                    Some(WhatAct::Workflow),
+                )
+            })),
         },
     );
 }
@@ -920,8 +1055,8 @@ pub fn when_cards(
     (cards, acts)
 }
 
-fn step_when(cx: Scope, store: Store, ctx: &UiCtx, d: Draft) {
-    step_when_errors(cx, store, ctx, d, Vec::new())
+fn step_when(cx: Scope, store: Store, ctx: &UiCtx, d: Draft, focus: Option<WhenAct>) {
+    step_when_errors(cx, store, ctx, d, Vec::new(), focus)
 }
 
 /// The served preview of `form` from the store (tracked inside a render).
@@ -934,7 +1069,14 @@ fn served_of(store: Store, trigger: &Option<Value>, tracked: bool) -> Option<aut
     }
 }
 
-fn step_when_errors(cx: Scope, store: Store, ctx: &UiCtx, mut d: Draft, errors: Vec<String>) {
+fn step_when_errors(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    mut d: Draft,
+    errors: Vec<String>,
+    focus: Option<WhenAct>,
+) {
     // Keep what was picked for the calendar rule across kind switches.
     d.rule.absorb(&d.form.when);
     // Every change reopens the step: ask the gateway to word this form once.
@@ -951,15 +1093,17 @@ fn step_when_errors(cx: Scope, store: Store, ctx: &UiCtx, mut d: Draft, errors: 
     });
     let ctx2 = ctx.clone();
     let act = Rc::new(move |a: WhenAct| {
+        // A change reopens the step with the cursor on the row changed.
         let reopen = {
             let ctx = ctx2.clone();
-            move |d: Draft| step_when(cx, store, &ctx, d)
+            let here = a.clone();
+            move |d: Draft| step_when(cx, store, &ctx, d, Some(here.clone()))
         };
         let mut nd = d.clone();
         let text_field =
             |title: &str, info: &str, initial: String, apply: fn(&mut CreateForm, String)| {
-                let (c3, d3) = (ctx2.clone(), d.clone());
-                let (c4, d4) = (ctx2.clone(), d.clone());
+                let (c3, d3, a3) = (ctx2.clone(), d.clone(), a.clone());
+                let (c4, d4, a4) = (ctx2.clone(), d.clone(), a.clone());
                 edit_text(
                     cx,
                     &ctx2,
@@ -969,9 +1113,9 @@ fn step_when_errors(cx: Scope, store: Store, ctx: &UiCtx, mut d: Draft, errors: 
                     Rc::new(move |v: String| {
                         let mut d = d3.clone();
                         apply(&mut d.form, v.trim().to_string());
-                        step_when(cx, store, &c3, d);
+                        step_when(cx, store, &c3, d, Some(a3.clone()));
                     }),
-                    Rc::new(move || step_when(cx, store, &c4, d4.clone())),
+                    Rc::new(move || step_when(cx, store, &c4, d4.clone(), Some(a4.clone()))),
                 );
             };
         match a {
@@ -1147,14 +1291,14 @@ fn step_when_errors(cx: Scope, store: Store, ctx: &UiCtx, mut d: Draft, errors: 
                     }
                 }
                 if errors.is_empty() {
-                    step_context(cx, store, &ctx2, d.clone(), Vec::new());
+                    step_context(cx, store, &ctx2, d.clone(), Vec::new(), None);
                 } else {
-                    step_when_errors(cx, store, &ctx2, d.clone(), errors);
+                    step_when_errors(cx, store, &ctx2, d.clone(), errors, None);
                 }
             }
         }
     });
-    step(cx, ctx, step_title(2), build, act);
+    step(cx, ctx, step_title(2), build, act, focus);
 }
 
 /// The When section's own problems (the kit's sentences), checked before
@@ -1207,20 +1351,27 @@ pub fn context_cards(form: &CreateForm, errors: &[String]) -> (Vec<Card>, Vec<Co
     (cards, acts)
 }
 
-fn step_context(cx: Scope, store: Store, ctx: &UiCtx, d: Draft, errors: Vec<String>) {
+fn step_context(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    d: Draft,
+    errors: Vec<String>,
+    focus: Option<ContextAct>,
+) {
     let d0 = d.clone();
     let build: Build<ContextAct> = Rc::new(move || context_cards(&d0.form, &errors));
     let ctx2 = ctx.clone();
     let act = Rc::new(move |a: ContextAct| {
         let mut nd = d.clone();
-        match a {
+        match a.clone() {
             ContextAct::Independent => {
                 nd.form.context = "independent".into();
-                step_context(cx, store, &ctx2, nd, Vec::new())
+                step_context(cx, store, &ctx2, nd, Vec::new(), Some(a))
             }
             ContextAct::Growing => {
                 nd.form.context = "growing".into();
-                step_context(cx, store, &ctx2, nd, Vec::new())
+                step_context(cx, store, &ctx2, nd, Vec::new(), Some(a))
             }
             ContextAct::MaxTokens => {
                 let (c3, d3) = (ctx2.clone(), d.clone());
@@ -1234,9 +1385,18 @@ fn step_context(cx: Scope, store: Store, ctx: &UiCtx, d: Draft, errors: Vec<Stri
                     Rc::new(move |v: String| {
                         let mut d = d3.clone();
                         d.form.growing_max_tokens = v.trim().to_string();
-                        step_context(cx, store, &c3, d, Vec::new());
+                        step_context(cx, store, &c3, d, Vec::new(), Some(ContextAct::MaxTokens));
                     }),
-                    Rc::new(move || step_context(cx, store, &c4, d4.clone(), Vec::new())),
+                    Rc::new(move || {
+                        step_context(
+                            cx,
+                            store,
+                            &c4,
+                            d4.clone(),
+                            Vec::new(),
+                            Some(ContextAct::MaxTokens),
+                        )
+                    }),
                 );
             }
             ContextAct::Next => {
@@ -1258,12 +1418,13 @@ fn step_context(cx: Scope, store: Store, ctx: &UiCtx, d: Draft, errors: Vec<Stri
                         vec![
                             "Max growing context must be a positive whole number of tokens.".into(),
                         ],
+                        None,
                     );
                 }
             }
         }
     });
-    step(cx, ctx, step_title(3), build, act);
+    step(cx, ctx, step_title(3), build, act, focus);
 }
 
 // ---------------------------------------------------------------------------
@@ -1273,32 +1434,242 @@ fn step_context(cx: Scope, store: Store, ctx: &UiCtx, d: Draft, errors: Vec<Stri
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ToolsAct {
     DefaultTools,
+    SelectAll,
+    UnselectAll,
+    /// A category header's box: every grantable tool of that toolset on
+    /// (none or some were) or off (all were).
+    Category(String),
     Tool(String),
     Auto,
     Ask,
     Next,
 }
 
-/// Pure: the Tools step's cards — the `/tools` rows (same builder) under
-/// "Use workflow default tools", then the approval radios, the kit's
-/// hints (the untrusted-content hint only with the email trigger).
-pub fn tools_cards(
-    form: &CreateForm,
+pub const SELECT_ALL: &str = "Select all";
+pub const UNSELECT_ALL: &str = "Unselect all";
+
+/// The Tools section's first value in the terminal: every tool
+/// deselected and "Use workflow default tools" off (operator ruling
+/// 2026-10-09: an automation gets no tool unless you give it one). The
+/// web's own first value is [`first_tools`].
+pub fn default_tools() -> Option<Vec<String>> {
+    Some(Vec::new())
+}
+
+/// A category's selection, shown in its header's box: `[x]` all, `[ ]`
+/// none, `[~]` some, `[-]` none of its tools can be granted here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tri {
+    All,
+    None,
+    Some,
+    Unavailable,
+}
+
+impl Tri {
+    pub fn marker(self) -> &'static str {
+        match self {
+            Tri::All => "[x] ",
+            Tri::None => "[ ] ",
+            Tri::Some => "[~] ",
+            Tri::Unavailable => "[-] ",
+        }
+    }
+}
+
+fn grantable<'a>(
+    inventory: &'a [crate::store::ToolInfo],
+    toolset: Option<&'a str>,
+) -> impl Iterator<Item = &'a crate::store::ToolInfo> + 'a {
+    inventory
+        .iter()
+        .filter(move |t| !t.served_disabled && toolset.is_none_or(|ts| t.toolset == ts))
+}
+
+/// Pure: a category's state against the selection.
+pub fn category_state(
+    selected: &[String],
+    inventory: &[crate::store::ToolInfo],
+    toolset: &str,
+) -> Tri {
+    let (mut n, mut on) = (0, 0);
+    for t in grantable(inventory, Some(toolset)) {
+        n += 1;
+        if selected.contains(&t.name) {
+            on += 1;
+        }
+    }
+    match (n, on) {
+        (0, _) => Tri::Unavailable,
+        (_, 0) => Tri::None,
+        (n, on) if n == on => Tri::All,
+        _ => Tri::Some,
+    }
+}
+
+/// Pure: what a Tools action does to the selection (`None` = "Use
+/// workflow default tools"). Served-disabled tools are never added.
+pub fn apply_tools(
+    tools: Option<Vec<String>>,
+    act: &ToolsAct,
+    inventory: &[crate::store::ToolInfo],
+) -> Option<Vec<String>> {
+    let add_all = |list: &mut Vec<String>, toolset: Option<&str>| {
+        for t in grantable(inventory, toolset) {
+            if !list.contains(&t.name) {
+                list.push(t.name.clone());
+            }
+        }
+    };
+    match act {
+        ToolsAct::DefaultTools => match tools {
+            Some(_) => None,
+            None => Some(Vec::new()),
+        },
+        ToolsAct::SelectAll => {
+            // The listed tools in the gateway's order, then any selected
+            // name this gateway does not list (still visible, removable).
+            let mut list = Vec::new();
+            add_all(&mut list, None);
+            for n in tools.unwrap_or_default() {
+                if !list.contains(&n) {
+                    list.push(n);
+                }
+            }
+            Some(list)
+        }
+        ToolsAct::UnselectAll => Some(Vec::new()),
+        ToolsAct::Category(ts) => {
+            let mut list = tools?;
+            if category_state(&list, inventory, ts) == Tri::All {
+                list.retain(|n| !grantable(inventory, Some(ts)).any(|t| t.name == *n));
+            } else {
+                add_all(&mut list, Some(ts));
+            }
+            Some(list)
+        }
+        ToolsAct::Tool(name) => {
+            let mut list = tools?;
+            if let Some(pos) = list.iter().position(|n| n == name) {
+                list.remove(pos);
+            } else if inventory
+                .iter()
+                .find(|t| t.name == *name)
+                .is_none_or(|t| !t.served_disabled)
+            {
+                list.push(name.clone());
+            }
+            Some(list)
+        }
+        ToolsAct::Auto | ToolsAct::Ask | ToolsAct::Next => tools,
+    }
+}
+
+/// One run of text on a Tools line; `item` = the action it selects.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolSpan {
+    pub text: String,
+    pub ink: Ink,
+    pub item: Option<usize>,
+}
+
+/// One logical line of the Tools step (a one-span line wraps; the button
+/// line keeps its spans side by side).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolLine {
+    pub spans: Vec<ToolSpan>,
+    pub indent: usize,
+}
+
+impl ToolLine {
+    fn one(text: impl Into<String>, ink: Ink, item: Option<usize>) -> ToolLine {
+        ToolLine {
+            spans: vec![ToolSpan {
+                text: text.into(),
+                ink,
+                item,
+            }],
+            indent: 0,
+        }
+    }
+
+    fn indent(mut self, n: usize) -> ToolLine {
+        self.indent = n;
+        self
+    }
+}
+
+/// Pure: the Tools step's lines — "Use workflow default tools", then
+/// (with a selection) "Select all · Unselect all", each toolset's header
+/// with its tri-state box and its `/tools` rows (same builder), then the
+/// approval radios and the kit's hints (the untrusted-content hint only
+/// with the email trigger), then Continue. `acts[i]` is what item `i`
+/// does.
+pub fn tools_lines(
+    tools: Option<&[String]>,
+    tool_approval: &str,
     inventory: &[crate::store::ToolInfo],
     email_kind: bool,
-) -> (Vec<Card>, Vec<ToolsAct>) {
-    let mut cards = vec![Card::heading("Tools")];
-    let mut acts = Vec::new();
-    cards.push(switch(form.tools.is_none(), DEFAULT_TOOLS_LABEL));
-    acts.push(ToolsAct::DefaultTools);
-    if let Some(selected) = &form.tools {
+) -> (Vec<ToolLine>, Vec<ToolsAct>) {
+    let mut lines = vec![ToolLine::one("Tools", Ink::Title, None)];
+    let mut acts: Vec<ToolsAct> = Vec::new();
+    let item = |acts: &mut Vec<ToolsAct>, a: ToolsAct| {
+        acts.push(a);
+        Some(acts.len() - 1)
+    };
+    let default_on = tools.is_none();
+    let ix = item(&mut acts, ToolsAct::DefaultTools);
+    lines.push(ToolLine::one(
+        format!(
+            "{}{DEFAULT_TOOLS_LABEL}",
+            if default_on { "[x] " } else { "[ ] " }
+        ),
+        if default_on { Ink::On } else { Ink::Text },
+        ix,
+    ));
+    if let Some(selected) = tools {
+        let all = item(&mut acts, ToolsAct::SelectAll);
+        let none = item(&mut acts, ToolsAct::UnselectAll);
+        lines.push(ToolLine {
+            spans: vec![
+                ToolSpan {
+                    text: SELECT_ALL.into(),
+                    ink: Ink::Accent,
+                    item: all,
+                },
+                ToolSpan {
+                    text: "  ·  ".into(),
+                    ink: Ink::Faint,
+                    item: None,
+                },
+                ToolSpan {
+                    text: UNSELECT_ALL.into(),
+                    ink: Ink::Accent,
+                    item: none,
+                },
+            ],
+            indent: 2,
+        });
         let on = |n: &str| selected.iter().any(|s| s == n);
-        for row in crate::ui::modals::tool_rows(inventory, &on, &[]) {
-            let marker = row.spec.checked.map(|m| m.marker()).unwrap_or("");
+        for (row, toolset) in crate::ui::modals::tool_rows(inventory, &on, &[])
+            .into_iter()
+            .zip(tool_row_toolsets(inventory))
+        {
             if row.spec.header {
-                cards.push(Card::heading(row.spec.text.clone()));
+                let tri = category_state(selected, inventory, &toolset);
+                let ix = item(&mut acts, ToolsAct::Category(toolset.clone()));
+                lines.push(ToolLine::one(
+                    format!("{}{}", tri.marker(), row.spec.text),
+                    if tri == Tri::Unavailable {
+                        Ink::Faint
+                    } else {
+                        Ink::Title
+                    },
+                    ix,
+                ));
                 continue;
             }
+            let marker = row.spec.checked.map(|m| m.marker()).unwrap_or("");
             let ink = if !row.grantable {
                 Ink::Faint
             } else if row.name.as_deref().is_some_and(on) {
@@ -1306,12 +1677,11 @@ pub fn tools_cards(
             } else {
                 Ink::Text
             };
-            cards.push(Card::new(vec![CardLine::new(
-                format!("{marker}{}", row.spec.text),
-                ink,
-            )
-            .indent(2)]));
-            acts.push(ToolsAct::Tool(row.name.clone().unwrap_or_default()));
+            let ix = item(
+                &mut acts,
+                ToolsAct::Tool(row.name.clone().unwrap_or_default()),
+            );
+            lines.push(ToolLine::one(format!("{marker}{}", row.spec.text), ink, ix).indent(2));
         }
         // A selected name this gateway does not list stays in the selection,
         // visible so it can be removed.
@@ -1320,44 +1690,452 @@ pub fn tools_cards(
             .filter(|n| !inventory.iter().any(|t| &t.name == *n))
             .collect();
         if !extra.is_empty() {
-            cards.push(Card::heading("not listed by this gateway"));
+            lines.push(ToolLine::one(
+                "not listed by this gateway",
+                Ink::Title,
+                None,
+            ));
             for n in extra {
-                cards.push(Card::new(vec![
-                    CardLine::new(format!("[x] {n}"), Ink::On).indent(2)
-                ]));
-                acts.push(ToolsAct::Tool(n.clone()));
+                let ix = item(&mut acts, ToolsAct::Tool(n.clone()));
+                lines.push(ToolLine::one(format!("[x] {n}"), Ink::On, ix).indent(2));
             }
         }
         if selected.is_empty() {
-            cards.push(Card::note("No tools enabled"));
+            lines.push(ToolLine::one("No tools enabled", Ink::Faint, None).indent(2));
         }
     }
-    cards.push(Card::note(TOOLS_HINT));
-    let ask = form.tool_approval == "ask";
-    cards.push(radio(!ask, AUTO_LABEL));
-    acts.push(ToolsAct::Auto);
-    cards.push(radio(ask, ASK_LABEL));
-    acts.push(ToolsAct::Ask);
-    if email_kind {
-        cards.push(Card::fixed(vec![CardLine::new(
-            email::UNTRUSTED_HINT,
-            Ink::Text,
-        )]));
+    lines.push(ToolLine::one(TOOLS_HINT, Ink::Faint, None));
+    let ask = tool_approval == "ask";
+    for (on, label, a) in [
+        (!ask, AUTO_LABEL, ToolsAct::Auto),
+        (ask, ASK_LABEL, ToolsAct::Ask),
+    ] {
+        let ix = item(&mut acts, a);
+        lines.push(ToolLine::one(
+            format!("{}{label}", if on { "(•) " } else { "( ) " }),
+            if on { Ink::On } else { Ink::Text },
+            ix,
+        ));
     }
-    cards.push(Card::note(if ask {
-        ASK_HINT.to_string()
-    } else {
-        format!("{}.", auto::TOOL_APPROVAL_CONSENT)
-    }));
-    cards.push(continue_card(5));
-    acts.push(ToolsAct::Next);
-    (cards, acts)
+    if email_kind {
+        lines.push(ToolLine::one(email::UNTRUSTED_HINT, Ink::Text, None));
+    }
+    lines.push(ToolLine::one(
+        if ask {
+            ASK_HINT.to_string()
+        } else {
+            format!("{}.", auto::TOOL_APPROVAL_CONSENT)
+        },
+        Ink::Faint,
+        None,
+    ));
+    let ix = item(&mut acts, ToolsAct::Next);
+    lines.push(ToolLine::one(
+        format!("Continue — {}", STEPS[4]),
+        Ink::Accent,
+        ix,
+    ));
+    (lines, acts)
 }
 
-/// The Tools section's first value (the web's `initialTools`): from the
-/// conversation (its customised list, else the workflow's served default
-/// list, `conv_schema` = the conversation workflow's schema) — or "Use
-/// workflow default tools" for another workflow.
+/// The toolset of each `tool_rows` row (header rows carry their group's).
+fn tool_row_toolsets(inventory: &[crate::store::ToolInfo]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut last: Option<&str> = None;
+    for t in inventory {
+        if last != Some(t.toolset.as_str()) {
+            last = Some(t.toolset.as_str());
+            out.push(t.toolset.clone());
+        }
+        out.push(t.toolset.clone());
+    }
+    out
+}
+
+/// One painted row of the Tools list: its cells (column, text, ink,
+/// item) and the item the whole row selects (a one-item row).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolRowPaint {
+    pub cells: Vec<(usize, String, Ink, Option<usize>)>,
+    pub item: Option<usize>,
+}
+
+/// Pure: lay the lines out at `width` cells (column 0–1 hold the cursor
+/// marker). One-span lines wrap — nothing is cut.
+pub fn layout_tool_lines(lines: &[ToolLine], width: usize) -> Vec<ToolRowPaint> {
+    let inner = width.saturating_sub(2).max(8);
+    let mut rows = Vec::new();
+    for line in lines {
+        let indent = line.indent.min(inner / 2);
+        if let [span] = line.spans.as_slice() {
+            for w in crate::ui::cards::wrap(&span.text, inner - indent) {
+                rows.push(ToolRowPaint {
+                    cells: vec![(2 + indent, w, span.ink, span.item)],
+                    item: span.item,
+                });
+            }
+            continue;
+        }
+        let mut x = 2 + indent;
+        let mut cells = Vec::new();
+        for s in &line.spans {
+            let w = abstracttui::text::width(&s.text).max(0) as usize;
+            cells.push((x, s.text.clone(), s.ink, s.item));
+            x += w;
+        }
+        rows.push(ToolRowPaint { cells, item: None });
+    }
+    rows
+}
+
+/// Rows of `item` in a layout (first, last).
+fn item_rows(rows: &[ToolRowPaint], item: usize) -> Option<(usize, usize)> {
+    let has = |r: &ToolRowPaint| r.cells.iter().any(|c| c.3 == Some(item));
+    let first = rows.iter().position(has)?;
+    let last = rows.iter().rposition(has).unwrap_or(first);
+    Some((first, last))
+}
+
+/// Pure: the first visible row — `top` (the last one painted, or the
+/// wheel's) when `follow` is off; otherwise the nearest window that shows
+/// the cursor's item whole (one row of context where possible).
+pub fn tools_window(
+    rows: &[ToolRowPaint],
+    cursor: usize,
+    top: usize,
+    height: usize,
+    follow: bool,
+) -> usize {
+    let max_start = rows.len().saturating_sub(height);
+    let top = top.min(max_start);
+    if !follow {
+        return top;
+    }
+    let Some((first, last)) = item_rows(rows, cursor) else {
+        return top;
+    };
+    if first < top + 1 {
+        first.saturating_sub(1).min(max_start)
+    } else if last + 2 > top + height {
+        (last + 2).saturating_sub(height).min(first).min(max_start)
+    } else {
+        top
+    }
+}
+
+/// The Tools step: its own modal (no reopen per change, so the cursor
+/// stays on the line you toggled), a scrolling list — ↑↓ / PgUp PgDn /
+/// Home End move, the mouse wheel scrolls, a click on a line toggles it
+/// (or presses the button / Continue), Space or Enter toggles the focused
+/// line.
+fn step_tools(cx: Scope, store: Store, ctx: &UiCtx, mut d: Draft) {
+    if !d.tools_set {
+        d.form.tools = default_tools();
+        d.tools_set = true;
+    }
+    let email_kind = matches!(d.form.when, When::Email) && usable(store);
+    let rows_hint = {
+        let inventory = store.tools.get_untracked();
+        tools_lines(
+            d.form.tools.as_deref(),
+            &d.form.tool_approval,
+            &inventory,
+            email_kind,
+        )
+        .0
+        .len() as i32
+    };
+    let size = modal_size(110, rows_hint + 10);
+    let ctx2 = ctx.clone();
+    let title = step_title(4);
+    ctx.open_modal(cx, size, move |mcx| {
+        let t = abstracttui::app::current_theme().tokens;
+        let tools = mcx.signal(d.form.tools.clone());
+        let approval = mcx.signal(d.form.tool_approval.clone());
+        let model = move || {
+            let inventory = store.tools.get();
+            let list = tools.get();
+            let ap = approval.get();
+            tools_lines(list.as_deref(), &ap, &inventory, email_kind)
+        };
+        let start = model().1.len().saturating_sub(1);
+        let cursor = mcx.signal(start);
+        // The window: `top` = the first painted row (written by the paint,
+        // moved by the wheel); `follow` = keep the cursor in view (keys) or
+        // not (the wheel scrolls freely). `tick` repaints after a wheel.
+        let top = Rc::new(std::cell::Cell::new(0usize));
+        let follow = Rc::new(std::cell::Cell::new(true));
+        let height = Rc::new(std::cell::Cell::new(10usize));
+        let tick = mcx.signal(0u64);
+        // What the last paint put where: (y, x0, x1, item).
+        let hits: Hits = Rc::default();
+
+        let activate = {
+            let ctx = ctx2.clone();
+            let d = d.clone();
+            Rc::new(move |ix: usize| {
+                let (_, acts) = model();
+                let Some(a) = acts.get(ix).cloned() else {
+                    return;
+                };
+                let inventory = store.tools.get_untracked();
+                match &a {
+                    ToolsAct::Next => {
+                        let mut nd = d.clone();
+                        nd.form.tools = tools.get_untracked();
+                        nd.form.tool_approval = approval.get_untracked();
+                        step_workspaces(cx, store, &ctx, nd);
+                    }
+                    ToolsAct::Auto => approval.set("auto".into()),
+                    ToolsAct::Ask => approval.set("ask".into()),
+                    ToolsAct::Tool(name)
+                        if inventory
+                            .iter()
+                            .any(|t| t.name == *name && t.served_disabled) =>
+                    {
+                        store.notify(format!("{name} is disabled on this gateway"));
+                    }
+                    ToolsAct::Category(ts)
+                        if category_state(&[], &inventory, ts) == Tri::Unavailable =>
+                    {
+                        let label = if ts.is_empty() { "other" } else { ts.as_str() };
+                        store.notify(format!("{label}: every tool is disabled on this gateway"));
+                    }
+                    _ => tools.set(apply_tools(tools.get_untracked(), &a, &inventory)),
+                }
+            })
+        };
+        let move_cursor = {
+            let follow = follow.clone();
+            Rc::new(move |delta: i64| {
+                let n = model().1.len();
+                if n > 0 {
+                    follow.set(true);
+                    cursor.update(|c| {
+                        *c = (*c as i64).saturating_add(delta).clamp(0, n as i64 - 1) as usize
+                    });
+                }
+            })
+        };
+        let page = {
+            let height = height.clone();
+            move || (height.get().saturating_sub(2)).max(1) as i64
+        };
+        let on_mouse = {
+            let (top, follow, hits) = (top.clone(), follow.clone(), hits.clone());
+            let activate = activate.clone();
+            move |ectx: &mut abstracttui::ui::EventCtx, ev: &abstracttui::ui::UiEvent| {
+                let abstracttui::ui::UiEvent::Mouse(m) = ev else {
+                    return;
+                };
+                match m.kind {
+                    abstracttui::ui::MouseKind::ScrollUp
+                    | abstracttui::ui::MouseKind::ScrollDown => {
+                        let up = matches!(m.kind, abstracttui::ui::MouseKind::ScrollUp);
+                        follow.set(false);
+                        top.set(if up {
+                            top.get().saturating_sub(3)
+                        } else {
+                            top.get() + 3
+                        });
+                        tick.update(|n| *n += 1);
+                        ectx.stop_propagation();
+                    }
+                    abstracttui::ui::MouseKind::Down(abstracttui::ui::MouseButton::Left) => {
+                        let hit = hits
+                            .borrow()
+                            .iter()
+                            .find(|(y, x0, x1, _)| *y == m.pos.y && m.pos.x >= *x0 && m.pos.x < *x1)
+                            .map(|h| h.3);
+                        if let Some(ix) = hit {
+                            ectx.stop_propagation();
+                            // The row clicked is the row focused (the view
+                            // stays where the wheel left it).
+                            cursor.set(ix);
+                            activate(ix);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        };
+        let list = {
+            let (top, follow, height, hits) =
+                (top.clone(), follow.clone(), height.clone(), hits.clone());
+            dyn_view(
+                LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)),
+                move || {
+                    let _ = tick.get();
+                    let (lines, acts) = model();
+                    let cur = cursor.get().min(acts.len().saturating_sub(1));
+                    let (top, follow, height, hits) =
+                        (top.clone(), follow.clone(), height.clone(), hits.clone());
+                    Element::new()
+                        .style(LayoutStyle::column().grow(1.0).basis(Dimension::Cells(0)))
+                        .draw(move |canvas, rect| {
+                            paint_tools(canvas, rect, &lines, cur, (&top, &follow, &height), &hits)
+                        })
+                        .build()
+                },
+            )
+        };
+        let mv = move_cursor;
+        Element::new()
+            .style(LayoutStyle::column().padding(Edges::all(1)))
+            .focusable()
+            .autofocus()
+            .on(abstracttui::ui::Phase::Bubble, on_mouse)
+            .shortcut(KeyChord::plain(Key::Escape), {
+                let ctx = ctx2.clone();
+                move |_| ctx.close_modal()
+            })
+            .shortcut(KeyChord::plain(Key::Up), {
+                let mv = mv.clone();
+                move |_| mv(-1)
+            })
+            .shortcut(KeyChord::plain(Key::Down), {
+                let mv = mv.clone();
+                move |_| mv(1)
+            })
+            .shortcut(KeyChord::plain(Key::PageUp), {
+                let (mv, page) = (mv.clone(), page.clone());
+                move |_| mv(-page())
+            })
+            .shortcut(KeyChord::plain(Key::PageDown), {
+                let (mv, page) = (mv.clone(), page.clone());
+                move |_| mv(page())
+            })
+            .shortcut(KeyChord::plain(Key::Home), {
+                let mv = mv.clone();
+                move |_| mv(i64::MIN / 2)
+            })
+            .shortcut(KeyChord::plain(Key::End), {
+                let mv = mv.clone();
+                move |_| mv(i64::MAX / 2)
+            })
+            .shortcut(KeyChord::plain(Key::Enter), {
+                let a = activate.clone();
+                move |_| a(cursor.get_untracked())
+            })
+            .shortcut(KeyChord::plain(Key::Char(' ')), {
+                let a = activate.clone();
+                move |_| a(cursor.get_untracked())
+            })
+            .child(title_row(&t, title.clone()))
+            .child(list)
+            .child(hint_bar(&t, TOOLS_HINTS, 8))
+            .build()
+    });
+}
+
+const TOOLS_HINTS: &[(&str, &str)] = &[
+    ("↑↓ PgUp PgDn", ""),
+    ("Space", "toggles"),
+    ("click", "toggles"),
+    ("wheel", "scrolls"),
+    ("End", "Continue"),
+    ("Esc", "cancels"),
+];
+
+/// What the last paint put where: (y, x0, x1, item).
+type Hits = Rc<std::cell::RefCell<Vec<(i32, i32, i32, usize)>>>;
+
+/// Paint the Tools list into `rect` and record where each item landed.
+fn paint_tools(
+    canvas: &mut dyn abstracttui::ui::StyledCanvas,
+    rect: Rect,
+    lines: &[ToolLine],
+    cursor: usize,
+    (top, follow, height): (
+        &std::cell::Cell<usize>,
+        &std::cell::Cell<bool>,
+        &std::cell::Cell<usize>,
+    ),
+    hits: &Hits,
+) {
+    let t = abstracttui::app::current_theme().tokens;
+    let rows = layout_tool_lines(lines, rect.w.max(10) as usize);
+    let h = rect.h.max(1) as usize;
+    height.set(h);
+    let start = tools_window(&rows, cursor, top.get(), h, follow.get());
+    top.set(start);
+    let mut hit = Vec::new();
+    let style_of = |ink: Ink, sel: bool| {
+        let fg = if sel {
+            t.selection_fg
+        } else {
+            match ink {
+                Ink::Text => t.text,
+                Ink::Faint => t.text_faint,
+                Ink::Title | Ink::Accent | Ink::On => t.accent,
+                Ink::Error => t.error,
+            }
+        };
+        let bg = if sel {
+            t.selection_bg
+        } else {
+            Rgba::TRANSPARENT
+        };
+        let mut style = abstracttui::render::Style::new().fg(fg).bg(bg);
+        if matches!(ink, Ink::Title | Ink::On) {
+            style = style.attrs(abstracttui::render::Attrs::BOLD);
+        }
+        style
+    };
+    let first_cursor_row = item_rows(&rows, cursor).map(|r| r.0);
+    for (line, ri) in (start..rows.len()).take(h).enumerate() {
+        let row = &rows[ri];
+        let y = rect.y + line as i32;
+        let whole = row.item == Some(cursor);
+        if whole {
+            canvas.fill(
+                Rect::new(rect.x, y, rect.w, 1),
+                ' ',
+                t.selection_fg,
+                t.selection_bg,
+            );
+        }
+        if Some(ri) == first_cursor_row {
+            canvas.print_styled(Point::new(rect.x, y), "▸ ", &style_of(Ink::Accent, whole));
+        }
+        if let Some(item) = row.item {
+            hit.push((y, rect.x, rect.x + rect.w, item));
+        }
+        for (x, text, ink, item) in &row.cells {
+            let sel = whole || *item == Some(cursor);
+            let x = rect.x + *x as i32;
+            canvas.print_styled(Point::new(x, y), text, &style_of(*ink, sel));
+            if let (Some(item), None) = (item, row.item) {
+                let w = abstracttui::text::width(text).max(1);
+                hit.push((y, x, x + w, *item));
+            }
+        }
+    }
+    // Honest overflow: how many rows sit above / below the window.
+    let below = rows.len().saturating_sub(start + h);
+    for (n, y, arrow) in [(start, rect.y, "↑"), (below, rect.bottom() - 1, "↓")] {
+        if n > 0 {
+            let msg = format!(" {arrow} {n} more ");
+            let w = abstracttui::text::width(&msg);
+            let at = Point::new(rect.x + rect.w - w, y);
+            canvas.fill(
+                Rect::new(at.x, y, w, 1),
+                ' ',
+                t.text_faint,
+                Rgba::TRANSPARENT,
+            );
+            canvas.print(at, &msg, t.text_faint, Rgba::TRANSPARENT);
+        }
+    }
+    *hits.borrow_mut() = hit;
+}
+
+/// The web's first value of the Tools section (its `initialTools`): from
+/// the conversation (its customised list, else the workflow's served
+/// default list, `conv_schema` = the conversation workflow's schema) — or
+/// "Use workflow default tools" for another workflow. The terminal starts
+/// from [`default_tools`] instead (operator ruling 2026-10-09); this stays
+/// the parity reference (`tests/schedule_parity.rs`).
 pub fn first_tools(d: &Draft, conv_schema: Option<&Value>) -> Option<Vec<String>> {
     if d.picked.is_some() {
         return None;
@@ -1366,69 +2144,6 @@ pub fn first_tools(d: &Draft, conv_schema: Option<&Value>) -> Option<Vec<String>
         .map(|schema| si::schema_defaults(Some(schema)))
         .unwrap_or_default();
     si::initial_tools(&defaults, &d.conv)
-}
-
-fn initial_tools(store: Store, d: &Draft) -> Option<Vec<String>> {
-    let schema = d
-        .conv_schema
-        .as_ref()
-        .and_then(|(b, v, f)| {
-            store
-                .automations
-                .with_untracked(|s| s.schema(&auto::schema_key(b, v, f)).cloned())
-        })
-        .and_then(Result::ok);
-    first_tools(d, schema.as_ref())
-}
-
-fn step_tools(cx: Scope, store: Store, ctx: &UiCtx, mut d: Draft) {
-    if !d.tools_set {
-        d.form.tools = initial_tools(store, &d);
-        d.tools_set = true;
-    }
-    let d0 = d.clone();
-    let email_kind = matches!(d.form.when, When::Email) && usable(store);
-    let build: Build<ToolsAct> = Rc::new(move || {
-        let inventory = store.tools.get();
-        tools_cards(&d0.form, &inventory, email_kind)
-    });
-    let ctx2 = ctx.clone();
-    let act = Rc::new(move |a: ToolsAct| {
-        let mut nd = d.clone();
-        match a {
-            ToolsAct::DefaultTools => {
-                // The kit's checkbox: on → null; off → an empty selection.
-                nd.form.tools = if nd.form.tools.is_some() {
-                    None
-                } else {
-                    Some(Vec::new())
-                };
-            }
-            ToolsAct::Tool(name) => {
-                let grantable = store.tools.with_untracked(|tl| {
-                    tl.iter()
-                        .find(|t| t.name == name)
-                        .is_none_or(|t| !t.served_disabled)
-                });
-                if !grantable {
-                    store.notify(format!("{name} is disabled on this gateway"));
-                    return;
-                }
-                if let Some(list) = nd.form.tools.as_mut() {
-                    if let Some(pos) = list.iter().position(|n| *n == name) {
-                        list.remove(pos);
-                    } else {
-                        list.push(name);
-                    }
-                }
-            }
-            ToolsAct::Auto => nd.form.tool_approval = "auto".into(),
-            ToolsAct::Ask => nd.form.tool_approval = "ask".into(),
-            ToolsAct::Next => return step_workspaces(cx, store, &ctx2, nd),
-        }
-        step_tools(cx, store, &ctx2, nd);
-    });
-    step(cx, ctx, step_title(4), build, act);
 }
 
 // ---------------------------------------------------------------------------
@@ -1453,7 +2168,7 @@ fn step_workspaces(cx: Scope, store: Store, ctx: &UiCtx, d: Draft) {
     let next: Rc<dyn Fn()> = Rc::new(move || {
         let mut d = d.clone();
         d.form.workspace = store.workspaces.with_untracked(|w| w.draft.clone());
-        step_mailbox(cx, store, &ctx2, d, Vec::new());
+        step_mailbox(cx, store, &ctx2, d, Vec::new(), None);
     });
     crate::ui::workspace_view::open_screen(
         cx,
@@ -1527,7 +2242,14 @@ pub fn mailbox_cards(
     (cards, acts)
 }
 
-fn step_mailbox(cx: Scope, store: Store, ctx: &UiCtx, d: Draft, errors: Vec<String>) {
+fn step_mailbox(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    d: Draft,
+    errors: Vec<String>,
+    focus: Option<MailAct>,
+) {
     let d0 = d.clone();
     let build: Build<MailAct> = Rc::new(move || {
         let status = store.automations.with(|v| v.email.clone());
@@ -1536,7 +2258,7 @@ fn step_mailbox(cx: Scope, store: Store, ctx: &UiCtx, d: Draft, errors: Vec<Stri
     let ctx2 = ctx.clone();
     let act = Rc::new(move |a: MailAct| {
         let mut nd = d.clone();
-        match a {
+        match a.clone() {
             MailAct::Notify => {
                 if !usable(store) {
                     store.notify(NOT_USABLE_SWITCH);
@@ -1558,9 +2280,18 @@ fn step_mailbox(cx: Scope, store: Store, ctx: &UiCtx, d: Draft, errors: Vec<Stri
                     Rc::new(move |v: String| {
                         let mut d = d3.clone();
                         d.form.recipients.addresses = v;
-                        step_mailbox(cx, store, &c3, d, Vec::new());
+                        step_mailbox(cx, store, &c3, d, Vec::new(), Some(MailAct::Addresses));
                     }),
-                    Rc::new(move || step_mailbox(cx, store, &c4, d4.clone(), Vec::new())),
+                    Rc::new(move || {
+                        step_mailbox(
+                            cx,
+                            store,
+                            &c4,
+                            d4.clone(),
+                            Vec::new(),
+                            Some(MailAct::Addresses),
+                        )
+                    }),
                 );
             }
             MailAct::Next => {
@@ -1570,15 +2301,15 @@ fn step_mailbox(cx: Scope, store: Store, ctx: &UiCtx, d: Draft, errors: Vec<Stri
                     Vec::new()
                 };
                 return if errors.is_empty() {
-                    step_limits(cx, store, &ctx2, nd, Vec::new())
+                    step_limits(cx, store, &ctx2, nd, Vec::new(), None)
                 } else {
-                    step_mailbox(cx, store, &ctx2, nd, errors)
+                    step_mailbox(cx, store, &ctx2, nd, errors, None)
                 };
             }
         }
-        step_mailbox(cx, store, &ctx2, nd, Vec::new());
+        step_mailbox(cx, store, &ctx2, nd, Vec::new(), Some(a));
     });
-    step(cx, ctx, step_title(6), build, act);
+    step(cx, ctx, step_title(6), build, act, focus);
 }
 
 // ---------------------------------------------------------------------------
@@ -1646,7 +2377,14 @@ pub fn limits_cards(
     (cards, acts)
 }
 
-fn step_limits(cx: Scope, store: Store, ctx: &UiCtx, d: Draft, errors: Vec<String>) {
+fn step_limits(
+    cx: Scope,
+    store: Store,
+    ctx: &UiCtx,
+    d: Draft,
+    errors: Vec<String>,
+    focus: Option<LimitRow>,
+) {
     // Max runs / stop at / first run change the trigger: the gateway words the new one.
     let trigger = preview_trigger(&d.form, usable(store));
     if let Some(t) = &trigger {
@@ -1675,9 +2413,9 @@ fn step_limits(cx: Scope, store: Store, ctx: &UiCtx, d: Draft, errors: Vec<Strin
                     Rc::new(move |v: String| {
                         let mut d = d3.clone();
                         apply(&mut d.form, v.trim().to_string());
-                        step_limits(cx, store, &c3, d, Vec::new());
+                        step_limits(cx, store, &c3, d, Vec::new(), Some(row));
                     }),
-                    Rc::new(move || step_limits(cx, store, &c4, d4.clone(), Vec::new())),
+                    Rc::new(move || step_limits(cx, store, &c4, d4.clone(), Vec::new(), Some(row))),
                 );
             };
         match row {
@@ -1714,10 +2452,11 @@ fn step_limits(cx: Scope, store: Store, ctx: &UiCtx, d: Draft, errors: Vec<Strin
         format!("{} (Enter creates it)", step_title(7)),
         build,
         act,
+        focus,
     );
 }
 
-/// The schema answer for `key` as `/schedule` needs it: the schema, or the
+/// The schema answer for `key` as `/automation` needs it: the schema, or the
 /// sentence that stops the create.
 pub fn schema_for_create(answer: Option<&Result<Value, String>>) -> Result<Value, String> {
     match answer {
@@ -1778,7 +2517,7 @@ fn create_automation(cx: Scope, store: Store, ctx: &UiCtx, d: &Draft) {
         }
     };
     match create_body(d, schema.as_ref().map_err(Clone::clone), email_usable, "") {
-        Err(errors) => step_limits(cx, store, ctx, d.clone(), errors),
+        Err(errors) => step_limits(cx, store, ctx, d.clone(), errors, None),
         Ok(body) => {
             let key = format!("create:{body}");
             let mut request_id = String::new();
@@ -1802,6 +2541,178 @@ fn create_automation(cx: Scope, store: Store, ctx: &UiCtx, d: &Draft) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn inv() -> Vec<crate::store::ToolInfo> {
+        let t = |n: &str, ts: &str, off: bool| crate::store::ToolInfo {
+            name: n.into(),
+            toolset: ts.into(),
+            served_disabled: off,
+            ..Default::default()
+        };
+        vec![
+            t("read_file", "files", false),
+            t("write_file", "files", false),
+            t("web_search", "web", false),
+            t("execute_command", "system", true),
+        ]
+    }
+
+    fn names(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn the_tools_section_starts_with_nothing_selected() {
+        assert_eq!(default_tools(), Some(Vec::new()));
+        let (lines, acts) = tools_lines(Some(&[]), "auto", &inv(), false);
+        assert_eq!(acts[0], ToolsAct::DefaultTools);
+        let text: Vec<String> = lines
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.text.as_str()).collect())
+            .collect();
+        assert!(
+            text.contains(&format!("[ ] {DEFAULT_TOOLS_LABEL}")),
+            "{text:?}"
+        );
+        assert!(text.iter().any(|l| l == "No tools enabled"), "{text:?}");
+        assert!(!text.iter().any(|l| l.starts_with("[x]")), "{text:?}");
+    }
+
+    #[test]
+    fn select_all_and_unselect_all() {
+        let all = apply_tools(Some(Vec::new()), &ToolsAct::SelectAll, &inv());
+        assert_eq!(all, Some(names(&["read_file", "write_file", "web_search"])));
+        // A selected name the gateway does not list is kept (visible).
+        let kept = apply_tools(Some(names(&["mcp_x"])), &ToolsAct::SelectAll, &inv());
+        assert_eq!(
+            kept,
+            Some(names(&["read_file", "write_file", "web_search", "mcp_x"]))
+        );
+        assert_eq!(
+            apply_tools(all, &ToolsAct::UnselectAll, &inv()),
+            Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn a_category_box_is_tri_state() {
+        let inv = inv();
+        assert_eq!(category_state(&[], &inv, "files"), Tri::None);
+        assert_eq!(
+            category_state(&names(&["read_file"]), &inv, "files"),
+            Tri::Some
+        );
+        let both = names(&["read_file", "write_file"]);
+        assert_eq!(category_state(&both, &inv, "files"), Tri::All);
+        assert_eq!(category_state(&both, &inv, "system"), Tri::Unavailable);
+        let cat = ToolsAct::Category("files".into());
+        // some → all, all → none, none → all; other categories untouched.
+        let some = Some(names(&["read_file", "web_search"]));
+        let all = apply_tools(some, &cat, &inv);
+        assert_eq!(all, Some(names(&["read_file", "web_search", "write_file"])));
+        let none = apply_tools(all, &cat, &inv);
+        assert_eq!(none, Some(names(&["web_search"])));
+        assert_eq!(
+            apply_tools(none, &cat, &inv),
+            Some(names(&["web_search", "read_file", "write_file"]))
+        );
+        // A gated-only category adds nothing.
+        let sys = ToolsAct::Category("system".into());
+        assert_eq!(apply_tools(Some(Vec::new()), &sys, &inv), Some(Vec::new()));
+        // The header shows the state.
+        let (lines, _) = tools_lines(Some(&names(&["read_file"])), "auto", &inv, false);
+        let headers: Vec<&str> = lines
+            .iter()
+            .filter(|l| l.spans.len() == 1 && l.spans[0].ink != Ink::Faint)
+            .map(|l| l.spans[0].text.as_str())
+            .filter(|t| t.ends_with("files") || t.ends_with("web"))
+            .collect();
+        assert_eq!(headers, vec!["[~] files", "[ ] web"]);
+    }
+
+    #[test]
+    fn a_tool_toggle_never_grants_a_disabled_tool() {
+        let t = ToolsAct::Tool("execute_command".into());
+        assert_eq!(apply_tools(Some(Vec::new()), &t, &inv()), Some(Vec::new()));
+        let t = ToolsAct::Tool("read_file".into());
+        let on = apply_tools(Some(Vec::new()), &t, &inv());
+        assert_eq!(on, Some(names(&["read_file"])));
+        assert_eq!(apply_tools(on, &t, &inv()), Some(Vec::new()));
+        // "Use workflow default tools": on → null, off → an empty selection.
+        let d = ToolsAct::DefaultTools;
+        assert_eq!(apply_tools(Some(names(&["read_file"])), &d, &inv()), None);
+        assert_eq!(apply_tools(None, &d, &inv()), Some(Vec::new()));
+    }
+
+    #[test]
+    fn a_toggle_keeps_every_item_where_it_was() {
+        // The focus rule rests on this: toggling item N never moves the
+        // other items, so the cursor index still names the same line.
+        let inv = inv();
+        let (_, before) = tools_lines(Some(&[]), "auto", &inv, false);
+        for (ix, a) in before.iter().enumerate() {
+            if matches!(a, ToolsAct::Next | ToolsAct::DefaultTools) {
+                continue;
+            }
+            let after_sel = apply_tools(Some(Vec::new()), a, &inv);
+            let (_, after) = tools_lines(after_sel.as_deref(), "auto", &inv, false);
+            assert_eq!(after[ix], before[ix], "item {ix} stays put");
+            assert_eq!(after.len(), before.len());
+        }
+    }
+
+    #[test]
+    fn the_window_follows_the_cursor_and_the_wheel_scrolls_freely() {
+        let lines: Vec<ToolLine> = (0..40)
+            .map(|i| ToolLine::one(format!("tool {i}"), Ink::Text, Some(i)))
+            .collect();
+        let rows = layout_tool_lines(&lines, 60);
+        // Following: the cursor's row is in view.
+        let start = tools_window(&rows, 39, 0, 10, true);
+        assert!(start + 10 > 39 && start <= 39, "{start}");
+        let start = tools_window(&rows, 5, 30, 10, true);
+        assert!(start <= 5, "{start}");
+        // Free (after a wheel): the top stays, clamped to the end.
+        assert_eq!(tools_window(&rows, 39, 3, 10, false), 3);
+        assert_eq!(tools_window(&rows, 0, 99, 10, false), 30);
+    }
+
+    #[test]
+    fn the_button_line_keeps_both_buttons_side_by_side() {
+        let (lines, acts) = tools_lines(Some(&[]), "auto", &inv(), false);
+        let rows = layout_tool_lines(&lines, 80);
+        let buttons = rows
+            .iter()
+            .find(|r| r.cells.iter().any(|c| c.1 == SELECT_ALL))
+            .expect("the button line");
+        assert_eq!(buttons.item, None, "two items: no whole-row item");
+        let items: Vec<&ToolsAct> = buttons
+            .cells
+            .iter()
+            .filter_map(|c| c.3.map(|i| &acts[i]))
+            .collect();
+        assert_eq!(items, vec![&ToolsAct::SelectAll, &ToolsAct::UnselectAll]);
+    }
+
+    #[test]
+    fn a_reopened_step_keeps_the_cursor_on_the_row_changed() {
+        let acts = [
+            WhenAct::Repeat,
+            WhenAct::Weekly,
+            WhenAct::Day(1),
+            WhenAct::Next,
+        ];
+        assert_eq!(start_cursor(&acts, None), 3, "first visit: Continue");
+        assert_eq!(start_cursor(&acts, Some(&WhenAct::Day(1))), 2);
+        // A row that is gone (the kind changed): Continue.
+        assert_eq!(start_cursor(&acts, Some(&WhenAct::OnceAt)), 3);
+    }
+
+    #[test]
+    fn the_dialog_is_named_like_the_webs_new_automation() {
+        assert_eq!(step_title(1), "New automation — 1/7 What");
+        assert_eq!(step_title(4), "New automation — 4/7 Tools");
+    }
 
     #[test]
     fn a_picked_workflow_starts_from_its_own_tools() {

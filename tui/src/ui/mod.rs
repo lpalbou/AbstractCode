@@ -1401,7 +1401,7 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
         Command::Archive => conversations_view::open_archive_current(cx, store, ctx),
         Command::Automations(None) => automations_view::open_automations(cx, store, ctx),
         Command::Automations(Some(id)) => automations_view::open_automation(cx, store, ctx, &id),
-        Command::Schedule(task) => automations_view::open_schedule(cx, store, ctx, task),
+        Command::NewAutomation(task) => automations_view::open_schedule(cx, store, ctx, task),
         Command::WorkspaceSend(arg) => workspace_send(store, ctx, arg.as_deref()),
         Command::Steer(text) => {
             if text.is_empty() {

@@ -35,10 +35,11 @@ pub enum Command {
     /// `/automations [id]` — the gateway's automations (every client's):
     /// list, open one, its runs, waits and controls. An id opens it.
     Automations(Option<String>),
-    /// `/schedule [task]` — create an automation that runs the current
-    /// workflow (task → when → context → tools); the task defaults to the
-    /// conversation's last prompt.
-    Schedule(Option<String>),
+    /// `/automation [task]` — "New automation": create an automation that
+    /// runs the current workflow (the Code web's dialog, seven steps); the
+    /// task defaults to the conversation's last prompt. `/schedule` stays a
+    /// silent alias for one release (0.9.2 → removed in the next).
+    NewAutomation(Option<String>),
     /// `/workspace` — root / access mode / allowed paths modal.
     Workspace,
     Skills,
@@ -209,10 +210,14 @@ pub fn parse(text: &str) -> Option<Command> {
         "/archive" => Command::Archive,
         "/workspace" | "/ws" => Command::Workspace,
         "/files" | "/file" => Command::Files,
-        "/automations" | "/automation" | "/autos" => {
+        "/automations" | "/autos" => {
             Command::Automations(if rest.is_empty() { None } else { Some(rest) })
         }
-        "/schedule" => Command::Schedule(if rest.is_empty() { None } else { Some(rest) }),
+        // `/schedule`: the old name, a silent alias for one release (not
+        // in the completions or the help).
+        "/automation" | "/schedule" => {
+            Command::NewAutomation(if rest.is_empty() { None } else { Some(rest) })
+        }
         "/skills" | "/skill" => Command::Skills,
         "/mcp" => Command::Mcp,
         "/cache" | "/caching" => Command::Cache,
@@ -351,8 +356,8 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
         "the gateway's automations: runs, approvals, pause/run now/stop/revise/archive, discuss",
     ),
     (
-        "schedule",
-        "create an automation that runs this workflow on a schedule",
+        "automation",
+        "New automation: run this workflow on a schedule or when an email arrives",
     ),
     ("skills", "attach gateway skills"),
     ("mcp", "MCP server registry"),
@@ -594,8 +599,8 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "the gateway's automations (shared with the Assistant and the Observer): state, what runs now, the next run; Enter opens one — its runs as chat pairs, approvals (y/n), answers, space switches Active · g run now · x stop current · e revise · a archive (hides and stops, history kept) · d discuss a run (a new chat, in place) · w its folder. g run now: Run it once now, without waiting for the schedule; the next scheduled run keeps its time.",
     ),
     (
-        "/schedule [task]",
-        "create an automation that runs the current workflow: the task (default: your last prompt), when (every N minutes/hours/days or once, UTC), context (independent or growing), tools (run without asking, or ask each time)",
+        "/automation [task]",
+        "New automation — the Code web's dialog in seven steps: What (the workflow and the task, a multiline text; default: your last prompt), When (Repeat, Daily, Weekly, Monthly, Once at…, or When an email arrives), Context, Tools (none selected until you choose; Select all / Unselect all, a box per category), Workspaces, Mailbox, Title and limits",
     ),
     (
         "/voice [read-aloud on|off]",
@@ -675,6 +680,33 @@ pub const HELP_EXTRA: &[(&str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `/automation` creates one ("New automation"); `/schedule` is its old
+    /// name, a silent alias for one release (not completed, not in help);
+    /// `/automations` stays the list.
+    #[test]
+    fn automation_creates_and_schedule_is_a_silent_alias() {
+        assert_eq!(
+            parse("/automation check the disk"),
+            Some(Command::NewAutomation(Some("check the disk".into())))
+        );
+        assert_eq!(parse("/automation"), Some(Command::NewAutomation(None)));
+        assert_eq!(
+            parse("/schedule check the disk"),
+            Some(Command::NewAutomation(Some("check the disk".into())))
+        );
+        assert_eq!(parse("/automations"), Some(Command::Automations(None)));
+        assert_eq!(
+            parse("/autos x"),
+            Some(Command::Automations(Some("x".into())))
+        );
+        assert!(COMPLETIONS.iter().any(|(c, _)| *c == "automation"));
+        assert!(!COMPLETIONS.iter().any(|(c, _)| *c == "schedule"));
+        assert!(HELP_LINES
+            .iter()
+            .any(|(c, _)| c.starts_with("/automation [task]")));
+        assert!(!HELP_LINES.iter().any(|(c, _)| c.contains("/schedule")));
+    }
 
     /// MTP must be discoverable everywhere a user looks: /help, the `/`
     /// completions, `--help`, and both command spellings.

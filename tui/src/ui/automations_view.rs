@@ -1,4 +1,4 @@
-//! `/automations` and `/schedule`: the gateway's automations in the terminal.
+//! `/automations` and `/automation`: the gateway's automations in the terminal.
 //!
 //! Same behaviour and contract as the Observer, the Assistant and the
 //! ui-kit panel (`crate::automations` holds the shared rules):
@@ -14,7 +14,8 @@
 //!   current, revise, archive — which hides and stops, never deletes);
 //! - Discuss (`d`) forks the automation at the selected run and SWITCHES
 //!   this terminal to the new chat, in place (one session pool);
-//! - `/schedule` opens the kit's schedule dialog (`crate::ui::schedule_view`):
+//! - `/automation` ("New automation"; `/schedule` is its old name) opens
+//!   the kit's schedule dialog (`crate::ui::schedule_view`):
 //!   seven steps with the same `schedule@2` body as every client; When =
 //!   Repeat · Daily · Weekly · Monthly · Once at… (each worded by the
 //!   gateway: schedule-preview's `first_run_sentence`, + the time-zone line
@@ -219,7 +220,7 @@ pub fn list_cards(v: &auto::View, now: i64, confirm: Option<&str>) -> (Vec<Card>
             }
             if shown.is_empty() {
                 cards.push(Card::note(
-                    "No automations yet. n creates one from the current workflow (/schedule).",
+                    "No automations yet. n creates one from the current workflow (/automation).",
                 ));
             }
         }
@@ -1212,7 +1213,7 @@ pub(crate) fn open_text(
 
 // ---------------------------------------------------------------------------
 
-/// `/schedule [task]` — the kit's schedule dialog (`crate::ui::schedule_view`).
+/// `/automation [task]` — the kit's schedule dialog (`crate::ui::schedule_view`).
 pub fn open_schedule(cx: Scope, store: Store, ctx: &UiCtx, seed: Option<String>) {
     crate::ui::schedule_view::open_schedule(cx, store, ctx, seed)
 }

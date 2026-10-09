@@ -647,6 +647,21 @@ impl Harness {
         }
         screen
     }
+
+    fn down(&mut self, n: usize) -> String {
+        let mut screen = String::new();
+        for _ in 0..n {
+            screen = self.keys(b"\x1b[B");
+        }
+        screen
+    }
+
+    /// End (the cursor to Continue — a change keeps it on the row changed),
+    /// then Enter.
+    fn cont(&mut self) -> String {
+        self.keys(b"\x1b[F");
+        self.keys(b"\r")
+    }
 }
 
 const BASIC_TOOLS: [&str; 9] = [
@@ -673,7 +688,7 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
         "the dialog reads the email status, the workflows and the schema: {cmds:?}"
     );
     h.answer_prepare("me_email_not_connected.json");
-    assert!(screen.contains("Schedule a task — 1/7 What"), "{screen}");
+    assert!(screen.contains("New automation — 1/7 What"), "{screen}");
     let screen = h.turn();
     for label in [
         "Workflow",
@@ -687,7 +702,7 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     // 2/7 When: Repeat, Daily, Weekly, Monthly, Once at…, the email option
     // disabled with the kit's notice; the line is the gateway's.
     let screen = h.keys(b"\r");
-    assert!(screen.contains("Schedule a task — 2/7 When"), "{screen}");
+    assert!(screen.contains("New automation — 2/7 When"), "{screen}");
     assert!(screen.contains("Checking the schedule…"), "{screen}");
     let screen = answer_preview(&mut h, "Runs every 24 hours (UTC), first run now.");
     for label in [
@@ -716,7 +731,7 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     );
     assert!(!screen.contains("your account's time zone"), "{screen}");
     // 3/7 Context: Growing (its token budget appears with the kit's help).
-    let screen = h.keys(b"\r");
+    let screen = h.cont();
     assert!(screen.contains("3/7 Context"), "{screen}");
     h.up(1);
     let screen = h.keys(b"\r");
@@ -728,12 +743,14 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     ] {
         assert!(screen.contains(label), "{label}:\n{screen}");
     }
-    // 4/7 Tools: the served default tool list is the first selection.
-    let screen = h.keys(b"\r");
+    // 4/7 Tools: every tool starts deselected (operator ruling 2026-10-09).
+    let screen = h.cont();
     assert!(screen.contains("4/7 Tools"), "{screen}");
     for label in [
         "[ ] Use workflow default tools",
-        "[x] read_file",
+        "Select all",
+        "Unselect all",
+        "No tools enabled",
         "(•) Run without asking",
         "( ) Ask me before each tool call (the run waits for you)",
         "Tools run without asking (you approve them now by creating this automation).",
@@ -756,9 +773,9 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
         "{screen}"
     );
     // 5/7 Workspaces.
-    let screen = h.keys(b"\r");
+    let screen = h.cont();
     assert!(
-        screen.contains("Schedule a task — 5/7 Workspaces"),
+        screen.contains("New automation — 5/7 Workspaces"),
         "{screen}"
     );
     assert!(screen.contains("Continue — Mailbox"), "{screen}");
@@ -775,7 +792,7 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     // 7/7 Title and limits.
     let screen = h.keys(b"\r");
     assert!(
-        screen.contains("Schedule a task — 7/7 Title and limits"),
+        screen.contains("New automation — 7/7 Title and limits"),
         "{screen}"
     );
     for label in [
@@ -807,8 +824,9 @@ fn schedule_creates_the_shared_definition_from_the_current_workflow() {
     assert_eq!(input["use_session_history"], json!(true));
     assert_eq!(input["use_context"], json!(false));
     assert_eq!(input["max_iterations"], json!(20), "a schema default");
-    assert_eq!(input["tools"], json!(BASIC_TOOLS));
-    assert_eq!(input["_runtime"]["allowed_tools"], json!(BASIC_TOOLS));
+    // Nothing selected: an empty selection disables tools (both fields).
+    assert_eq!(input["tools"], json!([]));
+    assert_eq!(input["_runtime"]["allowed_tools"], json!([]));
     assert!(input.get("workspace_root").is_none());
     assert_eq!(
         body["title"],
@@ -922,7 +940,7 @@ fn the_dialog_workspaces_and_limits_ride_the_create_body() {
         screen.contains("3 runs max"),
         "the preview reads the limit:\n{screen}"
     );
-    h.keys(b"\r"); // Create automation (the cursor is back on it)
+    h.cont(); // Create automation (End: the cursor stayed on the limit)
     let body = h.created();
     assert_eq!(
         body["trigger"]["config"],
@@ -966,17 +984,17 @@ fn the_email_trigger_and_the_mailbox_ride_the_create_body() {
     ] {
         assert!(screen.contains(label), "{label}:\n{screen}");
     }
-    // From these addresses: up from Continue past Attachments, Subject, To, Domains.
-    h.up(5);
+    // From these addresses: down from the email kind past Every, Max batch.
+    h.down(3);
     h.keys(b"\r");
     h.term.push_input(b"Boss@Example.test");
     h.turn();
     h.keys(b"\r");
-    h.up(1); // Attachments → only with attachments
+    h.down(4); // Attachments (the cursor stayed on From) → only with attachments
     let screen = h.keys(b"\r");
     assert!(screen.contains("only with attachments"), "{screen}");
     // 3/7 Context → 4/7 Tools: the untrusted-content hint shows.
-    h.keys(b"\r");
+    h.cont();
     let screen = h.keys(b"\r");
     assert!(screen.contains("4/7 Tools"), "{screen}");
     assert!(
@@ -1009,15 +1027,15 @@ fn the_email_trigger_and_the_mailbox_ride_the_create_body() {
     ] {
         assert!(screen.contains(label), "{label}:\n{screen}");
     }
-    h.up(1);
+    h.down(2);
     h.keys(b"\r"); // Me and these addresses
-    h.up(1);
+    h.down(1);
     h.keys(b"\r"); // the addresses
     h.term.push_input(b"team@example.test");
     h.turn();
     h.keys(b"\r");
     // 7/7: no limits for the email kind.
-    let screen = h.keys(b"\r");
+    let screen = h.cont();
     assert!(screen.contains("7/7 Title and limits"), "{screen}");
     assert!(!screen.contains("Stop after this many runs"), "{screen}");
     h.keys(b"\r");
@@ -1130,12 +1148,12 @@ fn the_workflow_picker_lists_the_executable_set_with_the_gateway_default_first()
             Ok(schema),
         )
     });
-    h.keys(b"\r"); // What → When
+    h.cont(); // What → When (the cursor stayed on Workflow)
     h.keys(b"\r"); // When → Context
     let screen = h.keys(b"\r"); // Context → Tools
     assert!(
-        screen.contains("[x] Use workflow default tools"),
-        "a picked workflow keeps its own tools:\n{screen}"
+        screen.contains("[ ] Use workflow default tools") && screen.contains("No tools enabled"),
+        "a picked workflow starts with no tool too:\n{screen}"
     );
     h.keys(b"\r"); // Tools → Workspaces
     h.keys(b"\r"); // Workspaces → Mailbox
@@ -1144,56 +1162,549 @@ fn the_workflow_picker_lists_the_executable_set_with_the_gateway_default_first()
     let body = h.created();
     assert_eq!(body["target"]["bundle_ref"], json!("react-agent@0.1.0"));
     assert_eq!(body["target"]["flow_id"], json!("react"));
-    assert!(body["target"]["input_data"].get("tools").is_none());
+    assert_eq!(body["target"]["input_data"]["tools"], json!([]));
     assert_eq!(
         body["target"]["input_data"]["prompt"],
         json!("check the build")
     );
 }
 
-#[test]
-fn the_tools_step_starts_from_the_conversations_choice() {
-    let mut h = harness();
-    let tool = |name: &str, toolset: &str| abstractcode::store::ToolInfo {
+// ---------------------------------------------------------------------------
+// Operator feedback 2026-10-09 (autofix): the Tools step starts with every
+// tool deselected, Select all / Unselect all, a tri-state box per category,
+// a scrolling list (wheel, page keys), a click toggles a line, Space keeps
+// the focus on the line toggled; the task is a multiline text; /automation.
+// ---------------------------------------------------------------------------
+
+fn tool(name: &str, toolset: &str) -> abstractcode::store::ToolInfo {
+    abstractcode::store::ToolInfo {
         name: name.into(),
         toolset: toolset.into(),
         description: format!("{name} tool"),
         ..Default::default()
-    };
-    h.store.tools.set(vec![
+    }
+}
+
+/// files: read_file, write_file · web: web_search, fetch_url · system:
+/// execute_command (disabled on this gateway).
+fn small_inventory() -> Vec<abstractcode::store::ToolInfo> {
+    let mut gated = tool("execute_command", "system");
+    gated.served_disabled = true;
+    vec![
         tool("read_file", "files"),
         tool("write_file", "files"),
         tool("web_search", "web"),
-    ]);
-    h.store.disabled_tools.set(vec!["write_file".into()]);
-    h.command("/schedule watch the disk");
+        tool("fetch_url", "web"),
+        gated,
+    ]
+}
+
+/// `/automation watch the disk` → What, When, Context → 4/7 Tools.
+fn open_tools_step(h: &mut Harness, tools: Vec<abstractcode::store::ToolInfo>) -> String {
+    h.store.tools.set(tools);
+    h.command("/automation watch the disk");
     h.answer_prepare("me_email_not_connected.json");
     h.keys(b"\r");
     h.keys(b"\r");
     let screen = h.keys(b"\r");
-    // The /tools rows: toolset headings, then each tool with its switch.
+    assert!(screen.contains("New automation — 4/7 Tools"), "{screen}");
+    screen
+}
+
+/// The line the cursor marker `▸` is on.
+fn focused_line(screen: &str) -> String {
+    screen
+        .lines()
+        .find(|l| l.contains('▸'))
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The screen line holding `needle`, as (row, column of the needle), 0-based.
+fn locate(screen: &str, needle: &str) -> (u16, u16) {
+    let (row, line) = screen
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains(needle))
+        .unwrap_or_else(|| panic!("{needle} not on screen:\n{screen}"));
+    let col = line[..line.find(needle).unwrap()].chars().count();
+    (row as u16, col as u16)
+}
+
+impl Harness {
+    /// A bare Esc (the 30 ms disambiguation deadline, then dispatch).
+    fn esc(&mut self) -> String {
+        self.term.push_input(&[0x1b]);
+        self.turn();
+        std::thread::sleep(std::time::Duration::from_millis(45));
+        self.turn();
+        self.turn()
+    }
+
+    /// SGR left click (press + release) at a 0-based cell.
+    fn click(&mut self, row: u16, col: u16) -> String {
+        self.term
+            .push_input(format!("\x1b[<0;{};{}M", col + 1, row + 1).as_bytes());
+        self.turn();
+        self.term
+            .push_input(format!("\x1b[<0;{};{}m", col + 1, row + 1).as_bytes());
+        self.turn();
+        self.turn()
+    }
+
+    /// SGR wheel at a 0-based cell (`up` = away from you).
+    fn wheel(&mut self, row: u16, col: u16, up: bool) -> String {
+        let b = if up { 64 } else { 65 };
+        self.term
+            .push_input(format!("\x1b[<{b};{};{}M", col + 1, row + 1).as_bytes());
+        self.turn();
+        self.turn()
+    }
+
+    fn click_on(&mut self, needle: &str) -> String {
+        let screen = self.turn();
+        let (row, col) = locate(&screen, needle);
+        self.click(row, col + 1)
+    }
+}
+
+/// Continue through Tools, Workspaces, Mailbox, then Create (each step's
+/// first visit puts the cursor on its Continue).
+fn finish_from_tools(h: &mut Harness) -> Value {
+    h.cont(); // Tools → Workspaces
+    h.keys(b"\r"); // Workspaces → Mailbox
+    h.keys(b"\r"); // Mailbox → Title and limits
+    h.keys(b"\r"); // Create automation
+    h.created()
+}
+
+#[test]
+fn the_tools_step_starts_with_every_tool_deselected() {
+    let mut h = harness();
+    // The conversation customised its tools: the automation still starts
+    // from none (operator ruling 2026-10-09).
+    h.store.disabled_tools.set(vec!["write_file".into()]);
+    let screen = open_tools_step(&mut h, small_inventory());
     for label in [
-        "files",
-        "[x] read_file  read_file tool",
+        "[ ] Use workflow default tools",
+        "Select all",
+        "Unselect all",
+        "[ ] files",
+        "[ ] read_file  read_file tool",
         "[ ] write_file",
-        "[x] web_search",
-        "web",
+        "[ ] web",
+        "[ ] web_search",
+        "[-] system",
+        "[-] execute_command — disabled on this gateway",
+        "No tools enabled",
     ] {
         assert!(screen.contains(label), "{label}:\n{screen}");
     }
-    // Uncheck web_search: up from Continue past consent? (note), Ask, Auto, hint (note).
-    h.up(3);
-    let screen = h.keys(b"\r");
-    assert!(screen.contains("[ ] web_search"), "{screen}");
-    for _ in 0..4 {
-        h.keys(b"\r");
-    }
-    let body = h.created();
-    assert_eq!(body["target"]["input_data"]["tools"], json!(["read_file"]));
+    assert!(!screen.contains("[x] "), "nothing selected:\n{screen}");
+    let body = finish_from_tools(&mut h);
+    assert_eq!(body["target"]["input_data"]["tools"], json!([]));
     assert_eq!(
         body["target"]["input_data"]["_runtime"]["allowed_tools"],
-        json!(["read_file"])
+        json!([])
     );
+}
+
+#[test]
+fn space_keeps_the_focus_on_the_line_toggled() {
+    let mut h = harness();
+    open_tools_step(&mut h, small_inventory());
+    // Items: Use workflow default (0), Select all (1), Unselect all (2),
+    // files (3), read_file (4), write_file (5), web (6), web_search (7),
+    // fetch_url (8), system (9), execute_command (10), Run without asking
+    // (11), Ask me (12), Continue (13).
+    h.keys(b"\x1b[H"); // Home
+    for (n, name) in [(4usize, "read_file"), (5, "write_file"), (7, "web_search")] {
+        h.keys(b"\x1b[H");
+        h.down(n);
+        assert!(focused_line(&h.turn()).contains(name), "{name}");
+        let screen = h.keys(b" ");
+        assert!(
+            screen.contains(&format!("[x] {name}")),
+            "Space toggles {name}:\n{screen}"
+        );
+        let line = focused_line(&screen);
+        assert!(
+            line.contains(name),
+            "the focus stays on line {n} ({name}), not on Continue: {line:?}\n{screen}"
+        );
+        // A second Space on the same line toggles the same tool back.
+        let screen = h.keys(b" ");
+        assert!(screen.contains(&format!("[ ] {name}")), "{screen}");
+        assert!(focused_line(&screen).contains(name), "{screen}");
+    }
+    // Enter toggles too, and keeps the focus.
+    h.keys(b"\x1b[H");
+    h.down(8);
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("[x] fetch_url"), "{screen}");
+    assert!(focused_line(&screen).contains("fetch_url"), "{screen}");
+    let body = finish_from_tools(&mut h);
+    assert_eq!(body["target"]["input_data"]["tools"], json!(["fetch_url"]));
+}
+
+#[test]
+fn select_all_and_unselect_all_change_every_grantable_tool() {
+    let mut h = harness();
+    open_tools_step(&mut h, small_inventory());
+    h.keys(b"\x1b[H");
+    h.down(1); // Select all
+    let screen = h.keys(b" ");
+    for label in [
+        "[x] files",
+        "[x] read_file",
+        "[x] write_file",
+        "[x] web",
+        "[x] web_search",
+        "[x] fetch_url",
+        "[-] system",
+        "[-] execute_command",
+    ] {
+        assert!(screen.contains(label), "{label}:\n{screen}");
+    }
+    assert!(focused_line(&screen).contains("Select all"), "{screen}");
+    h.down(1); // Unselect all
+    let screen = h.keys(b" ");
+    assert!(!screen.contains("[x] "), "{screen}");
+    assert!(screen.contains("No tools enabled"), "{screen}");
+    h.up(1);
+    h.keys(b" "); // Select all again
+    let body = finish_from_tools(&mut h);
+    let all = json!(["read_file", "write_file", "web_search", "fetch_url"]);
+    assert_eq!(body["target"]["input_data"]["tools"], all);
+    assert_eq!(
+        body["target"]["input_data"]["_runtime"]["allowed_tools"],
+        all
+    );
+}
+
+#[test]
+fn a_category_box_is_tri_state_and_toggles_its_tools() {
+    let mut h = harness();
+    open_tools_step(&mut h, small_inventory());
+    h.keys(b"\x1b[H");
+    h.down(4); // read_file
+    let screen = h.keys(b" ");
+    assert!(screen.contains("[~] files"), "some → [~]:\n{screen}");
+    h.up(1); // files
+    let screen = h.keys(b" ");
+    assert!(
+        screen.contains("[x] files")
+            && screen.contains("[x] read_file")
+            && screen.contains("[x] write_file"),
+        "some → all:\n{screen}"
+    );
+    assert!(
+        screen.contains("[ ] web"),
+        "other categories untouched:\n{screen}"
+    );
+    let screen = h.keys(b" ");
+    assert!(
+        screen.contains("[ ] files")
+            && screen.contains("[ ] read_file")
+            && screen.contains("[ ] write_file"),
+        "all → none:\n{screen}"
+    );
+    let screen = h.keys(b" ");
+    assert!(screen.contains("[x] files"), "none → all:\n{screen}");
+    // A category whose every tool is disabled here changes nothing.
+    h.down(6); // system
+    assert!(focused_line(&h.turn()).contains("system"));
+    let screen = h.keys(b" ");
+    assert!(screen.contains("[-] system"), "{screen}");
+    let body = finish_from_tools(&mut h);
+    assert_eq!(
+        body["target"]["input_data"]["tools"],
+        json!(["read_file", "write_file"])
+    );
+}
+
+/// The Tools step's action kinds a click test presses (meta-test below).
+const CLICKED_TOOLS_ACTIONS: [&str; 8] = [
+    "DefaultTools",
+    "SelectAll",
+    "UnselectAll",
+    "Category",
+    "Tool",
+    "Auto",
+    "Ask",
+    "Next",
+];
+
+#[test]
+fn every_offered_tools_action_has_a_click_test() {
+    use abstractcode::ui::schedule_view::{tools_lines, ToolsAct};
+    let (_, acts) = tools_lines(Some(&[]), "auto", &small_inventory(), false);
+    let mut kinds: Vec<&str> = acts
+        .iter()
+        .map(|a| match a {
+            ToolsAct::DefaultTools => "DefaultTools",
+            ToolsAct::SelectAll => "SelectAll",
+            ToolsAct::UnselectAll => "UnselectAll",
+            ToolsAct::Category(_) => "Category",
+            ToolsAct::Tool(_) => "Tool",
+            ToolsAct::Auto => "Auto",
+            ToolsAct::Ask => "Ask",
+            ToolsAct::Next => "Next",
+        })
+        .collect();
+    kinds.sort();
+    kinds.dedup();
+    let mut clicked = CLICKED_TOOLS_ACTIONS.to_vec();
+    clicked.sort();
+    assert_eq!(kinds, clicked, "an offered action without a click test");
+}
+
+#[test]
+fn a_click_on_a_tool_line_toggles_it() {
+    let mut h = harness();
+    open_tools_step(&mut h, small_inventory());
+    // "Use workflow default tools": on hides the list, off shows it empty.
+    let screen = h.click_on("[ ] Use workflow default tools");
+    assert!(
+        screen.contains("[x] Use workflow default tools"),
+        "{screen}"
+    );
+    assert!(!screen.contains("web_search"), "{screen}");
+    let screen = h.click_on("[x] Use workflow default tools");
+    assert!(screen.contains("No tools enabled"), "{screen}");
+    let (row, col) = locate(&screen, "[ ] web_search");
+    let screen = h.click(row, col + 6);
+    assert!(screen.contains("[x] web_search"), "{screen}");
+    assert!(
+        focused_line(&screen).contains("web_search"),
+        "the clicked line is the focused line:\n{screen}"
+    );
+    // A click on a category header toggles the category.
+    let screen = h.click_on("[~] web");
+    assert!(screen.contains("[x] fetch_url"), "{screen}");
+    // The buttons: Unselect all, then Select all.
+    let screen = h.click_on("Unselect all");
+    assert!(screen.contains("No tools enabled"), "{screen}");
+    let screen = h.click_on("Select all");
+    assert!(screen.contains("[x] read_file"), "{screen}");
+    // A click on a selected tool unselects it.
+    let screen = h.click_on("[x] write_file");
+    assert!(screen.contains("[ ] write_file"), "{screen}");
+    // The approval radios.
+    let screen = h.click_on("( ) Ask me before each tool call");
+    assert!(
+        screen.contains("(•) Ask me before each tool call"),
+        "{screen}"
+    );
+    let screen = h.click_on("( ) Run without asking");
+    assert!(screen.contains("(•) Run without asking"), "{screen}");
+    let screen = h.click_on("( ) Ask me before each tool call");
+    assert!(screen.contains("(•) Ask me"), "{screen}");
+    // A click on Continue continues.
+    let screen = h.click_on("Continue — Workspaces");
+    assert!(screen.contains("5/7 Workspaces"), "{screen}");
+    h.keys(b"\r"); // Workspaces → Mailbox
+    h.keys(b"\r"); // Mailbox → Title and limits
+    h.keys(b"\r"); // Create automation
+    let body = h.created();
+    assert_eq!(
+        body["target"]["input_data"]["tools"],
+        json!(["read_file", "web_search", "fetch_url"])
+    );
+    assert_eq!(body["policy"], json!({"tool_approval": "ask"}));
+}
+
+/// 60 tools in 6 toolsets: taller than the modal at 140x44.
+fn long_inventory() -> Vec<abstractcode::store::ToolInfo> {
+    (0..60)
+        .map(|i| tool(&format!("tool_{i:02}"), &format!("set_{}", i / 10)))
+        .collect()
+}
+
+#[test]
+fn the_wheel_and_the_page_keys_scroll_the_tool_list() {
+    let mut h = harness();
+    let screen = open_tools_step(&mut h, long_inventory());
+    // The cursor starts on Continue: the list shows its end.
+    assert!(screen.contains("tool_59"), "{screen}");
+    assert!(!screen.contains("tool_00"), "{screen}");
+    assert!(screen.contains("more"), "the overflow is said:\n{screen}");
+    let (row, col) = locate(&screen, "tool_55");
+    let mut screen = screen;
+    for _ in 0..30 {
+        screen = h.wheel(row, col, true);
+    }
+    assert!(
+        screen.contains("tool_00"),
+        "the wheel scrolls to the top:\n{screen}"
+    );
+    assert!(!screen.contains("tool_59"), "{screen}");
+    // A click after a wheel toggles the line under the pointer.
+    screen = h.click_on("[ ] tool_02");
+    assert!(screen.contains("[x] tool_02"), "{screen}");
+    for _ in 0..30 {
+        screen = h.wheel(row, col, false);
+    }
+    assert!(
+        screen.contains("tool_59"),
+        "the wheel scrolls back down:\n{screen}"
+    );
+    // Page keys move the cursor a page at a time, the window follows.
+    h.keys(b"\x1b[F"); // End: Continue
+    let mut screen = String::new();
+    for _ in 0..8 {
+        screen = h.keys(b"\x1b[5~"); // PgUp
+    }
+    assert!(
+        screen.contains("tool_00"),
+        "PgUp reaches the top:\n{screen}"
+    );
+    let before = focused_line(&screen);
+    let screen = h.keys(b"\x1b[6~"); // PgDn
+    assert_ne!(focused_line(&screen), before, "{screen}");
+    for _ in 0..8 {
+        h.keys(b"\x1b[6~");
+    }
+    let screen = h.turn();
+    assert!(
+        focused_line(&screen).contains("Continue — Workspaces"),
+        "{screen}"
+    );
+}
+
+#[test]
+fn use_workflow_default_tools_hides_the_list_and_sends_no_tools() {
+    let mut h = harness();
+    open_tools_step(&mut h, small_inventory());
+    h.keys(b"\x1b[H");
+    let screen = h.keys(b" ");
+    assert!(
+        screen.contains("[x] Use workflow default tools"),
+        "{screen}"
+    );
+    assert!(!screen.contains("Select all"), "{screen}");
+    assert!(!screen.contains("read_file"), "{screen}");
+    let body = finish_from_tools(&mut h);
+    assert!(body["target"]["input_data"].get("tools").is_none());
+}
+
+#[test]
+fn the_task_is_a_multiline_text_that_reaches_the_prompt() {
+    let mut h = harness();
+    h.command("/automation");
+    h.answer_prepare("me_email_not_connected.json");
+    h.up(1); // Task
+    let screen = h.keys(b"\r");
+    for label in [
+        "New automation — 1/7 What · Task",
+        "Continue — When",
+        "Enter / Ctrl+J newline",
+        "report the free memory of this computer",
+    ] {
+        assert!(screen.contains(label), "{label}:\n{screen}");
+    }
+    // Enter inserts a newline (it never leaves the field), Ctrl+J too.
+    h.keys(b"\x1b[F"); // End of the line
+    h.keys(b"\r");
+    h.term.push_input(b"in MB");
+    h.turn();
+    h.keys(b"\n"); // Ctrl+J
+    h.term.push_input(b"and swap");
+    let screen = h.turn();
+    let screen = if screen.contains("and swap") {
+        screen
+    } else {
+        h.turn()
+    };
+    assert!(
+        screen.contains("New automation — 1/7 What · Task"),
+        "Enter stayed in the editor:\n{screen}"
+    );
+    assert!(
+        screen.contains("in MB") && screen.contains("and swap"),
+        "{screen}"
+    );
+    // The visible Continue keeps it (a click presses it).
+    let screen = h.click_on("Continue — When");
+    assert!(screen.contains("1/7 What"), "{screen}");
+    assert!(
+        focused_line(&screen).contains("Task"),
+        "back on the Task row:\n{screen}"
+    );
+    for label in ["in MB", "and swap"] {
+        assert!(
+            screen.contains(label),
+            "the What step shows every line: {label}\n{screen}"
+        );
+    }
+    h.cont(); // What → When
+    for _ in 0..6 {
+        h.keys(b"\r"); // When, Context, Tools, Workspaces, Mailbox, Create
+    }
+    let body = h.created();
+    let task = "report the free memory of this computer\nin MB\nand swap";
+    assert_eq!(body["target"]["input_data"]["prompt"], json!(task));
+    assert_eq!(
+        body["title"],
+        json!("report the free memory of this computer"),
+        "the title defaults to the task's first line"
+    );
+}
+
+#[test]
+fn the_task_editor_continue_is_reachable_with_tab_and_esc_keeps_nothing() {
+    let mut h = harness();
+    h.command("/automation one line");
+    h.answer_prepare("me_email_not_connected.json");
+    h.up(1);
+    h.keys(b"\r");
+    h.keys(b"\x1b[F");
+    h.keys(b"\r");
+    h.term.push_input(b"two");
+    h.turn();
+    // Esc goes back without keeping.
+    let screen = h.esc();
+    assert!(!screen.contains("· Task"), "{screen}");
+    assert!(!screen.contains("two"), "{screen}");
+    // Tab reaches Continue, Enter presses it.
+    h.keys(b"\r"); // the cursor stayed on Task: the editor again
+    h.keys(b"\x1b[F");
+    h.keys(b"\r");
+    h.term.push_input(b"two");
+    h.turn();
+    h.keys(b"\t");
+    let screen = h.keys(b"\r");
+    assert!(!screen.contains("· Task"), "{screen}");
+    assert!(screen.contains("two"), "{screen}");
+    h.cont();
+    for _ in 0..6 {
+        h.keys(b"\r");
+    }
+    assert_eq!(
+        h.created()["target"]["input_data"]["prompt"],
+        json!("one line\ntwo")
+    );
+}
+
+#[test]
+fn select_all_keeps_the_gateways_order() {
+    let mut h = harness();
+    open_tools_step(
+        &mut h,
+        BASIC_TOOLS.iter().map(|n| tool(n, "core")).collect(),
+    );
+    h.keys(b"\x1b[H");
+    h.down(1);
+    h.keys(b" ");
+    let body = finish_from_tools(&mut h);
+    assert_eq!(body["target"]["input_data"]["tools"], json!(BASIC_TOOLS));
+}
+
+#[test]
+fn schedule_is_a_silent_alias_of_automation() {
+    let mut h = harness();
+    let screen = h.command("/schedule watch the disk");
+    assert!(screen.contains("New automation — 1/7 What"), "{screen}");
 }
 
 #[test]
@@ -1616,7 +2127,7 @@ fn schedule_daily_shows_the_gateways_words_and_writes_schedule_v2() {
         flat(&screen).contains(sentence),
         "the served sentence verbatim:\n{screen}"
     );
-    let screen = h.keys(b"\r"); // When: Continue
+    let screen = h.cont(); // When: Continue
     assert!(screen.contains("3/7 Context"), "{screen}");
     h.keys(b"\r"); // Context: Continue
     h.keys(b"\r"); // Tools: Continue
@@ -1645,13 +2156,14 @@ fn schedule_weekly_days_are_state_showing_toggles() {
         "{screen}"
     );
     // Selectable: six kinds, Mon..Sun (6..12), Time of day (13), Continue (14).
-    h.up(7); // Tue
+    // The cursor stays on Weekly (2) after the pick.
+    h.down(5); // Tue
     let screen = h.keys(b"\r"); // Tue on
     assert!(
         screen.contains("[x] Mon") && screen.contains("[x] Tue"),
         "{screen}"
     );
-    h.up(8); // Mon (the cursor is back on Continue)
+    h.up(1); // Mon (the cursor stayed on Tue)
     let screen = h.keys(b"\r"); // Mon off
     assert!(
         screen.contains("[ ] Mon") && screen.contains("[x] Tue"),
@@ -1662,18 +2174,18 @@ fn schedule_weekly_days_are_state_showing_toggles() {
         json!({"kind": "weekly", "days": ["tue"], "at": "08:00"})
     );
     // Tue off too: an empty day set is refused on Continue, never refilled.
-    h.up(7);
+    h.down(1);
     let screen = h.keys(b"\r");
     assert!(screen.contains("[ ] Tue"), "{screen}");
     assert!(screen.contains("Incomplete schedule."), "{screen}");
-    let screen = h.keys(b"\r"); // Continue
+    let screen = h.cont(); // Continue
     assert!(screen.contains("Pick at least one day."), "{screen}");
     assert!(!screen.contains("3/7 Context"), "{screen}");
     // Weekly → Monthly → Weekly keeps the picked (empty) set and the time.
     h.up(14 - KIND_MONTHLY);
     let screen = h.keys(b"\r");
     assert!(screen.contains("(•) Monthly"), "{screen}");
-    h.up(8 - KIND_WEEKLY);
+    h.up(KIND_MONTHLY - KIND_WEEKLY);
     let screen = h.keys(b"\r");
     assert!(
         screen.contains("[ ] Mon") && screen.contains("[ ] Tue"),
@@ -1687,8 +2199,9 @@ fn schedule_monthly_last_day_and_once_send_their_rules() {
     let screen = pick_when(&mut h, KIND_MONTHLY);
     assert!(screen.contains("(•) Monthly"), "{screen}");
     assert!(screen.contains("on day"), "{screen}");
-    // Selectable: six kinds, on day (6), Time of day (7), Continue (8).
-    h.up(2);
+    // Selectable: six kinds, on day (6), Time of day (7), Continue (8);
+    // the cursor stayed on Monthly (3).
+    h.down(3);
     h.keys(b"\r"); // edit "on day" (its value "1")
     h.keys(b"\x1b[F\x7f");
     h.term.push_input(b"last");
@@ -1704,8 +2217,9 @@ fn schedule_monthly_last_day_and_once_send_their_rules() {
     let screen = pick_when(&mut h, KIND_ONCE);
     assert!(screen.contains("(•) Once at…"), "{screen}");
     assert!(screen.contains("Run once at"), "{screen}");
-    // Selectable: six kinds, Run once at (6), Continue (7).
-    h.up(1);
+    // Selectable: six kinds, Run once at (6), Continue (7); the cursor
+    // stayed on Once at… (4).
+    h.down(2);
     h.keys(b"\r");
     h.term.push_input(b"2026-10-09 10:00");
     h.turn();
@@ -1727,7 +2241,7 @@ fn a_refused_rule_shows_the_gateways_sentence_and_does_not_continue() {
         .update(|v| v.apply_preview(&trigger, auto::PreviewState::Failed(refusal.into())));
     let screen = h.turn();
     assert!(flat(&screen).contains(refusal), "{screen}");
-    let screen = h.keys(b"\r");
+    let screen = h.cont();
     assert!(!screen.contains("3/7 Context"), "{screen}");
     assert!(flat(&screen).contains(refusal), "{screen}");
 }

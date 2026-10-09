@@ -649,9 +649,9 @@ fn r16_calendar_when_and_served_cards_fit_every_width() {
                 screen = h.keys(b"\x1b[A");
             }
             assert!(screen.contains("( ) Weekly"), "{screen}");
-            h.keys(b"\r"); // Weekly (Mon picked)
-            for _ in 0..7 {
-                h.keys(b"\x1b[A");
+            h.keys(b"\r"); // Weekly (Mon picked; the cursor stays on Weekly)
+            for _ in 0..5 {
+                h.keys(b"\x1b[B");
             }
             h.keys(b"\r"); // + Tue
             let screen = h.shot("r16-weekly-days");
@@ -686,6 +686,9 @@ fn r16_calendar_when_and_served_cards_fit_every_width() {
             h.store
                 .automations
                 .update(|v| v.apply_preview(&trigger, auto::PreviewState::Ready(p)));
+            // End: the cursor back on Continue (it stayed on Tue), the
+            // preview lines above it in view.
+            h.keys(b"\x1b[F");
             let screen = h.shot("r16-when-served-preview");
             assert!(
                 flat(&screen).contains("in Europe/Paris (your account's time zone)"),
