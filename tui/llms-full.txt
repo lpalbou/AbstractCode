@@ -2447,10 +2447,11 @@ served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
 
 ### Changed
 
+- **Behaviour change:** `/automation` now creates an automation — it used to
+  open the list, which is `/automations [id]` (or `/autos`); `/schedule` is
+  kept as an alias for this release.
 - **`/automation [task]`** opens **New automation** (the Code web's name for
-  it; the dialog's steps read `New automation — n/7 …`). `/schedule` is its
-  old name, kept as a silent alias for this release; `/automation` no
-  longer opens the list (`/automations [id]` and `/autos` do).
+  it; the dialog's steps read `New automation — n/7 …`).
 - New automation's **Task** (1/7) is a multiline editor — the composer's
   widget: it wraps and scrolls, `Enter` and `Ctrl+J` insert a newline,
   `Home`/`End` move along the line, the visible **Continue — When** button
