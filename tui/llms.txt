@@ -12,7 +12,7 @@
 > the agent mid-run, queues follow-up prompts, attaches files to prompts
 > (`/attach`, a file browser, or drag & drop), browses and previews the
 > run's workspace on the gateway host (`/files`), creates and manages
-> gateway automations (`/schedule` with Repeat / Daily / Weekly / Monthly /
+> gateway automations (`/automation` with Repeat / Daily / Weekly / Monthly /
 > Once at, worded and scheduled by the gateway, or When an email arrives;
 > `/automations`: cards with the Active switch, Run now / Stop / Edit /
 > Archive, Archived · N with Unarchive; "Automations · N waiting" in the
@@ -43,7 +43,7 @@
   resolution, module map, testing model, known limits.
 - [Reference](docs/api.md): Every CLI option and env var (including
   `--workflow default`, `--stream`, `--mtp`), slash commands
-  (including `/settings`, `/activity`, `/archive`, `/sessions`, `/voice`, `/speak`, `/dictate`, `/workflow`, `/files`, `/automations`, `/schedule`, `/stream`, `/about`, `/model`, `/mtp`,
+  (including `/settings`, `/activity`, `/archive`, `/sessions`, `/voice`, `/speak`, `/dictate`, `/workflow`, `/files`, `/automations`, `/automation`, `/stream`, `/about`, `/model`, `/mtp`,
   `/workspace send`, `@name`, `/entities`, `/task`, `/end`, `/queue`, `/goal`,
   `/permissions`, `/workspace`, `/attach`, `/export`, `/context`, `/gpu`,
   `/resources`, `/redraw`), the Workspaces chooser (`/workspace`: this

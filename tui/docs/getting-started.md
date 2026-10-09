@@ -262,13 +262,14 @@ for you (an approval, a question, a result you have not seen), the status
 line says **Automations · N waiting**; `Enter` on an empty prompt opens it.
 `/workspace` opens this conversation's workspaces: **Use my default**, or
 your own rows with Read-only / Read & write / Refused, stored on the
-conversation by the gateway. `/schedule` walks through the Code web's seven
-sections: **What** (workflow and task), **When** (**Repeat** every N
+conversation by the gateway. `/automation` (**New automation**) walks
+through the Code web's seven sections: **What** (workflow and task), **When** (**Repeat** every N
 minutes/hours/days in UTC, **Daily**, **Weekly**, **Monthly**, **Once at…** —
 the last four on your account's time zone, with the gateway's own sentence and
 first run — or **When an email arrives** when your mailbox is connected),
-**Context**, **Tools**, **Workspaces**, **Mailbox** and **Title and limits**.
-A calendar automation's card reads the gateway's words, e.g.
+**Context**, **Tools** (every tool starts deselected: **Select all**, a box
+per toolset, or a click on each tool), **Workspaces**, **Mailbox** and
+**Title and limits**. A calendar automation's card reads the gateway's words, e.g.
 `↻ Every day at 08:00 (Europe/Paris)`. Details in
 [api.md](api.md#settings-panels-settings) and
 [api.md](api.md#workspaces-workspace). Archiving and **Archived · N**

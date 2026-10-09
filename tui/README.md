@@ -97,9 +97,10 @@ Status: **0.9.1**, pre-alpha. Release history is in
   with **Run now**, **Stop**, **Edit**, **Archive** and an **Archived · N**
   line with **Unarchive**; open one to read its runs, approve its tool calls,
   browse its folder, discuss a run as a new chat in place, or hear a run's
-  reply (`Ctrl+P`). `/schedule [task]` creates one with the Code web's
+  reply (`Ctrl+P`). `/automation [task]` (**New automation**; `/schedule`
+  still works in 0.9.2) creates one with the Code web's
   dialog: the workflow (the conversation's, or any workflow you may run),
-  the task, when (Repeat in UTC, Daily, Weekly, Monthly or Once at — the
+  the task (a multiline editor), when (Repeat in UTC, Daily, Weekly, Monthly or Once at — the
   calendar rules on your account's time zone and worded by the gateway —
   or **When an email arrives**), context, tools, workspaces, **Mailbox**
   (**Email result**) and title and limits — with this conversation's model,

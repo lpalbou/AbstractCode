@@ -71,6 +71,27 @@ served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
 
 ### Changed
 
+- **`/automation [task]`** opens **New automation** (the Code web's name for
+  it; the dialog's steps read `New automation — n/7 …`). `/schedule` is its
+  old name, kept as a silent alias for this release; `/automation` no
+  longer opens the list (`/automations [id]` and `/autos` do).
+- New automation's **Task** (1/7) is a multiline editor — the composer's
+  widget: it wraps and scrolls, `Enter` and `Ctrl+J` insert a newline,
+  `Home`/`End` move along the line, the visible **Continue — When** button
+  (`Tab`, or a click) keeps the text, `Esc` goes back without keeping it.
+  Every line reaches the run's prompt; the title still defaults to the
+  first line.
+- New automation's **Tools** (4/7) starts with **every tool deselected** and
+  **Use workflow default tools** off (before: the conversation's tools, or
+  the workflow's own for a picked workflow). **Select all** / **Unselect
+  all** at the top; each toolset's header has a box that shows its state
+  (`[x]` all, `[ ]` none, `[~]` some, `[-]` nothing grantable here) and
+  turns its tools on (none or some were) or off (all were). The list
+  scrolls with the mouse wheel and `PgUp`/`PgDn` (`Home`/`End` too); a
+  click on a line toggles it (or presses the button / Continue).
+- In every New automation step a change keeps the cursor on the row you
+  changed (`End` goes back to Continue); a step still opens with the
+  cursor on Continue.
 - Every `/schedule` kind is sent as `schedule@2` (`{kind: "every", every}`,
   `{kind: "once", at}`, `{kind: "daily"|"weekly"|"monthly", …}`); the time
   zone is left to the gateway (your account's).

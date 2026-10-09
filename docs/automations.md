@@ -5,7 +5,7 @@ memory of this computer every 2 minutes", "summarise the open issues every 8
 hours". AbstractGateway runs it, keeps every run as a readable conversation,
 and asks for you only when something needs you. You can create, manage and
 answer automations from both AbstractCode clients — the terminal (`/automations`,
-`/schedule`) and the browser (the **Automations** section of the sidebar) — and
+`/automation`) and the browser (the **Automations** section of the sidebar) — and
 from the Assistant and the Observer: they all show the same automations, from
 the same gateway.
 
@@ -64,16 +64,18 @@ conversation workflow. Choosing a different automation workflow leaves the conve
 | Tools | **Run without asking** — tools run without asking (you approve them now by creating this automation). **Ask me before each tool call** — every tool call waits for your approval. Questions a workflow asks always wait for you. |
 | Email | **When an email arrives** (a When choice), **Email result** and **Recipients** — see [Email automations](#email-automations). |
 
-**Terminal.** `/schedule [task]` shows the browser dialog's sections as seven
-steps, with the same words: **What** (the workflow — the conversation's, or
-any workflow you may run with **Gateway default** first — and the task:
-default your last prompt, or the text after `/schedule`), **When** (Repeat,
+**Terminal.** `/automation [task]` (**New automation**; `/schedule` is the old
+name, still accepted in terminal 0.9.2) shows the browser dialog's sections as
+seven steps, with the same words: **What** (the workflow — the conversation's, or
+any workflow you may run with **Gateway default** first — and the task, a
+multiline text: default your last prompt, or the text after `/automation`), **When** (Repeat,
 Daily, Weekly with `[x] Mon` day toggles, Monthly, Once at… — the gateway's
 sentence under it, as in the browser — or **When an email arrives**),
-**Context**, **Tools** (the `/tools` rows, starting from the conversation's
-tools), **Workspaces**, **Mailbox** and **Title and limits**. The cursor
-starts on **Continue**, so Enter, Enter, … creates it with the defaults and
-opens it. The run input is built as in the browser (the workflow's input
+**Context**, **Tools** (the `/tools` rows with **Select all** / **Unselect all**
+and a state box per toolset; in the terminal every tool starts deselected —
+the browser starts from the conversation's tools), **Workspaces**, **Mailbox** and **Title and limits**. Each step
+opens with the cursor on **Continue**, so Enter, Enter, … creates it with the
+defaults (no tools) and opens it. The run input is built as in the browser (the workflow's input
 defaults plus the conversation's model, tools and skills, checked against the
 workflow's inputs before anything is sent).
 
@@ -189,7 +191,7 @@ pane beside the runs lists and previews its files.
 ## Related
 
 - [Getting started](getting-started.md) — connecting a client to a gateway.
-- [Terminal reference](../tui/docs/api.md) — `/automations`, `/schedule` and
+- [Terminal reference](../tui/docs/api.md) — `/automations`, `/automation` and
   their keys.
 - [Browser client](web.md) — the sidebar and the conversation view.
 

@@ -83,7 +83,7 @@ for credentials, remote gateways, and first-run configuration.
   with the result emailed to you), then switch it off with its
   **Active** switch, run it now, edit it, archive it, answer its approvals,
   browse its folder, and discuss any run as a new conversation (the
-  **Automations** sidebar section, `/automations`, `/schedule`).
+  **Automations** sidebar section, `/automations`, `/automation`).
 
 ## Documentation
 

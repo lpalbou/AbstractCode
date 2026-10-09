@@ -79,7 +79,7 @@ preview of each file.
 
 ## Can AbstractCode run something on a schedule?
 
-Yes, through gateway automations. In the terminal, `/schedule [task]` creates
+Yes, through gateway automations. In the terminal, `/automation [task]` creates
 one from the current workflow and `/automations` manages them; in the browser,
 use the **Automations** section of the sidebar. The gateway runs them whether
 or not a client is open, and every client (Assistant, Observer, AbstractCode)
