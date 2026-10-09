@@ -1865,6 +1865,9 @@ pub(crate) enum Mark {
     On,
     Off,
     Unavailable,
+    /// A change sent and not answered yet (`[…]`): input for it is ignored
+    /// until the answer, then the row shows the result.
+    Pending,
     /// A one-of-many radio (kept for radio rows; the workspace modal that
     /// used it was replaced by the kit chooser, R14.4).
     #[allow(dead_code)]
@@ -1887,6 +1890,7 @@ impl Mark {
             Mark::On => "[x] ",
             Mark::Off => "[ ] ",
             Mark::Unavailable => "[-] ",
+            Mark::Pending => "[…] ",
             Mark::Chosen => "(•) ",
             Mark::NotChosen => "( ) ",
         }

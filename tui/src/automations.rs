@@ -1342,6 +1342,93 @@ pub fn resume_command(command_id: &str, w: &Wait, payload: Value) -> Value {
 /// rows keep reading as before.
 pub const SCHEDULE_VERSION: u64 = 2;
 
+/// The one sentence shown IN PLACE of a round-16 feature when the connected
+/// gateway does not serve it (its route answered 404/405: AbstractGateway
+/// 0.13.x). Shown once where the feature would be — never the route's raw
+/// error, never repeated as a toast.
+pub const NEEDS_NEWER_GATEWAY: &str = "Not available on this gateway (needs AbstractGateway 0.14).";
+
+/// The mark on the calendar kinds (Daily / Weekly / Monthly) on such a gateway.
+pub const NEEDS_014_MARK: &str = "needs 0.14";
+
+/// Once at… on such a gateway: `schedule@1` reads the time as UTC.
+pub const ONCE_UTC_LEGACY: &str =
+    "This gateway reads this time as UTC (AbstractGateway 0.14 uses your account's time zone).";
+
+/// Whether the gateway serves the round-16 schedule API (`POST
+/// /automations/schedule-preview` and `schedule@2` triggers; they shipped
+/// together in AbstractGateway 0.14). Probed once per session: the first
+/// preview call answers it, and nothing is asked again once `Missing`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScheduleApi {
+    #[default]
+    Unknown,
+    Served,
+    Missing,
+}
+
+/// A refusal that means "this gateway has no such route" (404 Not Found or
+/// 405 Method Not Allowed — what 0.13.x answers for a round-16 route), as
+/// opposed to the route refusing the request.
+pub fn is_missing_route(e: &ApiError) -> bool {
+    matches!(e.status, Some(404 | 405))
+}
+
+/// The `schedule@1` form of a `schedule@2` trigger, for a gateway without
+/// the round-16 schedule API (`ScheduleApi::Missing`): Repeat keeps its
+/// interval and limits (UTC, as `schedule@1` always was); Once at… becomes
+/// its `start_at`, read as UTC; a calendar rule (Daily / Weekly / Monthly)
+/// has no `schedule@1` form → [`NEEDS_NEWER_GATEWAY`]. Any other trigger
+/// (email, an existing `schedule@1`) is returned unchanged.
+pub fn legacy_trigger(trigger: &Value) -> Result<Value, String> {
+    let is_v2 = trigger.get("source_id").and_then(Value::as_str) == Some("schedule")
+        && trigger.get("source_version").and_then(Value::as_u64) == Some(SCHEDULE_VERSION);
+    if !is_v2 {
+        return Ok(trigger.clone());
+    }
+    let config = trigger
+        .get("config")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut out = Map::new();
+    match config.get("kind").and_then(Value::as_str) {
+        Some("every") => {
+            for key in ["every", "start_at", "count", "until"] {
+                if let Some(v) = config.get(key).filter(|v| !v.is_null()) {
+                    out.insert(key.into(), v.clone());
+                }
+            }
+        }
+        Some("once") => {
+            let at = config
+                .get("at")
+                .and_then(Value::as_str)
+                .and_then(utc_from_input)
+                .ok_or_else(|| schedule_text("error_once").to_string())?;
+            out.insert("start_at".into(), json!(at));
+        }
+        _ => return Err(NEEDS_NEWER_GATEWAY.into()),
+    }
+    Ok(json!({"source_id": "schedule", "source_version": 1, "config": out}))
+}
+
+/// A create body for a gateway without the round-16 schedule API: its
+/// trigger in the `schedule@1` form ([`legacy_trigger`]), or the sentence.
+pub fn legacy_create_body(body: &Value) -> Result<Value, String> {
+    let mut out = body.clone();
+    if let Some(t) = body.get("trigger") {
+        out["trigger"] = legacy_trigger(t)?;
+    }
+    Ok(out)
+}
+
+/// Whether a trigger needs the round-16 schedule API (`schedule@2`).
+pub fn needs_schedule_api(trigger: &Value) -> bool {
+    trigger.get("source_id").and_then(Value::as_str) == Some("schedule")
+        && trigger.get("source_version").and_then(Value::as_u64) == Some(SCHEDULE_VERSION)
+}
+
 /// The weekdays of a weekly rule, Monday first (the wire's order).
 pub const CALENDAR_DAYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -1889,6 +1976,10 @@ pub enum PreviewState {
     Loading,
     Ready(SchedulePreview),
     Failed(String),
+    /// The gateway has no schedule-preview route (AbstractGateway 0.13.x):
+    /// the line is [`NEEDS_NEWER_GATEWAY`], never the route's error, and
+    /// it does not stop Continue.
+    Unavailable,
 }
 
 /// The served lines of a preview: the time-zone line (when ready and
@@ -1902,6 +1993,7 @@ pub fn preview_lines(state: &PreviewState, with_zone: bool) -> Vec<String> {
         }
         PreviewState::Ready(p) => vec![p.first_run_sentence.clone()],
         PreviewState::Failed(e) => vec![e.clone()],
+        PreviewState::Unavailable => vec![NEEDS_NEWER_GATEWAY.to_string()],
     }
 }
 
@@ -2481,6 +2573,10 @@ pub fn parse_api_error(status: u16, body: &str) -> ApiError {
 
 /// One visible sentence per error code, plus the server's own message.
 pub fn api_error_text(e: &ApiError) -> String {
+    // A round-16 feature this gateway lacks: the one sentence, alone.
+    if e.message == NEEDS_NEWER_GATEWAY || (is_missing_route(e) && e.code == "invalid_request") {
+        return NEEDS_NEWER_GATEWAY.to_string();
+    }
     let head = match e.code.as_str() {
         "unauthorized" => "Sign in to the gateway to manage automations.",
         "forbidden" => "You are not allowed to do this with automations.",
@@ -2598,6 +2694,133 @@ pub struct View {
     /// Per automation id: the calendar rule picked in the Edit panel, kept
     /// across kind switches (each switch is saved as its own revision).
     pub calendar_rules: Vec<(String, CalendarRuleState)>,
+    /// Whether this gateway serves the round-16 schedule API (probed once
+    /// per session by the first preview; see [`ScheduleApi`]).
+    pub schedule_api: ScheduleApi,
+    /// The action in flight on one automation (space Active, g Run now,
+    /// x Stop, a Archive, u Unarchive): its row shows the pending mark until
+    /// the gateway's state shows it done, or it refuses.
+    pub pending: Option<Pending>,
+}
+
+/// An action sent for one automation and not yet seen done. The gateway
+/// ACCEPTS a command when it is queued and its controller applies it
+/// moments later, so "accepted" is not "done": the row keeps its pending
+/// mark until a re-read shows the new state (or the last follow-up read).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pending {
+    pub id: String,
+    pub control: Control,
+    /// The summary's state when the action was sent.
+    pub status: String,
+    pub occurrences: u64,
+    pub current_run: Option<String>,
+    /// The gateway's notice once it accepted the command (`None` = no answer yet).
+    pub accepted: Option<String>,
+}
+
+impl Pending {
+    pub fn of(s: &Summary, control: Control) -> Pending {
+        Pending {
+            id: s.id.clone(),
+            control,
+            status: s.status.clone(),
+            occurrences: s.occurrence_count,
+            current_run: s.current.as_ref().map(|c| c.run_id.clone()),
+            accepted: None,
+        }
+    }
+
+    /// Whether `s` — this automation as the gateway now lists it (`None` =
+    /// absent from the active list) — shows the action done.
+    pub fn done_by(&self, s: Option<&Summary>) -> bool {
+        match self.control {
+            Control::Pause => s.is_some_and(|s| s.status != "active"),
+            Control::Resume => s.is_some_and(|s| s.status != "paused"),
+            Control::Archive => s.is_none_or(|s| s.status == "archived"),
+            Control::Unarchive => s.is_some_and(|s| s.status != "archived"),
+            Control::RunNow => s.is_some_and(|s| {
+                s.occurrence_count > self.occurrences
+                    || s.current.as_ref().map(|c| &c.run_id) != self.current_run.as_ref()
+            }),
+            Control::StopCurrent => {
+                s.is_none_or(|s| s.current.as_ref().map(|c| &c.run_id) != self.current_run.as_ref())
+            }
+            Control::Revise | Control::Discuss => true,
+        }
+    }
+}
+
+impl View {
+    /// The control in flight on automation `id`, if any.
+    pub fn pending_on(&self, id: &str) -> Option<Control> {
+        self.pending
+            .as_ref()
+            .filter(|p| p.id == id)
+            .map(|p| p.control)
+    }
+
+    /// An action was sent for `s`: busy (input for the controls ignored)
+    /// with the pending mark on its row until the answer.
+    pub fn start_pending(&mut self, s: &Summary, control: Control) {
+        self.busy = true;
+        self.error.clear();
+        self.notice = control.busy_notice().to_string();
+        self.pending = Some(Pending::of(s, control));
+    }
+
+    /// The gateway accepted the command: still pending until a re-read
+    /// shows it done (or the follow-up reads end, [`View::finish_pending`]).
+    pub fn accept_pending(&mut self, notice: String) {
+        match self.pending.as_mut() {
+            Some(p) => p.accepted = Some(notice),
+            None => {
+                self.busy = false;
+                self.notice = notice;
+            }
+        }
+        self.resolve_pending();
+    }
+
+    /// The gateway refused (or could not be reached): no longer pending,
+    /// and its "Pausing…" goes (the refusal is the line now).
+    pub fn fail_pending(&mut self) {
+        if let Some(p) = self.pending.take() {
+            if self.notice == p.control.busy_notice() {
+                self.notice.clear();
+            }
+        }
+    }
+
+    /// The follow-up reads ended: an accepted action is reported as the
+    /// gateway worded it, even if its state has not shown the change yet.
+    pub fn finish_pending(&mut self) {
+        if let Some(notice) = self.pending.as_ref().and_then(|p| p.accepted.clone()) {
+            self.pending = None;
+            self.busy = false;
+            self.notice = notice;
+        }
+    }
+
+    /// Done once the newest list (active, then archived) shows it.
+    fn resolve_pending(&mut self) {
+        let Some(p) = self.pending.as_ref() else {
+            return;
+        };
+        let Some(notice) = p.accepted.clone() else {
+            return;
+        };
+        let find = |list: &Option<Result<Vec<Summary>, String>>| match list {
+            Some(Ok(items)) => items.iter().find(|s| s.id == p.id).cloned(),
+            _ => None,
+        };
+        let fresh = find(&self.list).or_else(|| find(&self.archived));
+        if p.done_by(fresh.as_ref()) {
+            self.pending = None;
+            self.busy = false;
+            self.notice = notice;
+        }
+    }
 }
 
 impl View {
@@ -2675,6 +2898,7 @@ impl View {
         }
         self.list = Some(Ok(items));
         self.loading = false;
+        self.resolve_pending();
     }
 
     /// The open automation's detail and FIRST occurrence page answered.
@@ -3116,8 +3340,14 @@ mod tests {
         .unwrap();
         let page = parse_list_page(&v).expect("a pre-round-16 row never fails the list");
         let s = &page.items[0];
-        assert_eq!(s.next_run_at.as_deref(), Some("2026-10-09T19:53:29.622724+00:00"));
-        assert_eq!(s.next_run_local.as_deref(), Some("2026-10-09T19:53:29.622724+00:00"));
+        assert_eq!(
+            s.next_run_at.as_deref(),
+            Some("2026-10-09T19:53:29.622724+00:00")
+        );
+        assert_eq!(
+            s.next_run_local.as_deref(),
+            Some("2026-10-09T19:53:29.622724+00:00")
+        );
         assert_eq!(s.time_zone, "UTC");
         assert_eq!(s.schedule_rule_text, "");
         assert_eq!(summary_cadence(s), "—");
@@ -3125,8 +3355,14 @@ mod tests {
         let now = unix_secs("2026-10-09T16:53:29+00:00").unwrap();
         assert_eq!(next_label(s, now), "2026-10-09 19:53 UTC (in 3 h)");
         assert_eq!(next_run_text(s, now).as_deref(), Some("next in 3 h"));
-        assert!(run_now_next_line(s).unwrap().contains("2026-10-09 19:53 UTC"));
-        assert!(timing_line(s, now).starts_with("— · last "), "{}", timing_line(s, now));
+        assert!(run_now_next_line(s)
+            .unwrap()
+            .contains("2026-10-09 19:53 UTC"));
+        assert!(
+            timing_line(s, now).starts_with("— · last "),
+            "{}",
+            timing_line(s, now)
+        );
         // A served field of the wrong type is as absent as a missing one.
         let mut row = v["items"][0].clone();
         row["time_zone"] = json!(5);
@@ -3139,7 +3375,10 @@ mod tests {
         let mut row = v["items"][0].clone();
         row.as_object_mut().unwrap().remove("next_fire_at");
         let s = parse_summary(&row).unwrap();
-        assert_eq!((s.next_run_at.clone(), s.time_zone.clone()), (None, String::new()));
+        assert_eq!(
+            (s.next_run_at.clone(), s.time_zone.clone()),
+            (None, String::new())
+        );
         assert_eq!(next_label(&s, now), "none scheduled");
         // A round-16 row keeps its served values (the fallback never overrides them).
         let mut row = v["items"][0].clone();
@@ -3148,7 +3387,10 @@ mod tests {
         row["next_run_local"] = json!("2026-10-09T21:53:29.622724+02:00");
         row["schedule_rule_text"] = json!("Every 24 hours (UTC)");
         let s = parse_summary(&row).unwrap();
-        assert_eq!(next_label(&s, now), "2026-10-09 21:53 Europe/Paris (in 3 h)");
+        assert_eq!(
+            next_label(&s, now),
+            "2026-10-09 21:53 Europe/Paris (in 3 h)"
+        );
         assert_eq!(summary_cadence(&s), "Every 24 hours (UTC)");
     }
 
@@ -3694,5 +3936,174 @@ mod tests {
         );
         let raw = parse_api_error(502, "<html>bad gateway</html>");
         assert_eq!(raw.code, "invalid_response");
+    }
+
+    // -- compatibility with AbstractGateway 0.13.x (no round-16 schedule API) --
+
+    #[test]
+    fn only_404_and_405_mean_the_route_is_missing() {
+        let e = |status: Option<u16>, code: &str| ApiError {
+            status,
+            code: code.into(),
+            message: "Method Not Allowed".into(),
+            field: None,
+        };
+        assert!(is_missing_route(&e(Some(405), "invalid_request")));
+        assert!(is_missing_route(&e(Some(404), "invalid_response")));
+        for (status, code) in [
+            (Some(422), "invalid_definition"),
+            (Some(400), "invalid_request"),
+            (None, "unreachable"),
+        ] {
+            assert!(!is_missing_route(&e(status, code)), "{status:?}");
+        }
+        // The operator's sentence ("…malformed. Method Not Allowed") is never shown:
+        // a route the gateway lacks reads as the one sentence.
+        assert_eq!(
+            api_error_text(&e(Some(405), "invalid_request")),
+            NEEDS_NEWER_GATEWAY
+        );
+        assert_eq!(
+            api_error_text(&parse_api_error(
+                405,
+                r#"{"detail": {"reason_code": "invalid_request", "message": "Method Not Allowed"}}"#
+            )),
+            NEEDS_NEWER_GATEWAY
+        );
+        assert!(!api_error_text(&e(Some(400), "invalid_request")).contains("0.14"));
+    }
+
+    #[test]
+    fn a_v2_trigger_has_a_v1_form_except_the_calendar_rules() {
+        let v2 =
+            |config: Value| json!({"source_id": "schedule", "source_version": 2, "config": config});
+        assert_eq!(
+            legacy_trigger(&v2(
+                json!({"kind": "every", "every": "8h", "start_at": "2026-10-11T07:00:00Z", "count": 5, "until": null})
+            )),
+            Ok(json!({"source_id": "schedule", "source_version": 1,
+                      "config": {"every": "8h", "start_at": "2026-10-11T07:00:00Z", "count": 5}}))
+        );
+        assert_eq!(
+            legacy_trigger(&v2(json!({"kind": "once", "at": "2026-10-11T07:30"}))),
+            Ok(
+                json!({"source_id": "schedule", "source_version": 1, "config": {"start_at": "2026-10-11T07:30:00Z"}})
+            )
+        );
+        for kind in ["daily", "weekly", "monthly"] {
+            assert_eq!(
+                legacy_trigger(&v2(
+                    json!({"kind": kind, "at": "08:00", "days": ["mon"], "day": "1"})
+                )),
+                Err(NEEDS_NEWER_GATEWAY.to_string()),
+                "{kind}"
+            );
+        }
+        // Anything else goes as it is.
+        let v1 = json!({"source_id": "schedule", "source_version": 1, "config": {"every": "1h"}});
+        assert_eq!(legacy_trigger(&v1), Ok(v1.clone()));
+        let email = json!({"source_id": "email.received", "source_version": 1, "config": {}});
+        assert_eq!(legacy_trigger(&email), Ok(email.clone()));
+        assert!(needs_schedule_api(&v2(
+            json!({"kind": "every", "every": "1h"})
+        )));
+        assert!(!needs_schedule_api(&v1) && !needs_schedule_api(&email));
+        let body = json!({"title": "t", "trigger": v2(json!({"kind": "every", "every": "24h"}))});
+        assert_eq!(
+            legacy_create_body(&body).unwrap()["trigger"]["config"],
+            json!({"every": "24h"})
+        );
+        assert_eq!(legacy_create_body(&body).unwrap()["title"], "t");
+    }
+
+    #[test]
+    fn an_unavailable_preview_is_one_sentence() {
+        for zone in [false, true] {
+            assert_eq!(
+                preview_lines(&PreviewState::Unavailable, zone),
+                vec![NEEDS_NEWER_GATEWAY.to_string()]
+            );
+        }
+    }
+
+    // -- the pending state of an action (operator 2026-10-09: "space needs a spinner") --
+
+    #[test]
+    fn an_action_stays_pending_until_the_gateways_state_shows_it() {
+        let active = summary("active", false, ALL);
+        let mut v = View {
+            list: Some(Ok(vec![active.clone()])),
+            ..View::default()
+        };
+        v.start_pending(&active, Control::Pause);
+        assert!(v.busy);
+        assert_eq!(v.pending_on("a1"), Some(Control::Pause));
+        assert_eq!(v.pending_on("other"), None);
+        assert_eq!(v.notice, "Pausing…");
+        // Accepted (queued): still pending, the controls still ignore input.
+        v.accept_pending("Automation paused.".into());
+        assert_eq!(v.pending_on("a1"), Some(Control::Pause));
+        assert!(v.busy);
+        assert_eq!(
+            control_state(&active, Control::Resume, v.busy),
+            Err("Working…".into())
+        );
+        // A re-read that still says active: still pending.
+        v.apply_list(vec![active.clone()]);
+        assert_eq!(v.pending_on("a1"), Some(Control::Pause));
+        // The re-read shows it paused: done, the result said.
+        v.apply_list(vec![summary("paused", false, ALL)]);
+        assert_eq!(v.pending, None);
+        assert!(!v.busy);
+        assert_eq!(v.notice, "Automation paused.");
+    }
+
+    #[test]
+    fn a_refused_action_is_not_pending_and_a_slow_state_ends_with_the_follow_ups() {
+        let active = summary("active", false, ALL);
+        let mut v = View::default();
+        v.start_pending(&active, Control::RunNow);
+        v.fail_pending();
+        assert_eq!(v.pending, None);
+        assert_eq!(v.notice, "", "no stale “Starting a run…” after a refusal");
+        // Accepted, but no re-read showed the run (it came and went): the
+        // follow-up reads end with the gateway's words.
+        v.start_pending(&active, Control::RunNow);
+        v.finish_pending();
+        assert!(v.pending.is_some(), "no answer yet: still pending");
+        v.accept_pending("Run requested.".into());
+        v.finish_pending();
+        assert_eq!(
+            (v.pending.clone(), v.busy, v.notice.as_str()),
+            (None, false, "Run requested.")
+        );
+    }
+
+    #[test]
+    fn each_control_knows_when_it_is_done() {
+        let s = |status: &str, current: bool, count: u64| {
+            let mut s = summary(status, current, ALL);
+            s.occurrence_count = count;
+            s
+        };
+        let p = |from: &Summary, c: Control| Pending::of(from, c);
+        let idle = s("active", false, 3);
+        assert!(p(&idle, Control::RunNow).done_by(Some(&s("active", true, 3))));
+        assert!(p(&idle, Control::RunNow).done_by(Some(&s("active", false, 4))));
+        assert!(!p(&idle, Control::RunNow).done_by(Some(&idle)));
+        let busy = s("active", true, 3);
+        assert!(p(&busy, Control::StopCurrent).done_by(Some(&s("active", false, 3))));
+        assert!(!p(&busy, Control::StopCurrent).done_by(Some(&busy)));
+        assert!(
+            p(&idle, Control::Archive).done_by(None),
+            "gone from the active list"
+        );
+        assert!(p(&idle, Control::Archive).done_by(Some(&s("archived", false, 3))));
+        let archived = s("archived", false, 3);
+        assert!(p(&archived, Control::Unarchive).done_by(Some(&s("paused", false, 3))));
+        assert!(!p(&archived, Control::Unarchive).done_by(None));
+        let paused = s("paused", false, 3);
+        assert!(p(&paused, Control::Resume).done_by(Some(&idle)));
+        assert!(!p(&paused, Control::Resume).done_by(Some(&paused)));
     }
 }

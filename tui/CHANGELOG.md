@@ -9,7 +9,9 @@ All notable changes to this project are documented here. The format follows
 Needs AbstractGateway with round-16 calendar schedules (`schedule@2`, the
 served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
 `schedule_rule_text` on every automation, `POST /automations/schedule-preview`)
-for calendar schedules; `/automations` also reads an older gateway (see Fixed).
+for calendar schedules; on an older gateway (AbstractGateway 0.13.x)
+`/automations` and **New automation** work with Repeat, Once at… and the
+email trigger, and the calendar kinds say they need 0.14 (see Fixed).
 
 ### Added
 
@@ -149,6 +151,39 @@ for calendar schedules; `/automations` also reads an older gateway (see Fixed).
 
 - The release build no longer shows the engine's startup notices as toasts
   ("engine: caps: truecolor" at every launch); they remain in debug builds.
+
+- **New automation** works end to end on the released AbstractGateway
+  0.13.1 again: its When step said "The gateway rejected the request as
+  malformed. Method Not Allowed" (twice, once more on **Continue**, which it
+  refused) because 0.13.1 has no `POST /automations/schedule-preview`, and
+  Create sent a `schedule@2` trigger 0.13.1 refuses. The round-16 schedule
+  API is probed once per session (the first preview: a 404/405 means the
+  gateway lacks it; nothing is asked again). On such a gateway the line under
+  When — where the next run would be — is one sentence, "Not available on
+  this gateway (needs AbstractGateway 0.14).", never the route's error;
+  **Repeat**, **Once at…** (read as UTC there, said under it) and the email
+  trigger keep working and **Continue** always works; **Daily**, **Weekly**
+  and **Monthly** are shown as `(-) Daily · needs 0.14` and choosing one is
+  refused with the same sentence (once, never twice). Create sends Repeat and
+  Once as `schedule@1` (Once's time as `start_at`, UTC); a create made before
+  the probe answered probes first. A missing route anywhere in the
+  automations screens reads as that sentence. The account default workflow
+  also treats a 405 like a 404 (an older gateway: the panel says so once).
+  Every route the terminal calls is listed against 0.13.1 in
+  `docs/api.md` (only `schedule-preview` is round-16-only).
+- An automation action no longer looks like it did nothing (operator
+  2026-10-09: "space to activate/deactivate needs a spinner, it's not
+  instantaneous"). `space` Active, `g` Run now, `x` Stop, `a` Archive and
+  `u` Unarchive mark their row at once — the switch reads `[…] Active` with
+  "Pausing…" / "Activating…", the other actions their own words ("Starting a
+  run…", "Stopping…", "Archiving…", "Unarchiving…") — and the controls ignore
+  input until the answer. The gateway ACCEPTS a command before its
+  controller applies it, so the row stays pending until a re-read shows the
+  new state (or the last follow-up read, about 4 s), then shows the result
+  ("Automation paused.", "Run requested.", …); a refusal ends it with the
+  gateway's sentence. A revision save in an automation's Edit panel marks
+  the row being saved with `…` next to "Saving…", ignores further changes
+  until the gateway answers, then shows "Saved as revision N" (or why not).
 
 
 ## [0.9.1] - 2026-10-08

@@ -32,6 +32,9 @@ Requires AbstractGateway with `schedule@2`, the served schedule fields and `POST
 ### Fixed
 
 - tui + web: the automations list works again with a gateway that does not serve the round-16 schedule fields (AbstractGateway 0.13.x serves only `next_fire_at`): the terminal said "The automations could not be read: automation summary: `time_zone` is missing or not a string" and showed no automation. `next_run_at`, `next_run_local`, `time_zone`, `schedule_text` and `schedule_rule_text` are optional on read — a missing or non-text one never fails the list: the schedule reads "—" and the next run is the gateway's `next_fire_at`, shown in UTC (e.g. "2026-10-10 19:53 UTC"). A served value is always shown as served.
+- tui: **New automation** works end to end on the released AbstractGateway 0.13.1 again (it showed "The gateway rejected the request as malformed. Method Not Allowed" twice and refused **Continue**): the round-16 schedule API is probed once per session; without it the When line reads "Not available on this gateway (needs AbstractGateway 0.14).", Daily/Weekly/Monthly are marked `needs 0.14` and refused with that sentence, Repeat and Once at… are created as `schedule@1`, and Continue always works — see [tui/CHANGELOG.md](tui/CHANGELOG.md).
+- tui: automation actions (`space` Active, `g` Run now, `x` Stop, `a` Archive, `u` Unarchive) and revision saves show a pending state on their row (`[…] Active` · "Pausing…", `…` · "Saving…") until the gateway's state shows the change, then the result; input for them is ignored meanwhile.
+
 
 ## [terminal 0.9.1 / web 0.11.1] - 2026-10-08
 

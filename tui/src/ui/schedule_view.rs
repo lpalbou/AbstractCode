@@ -197,6 +197,11 @@ fn usable(store: Store) -> bool {
     EmailStatus::usable(email_status(store).as_ref())
 }
 
+/// What this session knows of the gateway's round-16 schedule API.
+fn schedule_api(store: Store) -> auto::ScheduleApi {
+    store.automations.with_untracked(|v| v.schedule_api)
+}
+
 /// The last task typed in this conversation (the default task to schedule).
 fn last_prompt(store: Store) -> String {
     store.fold.with_untracked(|f| {
@@ -808,6 +813,14 @@ pub fn ask_preview(store: Store, ctx: &UiCtx, trigger: &Value) {
     if asked {
         return;
     }
+    // The gateway has no preview route (probed once this session): the
+    // sentence in place, nothing sent again.
+    if schedule_api(store) == auto::ScheduleApi::Missing {
+        store
+            .automations
+            .update(|v| v.preview = Some((key, auto::PreviewState::Unavailable)));
+        return;
+    }
     store
         .automations
         .update(|v| v.preview = Some((key, auto::PreviewState::Loading)));
@@ -874,7 +887,9 @@ pub fn when_cards(
     status: Option<&EmailStatus>,
     served: Option<&auto::PreviewState>,
     errors: &[String],
+    api: auto::ScheduleApi,
 ) -> (Vec<Card>, Vec<WhenAct>) {
+    let legacy = api == auto::ScheduleApi::Missing;
     let usable = EmailStatus::usable(status);
     let mut cards = vec![Card::heading(auto::schedule_text("legend"))];
     let mut acts = Vec::new();
@@ -907,7 +922,16 @@ pub fn when_cards(
         (kind_once, auto::schedule_text("kind_once"), WhenAct::Once),
     ];
     for (on, label, act) in kinds {
-        cards.push(radio(on, label));
+        let calendar = matches!(act, WhenAct::Daily | WhenAct::Weekly | WhenAct::Monthly);
+        if legacy && calendar {
+            // Shown, marked, not choosable on a gateway without calendar rules.
+            cards.push(Card::new(vec![CardLine::new(
+                format!("(-) {label} · {}", auto::NEEDS_014_MARK),
+                Ink::Faint,
+            )]));
+        } else {
+            cards.push(radio(on, label));
+        }
         acts.push(act);
     }
     if usable {
@@ -982,7 +1006,11 @@ pub fn when_cards(
                 "YYYY-MM-DD HH:MM",
             ));
             acts.push(WhenAct::OnceAt);
-            cards.push(Card::note(auto::schedule_text("time_zone_hint")));
+            cards.push(Card::note(if legacy {
+                auto::ONCE_UTC_LEGACY
+            } else {
+                auto::schedule_text("time_zone_hint")
+            }));
         }
         When::Daily { at } | When::Weekly { at, .. } | When::Monthly { at, .. } => {
             if let When::Weekly { days, .. } = &shown.when {
@@ -1046,8 +1074,12 @@ pub fn when_cards(
             acts.push(WhenAct::Unit);
         }
     }
+    // One sentence, once: a refusal that repeats the line in place (the
+    // "needs 0.14" sentence) replaces it, in the error ink.
     for line in when_lines(form, usable, served) {
-        cards.push(Card::fixed(vec![CardLine::new(line, Ink::Faint)]));
+        if !errors.contains(&line) {
+            cards.push(Card::fixed(vec![CardLine::new(line, Ink::Faint)]));
+        }
     }
     errors_cards(&mut cards, errors);
     cards.push(continue_card(3));
@@ -1089,7 +1121,8 @@ fn step_when_errors(
     let build: Build<WhenAct> = Rc::new(move || {
         let status = store.automations.with(|v| v.email.clone());
         let served = served_of(store, &trigger_v, true);
-        when_cards(&d0.form, status.as_ref(), served.as_ref(), &errors)
+        let api = store.automations.with(|v| v.schedule_api);
+        when_cards(&d0.form, status.as_ref(), served.as_ref(), &errors, api)
     });
     let ctx2 = ctx.clone();
     let act = Rc::new(move |a: WhenAct| {
@@ -1127,6 +1160,19 @@ fn step_when_errors(
                     };
                 }
                 reopen(nd)
+            }
+            WhenAct::Daily | WhenAct::Weekly | WhenAct::Monthly
+                if schedule_api(store) == auto::ScheduleApi::Missing =>
+            {
+                // Refused with the one sentence; the picked kind stays.
+                step_when_errors(
+                    cx,
+                    store,
+                    &ctx2,
+                    d.clone(),
+                    vec![auto::NEEDS_NEWER_GATEWAY.to_string()],
+                    Some(a.clone()),
+                )
             }
             WhenAct::Daily | WhenAct::Weekly | WhenAct::Monthly => {
                 let kind = match a {
@@ -1244,7 +1290,12 @@ fn step_when_errors(
                     When::Once { at } => at.clone(),
                     _ => String::new(),
                 };
-                text_field(auto::schedule_text("once_label"), "A date and time in your account's time zone: YYYY-MM-DD HH:MM.", at, |f, v| {
+                let info = if schedule_api(store) == auto::ScheduleApi::Missing {
+                    "A date and time read as UTC on this gateway: YYYY-MM-DD HH:MM."
+                } else {
+                    "A date and time in your account's time zone: YYYY-MM-DD HH:MM."
+                };
+                text_field(auto::schedule_text("once_label"), info, at, |f, v| {
                     f.when = When::Once { at: v }
                 })
             }
@@ -1284,6 +1335,13 @@ fn step_when_errors(
             }
             WhenAct::Next => {
                 let mut errors = when_errors(&d.form, usable(store));
+                // A calendar rule picked before the probe answered.
+                if errors.is_empty()
+                    && d.form.when.is_calendar()
+                    && schedule_api(store) == auto::ScheduleApi::Missing
+                {
+                    errors.push(auto::NEEDS_NEWER_GATEWAY.to_string());
+                }
                 // The gateway refused this schedule (e.g. a time already past).
                 if errors.is_empty() {
                     if let Some(auto::PreviewState::Failed(e)) = served_of(store, &trigger, false) {
@@ -2529,7 +2587,8 @@ fn create_automation(cx: Scope, store: Store, ctx: &UiCtx, d: &Draft) {
             });
             let mut body = body;
             body["request_id"] = serde_json::json!(request_id);
-            send(ctx, AutoCmd::Create { body });
+            let schedule_api = schedule_api(store);
+            send(ctx, AutoCmd::Create { body, schedule_api });
             // The list opens now; the new automation opens when the gateway
             // answers (`wire_automations`).
             crate::ui::automations_view::open_automations(cx, store, ctx);

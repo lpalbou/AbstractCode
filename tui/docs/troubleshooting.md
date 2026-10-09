@@ -201,6 +201,23 @@ arrives when the call completes.
 "live reply failed/cancelled — the partial text was discarded" means the call
 ended without completing; the run's record shows what happened.
 
+## "Not available on this gateway (needs AbstractGateway 0.14)."
+
+The gateway is older than round 16 (AbstractGateway 0.13.x) and lacks the
+feature on that line. In **New automation** that means calendar schedules
+(Daily, Weekly, Monthly) and the gateway's preview of the next run. Repeat,
+Once at… (read as UTC on that gateway) and **When an email arrives** still
+work, and **Continue** is never blocked. Upgrade the gateway to 0.14 for
+calendar schedules. The terminal asks once per session, so restart it after
+upgrading the gateway. See [Gateway compatibility](api.md#gateway-compatibility-0131-and-round-16).
+
+## An automation's switch shows `[…] Active`
+
+The action was sent and the gateway has not applied it yet. Its controller
+applies a command moments after accepting it. The row shows the result as
+soon as a re-read shows the new state, at most about 4 s later. Until then
+the controls ignore input, so pressing again does not send a second command.
+
 ## `exec` hangs then exits 124
 
 The run outlived `--timeout`. The run itself stays durable on the gateway —

@@ -49,6 +49,11 @@ pub struct RailData {
     pub handover: Option<(String, Option<String>)>,
     /// The automation settings' save state (the revision line).
     pub save: SaveState,
+    /// The row last acted on in the automation's panels (`Act` as text).
+    pub acting_row: Option<String>,
+    /// The row whose revision is being saved: it shows the pending mark
+    /// (`…`) and further changes are ignored until the gateway answers.
+    pub saving_row: Option<String>,
     /// The panel the rail opened on last (reopened after a picker).
     pub panel: Option<Panel>,
     /// Reopen the rail here once the picker it opened closes.
@@ -68,6 +73,8 @@ impl Default for RailData {
             board_error: String::new(),
             handover: None,
             save: SaveState::Idle,
+            acting_row: None,
+            saving_row: None,
             panel: None,
             return_to: None,
             cursor: 0,
@@ -500,6 +507,29 @@ pub enum SaveState {
     Conflict,
 }
 
+/// The row-pending mark of a revision being saved: the saving row's right
+/// value gets `…` (pure, over a panel's cards and their acts; `key` = the
+/// saving row's act as text). The cards' selectable ones line up with acts.
+pub fn mark_saving<A: std::fmt::Debug>(
+    cards: &mut [crate::ui::cards::Card],
+    acts: &[A],
+    key: Option<&str>,
+) {
+    let Some(key) = key else { return };
+    let Some(ix) = acts.iter().position(|a| format!("{a:?}") == key) else {
+        return;
+    };
+    if let Some(card) = cards.iter_mut().filter(|c| c.selectable).nth(ix) {
+        if let Some(line) = card.lines.first_mut() {
+            line.right = if line.right.is_empty() {
+                "…".to_string()
+            } else {
+                format!("… {}", line.right)
+            };
+        }
+    }
+}
+
 /// The status line under "Revision N", verbatim from the web.
 pub fn save_line(state: &SaveState) -> String {
     match state {
@@ -847,5 +877,33 @@ mod tests {
         assert_eq!(g[1].status_label(), "Done");
         assert_eq!(g[2].status_label(), "Waiting for you");
         assert_eq!(g[1].lines, vec!["read_file src/main.rs · done"]);
+    }
+
+    #[test]
+    fn the_row_being_saved_shows_the_pending_mark() {
+        use crate::ui::cards::{Card, CardLine, Ink};
+        #[derive(Debug)]
+        enum A {
+            Title,
+            Budget,
+        }
+        let mk = || {
+            vec![
+                Card::fixed(vec![CardLine::new("heading", Ink::Faint)]),
+                Card::new(vec![CardLine::new("Title", Ink::Text).right("Inbox")]),
+                Card::new(vec![CardLine::new("Max growing context", Ink::Text)]),
+            ]
+        };
+        let acts = [A::Title, A::Budget];
+        let mut cards = mk();
+        mark_saving(&mut cards, &acts, Some("Budget"));
+        assert_eq!(cards[2].lines[0].right, "…");
+        assert_eq!(cards[1].lines[0].right, "Inbox");
+        let mut cards = mk();
+        mark_saving(&mut cards, &acts, Some("Title"));
+        assert_eq!(cards[1].lines[0].right, "… Inbox");
+        let mut cards = mk();
+        mark_saving(&mut cards, &acts, None);
+        assert_eq!(cards[1].lines[0].right, "Inbox");
     }
 }

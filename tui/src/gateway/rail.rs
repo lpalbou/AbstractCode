@@ -185,7 +185,10 @@ pub fn save_revision_now(
     };
     let transport = matches!(&out, Err(e) if e.is_transport());
     wake.post(move || {
-        store.rail.update(|r| r.save = state);
+        store.rail.update(|r| {
+            r.save = state;
+            r.saving_row = None;
+        });
         store.automations.update(|v| v.ids.settle(transport));
     });
     // The latest definition either way (a conflict shows the revision

@@ -665,6 +665,48 @@ explicitly that the engine reported no reason. It does not guess one: an
 exhausted budget and a stuck-loop stop both arrive as
 `outcome: "iteration_budget"`, and only the engine can tell them apart.
 
+## Gateway compatibility (0.13.1 and round 16)
+
+The terminal works end to end on the released AbstractGateway 0.13.1 and on
+AbstractGateway 0.14 (round 16). Of the 67 gateway routes it calls (method +
+path under `/api/gateway`, checked against the route table of both
+releases), exactly one is round-16-only: `POST /automations/schedule-preview`
+(the When line of **New automation** and the line under a calendar rule in
+an automation's Edit). It ships with the `schedule@2` trigger (Daily, Weekly,
+Monthly, Once at… in the account's time zone).
+
+- **Probed once per session.** The first preview answers it: a 404/405 means
+  this gateway lacks the round-16 schedule API, and nothing asks again. A
+  create made before any preview probes first, once.
+- **One sentence, in place.** Where the feature would be — the line that
+  shows the next run — the terminal says "Not available on this gateway
+  (needs AbstractGateway 0.14)." It never shows the route's raw error, never
+  as a toast, never twice.
+- **The flow stays usable.** On 0.13.1 the When step keeps **Repeat** (UTC
+  interval), **Once at…** (the time is read as UTC there, and the step says
+  so) and **When an email arrives**; **Continue** always works. **Daily**,
+  **Weekly** and **Monthly** are shown as `(-) Daily · needs 0.14`; choosing
+  one is refused with the sentence. Create sends Repeat and Once as
+  `schedule@1`, the trigger 0.13.1 runs.
+- The account's default workflow (`/accounts/me/preferences`) exists on
+  0.13.1; a gateway without it (404 or 405) gets the panel's own "needs a
+  newer gateway" line, and `/workflow` saves on this computer as before.
+
+### Automation actions show a pending state
+
+`space` Active, `g` Run now, `x` Stop, `a` Archive and `u` Unarchive mark
+their row at once: the switch reads `[…] Active` with "Pausing…" or
+"Activating…"; the other actions show their own words ("Starting a run…",
+"Stopping…", "Archiving…", "Unarchiving…"). Input for the controls is ignored
+until the answer. The gateway accepts a command when it is queued and its
+controller applies it moments later, so the row stays pending until a
+re-read shows the new state, or until the last follow-up read (about 4 s).
+Then the row shows the result ("Automation paused.", "Run requested.", …). A
+refusal ends the pending state with the gateway's sentence. A revision save
+in an automation's Edit panel marks the row being saved with `…` next to
+"Saving…", ignores further changes until the gateway answers, then reads
+"Saved as revision N" (or why it was not saved).
+
 ## Status surfaces
 
 - **Header**: wordmark · workflow · route · entity chips · cockpit facts ·

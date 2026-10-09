@@ -212,7 +212,13 @@ fn every_list_row_parses_and_reads_state_from_the_gateway() {
 fn a_row_without_the_served_schedule_fields_still_lists() {
     let mut v = load("list.json");
     let row = v["items"][0].as_object_mut().unwrap();
-    for key in ["schedule_rule_text", "schedule_text", "time_zone", "next_run_at", "next_run_local"] {
+    for key in [
+        "schedule_rule_text",
+        "schedule_text",
+        "time_zone",
+        "next_run_at",
+        "next_run_local",
+    ] {
         row.remove(key);
     }
     let page = auto::parse_list_page(&v).expect("a row without the served fields still lists");

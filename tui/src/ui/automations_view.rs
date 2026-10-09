@@ -80,9 +80,9 @@ pub(crate) fn command(store: Store, ctx: &UiCtx, s: &Summary, control: Control) 
     let mut command_id = String::new();
     store.automations.update(|v| {
         command_id = v.ids.id_for(&key, crate::config::mint_session_id);
-        v.busy = true;
-        v.error.clear();
-        v.notice = control.busy_notice().to_string();
+        // Busy + the pending mark on this automation's row until the
+        // gateway's answer shows it done (or refuses).
+        v.start_pending(s, control);
     });
     send(
         ctx,
@@ -107,23 +107,27 @@ pub(crate) fn switch_active(store: Store, ctx: &UiCtx, s: &Summary) {
 }
 
 /// The Active switch row of one automation (`[x] Active — …`), the
-/// automation screen's first header row.
-pub(crate) fn active_row(s: &Summary, busy: bool) -> RowSpec {
+/// automation screen's first header row. `pending` = the control in flight
+/// on it: a switch flip shows `[…] Active — Pausing…` until the answer.
+pub(crate) fn active_row(s: &Summary, busy: bool, pending: Option<Control>) -> RowSpec {
+    let detail = match pending {
+        Some(c @ (Control::Pause | Control::Resume)) => c.busy_notice().to_string(),
+        _ => auto::active_detail(s, busy),
+    };
     RowSpec {
-        text: format!(
-            "{} — {}",
-            auto::active_label(),
-            auto::active_detail(s, busy)
-        ),
+        text: format!("{} — {detail}", auto::active_label()),
         header: false,
-        checked: Some(active_mark(s, busy)),
+        checked: Some(active_mark(s, busy, pending)),
         dim: false,
     }
 }
 
-/// The switch's mark: on/off, or unavailable (with the state kept while a
-/// command is in flight).
-fn active_mark(s: &Summary, busy: bool) -> Mark {
+/// The switch's mark: on/off, pending (`[…]`) while a flip is in flight,
+/// or unavailable (with the state kept while another command is in flight).
+fn active_mark(s: &Summary, busy: bool, pending: Option<Control>) -> Mark {
+    if matches!(pending, Some(Control::Pause | Control::Resume)) {
+        return Mark::Pending;
+    }
     match auto::active_switch(s, busy) {
         Ok(on) => Mark::switch(on),
         // In flight: keep showing the current state, not "unavailable".
@@ -134,9 +138,20 @@ fn active_mark(s: &Summary, busy: bool) -> Mark {
     }
 }
 
-/// `[x] Active` / `[ ] Active` / `[-] Active` — the card's switch.
-pub(crate) fn active_switch_text(s: &Summary, busy: bool) -> String {
-    format!("{}{}", active_mark(s, busy).marker(), auto::active_label())
+/// `[x] Active` / `[ ] Active` / `[-] Active` — the card's switch;
+/// `[…] Active` while a flip is in flight; another action in flight on
+/// this automation reads as its own words ("Starting a run…").
+pub(crate) fn active_switch_text(s: &Summary, busy: bool, pending: Option<Control>) -> String {
+    match pending {
+        Some(
+            c @ (Control::RunNow | Control::StopCurrent | Control::Archive | Control::Unarchive),
+        ) => c.busy_notice().to_string(),
+        _ => format!(
+            "{}{}",
+            active_mark(s, busy, pending).marker(),
+            auto::active_label()
+        ),
+    }
 }
 
 /// The status lines under a title: notice, error, availability.
@@ -200,15 +215,17 @@ pub fn list_cards(v: &auto::View, now: i64, confirm: Option<&str>) -> (Vec<Card>
                 let mut lines = vec![CardLine::new(s.title.clone(), Ink::Title)
                     .right(auto::waiting_badge(s).unwrap_or(""))];
                 lines.push(CardLine::new(line1, Ink::Faint).indent(2));
-                let switch_ink = match active_mark(s, v.busy) {
-                    Mark::On => Ink::On,
-                    Mark::Unavailable => Ink::Faint,
+                let pending = v.pending_on(&s.id);
+                let switch_ink = match (pending, active_mark(s, v.busy, pending)) {
+                    (Some(_), _) => Ink::Accent,
+                    (_, Mark::On) => Ink::On,
+                    (_, Mark::Unavailable) => Ink::Faint,
                     _ => Ink::Text,
                 };
                 lines.push(
                     CardLine::new(line2, Ink::Faint)
                         .indent(2)
-                        .right(active_switch_text(s, v.busy))
+                        .right(active_switch_text(s, v.busy, pending))
                         .right_ink(switch_ink),
                 );
                 if confirm == Some(s.id.as_str()) {
@@ -238,9 +255,13 @@ pub fn list_cards(v: &auto::View, now: i64, confirm: Option<&str>) -> (Vec<Card>
                 .indent(2)])),
                 Some(Ok(items)) => {
                     for s in items {
+                        let right = match v.pending_on(&s.id) {
+                            Some(c) => c.busy_notice(),
+                            None => Control::Unarchive.button(),
+                        };
                         cards.push(Card::new(vec![CardLine::new(s.title.clone(), Ink::Faint)
                             .indent(2)
-                            .right(Control::Unarchive.button())]));
+                            .right(right)]));
                         targets.push(ListTarget::Archived(s.id.clone()));
                     }
                 }
@@ -1222,7 +1243,7 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
                     v.detail
                         .as_ref()
                         .and_then(|d| d.summary.as_ref())
-                        .map(|s| active_row(s, v.busy))
+                        .map(|s| active_row(s, v.busy, v.pending_on(&s.id)))
                 });
                 draw_rows(row.into_iter().collect(), 0, Vec::new())
             }))

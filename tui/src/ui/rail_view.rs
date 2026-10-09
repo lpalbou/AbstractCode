@@ -306,6 +306,7 @@ pub fn calendar_preview_lines(state: Option<&auto::PreviewState>) -> Vec<String>
             p.first_run_sentence.clone(),
         ],
         Some(auto::PreviewState::Failed(e)) => vec![e.clone()],
+        Some(auto::PreviewState::Unavailable) => vec![auto::NEEDS_NEWER_GATEWAY.to_string()],
         _ => vec![auto::schedule_text("describing").to_string()],
     }
 }
@@ -1720,8 +1721,9 @@ pub fn open_rail(cx: Scope, store: Store, ctx: &UiCtx, binding: Binding, panel: 
                         let scroll = scroll.clone();
                         move || {
                             let s = snap(store, &ctx, &binding, true);
-                            let (cards, acts) =
+                            let (mut cards, acts) =
                                 panel_cards(current.get(), &s, &open.get(), auto::now_unix());
+                            rail::mark_saving(&mut cards, &acts, s.rail.saving_row.as_deref());
                             let cur = cursor.get().min(acts.len().saturating_sub(1));
                             crate::ui::cards::draw_cards_scrolled(cards, cur, scroll.clone())
                         }
@@ -1851,7 +1853,15 @@ fn save_revision(store: Store, ctx: &UiCtx, binding: &Binding, changes: Option<V
             .and_then(|d| d.definition.as_ref().map(|def| def.revision))
     });
     let Some(expected_revision) = rev else { return };
-    store.rail.update(|r| r.save = SaveState::Saving);
+    // One revision at a time: a change while one is saving is ignored (its
+    // row shows the pending mark until the gateway answers).
+    if store.rail.with_untracked(|r| r.save == SaveState::Saving) {
+        return;
+    }
+    store.rail.update(|r| {
+        r.save = SaveState::Saving;
+        r.saving_row = r.acting_row.clone();
+    });
     ctx.send(Cmd::Rail(RailCmd::SaveRevision {
         id: id.clone(),
         command_id: crate::config::mint_session_id(),
@@ -1871,6 +1881,9 @@ fn run_act(
     reset: bool,
     open: Signal<Vec<(String, bool)>>,
 ) {
+    store
+        .rail
+        .update(|r| r.acting_row = Some(format!("{act:?}")));
     let s = snap(store, ctx, binding, false);
     let settings = auto_settings(&s);
     // Apply a settings edit to the automation's input and save it.

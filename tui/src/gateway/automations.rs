@@ -52,6 +52,9 @@ pub enum AutoCmd {
     },
     Create {
         body: Value,
+        /// What the session knows of the round-16 schedule API: `Unknown`
+        /// probes it first (one preview), `Missing` sends `schedule@1`.
+        schedule_api: auto::ScheduleApi,
     },
     Discuss {
         id: String,
@@ -537,10 +540,24 @@ fn run(client: &AutomationClient, wake: &WakeHandle, store: Store, cmd: AutoCmd)
                         format!("{verb} sent — the gateway applies it in a moment")
                     }
                 });
-            let ok = out.is_ok();
-            settle(wake, store, out);
-            if ok {
-                follow_up(client, wake, store, Some(id));
+            // Accepted is not done: the row stays pending until a re-read
+            // shows the new state (or the follow-up reads end).
+            match out {
+                Ok(notice) => {
+                    wake.post(move || {
+                        store.automations.update(|v| {
+                            v.ids.settle(false);
+                            v.error.clear();
+                            v.accept_pending(notice);
+                        })
+                    });
+                    follow_up(client, wake, store, Some(id));
+                    wake.post(move || store.automations.update(|v| v.finish_pending()));
+                }
+                Err(e) => {
+                    wake.post(move || store.automations.update(|v| v.fail_pending()));
+                    settle(wake, store, Err(e));
+                }
             }
         }
         AutoCmd::Revise {
@@ -563,39 +580,16 @@ fn run(client: &AutomationClient, wake: &WakeHandle, store: Store, cmd: AutoCmd)
                 follow_up(client, wake, store, Some(id));
             }
         }
-        AutoCmd::Create { body } => match client.send(&auto::create_request(body)) {
-            Ok(r) => {
-                let id = r
-                    .get("automation_id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                if id.is_empty() {
-                    settle(
-                        wake,
-                        store,
-                        Err(ApiError {
-                            status: Some(200),
-                            code: "invalid_response".into(),
-                            message: "the create answer carried no automation_id".into(),
-                            field: None,
-                        }),
-                    );
+        AutoCmd::Create { body, schedule_api } => {
+            let body = match schedule_create_body(client, wake, store, body, schedule_api) {
+                Ok(b) => b,
+                Err(e) => {
+                    settle(wake, store, Err(e));
                     return;
                 }
-                let title = r
-                    .pointer("/summary/title")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                settle(wake, store, Ok(format!("automation created: {title}")));
-                let created = id.clone();
-                wake.post(move || store.automations.update(|v| v.created = Some(created)));
-                // The first occurrence is admitted moments after the answer.
-                follow_up(client, wake, store, Some(id));
-            }
-            Err(e) => settle(wake, store, Err(e)),
-        },
+            };
+            create(client, wake, store, body)
+        }
         AutoCmd::Discuss {
             id,
             request_id,
@@ -640,17 +634,12 @@ fn run(client: &AutomationClient, wake: &WakeHandle, store: Store, cmd: AutoCmd)
             });
         }
         AutoCmd::Preview { trigger } => {
-            let state = match client.send(&auto::preview_request(trigger.clone())) {
-                Ok(v) => match auto::parse_schedule_preview(&v) {
-                    Ok(p) => auto::PreviewState::Ready(p),
-                    Err(e) => auto::PreviewState::Failed(e),
-                },
-                Err(e) => auto::PreviewState::Failed(auto::api_error_text(&e)),
-            };
+            let (state, api) = preview_state(client.send(&auto::preview_request(trigger.clone())));
             wake.post(move || {
-                store
-                    .automations
-                    .update(|v| v.apply_preview(&trigger, state))
+                store.automations.update(|v| {
+                    v.schedule_api = api;
+                    v.apply_preview(&trigger, state)
+                })
             });
         }
         AutoCmd::Answer {
@@ -698,6 +687,121 @@ fn run(client: &AutomationClient, wake: &WakeHandle, store: Store, cmd: AutoCmd)
     }
 }
 
+/// `POST /automations` and what follows (the new automation opens).
+fn create(client: &AutomationClient, wake: &WakeHandle, store: Store, body: Value) {
+    match client.send(&auto::create_request(body)) {
+        Ok(r) => {
+            let id = r
+                .get("automation_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if id.is_empty() {
+                settle(
+                    wake,
+                    store,
+                    Err(ApiError {
+                        status: Some(200),
+                        code: "invalid_response".into(),
+                        message: "the create answer carried no automation_id".into(),
+                        field: None,
+                    }),
+                );
+                return;
+            }
+            let title = r
+                .pointer("/summary/title")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            settle(wake, store, Ok(format!("automation created: {title}")));
+            let created = id.clone();
+            wake.post(move || store.automations.update(|v| v.created = Some(created)));
+            // The first occurrence is admitted moments after the answer.
+            follow_up(client, wake, store, Some(id));
+        }
+        Err(e) => settle(wake, store, Err(e)),
+    }
+}
+
+/// The create body for THIS gateway (posts what a probe learned).
+fn schedule_create_body(
+    client: &AutomationClient,
+    wake: &WakeHandle,
+    store: Store,
+    body: Value,
+    known: auto::ScheduleApi,
+) -> Result<Value, ApiError> {
+    let (out, learned) = create_body_for(client, body, known);
+    if let Some(api) = learned {
+        wake.post(move || store.automations.update(|v| v.schedule_api = api));
+    }
+    out
+}
+
+/// The create body for THIS gateway: a `schedule@2` trigger on a gateway
+/// without the round-16 schedule API is sent as `schedule@1` (Repeat, Once
+/// at… in UTC); a calendar rule there is refused with the one sentence.
+/// When the session has not probed yet (`Unknown`), the trigger's own
+/// preview is the probe — once; the second value is what it learned.
+pub fn create_body_for(
+    client: &AutomationClient,
+    body: Value,
+    known: auto::ScheduleApi,
+) -> (Result<Value, ApiError>, Option<auto::ScheduleApi>) {
+    let trigger = body.get("trigger").cloned().unwrap_or(Value::Null);
+    if !auto::needs_schedule_api(&trigger) {
+        return (Ok(body), None);
+    }
+    let (api, learned) = match known {
+        auto::ScheduleApi::Unknown => {
+            let api = match client.send(&auto::preview_request(trigger)) {
+                Err(e) if auto::is_missing_route(&e) => auto::ScheduleApi::Missing,
+                _ => auto::ScheduleApi::Served,
+            };
+            (api, Some(api))
+        }
+        known => (known, None),
+    };
+    if api != auto::ScheduleApi::Missing {
+        return (Ok(body), learned);
+    }
+    let out = auto::legacy_create_body(&body).map_err(|m| ApiError {
+        status: Some(422),
+        code: "unsupported_feature".into(),
+        message: m,
+        field: None,
+    });
+    (out, learned)
+}
+
+/// A preview answer as the When line shows it, and what it says about the
+/// round-16 schedule API: a 404/405 (no such route: AbstractGateway 0.13.x)
+/// is `Unavailable` + `Missing` — the sentence in place, never the route's
+/// error, and no further preview is asked this session.
+pub fn preview_state(answer: Result<Value, ApiError>) -> (auto::PreviewState, auto::ScheduleApi) {
+    match answer {
+        Ok(v) => (
+            match auto::parse_schedule_preview(&v) {
+                Ok(p) => auto::PreviewState::Ready(p),
+                Err(e) => auto::PreviewState::Failed(e),
+            },
+            auto::ScheduleApi::Served,
+        ),
+        Err(e) if auto::is_missing_route(&e) => {
+            (auto::PreviewState::Unavailable, auto::ScheduleApi::Missing)
+        }
+        Err(e) => (
+            auto::PreviewState::Failed(auto::api_error_text(&e)),
+            if e.is_transport() {
+                auto::ScheduleApi::Unknown
+            } else {
+                auto::ScheduleApi::Served
+            },
+        ),
+    }
+}
+
 fn post_schema(
     client: &AutomationClient,
     wake: &WakeHandle,
@@ -714,5 +818,162 @@ fn follow_up(client: &AutomationClient, wake: &WakeHandle, store: Store, open: O
     for pause in FOLLOW_UPS {
         std::thread::sleep(pause);
         refresh(client, wake, store, open.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::io::{BufRead, BufReader, Read, Write};
+
+    /// A local HTTP server answering `answers` in order (status, body);
+    /// hands back every (request line, body) that went on the wire.
+    fn server(
+        answers: Vec<(&'static str, &'static str)>,
+    ) -> (String, std::sync::mpsc::Receiver<(String, String)>) {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let url = format!("http://{}", l.local_addr().unwrap());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for (status, body) in answers {
+                let (mut sock, _) = l.accept().expect("accept");
+                let mut reader = BufReader::new(sock.try_clone().unwrap());
+                let mut first = String::new();
+                reader.read_line(&mut first).unwrap();
+                let mut len = 0usize;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        len = v.trim().parse().unwrap_or(0);
+                    }
+                }
+                let mut buf = vec![0u8; len];
+                reader.read_exact(&mut buf).unwrap();
+                let _ = tx.send((
+                    first.trim_end().to_string(),
+                    String::from_utf8(buf).unwrap(),
+                ));
+                let head = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = sock.write_all(head.as_bytes());
+                let _ = sock.write_all(body.as_bytes());
+            }
+        });
+        (url, rx)
+    }
+
+    fn client(url: &str) -> AutomationClient {
+        AutomationClient::from_gateway(&GatewayClient::new(url, Some("t")))
+    }
+
+    /// What AbstractGateway 0.13.1 answers for `POST /automations/schedule-preview`
+    /// (measured on the released package: the route does not exist there).
+    const METHOD_NOT_ALLOWED: &str =
+        r#"{"detail": {"reason_code": "invalid_request", "message": "Method Not Allowed"}}"#;
+
+    fn repeat_v2() -> Value {
+        json!({"source_id": "schedule", "source_version": 2,
+               "config": {"kind": "every", "every": "24h", "count": 3}})
+    }
+
+    fn body_with(trigger: Value) -> Value {
+        json!({"request_id": "r1", "title": "t", "target": {"flow_id": "f"}, "trigger": trigger})
+    }
+
+    #[test]
+    fn a_405_or_404_preview_is_the_sentence_and_marks_the_api_missing() {
+        for status in ["405 Method Not Allowed", "404 Not Found"] {
+            let (url, rx) = server(vec![(status, METHOD_NOT_ALLOWED)]);
+            let answer = client(&url).send(&auto::preview_request(repeat_v2()));
+            let (state, api) = preview_state(answer);
+            assert_eq!(state, auto::PreviewState::Unavailable, "{status}");
+            assert_eq!(api, auto::ScheduleApi::Missing, "{status}");
+            assert_eq!(
+                auto::preview_lines(&state, false),
+                vec![auto::NEEDS_NEWER_GATEWAY.to_string()]
+            );
+            let (line, _) = rx.recv().unwrap();
+            assert!(
+                line.starts_with("POST /api/gateway/automations/schedule-preview"),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_refused_rule_is_the_gateways_sentence_and_the_api_is_served() {
+        let (url, _rx) = server(vec![(
+            "422 Unprocessable Entity",
+            r#"{"detail": {"reason_code": "invalid_definition", "message": "Once at… is in the past."}}"#,
+        )]);
+        let (state, api) = preview_state(client(&url).send(&auto::preview_request(repeat_v2())));
+        assert_eq!(api, auto::ScheduleApi::Served);
+        match state {
+            auto::PreviewState::Failed(e) => assert!(e.contains("Once at… is in the past."), "{e}"),
+            other => panic!("{other:?}"),
+        }
+        // No gateway answer at all: nothing learned (asked again later).
+        let (_, api) =
+            preview_state(client("http://127.0.0.1:9").send(&auto::preview_request(repeat_v2())));
+        assert_eq!(api, auto::ScheduleApi::Unknown);
+    }
+
+    #[test]
+    fn an_unprobed_create_probes_once_then_sends_schedule_v1() {
+        let (url, rx) = server(vec![("405 Method Not Allowed", METHOD_NOT_ALLOWED)]);
+        let (out, learned) = create_body_for(
+            &client(&url),
+            body_with(repeat_v2()),
+            auto::ScheduleApi::Unknown,
+        );
+        assert_eq!(learned, Some(auto::ScheduleApi::Missing));
+        assert_eq!(
+            out.unwrap()["trigger"],
+            json!({"source_id": "schedule", "source_version": 1, "config": {"every": "24h", "count": 3}})
+        );
+        assert!(rx.recv().unwrap().0.contains("schedule-preview"));
+        assert!(rx.try_recv().is_err(), "one probe only");
+    }
+
+    #[test]
+    fn a_known_missing_api_never_probes_and_refuses_a_calendar_rule() {
+        // No server at all: any request would fail the test with a transport error.
+        let c = client("http://127.0.0.1:9");
+        let (out, learned) =
+            create_body_for(&c, body_with(repeat_v2()), auto::ScheduleApi::Missing);
+        assert_eq!(learned, None);
+        assert_eq!(out.unwrap()["trigger"]["source_version"], 1);
+        let daily = json!({"source_id": "schedule", "source_version": 2, "config": {"kind": "daily", "at": "08:00"}});
+        let (out, _) = create_body_for(&c, body_with(daily), auto::ScheduleApi::Missing);
+        let e = out.unwrap_err();
+        assert_eq!(auto::api_error_text(&e), auto::NEEDS_NEWER_GATEWAY);
+        // A round-16 gateway: the body goes as built (schedule@2).
+        let (out, learned) = create_body_for(&c, body_with(repeat_v2()), auto::ScheduleApi::Served);
+        assert_eq!(
+            (out.unwrap()["trigger"].clone(), learned),
+            (repeat_v2(), None)
+        );
+    }
+
+    #[test]
+    fn a_served_preview_keeps_schedule_v2() {
+        let (url, _rx) = server(vec![(
+            "200 OK",
+            r#"{"trigger": {}, "time_zone": "Europe/Paris", "schedule_rule_text": "Every day at 08:00 (Europe/Paris)",
+                "schedule_text": "x", "first_run_sentence": "Runs every day at 08:00 (Europe/Paris), first run Sat 10 Oct 08:00."}"#,
+        )]);
+        let (out, learned) = create_body_for(
+            &client(&url),
+            body_with(repeat_v2()),
+            auto::ScheduleApi::Unknown,
+        );
+        assert_eq!(learned, Some(auto::ScheduleApi::Served));
+        assert_eq!(out.unwrap()["trigger"], repeat_v2());
     }
 }

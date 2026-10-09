@@ -104,7 +104,9 @@ pub fn load(client: &GatewayClient, device: Option<&str>) -> (State, bool) {
             Ok(r) => r,
             Err(e) => return (State::Error(e), false),
         },
-        Err(e) if e.status == Some(404) => return (State::Unsupported, false),
+        // No such route (404, or 405 from a gateway that routes the path
+        // for another method): an older gateway, said once in place.
+        Err(e) if matches!(e.status, Some(404 | 405)) => return (State::Unsupported, false),
         Err(e) => return (State::Error(e.sentence), false),
     };
     let mut clear = false;
@@ -259,12 +261,21 @@ mod tests {
 
     #[test]
     fn an_older_gateway_is_unsupported() {
-        let (url, _rx) = server(vec![("404 Not Found", r#"{"detail":"Not Found"}"#)]);
-        let c = GatewayClient::new(&url, Some("t"));
-        assert_eq!(
-            load(&c, Some("coding-agent:coder")),
-            (State::Unsupported, false)
-        );
+        for (status, body) in [
+            ("404 Not Found", r#"{"detail":"Not Found"}"#),
+            (
+                "405 Method Not Allowed",
+                r#"{"detail": {"reason_code": "invalid_request", "message": "Method Not Allowed"}}"#,
+            ),
+        ] {
+            let (url, _rx) = server(vec![(status, body)]);
+            let c = GatewayClient::new(&url, Some("t"));
+            assert_eq!(
+                load(&c, Some("coding-agent:coder")),
+                (State::Unsupported, false),
+                "{status}"
+            );
+        }
     }
 
     #[test]

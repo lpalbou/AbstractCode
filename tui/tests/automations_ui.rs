@@ -637,7 +637,7 @@ impl Harness {
         self.auto_cmds()
             .into_iter()
             .find_map(|c| match c {
-                AutoCmd::Create { body } => Some(body),
+                AutoCmd::Create { body, .. } => Some(body),
                 _ => None,
             })
             .expect("create")
@@ -1743,7 +1743,21 @@ fn saves(h: &mut Harness) -> Vec<(u64, serde_json::Value)> {
             out.push((expected_revision, changes));
         }
     }
+    gateway_answers_saves(h, &out);
     out
+}
+
+/// The lane's answer to the drained revisions (as `save_revision_now`
+/// posts it): saved, the row no longer pending — the next change can go.
+fn gateway_answers_saves(h: &mut Harness, saved: &[(u64, serde_json::Value)]) {
+    if let Some((rev, _)) = saved.last() {
+        let n = rev + 1;
+        h.store.rail.update(|r| {
+            r.save = abstractcode::rail::SaveState::Saved(n);
+            r.saving_row = None;
+        });
+        h.turn();
+    }
 }
 
 #[test]
@@ -2281,6 +2295,7 @@ fn previews_and_saves(h: &mut Harness) -> (Vec<Value>, Vec<(u64, Value)>) {
             _ => {}
         }
     }
+    gateway_answers_saves(h, &saved);
     (previews, saved)
 }
 
@@ -2850,7 +2865,292 @@ fn a_pre_round_16_gateway_row_lists_and_opens() {
     h.keys(b"\r");
     let cmds = h.auto_cmds();
     assert!(
-        cmds.iter().any(|c| matches!(c, AutoCmd::Open { id: o } if *o == id)),
+        cmds.iter()
+            .any(|c| matches!(c, AutoCmd::Open { id: o } if *o == id)),
         "Enter opens the pre-round-16 automation: {cmds:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Compatibility with the RELEASED AbstractGateway 0.13.1 (operator 2026-10-09:
+// "Method Not Allowed" twice in the When step): the round-16 schedule API is
+// probed once; on a gateway without it the When step says ONE sentence in
+// place and keeps working, and every async action shows a pending state.
+// ---------------------------------------------------------------------------
+
+/// What AbstractGateway 0.13.1 answers for `POST /automations/schedule-preview`.
+const METHOD_NOT_ALLOWED: &str =
+    r#"{"detail": {"reason_code": "invalid_request", "message": "Method Not Allowed"}}"#;
+
+/// The lane's answer to the latest preview on a 0.13.1 gateway (405), applied
+/// as `AutoCmd::Preview` posts it.
+fn answer_preview_405(h: &mut Harness) -> String {
+    let trigger = preview_asked(h);
+    let (state, api) = abstractcode::gateway::automations::preview_state(Err(
+        auto::parse_api_error(405, METHOD_NOT_ALLOWED),
+    ));
+    h.store.automations.update(|v| {
+        v.schedule_api = api;
+        v.apply_preview(&trigger, state)
+    });
+    h.turn()
+}
+
+fn previews_sent(cmds: &[AutoCmd]) -> usize {
+    cmds.iter()
+        .filter(|c| matches!(c, AutoCmd::Preview { .. }))
+        .count()
+}
+
+fn count(screen: &str, needle: &str) -> usize {
+    flat(screen).matches(needle).count()
+}
+
+#[test]
+fn on_a_0_13_gateway_the_when_step_says_one_sentence_and_continues() {
+    let mut h = harness();
+    pick_when(&mut h, KIND_REPEAT);
+    let screen = answer_preview_405(&mut h);
+    assert_eq!(count(&screen, auto::NEEDS_NEWER_GATEWAY), 1, "{screen}");
+    assert!(!screen.contains("Method Not Allowed"), "{screen}");
+    assert!(!screen.contains("malformed"), "{screen}");
+    assert!(screen.contains("(•) Repeat"), "{screen}");
+    for kind in ["Daily", "Weekly", "Monthly"] {
+        assert!(
+            screen.contains(&format!("(-) {kind} · needs 0.14")),
+            "{kind} shown, marked:\n{screen}"
+        );
+    }
+    // Daily: refused with the sentence (once), Repeat stays, nothing asked.
+    h.up(13);
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("(•) Repeat"), "{screen}");
+    assert!(!screen.contains("Time of day"), "{screen}");
+    assert_eq!(count(&screen, auto::NEEDS_NEWER_GATEWAY), 1, "{screen}");
+    // Once at…: offered, read as UTC on this gateway; still one sentence.
+    h.down(3);
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("(•) Once at…"), "{screen}");
+    assert!(flat(&screen).contains(auto::ONCE_UTC_LEGACY), "{screen}");
+    // Repeat again: Continue always works.
+    h.up(4);
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("(•) Repeat"), "{screen}");
+    assert_eq!(count(&screen, auto::NEEDS_NEWER_GATEWAY), 1, "{screen}");
+    let cmds = h.auto_cmds();
+    assert_eq!(
+        previews_sent(&cmds),
+        0,
+        "probed once: no preview is asked again on this gateway: {cmds:?}"
+    );
+    let screen = h.cont();
+    assert!(screen.contains("3/7 Context"), "{screen}");
+    h.keys(b"\r"); // Context
+    h.keys(b"\r"); // Tools
+    h.keys(b"\r"); // Workspaces
+    let screen = h.keys(b"\r"); // Mailbox
+    assert!(screen.contains("7/7 Title and limits"), "{screen}");
+    assert_eq!(count(&screen, auto::NEEDS_NEWER_GATEWAY), 1, "{screen}");
+    h.keys(b"\r"); // Create automation
+    let cmds = h.auto_cmds();
+    assert_eq!(previews_sent(&cmds), 0, "{cmds:?}");
+    let create = cmds
+        .iter()
+        .find_map(|c| match c {
+            AutoCmd::Create { body, schedule_api } => Some((body.clone(), *schedule_api)),
+            _ => None,
+        })
+        .expect("create");
+    // The lane sends it as schedule@1 on this gateway (`create_body_for`).
+    assert_eq!(create.1, auto::ScheduleApi::Missing);
+    assert_eq!(
+        auto::legacy_create_body(&create.0).unwrap()["trigger"],
+        json!({"source_id": "schedule", "source_version": 1, "config": {"every": "24h"}})
+    );
+}
+
+#[test]
+fn a_calendar_rule_picked_before_the_probe_answered_is_refused_on_continue() {
+    let mut h = harness();
+    pick_when(&mut h, KIND_DAILY);
+    let screen = answer_preview_405(&mut h);
+    assert!(screen.contains("(-) Daily · needs 0.14"), "{screen}");
+    assert_eq!(count(&screen, auto::NEEDS_NEWER_GATEWAY), 1, "{screen}");
+    let screen = h.cont();
+    assert!(!screen.contains("3/7 Context"), "{screen}");
+    assert_eq!(count(&screen, auto::NEEDS_NEWER_GATEWAY), 1, "{screen}");
+}
+
+#[test]
+fn on_a_round_16_gateway_the_calendar_rules_are_offered() {
+    let mut h = harness();
+    pick_when(&mut h, KIND_REPEAT);
+    let trigger = preview_asked(&mut h);
+    let sentence = "Runs every 24 hours, first run now.";
+    h.store.automations.update(|v| {
+        v.schedule_api = auto::ScheduleApi::Served;
+        v.apply_preview(&trigger, served_preview(&trigger, sentence))
+    });
+    let screen = h.turn();
+    assert!(screen.contains("( ) Daily"), "{screen}");
+    assert!(!screen.contains("needs 0.14"), "{screen}");
+    assert!(
+        !flat(&screen).contains(auto::NEEDS_NEWER_GATEWAY),
+        "{screen}"
+    );
+    assert!(flat(&screen).contains(sentence), "{screen}");
+}
+
+#[test]
+fn space_shows_the_pending_mark_until_the_gateway_shows_the_new_state() {
+    let mut h = harness();
+    h.command("/automations");
+    h.answer_list();
+    h.auto_cmds();
+    // The first row (Inbox triage) is active.
+    let screen = h.keys(b" ");
+    let cmds = h.auto_cmds();
+    assert!(
+        matches!(cmds.as_slice(), [AutoCmd::Command { id, command_type, .. }] if id == INBOX && command_type == "automation.pause"),
+        "{cmds:?}"
+    );
+    assert!(screen.contains("[…] Active"), "pending at once:\n{screen}");
+    assert!(screen.contains("Pausing…"), "{screen}");
+    // Space again while pending: ignored (nothing sent).
+    let screen = h.keys(b" ");
+    assert!(h.auto_cmds().is_empty(), "input ignored while pending");
+    assert!(screen.contains("[…] Active"), "{screen}");
+    // The (slow) gateway accepts: still pending until its state shows it.
+    h.store
+        .automations
+        .update(|v| v.accept_pending("Automation paused.".into()));
+    let screen = h.turn();
+    assert!(screen.contains("[…] Active"), "{screen}");
+    // The re-read shows it paused: the result.
+    let mut page = auto::parse_list_page(&fixture("list.json")).unwrap();
+    for s in page.items.iter_mut().filter(|s| s.id == INBOX) {
+        s.status = "paused".into();
+    }
+    h.store.automations.update(|v| v.apply_list(page.items));
+    let screen = h.turn();
+    assert!(!screen.contains("[…]"), "{screen}");
+    assert!(screen.contains("Automation paused."), "{screen}");
+    let inbox = screen
+        .lines()
+        .skip_while(|l| !l.contains("Inbox triage"))
+        .take(3)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(inbox.contains("[ ] Active"), "{inbox}");
+}
+
+#[test]
+fn a_refused_action_leaves_the_pending_state_with_the_gateways_sentence() {
+    let mut h = harness();
+    open_inbox(&mut h);
+    h.auto_cmds();
+    // x Stop (Inbox triage has a run in progress): pending on the detail screen.
+    let screen = h.keys(b"x");
+    assert!(screen.contains("Stopping…"), "{screen}");
+    // The gateway refuses: the lane posts fail_pending + the sentence.
+    h.store.automations.update(|v| {
+        v.fail_pending();
+        v.busy = false;
+        v.error = auto::api_error_text(&auto::parse_api_error(
+            409,
+            r#"{"detail": {"reason_code": "invalid_state", "message": "Nothing is running."}}"#,
+        ));
+    });
+    let screen = h.turn();
+    assert!(!screen.contains("Stopping…"), "{screen}");
+    assert!(
+        flat(&screen)
+            .contains("The automation's current state does not allow this. Nothing is running."),
+        "{screen}"
+    );
+    // Space on the detail screen: the Active row itself shows the pending mark.
+    let screen = h.keys(b" ");
+    assert!(screen.contains("[…] Active — Pausing…"), "{screen}");
+}
+
+#[test]
+fn run_now_archive_and_unarchive_show_their_own_pending_words_on_the_row() {
+    let mut h = harness();
+    h.command("/automations");
+    h.answer_list();
+    h.auto_cmds();
+    // The paused row (third visible): g Run now.
+    h.keys(b"\x1b[B\x1b[B");
+    let screen = h.keys(b"g");
+    let row = screen
+        .lines()
+        .skip_while(|l| !l.contains("Weekly journal monitor"))
+        .take(3)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(row.contains("Starting a run…"), "{row}");
+    assert!(screen.contains("Starting a run…"), "{screen}");
+}
+
+#[test]
+fn a_revision_save_marks_its_row_and_ignores_changes_until_the_answer() {
+    let mut h = harness();
+    open_inbox(&mut h);
+    h.auto_cmds();
+    h.keys(b"e");
+    h.keys(b"\x1b[B"); // Repeat every
+    h.keys(b"\r");
+    h.keys(b"\x1b[F\x7f\x7f\x7f");
+    h.term.push_input(b"6h");
+    h.turn();
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("Saving…"), "{screen}");
+    let marked = screen
+        .lines()
+        .find(|l| l.contains("Repeat every"))
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        marked.contains('…'),
+        "the saving row shows the pending mark: {marked:?}\n{screen}"
+    );
+    // Drain without answering: the save is in flight.
+    let mut sent = 0;
+    while let Ok(cmd) = h.rx.try_recv() {
+        if matches!(
+            cmd,
+            Cmd::Rail(abstractcode::gateway::rail::RailCmd::SaveRevision { .. })
+        ) {
+            sent += 1;
+        }
+    }
+    assert_eq!(sent, 1);
+    // Another change while saving: ignored.
+    h.keys(b"\r");
+    h.keys(b"\x1b[F\x7f\x7f");
+    h.term.push_input(b"2h");
+    h.turn();
+    h.keys(b"\r");
+    let again = std::iter::from_fn(|| h.rx.try_recv().ok())
+        .filter(|c| {
+            matches!(
+                c,
+                Cmd::Rail(abstractcode::gateway::rail::RailCmd::SaveRevision { .. })
+            )
+        })
+        .count();
+    assert_eq!(again, 0, "one revision at a time");
+    // The answer: the result, the mark gone.
+    h.store.rail.update(|r| {
+        r.save = abstractcode::rail::SaveState::Saved(4);
+        r.saving_row = None;
+    });
+    let screen = h.turn();
+    assert!(screen.contains("Saved as revision 4"), "{screen}");
+    let row = screen
+        .lines()
+        .find(|l| l.contains("Repeat every"))
+        .unwrap_or_default()
+        .to_string();
+    assert!(!row.contains('…'), "{row}");
 }
