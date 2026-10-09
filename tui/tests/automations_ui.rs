@@ -3183,3 +3183,73 @@ fn a_preview_without_any_gateway_answer_is_one_plain_line_and_continue_works() {
         "only a refusal stops Continue:\n{screen}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Esc in New automation goes back one step (adversary F5): step 1 closes,
+// asking "Discard?" first only when something was entered.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn esc_in_a_step_goes_back_one_step_with_its_values_kept() {
+    let mut h = harness();
+    let screen = pick_when(&mut h, KIND_DAILY);
+    assert!(screen.contains("(•) Daily"), "{screen}");
+    let screen = h.cont(); // When → Context
+    assert!(screen.contains("3/7 Context"), "{screen}");
+    // Growing (the second radio), the cursor then back on Continue.
+    h.keys(b"\x1b[H");
+    let screen = h.down(1);
+    assert!(focused_line(&screen).contains("Growing"), "{screen}");
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("(•) Growing"), "{screen}");
+    // Esc: back to When, Daily 08:00 kept (not the whole dialog closed).
+    let screen = h.esc();
+    assert!(screen.contains("2/7 When"), "{screen}");
+    assert!(screen.contains("(•) Daily"), "{screen}");
+    assert!(screen.contains("08:00"), "{screen}");
+    // Continue again: Context still Growing.
+    let screen = h.cont();
+    assert!(screen.contains("3/7 Context"), "{screen}");
+    assert!(screen.contains("(•) Growing"), "{screen}");
+    // Context → Tools → Esc → Context; When → Esc → What.
+    let screen = h.cont();
+    assert!(screen.contains("4/7 Tools"), "{screen}");
+    let screen = h.esc();
+    assert!(
+        screen.contains("3/7 Context") && screen.contains("(•) Growing"),
+        "{screen}"
+    );
+    h.esc();
+    let screen = h.esc();
+    assert!(screen.contains("1/7 What"), "{screen}");
+    assert!(screen.contains("brief me"), "the task kept:\n{screen}");
+    // Something was entered (Daily, Growing): step 1's Esc asks first.
+    let screen = h.esc();
+    assert!(screen.contains("1/7 What"), "{screen}");
+    assert!(
+        flat(&screen).contains(abstractcode::ui::schedule_view::DISCARD_QUESTION),
+        "{screen}"
+    );
+    // The second Esc discards: the dialog closes.
+    let screen = h.esc();
+    assert!(!screen.contains("New automation —"), "{screen}");
+    assert!(h
+        .auto_cmds()
+        .iter()
+        .all(|c| !matches!(c, AutoCmd::Create { .. })));
+}
+
+#[test]
+fn esc_on_an_untouched_step_one_closes_without_asking() {
+    let mut h = harness();
+    h.command("/schedule brief me");
+    h.answer_prepare("me_email_not_connected.json");
+    let screen = h.turn();
+    assert!(screen.contains("1/7 What"), "{screen}");
+    let screen = h.esc();
+    assert!(!screen.contains("New automation —"), "{screen}");
+    assert!(
+        !flat(&screen).contains("Discard this new automation?"),
+        "{screen}"
+    );
+}

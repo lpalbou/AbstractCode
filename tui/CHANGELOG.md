@@ -175,6 +175,12 @@ email trigger, and the calendar kinds say they need 0.14 (see Fixed).
   also treats a 405 like a 404 (an older gateway: the panel says so once).
   Every route the terminal calls is listed against 0.13.1 in
   `docs/api.md` (only `schedule-preview` is round-16-only).
+- `Esc` in a **New automation** step goes back to the previous step with
+  everything entered kept (Tools keeps its selection, Workspaces its
+  choice); it used to close the whole dialog and lose the draft. On **1/7
+  What** it closes the dialog — at once when nothing was entered, otherwise
+  after "Discard this new automation? Esc discards it · any other key keeps
+  editing." and a second `Esc`. The step hint reads `Esc back`.
 - An automation action no longer looks like it did nothing (operator
   2026-10-09: "space to activate/deactivate needs a spinner, it's not
   instantaneous"). `space` Active, `g` Run now, `x` Stop, `a` Archive and

@@ -104,6 +104,8 @@ fn draft_of(case: &Value) -> (Draft, Value, bool) {
             schema: Ok(("picked".into(), "0".into(), "f".into())),
         });
     let mut draft = Draft {
+        opened: Box::default(),
+        discard_asked: false,
         form: CreateForm {
             prompt: s(&d["prompt"]),
             when,

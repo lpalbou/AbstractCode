@@ -129,6 +129,27 @@ pub struct Draft {
     /// The calendar rule's fields, kept across kind switches (the kit's
     /// `CalendarRuleState`: Weekly → Monthly → Weekly keeps the days).
     pub rule: auto::CalendarRuleState,
+    /// The form as the dialog opened (Esc on step 1 asks "Discard?" only
+    /// when something was entered since).
+    pub opened: Box<CreateForm>,
+    /// Esc on step 1 asked "Discard?": a second Esc discards.
+    pub discard_asked: bool,
+}
+
+/// Esc on step 1 when something was entered: the question, in place.
+pub const DISCARD_QUESTION: &str =
+    "Discard this new automation? Esc discards it · any other key keeps editing.";
+
+impl Draft {
+    /// Something was entered since the dialog opened (the task, a workflow,
+    /// any step's value; the Tools step's own first selection does not count).
+    pub fn edited(&self) -> bool {
+        let opened = CreateForm {
+            tools: self.form.tools.clone(),
+            ..(*self.opened).clone()
+        };
+        self.picked.is_some() || self.form != opened
+    }
 }
 
 impl Draft {
@@ -234,11 +255,14 @@ pub fn open_schedule(cx: Scope, store: Store, ctx: &UiCtx, seed: Option<String>)
     } else {
         workflow.versioned_label()
     };
+    let form = CreateForm {
+        prompt: seed.unwrap_or_else(|| last_prompt(store)),
+        ..CreateForm::default()
+    };
     let draft = Draft {
-        form: CreateForm {
-            prompt: seed.unwrap_or_else(|| last_prompt(store)),
-            ..CreateForm::default()
-        },
+        opened: Box::new(form.clone()),
+        discard_asked: false,
+        form,
         conv_target: auto::target_for(&workflow),
         conv_label,
         conv_schema,
@@ -258,7 +282,7 @@ const STEP_HINTS: &[(&str, &str)] = &[
     ("↑↓", ""),
     ("Enter", "change / continue"),
     ("End", "Continue"),
-    ("Esc", "cancels"),
+    ("Esc", "back"),
 ];
 
 type Build<A> = Rc<dyn Fn() -> (Vec<Card>, Vec<A>)>;
@@ -283,11 +307,11 @@ fn step<A: Clone + PartialEq + 'static>(
     build: Build<A>,
     act: Rc<dyn Fn(A)>,
     focus: Option<A>,
+    back: Rc<dyn Fn()>,
 ) {
     let (cards0, acts0) = build();
     let rows: i32 = cards0.iter().map(|c| c.lines.len() as i32 + 1).sum();
     let size = modal_size(100, rows + 8);
-    let ctx2 = ctx.clone();
     let start = start_cursor(&acts0, focus.as_ref());
     ctx.open_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
@@ -318,10 +342,9 @@ fn step<A: Clone + PartialEq + 'static>(
             .style(LayoutStyle::column().padding(Edges::all(1)))
             .focusable()
             .autofocus()
-            .shortcut(KeyChord::plain(Key::Escape), {
-                let ctx = ctx2.clone();
-                move |_| ctx.close_modal()
-            })
+            // Esc = the previous step (step 1: close, asking first when
+            // something was entered) — never the whole dialog at once.
+            .shortcut(KeyChord::plain(Key::Escape), move |_| back())
             .shortcut(KeyChord::plain(Key::Up), {
                 let mv = mv.clone();
                 move |_| mv(-1)
@@ -555,6 +578,27 @@ fn step_what(
     errors: Vec<String>,
     focus: Option<WhatAct>,
 ) {
+    // Esc asked "Discard?" last time: the question shows; any action goes on.
+    let asked = d.discard_asked;
+    let mut d = d;
+    d.discard_asked = false;
+    let mut errors = errors;
+    if asked {
+        errors.push(DISCARD_QUESTION.to_string());
+    }
+    let back: Rc<dyn Fn()> = {
+        let ctx = ctx.clone();
+        let d = d.clone();
+        Rc::new(move || {
+            if asked || !d.edited() {
+                ctx.close_modal();
+            } else {
+                let mut nd = d.clone();
+                nd.discard_asked = true;
+                step_what(cx, store, &ctx, nd, Vec::new(), None);
+            }
+        })
+    };
     let d0 = d.clone();
     let build: Build<WhatAct> = Rc::new(move || {
         let exec = store.automations.with(|v| v.executable.clone());
@@ -597,7 +641,7 @@ fn step_what(
             }
         }
     });
-    step(cx, ctx, step_title(1), build, act, focus);
+    step(cx, ctx, step_title(1), build, act, focus, back);
 }
 
 /// The picker's rows (the kit's workflowPickerRows): "Gateway default —
@@ -1117,6 +1161,7 @@ fn step_when_errors(
         ask_preview(store, ctx, t);
     }
     let d0 = d.clone();
+    let d_back = d.clone();
     let trigger_v = trigger.clone();
     let build: Build<WhenAct> = Rc::new(move || {
         let status = store.automations.with(|v| v.email.clone());
@@ -1356,7 +1401,11 @@ fn step_when_errors(
             }
         }
     });
-    step(cx, ctx, step_title(2), build, act, focus);
+    let back: Rc<dyn Fn()> = {
+        let ctx = ctx.clone();
+        Rc::new(move || step_what(cx, store, &ctx, d_back.clone(), Vec::new(), None))
+    };
+    step(cx, ctx, step_title(2), build, act, focus, back);
 }
 
 /// The When section's own problems (the kit's sentences), checked before
@@ -1418,6 +1467,7 @@ fn step_context(
     focus: Option<ContextAct>,
 ) {
     let d0 = d.clone();
+    let d_back = d.clone();
     let build: Build<ContextAct> = Rc::new(move || context_cards(&d0.form, &errors));
     let ctx2 = ctx.clone();
     let act = Rc::new(move |a: ContextAct| {
@@ -1482,7 +1532,11 @@ fn step_context(
             }
         }
     });
-    step(cx, ctx, step_title(3), build, act, focus);
+    let back: Rc<dyn Fn()> = {
+        let ctx = ctx.clone();
+        Rc::new(move || step_when(cx, store, &ctx, d_back.clone(), None))
+    };
+    step(cx, ctx, step_title(3), build, act, focus, back);
 }
 
 // ---------------------------------------------------------------------------
@@ -2043,9 +2097,16 @@ fn step_tools(cx: Scope, store: Store, ctx: &UiCtx, mut d: Draft) {
             .focusable()
             .autofocus()
             .on(abstracttui::ui::Phase::Bubble, on_mouse)
+            // Esc = back to Context, the tools chosen so far kept.
             .shortcut(KeyChord::plain(Key::Escape), {
                 let ctx = ctx2.clone();
-                move |_| ctx.close_modal()
+                let d = d.clone();
+                move |_| {
+                    let mut nd = d.clone();
+                    nd.form.tools = tools.get_untracked();
+                    nd.form.tool_approval = approval.get_untracked();
+                    step_context(cx, store, &ctx, nd, Vec::new(), None);
+                }
             })
             .shortcut(KeyChord::plain(Key::Up), {
                 let mv = mv.clone();
@@ -2223,6 +2284,7 @@ fn step_workspaces(cx: Scope, store: Store, ctx: &UiCtx, d: Draft) {
     });
     let ctx2 = ctx.clone();
     let cancel_ctx = ctx.clone();
+    let d_back = d.clone();
     let next: Rc<dyn Fn()> = Rc::new(move || {
         let mut d = d.clone();
         d.form.workspace = store.workspaces.with_untracked(|w| w.draft.clone());
@@ -2235,7 +2297,12 @@ fn step_workspaces(cx: Scope, store: Store, ctx: &UiCtx, d: Draft) {
         crate::ui::workspace_view::Host::NewAutomation,
         step_title(5),
         Some((format!("Continue — {}", STEPS[5]), next)),
-        Rc::new(move || cancel_ctx.close_modal()),
+        // Esc = back to Tools, the workspace chosen so far kept.
+        Rc::new(move || {
+            let mut d = d_back.clone();
+            d.form.workspace = store.workspaces.with_untracked(|w| w.draft.clone());
+            step_tools(cx, store, &cancel_ctx, d);
+        }),
     );
 }
 
@@ -2309,6 +2376,7 @@ fn step_mailbox(
     focus: Option<MailAct>,
 ) {
     let d0 = d.clone();
+    let d_back = d.clone();
     let build: Build<MailAct> = Rc::new(move || {
         let status = store.automations.with(|v| v.email.clone());
         mailbox_cards(&d0.form, status.as_ref(), &errors)
@@ -2367,7 +2435,11 @@ fn step_mailbox(
         }
         step_mailbox(cx, store, &ctx2, nd, Vec::new(), Some(a));
     });
-    step(cx, ctx, step_title(6), build, act, focus);
+    let back: Rc<dyn Fn()> = {
+        let ctx = ctx.clone();
+        Rc::new(move || step_workspaces(cx, store, &ctx, d_back.clone()))
+    };
+    step(cx, ctx, step_title(6), build, act, focus, back);
 }
 
 // ---------------------------------------------------------------------------
@@ -2449,6 +2521,11 @@ fn step_limits(
         ask_preview(store, ctx, t);
     }
     let d0 = d.clone();
+    let back: Rc<dyn Fn()> = {
+        let ctx = ctx.clone();
+        let d = d.clone();
+        Rc::new(move || step_mailbox(cx, store, &ctx, d.clone(), Vec::new(), None))
+    };
     let build: Build<LimitRow> = Rc::new(move || {
         let ok = store
             .automations
@@ -2511,6 +2588,7 @@ fn step_limits(
         build,
         act,
         focus,
+        back,
     );
 }
 
@@ -2777,6 +2855,8 @@ mod tests {
     fn a_picked_workflow_starts_from_its_own_tools() {
         let schema = json!({"properties": {"tools": {"default": ["read_file", "web_search"]}}});
         let mut d = Draft {
+            opened: Box::default(),
+            discard_asked: false,
             form: CreateForm::default(),
             conv_target: Some(
                 json!({"flow_id": "@default", "interface": auto::CODE_AGENT_INTERFACE}),
