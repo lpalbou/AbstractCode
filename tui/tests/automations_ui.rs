@@ -2741,3 +2741,44 @@ fn the_rail_offers_only_the_automations_sections() {
     let screen = h.keys(b"8");
     assert!(screen.contains("▸5 Skills"), "{screen}");
 }
+
+/// 120x40 screens of the three fixes (fixture automation "Inbox triage",
+/// 7 runs): the definition panel at its top and scrolled to its end, the
+/// automation's sections, and the runs opened as a chat (newest, then the
+/// oldest). `AUTOFIX_CAPTURE_DIR=<dir>` writes them as text.
+#[test]
+fn autofix2_screens_at_120x40() {
+    let dir = std::env::var("AUTOFIX_CAPTURE_DIR").ok();
+    let shot = |name: &str, screen: &str| {
+        if let Some(d) = &dir {
+            std::fs::create_dir_all(d).unwrap();
+            std::fs::write(format!("{d}/{name}.txt"), screen).unwrap();
+        }
+    };
+    let mut h = edit_inbox_small(Size::new(120, 40));
+    let screen = h.turn();
+    assert!(screen.contains("Sections (1–5)"), "{screen}");
+    shot("a2-01-edit-panel-top", &screen);
+    let screen = h.keys(b"\x1b[F");
+    assert!(
+        screen.contains("Title and limits") && screen.contains("Mailbox"),
+        "{screen}"
+    );
+    shot("a2-02-edit-panel-end-mailbox-title-and-limits", &screen);
+    h.keys(b"\x1b[H");
+    h.keys(b"\x1b[B\x1b[B\x1b[B");
+    let screen = h.turn();
+    assert!(screen.contains("Max growing context (tokens)"), "{screen}");
+    shot("a2-03-edit-panel-growing-budget", &screen);
+    let screen = h.click_on("2 Model and limits");
+    assert!(screen.contains("▸2 Model and limits"), "{screen}");
+    shot("a2-04-rail-section-clicked", &screen);
+    let mut h = harness_sized(Size::new(120, 40));
+    open_inbox(&mut h);
+    let screen = h.keys(b"o");
+    assert!(screen.contains("· as chat · 7 runs"), "{screen}");
+    shot("a2-05-open-as-chat-newest", &screen);
+    let screen = h.keys(b"\x1b[H");
+    assert!(screen.contains("#1 · completed"), "{screen}");
+    shot("a2-06-open-as-chat-oldest", &screen);
+}

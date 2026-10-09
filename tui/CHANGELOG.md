@@ -93,6 +93,24 @@ served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
 - In every New automation step a change keeps the cursor on the row you
   changed (`End` goes back to Continue); a step still opens with the
   cursor on Continue.
+- An automation's **Edit** panel: the rail reads **Sections (1–5)** — "the
+  automation's definition — changes save as a new revision" — with only the
+  sections a definition holds, named by what they edit (**Task and
+  schedule**, **Model and limits**, **Workspaces**, **Tools**, **Skills**;
+  Activity, Files and Voice are gone from it), the current one highlighted,
+  each clickable, `1`–`5` and `←`/`→` switch. **Task and schedule** follows
+  the New automation dialog's sections (What, When, Context, Tools,
+  Mailbox, Title and limits) and scrolls: `↑`/`↓`, `PgUp`/`PgDn`,
+  `Home`/`End` keep the focused row in view, the wheel scrolls, and every
+  row — Mailbox and Title and limits included — is reachable (before, rows
+  under the last selectable one stayed behind "↓ 2 more"). A growing
+  automation's **Max growing context (tokens)** can now be changed: one
+  revision with the kit's `context`.
+- One automation: `o` **Open as chat** (or `Enter` on a run) shows its runs
+  as a read-only conversation in the transcript widget — a separator per
+  run (`#N · completed · <time>`), the task as your turn, the answer as the
+  reply — scrollable and wrapped, opened on the selected run; `Esc` goes
+  back. `d` Discuss still forks a run into a new chat.
 - Every `/schedule` kind is sent as `schedule@2` (`{kind: "every", every}`,
   `{kind: "once", at}`, `{kind: "daily"|"weekly"|"monthly", …}`); the time
   zone is left to the gateway (your account's).

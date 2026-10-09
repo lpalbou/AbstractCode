@@ -75,7 +75,12 @@ sentence under it, as in the browser — or **When an email arrives**),
 and a state box per toolset; in the terminal every tool starts deselected —
 the browser starts from the conversation's tools), **Workspaces**, **Mailbox** and **Title and limits**. Each step
 opens with the cursor on **Continue**, so Enter, Enter, … creates it with the
-defaults (no tools) and opens it. The run input is built as in the browser (the workflow's input
+defaults (no tools) and opens it. In one automation, `o` (**Open as chat**, or `Enter` on a run)
+reads its runs as a read-only conversation in the terminal's transcript
+view, one separator per run; `e` (Edit) opens its definition: **Sections
+(1–5)** — Task and schedule (with **Max growing context (tokens)** for a
+growing automation), Model and limits, Workspaces, Tools, Skills — in a
+panel that scrolls with the keys and the wheel. The run input is built as in the browser (the workflow's input
 defaults plus the conversation's model, tools and skills, checked against the
 workflow's inputs before anything is sent).
 
