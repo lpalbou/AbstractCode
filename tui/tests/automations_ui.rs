@@ -2782,3 +2782,38 @@ fn autofix2_screens_at_120x40() {
     assert!(screen.contains("#1 · completed"), "{screen}");
     shot("a2-06-open-as-chat-oldest", &screen);
 }
+
+#[test]
+fn esc_from_an_automations_edit_goes_back_to_the_automation() {
+    let mut h = harness();
+    open_inbox(&mut h);
+    let screen = h.keys(b"e");
+    assert!(screen.contains("Sections (1–5)"), "{screen}");
+    assert!(
+        screen.contains("Esc back"),
+        "the hint says where Esc goes:\n{screen}"
+    );
+    let screen = h.esc();
+    assert!(
+        screen.contains("Automations / Inbox triage"),
+        "back on the automation:\n{screen}"
+    );
+    assert!(
+        screen.contains("o Open as chat"),
+        "the automation's own screen:\n{screen}"
+    );
+    assert!(!screen.contains("Sections (1–5)"), "{screen}");
+    // The conversation's panels still close on Esc (back to the list, then
+    // closed, then /settings).
+    h.esc();
+    let screen = h.esc();
+    assert!(
+        !screen.contains("Automations / ") && !screen.contains("Archived"),
+        "{screen}"
+    );
+    let screen = h.command("/settings");
+    assert!(screen.contains("Esc closes"), "{screen}");
+    let screen = h.esc();
+    assert!(!screen.contains("Esc closes"), "closed:\n{screen}");
+    assert!(!screen.contains("Automations / "), "{screen}");
+}

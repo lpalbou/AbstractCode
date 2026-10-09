@@ -2707,7 +2707,7 @@ rail on the right edge — **Activity**, **Files**, **Model**, **Workflow**,
 **Workspace**, **Tools**, **Skills**, **Voice**, the web's order and names.
 `←`/`→` (or `Tab`, or `1`–`8`) changes panel · `↑`/`↓` moves · `Enter`
 changes the selected row · `Space` flips a `[x]` switch · `d` puts the row
-back to **Gateway default** · `Esc` closes. A picker or a text field opened
+back to **Gateway default** · `Esc` closes (an automation's Edit: `Esc` goes back to the automation). A picker or a text field opened
 from a panel comes back to the same panel and row.
 
 The panels follow what is selected:
@@ -2930,7 +2930,7 @@ recovers it.
 | `/resources` | `↑↓` move (model, cache and totals rows are all reachable; admin keys act on the selected MODEL row) · `u` unload → `y`/`Enter` confirms · `f` force-unload (confirm labeled FORCED) · `n`/`Esc` cancel an armed confirm · `k` lock/unlock residency · `e` context estimate (inline result) · `r` refresh (re-probes capabilities while the contract is unconfirmed) · `Enter`/`Esc` close |
 | `/entities` | `↑↓` browse (the identity card follows) · `Enter` talk (`@name`) · `t` leave a task (title prompt) · `e` end that entity's open visit · `Ctrl+D` show per-section provenance · `Esc` close |
 | `/workspace` | the Workspace panel: `↑↓` move · `Enter` changes the row (a mode picker, the posture, **Add a workspace path**) · `Space` flips **Use my default** · `d` back to **Use my default** · `Esc` close |
-| `/settings` | `←`/`→`/`Tab`/`1`–`8` panel (an automation's Edit: `1`–`5`, or a click on a section) · `↑↓` move · `PgUp`/`PgDn`/`Home`/`End` · wheel scrolls · `Enter` change · `Space` switch · `d` Gateway default · `Esc` close |
+| `/settings` | `←`/`→`/`Tab`/`1`–`8` panel (an automation's Edit: `1`–`5`, or a click on a section) · `↑↓` move · `PgUp`/`PgDn`/`Home`/`End` · wheel scrolls · `Enter` change · `Space` switch · `d` Gateway default · `Esc` close (an automation's Edit: back to the automation) |
 | `/sessions` | `↑↓` move · `Enter` continue / open `Archived · N` / unarchive · `a` Archive → `y` archives, `n`/`Esc` cancels · `u` Unarchive · `n` new conversation · `r` refresh · `/` search (typing filters on title + id; `Backspace`; `Esc` clears it) · `Esc` close |
 | `/automations` | `↑↓` move · `Enter` open / open `Archived · N` / unarchive · `Space` Active · `g` Run now · `x` Stop · `e` Edit · `a` Archive → `y`, `n`/`Esc` keeps it · `u` Unarchive · `n` new · `r` refresh · `Esc` close; in one automation `o` Open as chat (or `Enter` on a run; `Esc` back) |
 
@@ -3900,7 +3900,7 @@ Requires AbstractGateway with `schedule@2`, the served schedule fields and `POST
 ### Changed
 
 - tui: **behaviour change** — `/automation` now creates an automation; it used to open the list, which is `/automations` (or `/autos`); `/schedule` is kept as an alias for this release.
-- tui: an automation's **Edit** panel offers only its definition's sections (**Sections (1–5)**: Task and schedule, Model and limits, Workspaces, Tools, Skills — named, highlighted, clickable), scrolls with the keys and the wheel so Mailbox and Title and limits are always reachable, and changes **Max growing context (tokens)** (one revision); `o` **Open as chat** (or `Enter` on a run) reads an automation's runs as a read-only conversation in the transcript view.
+- tui: an automation's **Edit** panel offers only its definition's sections (**Sections (1–5)**: Task and schedule, Model and limits, Workspaces, Tools, Skills — named, highlighted, clickable), scrolls with the keys and the wheel so Mailbox and Title and limits are always reachable, and changes **Max growing context (tokens)** (one revision); `o` **Open as chat** (or `Enter` on a run) reads an automation's runs as a read-only conversation in the transcript view. `Esc` in an automation's Edit goes back to the automation (it used to close everything).
 - tui: `/automation [task]` opens **New automation** (`/schedule`, its old name, stays a silent alias for this release; `/automation` no longer opens the list — `/automations` does). Its **Task** is a multiline editor (the composer's widget: `Enter`/`Ctrl+J` newline, a visible **Continue** button); its **Tools** step starts with every tool deselected and **Use workflow default tools** off, with **Select all** / **Unselect all**, a state box per toolset (`[x]` all · `[ ]` none · `[~]` some) that toggles its tools, wheel and page-key scrolling, click-to-toggle, and the focus staying on the line you toggle. The web dialog's Tools section is unchanged (it starts from the conversation's tools) — see [tui/CHANGELOG.md](tui/CHANGELOG.md).
 - Web: automation rows, the header and Run now's hint show the gateway's served next run (`next_run_local`, cut to "2026-10-09 07:30 Europe/Paris", plus the relative time to `next_run_at`) and every schedule's `schedule_rule_text` (cards read "Every 30 minutes (UTC) · last 3 h ago"); the app no longer reads `next_fire_at` or computes a next run.
 - tui: an automation created in the terminal carries the workflow's real inputs, built like the web's: the workflow's input schema defaults, then the conversation's provider/model, reasoning, stream setting, iteration and token limits, tools and skills (never its workspace or approval policy), checked against the schema before the POST (the check's sentence otherwise). Before, only the task was sent.

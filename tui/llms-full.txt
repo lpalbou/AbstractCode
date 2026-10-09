@@ -1220,7 +1220,7 @@ rail on the right edge — **Activity**, **Files**, **Model**, **Workflow**,
 **Workspace**, **Tools**, **Skills**, **Voice**, the web's order and names.
 `←`/`→` (or `Tab`, or `1`–`8`) changes panel · `↑`/`↓` moves · `Enter`
 changes the selected row · `Space` flips a `[x]` switch · `d` puts the row
-back to **Gateway default** · `Esc` closes. A picker or a text field opened
+back to **Gateway default** · `Esc` closes (an automation's Edit: `Esc` goes back to the automation). A picker or a text field opened
 from a panel comes back to the same panel and row.
 
 The panels follow what is selected:
@@ -1443,7 +1443,7 @@ recovers it.
 | `/resources` | `↑↓` move (model, cache and totals rows are all reachable; admin keys act on the selected MODEL row) · `u` unload → `y`/`Enter` confirms · `f` force-unload (confirm labeled FORCED) · `n`/`Esc` cancel an armed confirm · `k` lock/unlock residency · `e` context estimate (inline result) · `r` refresh (re-probes capabilities while the contract is unconfirmed) · `Enter`/`Esc` close |
 | `/entities` | `↑↓` browse (the identity card follows) · `Enter` talk (`@name`) · `t` leave a task (title prompt) · `e` end that entity's open visit · `Ctrl+D` show per-section provenance · `Esc` close |
 | `/workspace` | the Workspace panel: `↑↓` move · `Enter` changes the row (a mode picker, the posture, **Add a workspace path**) · `Space` flips **Use my default** · `d` back to **Use my default** · `Esc` close |
-| `/settings` | `←`/`→`/`Tab`/`1`–`8` panel (an automation's Edit: `1`–`5`, or a click on a section) · `↑↓` move · `PgUp`/`PgDn`/`Home`/`End` · wheel scrolls · `Enter` change · `Space` switch · `d` Gateway default · `Esc` close |
+| `/settings` | `←`/`→`/`Tab`/`1`–`8` panel (an automation's Edit: `1`–`5`, or a click on a section) · `↑↓` move · `PgUp`/`PgDn`/`Home`/`End` · wheel scrolls · `Enter` change · `Space` switch · `d` Gateway default · `Esc` close (an automation's Edit: back to the automation) |
 | `/sessions` | `↑↓` move · `Enter` continue / open `Archived · N` / unarchive · `a` Archive → `y` archives, `n`/`Esc` cancels · `u` Unarchive · `n` new conversation · `r` refresh · `/` search (typing filters on title + id; `Backspace`; `Esc` clears it) · `Esc` close |
 | `/automations` | `↑↓` move · `Enter` open / open `Archived · N` / unarchive · `Space` Active · `g` Run now · `x` Stop · `e` Edit · `a` Archive → `y`, `n`/`Esc` keeps it · `u` Unarchive · `n` new · `r` refresh · `Esc` close; in one automation `o` Open as chat (or `Enter` on a run; `Esc` back) |
 
@@ -2501,6 +2501,9 @@ served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
   run (`#N · completed · <time>`), the task as your turn, the answer as the
   reply — scrollable and wrapped, opened on the selected run; `Esc` goes
   back. `d` Discuss still forks a run into a new chat.
+- `Esc` in an automation's **Edit** goes back to the automation it came
+  from (the hint reads "Esc back"); before, it closed everything and left
+  the empty chat screen. The conversation's `/settings` still closes on `Esc`.
 - Every `/schedule` kind is sent as `schedule@2` (`{kind: "every", every}`,
   `{kind: "once", at}`, `{kind: "daily"|"weekly"|"monthly", …}`); the time
   zone is left to the gateway (your account's).

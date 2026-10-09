@@ -1345,7 +1345,7 @@ pub const AUTO_RAIL_HINTS: &[(&str, &str)] = &[
     ("Enter", "change"),
     ("space", "switch"),
     ("d", "Gateway default"),
-    ("Esc", "closes"),
+    ("Esc", "back"),
 ];
 
 const RAIL_W: i32 = 13;
@@ -1626,9 +1626,17 @@ pub fn open_rail(cx: Scope, store: Store, ctx: &UiCtx, binding: Binding, panel: 
                     }
                 }
             })
+            // Esc: an automation's Edit goes back to the automation it came
+            // from (like Open as chat); the conversation's panels close.
             .shortcut(KeyChord::plain(Key::Escape), {
                 let ctx = ctx2.clone();
-                move |_| ctx.close_modal()
+                let binding = binding.clone();
+                move |_| match &binding {
+                    Binding::Automation(id) => {
+                        crate::ui::automations_view::open_automation(cx, store, &ctx, id)
+                    }
+                    Binding::Conversation => ctx.close_modal(),
+                }
             })
             .shortcut(KeyChord::plain(Key::Left), {
                 let go = go.clone();

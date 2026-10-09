@@ -111,6 +111,9 @@ served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
   run (`#N · completed · <time>`), the task as your turn, the answer as the
   reply — scrollable and wrapped, opened on the selected run; `Esc` goes
   back. `d` Discuss still forks a run into a new chat.
+- `Esc` in an automation's **Edit** goes back to the automation it came
+  from (the hint reads "Esc back"); before, it closed everything and left
+  the empty chat screen. The conversation's `/settings` still closes on `Esc`.
 - Every `/schedule` kind is sent as `schedule@2` (`{kind: "every", every}`,
   `{kind: "once", at}`, `{kind: "daily"|"weekly"|"monthly", …}`); the time
   zone is left to the gateway (your account's).
