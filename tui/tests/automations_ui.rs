@@ -3154,3 +3154,32 @@ fn a_revision_save_marks_its_row_and_ignores_changes_until_the_answer() {
         .to_string();
     assert!(!row.contains('…'), "{row}");
 }
+
+#[test]
+fn a_preview_without_any_gateway_answer_is_one_plain_line_and_continue_works() {
+    let mut h = harness();
+    pick_when(&mut h, KIND_REPEAT);
+    let trigger = preview_asked(&mut h);
+    let (state, api) = abstractcode::gateway::automations::preview_state(Err(auto::ApiError {
+        status: None,
+        code: "unreachable".into(),
+        message: "POST /api/gateway/automations/schedule-preview: Connection refused (os error 61)"
+            .into(),
+        field: None,
+    }));
+    h.store.automations.update(|v| {
+        v.schedule_api = api;
+        v.apply_preview(&trigger, state)
+    });
+    let screen = h.turn();
+    assert!(flat(&screen).contains(auto::UNREACHED_LINE), "{screen}");
+    assert!(
+        !screen.contains("Connection refused"),
+        "never the transport text:\n{screen}"
+    );
+    let screen = h.cont();
+    assert!(
+        screen.contains("3/7 Context"),
+        "only a refusal stops Continue:\n{screen}"
+    );
+}

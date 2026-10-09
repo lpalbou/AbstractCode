@@ -167,7 +167,11 @@ email trigger, and the calendar kinds say they need 0.14 (see Fixed).
   refused with the same sentence (once, never twice). Create sends Repeat and
   Once as `schedule@1` (Once's time as `start_at`, UTC); a create made before
   the probe answered probes first. A missing route anywhere in the
-  automations screens reads as that sentence. The account default workflow
+  automations screens reads as that sentence (a 405, or a 404 with the
+  router's own "Not Found"; a route's own 404 keeps its words). A preview
+  that gets no gateway answer reads "The gateway could not be reached." (never
+  the transport text) and does not stop **Continue**; only a refusal from the
+  route itself does. The account default workflow
   also treats a 405 like a 404 (an older gateway: the panel says so once).
   Every route the terminal calls is listed against 0.13.1 in
   `docs/api.md` (only `schedule-preview` is round-16-only).

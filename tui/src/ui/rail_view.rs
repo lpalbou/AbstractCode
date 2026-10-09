@@ -307,6 +307,7 @@ pub fn calendar_preview_lines(state: Option<&auto::PreviewState>) -> Vec<String>
         ],
         Some(auto::PreviewState::Failed(e)) => vec![e.clone()],
         Some(auto::PreviewState::Unavailable) => vec![auto::NEEDS_NEWER_GATEWAY.to_string()],
+        Some(auto::PreviewState::Unreached) => vec![auto::UNREACHED_LINE.to_string()],
         _ => vec![auto::schedule_text("describing").to_string()],
     }
 }

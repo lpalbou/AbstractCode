@@ -791,13 +791,12 @@ pub fn preview_state(answer: Result<Value, ApiError>) -> (auto::PreviewState, au
         Err(e) if auto::is_missing_route(&e) => {
             (auto::PreviewState::Unavailable, auto::ScheduleApi::Missing)
         }
+        // No answer: one plain line (never the transport text), nothing
+        // learned, and Continue is not stopped.
+        Err(e) if e.is_transport() => (auto::PreviewState::Unreached, auto::ScheduleApi::Unknown),
         Err(e) => (
             auto::PreviewState::Failed(auto::api_error_text(&e)),
-            if e.is_transport() {
-                auto::ScheduleApi::Unknown
-            } else {
-                auto::ScheduleApi::Served
-            },
+            auto::ScheduleApi::Served,
         ),
     }
 }
@@ -918,10 +917,13 @@ mod tests {
             auto::PreviewState::Failed(e) => assert!(e.contains("Once at… is in the past."), "{e}"),
             other => panic!("{other:?}"),
         }
-        // No gateway answer at all: nothing learned (asked again later).
-        let (_, api) =
+        // No gateway answer at all: one plain line, nothing learned.
+        let (state, api) =
             preview_state(client("http://127.0.0.1:9").send(&auto::preview_request(repeat_v2())));
-        assert_eq!(api, auto::ScheduleApi::Unknown);
+        assert_eq!(
+            (state, api),
+            (auto::PreviewState::Unreached, auto::ScheduleApi::Unknown)
+        );
     }
 
     #[test]

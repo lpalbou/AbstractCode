@@ -1980,7 +1980,14 @@ pub enum PreviewState {
     /// the line is [`NEEDS_NEWER_GATEWAY`], never the route's error, and
     /// it does not stop Continue.
     Unavailable,
+    /// No gateway answer (transport failure): [`UNREACHED_LINE`], never the
+    /// raw transport text, and it does not stop Continue (only a refusal
+    /// from the route itself does).
+    Unreached,
 }
+
+/// The line when the preview got no gateway answer.
+pub const UNREACHED_LINE: &str = "The gateway could not be reached.";
 
 /// The served lines of a preview: the time-zone line (when ready and
 /// `with_zone` — not for Repeat, a fixed UTC interval) and the sentence —
@@ -1994,6 +2001,7 @@ pub fn preview_lines(state: &PreviewState, with_zone: bool) -> Vec<String> {
         PreviewState::Ready(p) => vec![p.first_run_sentence.clone()],
         PreviewState::Failed(e) => vec![e.clone()],
         PreviewState::Unavailable => vec![NEEDS_NEWER_GATEWAY.to_string()],
+        PreviewState::Unreached => vec![UNREACHED_LINE.to_string()],
     }
 }
 
@@ -2573,8 +2581,13 @@ pub fn parse_api_error(status: u16, body: &str) -> ApiError {
 
 /// One visible sentence per error code, plus the server's own message.
 pub fn api_error_text(e: &ApiError) -> String {
-    // A round-16 feature this gateway lacks: the one sentence, alone.
-    if e.message == NEEDS_NEWER_GATEWAY || (is_missing_route(e) && e.code == "invalid_request") {
+    // A route this gateway lacks (a round-16 feature on 0.13.x): the one
+    // sentence, alone — decided by STATUS: 405 (the path exists for another
+    // method only), or 404 with the router's own "Not Found" (no such path;
+    // a route's own 404 — automation_not_found, a missing run — keeps its words).
+    let no_route = e.status == Some(405)
+        || (e.status == Some(404) && e.code == "invalid_response" && e.message == "Not Found");
+    if e.message == NEEDS_NEWER_GATEWAY || no_route {
         return NEEDS_NEWER_GATEWAY.to_string();
     }
     let head = match e.code.as_str() {
@@ -3971,6 +3984,24 @@ mod tests {
             NEEDS_NEWER_GATEWAY
         );
         assert!(!api_error_text(&e(Some(400), "invalid_request")).contains("0.14"));
+        // A 404 with the router's "Not Found" (no such path) is the sentence; a
+        // route's own 404 keeps its words.
+        assert_eq!(
+            api_error_text(&parse_api_error(404, r#"{"detail":"Not Found"}"#)),
+            NEEDS_NEWER_GATEWAY
+        );
+        let own = parse_api_error(
+            404,
+            r#"{"detail": {"reason_code": "automation_not_found", "message": "no such automation"}}"#,
+        );
+        assert_eq!(
+            api_error_text(&own),
+            "This automation does not exist (or is not yours). no such automation"
+        );
+        assert!(
+            !api_error_text(&parse_api_error(404, r#"{"detail":"Run not found"}"#))
+                .contains("0.14")
+        );
     }
 
     #[test]
@@ -4022,6 +4053,10 @@ mod tests {
             assert_eq!(
                 preview_lines(&PreviewState::Unavailable, zone),
                 vec![NEEDS_NEWER_GATEWAY.to_string()]
+            );
+            assert_eq!(
+                preview_lines(&PreviewState::Unreached, zone),
+                vec![UNREACHED_LINE.to_string()]
             );
         }
     }

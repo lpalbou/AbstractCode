@@ -38,9 +38,10 @@ DEFAULTS = [
 # the calendar kinds) live in its `schedule` block, which the terminal vendors byte-identical.
 KIT_FILES = ["AfScheduleDialog.tsx", "email_fields.tsx", "automation_tools_picker.tsx", "panel_core.ts", "automation_controls.json"]
 
-# The dialog's non-table words the terminal shows (kit literals, verbatim).
+# The dialog's non-table words the terminal shows (kit literals, verbatim). The dialog's NAME is not
+# the kit's default title ("Schedule a task", `props.title ?? …`): the terminal shows the title the Code
+# web passes to the kit dialog, "New automation" (WEB_WORDS below, since 0.9.2 autofix-1).
 DIALOG_WORDS = [
-    "Schedule a task",
     "What",
     "Context",
     "Tools",
@@ -68,6 +69,11 @@ DIALOG_WORDS = [
     "Incomplete email trigger.",
     "Incomplete schedule.",
 ]
+
+
+# Words the terminal takes from the Code web (the caller of the kit dialog), verbatim in both sources.
+WEB_SOURCES = [HERE / "../web/src/workspace/automations_view.tsx"]
+WEB_WORDS = ["New automation"]
 
 
 def rust_pairs(text: str) -> list:
@@ -123,6 +129,14 @@ def main() -> int:
             problems.append(f"dialog word not in the kit source: {word!r}")
         if word not in tui_src:
             problems.append(f"dialog word not in the terminal source: {word!r}")
+    web_src = "\n".join(p.read_text() for p in WEB_SOURCES if p.exists())
+    if not web_src:
+        problems.append(f"Code web source not found: {', '.join(str(p) for p in WEB_SOURCES)}")
+    for word in WEB_WORDS:
+        if word not in web_src:
+            problems.append(f"web word not in the Code web source: {word!r}")
+        if word not in tui_src:
+            problems.append(f"web word not in the terminal source: {word!r}")
     print(f"kit: {kit_dir.resolve()}")
     print(f"EMAIL_TEXT keys: kit {len(kit)} · vendored {len(vendored)} · terminal {len(ours)}; dialog words: {len(DIALOG_WORDS)}")
     for p in problems:
