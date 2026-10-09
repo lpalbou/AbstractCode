@@ -145,6 +145,60 @@ pub enum Binding {
     Automation(String),
 }
 
+/// An automation's sections (operator feedback 2026-10-09): only the
+/// panels that edit its DEFINITION — the task and schedule first (the
+/// panel Edit opens on), then the model, workspaces, tools and skills.
+/// Activity, Files and Voice are not part of a definition (the runs and
+/// the folder are on the automation's own screen; voice is this device's).
+pub const AUTOMATION_PANELS: [Panel; 5] = [
+    Panel::Workflow,
+    Panel::Model,
+    Panel::Workspace,
+    Panel::Tools,
+    Panel::Skills,
+];
+
+/// The rail's sentence under "Sections" for an automation.
+pub const AUTOMATION_SECTIONS_NOTE: &str =
+    "the automation's definition — changes save as a new revision";
+
+impl Binding {
+    /// The sections this binding offers, in rail order (1, 2, …).
+    pub fn panels(&self) -> &'static [Panel] {
+        match self {
+            Binding::Conversation => &Panel::ALL,
+            Binding::Automation(_) => &AUTOMATION_PANELS,
+        }
+    }
+
+    /// A section's name: for an automation, what it edits.
+    pub fn panel_label(&self, p: Panel) -> &'static str {
+        match (self, p) {
+            (Binding::Automation(_), Panel::Workflow) => "Task and schedule",
+            (Binding::Automation(_), Panel::Model) => "Model and limits",
+            (Binding::Automation(_), Panel::Workspace) => "Workspaces",
+            _ => p.label(),
+        }
+    }
+
+    /// The section `delta` steps away among this binding's, wrapping (a
+    /// panel the binding does not offer steps from its first).
+    pub fn step(&self, p: Panel, delta: i64) -> Panel {
+        let all = self.panels();
+        let at = all.iter().position(|x| *x == p).unwrap_or(0) as i64;
+        all[((at + delta).rem_euclid(all.len() as i64)) as usize]
+    }
+
+    /// `p` when this binding offers it, else its first section.
+    pub fn offered(&self, p: Panel) -> Panel {
+        if self.panels().contains(&p) {
+            p
+        } else {
+            self.panels()[0]
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // An automation's run settings (definition.target.input_data)
 // ---------------------------------------------------------------------------
@@ -656,6 +710,36 @@ pub fn run_group_title(index: u64, fired_at: &str, status: &str, now: i64) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_automation_offers_only_its_definitions_sections() {
+        let b = Binding::Automation("a1".into());
+        assert_eq!(
+            b.panels(),
+            &[
+                Panel::Workflow,
+                Panel::Model,
+                Panel::Workspace,
+                Panel::Tools,
+                Panel::Skills
+            ]
+        );
+        for gone in [Panel::Activity, Panel::Files, Panel::Voice] {
+            assert!(!b.panels().contains(&gone));
+            assert_eq!(b.offered(gone), Panel::Workflow);
+        }
+        assert_eq!(b.panel_label(Panel::Workflow), "Task and schedule");
+        assert_eq!(b.panel_label(Panel::Model), "Model and limits");
+        assert_eq!(b.step(Panel::Workflow, -1), Panel::Skills);
+        assert_eq!(b.step(Panel::Skills, 1), Panel::Workflow);
+        // The conversation keeps its eight panels and their names.
+        assert_eq!(Binding::Conversation.panels().len(), 8);
+        assert_eq!(
+            Binding::Conversation.panel_label(Panel::Workflow),
+            "Workflow"
+        );
+        assert_eq!(Binding::Conversation.step(Panel::Voice, 1), Panel::Activity);
+    }
 
     #[test]
     fn settings_round_trip_with_the_web_keys() {

@@ -36,8 +36,11 @@ struct Harness {
 }
 
 fn harness() -> Harness {
+    harness_sized(Size::new(140, 44))
+}
+
+fn harness_sized(size: Size) -> Harness {
     abstracttui::app::set_theme_by_id("abstract-dark");
-    let size = Size::new(140, 44);
     let mut app = App::new(size);
     let overlays = app.overlays();
     let quitter = app.quitter();
@@ -1757,8 +1760,8 @@ fn edit_opens_the_settings_on_the_automation_and_a_refusal_stays_readable() {
         "{screen}"
     );
     assert!(screen.contains("Repeat every (UTC)"), "{screen}");
-    // Workflow, Title, Repeat every: Enter edits it; an invalid interval.
-    h.keys(b"\x1b[B\x1b[B");
+    // Workflow, Repeat every (What, then When): Enter edits it; an invalid interval.
+    h.keys(b"\x1b[B");
     h.keys(b"\r");
     h.keys(b"\x1b[F\x7f\x7f\x7f");
     h.term.push_input(b"6 hours");
@@ -1777,7 +1780,7 @@ fn a_settings_change_is_saved_as_a_new_revision() {
     open_inbox(&mut h);
     h.auto_cmds();
     h.keys(b"e");
-    h.keys(b"\x1b[B\x1b[B");
+    h.keys(b"\x1b[B"); // Repeat every
     h.keys(b"\r");
     h.keys(b"\x1b[F\x7f\x7f\x7f");
     h.term.push_input(b"6h");
@@ -1819,10 +1822,14 @@ fn the_definition_panel_edits_the_limits_as_one_revision() {
             .any(|c| matches!(c, AutoCmd::EmailStatus)),
         "the Mailbox rows read the account's email status"
     );
+    // Workflow, Repeat every, Context, Max growing context (Inbox triage is
+    // growing), Tools, Email result, Title, then "Stop after this many runs"
+    // (the kit's last section, Title and limits).
     let mut screen = String::new();
-    for _ in 0..5 {
+    for _ in 0..7 {
         screen = h.keys(b"\x1b[B");
     }
+    assert!(screen.contains("Title and limits"), "{screen}");
     assert!(screen.contains("Stop after this many runs"), "{screen}");
     assert!(screen.contains("no limit"), "{screen}");
     h.keys(b"\r");
@@ -1880,8 +1887,10 @@ fn the_definition_panel_edits_the_email_options() {
         ))
         .ok()
     });
+    // Workflow, Repeat every, Context, Max growing context, Tools, then
+    // Email result (Mailbox).
     let mut screen = String::new();
-    for _ in 0..7 {
+    for _ in 0..5 {
         screen = h.keys(b"\x1b[B");
     }
     assert!(screen.contains("Mailbox"), "{screen}");
@@ -1955,7 +1964,7 @@ fn an_automation_workspaces_change_is_one_revision_after_the_dry_run() {
                            "workspace_allowed_paths": ["/old/list"]}});
     });
     h.keys(b"e");
-    h.keys(b"5"); // the Workspace panel
+    h.keys(b"3"); // the Workspaces section (an automation's third)
                   // The panel asks for the dry run of the stored value (none = Use my default).
     let mut dry = false;
     while let Ok(cmd) = h.rx.try_recv() {
@@ -2364,9 +2373,9 @@ fn edit_a_calendar_rule_keeps_its_time_zone_and_shows_the_gateways_line() {
         "{screen}"
     );
     assert!(screen.contains(sentence), "{screen}");
-    // When (row 3: Workflow, Title, When) → Weekly: ONE revision with the
+    // When (row 2: Workflow, When) → Weekly: ONE revision with the
     // rule and the binding's own zone.
-    h.keys(b"\x1b[B\x1b[B");
+    h.keys(b"\x1b[B");
     let screen = h.keys(b"\r");
     assert!(
         screen.contains("Weekly") && screen.contains("Monthly"),
@@ -2393,8 +2402,8 @@ fn edit_a_calendar_time_sends_only_a_changed_rule() {
     let mut h = harness();
     edit_morning_briefing(&mut h);
     previews_and_saves(&mut h);
-    // Time of day (row 4).
-    h.keys(b"\x1b[B\x1b[B\x1b[B");
+    // Time of day (row 3: Workflow, When, Time of day).
+    h.keys(b"\x1b[B\x1b[B");
     let screen = h.keys(b"\r");
     assert!(screen.contains("Time of day"), "{screen}");
     // The same time: nothing is sent.
@@ -2451,8 +2460,8 @@ fn edit_weekly_days_survive_monthly_and_back() {
     let mut h = harness();
     let s = edit_morning_briefing(&mut h);
     previews_and_saves(&mut h);
-    // When (row 2) → Weekly.
-    h.keys(b"\x1b[B\x1b[B");
+    // When (row 2: Workflow, When) → Weekly.
+    h.keys(b"\x1b[B");
     h.keys(b"\r");
     h.keys(b"\x1b[B");
     h.keys(b"\r");
@@ -2501,4 +2510,234 @@ fn answer_preview(h: &mut Harness, sentence: &str) -> String {
         .automations
         .update(|v| v.apply_preview(&trigger, served_preview(&trigger, sentence)));
     h.turn()
+}
+
+// ---------------------------------------------------------------------------
+// Operator feedback 2026-10-09 (autofix 2): the definition panel scrolls
+// and edits the growing budget; an automation opens as a chat; the rail
+// offers only the automation's sections.
+// ---------------------------------------------------------------------------
+
+/// Inbox triage (growing) open in Edit on a small terminal.
+fn edit_inbox_small(size: Size) -> Harness {
+    let mut h = harness_sized(size);
+    open_inbox(&mut h);
+    h.auto_cmds();
+    h.keys(b"e");
+    h
+}
+
+/// The line the cursor marker `▸ ` (a card's) is on, if any.
+fn card_cursor_line(screen: &str) -> Option<String> {
+    screen
+        .lines()
+        .find(|l| l.trim_start().starts_with("▸ "))
+        .map(str::to_string)
+}
+
+#[test]
+fn the_definition_panel_scrolls_to_mailbox_and_title_and_limits() {
+    let mut h = edit_inbox_small(Size::new(100, 26));
+    let screen = h.turn();
+    assert!(screen.contains("↓"), "the panel overflows here:\n{screen}");
+    assert!(!screen.contains("Stop at (UTC)"), "{screen}");
+    // ↓ walks every row; the focused row is always on screen.
+    let mut seen = String::new();
+    for _ in 0..12 {
+        let screen = h.keys(b"\x1b[B");
+        assert!(
+            card_cursor_line(&screen).is_some(),
+            "the focused row is visible:\n{screen}"
+        );
+        seen.push_str(&flat(&screen));
+    }
+    for n in [
+        "Mailbox",
+        "Email result",
+        "Title and limits",
+        "Inbox triage",
+        "Stop after this many runs",
+        "Stop at (UTC)",
+    ] {
+        assert!(seen.contains(n), "{n} reached");
+    }
+    // At the last row the panel's end shows (nothing below it).
+    let screen = h.turn();
+    assert!(
+        card_cursor_line(&screen).unwrap().contains("Stop at (UTC)"),
+        "{screen}"
+    );
+    assert!(
+        !screen
+            .lines()
+            .any(|l| l.contains('↓') && l.contains(" more")),
+        "nothing below the end:\n{screen}"
+    );
+    // PgUp goes back up a page at a time; Home to the first row (the top).
+    h.keys(b"\x1b[5~");
+    let screen = h.keys(b"\x1b[H");
+    assert!(
+        card_cursor_line(&screen).unwrap().contains("Workflow"),
+        "{screen}"
+    );
+    assert!(screen.contains("What"), "{screen}");
+    // PgDn twice reaches the end too.
+    h.keys(b"\x1b[6~");
+    h.keys(b"\x1b[6~");
+    h.keys(b"\x1b[6~");
+    let screen = h.keys(b"\x1b[6~");
+    assert!(screen.contains("Stop at (UTC)"), "{screen}");
+    // The wheel scrolls without moving the cursor: back to the top rows.
+    let (row, col) = locate(&screen, "Stop at (UTC)");
+    let mut screen = screen;
+    for _ in 0..10 {
+        screen = h.wheel(row, col, true);
+    }
+    assert!(
+        screen.contains("Workflow"),
+        "the wheel scrolls up:\n{screen}"
+    );
+    for _ in 0..10 {
+        screen = h.wheel(row, col, false);
+    }
+    assert!(screen.contains("Stop at (UTC)"), "and down:\n{screen}");
+}
+
+#[test]
+fn the_growing_budget_round_trips_to_a_revision() {
+    let mut h = harness();
+    open_inbox(&mut h);
+    h.auto_cmds();
+    h.keys(b"e");
+    // What: Workflow · When: Repeat every · Context: Context, budget.
+    h.keys(b"\x1b[B\x1b[B\x1b[B");
+    let screen = h.turn();
+    let line = card_cursor_line(&screen).unwrap();
+    assert!(
+        line.contains("Max growing context (tokens)") && line.contains("50000"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("Limits history carried into the next run"),
+        "{screen}"
+    );
+    // A bad value: the kit's sentence, nothing sent.
+    h.keys(b"\r");
+    h.keys(b"\x1b[F\x7f\x7f\x7f\x7f\x7f");
+    h.term.push_input(b"lots");
+    h.turn();
+    let screen = h.keys(b"\r");
+    assert!(saves(&mut h).is_empty());
+    assert!(
+        flat(&screen).contains("Max growing context must be a positive whole number of tokens."),
+        "{screen}"
+    );
+    // 80000: ONE revision, the kit's context shape.
+    h.keys(b"\r");
+    h.keys(b"\x1b[F\x7f\x7f\x7f\x7f\x7f");
+    h.term.push_input(b"80000");
+    h.turn();
+    h.keys(b"\r");
+    match saves(&mut h).as_slice() {
+        [(3, changes)] => assert_eq!(
+            changes,
+            &json!({"context": {"mode": "growing", "growing": {"max_tokens": 80000}}})
+        ),
+        other => panic!("expected one revision, got {other:?}"),
+    }
+    // The gateway stored it: the panel reads it back.
+    h.store.automations.update(|v| {
+        let def = v.detail.as_mut().unwrap().definition.as_mut().unwrap();
+        def.growing.insert("max_tokens".into(), json!(80000));
+        def.revision = 4;
+    });
+    let screen = h.turn();
+    assert!(
+        card_cursor_line(&screen).unwrap().contains("80000"),
+        "{screen}"
+    );
+    // Back to the default: the kit sends the mode alone.
+    h.keys(b"\r");
+    h.keys(b"\x1b[F\x7f\x7f\x7f\x7f\x7f");
+    h.term.push_input(b"50000");
+    h.turn();
+    h.keys(b"\r");
+    match saves(&mut h).as_slice() {
+        [(4, changes)] => assert_eq!(changes, &json!({"context": {"mode": "growing"}})),
+        other => panic!("expected one revision, got {other:?}"),
+    }
+}
+
+#[test]
+fn open_as_chat_renders_every_run_as_a_transcript() {
+    let mut h = harness();
+    open_inbox(&mut h);
+    let screen = h.keys(b"o");
+    assert!(
+        screen.contains("Automations / Inbox triage · as chat · 7 runs (read-only)"),
+        "{screen}"
+    );
+    // The newest run at the end, in the transcript's own cards.
+    assert!(screen.contains("━━ #7"), "{screen}");
+    assert!(
+        screen.contains("══ you"),
+        "the task is your turn:\n{screen}"
+    );
+    // Home: the oldest run; every separator is met on the way down.
+    let mut seen = flat(&h.keys(b"\x1b[H"));
+    assert!(seen.contains("#1 · completed"), "{seen}");
+    for _ in 0..40 {
+        seen.push_str(&flat(&h.keys(b"\x1b[6~")));
+    }
+    for i in 1..=7 {
+        assert!(seen.contains(&format!("━━ #{i} ")), "run #{i}:\n{seen}");
+    }
+    assert!(seen.contains("No new email needs a reply today."), "{seen}");
+    // Esc: back to the automation.
+    let screen = h.esc();
+    assert!(screen.contains("Automations / Inbox triage"), "{screen}");
+    assert!(!screen.contains("· as chat ·"), "{screen}");
+    // Enter on a run (the newest, at the end) opens the chat on that run.
+    h.down(30);
+    let screen = h.keys(b"\r");
+    assert!(screen.contains("· as chat ·"), "{screen}");
+}
+
+#[test]
+fn the_rail_offers_only_the_automations_sections() {
+    let mut h = harness();
+    open_inbox(&mut h);
+    let screen = h.keys(b"e");
+    for label in [
+        "Sections (1–5)",
+        "the automation's",
+        "definition — changes",
+        "1 Task and schedule",
+        "2 Model and limits",
+        "3 Workspaces",
+        "4 Tools",
+        "5 Skills",
+    ] {
+        assert!(flat(&screen).contains(label), "{label}:\n{screen}");
+    }
+    for gone in ["Activity", "Files", "Voice"] {
+        assert!(!screen.contains(gone), "{gone}:\n{screen}");
+    }
+    assert!(screen.contains("1–5 ←→ section"), "the key hint:\n{screen}");
+    // A click on a section switches to it (its title, its highlight).
+    let screen = h.click_on("4 Tools");
+    assert!(screen.contains("▸4 Tools"), "{screen}");
+    assert!(
+        screen.contains("All tools") || screen.contains("Loading tools…"),
+        "the Tools section:\n{screen}"
+    );
+    // ← wraps among the five: 3 Workspaces; 1 then ← = 5 Skills.
+    let screen = h.keys(b"\x1b[D");
+    assert!(screen.contains("▸3 Workspaces"), "{screen}");
+    h.keys(b"1");
+    let screen = h.keys(b"\x1b[D");
+    assert!(screen.contains("▸5 Skills"), "{screen}");
+    // 6–8 do nothing here.
+    let screen = h.keys(b"8");
+    assert!(screen.contains("▸5 Skills"), "{screen}");
 }

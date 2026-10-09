@@ -327,6 +327,188 @@ pub fn draw_cards(cards: Vec<Card>, cursor: usize) -> View {
         .build()
 }
 
+/// A card list's scroll position that outlives a repaint: `top` = the
+/// first painted row (written by the paint, moved by the wheel), `follow`
+/// = keep the cursor's card in view (keys) or not (the wheel scrolls
+/// freely), `height` = the last painted height (page keys), `tick`
+/// repaints after a wheel.
+#[derive(Clone)]
+pub struct CardScroll {
+    pub top: std::rc::Rc<std::cell::Cell<usize>>,
+    pub follow: std::rc::Rc<std::cell::Cell<bool>>,
+    pub height: std::rc::Rc<std::cell::Cell<usize>>,
+    pub tick: Signal<u64>,
+}
+
+impl CardScroll {
+    pub fn new(cx: Scope) -> CardScroll {
+        CardScroll {
+            top: Default::default(),
+            follow: std::rc::Rc::new(std::cell::Cell::new(true)),
+            height: std::rc::Rc::new(std::cell::Cell::new(10)),
+            tick: cx.signal(0u64),
+        }
+    }
+
+    /// The mouse wheel: three rows, the cursor stays where it is.
+    pub fn wheel(&self, up: bool) {
+        self.follow.set(false);
+        let top = self.top.get();
+        self.top
+            .set(if up { top.saturating_sub(3) } else { top + 3 });
+        self.tick.update(|n| *n += 1);
+    }
+
+    /// A key moved the cursor: the window follows it again.
+    pub fn follow_cursor(&self) {
+        self.follow.set(true);
+    }
+
+    /// Back to the top (another panel opened).
+    pub fn reset(&self) {
+        self.top.set(0);
+        self.follow.set(true);
+    }
+
+    /// Cards a page key moves the cursor by.
+    pub fn page(&self) -> i64 {
+        (self.height.get() / 3).max(1) as i64
+    }
+}
+
+/// Pure: the first visible row of a scrolled card list. Following the
+/// cursor, the FIRST selectable card shows the list's top (the headings
+/// above it), the LAST shows its end (the notes under it — nothing is ever
+/// stranded below the last row you can select), any other card is scrolled
+/// into view with one row of context; not following (the wheel), `top`
+/// stays, clamped.
+pub fn scroll_window(
+    cards: &[Card],
+    rows: &[Row],
+    cursor: usize,
+    top: usize,
+    height: usize,
+    follow: bool,
+) -> usize {
+    let max_start = rows.len().saturating_sub(height);
+    let top = top.min(max_start);
+    if !follow || rows.len() <= height {
+        return if rows.len() <= height { 0 } else { top };
+    }
+    let n_sel = cards.iter().filter(|c| c.selectable).count();
+    let Some(card) = selected_card(cards, cursor) else {
+        return top;
+    };
+    let first = rows.iter().position(|r| r.card == card).unwrap_or(0);
+    let last = rows.iter().rposition(|r| r.card == card).unwrap_or(first);
+    // The ends, when the cursor's card is still whole in that window.
+    if cursor == 0 && last < height {
+        return 0;
+    }
+    if n_sel > 0 && cursor + 1 >= n_sel && first >= max_start {
+        return max_start;
+    }
+    if first < top + 1 {
+        first.saturating_sub(1).min(max_start)
+    } else if last + 2 > top + height {
+        (last + 2).saturating_sub(height).min(first).min(max_start)
+    } else {
+        top
+    }
+}
+
+/// [`draw_cards`] with a [`CardScroll`]: the wheel scrolls, the cursor's
+/// card stays in view while keys move it, and the counts of rows above /
+/// below are drawn at the right edge (no row is given up for them).
+pub fn draw_cards_scrolled(cards: Vec<Card>, cursor: usize, scroll: CardScroll) -> View {
+    let t = abstracttui::app::current_theme().tokens;
+    let _ = scroll.tick.get();
+    let selected = selected_card(&cards, cursor);
+    Element::new()
+        .style(LayoutStyle::column().grow(1.0).basis(Dimension::Cells(0)))
+        .draw(move |canvas, rect| {
+            let rows = layout(&cards, rect.w.max(10) as usize);
+            let h = rect.h.max(1) as usize;
+            scroll.height.set(h);
+            let start = scroll_window(
+                &cards,
+                &rows,
+                cursor,
+                scroll.top.get(),
+                h,
+                scroll.follow.get(),
+            );
+            scroll.top.set(start);
+            for (line, ri) in (start..rows.len()).take(h).enumerate() {
+                let row = &rows[ri];
+                let y = rect.y + line as i32;
+                let is_sel = selected == Some(row.card);
+                let bg = if is_sel {
+                    t.selection_bg
+                } else {
+                    Rgba::TRANSPARENT
+                };
+                if is_sel {
+                    canvas.fill(Rect::new(rect.x, y, rect.w, 1), ' ', t.selection_fg, bg);
+                }
+                let first_of_card = ri == 0 || rows[ri - 1].card != row.card;
+                let marker = if is_sel && first_of_card {
+                    "▸ "
+                } else {
+                    "  "
+                };
+                let style_of = |ink: Ink| {
+                    let fg = if is_sel {
+                        t.selection_fg
+                    } else {
+                        match ink {
+                            Ink::Text => t.text,
+                            Ink::Faint => t.text_faint,
+                            Ink::Title | Ink::Accent | Ink::On => t.accent,
+                            Ink::Error => t.error,
+                        }
+                    };
+                    let mut style = abstracttui::render::Style::new().fg(fg).bg(bg);
+                    if matches!(ink, Ink::Title | Ink::On) {
+                        style = style.attrs(abstracttui::render::Attrs::BOLD);
+                    }
+                    style
+                };
+                let (left, right) = match row.right_at {
+                    Some((at, ink)) if at <= row.text.len() => {
+                        (&row.text[..at], Some((&row.text[at..], ink)))
+                    }
+                    _ => (row.text.as_str(), None),
+                };
+                let head = format!("{marker}{left}");
+                canvas.print_styled(Point::new(rect.x, y), &head, &style_of(row.ink));
+                if let Some((r, ink)) = right {
+                    canvas.print_styled(
+                        Point::new(rect.x + width_of(&head) as i32, y),
+                        r,
+                        &style_of(ink),
+                    );
+                }
+            }
+            let below = rows.len().saturating_sub(start + h);
+            for (n, y, arrow) in [(start, rect.y, "↑"), (below, rect.bottom() - 1, "↓")] {
+                if n > 0 {
+                    let msg = format!(" {arrow} {n} more ");
+                    let w = abstracttui::text::width(&msg);
+                    let at = Point::new(rect.x + rect.w - w, y);
+                    canvas.fill(
+                        Rect::new(at.x, y, w, 1),
+                        ' ',
+                        t.text_faint,
+                        Rgba::TRANSPARENT,
+                    );
+                    canvas.print(at, &msg, t.text_faint, Rgba::TRANSPARENT);
+                }
+            }
+        })
+        .build()
+}
+
 /// Faint sentences wrapped to the current viewport (`inset` = the panel's
 /// horizontal chrome) — status, errors and notes above or below a list,
 /// never cut with an ellipsis.
@@ -470,6 +652,37 @@ mod tests {
             visible.iter().filter(|c| **c == 15).count() == 2,
             "{visible:?}"
         );
+    }
+
+    #[test]
+    fn a_scrolled_list_never_strands_rows_above_or_below() {
+        // A heading, 12 selectable cards, then two trailing notes.
+        let mut cards = vec![Card::heading("Head")];
+        cards.extend((0..12).map(|i| Card::new(vec![CardLine::new(format!("c{i}"), Ink::Text)])));
+        cards.push(Card::note("note one"));
+        cards.push(Card::note("note two"));
+        let rows = layout(&cards, 40);
+        assert_eq!(rows.len(), 15);
+        // First selectable: the heading shows.
+        assert_eq!(scroll_window(&cards, &rows, 0, 7, 6, true), 0);
+        // Last selectable: the notes under it show (the end).
+        assert_eq!(scroll_window(&cards, &rows, 11, 0, 6, true), 9);
+        // A first card below a tall preamble is still brought into view.
+        let mut tall = vec![Card::fixed(
+            (0..8)
+                .map(|i| CardLine::new(format!("p{i}"), Ink::Faint))
+                .collect(),
+        )];
+        tall.push(Card::new(vec![CardLine::new("first", Ink::Text)]));
+        let trows = layout(&tall, 40);
+        let start = scroll_window(&tall, &trows, 0, 0, 5, true);
+        assert!(start + 5 > 8, "{start}");
+        // A middle card comes into view with a row of context.
+        let start = scroll_window(&cards, &rows, 6, 0, 6, true);
+        assert!(start <= 7 && start + 6 > 7, "{start}");
+        // The wheel: the top stays (clamped), the cursor does not drag it.
+        assert_eq!(scroll_window(&cards, &rows, 0, 4, 6, false), 4);
+        assert_eq!(scroll_window(&cards, &rows, 0, 99, 6, false), 9);
     }
 
     #[test]

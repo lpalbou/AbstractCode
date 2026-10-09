@@ -28,7 +28,7 @@ use crate::rail::{self, Binding, Panel, RunSettings, SaveState};
 use crate::runner::Cmd;
 use crate::store::{Conn, Phase, SkillInfo, Store, ToolInfo, Workflow};
 use crate::transcript::Item;
-use crate::ui::cards::{draw_cards, hint_bar, note_lines, Card, CardLine, Ink};
+use crate::ui::cards::{hint_bar, note_lines, Card, CardLine, Ink};
 use crate::ui::modals::{modal_size, open_picker, title_row, Picker};
 use crate::ui::UiCtx;
 
@@ -90,6 +90,8 @@ pub enum Act {
     ACalMonthDay,
     ACalAt,
     AContextMode,
+    /// "Max growing context (tokens)" (a growing automation).
+    AGrowingTokens,
     AApproval,
     /// "Stop after this many runs" / "Stop at (UTC)" (repeating schedules).
     ACount,
@@ -324,8 +326,9 @@ fn or_default(v: &str, default: &str) -> String {
     }
 }
 
-/// The definition panel's limits ("Stop after this many runs", "Stop at
-/// (UTC)": repeating schedules) and Mailbox rows ("Email result", the
+/// The definition panel's last two sections, in the kit dialog's order:
+/// Mailbox, then "Title and limits" (the title; "Stop after this many
+/// runs", "Stop at (UTC)": repeating schedules). The Mailbox rows ("Email result", the
 /// recipients — offered while `GET /me/email` says email is usable; the
 /// kit's notice otherwise, the current state still shown).
 fn definition_limits_and_mailbox(
@@ -343,30 +346,6 @@ fn definition_limits_and_mailbox(
         }
         cards.push(card);
     };
-    if let (Some(count), Some(until)) = (&form.count, &form.until) {
-        push(
-            Card::new(vec![row(
-                "Stop after this many runs",
-                if count.is_empty() {
-                    "no limit".to_string()
-                } else {
-                    count.clone()
-                },
-            )]),
-            Act::ACount,
-        );
-        push(
-            Card::new(vec![row(
-                "Stop at (UTC)",
-                if until.is_empty() {
-                    "no end".to_string()
-                } else {
-                    format!("{until} UTC")
-                },
-            )]),
-            Act::AUntil,
-        );
-    }
     push(Card::heading("Mailbox"), Act::None);
     let usable = email::EmailStatus::usable(s.email.as_ref());
     let on = form.notify_email.unwrap_or(false);
@@ -414,6 +393,39 @@ fn definition_limits_and_mailbox(
                 Ink::Faint,
             )]),
             Act::ANotify,
+        );
+    }
+    // The kit dialog's last section: the title, then the limits.
+    push(
+        Card::heading(crate::ui::schedule_view::LIMITS_TITLE),
+        Act::None,
+    );
+    push(
+        Card::new(vec![row("Title", summary.title.clone())]),
+        Act::ATitle,
+    );
+    if let (Some(count), Some(until)) = (&form.count, &form.until) {
+        push(
+            Card::new(vec![row(
+                "Stop after this many runs",
+                if count.is_empty() {
+                    "no limit".to_string()
+                } else {
+                    count.clone()
+                },
+            )]),
+            Act::ACount,
+        );
+        push(
+            Card::new(vec![row(
+                "Stop at (UTC)",
+                if until.is_empty() {
+                    "no end".to_string()
+                } else {
+                    format!("{until} UTC")
+                },
+            )]),
+            Act::AUntil,
         );
     }
 }
@@ -642,15 +654,13 @@ pub fn panel_cards(
                     .find(|w| w.flow_id == flow && bundle.starts_with(&w.bundle_id))
                     .map(|w| w.label())
                     .unwrap_or_else(|| flow.to_string());
+                // The kit dialog's sections, in its order: What, When,
+                // Context, Tools, Mailbox, Title and limits.
+                push(&mut cards, Card::heading("What"), Act::None);
                 push(
                     &mut cards,
                     Card::new(vec![row("Workflow", named), faint(bundle.to_string())]),
                     Act::AWorkflow,
-                );
-                push(
-                    &mut cards,
-                    Card::new(vec![row("Title", summary.title.clone())]),
-                    Act::ATitle,
                 );
                 if let Some(prompt) = def
                     .target
@@ -668,6 +678,7 @@ pub fn panel_cards(
                     &summary.trigger.source_id,
                     summary.trigger.source_version,
                 );
+                push(&mut cards, Card::heading("When"), Act::None);
                 match summary.trigger.config.get("every").and_then(Value::as_str) {
                     _ if calendar.is_some() => {
                         let (when, trigger) = calendar.clone().expect("checked");
@@ -769,42 +780,67 @@ pub fn panel_cards(
                         Act::None,
                     );
                 }
+                push(&mut cards, Card::heading("Context"), Act::None);
                 push(
                     &mut cards,
                     Card::new(vec![
-                        row("Context", ""),
-                        faint(format!(
-                            "{}Independent — each run starts fresh",
-                            if summary.context_mode == "growing" {
-                                "( ) "
-                            } else {
-                                "(•) "
-                            }
-                        )),
-                        faint(format!(
-                            "{}Growing — each run sees the previous runs",
-                            if summary.context_mode == "growing" {
-                                "(•) "
-                            } else {
-                                "( ) "
-                            }
-                        )),
+                        CardLine::new(
+                            format!(
+                                "{}Independent — each run starts fresh",
+                                if summary.context_mode == "growing" {
+                                    "( ) "
+                                } else {
+                                    "(•) "
+                                }
+                            ),
+                            Ink::Text,
+                        ),
+                        CardLine::new(
+                            format!(
+                                "{}Growing — each run sees the previous runs",
+                                if summary.context_mode == "growing" {
+                                    "(•) "
+                                } else {
+                                    "( ) "
+                                }
+                            ),
+                            Ink::Text,
+                        ),
                     ]),
                     Act::AContextMode,
                 );
+                if summary.context_mode == "growing" {
+                    // The kit dialog's budget field, its words.
+                    push(
+                        &mut cards,
+                        Card::new(vec![row(
+                            auto::GROWING_MAX_TOKENS_LABEL,
+                            auto::growing_max_tokens_of(&summary, &def).to_string(),
+                        )]),
+                        Act::AGrowingTokens,
+                    );
+                    push(
+                        &mut cards,
+                        Card::note(auto::GROWING_CONTEXT_HELP),
+                        Act::None,
+                    );
+                }
+                push(&mut cards, Card::heading("Tools"), Act::None);
                 let ask = def.tool_approval == "ask";
                 push(
                     &mut cards,
                     Card::new(vec![
-                        row("Tools", ""),
-                        faint(format!(
-                            "{}Run without asking",
-                            if ask { "( ) " } else { "(•) " }
-                        )),
-                        faint(format!(
-                            "{}Ask before each tool call",
-                            if ask { "(•) " } else { "( ) " }
-                        )),
+                        CardLine::new(
+                            format!("{}Run without asking", if ask { "( ) " } else { "(•) " }),
+                            Ink::Text,
+                        ),
+                        CardLine::new(
+                            format!(
+                                "{}Ask before each tool call",
+                                if ask { "(•) " } else { "( ) " }
+                            ),
+                            Ink::Text,
+                        ),
                     ]),
                     Act::AApproval,
                 );
@@ -1301,10 +1337,61 @@ pub const RAIL_HINTS: &[(&str, &str)] = &[
     ("Esc", "closes"),
 ];
 
+/// The rail's key hints bound to an automation (its sections, the
+/// scrolling list).
+pub const AUTO_RAIL_HINTS: &[(&str, &str)] = &[
+    ("1–5 ←→", "section"),
+    ("↑↓ PgUp PgDn wheel", ""),
+    ("Enter", "change"),
+    ("space", "switch"),
+    ("d", "Gateway default"),
+    ("Esc", "closes"),
+];
+
 const RAIL_W: i32 = 13;
+/// The rail's width bound to an automation (named sections + the note).
+const AUTO_RAIL_W: i32 = 21;
+
+/// The rail column's lines: (text, the section it switches to, on). For
+/// an automation: "Sections (1–N)", the note, then the sections named by
+/// what they edit; for the conversation: the eight panels.
+pub fn rail_lines(binding: &Binding, here: Panel) -> Vec<(String, Option<Panel>, bool)> {
+    let mut out = Vec::new();
+    let panels = binding.panels();
+    if matches!(binding, Binding::Automation(_)) {
+        out.push((format!("Sections (1–{})", panels.len()), None, false));
+        // The sentence under the heading where the terminal has the rows
+        // (the panel header says the same at every size: "Changes are
+        // saved as a new revision…").
+        if abstracttui::app::current_viewport().h >= 30 {
+            for l in
+                crate::ui::cards::wrap(rail::AUTOMATION_SECTIONS_NOTE, (AUTO_RAIL_W - 1) as usize)
+            {
+                out.push((l, None, false));
+            }
+            out.push((String::new(), None, false));
+        }
+    }
+    for (i, p) in panels.iter().enumerate() {
+        let on = *p == here;
+        out.push((
+            format!(
+                "{}{} {}",
+                if on { "▸" } else { " " },
+                i + 1,
+                binding.panel_label(*p)
+            ),
+            Some(*p),
+            on,
+        ));
+    }
+    out
+}
 
 /// Open the rail on `panel`, bound to `binding`.
 pub fn open_rail(cx: Scope, store: Store, ctx: &UiCtx, binding: Binding, panel: Panel) {
+    // An automation offers only its definition's sections.
+    let panel = binding.offered(panel);
     // The revision line is NOT reset here: reopening after a text field or
     // a picker must keep "Not saved: …" / "Saved as revision N" readable.
     let start_cursor = store
@@ -1327,6 +1414,7 @@ pub fn open_rail(cx: Scope, store: Store, ctx: &UiCtx, binding: Binding, panel: 
         let t = abstracttui::app::current_theme().tokens;
         let current = mcx.signal(panel);
         let cursor = mcx.signal(start_cursor);
+        let scroll = crate::ui::cards::CardScroll::new(mcx);
         // Remembered so a picker or a text field returns to the same row.
         mcx.effect(move || {
             let c = cursor.get();
@@ -1467,21 +1555,32 @@ pub fn open_rail(cx: Scope, store: Store, ctx: &UiCtx, binding: Binding, panel: 
                     .unwrap_or(Act::None)
             }
         };
-        let go = move |delta: i64| {
-            current.update(|p| *p = p.step(delta));
-            cursor.set(0);
-            store
-                .rail
-                .update(|r| r.panel = Some(current.get_untracked()));
+        let switch_to = {
+            let scroll = scroll.clone();
+            Rc::new(move |p: Panel| {
+                current.set(p);
+                cursor.set(0);
+                scroll.reset();
+                store.rail.update(|r| r.panel = Some(p));
+            })
+        };
+        let go = {
+            let binding = binding.clone();
+            let switch_to = switch_to.clone();
+            move |delta: i64| switch_to(binding.step(current.get_untracked(), delta))
         };
         let move_cursor = {
             let acts = acts.clone();
-            move |delta: i64| {
+            let scroll = scroll.clone();
+            Rc::new(move |delta: i64| {
                 let n = acts().len();
                 if n > 0 {
-                    cursor.update(|c| *c = (*c as i64 + delta).clamp(0, n as i64 - 1) as usize);
+                    scroll.follow_cursor();
+                    cursor.update(|c| {
+                        *c = (*c as i64).saturating_add(delta).clamp(0, n as i64 - 1) as usize
+                    });
                 }
-            }
+            })
         };
         let activate = {
             let ctx = ctx2.clone();
@@ -1501,22 +1600,68 @@ pub fn open_rail(cx: Scope, store: Store, ctx: &UiCtx, binding: Binding, panel: 
                 );
             })
         };
+        let is_auto = matches!(binding, Binding::Automation(_));
         let mut el = Element::new()
             .style(LayoutStyle::column().padding(Edges::all(1)))
             .focusable()
             .autofocus()
+            // The wheel scrolls the panel (the cursor stays); a click on a
+            // rail section switches to it (the rail's own handler).
+            .on(abstracttui::ui::Phase::Bubble, {
+                let scroll = scroll.clone();
+                move |ectx, ev| {
+                    let abstracttui::ui::UiEvent::Mouse(m) = ev else {
+                        return;
+                    };
+                    match m.kind {
+                        abstracttui::ui::MouseKind::ScrollUp => {
+                            scroll.wheel(true);
+                            ectx.stop_propagation();
+                        }
+                        abstracttui::ui::MouseKind::ScrollDown => {
+                            scroll.wheel(false);
+                            ectx.stop_propagation();
+                        }
+                        _ => {}
+                    }
+                }
+            })
             .shortcut(KeyChord::plain(Key::Escape), {
                 let ctx = ctx2.clone();
                 move |_| ctx.close_modal()
             })
-            .shortcut(KeyChord::plain(Key::Left), move |_| go(-1))
-            .shortcut(KeyChord::plain(Key::Right), move |_| go(1))
+            .shortcut(KeyChord::plain(Key::Left), {
+                let go = go.clone();
+                move |_| go(-1)
+            })
+            .shortcut(KeyChord::plain(Key::Right), {
+                let go = go.clone();
+                move |_| go(1)
+            })
             .shortcut(KeyChord::plain(Key::Tab), move |_| go(1))
             .shortcut(KeyChord::plain(Key::Up), {
                 let m = move_cursor.clone();
                 move |_| m(-1)
             })
-            .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
+            .shortcut(KeyChord::plain(Key::Down), {
+                let m = move_cursor.clone();
+                move |_| m(1)
+            })
+            .shortcut(KeyChord::plain(Key::PageUp), {
+                let (m, scroll) = (move_cursor.clone(), scroll.clone());
+                move |_| m(-scroll.page())
+            })
+            .shortcut(KeyChord::plain(Key::PageDown), {
+                let (m, scroll) = (move_cursor.clone(), scroll.clone());
+                move |_| m(scroll.page())
+            })
+            .shortcut(KeyChord::plain(Key::Home), {
+                let m = move_cursor.clone();
+                move |_| m(i64::MIN / 2)
+            })
+            .shortcut(KeyChord::plain(Key::End), move |_| {
+                move_cursor(i64::MAX / 2)
+            })
             .shortcut(KeyChord::plain(Key::Enter), {
                 let a = activate.clone();
                 move |_| a(false)
@@ -1529,20 +1674,18 @@ pub fn open_rail(cx: Scope, store: Store, ctx: &UiCtx, binding: Binding, panel: 
                 let a = activate.clone();
                 move |_| a(true)
             });
-        for (i, p) in Panel::ALL.iter().enumerate() {
+        for (i, p) in binding.panels().iter().enumerate() {
             let p = *p;
+            let switch_to = switch_to.clone();
             el = el.shortcut(
                 KeyChord::plain(Key::Char(char::from(b'1' + i as u8))),
-                move |_| {
-                    current.set(p);
-                    cursor.set(0);
-                    store.rail.update(|r| r.panel = Some(p));
-                },
+                move |_| switch_to(p),
             );
         }
+        let binding3 = binding.clone();
         el.child(dyn_view(LayoutStyle::line(1).shrink(0.0), move || {
             let t2 = abstracttui::app::current_theme().tokens;
-            title_row(&t2, current.get().label().to_string())
+            title_row(&t2, binding3.panel_label(current.get()).to_string())
         }))
         .child(dyn_view(LayoutStyle::column().shrink(0.0), {
             let ctx = ctx2.clone();
@@ -1566,34 +1709,46 @@ pub fn open_rail(cx: Scope, store: Store, ctx: &UiCtx, binding: Binding, panel: 
                     {
                         let ctx = ctx2.clone();
                         let binding = binding2.clone();
+                        let scroll = scroll.clone();
                         move || {
                             let s = snap(store, &ctx, &binding, true);
                             let (cards, acts) =
                                 panel_cards(current.get(), &s, &open.get(), auto::now_unix());
                             let cur = cursor.get().min(acts.len().saturating_sub(1));
-                            draw_cards(cards, cur)
+                            crate::ui::cards::draw_cards_scrolled(cards, cur, scroll.clone())
                         }
                     },
                 ))
                 .child(dyn_view(
                     LayoutStyle::column()
-                        .width(Dimension::Cells(RAIL_W))
+                        .width(Dimension::Cells(if is_auto { AUTO_RAIL_W } else { RAIL_W }))
                         .shrink(0.0),
-                    move || {
-                        let t2 = abstracttui::app::current_theme().tokens;
-                        let here = current.get();
-                        let mut col = Element::new().style(LayoutStyle::column());
-                        for (i, p) in Panel::ALL.iter().enumerate() {
-                            let on = *p == here;
-                            let label =
-                                format!("{}{} {}", if on { "▸" } else { " " }, i + 1, p.label());
-                            let ink = if on { t2.accent } else { t2.text_faint };
-                            col = col.child(
-                                Element::new()
+                    {
+                        let binding = binding2.clone();
+                        let switch_to = switch_to.clone();
+                        move || {
+                            let t2 = abstracttui::app::current_theme().tokens;
+                            let mut col = Element::new().style(LayoutStyle::column());
+                            for (label, target, on) in rail_lines(&binding, current.get()) {
+                                let heading = target.is_none() && label.starts_with("Sections");
+                                let ink = if on || heading {
+                                    t2.accent
+                                } else {
+                                    t2.text_faint
+                                };
+                                let (sel_fg, sel_bg) = (t2.selection_fg, t2.selection_bg);
+                                let mut line = Element::new()
                                     .style(LayoutStyle::line(1).shrink(0.0))
                                     .draw(move |canvas, rect| {
                                         let mut style = abstracttui::render::Style::new().fg(ink);
                                         if on {
+                                            // The current section: highlighted, not only coloured.
+                                            canvas.fill(rect, ' ', sel_fg, sel_bg);
+                                            style = abstracttui::render::Style::new()
+                                                .fg(sel_fg)
+                                                .bg(sel_bg);
+                                        }
+                                        if on || heading {
                                             style = style.attrs(abstracttui::render::Attrs::BOLD);
                                         }
                                         canvas.print_styled(
@@ -1601,16 +1756,35 @@ pub fn open_rail(cx: Scope, store: Store, ctx: &UiCtx, binding: Binding, panel: 
                                             &label,
                                             &style,
                                         );
-                                    })
-                                    .build(),
-                            );
+                                    });
+                                if let Some(p) = target {
+                                    let switch_to = switch_to.clone();
+                                    line =
+                                        line.on(abstracttui::ui::Phase::Bubble, move |ectx, ev| {
+                                            if let abstracttui::ui::UiEvent::Mouse(m) = ev {
+                                                if let abstracttui::ui::MouseKind::Down(
+                                                    abstracttui::ui::MouseButton::Left,
+                                                ) = m.kind
+                                                {
+                                                    ectx.stop_propagation();
+                                                    switch_to(p);
+                                                }
+                                            }
+                                        });
+                                }
+                                col = col.child(line.build());
+                            }
+                            col.build()
                         }
-                        col.build()
                     },
                 ))
                 .build(),
         )
-        .child(hint_bar(&t, RAIL_HINTS, 8))
+        .child(hint_bar(
+            &t,
+            if is_auto { AUTO_RAIL_HINTS } else { RAIL_HINTS },
+            8,
+        ))
         .build()
     });
 }
@@ -2454,6 +2628,25 @@ fn run_act(
                 }),
             );
         }
+        Act::AGrowingTokens => {
+            let Some((summary, def, _)) = settings.clone() else {
+                return;
+            };
+            let initial = auto::growing_max_tokens_of(&summary, &def).to_string();
+            let ctx2 = ctx.clone();
+            let binding2 = binding.clone();
+            text_then(
+                auto::GROWING_MAX_TOKENS_LABEL,
+                auto::GROWING_CONTEXT_HELP,
+                initial,
+                Rc::new(
+                    move |v: String| match auto::growing_budget_changes(&summary, &def, &v) {
+                        Ok(ch) => save_revision(store, &ctx2, &binding2, ch),
+                        Err(e) => store.rail.update(|r| r.save = SaveState::Refused(e)),
+                    },
+                ),
+            );
+        }
         Act::ANotify => {
             let Some((summary, def, _)) = settings.clone() else {
                 return;
@@ -2743,4 +2936,38 @@ pub fn wire_rail(cx: Scope, store: Store, ctx: UiCtx) {
             }
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_automation_rail_names_its_sections_and_marks_the_current_one() {
+        let b = Binding::Automation("a1".into());
+        let lines = rail_lines(&b, Panel::Tools);
+        assert_eq!(lines[0].0, "Sections (1–5)");
+        let sections: Vec<(String, bool)> = lines
+            .iter()
+            .filter(|(_, p, _)| p.is_some())
+            .map(|(t, _, on)| (t.clone(), *on))
+            .collect();
+        assert_eq!(
+            sections,
+            vec![
+                (" 1 Task and schedule".to_string(), false),
+                (" 2 Model and limits".to_string(), false),
+                (" 3 Workspaces".to_string(), false),
+                ("▸4 Tools".to_string(), true),
+                (" 5 Skills".to_string(), false),
+            ]
+        );
+        assert!(!lines
+            .iter()
+            .any(|(t, _, _)| t.contains("Activity") || t.contains("Voice")));
+        // The conversation's rail is unchanged: eight panels, no heading.
+        let conv = rail_lines(&Binding::Conversation, Panel::Model);
+        assert_eq!(conv.len(), 8);
+        assert_eq!(conv[2].0, "▸3 Model");
+    }
 }

@@ -230,11 +230,35 @@ fn squash(s: &str) -> String {
 }
 
 /// The screen as one line of words (wrapped sentences read whole).
+/// An automation's rail sections (0.9.2), as the rail names them.
+const AUTOMATION_SECTIONS: [&str; 5] = [
+    "Task and schedule",
+    "Model and limits",
+    "Workspaces",
+    "Tools",
+    "Skills",
+];
+
 fn flatten(screen: &str) -> String {
     let rows: Vec<String> = screen
         .lines()
         .map(|l| {
             let mut l = l.trim_end().to_string();
+            // An automation's rail: its heading and named sections.
+            for tail in ["Sections (1–5)"] {
+                if l.ends_with(tail) {
+                    l.truncate(l.len() - tail.len());
+                }
+            }
+            for (i, p) in AUTOMATION_SECTIONS.iter().enumerate() {
+                for mark in ["▸", " "] {
+                    let tail = format!("{mark}{} {p}", i + 1);
+                    if l.trim_end().ends_with(&tail) {
+                        l = l.trim_end().to_string();
+                        l.truncate(l.len() - tail.len());
+                    }
+                }
+            }
             for (i, p) in PANELS.iter().enumerate() {
                 for mark in ["▸", " "] {
                     let tail = format!("{mark}{} {p}", i + 1);
@@ -458,7 +482,7 @@ fn open_automation_workspace(h: &mut H) -> String {
         .update(|v| v.apply_detail(INBOX, definition, summary, page));
     h.turn();
     h.keys(b"e");
-    h.keys(b"5")
+    h.keys(b"3") // the Workspaces section (an automation's third)
 }
 
 #[test]
@@ -477,13 +501,22 @@ fn an_automation_workspace_panel_is_the_run_level() {
         );
         h.answer_dry_run(&key, "dryrun_payload.json");
         let screen = h.shot("workspace-automation");
+        h.assert_rows(&screen, &["Automation Inbox triage", "[ ] Use my default"]);
+        // The sentence above the first row: in view, or one wheel away on a
+        // small terminal (the automation's named sections take the right
+        // edge; the panel scrolls with the wheel since 0.9.2).
+        let read = if flatten(&screen).contains(&squash(
+            "The workspaces this run uses, among the eligible ones.",
+        )) {
+            screen.clone()
+        } else {
+            h.term.push_input(b"\x1b[<64;10;12M");
+            h.turn();
+            h.turn()
+        };
         h.assert_rows(
-            &screen,
-            &[
-                "Automation Inbox triage",
-                "The workspaces this run uses, among the eligible ones.",
-                "[ ] Use my default",
-            ],
+            &read,
+            &["The workspaces this run uses, among the eligible ones."],
         );
         if size.h >= 40 {
             h.assert_rows(&screen, &["Runs work in the automation folder"]);

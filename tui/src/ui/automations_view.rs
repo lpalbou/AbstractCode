@@ -547,7 +547,8 @@ pub const DETAIL_HINTS: &[(&str, &str)] = &[
     ("space", "Active"),
     ("↑↓", ""),
     ("y/n", "approve/deny"),
-    ("Enter", "answers"),
+    ("Enter", "answers · opens a run as chat"),
+    ("o", "Open as chat"),
     ("d", "Discuss run"),
     ("Ctrl+P", "read aloud"),
     ("w", "folder"),
@@ -663,6 +664,125 @@ pub(crate) fn detail_rows(d: &auto::Detail, width: i32) -> (Vec<RowSpec>, Vec<(u
         }
     }
     (rows, targets)
+}
+
+/// The automation's runs as a conversation, oldest first: per run a
+/// separator (`#N · completed · <time>`, the run header's words, feed key
+/// `r<N>`), its task as your turn, its answer as the reply, then what it
+/// notified, its failure and its artifacts.
+pub fn occurrences_as_chat(
+    occs: &[auto::Occurrence],
+) -> Vec<crate::ui::transcript_view::ChatEntry> {
+    use crate::transcript::Item;
+    use crate::ui::transcript_view::ChatEntry;
+    let mut out = Vec::new();
+    let mut ordered: Vec<&auto::Occurrence> = occs.iter().collect();
+    ordered.sort_by_key(|o| o.index);
+    for o in ordered {
+        out.push(ChatEntry::Separator {
+            key: format!("r{}", o.index),
+            label: auto::occurrence_header(o),
+        });
+        if !o.user_turn.is_empty() {
+            out.push(ChatEntry::Item(Box::new(Item::User {
+                text: o.user_turn.clone(),
+            })));
+        }
+        if !o.answer.is_empty() {
+            out.push(ChatEntry::Item(Box::new(Item::Assistant {
+                text: o.answer.clone(),
+                final_answer: true,
+            })));
+        }
+        if let Some((title, body)) = &o.notify {
+            out.push(ChatEntry::Item(Box::new(Item::Info {
+                text: format!("notify: {title} — {body}"),
+            })));
+        }
+        if let Some(f) = &o.failure {
+            out.push(ChatEntry::Item(Box::new(Item::Error {
+                text: format!(
+                    "failed: {} {} (after {} attempts)",
+                    f.reason_code, f.message, f.attempts
+                ),
+            })));
+        }
+        if !o.artifacts.is_empty() {
+            out.push(ChatEntry::Item(Box::new(Item::Info {
+                text: format!("artifacts: {}", o.artifacts.join(", ")),
+            })));
+        }
+    }
+    out
+}
+
+/// The "Open as chat" view's key hints.
+pub const CHAT_HINTS: &[(&str, &str)] = &[
+    ("↑↓ PgUp PgDn Home End wheel", "scroll"),
+    ("Esc", "back to the automation"),
+];
+
+/// "Open as chat": the automation's loaded runs in the conversation's
+/// transcript widget (read-only, scrollable, wrapped), opened on run
+/// `at` (else the newest). Esc goes back to the automation; `d` Discuss
+/// there still forks a run into a new chat.
+pub fn open_as_chat(cx: Scope, store: Store, ctx: &UiCtx, at: Option<u64>) {
+    let Some((id, title, entries)) = store.automations.with_untracked(|v| {
+        v.detail.as_ref().map(|d| {
+            (
+                d.id.clone(),
+                d.summary
+                    .as_ref()
+                    .map(|s| s.title.clone())
+                    .unwrap_or_default(),
+                occurrences_as_chat(&d.occurrences),
+            )
+        })
+    }) else {
+        return;
+    };
+    let n = entries
+        .iter()
+        .filter(|e| matches!(e, crate::ui::transcript_view::ChatEntry::Separator { .. }))
+        .count();
+    let ctx2 = ctx.clone();
+    let size = modal_size(160, 44);
+    ctx.open_modal(cx, size, move |mcx| {
+        let t = abstracttui::app::current_theme().tokens;
+        let back = {
+            let ctx = ctx2.clone();
+            let id = id.clone();
+            move || open_automation(cx, store, &ctx, &id)
+        };
+        let body = if entries.is_empty() {
+            note_lines(&t, &["no runs yet — g runs it now".to_string()], 8)
+        } else {
+            crate::ui::transcript_view::read_only_transcript(
+                mcx,
+                store,
+                &entries,
+                at.map(|i| format!("r{i}")),
+            )
+        };
+        Element::new()
+            .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
+            .shortcut(KeyChord::plain(Key::Escape), move |_| back())
+            .child(title_row(
+                &t,
+                format!(
+                    "Automations / {title} · as chat · {n} {} (read-only)",
+                    if n == 1 { "run" } else { "runs" }
+                ),
+            ))
+            .child(
+                Element::new()
+                    .style(LayoutStyle::column().grow(1.0).basis(Dimension::Cells(0)))
+                    .child(body)
+                    .build(),
+            )
+            .child(hint_bar(&t, CHAT_HINTS, 8))
+            .build()
+    });
 }
 
 /// Where the cursor rests before the user moves it (`usize::MAX`): on the
@@ -847,7 +967,18 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
                 Some(Target::Wait(w)) if w.kind == "tool_approval" => store
                     .automations
                     .update(|v| v.notice = "a tool approval is answered with y (approve) or n (deny)".into()),
+                Some(Target::Run(i)) => open_as_chat(cx, store, &ctx, Some(i)),
                 _ => {}
+            }
+        };
+        let as_chat = {
+            let ctx = ctx2.clone();
+            move || {
+                let at = match at() {
+                    Some(Target::Run(i)) => Some(i),
+                    _ => None,
+                };
+                open_as_chat(cx, store, &ctx, at)
             }
         };
         let approve = {
@@ -1046,6 +1177,7 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
             .shortcut(key('e'), move |_| revise())
             .shortcut(key('a'), move |_| archive())
             .shortcut(key('d'), move |_| discuss())
+            .shortcut(key('o'), move |_| as_chat())
             .shortcut(key('w'), move |_| folder())
             // Ctrl+P reads the selected run's reply aloud (again = stop),
             // the conversation's read-aloud path on this automation's run.
@@ -1240,4 +1372,68 @@ pub fn wire_automations(cx: Scope, store: Store, ctx: UiCtx) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::transcript_view::ChatEntry;
+
+    fn occ(index: u64, status: &str, task: &str, answer: &str) -> auto::Occurrence {
+        auto::Occurrence {
+            run_id: format!("run-{index}"),
+            index,
+            attempts: 1,
+            fired_at: String::new(),
+            status: status.into(),
+            trigger_summary: String::new(),
+            user_turn: task.into(),
+            answer: answer.into(),
+            notify: None,
+            failure: None,
+            artifacts: Vec::new(),
+            waits: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_runs_read_as_a_conversation_oldest_first() {
+        let occs = vec![
+            occ(3, "running", "check", ""),
+            occ(1, "completed", "check", "all quiet"),
+            occ(2, "completed", "check", "two new"),
+        ];
+        let entries = occurrences_as_chat(&occs);
+        let seps: Vec<&str> = entries
+            .iter()
+            .filter_map(|e| match e {
+                ChatEntry::Separator { key, .. } => Some(key.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            seps,
+            vec!["r1", "r2", "r3"],
+            "one separator per run, oldest first"
+        );
+        match &entries[0] {
+            ChatEntry::Separator { label, .. } => assert!(label.starts_with("#1 · completed")),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            entries[1],
+            ChatEntry::Item(Box::new(crate::transcript::Item::User {
+                text: "check".into()
+            }))
+        );
+        assert_eq!(
+            entries[2],
+            ChatEntry::Item(Box::new(crate::transcript::Item::Assistant {
+                text: "all quiet".into(),
+                final_answer: true
+            }))
+        );
+        // A run still going has its task and no reply yet.
+        assert_eq!(entries.len(), 3 * 2 + 2);
+    }
 }

@@ -1479,6 +1479,72 @@ pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState, link_root: Option<Rc
 }
 
 // ---------------------------------------------------------------------------
+// A read-only transcript (an automation's runs as a chat)
+// ---------------------------------------------------------------------------
+
+/// One entry of a read-only transcript: a full-width separator (its feed
+/// key, its label) or a transcript item.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChatEntry {
+    Separator { key: String, label: String },
+    Item(Box<Item>),
+}
+
+/// The conversation's transcript widget over fixed entries, read-only:
+/// the same `render_item` cards (full detail: nothing capped), a
+/// separator per entry group (`rule_block`), wrapped to the width,
+/// scrolled by the engine `Scroll` (↑↓, PgUp/PgDn, Home/End, the wheel;
+/// it takes the focus). `focus_key` = the separator to show first (else
+/// the end, the newest).
+pub fn read_only_transcript(
+    cx: Scope,
+    store: Store,
+    entries: &[ChatEntry],
+    focus_key: Option<String>,
+) -> View {
+    let t = abstracttui::app::current_theme().tokens;
+    let feed = FeedState::new(cx);
+    for (i, e) in entries.iter().enumerate() {
+        match e {
+            ChatEntry::Separator { key, label } => feed.push(
+                key.clone(),
+                FeedItem::new().block(rule_block('━', label.clone(), t.accent, t.text_faint)),
+            ),
+            ChatEntry::Item(item) => {
+                if let Some(fi) = render_item(&t, item, store, true, None, false) {
+                    feed.push(format!("c{i}"), fi);
+                }
+            }
+        }
+    }
+    let offset = cx.signal(0i32);
+    let follow = cx.signal(focus_key.is_none());
+    if let Some(key) = focus_key {
+        // Once laid out, open on the chosen run (then the reader scrolls).
+        let feed2 = feed.clone();
+        let done = Rc::new(std::cell::Cell::new(false));
+        cx.effect(move || {
+            let _ = feed2.total_rows().get();
+            if done.get() {
+                return;
+            }
+            if let Some(row) = feed2.row_of(&key) {
+                done.set(true);
+                offset.set(row);
+            }
+        });
+    }
+    abstracttui::widgets::Scroll::new(Feed::new(&feed).gap(0).view(cx))
+        .offset_y(offset)
+        .follow_tail(follow)
+        .layout(LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)))
+        .element(cx, &t)
+        .focusable()
+        .autofocus()
+        .build()
+}
+
+// ---------------------------------------------------------------------------
 // Live replies (contract S): a SECOND feed under the transcript
 // ---------------------------------------------------------------------------
 

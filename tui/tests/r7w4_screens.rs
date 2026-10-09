@@ -521,11 +521,23 @@ fn every_rail_panel_on_an_automation() {
         h.keys(b"e");
         h.answer_panels();
         h.answer_detail();
-        let expect: [(&str, &[&str]); 7] = [
-            ("activity", &["▾ Run #7", "▸ Run #6"]),
-            ("files", &["Automation folder"]),
-            ("model", &["Custom", "lmstudio · qwen3-8b", "high", "12"]),
-            ("workflow", &["Title", "Inbox triage", "Task"]),
+        // An automation's sections (operator feedback 2026-10-09): only
+        // what its definition holds, named by what they edit.
+        let expect: [(&str, &[&str]); 5] = [
+            (
+                "workflow",
+                &["Task and schedule", "What", "Workflow", "Task"],
+            ),
+            (
+                "model",
+                &[
+                    "Model and limits",
+                    "Custom",
+                    "lmstudio · qwen3-8b",
+                    "high",
+                    "12",
+                ],
+            ),
             (
                 "workspace",
                 &["Runs work in the automation folder", "Workspaces"],
@@ -548,6 +560,14 @@ fn every_rail_panel_on_an_automation() {
             }
             assert!(screen.contains("Automation Inbox triage"), "{screen}");
             assert!(screen.contains("Revision 3"), "{screen}");
+            assert!(screen.contains("Sections (1–5)"), "{screen}");
+            for gone in ["Activity", "Files", "Voice"] {
+                assert!(
+                    !screen.contains(&format!(" {gone}\n"))
+                        && !flat(&screen).contains(&format!("8 {gone}")),
+                    "{gone}:\n{screen}"
+                );
+            }
             h.shot(&format!("rail-automation-{name}"));
             if *name == "workflow" {
                 // The rest of the definition form, scrolled into view.
@@ -555,11 +575,14 @@ fn every_rail_panel_on_an_automation() {
                 // rows are read while walking down.)
                 let mut seen = String::new();
                 let mut screen = String::new();
-                for _ in 0..9 {
+                for _ in 0..10 {
                     screen = h.keys(b"\x1b[B");
                     seen.push_str(&flat(&screen));
                 }
                 for n in [
+                    "Max growing context (tokens)",
+                    "Title and limits",
+                    "Inbox triage",
                     "Repeat every (UTC)",
                     "Every 30 minutes (UTC)",
                     "Context",
@@ -577,7 +600,7 @@ fn every_rail_panel_on_an_automation() {
                     );
                 }
                 h.shot("rail-automation-workflow-end");
-                h.keys(b"4");
+                h.keys(b"1");
             }
         }
         // A switch saves a revision: the skill off → `skills` removed.

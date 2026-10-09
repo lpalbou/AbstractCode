@@ -1787,6 +1787,34 @@ pub fn automation_context(mode: &str, max_tokens: u64) -> Value {
     }
 }
 
+/// A growing automation's budget as its definition states it (the kit's
+/// `definition.context.growing.max_tokens`, else the default).
+pub fn growing_max_tokens_of(_summary: &Summary, def: &Definition) -> u64 {
+    def.growing
+        .get("max_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(DEFAULT_GROWING_MAX_TOKENS)
+}
+
+/// The revision a new "Max growing context (tokens)" value makes (the
+/// kit's `reviseChanges`: `changes.context = automationContext(mode,
+/// maxTokens)` when it changed): `Ok(None)` = unchanged, `Err` = the kit's
+/// sentence.
+pub fn growing_budget_changes(
+    summary: &Summary,
+    def: &Definition,
+    typed: &str,
+) -> Result<Option<Value>, String> {
+    let n = match typed.trim().parse::<u64>() {
+        Ok(n) if n > 0 && n <= 9_007_199_254_740_991 => n,
+        _ => return Err(GROWING_MAX_TOKENS_ERROR.into()),
+    };
+    if n == growing_max_tokens_of(summary, def) {
+        return Ok(None);
+    }
+    Ok(Some(json!({"context": automation_context("growing", n)})))
+}
+
 /// `POST /api/gateway/automations/schedule-preview` (nothing stored): the
 /// normalized trigger, the zone, the gateway's words and the first run.
 #[derive(Debug, Clone, PartialEq)]
@@ -2704,6 +2732,47 @@ pub fn discussion_notice(index: u64, r: &DiscussResponse) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_growing_budget_is_one_context_revision() {
+        let s = summary("active", false, &[]);
+        let mut def = Definition {
+            revision: 3,
+            workflow_id: String::new(),
+            tool_approval: "auto".into(),
+            growing: Map::new(),
+            max_attempts: None,
+            workspace_root: String::new(),
+            target: Value::Null,
+            notify: Value::Null,
+        };
+        assert_eq!(growing_max_tokens_of(&s, &def), DEFAULT_GROWING_MAX_TOKENS);
+        assert_eq!(
+            growing_budget_changes(&s, &def, " 80000 "),
+            Ok(Some(
+                json!({"context": {"mode": "growing", "growing": {"max_tokens": 80000}}})
+            ))
+        );
+        assert_eq!(
+            growing_budget_changes(&s, &def, "50000"),
+            Ok(None),
+            "unchanged"
+        );
+        for bad in ["", "0", "-3", "lots", "1.5"] {
+            assert_eq!(
+                growing_budget_changes(&s, &def, bad),
+                Err(GROWING_MAX_TOKENS_ERROR.to_string()),
+                "{bad:?}"
+            );
+        }
+        def.growing.insert("max_tokens".into(), json!(80000));
+        assert_eq!(growing_max_tokens_of(&s, &def), 80000);
+        assert_eq!(
+            growing_budget_changes(&s, &def, "50000"),
+            Ok(Some(json!({"context": {"mode": "growing"}}))),
+            "back to the default: the mode alone (the kit's automationContext)"
+        );
+    }
 
     fn summary(status: &str, current: bool, caps: &[&str]) -> Summary {
         Summary {
