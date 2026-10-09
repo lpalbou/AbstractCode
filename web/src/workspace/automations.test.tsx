@@ -19,6 +19,7 @@ import {
 } from "./automations";
 import { AutomationsSection, NewAutomationDialog, automationPanelProps, folderRefreshKey, folderTitle } from "./automations_view";
 import { AutomationCard } from "./sidebar_cards";
+import { servedSummary } from "./served_summary";
 
 // The ui-kit's canonical wire fixtures, vendored byte-identical (checksums
 // verified by the terminal client's contract test in this repo).
@@ -461,5 +462,54 @@ describe("email automations (framework backlog 0992 WP6)", () => {
     };
     await ctl.create(body);
     expect(client.createAutomation).toHaveBeenCalledWith(body);
+  });
+});
+
+// 2026-10-09 operator report: a gateway before round 16 (0.13.x) serves no time_zone /
+// next_run_at / next_run_local / schedule_text / schedule_rule_text — only next_fire_at.
+// The row below is a COPY of that live summary's shape (tui/tests/fixtures/legacy_summary).
+describe("a pre-round-16 gateway row (served fields optional)", () => {
+  const legacyPage = () => JSON.parse(readFileSync(join(__dirname, "../../../tui/tests/fixtures/legacy_summary/list-gateway-0.13.json"), "utf8"));
+  const LEGACY_NOW = Date.parse("2026-10-09T16:53:29Z");
+
+  it("normalizes: next run from next_fire_at (UTC), rule and sentence '—', served values never overridden", () => {
+    const raw = legacyPage().items[0];
+    const s = servedSummary(raw);
+    expect(s.next_run_at).toBe("2026-10-09T19:53:29.622724+00:00");
+    expect(s.next_run_local).toBe("2026-10-09T19:53:29.622724+00:00");
+    expect(s.time_zone).toBe("UTC");
+    expect(s.schedule_rule_text).toBe("—");
+    expect(s.schedule_text).toBe("—");
+    const row = automationRowView(s, LEGACY_NOW);
+    expect(row.cadence).toBe("—");
+    expect(row.next).toBe("2026-10-09 19:53 UTC (in 3 h)");
+    // Invalid types are as absent as missing ones.
+    const bad = servedSummary({ ...raw, time_zone: 5, schedule_rule_text: ["x"], next_run_local: null });
+    expect([bad.time_zone, bad.schedule_rule_text]).toEqual(["UTC", "—"]);
+    // No next run served: none scheduled (never a computed one).
+    const { next_fire_at: _drop, ...noNext } = raw;
+    expect(automationRowView(servedSummary(noNext), LEGACY_NOW).next).toBe("none scheduled");
+    // A round-16 row keeps its served words.
+    const r16 = servedSummary({ ...raw, time_zone: "Europe/Paris", next_run_at: raw.next_fire_at, next_run_local: "2026-10-09T21:53:29.622724+02:00", schedule_rule_text: "Every 24 hours (UTC)", schedule_text: "Every 24 hours (UTC) · next Fri 9 Oct 21:53" });
+    expect(automationRowView(r16, LEGACY_NOW)).toMatchObject({ cadence: "Every 24 hours (UTC)", next: "2026-10-09 21:53 Europe/Paris (in 3 h)" });
+  });
+
+  it("the controller lists and opens it; the card renders '—' and the next run", async () => {
+    const page = legacyPage();
+    const raw = page.items[0];
+    const client = stubClient({
+      listAutomations: vi.fn(async () => page),
+      getAutomation: vi.fn(async () => ({ definition: { revision: 4 } as any, active_revision: 4, summary: raw })),
+    });
+    const ctl = new AutomationsController(client, vi.fn(), []);
+    await ctl.refresh();
+    expect(ctl.state.listError).toBeNull();
+    expect(ctl.state.items.map((s) => [s.title, s.time_zone, s.schedule_rule_text])).toEqual([["Daily price watch", "UTC", "—"]]);
+    await ctl.select(raw.automation_id);
+    expect(ctl.state.detail?.summary.next_run_at).toBe(raw.next_fire_at);
+    const html = renderToStaticMarkup(<AutomationCard summary={ctl.state.items[0]} selected={false} busy={false} nowMs={LEGACY_NOW} onSelect={() => {}} onToggleActive={() => {}} />);
+    expect(html).toContain("Daily price watch");
+    expect(html).toContain("—");
+    expect(html).toContain("next in 3 h");
   });
 });

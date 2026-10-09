@@ -8,7 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 Needs AbstractGateway with round-16 calendar schedules (`schedule@2`, the
 served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
-`schedule_rule_text` on every automation, `POST /automations/schedule-preview`).
+`schedule_rule_text` on every automation, `POST /automations/schedule-preview`)
+for calendar schedules; `/automations` also reads an older gateway (see Fixed).
 
 ### Added
 
@@ -137,6 +138,14 @@ served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
   by the web's own functions (`scripts/web_schedule_body.ts`).
 
 ### Fixed
+
+- `/automations` works again with a gateway that does not serve the
+  round-16 schedule fields (AbstractGateway 0.13.x: only `next_fire_at`):
+  it said "The automations could not be read: automation summary: `time_zone` is missing or not a string" and listed nothing. Each served schedule field is optional
+  on read: a missing or non-text one reads `—`, and the next run is the
+  gateway's `next_fire_at`, shown in UTC (`next in 3 h`, `Next scheduled
+  run: 2026-10-10 19:53 UTC.`). A missing `schedule_rule_text` reads `—`
+  (it read `schedule@<version>`).
 
 - The release build no longer shows the engine's startup notices as toasts
   ("engine: caps: truecolor" at every launch); they remain in debug builds.

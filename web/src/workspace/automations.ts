@@ -48,6 +48,7 @@ import {
   type TriggerSpec,
 } from "@abstractframework/ui-kit";
 
+import { withServedSummaries } from "./served_summary";
 import { csrfHeaders, gatewayRequest } from "./transport";
 import { CODE_AGENT_INTERFACE, GATEWAY_DEFAULT } from "./workflow_selection";
 import type { WorkflowDefinition } from "./catalog";
@@ -261,12 +262,17 @@ export class AutomationsController {
   private detailSeq = 0;
   private sourcesLoaded = false;
 
+  /** Every summary read through it has its served schedule block made total (`served_summary.ts`). */
+  private readonly client: AutomationsClient;
+
   /** `followupsMs`: re-reads after a command (the gateway applies it moments later). */
   constructor(
-    private readonly client: AutomationsClient,
+    client: AutomationsClient,
     private readonly answerWaitVia: AnswerWait,
     private readonly followupsMs: number[] = [1500, 4000],
-  ) {}
+  ) {
+    this.client = withServedSummaries(client);
+  }
 
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn);

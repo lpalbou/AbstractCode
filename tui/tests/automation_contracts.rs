@@ -204,17 +204,23 @@ fn every_list_row_parses_and_reads_state_from_the_gateway() {
     }
 }
 
-/// A summary without the served schedule fields is a broken R16.1 seam: it
-/// fails loudly instead of showing a next run or a sentence made up here.
+/// The served schedule fields are OPTIONAL on read (2026-10-09 operator
+/// report: a 0.13.x gateway serves none of them and the whole list failed):
+/// a row without them still lists — its rule reads "—", never a sentence
+/// made up here, and its next run comes from the served `next_fire_at`.
 #[test]
-fn a_row_without_the_served_schedule_fields_is_refused() {
+fn a_row_without_the_served_schedule_fields_still_lists() {
     let mut v = load("list.json");
-    v["items"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("schedule_rule_text");
-    let err = auto::parse_list_page(&v).unwrap_err();
-    assert!(err.contains("schedule_rule_text"), "{err}");
+    let row = v["items"][0].as_object_mut().unwrap();
+    for key in ["schedule_rule_text", "schedule_text", "time_zone", "next_run_at", "next_run_local"] {
+        row.remove(key);
+    }
+    let page = auto::parse_list_page(&v).expect("a row without the served fields still lists");
+    assert_eq!(auto::served_rule(&page.items[0]), "—");
+    assert_eq!(
+        page.items[0].next_run_at.as_deref(),
+        v["items"][0]["next_fire_at"].as_str()
+    );
 }
 
 /// The vendored wording (`assets/automation_controls.json`) is BYTE-IDENTICAL

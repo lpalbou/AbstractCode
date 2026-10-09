@@ -2817,3 +2817,40 @@ fn esc_from_an_automations_edit_goes_back_to_the_automation() {
     assert!(!screen.contains("Esc closes"), "closed:\n{screen}");
     assert!(!screen.contains("Automations / "), "{screen}");
 }
+
+/// The operator's report (2026-10-09): against a gateway before round 16
+/// (0.13.x, no `time_zone`/`next_run_*`/`schedule_text` on its rows) the
+/// list said "The automations could not be read: automation summary:
+/// `time_zone` is missing or not a string". The row is a COPY of that live
+/// summary's shape: it lists, its rule reads "—", its next run comes from
+/// `next_fire_at` (UTC), and Enter opens it.
+#[test]
+fn a_pre_round_16_gateway_row_lists_and_opens() {
+    let mut h = harness();
+    h.command("/automations");
+    let raw: Value = serde_json::from_slice(
+        &std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/legacy_summary/list-gateway-0.13.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let page = auto::parse_list_page(&raw).expect("the pre-round-16 list reads");
+    let id = page.items[0].id.clone();
+    h.store.automations.update(|v| {
+        v.availability = Some(Ok(()));
+        v.apply_list(page.items);
+    });
+    let screen = h.turn();
+    assert!(!screen.contains("could not be read"), "{screen}");
+    assert!(screen.contains("Daily price watch"), "{screen}");
+    assert!(screen.contains("↻ — · last"), "{screen}");
+    h.auto_cmds();
+    h.keys(b"\r");
+    let cmds = h.auto_cmds();
+    assert!(
+        cmds.iter().any(|c| matches!(c, AutoCmd::Open { id: o } if *o == id)),
+        "Enter opens the pre-round-16 automation: {cmds:?}"
+    );
+}

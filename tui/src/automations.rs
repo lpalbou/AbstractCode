@@ -262,6 +262,49 @@ fn parse_waits(v: &Value, key: &str) -> Parse<Vec<Wait>> {
     }
 }
 
+/// The served schedule block of one summary row (R16.1: `next_run_at`,
+/// `next_run_local`, `time_zone`, `schedule_text`, `schedule_rule_text`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ServedSchedule {
+    pub next_run_at: Option<String>,
+    pub next_run_local: Option<String>,
+    pub time_zone: String,
+    pub schedule_text: String,
+    pub schedule_rule_text: String,
+}
+
+/// True for a UTC ISO timestamp ("…+00:00" / "…Z"), the runtime's form of
+/// `next_fire_at`.
+fn is_utc_iso(ts: &str) -> bool {
+    ts.ends_with("+00:00") || ts.ends_with('Z')
+}
+
+/// Every field of the served schedule block is OPTIONAL on read: a gateway
+/// before round 16 (0.13.x) serves none of them — only the runtime's
+/// `next_fire_at` (UTC) — and a row must never fail the list for it. A
+/// missing or non-string field reads as empty (shown as "—", see
+/// [`served_rule`]); the next run falls back to the served `next_fire_at`,
+/// shown in UTC (its own zone: the string is CUT, no clock arithmetic).
+pub fn served_schedule(v: &Value) -> ServedSchedule {
+    let text = |key: &str| opt_str(v, key).filter(|s| !s.is_empty());
+    let next_run_at = text("next_run_at").or_else(|| text("next_fire_at"));
+    let mut next_run_local = text("next_run_local");
+    let mut time_zone = text("time_zone").unwrap_or_default();
+    if next_run_local.is_none() && time_zone.is_empty() {
+        if let Some(at) = next_run_at.as_deref().filter(|at| is_utc_iso(at)) {
+            next_run_local = Some(at.to_string());
+            time_zone = "UTC".into();
+        }
+    }
+    ServedSchedule {
+        next_run_at,
+        next_run_local,
+        time_zone,
+        schedule_text: text("schedule_text").unwrap_or_default(),
+        schedule_rule_text: text("schedule_rule_text").unwrap_or_default(),
+    }
+}
+
 pub fn parse_summary(v: &Value) -> Parse<Summary> {
     let what = "automation summary";
     let att = v
@@ -307,6 +350,7 @@ pub fn parse_summary(v: &Value) -> Parse<Summary> {
     if !v.get("capabilities").is_some_and(Value::is_array) {
         return Err(format!("{what}: `capabilities` is missing or not a list"));
     }
+    let served = served_schedule(v);
     Ok(Summary {
         id: req_str(v, "automation_id", what)?,
         title: req_str(v, "title", what)?,
@@ -314,12 +358,11 @@ pub fn parse_summary(v: &Value) -> Parse<Summary> {
         trigger: parse_trigger(v, what)?,
         context_mode: opt_str(v, "context_mode").unwrap_or_default(),
         workspace_root: opt_str(v, "workspace_root").filter(|s| !s.is_empty()),
-        next_run_at: opt_str(v, "next_run_at").filter(|s| !s.is_empty()),
-        next_run_local: opt_str(v, "next_run_local").filter(|s| !s.is_empty()),
-        // Served on every row by R16.1 gateways: a missing one is a broken seam, said loudly.
-        time_zone: req_str(v, "time_zone", what)?,
-        schedule_text: req_str(v, "schedule_text", what)?,
-        schedule_rule_text: req_str(v, "schedule_rule_text", what)?,
+        next_run_at: served.next_run_at,
+        next_run_local: served.next_run_local,
+        time_zone: served.time_zone,
+        schedule_text: served.schedule_text,
+        schedule_rule_text: served.schedule_rule_text,
         current,
         occurrence_count: v
             .get("occurrence_count")
@@ -591,13 +634,16 @@ pub fn is_schedule_v2(t: &Trigger) -> bool {
     t.source_id == "schedule" && t.source_version == SCHEDULE_VERSION
 }
 
+/// What a row shows for a served field the gateway did not send.
+pub const NOT_SERVED: &str = "—";
+
 /// The served rule verbatim (`schedule_rule_text`, every schedule row:
-/// `schedule@1` and `schedule@2`, Repeat with its bounds included); an empty
-/// one (a broken gateway seam) reads as the literal "schedule@<version>",
+/// `schedule@1` and `schedule@2`, Repeat with its bounds included); a
+/// missing one (a gateway before round 16) reads as "—" ([`NOT_SERVED`]),
 /// never as a sentence made up here.
 pub fn served_rule(s: &Summary) -> String {
     if s.schedule_rule_text.is_empty() {
-        format!("schedule@{}", s.trigger.source_version)
+        NOT_SERVED.to_string()
     } else {
         s.schedule_rule_text.clone()
     }
@@ -3035,9 +3081,9 @@ mod tests {
             summary_trigger_text(&s),
             "Every day at 08:00 (Europe/Paris)"
         );
-        // A broken seam reads as the literal, never a sentence made up here.
+        // A rule the gateway did not serve reads as "—", never a sentence made up here.
         s.schedule_rule_text.clear();
-        assert_eq!(summary_cadence(&s), "schedule@2");
+        assert_eq!(summary_cadence(&s), "—");
         // Repeat too reads the served words (never a local "every 24 h").
         s.trigger.config = json!({"kind": "every", "every": "24h"})
             .as_object()
@@ -3049,12 +3095,61 @@ mod tests {
             summary_trigger_text(&s),
             "Every 24 hours (UTC) · 3 runs max"
         );
-        // schedule@1 rows as well; a missing value names the version.
+        // schedule@1 rows as well; a missing value reads as "—".
         s.trigger.source_version = 1;
         assert_eq!(summary_cadence(&s), "Every 24 hours (UTC) · 3 runs max");
         s.schedule_rule_text.clear();
-        assert_eq!(summary_cadence(&s), "schedule@1");
-        assert_eq!(summary_trigger_text(&s), "schedule@1");
+        assert_eq!(summary_cadence(&s), "—");
+        assert_eq!(summary_trigger_text(&s), "—");
+    }
+
+    /// A row from a gateway before round 16 (the operator's 0.13.x shape,
+    /// copied from a live `GET /automations`): no `time_zone`, `next_run_at`,
+    /// `next_run_local`, `schedule_text` or `schedule_rule_text` — only
+    /// `next_fire_at`. The list must read; the rule shows "—" and the next
+    /// run falls back to `next_fire_at`, in UTC.
+    #[test]
+    fn a_pre_round_16_row_reads_with_next_fire_at_and_dashes() {
+        let v: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/legacy_summary/list-gateway-0.13.json"
+        ))
+        .unwrap();
+        let page = parse_list_page(&v).expect("a pre-round-16 row never fails the list");
+        let s = &page.items[0];
+        assert_eq!(s.next_run_at.as_deref(), Some("2026-10-09T19:53:29.622724+00:00"));
+        assert_eq!(s.next_run_local.as_deref(), Some("2026-10-09T19:53:29.622724+00:00"));
+        assert_eq!(s.time_zone, "UTC");
+        assert_eq!(s.schedule_rule_text, "");
+        assert_eq!(summary_cadence(s), "—");
+        assert_eq!(summary_trigger_text(s), "—");
+        let now = unix_secs("2026-10-09T16:53:29+00:00").unwrap();
+        assert_eq!(next_label(s, now), "2026-10-09 19:53 UTC (in 3 h)");
+        assert_eq!(next_run_text(s, now).as_deref(), Some("next in 3 h"));
+        assert!(run_now_next_line(s).unwrap().contains("2026-10-09 19:53 UTC"));
+        assert!(timing_line(s, now).starts_with("— · last "), "{}", timing_line(s, now));
+        // A served field of the wrong type is as absent as a missing one.
+        let mut row = v["items"][0].clone();
+        row["time_zone"] = json!(5);
+        row["schedule_rule_text"] = json!(["x"]);
+        row["next_run_local"] = Value::Null;
+        let s = parse_summary(&row).expect("invalid served fields never fail the row");
+        assert_eq!(s.time_zone, "UTC");
+        assert_eq!(served_rule(&s), "—");
+        // No next run served at all: none scheduled, never a computed one.
+        let mut row = v["items"][0].clone();
+        row.as_object_mut().unwrap().remove("next_fire_at");
+        let s = parse_summary(&row).unwrap();
+        assert_eq!((s.next_run_at.clone(), s.time_zone.clone()), (None, String::new()));
+        assert_eq!(next_label(&s, now), "none scheduled");
+        // A round-16 row keeps its served values (the fallback never overrides them).
+        let mut row = v["items"][0].clone();
+        row["time_zone"] = json!("Europe/Paris");
+        row["next_run_at"] = json!("2026-10-09T19:53:29.622724+00:00");
+        row["next_run_local"] = json!("2026-10-09T21:53:29.622724+02:00");
+        row["schedule_rule_text"] = json!("Every 24 hours (UTC)");
+        let s = parse_summary(&row).unwrap();
+        assert_eq!(next_label(&s, now), "2026-10-09 21:53 Europe/Paris (in 3 h)");
+        assert_eq!(summary_cadence(&s), "Every 24 hours (UTC)");
     }
 
     fn form_with(when: When) -> CreateForm {

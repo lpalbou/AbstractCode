@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [terminal 0.9.2 / web 0.11.2] - 2026-10-09
 
-Requires AbstractGateway with `schedule@2`, the served schedule fields and `POST /api/gateway/automations/schedule-preview` (round 16) and `@abstractframework/ui-kit` 0.8.7.
+Requires AbstractGateway with `schedule@2`, the served schedule fields and `POST /api/gateway/automations/schedule-preview` (round 16) and `@abstractframework/ui-kit` 0.8.7 for calendar schedules; the automations list and an automation's screen also read an older gateway (see Fixed).
 
 ### Added
 
@@ -28,6 +28,10 @@ Requires AbstractGateway with `schedule@2`, the served schedule fields and `POST
 - tui: `/automation [task]` opens **New automation** (`/schedule`, its old name, stays a silent alias for this release; `/automation` no longer opens the list — `/automations` does). Its **Task** is a multiline editor (the composer's widget: `Enter`/`Ctrl+J` newline, a visible **Continue** button); its **Tools** step starts with every tool deselected and **Use workflow default tools** off, with **Select all** / **Unselect all**, a state box per toolset (`[x]` all · `[ ]` none · `[~]` some) that toggles its tools, wheel and page-key scrolling, click-to-toggle, and the focus staying on the line you toggle. The web dialog's Tools section is unchanged (it starts from the conversation's tools) — see [tui/CHANGELOG.md](tui/CHANGELOG.md).
 - Web: automation rows, the header and Run now's hint show the gateway's served next run (`next_run_local`, cut to "2026-10-09 07:30 Europe/Paris", plus the relative time to `next_run_at`) and every schedule's `schedule_rule_text` (cards read "Every 30 minutes (UTC) · last 3 h ago"); the app no longer reads `next_fire_at` or computes a next run.
 - tui: an automation created in the terminal carries the workflow's real inputs, built like the web's: the workflow's input schema defaults, then the conversation's provider/model, reasoning, stream setting, iteration and token limits, tools and skills (never its workspace or approval policy), checked against the schema before the POST (the check's sentence otherwise). Before, only the task was sent.
+
+### Fixed
+
+- tui + web: the automations list works again with a gateway that does not serve the round-16 schedule fields (AbstractGateway 0.13.x serves only `next_fire_at`): the terminal said "The automations could not be read: automation summary: `time_zone` is missing or not a string" and showed no automation. `next_run_at`, `next_run_local`, `time_zone`, `schedule_text` and `schedule_rule_text` are optional on read — a missing or non-text one never fails the list: the schedule reads "—" and the next run is the gateway's `next_fire_at`, shown in UTC (e.g. "2026-10-10 19:53 UTC"). A served value is always shown as served.
 
 ## [terminal 0.9.1 / web 0.11.1] - 2026-10-08
 
