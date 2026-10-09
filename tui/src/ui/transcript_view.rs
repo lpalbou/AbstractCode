@@ -1749,6 +1749,7 @@ pub fn pane(
     splash: Signal<u64>,
     anim: crate::ui::animation::FeedHandle,
     anim_frame: Signal<u64>,
+    overlay_open: abstracttui::reactive::Memo<bool>,
 ) -> View {
     let tokens = *t;
     let feed = feed.clone();
@@ -1800,6 +1801,14 @@ pub fn pane(
             // session <agent-session>…" over an entity conversation
             // that has nothing to do with the restore, while the
             // composer below it showed that entity's own placeholder.
+            // The empty chat (splash, restore screen) is BACKGROUND: while
+            // anything is open over it, nothing of it is drawn — no logo,
+            // no mark, no guidance around or through the overlay.
+            if empty.get() && overlay_open.get() {
+                return Element::new()
+                    .style(LayoutStyle::default().grow(1.0))
+                    .build();
+            }
             if store.restoring.get() && matches!(store.focus.get(), Focus::Agent) {
                 return crate::ui::loading::view(&tokens, store, splash.get());
             }

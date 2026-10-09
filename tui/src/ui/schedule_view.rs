@@ -132,8 +132,6 @@ pub struct Draft {
     /// The form as the dialog opened (Esc on step 1 asks "Discard?" only
     /// when something was entered since).
     pub opened: Box<CreateForm>,
-    /// Esc on step 1 asked "Discard?": a second Esc discards.
-    pub discard_asked: bool,
 }
 
 /// Esc on step 1 when something was entered: the question, in place.
@@ -261,7 +259,6 @@ pub fn open_schedule(cx: Scope, store: Store, ctx: &UiCtx, seed: Option<String>)
     };
     let draft = Draft {
         opened: Box::new(form.clone()),
-        discard_asked: false,
         form,
         conv_target: auto::target_for(&workflow),
         conv_label,
@@ -309,6 +306,22 @@ fn step<A: Clone + PartialEq + 'static>(
     focus: Option<A>,
     back: Rc<dyn Fn()>,
 ) {
+    step_keyed(cx, ctx, title, build, act, focus, back, None)
+}
+
+/// [`step`] with `on_key`: called on every key but Esc (step 1 clears its
+/// "Discard?" question with it).
+#[allow(clippy::too_many_arguments)]
+fn step_keyed<A: Clone + PartialEq + 'static>(
+    cx: Scope,
+    ctx: &UiCtx,
+    title: String,
+    build: Build<A>,
+    act: Rc<dyn Fn(A)>,
+    focus: Option<A>,
+    back: Rc<dyn Fn()>,
+    on_key: Option<Rc<dyn Fn()>>,
+) {
     let (cards0, acts0) = build();
     let rows: i32 = cards0.iter().map(|c| c.lines.len() as i32 + 1).sum();
     let size = modal_size(100, rows + 8);
@@ -319,7 +332,11 @@ fn step<A: Clone + PartialEq + 'static>(
         let activate = {
             let build = build.clone();
             let act = act.clone();
+            let on_key = on_key.clone();
             Rc::new(move || {
+                if let Some(k) = &on_key {
+                    k();
+                }
                 let (_, acts) = build();
                 if let Some(a) = acts.get(cursor.get_untracked()).cloned() {
                     act(a);
@@ -336,7 +353,12 @@ fn step<A: Clone + PartialEq + 'static>(
                 cursor.update(|c| *c = (*c as i64 + delta).clamp(0, n as i64 - 1) as usize);
             }
         };
-        let mv = Rc::new(move_cursor);
+        let mv = Rc::new(move |delta: i64| {
+            if let Some(k) = &on_key {
+                k();
+            }
+            move_cursor(delta)
+        });
         let build_v = build.clone();
         Element::new()
             .style(LayoutStyle::column().padding(Edges::all(1)))
@@ -578,30 +600,32 @@ fn step_what(
     errors: Vec<String>,
     focus: Option<WhatAct>,
 ) {
-    // Esc asked "Discard?" last time: the question shows; any action goes on.
-    let asked = d.discard_asked;
-    let mut d = d;
-    d.discard_asked = false;
-    let mut errors = errors;
-    if asked {
-        errors.push(DISCARD_QUESTION.to_string());
-    }
+    // Esc asks "Discard?" (when something was entered); any other key clears
+    // the question and the dialog stays; the next Esc asks again.
+    let asked = cx.signal(false);
     let back: Rc<dyn Fn()> = {
         let ctx = ctx.clone();
         let d = d.clone();
         Rc::new(move || {
-            if asked || !d.edited() {
+            if asked.get_untracked() || !d.edited() {
                 ctx.close_modal();
             } else {
-                let mut nd = d.clone();
-                nd.discard_asked = true;
-                step_what(cx, store, &ctx, nd, Vec::new(), None);
+                asked.set(true);
             }
         })
     };
+    let on_key: Rc<dyn Fn()> = Rc::new(move || {
+        if asked.get_untracked() {
+            asked.set(false);
+        }
+    });
     let d0 = d.clone();
     let build: Build<WhatAct> = Rc::new(move || {
         let exec = store.automations.with(|v| v.executable.clone());
+        let mut errors = errors.clone();
+        if asked.get() {
+            errors.push(DISCARD_QUESTION.to_string());
+        }
         what_cards(&d0, exec.as_ref(), &errors)
     });
     let ctx2 = ctx.clone();
@@ -641,7 +665,16 @@ fn step_what(
             }
         }
     });
-    step(cx, ctx, step_title(1), build, act, focus, back);
+    step_keyed(
+        cx,
+        ctx,
+        step_title(1),
+        build,
+        act,
+        focus,
+        back,
+        Some(on_key),
+    );
 }
 
 /// The picker's rows (the kit's workflowPickerRows): "Gateway default —
@@ -2856,7 +2889,6 @@ mod tests {
         let schema = json!({"properties": {"tools": {"default": ["read_file", "web_search"]}}});
         let mut d = Draft {
             opened: Box::default(),
-            discard_asked: false,
             form: CreateForm::default(),
             conv_target: Some(
                 json!({"flow_id": "@default", "interface": auto::CODE_AGENT_INTERFACE}),

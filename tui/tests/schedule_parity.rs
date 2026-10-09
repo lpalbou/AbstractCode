@@ -105,7 +105,6 @@ fn draft_of(case: &Value) -> (Draft, Value, bool) {
         });
     let mut draft = Draft {
         opened: Box::default(),
-        discard_asked: false,
         form: CreateForm {
             prompt: s(&d["prompt"]),
             when,

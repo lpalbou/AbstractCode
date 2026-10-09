@@ -219,6 +219,19 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     // duplicated across an effect and a render is the mirror-drift
     // class this codebase has already paid for twice). "Splash" = the
     // agent lane with no conversation yet (boot Info notices only).
+    let stance_mode = cx.signal(stance::OFF);
+    // The logo is the empty chat's BACKGROUND: whenever anything opens over
+    // it — any modal (automations, settings, the New automation dialog, the
+    // rail, approvals, pickers: all go through `UiCtx::open_modal`) or the
+    // `/stance` panel — it is not drawn at all (operator 2026-10-09: it
+    // painted through the Automations overlay, on top of the cards).
+    let overlay_open = {
+        let ctx = ctx.clone();
+        cx.memo(move || {
+            let _ = ctx.modal_epoch.get();
+            ctx.modal_open() || stance_mode.get() != stance::OFF
+        })
+    };
     let splash_visible = cx.memo(move || {
         // A session restore in flight shows the loading screen
         // (`ui::loading`), which shares the splash's frame clock — the
@@ -242,7 +255,10 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     // engine's zero-wakeup idle guarantee (the one deliberate exception
     // is the splash itself: a continuous logo shimmer is the point).
     let splash = cx.signal(0u64);
-    wire_splash_ticker(cx, store, splash_visible, splash);
+    // What the pane actually paints: the splash only with nothing over it
+    // (the ticker runs only then, too).
+    let splash_shown = cx.memo(move || splash_visible.get() && !overlay_open.get());
+    wire_splash_ticker(cx, store, splash_shown, splash);
     // `/animation`: the feed accumulates whether or not the pane is
     // showing (opening it mid-run must show the run's whole history, not
     // start from blank); the ticker exists only while it IS showing.
@@ -253,7 +269,6 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     // the terminal. Session-scoped and off by default; the signal lives
     // HERE rather than in `store` so the feature stays one directory
     // plus three lines (see `ui::stance`'s removal note).
-    let stance_mode = cx.signal(stance::OFF);
     let stance_frame = cx.signal(0u64);
     wire_stance_ticker(cx, store, stance_mode, stance_frame);
     // The read floats bottom-right as an OVERLAY rather than taking a
@@ -643,6 +658,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                         splash,
                         anim_feed.clone(),
                         anim_frame,
+                        overlay_open,
                     ))
                     // One breathing row between the transcript's last line
                     // and the control panel (operator ask, 2026-07-23). A

@@ -3230,7 +3230,21 @@ fn esc_in_a_step_goes_back_one_step_with_its_values_kept() {
         flat(&screen).contains(abstractcode::ui::schedule_view::DISCARD_QUESTION),
         "{screen}"
     );
-    // The second Esc discards: the dialog closes.
+    // Any other key keeps editing: the question goes, the dialog stays...
+    let screen = h.keys(b"\x1b[A");
+    assert!(screen.contains("1/7 What"), "{screen}");
+    assert!(
+        !flat(&screen).contains("Discard this new automation?"),
+        "{screen}"
+    );
+    // ...and the next Esc asks again (it does not discard).
+    let screen = h.esc();
+    assert!(screen.contains("1/7 What"), "{screen}");
+    assert!(
+        flat(&screen).contains(abstractcode::ui::schedule_view::DISCARD_QUESTION),
+        "{screen}"
+    );
+    // The second Esc in a row discards: the dialog closes.
     let screen = h.esc();
     assert!(!screen.contains("New automation —"), "{screen}");
     assert!(h
@@ -3252,4 +3266,89 @@ fn esc_on_an_untouched_step_one_closes_without_asking() {
         !flat(&screen).contains("Discard this new automation?"),
         "{screen}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The logo is the empty chat's background (operator 2026-10-09: it painted
+// through the Automations overlay): never drawn while anything is open.
+// ---------------------------------------------------------------------------
+
+/// Any part of the logo lockup on screen: a row of the house mark (its
+/// half-block rows), the wordmark (`ui::logo::WORD_TOP`), or the splash's
+/// guidance under it.
+fn logo_on(screen: &str) -> bool {
+    [
+        "▀▀ ▀▀",
+        "▀ ▀ ▀",
+        "▀▀▀ ▀▀▀",
+        "▀ ▀▀▀▀▀ ▀",
+        "describe a task below",
+    ]
+    .iter()
+    .any(|p| screen.contains(p))
+        || screen.contains(abstractcode::ui::logo::WORD_TOP.trim())
+}
+
+/// A fresh harness on the splash (no conversation yet), tall enough for the hero.
+fn on_splash() -> Harness {
+    let mut h = harness_sized(Size::new(200, 60));
+    h.store.fold.update(|f| f.items.clear());
+    let screen = h.keys(b"");
+    assert!(
+        logo_on(&screen),
+        "the splash shows the logo first:\n{screen}"
+    );
+    h
+}
+
+#[test]
+fn the_logo_is_never_drawn_under_an_overlay_and_comes_back_when_it_closes() {
+    // Every kind of overlay: the Automations list, the New automation
+    // dialog, the settings rail, the session board.
+    for (open, answer) in [
+        ("/automations", true),
+        ("/automation brief me", false),
+        ("/settings", false),
+        ("/sessions", false),
+    ] {
+        let mut h = on_splash();
+        h.command(open);
+        if answer {
+            h.answer_list();
+        }
+        // Several frames of the splash's own clock (its shimmer ticks every
+        // ~150 ms): a background repaint must not reach the overlay either.
+        let mut screen = h.turn();
+        for _ in 0..4 {
+            std::thread::sleep(std::time::Duration::from_millis(180));
+            screen = h.turn();
+            assert!(
+                !logo_on(&screen),
+                "{open}: no logo while it is open:\n{screen}"
+            );
+        }
+        assert!(
+            !screen.contains("▀▀▀▀▀▀▀▀▀▀▀"),
+            "{open}: no mark either:\n{screen}"
+        );
+        // Closing returns to the splash: the logo is back.
+        let mut screen = h.esc();
+        for _ in 0..4 {
+            if !screen.contains("1/7 What") && !screen.contains("Discard") {
+                break;
+            }
+            screen = h.esc();
+        }
+        assert!(
+            logo_on(&screen),
+            "{open}: the logo is back once it closes:\n{screen}"
+        );
+    }
+}
+
+#[test]
+fn the_stance_panel_hides_the_logo_too() {
+    let mut h = on_splash();
+    let screen = h.command("/stance");
+    assert!(!logo_on(&screen), "{screen}");
 }

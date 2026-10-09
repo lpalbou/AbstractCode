@@ -178,9 +178,20 @@ email trigger, and the calendar kinds say they need 0.14 (see Fixed).
 - `Esc` in a **New automation** step goes back to the previous step with
   everything entered kept (Tools keeps its selection, Workspaces its
   choice); it used to close the whole dialog and lose the draft. On **1/7
-  What** it closes the dialog — at once when nothing was entered, otherwise
-  after "Discard this new automation? Esc discards it · any other key keeps
-  editing." and a second `Esc`. The step hint reads `Esc back`.
+  What** it closes the dialog — at once when nothing was entered,
+  otherwise after "Discard this new automation? Esc discards it · any other
+  key keeps editing." and a second `Esc` in a row; any other key clears the
+  question (the dialog stays) and the next `Esc` asks again. The step hint
+  reads `Esc back`.
+- The empty chat's logo no longer shows around or through an open overlay:
+  it is the chat's background and is not drawn at all while any modal (the
+  Automations list, New automation, the settings rail, `/sessions`,
+  pickers, approvals) or the `/stance` panel is open; it comes back when
+  they close. The restore screen's mark follows the same rule.
+- A New automation created before the schedule probe got any gateway
+  answer is sent as `schedule@1` (the shape every gateway accepts), never
+  `schedule@2`; a calendar rule then is not sent ("The gateway could not be
+  reached.").
 - An automation action no longer looks like it did nothing (operator
   2026-10-09: "space to activate/deactivate needs a spinner, it's not
   instantaneous"). `space` Active, `g` Run now, `x` Stop, `a` Archive and

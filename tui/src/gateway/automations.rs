@@ -757,6 +757,12 @@ pub fn create_body_for(
         auto::ScheduleApi::Unknown => {
             let api = match client.send(&auto::preview_request(trigger)) {
                 Err(e) if auto::is_missing_route(&e) => auto::ScheduleApi::Missing,
+                // No answer: the probe learned nothing — send the shape every
+                // gateway accepts (schedule@1), never a schedule@2 guess; a
+                // calendar rule has no such shape, so it is not sent.
+                Err(e) if e.is_transport() => {
+                    return (auto::legacy_create_body(&body).map_err(|_| e), None);
+                }
                 _ => auto::ScheduleApi::Served,
             };
             (api, Some(api))
@@ -961,6 +967,22 @@ mod tests {
             (out.unwrap()["trigger"].clone(), learned),
             (repeat_v2(), None)
         );
+    }
+
+    #[test]
+    fn an_unprobed_create_without_any_answer_sends_schedule_v1() {
+        let c = client("http://127.0.0.1:9");
+        let (out, learned) =
+            create_body_for(&c, body_with(repeat_v2()), auto::ScheduleApi::Unknown);
+        assert_eq!(learned, None, "nothing learned from no answer");
+        assert_eq!(
+            out.unwrap()["trigger"],
+            json!({"source_id": "schedule", "source_version": 1, "config": {"every": "24h", "count": 3}})
+        );
+        // A calendar rule has no schedule@1 shape: not sent, the transport sentence.
+        let daily = json!({"source_id": "schedule", "source_version": 2, "config": {"kind": "daily", "at": "08:00"}});
+        let (out, _) = create_body_for(&c, body_with(daily), auto::ScheduleApi::Unknown);
+        assert!(out.unwrap_err().is_transport());
     }
 
     #[test]
