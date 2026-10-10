@@ -3251,3 +3251,38 @@ select option {
 
 /* Round 16 (R16.1 A2): the account time zone (kit AfTimeZonePicker) under the default workflow. */
 .code-account-time-zone { margin-top: 12px; }
+
+/* The last "Email result" when it failed (round 16, last_notification.tsx): the kit's error pill
+   carrying the gateway's sentence verbatim, then the compact time. One line on the card (ellipsis,
+   full text in the tooltip); wraps in the automation header. */
+.code-notif-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text-secondary);
+}
+.code-notif-line .code-notif-pill {
+  min-width: 0;
+  max-width: 100%;
+}
+.code-notif-line .code-notif-time {
+  flex: none;
+  font-size: var(--font-size-xxs);
+}
+.code-card-notif .code-notif-pill .af-chip__label {
+  white-space: nowrap;
+}
+.code-auto-header__notif .code-notif-pill {
+  border-radius: 10px;
+}
+.code-auto-header__notif .code-notif-pill .af-chip__label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.code-auto-card > .code-card-notif {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  padding: 0 12px 8px;
+}

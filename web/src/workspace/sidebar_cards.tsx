@@ -6,7 +6,8 @@
 // - Automation (round 5): the name on its own row (+ the "waiting for you" badge while an approval
 //   is pending), then two quiet lines from the kit's `automationTiming` (deterministic):
 //   `↻ every 24 h · last 3 h ago`, then `next in 20 h` with the Active switch right-aligned on that
-//   same line. The card body selects; the switch is a sibling control.
+//   same line. The card body selects; the switch is a sibling control. A third line only while the
+//   gateway's last "Email result" failed: its served sentence verbatim (last_notification.tsx).
 import React from "react";
 import {
   AfMenu,
@@ -19,6 +20,7 @@ import {
 } from "@abstractframework/ui-kit";
 
 import type { SessionSummary } from "./catalog";
+import { LastNotificationLine } from "./last_notification";
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -171,6 +173,7 @@ export function AutomationCard(props: {
         <small className="code-card-meta" data-field="next">{lines.second}</small>
         <AutomationActiveSwitch className="code-card-switch" iconOnly summary={s} busy={props.busy} onToggle={props.onToggleActive} />
       </div>
+      <LastNotificationLine summary={s} nowMs={props.nowMs} className="code-card-notif" />
     </div>
   );
 }

@@ -25,6 +25,7 @@ import {
 
 import { AutomationActiveSwitch, WaitingBadge, automationIsWaiting } from "./sidebar_cards";
 import { workspaceLabel } from "./sidebar_panels";
+import { LastNotificationLine } from "./last_notification";
 
 /** What the result line says once the gateway accepted a command (the NEW state, not the verb). */
 export const HEADER_NOTICES: Record<string, string> = {
@@ -77,7 +78,8 @@ export function AutomationHeaderBar(props: {
 }): React.ReactElement {
   const s = props.summary;
   const controls = automationControls(s, props.occurrences, props.busy);
-  const timing = automationTiming(s, props.nowMs ?? Date.now());
+  const nowMs = props.nowMs ?? Date.now();
+  const timing = automationTiming(s, nowMs);
   const [confirmingArchive, setConfirmingArchive] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const confirmRef = useRef<HTMLButtonElement | null>(null);
@@ -127,6 +129,7 @@ export function AutomationHeaderBar(props: {
         {automationIsWaiting(s) ? <WaitingBadge /> : null}
         <span className="code-auto-header__timing" data-field="timing">{timing.line}</span>
       </div>
+      <LastNotificationLine summary={s} nowMs={nowMs} className="code-auto-header__notif" />
       {problem ? (
         <p className="code-auto-header__warn" role="note" data-field="trigger-problem">
           <Icon name="warning" size={13} /> <span>{problem}</span>

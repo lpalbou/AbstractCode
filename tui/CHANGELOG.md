@@ -15,6 +15,7 @@ email trigger, and the calendar kinds say they need 0.14 (see Fixed).
 
 ### Added
 
+- `/automations`: a card gets a third line, in the error colour, only while the automation's last **Email result** failed — the gateway's `last_notification.text` verbatim plus "· 3 h ago"; the automation's header shows the same line under its timing line. A sent notice (a later success) clears it.
 - `/schedule`'s **When** step (2/7): **Repeat** (the UTC presets and every
   N m/h/d, unchanged), **Daily**, **Weekly** (the days as `[x] Mon`
   toggles), **Monthly** (**on day** 1–31 or **last**), each with **Time of

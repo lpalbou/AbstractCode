@@ -196,7 +196,8 @@ pub fn archive_question(title: &str) -> String {
 
 /// The list as cards (pure, test-pinned): each automation is its name (+
 /// the "waiting for you" badge), `↻ every 24 h · last 3 h ago`, then
-/// `next in 20 h` with the Active switch at the right; then the quiet
+/// `next in 20 h` with the Active switch at the right (+ a third line, in the
+/// error ink, only while the last "Email result" failed); then the quiet
 /// `Archived · N` line and, when open, the archived ones with Unarchive.
 /// `confirm` = the automation whose Archive question is showing.
 pub fn list_cards(v: &auto::View, now: i64, confirm: Option<&str>) -> (Vec<Card>, Vec<ListTarget>) {
@@ -228,6 +229,11 @@ pub fn list_cards(v: &auto::View, now: i64, confirm: Option<&str>) -> (Vec<Card>
                         .right(active_switch_text(s, v.busy, pending))
                         .right_ink(switch_ink),
                 );
+                // Round 16: a third line only while the last "Email result" failed — the
+                // gateway's `last_notification.text` verbatim + "· 3 h ago".
+                if let Some(failed) = auto::email_failed_line(s, now) {
+                    lines.push(CardLine::new(failed, Ink::Error).indent(2));
+                }
                 if confirm == Some(s.id.as_str()) {
                     lines.push(CardLine::new(archive_question(&s.title), Ink::Accent).indent(2));
                     lines.push(CardLine::new("y Archive · n Keep it", Ink::Accent).indent(2));
@@ -496,7 +502,8 @@ pub enum Target {
 
 /// The header lines of one automation (pure, test-pinned): the Code web
 /// header — `[x] Active · every 24 h · last 3 h ago · next in 14 h` (+ the
-/// "waiting for you" badge), the workspace as a short name — then the
+/// "waiting for you" badge), the served "Email result failed — …" line while
+/// the last one failed, the workspace as a short name — then the
 /// facts the terminal keeps (runs, revision, context, tools, workflow).
 pub fn header_lines(s: &Summary, def: Option<&auto::Definition>, now: i64) -> Vec<String> {
     let mut first = auto::timing_line(s, now);
@@ -504,6 +511,9 @@ pub fn header_lines(s: &Summary, def: Option<&auto::Definition>, now: i64) -> Ve
         first.push_str(&format!(" · {badge}"));
     }
     let mut out = vec![first];
+    if let Some(failed) = auto::email_failed_line(s, now) {
+        out.push(failed);
+    }
     if let Some(cur) = auto::current_label(s) {
         out.push(cur);
     }

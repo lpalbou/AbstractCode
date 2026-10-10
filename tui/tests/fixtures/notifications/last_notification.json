@@ -1,0 +1,21 @@
+{
+  "_comment": "Gateway round 16 (abstractgateway 2101944) automation summary `last_notification`, the shape asserted by tests/test_r16_sealing_key_file.py: null | {channel, status, at, sent_at, code, sentence, text}.",
+  "failed": {
+    "channel": "email",
+    "status": "failed",
+    "at": "2026-09-27T03:35:00+00:00",
+    "sent_at": null,
+    "code": "email_needs_reconnect",
+    "sentence": "Reconnect your mailbox — its saved password was sealed with the old macOS keychain key.",
+    "text": "Email result failed — Reconnect your mailbox — its saved password was sealed with the old macOS keychain key."
+  },
+  "sent": {
+    "channel": "email",
+    "status": "sent",
+    "at": "2026-09-27T05:35:00+00:00",
+    "sent_at": "2026-09-27T05:35:02+00:00",
+    "code": null,
+    "sentence": null,
+    "text": "Email result sent"
+  }
+}

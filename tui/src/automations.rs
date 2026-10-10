@@ -128,6 +128,40 @@ pub struct Summary {
     pub legacy: bool,
     pub revision: Option<u64>,
     pub capabilities: Vec<String>,
+    /// Served (round 16): the last "Email result" when it FAILED — see
+    /// [`FailedNotification`]; `None` otherwise (none, sent, queued…).
+    pub email_failed: Option<FailedNotification>,
+}
+
+/// `last_notification` of a summary (round 16) while its status is
+/// `failed`: the gateway's `text` ("Email result failed — <sentence>"),
+/// shown verbatim, and its `at`. A later successful send replaces the
+/// gateway's newest notice, so the line clears by itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailedNotification {
+    pub text: String,
+    pub at: Option<String>,
+}
+
+fn failed_notification(v: &Value) -> Option<FailedNotification> {
+    let n = v.get("last_notification").filter(|n| n.is_object())?;
+    if n.get("status").and_then(Value::as_str) != Some("failed") {
+        return None;
+    }
+    Some(FailedNotification {
+        text: opt_str(n, "text").filter(|s| !s.is_empty())?,
+        at: opt_str(n, "at").filter(|s| !s.is_empty()),
+    })
+}
+
+/// The card's third line / the header's line: the served text, then
+/// "· 3 h ago" from the served `at` (kit wording); `None` unless failed.
+pub fn email_failed_line(s: &Summary, now: i64) -> Option<String> {
+    let n = s.email_failed.as_ref()?;
+    Some(match n.at.as_deref().and_then(unix_secs) {
+        Some(t) => format!("{} · {} ago", n.text, compact_duration((now - t).max(0))),
+        None => n.text.clone(),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -381,6 +415,7 @@ pub fn parse_summary(v: &Value) -> Parse<Summary> {
         legacy: v.get("legacy").and_then(Value::as_bool).unwrap_or(false),
         revision: v.get("revision").and_then(Value::as_u64),
         capabilities: str_list(v, "capabilities"),
+        email_failed: failed_notification(v),
     })
 }
 
@@ -3091,6 +3126,7 @@ mod tests {
             legacy: false,
             revision: Some(1),
             capabilities: caps.iter().map(|c| c.to_string()).collect(),
+            email_failed: None,
         }
     }
 
@@ -4140,5 +4176,55 @@ mod tests {
         let paused = s("paused", false, 3);
         assert!(p(&paused, Control::Resume).done_by(Some(&idle)));
         assert!(!p(&paused, Control::Resume).done_by(Some(&paused)));
+    }
+
+    /// Round 16: `last_notification` — a failed notice is the served text
+    /// verbatim + the kit's compact time; a sent one (the gateway's newest
+    /// after a later success), null or absent shows nothing.
+    #[test]
+    fn last_notification_failed_is_the_served_line_and_a_success_clears_it() {
+        let notices: Value = serde_json::from_slice(
+            &std::fs::read(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/notifications/last_notification.json"
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let page: Value = serde_json::from_slice(
+            &std::fs::read(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/automations/list.json"
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let with = |n: Value| {
+            let mut row = page["items"][0].clone();
+            row["last_notification"] = n;
+            parse_summary(&row).unwrap()
+        };
+        let now = unix_secs("2026-09-27T06:35:00Z").unwrap();
+        let failed = with(notices["failed"].clone());
+        let text = notices["failed"]["text"].as_str().unwrap();
+        assert_eq!(
+            email_failed_line(&failed, now).as_deref(),
+            Some(format!("{text} · 3 h ago").as_str())
+        );
+        let mut other = notices["failed"].clone();
+        other["text"] = json!("Served words only");
+        other["at"] = Value::Null;
+        assert_eq!(
+            email_failed_line(&with(other), now).as_deref(),
+            Some("Served words only"),
+            "verbatim; no time when none is served"
+        );
+        for n in [notices["sent"].clone(), Value::Null] {
+            assert_eq!(email_failed_line(&with(n), now), None);
+        }
+        assert_eq!(
+            email_failed_line(&parse_summary(&page["items"][0]).unwrap(), now),
+            None
+        );
     }
 }

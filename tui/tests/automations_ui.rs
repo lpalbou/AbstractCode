@@ -3352,3 +3352,76 @@ fn the_stance_panel_hides_the_logo_too() {
     let screen = h.command("/stance");
     assert!(!logo_on(&screen), "{screen}");
 }
+
+/// Round 16: the gateway's `last_notification` — a failed "Email result" is
+/// a third card line and a header line with the served text verbatim; a
+/// sent one (a later success) shows nothing.
+#[test]
+fn a_failed_email_result_is_a_third_card_line_and_a_header_line() {
+    let notices: Value = serde_json::from_slice(
+        &std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/notifications/last_notification.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let text = notices["failed"]["text"].as_str().unwrap().to_string();
+    let mut raw = fixture("list.json");
+    let items = raw["items"].as_array_mut().unwrap();
+    for row in items.iter_mut() {
+        let n = if row["automation_id"] == INBOX {
+            notices["failed"].clone()
+        } else {
+            notices["sent"].clone()
+        };
+        row["last_notification"] = n;
+    }
+    let page = auto::parse_list_page(&raw).unwrap();
+    let inbox = page.items.iter().find(|s| s.id == INBOX).unwrap().clone();
+    let mut h = harness_sized(Size::new(200, 44));
+    h.command("/automations");
+    h.store.automations.update(|v| {
+        v.availability = Some(Ok(()));
+        v.apply_list(page.items.clone());
+    });
+    h.turn();
+    let screen = h.turn();
+    eprintln!("--- /automations (failed on Inbox triage, sent elsewhere) ---\n{screen}");
+    let card: Vec<&str> = screen
+        .lines()
+        .skip_while(|l| !l.contains("Inbox triage"))
+        .take(4)
+        .collect();
+    assert!(
+        card[3].contains(&text) && card[3].contains("ago"),
+        "the third line is the served text + time:\n{}",
+        card.join("\n")
+    );
+    assert_eq!(
+        screen.matches("Email result").count(),
+        1,
+        "only the failed one shows a line:\n{screen}"
+    );
+    assert!(!screen.contains("Email result sent"), "{screen}");
+    // The detail header carries the same line.
+    h.keys(b"\r");
+    let definition = auto::Definition {
+        revision: 3,
+        workflow_id: "inbox@1.0.0:triage".into(),
+        tool_approval: "ask".into(),
+        growing: Default::default(),
+        max_attempts: Some(3),
+        workspace_root: inbox.workspace_root.clone().unwrap(),
+        target: serde_json::Value::Null,
+        notify: serde_json::Value::Null,
+    };
+    let occ = auto::parse_occurrence_page(&fixture("occurrences.json")).unwrap();
+    h.store
+        .automations
+        .update(|v| v.apply_detail(INBOX, definition, inbox, occ));
+    h.turn();
+    let screen = h.turn();
+    eprintln!("--- /automations <Inbox triage> ---\n{screen}");
+    assert!(screen.contains(&text), "the header line:\n{screen}");
+}
