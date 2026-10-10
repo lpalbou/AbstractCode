@@ -2807,6 +2807,15 @@ select option {
   color: var(--text-secondary);
   max-width: 34ch;
 }
+/* "Spoken language: French" beside the mic: the ACCOUNT's language, served by the gateway (round 18). */
+.code-voice-language {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
 /* "Recording… 2 s" / "Transcribing… 12 s · faster-whisper / large-v3" beside the mic (round 6). */
 .code-voice-status {
   min-width: 0;

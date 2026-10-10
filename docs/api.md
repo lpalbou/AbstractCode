@@ -65,7 +65,8 @@ Both clients use the same endpoints. This is the integration contract:
 | Session history | `GET` the session's history bundle for replay |
 | Conversations | `GET` root runs per session (with per-turn tool totals and the `archived_sessions` count); `POST` a session's archive or unarchive |
 | Automations | `GET`, create, `PATCH` (a new revision, guarded by `expected_revision`) and the lifecycle commands — pause, resume, run now, stop, archive, unarchive; `GET` the archived list with its `archived_automations` count |
-| Voice | `GET` the gateway's default voice routes; `POST` a reply's text for streamed speech, and recorded audio for transcription |
+| Voice | `GET` the gateway's default voice routes; `POST` a reply's text for streamed speech, and recorded audio for transcription (the route override only — never a language: the gateway applies the account's spoken language) |
+| Account preferences | `GET`/`PUT` the account's preferences: the default workflow per app, the time zone and the **spoken language** (round 18: the served `spoken_language` block `{value, label, help, choices}`; a pick is `PUT {"spoken_language": "fr"}`, `"auto"` lets the engine detect it) |
 | Discovery | `GET` the available workflows (with the gateway's default agent workflow), providers, models, tools, skills, and capabilities such as live replies |
 | Workspace files | `GET` a run's workspace location, a folder listing, and file content (with `Range`) |
 | About | `GET` the gateway's AbstractFramework and package versions |

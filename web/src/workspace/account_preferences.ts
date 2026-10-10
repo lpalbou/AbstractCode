@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { gatewayApiPath, type TimeZonePreference } from "@abstractframework/ui-kit";
+import { SPOKEN_LANGUAGE_MISSING, gatewayApiPath, type SpokenLanguagePreference, type TimeZonePreference } from "@abstractframework/ui-kit";
 import type { WorkflowDefinition } from "./catalog";
 import { readPreferences } from "./preferences";
 import { gatewayRequest } from "./transport";
@@ -25,7 +25,7 @@ export type AccountWorkflowState =
   | { status: "loading" }
   | { status: "unsupported" }
   | { status: "error"; message: string }
-  | { status: "ok"; row: AccountWorkflowRow; timeZone: TimeZonePreference };
+  | { status: "ok"; row: AccountWorkflowRow; timeZone: TimeZonePreference; spokenLanguage: SpokenLanguagePreference };
 
 /** The `time_zone` block of the answer (round 16, R16.1 A2), checked: a missing block or field is
  * said, never guessed — the IANA list is the gateway's, never the browser's. */
@@ -40,6 +40,21 @@ export function accountTimeZone(answer: unknown): TimeZonePreference {
     label: typeof block.label === "string" ? block.label : "Time zone",
     help: typeof block.help === "string" ? block.help : "",
     choices: (block.choices as unknown[]).map(String),
+  };
+}
+
+/** The `spoken_language` block of the answer (round 18), checked: the account's spoken language
+ * with the served label, help and choices. A missing block or field is said, never guessed — the
+ * language list is the gateway's (AbstractVoice's), never this app's. */
+export function accountSpokenLanguage(answer: unknown): SpokenLanguagePreference {
+  const block = record(record(answer)?.spoken_language);
+  if (!block || typeof block.value !== "string" || !block.value || !Array.isArray(block.choices) || typeof block.label !== "string" || typeof block.help !== "string")
+    throw new Error(SPOKEN_LANGUAGE_MISSING);
+  return {
+    value: block.value,
+    label: block.label,
+    help: block.help,
+    choices: (block.choices as unknown[]).map(record).filter(Boolean).map((c) => ({ value: String(c!.value), label: String(c!.label ?? c!.value) })),
   };
 }
 
@@ -129,10 +144,12 @@ export async function loadAccountWorkflow(
 ): Promise<AccountWorkflowState> {
   let row: AccountWorkflowRow;
   let timeZone: TimeZonePreference;
+  let spokenLanguage: SpokenLanguagePreference;
   try {
     const answer = await request(ACCOUNT_PREFERENCES_PATH);
     row = accountWorkflowRow(answer);
     timeZone = accountTimeZone(answer);
+    spokenLanguage = accountSpokenLanguage(answer);
   } catch (reason) {
     return status(reason) === 404 ? { status: "unsupported" } : { status: "error", message: errorText(reason) };
   }
@@ -148,6 +165,7 @@ export async function loadAccountWorkflow(
           });
           row = accountWorkflowRow(answer);
           timeZone = accountTimeZone(answer);
+          spokenLanguage = accountSpokenLanguage(answer);
         } catch (reason) {
           clear = status(reason) === 400; // refused: the old choice no longer runs
         }
@@ -155,7 +173,7 @@ export async function loadAccountWorkflow(
     }
     if (clear) onDeviceCleared();
   }
-  return { status: "ok", row, timeZone };
+  return { status: "ok", row, timeZone, spokenLanguage };
 }
 
 /** Read / write the account's default workflow for AbstractCode (loadAccountWorkflow runs the
@@ -182,11 +200,15 @@ export function useAccountWorkflow(identity: string, onDeviceCleared: () => void
     const answer = await gatewayRequest(ACCOUNT_PREFERENCES_PATH, { method: "PUT", body: JSON.stringify(changes) });
     const row = accountWorkflowRow(answer);
     const timeZone = accountTimeZone(answer);
-    setState({ status: "ok", row, timeZone });
-    return { row, timeZone };
+    const spokenLanguage = accountSpokenLanguage(answer);
+    setState({ status: "ok", row, timeZone, spokenLanguage });
+    return { row, timeZone, spokenLanguage };
   }, []);
   const save = useCallback(async (value: string | null) => (await put({ default_workflow: { [CODE_AGENT_INTERFACE]: value } })).row, [put]);
   /** The account's time zone (null = the gateway default): one PUT, at once (round 16). */
   const saveTimeZone = useCallback(async (value: string | null) => (await put({ time_zone: value })).timeZone, [put]);
-  return { state, save, saveTimeZone };
+  /** The account's spoken language ("auto" or a served code): one PUT, at once (round 18). The
+   * gateway applies it to every transcription; this app never sends a language of its own. */
+  const saveSpokenLanguage = useCallback(async (value: string) => (await put({ spoken_language: value })).spokenLanguage, [put]);
+  return { state, save, saveTimeZone, saveSpokenLanguage };
 }

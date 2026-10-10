@@ -4,6 +4,7 @@ import {
   AfVoiceSection,
   Icon,
   elapsedSeconds,
+  spokenLanguageLabel,
   streamTtsJsonl,
   transcribingLine,
   useGatewayVoice,
@@ -12,7 +13,7 @@ import {
 } from "@abstractframework/ui-kit";
 import { gateway, gatewayRequest, newId, csrfHeaders } from "./transport";
 import { MEDIA_NEEDS_HTTPS, mediaAvailable } from "../lib/secure-context";
-import type { VoiceClientPreferences, VoiceDefaults } from "@abstractframework/ui-kit";
+import type { SpokenLanguagePreference, VoiceClientPreferences, VoiceDefaults } from "@abstractframework/ui-kit";
 
 /** The gateway's default voice routes (output.voice / input.voice): what "Gateway default" names. */
 export function fetchVoiceDefaults(): Promise<VoiceDefaults> {
@@ -43,18 +44,56 @@ export function useVoiceDefaults(connected: boolean): { value: VoiceDefaults | n
   return state;
 }
 
-/** Code's Voice panel: the kit's shared section, fed by this gateway. */
+/** The line next to the microphone (round 18): the ACCOUNT's spoken language, "" while unknown. */
+export function spokenLanguageLine(block: SpokenLanguagePreference | null | undefined): string {
+  const label = spokenLanguageLabel(block ?? null);
+  return label ? `Spoken language: ${label}` : "";
+}
+
+/** What a transcription request carries: the uploaded audio, a request id and the STT route
+ * override (`voiceSttRequest`: provider/model only). Never a language — the gateway applies the
+ * account's spoken language (round 18). */
+export function transcribeRequestBody<A>(audioArtifact: A, preferences: VoiceClientPreferences, requestId: string = newId()) {
+  return { audio_artifact: audioArtifact, request_id: requestId, ...voiceSttRequest(preferences) };
+}
+
+/** Code's Voice panel: the kit's shared section, fed by this gateway. `spokenLanguage` = the
+ * account's block (null when the gateway did not serve it) and its one-PUT save; absent = no
+ * account (no row). The save note is kept here like AccountTimeZone's. */
 export function CodeVoiceSettings({
   value,
   onChange,
   defaults,
   connected,
+  spokenLanguage,
 }: {
   value: VoiceClientPreferences;
   onChange: (next: VoiceClientPreferences) => void;
   defaults: { value: VoiceDefaults | null; failed: boolean };
   connected: boolean;
+  spokenLanguage?: { block: SpokenLanguagePreference | null; save: (value: string) => Promise<unknown> };
 }) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const spoken = spokenLanguage
+    ? {
+        block: spokenLanguage.block,
+        note,
+        disabled: busy || !connected,
+        onChange: async (next: string) => {
+          setBusy(true);
+          setNote(null);
+          try {
+            await spokenLanguage.save(next);
+            setNote({ ok: true, text: "Saved." });
+          } catch (reason) {
+            setNote({ ok: false, text: `Not saved. ${reason instanceof Error ? reason.message : String(reason)}` });
+          } finally {
+            setBusy(false);
+          }
+        },
+      }
+    : undefined;
   return (
     <AfVoiceSection
       value={value}
@@ -65,6 +104,7 @@ export function CodeVoiceSettings({
       overrideOwner="this app"
       nested
       unavailableReason={connected ? null : "Connect to a gateway to configure voice."}
+      spokenLanguage={spoken}
     />
   );
 }
@@ -155,11 +195,7 @@ export function useWorkspaceVoice({
             // A transcription that never answers ends as a sentence, never a spinner forever.
             let timer: ReturnType<typeof setTimeout> | undefined;
             const response: any = await Promise.race([
-              gateway.audio_transcribe(runId, {
-                audio_artifact: attachment,
-                request_id: newId(),
-                ...voiceSttRequest(preferences),
-              }),
+              gateway.audio_transcribe(runId, transcribeRequestBody(attachment, preferences)),
               new Promise((_, reject) => {
                 timer = setTimeout(
                   () => reject(new Error(`the gateway did not answer within ${TRANSCRIBE_TIMEOUT_MS / 1000} s`)),
@@ -213,6 +249,7 @@ export function VoiceTools({
   runId,
   capability,
   route = "",
+  spokenLanguage = null,
   onSettings,
 }: {
   voice: ReturnType<typeof useWorkspaceVoice>;
@@ -220,6 +257,8 @@ export function VoiceTools({
   capability: Record<string, any>;
   /** The transcription route ("faster-whisper / large-v3": the override, else the gateway default). */
   route?: string;
+  /** The account's spoken-language block (round 18): "Spoken language: <label>" by the mic. */
+  spokenLanguage?: SpokenLanguagePreference | null;
   onSettings?: () => void;
 }) {
   const held = useRef(false);
@@ -284,6 +323,7 @@ export function VoiceTools({
   // Over plain http from another machine the browser withholds the microphone:
   // say why on the control instead of a silently disabled button.
   const micBlocked = !mediaAvailable();
+  const language = spokenLanguageLine(spokenLanguage);
   const status = voice.voice_ptt_recording
     ? `Recording… ${since ? elapsedSeconds(since, now) : ""}`.trim()
     : voice.voice_ptt_busy
@@ -315,11 +355,15 @@ export function VoiceTools({
               ? "Recording — tap or release to transcribe"
               : "Hold to dictate"
           }
-          title={
+          title={[
             runId
               ? "Hold to dictate, or tap to start and tap again to stop (Space or Enter on keyboard)"
-              : "Start a conversation to enable dictation"
-          }
+              : "Start a conversation to enable dictation",
+            language,
+          ]
+            .filter(Boolean)
+            .join("\n")}
+          aria-describedby={language ? "code-voice-language" : undefined}
           disabled={!voice.voice_ptt_supported || voice.voice_ptt_busy}
           aria-pressed={voice.voice_ptt_recording}
           onPointerDown={(event) => {
@@ -345,6 +389,11 @@ export function VoiceTools({
         >
           <Icon name={voice.voice_ptt_busy ? "loader" : "mic"} size={15} className={voice.voice_ptt_busy ? "code-loading-spinner" : undefined} />
         </button>
+      ) : null}
+      {capability.stt?.available && !micBlocked && language ? (
+        <span id="code-voice-language" className="code-voice-language" data-voice-language>
+          {language}
+        </span>
       ) : null}
       {/* No composer speaker (round 6): each reply has its own speaker button; Stop stays while one plays. */}
       {voice.tts_playback.status !== "idle" ? (

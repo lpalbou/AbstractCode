@@ -1,9 +1,11 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition } from "./catalog";
 import {
   ACCOUNT_PREFERENCES_PATH,
+  accountSpokenLanguage,
   accountTimeZone,
   accountValueFromSelection,
   accountWorkflowRow,
@@ -17,14 +19,23 @@ import { parsePreferences, preferencesKey, writePreferences } from "./preference
 import { DEFAULT_PREFERENCES } from "./settings_panel";
 
 const IFACE = "abstractcode.agent.v1";
+const SPOKEN_HELP =
+  "The language spoken to the microphone. Auto lets the speech engine detect it; naming it skips detection, so short phrases and mixed-language speech transcribe reliably and a little faster.";
+const SPOKEN_CHOICES = [
+  { value: "auto", label: "Auto (detected)" },
+  { value: "en", label: "English" },
+  { value: "fr", label: "French" },
+];
 
 /** A fake gateway holding the account's value: GET/PUT /accounts/me/preferences (or 404). */
 function fakeGateway(opts: { supported?: boolean; value?: string | null; runnable?: string[] } = {}) {
-  const state = { value: opts.value ?? null, zone: null as string | null, calls: [] as Array<{ method: string; body: any }> };
+  const state = { value: opts.value ?? null, zone: null as string | null, language: "auto", calls: [] as Array<{ method: string; body: any }> };
   const runnable = opts.runnable ?? ["coding-agent:coder", "basic-agent:main"];
   const answer = () => ({
     ok: true,
-    preferences: { default_workflow: { [IFACE]: state.value, "abstractassistant.agent.v1": null }, time_zone: state.zone },
+    preferences: { default_workflow: { [IFACE]: state.value, "abstractassistant.agent.v1": null }, time_zone: state.zone, spoken_language: state.language },
+    // Round 18: the spoken-language block, served whole (the gateway's spoken_language.preferences_block).
+    spoken_language: { value: state.language, label: "Spoken language", help: SPOKEN_HELP, choices: SPOKEN_CHOICES },
     // R16.1 (W1 "API — FINAL" (4)): the time-zone block, served whole.
     time_zone: { value: state.zone, gateway_default: "Europe/Paris", effective: state.zone ?? "Europe/Paris", label: "Time zone", help: "Daily, weekly and monthly automations run on this clock. Gateway default follows this computer's time zone.", choices: ["America/Los_Angeles", "Asia/Tokyo", "Europe/Paris", "UTC"] },
     apps: [
@@ -44,7 +55,12 @@ function fakeGateway(opts: { supported?: boolean; value?: string | null; runnabl
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     state.calls.push({ method, body });
     if (opts.supported === false) throw Object.assign(new Error("Not Found"), { status: 404 });
-    if (method === "PUT" && "time_zone" in body) {
+    if (method === "PUT" && "spoken_language" in body) {
+      const v = body.spoken_language;
+      if (v && v !== "auto" && !SPOKEN_CHOICES.some((c) => c.value === v))
+        throw Object.assign(new Error(`spoken_language = '${v}' refused: not a language the speech engines support. Choose auto or one of: en, fr.`), { status: 400 });
+      state.language = v || "auto";
+    } else if (method === "PUT" && "time_zone" in body) {
       if (body.time_zone !== null && !["America/Los_Angeles", "Asia/Tokyo", "Europe/Paris", "UTC"].includes(body.time_zone))
         throw Object.assign(new Error(`'${body.time_zone}' is not a time zone this gateway knows (an IANA name such as Europe/Paris).`), { status: 400 });
       state.zone = body.time_zone;
@@ -158,6 +174,34 @@ describe("account default workflow (R14.2)", () => {
       return a;
     };
     expect(await loadAccountWorkflow(bare, "@default", () => undefined)).toEqual({ status: "error", message: expect.stringMatching(/no time_zone block/) });
+  });
+
+  it("R18: reads the served spoken-language block; saveSpokenLanguage's PUT is {spoken_language}; a missing block fails loudly", async () => {
+    const gw = fakeGateway();
+    const loaded = await loadAccountWorkflow(gw.request, "@default", () => undefined);
+    expect(loaded.status === "ok" && loaded.spokenLanguage).toEqual({ value: "auto", label: "Spoken language", help: SPOKEN_HELP, choices: SPOKEN_CHOICES });
+    // The hook's saveSpokenLanguage is put({spoken_language: value}) — the source pin + the wire.
+    const src = readFileSync(new URL("./account_preferences.ts", import.meta.url), "utf8");
+    expect(src).toMatch(/const saveSpokenLanguage = useCallback\(async \(value: string\) => \(await put\(\{ spoken_language: value \}\)\)\.spokenLanguage/);
+    expect(src).toMatch(/const spokenLanguage = accountSpokenLanguage\(answer\);\n    setState\(\{ status: "ok", row, timeZone, spokenLanguage \}\)/);
+    const answer = await gw.request(ACCOUNT_PREFERENCES_PATH, { method: "PUT", body: JSON.stringify({ spoken_language: "fr" }) });
+    expect(gw.puts()).toEqual([{ spoken_language: "fr" }]);
+    expect(accountSpokenLanguage(answer).value).toBe("fr");
+    const again = await loadAccountWorkflow(gw.request, "@default", () => undefined);
+    expect(again.status === "ok" && again.spokenLanguage.value).toBe("fr");
+    expect(() => accountSpokenLanguage({ apps: [], preferences: { default_workflow: {} } })).toThrow(
+      "The gateway's account preferences answer has no spoken_language block.",
+    );
+    const noBlock = fakeGateway();
+    const bare: GatewayCall = async (path, init) => {
+      const a = (await noBlock.request(path, init)) as Record<string, unknown>;
+      delete a.spoken_language;
+      return a;
+    };
+    expect(await loadAccountWorkflow(bare, "@default", () => undefined)).toEqual({
+      status: "error",
+      message: "The gateway's account preferences answer has no spoken_language block.",
+    });
   });
 
   it("R16.1: Settings → Workflow shows the kit time-zone picker, Gateway default (<zone>) first, no Save", () => {

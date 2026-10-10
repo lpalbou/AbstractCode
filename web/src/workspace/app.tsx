@@ -1276,6 +1276,16 @@ export function CodeWorkspace() {
         onChange={(next) => { voice.stop_tts(); changeVoicePreferences(next); }}
         defaults={voiceDefaults}
         connected={connection.connected}
+        // The account's spoken language (round 18): no row while the answer loads; null = the
+        // gateway did not serve the block (older gateway / error) and the row says so.
+        spokenLanguage={
+          accountWorkflow.state.status === "loading"
+            ? undefined
+            : {
+                block: accountWorkflow.state.status === "ok" ? accountWorkflow.state.spokenLanguage : null,
+                save: accountWorkflow.saveSpokenLanguage,
+              }
+        }
       />
   );
   const automationDetail = automationsState.detail;
@@ -1991,6 +2001,7 @@ export function CodeWorkspace() {
                       voice={voice}
                       capability={voiceCapability}
                       route={sttRouteText(voicePreferences, voiceDefaults.value)}
+                      spokenLanguage={accountWorkflow.state.status === "ok" ? accountWorkflow.state.spokenLanguage : null}
                     />
                   ) : null}
                   {active ? (

@@ -172,6 +172,8 @@ describe("voice", () => {
   it("TTS requests carry only the speech fields; transcription carries the STT override", () => {
     expect(voiceSource).toContain("...voiceTtsRequest(preferences)");
     expect(voiceSource).toContain("...voiceSttRequest(preferences)");
+    // Round 18: never a language of Code's own — the account's applies on the gateway.
+    expect(voiceSource).not.toContain("stt_language");
     expect(voiceSource).toContain('output_device_id: preferences.output_device || ""');
   });
   it("Settings → Voice is the kit's Assistant-layout section", () => {
