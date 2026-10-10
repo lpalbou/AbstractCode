@@ -15,6 +15,15 @@ email trigger, and the calendar kinds say they need 0.14 (see Fixed).
 
 ### Added
 
+- `/voice` → **Spoken language** is your account's, kept by the gateway
+  (round 18; `GET`/`PUT /accounts/me/preferences` `spoken_language`): the
+  row shows the served label (`Auto (detected)`, `French`, …), Enter opens
+  the gateway's choices, a pick is ONE PUT ("Saved." / "Not saved.
+  <sentence>"), the help line is the gateway's `help`; an answer without
+  the block says "The gateway's account preferences answer has no
+  spoken_language block." The dictation status line names it while it
+  records and transcribes (`· Spoken language: French`). The transcription
+  answer's `language` / `detected_language` are read (not shown).
 - `/automations`: a card gets a third line, in the error colour, only while the automation's last **Email result** failed — the gateway's `last_notification.text` verbatim plus "· 3 h ago"; the automation's header shows the same line under its timing line. A sent notice (a later success) clears it.
 - `/schedule`'s **When** step (2/7): **Repeat** (the UTC presets and every
   N m/h/d, unchanged), **Daily**, **Weekly** (the days as `[x] Mon`
@@ -75,6 +84,10 @@ email trigger, and the calendar kinds say they need 0.14 (see Fixed).
 
 ### Changed
 
+- Dictation never sends a language of its own: `VoicePrefs.stt_language`
+  and the built-in `LANGUAGES` list are gone (round 18); the gateway applies
+  the account's spoken language. A `stt_language` saved in `prefs.json`
+  before is ignored (pick it once in `/voice`).
 - **Behaviour change:** `/automation` now creates an automation — it used to
   open the list, which is `/automations [id]` (or `/autos`); `/schedule` is
   kept as an alias for this release.

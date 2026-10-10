@@ -21,6 +21,12 @@
 //!   it for the next start;
 //! - a gateway without the route (404, older than 0.13.1) keeps the old
 //!   behaviour: the choice stays on this computer (`/workflow` saves it).
+//!
+//! Round 18 — the account's SPOKEN LANGUAGE rides on the same answer: the
+//! `spoken_language` block `{value, label, help, choices}` ("auto" or a
+//! code; the list is the gateway's, i.e. AbstractVoice's). The terminal
+//! keeps no list and no copy; a pick is ONE PUT `{"spoken_language": v}`.
+//! A missing block is said with the web's sentence ([`SPOKEN_LANGUAGE_MISSING`]).
 
 use serde_json::{json, Value};
 
@@ -38,6 +44,73 @@ pub const HELP: &str = "Kept by the gateway for your account: the Assistant and 
 pub const UNSUPPORTED: &str = "This gateway does not keep a default for your account (it needs a newer gateway): /workflow saves your choice on this computer, as before.";
 pub const SAVED: &str = "Saved.";
 pub const NOT_SAVED: &str = "Not saved.";
+
+/// The sentence when the answer lacks the block (the kit's
+/// `SPOKEN_LANGUAGE_MISSING`, verbatim).
+pub const SPOKEN_LANGUAGE_MISSING: &str =
+    "The gateway's account preferences answer has no spoken_language block.";
+
+/// The account's spoken language as the gateway serves it (the kit's
+/// `SpokenLanguagePreference`): `value` = "auto" or a code, never empty.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpokenLanguagePref {
+    pub value: String,
+    pub label: String,
+    pub help: String,
+    /// `(value, label)` in the gateway's order ("auto" first).
+    pub choices: Vec<(String, String)>,
+}
+
+impl SpokenLanguagePref {
+    /// The current choice's served label ("Auto (detected)", "French");
+    /// the bare value when the gateway does not list it.
+    pub fn current_label(&self) -> String {
+        self.choices
+            .iter()
+            .find(|(v, _)| *v == self.value)
+            .map(|(_, l)| l.clone())
+            .unwrap_or_else(|| self.value.clone())
+    }
+
+    /// The line beside the dictation control: "Spoken language: <label>".
+    pub fn line(&self) -> String {
+        format!("Spoken language: {}", self.current_label())
+    }
+}
+
+/// The `spoken_language` block, checked like the web's
+/// `accountSpokenLanguage`: a missing block or field is said, never guessed.
+pub fn spoken_language(answer: &Value) -> Result<SpokenLanguagePref, String> {
+    let b = answer.get("spoken_language").filter(|b| b.is_object());
+    let parsed = b.and_then(|b| {
+        let value = b
+            .get("value")
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())?;
+        let label = b.get("label").and_then(Value::as_str)?;
+        let help = b.get("help").and_then(Value::as_str)?;
+        let choices = b.get("choices").and_then(Value::as_array)?;
+        Some(SpokenLanguagePref {
+            value: value.to_string(),
+            label: label.to_string(),
+            help: help.to_string(),
+            choices: choices
+                .iter()
+                .filter_map(|c| {
+                    let v = c.get("value").and_then(Value::as_str)?;
+                    let l = c.get("label").and_then(Value::as_str).unwrap_or(v);
+                    Some((v.to_string(), l.to_string()))
+                })
+                .collect(),
+        })
+    });
+    parsed.ok_or_else(|| SPOKEN_LANGUAGE_MISSING.to_string())
+}
+
+/// The PUT body of a spoken-language pick ("auto" = the engine detects it).
+pub fn put_spoken_language(value: &str) -> Value {
+    json!({"spoken_language": value})
+}
 
 /// One choice of the row: the account value, its label, the bundle and
 /// flow it runs (for the terminal's own workflow list).
@@ -219,8 +292,9 @@ pub enum State {
     Ok(Row),
 }
 
-/// Everything the Workflow panel needs.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// Everything the Workflow panel (and the Voice panel's Spoken language
+/// row) needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct View {
     pub state: State,
     /// A PUT is in flight (the row is busy).
@@ -229,6 +303,28 @@ pub struct View {
     pub note: Option<(bool, String)>,
     /// The migration settled: remove the old device choice (UI thread).
     pub clear_device: bool,
+    /// The account's spoken language from the same GET (round 18). `Err("")`
+    /// = not read yet; `Err(sentence)` = the gateway did not serve it (an
+    /// older gateway: [`SPOKEN_LANGUAGE_MISSING`]) or could not be read.
+    pub spoken_language: Result<SpokenLanguagePref, String>,
+    /// A spoken-language PUT is in flight.
+    pub spoken_busy: bool,
+    /// "Saved." / "Not saved. <sentence>" under the Spoken language row.
+    pub spoken_note: Option<(bool, String)>,
+}
+
+impl Default for View {
+    fn default() -> Self {
+        View {
+            state: State::Unknown,
+            busy: false,
+            note: None,
+            clear_device: false,
+            spoken_language: Err(String::new()),
+            spoken_busy: false,
+            spoken_note: None,
+        }
+    }
 }
 
 impl View {
@@ -254,6 +350,23 @@ impl View {
         self.busy = false;
         self.note = Some(note);
     }
+
+    /// The account's spoken language when the gateway served it.
+    pub fn spoken(&self) -> Option<&SpokenLanguagePref> {
+        self.spoken_language.as_ref().ok()
+    }
+
+    /// A spoken-language pick answered (the PUT's whole answer, parsed): the
+    /// new block on success; on a refusal the shown value stays and the note
+    /// says why ("Not saved. <the gateway's sentence>").
+    pub fn apply_spoken_save(&mut self, out: Result<SpokenLanguagePref, String>) {
+        let note = change_note(&out.as_ref().map(|_| ()).map_err(Clone::clone));
+        if let Ok(block) = out {
+            self.spoken_language = Ok(block);
+        }
+        self.spoken_busy = false;
+        self.spoken_note = Some(note);
+    }
 }
 
 /// The note of a change: "Saved." or "Not saved. <sentence>" (the web's).
@@ -277,6 +390,7 @@ mod tests {
 
     const GET: &str = include_str!("../tests/fixtures/account_prefs/get_default.json");
     const PUT_OK: &str = include_str!("../tests/fixtures/account_prefs/put_coder.json");
+    const PUT_FR: &str = include_str!("../tests/fixtures/account_prefs/put_spoken_fr.json");
 
     fn parse(s: &str) -> Value {
         serde_json::from_str(s).unwrap()
@@ -399,6 +513,68 @@ mod tests {
         );
         assert_eq!(v.note, Some((false, "Saved.".into())));
         assert!(!v.busy);
+    }
+
+    #[test]
+    fn the_spoken_language_block_is_read_from_the_recorded_answer() {
+        let b = spoken_language(&parse(GET)).unwrap();
+        assert_eq!(b.value, "auto");
+        assert_eq!(b.label, "Spoken language");
+        assert_eq!(b.help, "The language spoken to the microphone. Auto lets the speech engine detect it; naming it skips detection, so short phrases and mixed-language speech transcribe reliably and a little faster.");
+        assert_eq!(
+            b.choices[0],
+            ("auto".to_string(), "Auto (detected)".to_string())
+        );
+        assert!(b
+            .choices
+            .contains(&("fr".to_string(), "French".to_string())));
+        assert_eq!(b.current_label(), "Auto (detected)");
+        assert_eq!(b.line(), "Spoken language: Auto (detected)");
+        let fr = spoken_language(&parse(PUT_FR)).unwrap();
+        assert_eq!(fr.value, "fr");
+        assert_eq!(fr.line(), "Spoken language: French");
+    }
+
+    #[test]
+    fn a_missing_spoken_language_block_is_said_never_guessed() {
+        let mut v = parse(GET);
+        v.as_object_mut().unwrap().remove("spoken_language");
+        assert_eq!(
+            spoken_language(&v).unwrap_err(),
+            "The gateway's account preferences answer has no spoken_language block."
+        );
+        let mut v = parse(GET);
+        v["spoken_language"]
+            .as_object_mut()
+            .unwrap()
+            .remove("choices");
+        assert_eq!(spoken_language(&v).unwrap_err(), SPOKEN_LANGUAGE_MISSING);
+        // The workflow row still reads: the two blocks are independent.
+        assert!(row(&v).is_ok());
+    }
+
+    #[test]
+    fn a_spoken_language_pick_is_one_put_body_and_its_note() {
+        assert_eq!(put_spoken_language("fr"), json!({"spoken_language": "fr"}));
+        assert_eq!(
+            put_spoken_language("auto"),
+            json!({"spoken_language": "auto"})
+        );
+        let mut v = View {
+            spoken_language: spoken_language(&parse(GET)),
+            spoken_busy: true,
+            ..View::default()
+        };
+        v.apply_spoken_save(Err(
+            "spoken_language = 'xx' refused: not a language the speech engines support.".into(),
+        ));
+        assert_eq!(v.spoken().unwrap().value, "auto", "no optimistic flip");
+        assert!(!v.spoken_busy);
+        assert_eq!(v.spoken_note, Some((true, "Not saved. spoken_language = 'xx' refused: not a language the speech engines support.".into())));
+        v.apply_spoken_save(spoken_language(&parse(PUT_FR)));
+        assert_eq!(v.spoken().unwrap().value, "fr");
+        assert_eq!(v.spoken_note, Some((false, "Saved.".into())));
+        assert_eq!(v.note, None, "the workflow row's note is untouched");
     }
 
     #[test]

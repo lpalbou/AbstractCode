@@ -18,6 +18,10 @@
 //! - Preferences use the kit's `VoiceClientPreferences` keys, so a value
 //!   means the same thing in every app; an empty field = the gateway
 //!   default.
+//! - The spoken language is the ACCOUNT's (round 18): the gateway applies
+//!   its `spoken_language` preference ([`crate::account_prefs`]) to every
+//!   transcription. This app keeps no language and never sends one (an old
+//!   `stt_language` key in the config is ignored).
 //!
 //! Host audio (speaker, microphone, device lists) is AbstractVoice's, run
 //! through [`crate::voice_host`]; this module never synthesises or
@@ -42,21 +46,6 @@ pub const TRANSCRIBE_TIMEOUT: Duration = Duration::from_secs(180);
 /// A dictation stops by itself after this long (a forgotten recording must end).
 pub const MAX_RECORDING_S: u64 = 120;
 
-/// Spoken-language choices for transcription (the kit's `VOICE_LANGUAGE_OPTIONS`).
-pub const LANGUAGES: &[(&str, &str)] = &[
-    ("", "Detect automatically"),
-    ("en", "English"),
-    ("fr", "French"),
-    ("de", "German"),
-    ("es", "Spanish"),
-    ("it", "Italian"),
-    ("pt", "Portuguese"),
-    ("nl", "Dutch"),
-    ("zh", "Chinese"),
-    ("ja", "Japanese"),
-    ("ko", "Korean"),
-];
-
 /// The latency choices (`quality_preset`, the kit's `VOICE_LATENCY_OPTIONS`).
 pub const LATENCY: &[(&str, &str)] = &[
     ("", "Gateway default"),
@@ -78,7 +67,6 @@ pub struct VoicePrefs {
     pub instructions: String,
     pub stt_provider: String,
     pub stt_model: String,
-    pub stt_language: String,
     pub output_device: String,
     pub input_device: String,
     pub input_gain: Option<f64>,
@@ -119,7 +107,6 @@ impl VoicePrefs {
             instructions: s("instructions"),
             stt_provider: s("stt_provider"),
             stt_model: s("stt_model"),
-            stt_language: s("stt_language"),
             output_device: s("output_device"),
             input_device: s("input_device"),
             input_gain: f("input_gain"),
@@ -147,7 +134,6 @@ impl VoicePrefs {
         put("instructions", &self.instructions);
         put("stt_provider", &self.stt_provider);
         put("stt_model", &self.stt_model);
-        put("stt_language", &self.stt_language);
         put("output_device", &self.output_device);
         put("input_device", &self.input_device);
         if let Some(x) = self.speed {
@@ -192,7 +178,8 @@ impl VoicePrefs {
 
     /// The fields a transcription request carries (the kit's
     /// `voiceSttRequest`): provider/model only when overridden (empty =
-    /// gateway default), language when named.
+    /// gateway default). Never a language: the gateway applies the
+    /// account's spoken language (round 18).
     pub fn stt_request(&self) -> Map<String, Value> {
         let mut m = Map::new();
         if !self.stt_provider.is_empty() {
@@ -200,9 +187,6 @@ impl VoicePrefs {
             if !self.stt_model.is_empty() {
                 m.insert("model".into(), json!(self.stt_model));
             }
-        }
-        if !self.stt_language.is_empty() {
-            m.insert("language".into(), json!(self.stt_language));
         }
         m
     }
@@ -488,6 +472,11 @@ pub struct Transcription {
     pub provider: String,
     pub model: String,
     pub duration_ms: Option<u64>,
+    /// What reached the engine (round 18): the account's spoken language or
+    /// "auto" ("" from a gateway older than round 18).
+    pub language: String,
+    /// What the engine reported ("" when it did not say).
+    pub detected_language: String,
 }
 
 /// The gateway's voice routes over this client's connection. Built from the
@@ -709,6 +698,8 @@ impl VoiceGateway {
             provider: s("provider"),
             model: s("model"),
             duration_ms: v.get("duration_ms").and_then(Value::as_u64),
+            language: s("language"),
+            detected_language: s("detected_language"),
         })
     }
 }
@@ -1027,7 +1018,6 @@ mod tests {
             provider: "piper".into(),
             stt_provider: "faster-whisper".into(),
             stt_model: "small".into(),
-            stt_language: "fr".into(),
             output_device: "BuiltIn".into(),
             read_aloud: true,
             ..Default::default()
@@ -1037,7 +1027,22 @@ mod tests {
         assert!(!tts.contains_key("output_device") && !tts.contains_key("read_aloud"));
         let stt = p.stt_request();
         assert_eq!(stt.get("model"), Some(&json!("small")));
-        assert_eq!(stt.get("language"), Some(&json!("fr")));
+        assert_eq!(stt.len(), 2, "provider/model only: {stt:?}");
+    }
+
+    #[test]
+    fn a_transcription_request_never_carries_a_language() {
+        // Round 18: an old config's `stt_language` is ignored; the account's applies on the gateway.
+        let p = VoicePrefs::from_json(Some(
+            &json!({"stt_language": "fr", "stt_provider": "faster-whisper"}),
+        ));
+        let stt = p.stt_request();
+        assert!(!stt.contains_key("language"), "{stt:?}");
+        assert_eq!(Value::Object(stt), json!({"provider": "faster-whisper"}));
+        assert!(
+            p.to_json().get("stt_language").is_none(),
+            "never written back"
+        );
     }
 
     #[test]

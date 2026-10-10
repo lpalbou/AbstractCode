@@ -1713,4 +1713,36 @@ mod tests {
         assert_eq!(both.workflow_preference(), (None, None));
         let _ = fs::remove_dir_all(dir);
     }
+
+    #[test]
+    fn an_old_voice_stt_language_keeps_parsing_and_is_ignored() {
+        // Round 18: the spoken language is the account's (gateway). A prefs
+        // file written before still loads; its `stt_language` is ignored and
+        // never written back by the voice screen.
+        let dir = std::env::temp_dir().join(format!("acode-prefs-r18-lang-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("prefs.json");
+        fs::write(
+            &path,
+            r#"{"theme": "nord", "voice": {"stt_language": "fr", "read_aloud": true, "stt_provider": "faster-whisper"}}"#,
+        )
+        .unwrap();
+        let p = Prefs::load_from(path);
+        assert_eq!(
+            p.theme.as_deref(),
+            Some("nord"),
+            "the rest of the file loads"
+        );
+        let v = crate::voice::VoicePrefs::from_json(p.voice.as_ref());
+        assert!(v.read_aloud);
+        assert_eq!(v.stt_provider, "faster-whisper");
+        assert!(!v.stt_request().contains_key("language"));
+        assert_eq!(
+            v.to_json(),
+            json!({"read_aloud": true, "stt_provider": "faster-whisper"}),
+            "the old key is dropped on the next save"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
 }

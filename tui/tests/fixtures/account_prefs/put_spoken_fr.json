@@ -7,7 +7,7 @@
             "abstractcode.agent.v1": null,
             "abstractassistant.agent.v1": null
         },
-        "spoken_language": "auto"
+        "spoken_language": "fr"
     },
     "declared": {
         "default_workflow": {
@@ -210,7 +210,7 @@
         }
     ],
     "spoken_language": {
-        "value": "auto",
+        "value": "fr",
         "label": "Spoken language",
         "help": "The language spoken to the microphone. Auto lets the speech engine detect it; naming it skips detection, so short phrases and mixed-language speech transcribe reliably and a little faster.",
         "choices": [

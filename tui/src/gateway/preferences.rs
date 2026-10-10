@@ -7,6 +7,10 @@
 //! change is ONE PUT of this app's interface only; a refusal (400
 //! `{detail: {reason: "preference_refused", message}}`) becomes "Not saved.
 //! <message>" and nothing changes. 404 = a gateway older than the route.
+//!
+//! Round 18: the same GET carries the account's `spoken_language` block
+//! (read into `View::spoken_language`, independent of the workflow row);
+//! `PrefCmd::SaveSpokenLanguage` is ONE PUT `{"spoken_language": v}`.
 
 use abstracttui::reactive::WakeHandle;
 use serde_json::Value;
@@ -23,6 +27,8 @@ pub enum PrefCmd {
     Load { device: Option<String> },
     /// One change (`None` = the gateway default).
     Save { value: Option<String> },
+    /// One spoken-language pick ("auto" or a served code), round 18.
+    SaveSpokenLanguage { value: String },
 }
 
 /// A failed call: the HTTP status (when the gateway answered) and the
@@ -96,18 +102,40 @@ impl GatewayClient {
     }
 }
 
-/// What a load ends with: the row state and whether the old device choice
-/// is settled (removed here).
-pub fn load(client: &GatewayClient, device: Option<&str>) -> (State, bool) {
-    let mut row = match client.account_preferences(None) {
+/// What a load ends with: the row state, the account's spoken language
+/// (round 18) and whether the old device choice is settled (removed here).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Loaded {
+    pub state: State,
+    /// `Err(SPOKEN_LANGUAGE_MISSING)` for an answer (or a gateway) without
+    /// the block; `Err(<transport sentence>)` when nothing was read.
+    pub spoken_language: Result<ap::SpokenLanguagePref, String>,
+    pub clear: bool,
+}
+
+pub fn load(client: &GatewayClient, device: Option<&str>) -> Loaded {
+    let fail = |state: State, spoken: String| Loaded {
+        state,
+        spoken_language: Err(spoken),
+        clear: false,
+    };
+    let (mut row, mut spoken) = match client.account_preferences(None) {
         Ok(v) => match ap::row(&v) {
-            Ok(r) => r,
-            Err(e) => return (State::Error(e), false),
+            Ok(r) => (r, ap::spoken_language(&v)),
+            Err(e) => {
+                return Loaded {
+                    state: State::Error(e),
+                    spoken_language: ap::spoken_language(&v),
+                    clear: false,
+                }
+            }
         },
         // No such route (404, or 405 from a gateway that routes the path
         // for another method): an older gateway, said once in place.
-        Err(e) if matches!(e.status, Some(404 | 405)) => return (State::Unsupported, false),
-        Err(e) => return (State::Error(e.sentence), false),
+        Err(e) if matches!(e.status, Some(404 | 405)) => {
+            return fail(State::Unsupported, ap::SPOKEN_LANGUAGE_MISSING.into())
+        }
+        Err(e) => return fail(State::Error(e.sentence.clone()), e.sentence),
     };
     let mut clear = false;
     if let Some(device) = device.filter(|d| !d.is_empty()) {
@@ -116,16 +144,38 @@ pub fn load(client: &GatewayClient, device: Option<&str>) -> (State, bool) {
             match client
                 .account_preferences(Some(&ap::put_body(Some(device))))
                 .map_err(|e| (e.status, e.sentence))
-                .and_then(|v| ap::row(&v).map_err(|e| (None, e)))
-            {
-                Ok(r) => row = r,
+                .and_then(|v| {
+                    ap::row(&v)
+                        .map(|r| (r, ap::spoken_language(&v)))
+                        .map_err(|e| (None, e))
+                }) {
+                Ok((r, s)) => {
+                    row = r;
+                    spoken = s;
+                }
                 // Refused: the old choice no longer runs — removed too.
                 // Any other failure keeps it for the next start.
                 Err((status, _)) => clear = status == Some(400),
             }
         }
     }
-    (State::Ok(row), clear)
+    Loaded {
+        state: State::Ok(row),
+        spoken_language: spoken,
+        clear,
+    }
+}
+
+/// One spoken-language pick: the PUT, then the answer's block (a refusal
+/// is the gateway's sentence; an answer without the block is said).
+pub fn save_spoken_language(
+    client: &GatewayClient,
+    value: &str,
+) -> Result<ap::SpokenLanguagePref, String> {
+    client
+        .account_preferences(Some(&ap::put_spoken_language(value)))
+        .map_err(|e| e.sentence)
+        .and_then(|v| ap::spoken_language(&v))
 }
 
 pub fn spawn(client: &GatewayClient, wake: WakeHandle, store: Store, cmd: PrefCmd) {
@@ -139,10 +189,15 @@ pub fn spawn(client: &GatewayClient, wake: WakeHandle, store: Store, cmd: PrefCm
 fn run(client: &GatewayClient, wake: &WakeHandle, store: Store, cmd: PrefCmd) {
     match cmd {
         PrefCmd::Load { device } => {
-            let (state, clear) = load(client, device.as_deref());
+            let Loaded {
+                state,
+                spoken_language,
+                clear,
+            } = load(client, device.as_deref());
             wake.post(move || {
                 store.account_workflow.update(|v| {
                     v.state = state;
+                    v.spoken_language = spoken_language;
                     if clear {
                         v.clear_device = true;
                     }
@@ -156,6 +211,10 @@ fn run(client: &GatewayClient, wake: &WakeHandle, store: Store, cmd: PrefCmd) {
                 .and_then(|v| ap::row(&v));
             wake.post(move || store.account_workflow.update(|v| v.apply_save(out)));
         }
+        PrefCmd::SaveSpokenLanguage { value } => {
+            let out = save_spoken_language(client, &value);
+            wake.post(move || store.account_workflow.update(|v| v.apply_spoken_save(out)));
+        }
     }
 }
 
@@ -168,6 +227,9 @@ mod tests {
     const GET: &str = include_str!("../../tests/fixtures/account_prefs/get_default.json");
     const PUT_OK: &str = include_str!("../../tests/fixtures/account_prefs/put_coder.json");
     const REFUSED: &str = include_str!("../../tests/fixtures/account_prefs/put_refused_400.json");
+    const PUT_FR: &str = include_str!("../../tests/fixtures/account_prefs/put_spoken_fr.json");
+    const SPOKEN_REFUSED: &str =
+        include_str!("../../tests/fixtures/account_prefs/put_spoken_refused_400.json");
 
     /// A local HTTP server answering `answers` in order (status, body);
     /// hands back every (request line, body) that went on the wire.
@@ -214,9 +276,18 @@ mod tests {
     fn the_row_is_read_from_the_account_route() {
         let (url, rx) = server(vec![("200 OK", GET)]);
         let c = GatewayClient::new(&url, Some("t"));
-        let (state, clear) = load(&c, None);
+        let Loaded {
+            state,
+            spoken_language,
+            clear,
+        } = load(&c, None);
         assert!(matches!(state, State::Ok(ref r) if r.value.is_none()));
         assert!(!clear);
+        assert_eq!(
+            spoken_language.unwrap().line(),
+            "Spoken language: Auto (detected)",
+            "the same GET fills the spoken language"
+        );
         let (line, body) = rx.recv().unwrap();
         assert_eq!(line, "GET /api/gateway/accounts/me/preferences HTTP/1.1");
         assert!(body.is_empty());
@@ -272,7 +343,11 @@ mod tests {
             let c = GatewayClient::new(&url, Some("t"));
             assert_eq!(
                 load(&c, Some("coding-agent:coder")),
-                (State::Unsupported, false),
+                Loaded {
+                    state: State::Unsupported,
+                    spoken_language: Err(ap::SPOKEN_LANGUAGE_MISSING.into()),
+                    clear: false
+                },
                 "{status}"
             );
         }
@@ -282,7 +357,7 @@ mod tests {
     fn the_device_choice_is_uploaded_once_when_the_account_has_none() {
         let (url, rx) = server(vec![("200 OK", GET), ("200 OK", PUT_OK)]);
         let c = GatewayClient::new(&url, Some("t"));
-        let (state, clear) = load(&c, Some("coding-agent:coder"));
+        let Loaded { state, clear, .. } = load(&c, Some("coding-agent:coder"));
         assert!(clear, "uploaded → removed from this computer");
         assert!(
             matches!(state, State::Ok(ref r) if r.value.as_deref() == Some("coding-agent:coder"))
@@ -300,7 +375,7 @@ mod tests {
     fn an_account_choice_made_elsewhere_wins_and_the_device_choice_goes() {
         let (url, rx) = server(vec![("200 OK", PUT_OK)]);
         let c = GatewayClient::new(&url, Some("t"));
-        let (state, clear) = load(&c, Some("basic-agent:81795ea9"));
+        let Loaded { state, clear, .. } = load(&c, Some("basic-agent:81795ea9"));
         assert!(clear);
         assert!(
             matches!(state, State::Ok(ref r) if r.value.as_deref() == Some("coding-agent:coder"))
@@ -317,13 +392,54 @@ mod tests {
     fn a_refused_upload_removes_the_device_choice_a_network_failure_keeps_it() {
         let (url, _rx) = server(vec![("200 OK", GET), ("400 Bad Request", REFUSED)]);
         let c = GatewayClient::new(&url, Some("t"));
-        let (state, clear) = load(&c, Some("nope-bundle:nope"));
+        let Loaded { state, clear, .. } = load(&c, Some("nope-bundle:nope"));
         assert!(clear);
         assert!(matches!(state, State::Ok(ref r) if r.value.is_none()));
 
         let (url, _rx) = server(vec![("200 OK", GET), ("503 Service Unavailable", "")]);
         let c = GatewayClient::new(&url, Some("t"));
-        let (_, clear) = load(&c, Some("coding-agent:coder"));
+        let Loaded { clear, .. } = load(&c, Some("coding-agent:coder"));
         assert!(!clear, "kept for the next start");
+    }
+
+    #[test]
+    fn a_spoken_language_pick_is_one_put_and_the_answer_is_read_back() {
+        let (url, rx) = server(vec![("200 OK", PUT_FR)]);
+        let c = GatewayClient::new(&url, Some("t"));
+        let block = save_spoken_language(&c, "fr").unwrap();
+        assert_eq!(block.value, "fr");
+        assert_eq!(block.line(), "Spoken language: French");
+        let (line, body) = rx.recv().unwrap();
+        assert_eq!(line, "PUT /api/gateway/accounts/me/preferences HTTP/1.1");
+        assert_eq!(
+            serde_json::from_str::<Value>(&body).unwrap(),
+            json!({"spoken_language": "fr"})
+        );
+    }
+
+    #[test]
+    fn a_refused_spoken_language_is_the_gateways_sentence() {
+        let (url, _rx) = server(vec![("400 Bad Request", SPOKEN_REFUSED)]);
+        let c = GatewayClient::new(&url, Some("t"));
+        let e = save_spoken_language(&c, "xx").unwrap_err();
+        assert_eq!(
+            ap::change_note(&Err(e)).1,
+            "Not saved. spoken_language = 'xx' refused: not a language the speech engines support. Choose auto or one of: ar, de, el, en, es, fr, hi, it, ja, ko, nl, pl, pt, ru, vi, zh."
+        );
+    }
+
+    #[test]
+    fn an_answer_without_the_block_says_so_and_the_workflow_row_still_reads() {
+        let mut v: Value = serde_json::from_str(GET).unwrap();
+        v.as_object_mut().unwrap().remove("spoken_language");
+        let body: &'static str = Box::leak(v.to_string().into_boxed_str());
+        let (url, _rx) = server(vec![("200 OK", body)]);
+        let c = GatewayClient::new(&url, Some("t"));
+        let l = load(&c, None);
+        assert!(matches!(l.state, State::Ok(_)));
+        assert_eq!(
+            l.spoken_language,
+            Err("The gateway's account preferences answer has no spoken_language block.".into())
+        );
     }
 }

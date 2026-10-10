@@ -11,6 +11,12 @@
 //! a dictation (again = transcribe), Esc stops speech / cancels a
 //! recording. Commands: `/voice`, `/speak [stop]`, `/dictate`.
 //!
+//! Spoken language (round 18): the ACCOUNT's, from the gateway's
+//! preferences answer (`store.account_workflow.spoken_language`, read by
+//! `crate::gateway::preferences`): the row shows the served label, Enter
+//! opens the served choices, a pick is ONE PUT; the dictation status line
+//! names it ("Spoken language: French"). This app keeps no language list.
+//!
 //! Threads: every gateway call and every bridge wait runs on a named voice
 //! thread; results come back as posted closures. The UI thread only flips
 //! signals and sends one-line commands to an already running bridge.
@@ -26,6 +32,8 @@ use serde_json::{json, Value};
 
 use super::modals::{modal_size, open_picker, Picker};
 use super::UiCtx;
+use crate::account_prefs as ap;
+use crate::gateway::preferences::PrefCmd;
 use crate::store::{Phase, Store};
 use crate::transcript::Item;
 use crate::voice::{
@@ -386,19 +394,36 @@ pub fn wire(cx: Scope, store: Store, ctx: &UiCtx, composer: abstracttui::widgets
     });
 }
 
+/// "Spoken language: <label>" of the account (round 18), `None` while the
+/// gateway has not served the block.
+pub fn spoken_language_line(store: Store) -> Option<String> {
+    store
+        .account_workflow
+        .with(|a| a.spoken().map(|b| b.line()))
+}
+
 /// The status line shown above the composer while voice is busy:
-/// "♪ Speaking… · Esc stops", "● Recording… 3 s · Ctrl+R transcribes · Esc
-/// cancels", "Transcribing… 4 s · faster-whisper / large-v3".
+/// "♪ Speaking… · Esc stops", "● Recording… 3 s · Spoken language: French ·
+/// Ctrl+R transcribes · Esc cancels", "Transcribing… 4 s · faster-whisper /
+/// large-v3 · Spoken language: French" (the language once the gateway
+/// served the account's).
 pub fn status_text(store: Store, now: Instant) -> Option<String> {
     match store.voice.dictation.get() {
         Dictation::Recording { since, .. } => {
+            let lang = spoken_language_line(store)
+                .map(|l| format!(" · {l}"))
+                .unwrap_or_default();
             return Some(format!(
-                "● Recording… {} · Ctrl+R transcribes · Esc cancels",
+                "● Recording… {}{lang} · Ctrl+R transcribes · Esc cancels",
                 voice::elapsed_seconds(since, now)
-            ))
+            ));
         }
         Dictation::Transcribing { since, route } => {
-            return Some(transcribing_line(since, now, &route))
+            let line = transcribing_line(since, now, &route);
+            return Some(match spoken_language_line(store) {
+                Some(l) => format!("{line} · {l}"),
+                None => line,
+            });
         }
         Dictation::Idle => {}
     }
@@ -615,12 +640,20 @@ fn settings_rows(store: Store, p: &VoicePrefs) -> Vec<(String, Row)> {
     if let Some(e) = dev_note {
         rows.push((format!("  {e}"), Row::None));
     }
-    let lang = voice::LANGUAGES
-        .iter()
-        .find(|(k, _)| *k == p.stt_language)
-        .map(|(_, l)| l.to_string())
-        .unwrap_or_else(|| p.stt_language.clone());
+    // The ACCOUNT's spoken language, served by the gateway (round 18).
+    let (lang, lang_note) = store.account_workflow.with(|a| {
+        let value = match &a.spoken_language {
+            Ok(b) if a.spoken_busy => format!("{} · saving…", b.current_label()),
+            Ok(b) => b.current_label(),
+            Err(e) if e.is_empty() => "…".to_string(),
+            Err(e) => e.clone(),
+        };
+        (value, a.spoken_note.clone())
+    });
     rows.push((label("Spoken language", lang), Row::Language));
+    if let Some((_, note)) = lang_note {
+        rows.push((format!("  {note}"), Row::None));
+    }
     rows.push((
         label("Input level", format!("{}  ←/→", percent(p.gain()))),
         Row::Gain,
@@ -645,19 +678,28 @@ fn settings_rows(store: Store, p: &VoicePrefs) -> Vec<(String, Row)> {
     rows
 }
 
-/// One line of help for the selected row (the kit's helper sentences).
-fn row_help(row: Row) -> &'static str {
+/// One line of help for the selected row (the kit's helper sentences; the
+/// Spoken language row's is the gateway's served `help`).
+fn row_help(store: Store, row: Row) -> String {
+    if row == Row::Language {
+        return store.account_workflow.with(|a| match &a.spoken_language {
+            Ok(b) => b.help.clone(),
+            Err(e) if e.is_empty() => String::new(),
+            Err(_) => ap::SPOKEN_LANGUAGE_MISSING.to_string(),
+        });
+    }
     match row {
         Row::Tts | Row::Stt => "Enter: Gateway default or an override for this app",
         Row::Output => "Enter picks the speaker (AbstractVoice on this computer)",
         Row::Volume => "←/→ changes the reply volume",
         Row::Gain => "Raises a quiet microphone · ←/→",
-        Row::Language => "Naming it skips detection: transcription is faster.",
+        Row::Language => "",
         Row::Latency => "Trades quality for a faster first word.",
         Row::ReadAloud => "Enter switches it",
         Row::TestSpeaker | Row::TestMic | Row::Input => "Enter",
         Row::None => "",
     }
+    .to_string()
 }
 
 fn load_devices(store: Store) {
@@ -737,9 +779,8 @@ pub fn open_voice_settings(cx: Scope, store: Store, ctx: &UiCtx) {
                 let _ = store.voice.tick.get();
                 let rows = settings_rows(store, &prefs(&help_ctx));
                 rows.get(help_sel.get())
-                    .map(|(_, r)| row_help(*r))
-                    .unwrap_or("")
-                    .to_string()
+                    .map(|(_, r)| row_help(store, *r))
+                    .unwrap_or_default()
             })),
             keys: vec![
                 (
@@ -792,15 +833,7 @@ fn activate(cx: Scope, store: Store, ctx: &UiCtx, row: Row) {
         Row::TestSpeaker => test_speaker(store, &p),
         Row::TestMic => test_microphone(store, &p),
         Row::Output | Row::Input => open_device_picker(cx, store, ctx, row == Row::Output),
-        Row::Language => open_choice_picker(
-            cx,
-            store,
-            ctx,
-            "Spoken language",
-            voice::LANGUAGES,
-            p.stt_language.clone(),
-            |p, v| p.stt_language = v,
-        ),
+        Row::Language => open_spoken_language_picker(cx, store, ctx),
         Row::Latency => open_choice_picker(
             cx,
             store,
@@ -893,6 +926,78 @@ fn test_microphone(store: Store, p: &VoicePrefs) {
             store.voice.mic_note.set(Some(note));
         });
     });
+}
+
+/// The served choices of the account's spoken language (labels verbatim);
+/// a pick is ONE PUT through the preferences lane. Unknown block = the
+/// seam sentence, no picker.
+fn open_spoken_language_picker(cx: Scope, store: Store, ctx: &UiCtx) {
+    let Some(block) = store
+        .account_workflow
+        .with_untracked(|a| a.spoken().cloned())
+    else {
+        let why = store
+            .account_workflow
+            .with_untracked(|a| match &a.spoken_language {
+                Err(e) if !e.is_empty() => e.clone(),
+                _ => ap::SPOKEN_LANGUAGE_MISSING.to_string(),
+            });
+        post_error(store, why);
+        return;
+    };
+    if store.account_workflow.with_untracked(|a| a.spoken_busy) {
+        return;
+    }
+    let start = block
+        .choices
+        .iter()
+        .position(|(v, _)| *v == block.value)
+        .unwrap_or(0);
+    let values: Vec<String> = block.choices.iter().map(|(v, _)| v.clone()).collect();
+    let pctx = ctx.clone();
+    let back = ctx.clone();
+    open_picker(
+        cx,
+        ctx,
+        Picker {
+            title: format!("{} · Enter selects · Esc back", block.label),
+            labels: block.choices.iter().map(|(_, l)| l.clone()).collect(),
+            live: None,
+            start,
+            size: modal_size(60, block.choices.len() as i32 + 6),
+            hint: Some(block.help.clone()),
+            live_hint: None,
+            keys: Vec::new(),
+            on_mount: None,
+            on_selection: None,
+            on_choose: Box::new(move |ix| {
+                if let Some(value) = values.get(ix).cloned() {
+                    save_spoken_language(store, &pctx, value);
+                }
+                open_voice_settings(cx, store, &pctx);
+            }),
+            on_cancel: Some(Box::new(move || open_voice_settings(cx, store, &back))),
+        },
+    );
+}
+
+/// One spoken-language pick: the row busy, then ONE PUT (the lane posts
+/// "Saved." / "Not saved. <sentence>" back into the view).
+pub fn save_spoken_language(store: Store, ctx: &UiCtx, value: String) {
+    store.account_workflow.update(|a| {
+        a.spoken_busy = true;
+        a.spoken_note = None;
+    });
+    if !ctx.send(crate::runner::Cmd::AccountPrefs(
+        PrefCmd::SaveSpokenLanguage { value },
+    )) {
+        store.account_workflow.update(|a| {
+            a.spoken_busy = false;
+            a.spoken_note = Some(ap::change_note(&Err(
+                "the gateway worker is not running.".into()
+            )));
+        });
+    }
 }
 
 fn open_choice_picker(

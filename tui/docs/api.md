@@ -325,7 +325,10 @@ computer.
   large-v3` (the override, else the gateway default). The 16 kHz WAV is
   uploaded as a session attachment (`POST /attachments/upload`) and sent to
   `POST /runs/{run_id}/audio/transcribe` with `provider`/`model` only when
-  overridden and `language` when you named one; the text lands at the end
+  overridden — never a language: the gateway applies your account's spoken
+  language (round 18). While it records and transcribes, the status line
+  names it: `● Recording… 3 s · Spoken language: French · Ctrl+R
+  transcribes · Esc cancels`. The text lands at the end
   of the draft. Too short, silent ("Nothing was heard. Check the
   microphone in Settings → Voice (Test), then try again."), no answer
   within 180 s, or a refusal: one sentence each, never a silent spinner.
@@ -334,11 +337,18 @@ computer.
 - **The screen** (`/voice`): Output device (this computer's speakers, from
   AbstractVoice) + Test speaker (a short chime), Reply volume (`←`/`→`),
   Input device + Test microphone (3 s recorded with a live level meter,
-  then played back), Spoken language (naming it skips detection:
-  transcription is faster), Input level, `[x] Read aloud — Speak each new
+  then played back), Spoken language (your ACCOUNT's, round 18: the
+  gateway's served `spoken_language` block of `GET
+  /accounts/me/preferences` — the row shows its label, Enter opens the
+  served choices, `Auto (detected)` first, a pick is ONE `PUT
+  {"spoken_language": "fr"}` with "Saved." / "Not saved. <sentence>"; the
+  help line is the gateway's; an answer without the block says "The
+  gateway's account preferences answer has no spoken_language block."),
+  Input level, `[x] Read aloud — Speak each new
   reply.`, Voice latency (`quality_preset`), and the last reply's
   `first audio 0.41 s · engine on cpu`. Saved in `prefs.json` under `voice`
-  with the kit's `VoiceClientPreferences` keys.
+  with the kit's `VoiceClientPreferences` keys (an old `stt_language` key
+  is ignored and dropped on the next save; the language is the account's).
 - **Host audio.** A terminal cannot play or record, and this crate ships no
   audio engine: the client runs `assets/voice_bridge.py` with the Python
   that has AbstractVoice (`--voice-python`, else the one next to the

@@ -515,11 +515,11 @@ fn dictation_uploads_the_recording_and_uses_the_default_route() {
         body.get("provider").is_none() && body.get("model").is_none(),
         "gateway default = no route in the request"
     );
-    // An override (and a named language) rides the request.
+    // An override rides the request; a language never does (round 18: the
+    // gateway applies the account's spoken language).
     let o = VoicePrefs {
         stt_provider: "faster-whisper".into(),
         stt_model: "small".into(),
-        stt_language: "fr".into(),
         ..Default::default()
     };
     vg.transcribe("sess-1", "run-4", &bytes, &o).unwrap();
@@ -530,11 +530,7 @@ fn dictation_uploads_the_recording_and_uses_the_default_route() {
             body.get("model"),
             body.get("language")
         ),
-        (
-            Some(&json!("faster-whisper")),
-            Some(&json!("small")),
-            Some(&json!("fr"))
-        )
+        (Some(&json!("faster-whisper")), Some(&json!("small")), None)
     );
 }
 
@@ -1185,4 +1181,120 @@ fn voice_screen_shows_the_gateways_served_speech_input_hint() {
     for line in abstracttui::text::wrap(sentence, 80) {
         assert!(s.contains(line.trim_end()), "missing {line:?}:\n{s}");
     }
+}
+
+// -- round 18: the spoken language is the ACCOUNT's (gateway-served block) --------
+
+const PREFS_GET: &str = include_str!("fixtures/account_prefs/get_default.json");
+const PREFS_PUT_FR: &str = include_str!("fixtures/account_prefs/put_spoken_fr.json");
+
+fn spoken(fixture: &str) -> abstractcode::account_prefs::SpokenLanguagePref {
+    abstractcode::account_prefs::spoken_language(&serde_json::from_str(fixture).unwrap()).unwrap()
+}
+
+#[test]
+fn voice_screen_spoken_language_is_the_accounts_served_block() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, _log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("ok");
+    // Unknown block (an older gateway): the row says the seam sentence.
+    h.store.account_workflow.update(|v| {
+        v.spoken_language = Err(abstractcode::account_prefs::SPOKEN_LANGUAGE_MISSING.to_string())
+    });
+    h.type_text("/voice\r");
+    let s = h.until("the voice screen", |s| s.contains("Spoken language"));
+    assert!(
+        s.contains("Spoken language   The gateway's account preferences answer has no spoken_language block."),
+        "{s}"
+    );
+    h.escape();
+    // Served block: the row shows the served label of the account's value.
+    h.store
+        .account_workflow
+        .update(|v| v.spoken_language = Ok(spoken(PREFS_GET)));
+    h.type_text("/voice\r");
+    let s = h.until("the served label", |s| {
+        s.contains("Spoken language   Auto (detected)")
+    });
+    assert!(!s.contains("Detect automatically"), "no client list:\n{s}");
+    // Rows: 1 TTS … 10 Spoken language (0 Engines, 3 Output, 4 Output device,
+    // 5 Test speaker, 6 Reply volume, 7 Microphone, 8 Input device, 9 Test microphone).
+    h.term.push_input("\x1b[B".repeat(9).as_bytes());
+    let s = h.until("the served help on the row", |s| {
+        s.contains("The language spoken to the microphone.")
+    });
+    assert!(s.contains("Spoken language   Auto (detected)"), "{s}");
+    while h._rx.try_recv().is_ok() {}
+    h.type_text("\r");
+    let s = h.until("the served choices", |s| {
+        s.contains("Spoken language · Enter selects") && s.contains("French")
+    });
+    assert!(
+        s.contains("Auto (detected)") && s.contains("English"),
+        "{s}"
+    );
+    // Pick French: Auto(0) Arabic Chinese Dutch English French = 5 downs.
+    let fr_ix = spoken(PREFS_GET)
+        .choices
+        .iter()
+        .position(|(v, _)| v == "fr")
+        .unwrap();
+    h.term.push_input("\x1b[B".repeat(fr_ix).as_bytes());
+    h.turn();
+    h.type_text("\r");
+    h.turn();
+    let sent: Vec<Cmd> = std::iter::from_fn(|| h._rx.try_recv().ok()).collect();
+    assert!(
+        sent.iter().any(|c| matches!(c, Cmd::AccountPrefs(abstractcode::gateway::preferences::PrefCmd::SaveSpokenLanguage { value }) if value == "fr")),
+        "one PUT of the pick: {sent:?}"
+    );
+    // The lane answers: the row follows the gateway, with the note.
+    h.store
+        .account_workflow
+        .update(|v| v.apply_spoken_save(Ok(spoken(PREFS_PUT_FR))));
+    let s = h.until("French saved", |s| {
+        s.contains("Spoken language   French") && s.contains("Saved.")
+    });
+    assert!(s.contains("Voice ·"), "{s}");
+    // The config never holds a language.
+    let saved = h.prefs.borrow().voice.clone().unwrap_or(json!({}));
+    assert!(saved.get("stt_language").is_none(), "{saved}");
+}
+
+#[test]
+fn the_dictation_line_names_the_accounts_spoken_language() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, _log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("ready");
+    h.store
+        .account_workflow
+        .update(|v| v.spoken_language = Ok(spoken(PREFS_PUT_FR)));
+    h.store
+        .voice
+        .dictation
+        .set(abstractcode::voice::Dictation::Transcribing {
+            since: Instant::now() - Duration::from_secs(4),
+            route: "faster-whisper / large-v3".into(),
+        });
+    let s = h.turn();
+    assert!(
+        s.contains("Transcribing… 4 s · faster-whisper / large-v3 · Spoken language: French"),
+        "{s}"
+    );
+    h.store
+        .voice
+        .dictation
+        .set(abstractcode::voice::Dictation::Recording {
+            since: Instant::now(),
+            gen: 0,
+        });
+    let s = h.turn();
+    assert!(
+        s.contains("● Recording… 0 s · Spoken language: French · Ctrl+R transcribes"),
+        "{s}"
+    );
 }
