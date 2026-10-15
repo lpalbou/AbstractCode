@@ -245,10 +245,9 @@ fn flatten(screen: &str) -> String {
         .map(|l| {
             let mut l = l.trim_end().to_string();
             // An automation's rail: its heading and named sections.
-            for tail in ["Sections (1–5)"] {
-                if l.ends_with(tail) {
-                    l.truncate(l.len() - tail.len());
-                }
+            let tail = "Sections (1–5)";
+            if l.ends_with(tail) {
+                l.truncate(l.len() - tail.len());
             }
             for (i, p) in AUTOMATION_SECTIONS.iter().enumerate() {
                 for mark in ["▸", " "] {
