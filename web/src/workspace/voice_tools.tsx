@@ -12,6 +12,7 @@ import {
 } from "@abstractframework/ui-kit";
 import { gateway, gatewayRequest, newId, csrfHeaders } from "./transport";
 import { MEDIA_NEEDS_HTTPS, mediaAvailable } from "../lib/secure-context";
+import { session_memory_owner_run_id } from "../lib/session_memory";
 import type { VoiceClientPreferences, VoiceDefaults } from "@abstractframework/ui-kit";
 
 /** The gateway's default voice routes (output.voice / input.voice): what "Gateway default" names. */
@@ -67,6 +68,15 @@ export function CodeVoiceSettings({
       unavailableReason={connected ? null : "Connect to a gateway to configure voice."}
     />
   );
+}
+
+/** The run a transcription rides: the conversation's run when it has one,
+ * otherwise the SESSION's media run (`session_memory_<session id>`), which the
+ * gateway creates on first use — so the very first message of a conversation
+ * can be spoken (the terminal client and Observer do the same). */
+export async function transcriptionRunId(runId: string, sessionId: string): Promise<string> {
+  if (runId) return runId;
+  return session_memory_owner_run_id(sessionId);
 }
 
 /** How long a transcription may take before it is reported as failed. */
@@ -129,7 +139,7 @@ export function useWorkspaceVoice({
           }
         : undefined,
     transcribe:
-      capability.stt?.available === true && runId
+      capability.stt?.available === true && (runId || sessionId)
         ? async (blob, mime) => {
             assertCurrent();
             const limit = Number(capability.stt?.max_upload_bytes || 0);
@@ -154,8 +164,10 @@ export function useWorkspaceVoice({
             assertCurrent();
             // A transcription that never answers ends as a sentence, never a spinner forever.
             let timer: ReturnType<typeof setTimeout> | undefined;
+            const transcriptionRun = await transcriptionRunId(runId, sessionId);
+            assertCurrent();
             const response: any = await Promise.race([
-              gateway.audio_transcribe(runId, {
+              gateway.audio_transcribe(transcriptionRun, {
                 audio_artifact: attachment,
                 request_id: newId(),
                 ...voiceSttRequest(preferences),
@@ -193,8 +205,24 @@ export function useWorkspaceVoice({
   return voice;
 }
 
-/** A press shorter than this is a tap: recording keeps going until the next tap. */
+/** A press shorter than this is a tap: it is discarded, nothing is sent. */
 export const TAP_MS = 350;
+
+/** What releasing the microphone button does (press to talk, like the
+ * terminal client's Space key): a hold sends what was said; a tap — too short
+ * to be speech — is discarded. Pure, so it is tested without a browser. */
+export function releaseAction(heldMs: number): "send" | "discard" {
+  return heldMs < TAP_MS ? "discard" : "send";
+}
+
+/** The message a press-to-talk sends: what was already typed, then what was said. */
+export function spokenMessage(draft: string, transcript: string): string {
+  const typed = draft.trimEnd();
+  return typed ? `${typed}\n${transcript}` : transcript;
+}
+
+/** What the button teaches after a tap. */
+export const HOLD_HINT = "Hold the microphone while you speak — release to send.";
 
 /** Ticks once a second while `active` (the elapsed seconds of "Recording…" / "Transcribing…"). */
 function useNow(active: boolean): number {
@@ -210,74 +238,72 @@ function useNow(active: boolean): number {
 
 export function VoiceTools({
   voice,
-  runId,
   capability,
   route = "",
   onSettings,
 }: {
   voice: ReturnType<typeof useWorkspaceVoice>;
-  runId: string;
   capability: Record<string, any>;
   /** The transcription route ("faster-whisper / large-v3": the override, else the gateway default). */
   route?: string;
   onSettings?: () => void;
 }) {
   const held = useRef(false);
-  const latched = useRef(false);
   const pressedAt = useRef(0);
   const mounted = useRef(true);
+  const [tapHint, setTapHint] = useState(false);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       held.current = false;
-      latched.current = false;
     };
   }, []);
-  // Press: start (or, while a tapped recording runs, stop it).
+  useEffect(() => {
+    if (!tapHint) return;
+    const timer = setTimeout(() => setTapHint(false), 4000);
+    return () => clearTimeout(timer);
+  }, [tapHint]);
+  // Press: record at once. A disabled button still receives pointer events
+  // (only clicks are suppressed), so the press itself checks.
   const begin = () => {
-    if (latched.current) {
-      latched.current = false;
-      voice.stop_voice_ptt_recording();
-      return;
-    }
+    if (!voice.voice_ptt_supported || voice.voice_ptt_busy || held.current) return;
     held.current = true;
     pressedAt.current = Date.now();
+    setTapHint(false);
     void voice.start_voice_ptt_recording().then(() => {
       // A permission prompt may outlive the press; never leave the mic open.
-      if (!held.current && !latched.current) voice.stop_voice_ptt_recording();
+      if (!held.current) voice.cancel_voice_ptt_recording?.();
       if (!mounted.current) voice.cancel_voice_ptt_recording?.();
     });
   };
-  // Release: a hold ends the recording; a tap keeps it going until the next tap.
+  // Release: a hold sends what was said; a tap is discarded.
   const release = () => {
     if (!held.current) return;
     held.current = false;
-    if (Date.now() - pressedAt.current < TAP_MS) {
-      latched.current = true;
+    if (releaseAction(Date.now() - pressedAt.current) === "discard") {
+      voice.cancel_voice_ptt_recording?.();
+      setTapHint(true);
       return;
     }
     voice.stop_voice_ptt_recording();
   };
-  // Focus left the page: end any recording.
-  const stopAll = () => {
+  // Focus left the page mid-hold: nothing is sent.
+  const abandon = () => {
+    if (!held.current) return;
     held.current = false;
-    latched.current = false;
-    voice.stop_voice_ptt_recording();
+    voice.cancel_voice_ptt_recording?.();
   };
   useEffect(() => {
     window.addEventListener("pointerup", release);
     window.addEventListener("pointercancel", release);
-    window.addEventListener("blur", stopAll);
+    window.addEventListener("blur", abandon);
     return () => {
       window.removeEventListener("pointerup", release);
       window.removeEventListener("pointercancel", release);
-      window.removeEventListener("blur", stopAll);
+      window.removeEventListener("blur", abandon);
     };
-  }, [voice.stop_voice_ptt_recording]);
-  useEffect(() => {
-    if (!voice.voice_ptt_recording) latched.current = false;
-  }, [voice.voice_ptt_recording]);
+  }, [voice.stop_voice_ptt_recording, voice.cancel_voice_ptt_recording]);
   const since = voice.voice_ptt_since || 0;
   const now = useNow(Boolean(since));
   if (!capability.tts?.available && !capability.stt?.available) return null;
@@ -288,7 +314,9 @@ export function VoiceTools({
     ? `Recording… ${since ? elapsedSeconds(since, now) : ""}`.trim()
     : voice.voice_ptt_busy
       ? transcribingLine(since || now, now, route)
-      : "";
+      : tapHint
+        ? HOLD_HINT
+        : "";
   return (
     <>
       {capability.stt?.available && micBlocked ? (
@@ -311,15 +339,9 @@ export function VoiceTools({
         <button
           className="code-icon-button"
           aria-label={
-            voice.voice_ptt_recording
-              ? "Recording — tap or release to transcribe"
-              : "Hold to dictate"
+            voice.voice_ptt_recording ? "Recording — release to send" : "Hold to talk"
           }
-          title={
-            runId
-              ? "Hold to dictate, or tap to start and tap again to stop (Space or Enter on keyboard)"
-              : "Start a conversation to enable dictation"
-          }
+          title="Hold to talk, release to send (or hold Space or Enter on the focused button)"
           disabled={!voice.voice_ptt_supported || voice.voice_ptt_busy}
           aria-pressed={voice.voice_ptt_recording}
           onPointerDown={(event) => {
@@ -339,9 +361,7 @@ export function VoiceTools({
               release();
             }
           }}
-          onBlur={() => {
-            if (!latched.current) release();
-          }}
+          onBlur={release}
         >
           <Icon name={voice.voice_ptt_busy ? "loader" : "mic"} size={15} className={voice.voice_ptt_busy ? "code-loading-spinner" : undefined} />
         </button>

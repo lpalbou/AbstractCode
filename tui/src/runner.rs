@@ -592,6 +592,11 @@ struct Runner {
     /// UI-thread signals to recover it. Empty until the catalog loads
     /// (the fold degrades gracefully — structural id contract still binds).
     agent_workflow_ids: Vec<String>,
+    /// Catalog-declared GOAL workflow ids (`abstractcode.goal.v1`, the
+    /// run-facing form): the attach probe recognises a session's live
+    /// goal run by them. Retained here for the same reason as
+    /// `agent_workflow_ids` (no UI-signal reads on this thread).
+    goal_workflow_ids: Vec<String>,
     /// Consecutive status-less probe/catalog failures (the `Conn::Down`
     /// persistence evidence — see `marks_gateway_down`). Reset by any
     /// successful gateway answer on this thread, HTTP errors included.
@@ -614,9 +619,6 @@ struct Runner {
     /// `(session_id, note)` of the last workspace preflight note actually
     /// printed — the dedup memo for `announce_workspace_note`.
     last_workspace_note: Option<(String, String)>,
-    /// `(session_id, note)` of the last "running <workflow>" notice — same
-    /// dedup memo shape as `last_workspace_note`.
-    last_workflow_note: Option<(String, String)>,
     /// The boot "workspace: gateway-managed" notice was posted (once).
     workspace_notice_posted: bool,
     /// The gateway's same-machine verdict was asked for (once).
@@ -645,13 +647,13 @@ pub fn spawn(
                     tx,
                     stream_stops: Vec::new(),
                     agent_workflow_ids: Vec::new(),
+                    goal_workflow_ids: Vec::new(),
                     soft_failures: 0,
                     catalog_attempted: false,
                     catalog_loaded: false,
                     catalog_preference: (None, None),
                     requested_workflow,
                     last_workspace_note: None,
-                    last_workflow_note: None,
                     workspace_notice_posted: false,
                     same_machine_probed: false,
                 };
@@ -1176,6 +1178,8 @@ impl Runner {
                 // fresh Folds rehydration builds worker-side.
                 let agent_ids = agent_workflow_ids_from_bundles(&v);
                 self.agent_workflow_ids = agent_ids.clone();
+                self.goal_workflow_ids =
+                    crate::discovery::workflow_ids_with_interface(&v, GOAL_INTERFACE_V1);
                 // §D: the gateway's default for our interface, from the
                 // `/bundles` envelope. No client fallback chain exists any
                 // more — `None` here with no preference means "ask".
@@ -1729,14 +1733,9 @@ impl Runner {
                 let tx = self.tx.clone();
                 let started_session = session_id.clone();
                 let sent = attachments.clone();
-                // What the gateway says it ran (§D `resolved_workflow`):
-                // announced once per session and whenever it changes — so a
-                // gateway-side default switch is visible on the next turn.
-                let resolved_note = started.resolved.as_ref().and_then(|r| {
-                    let note = format!("running {}", r.describe());
-                    announce_workspace_note(&mut self.last_workflow_note, &session_id, &note)
-                        .then_some(note)
-                });
+                // What the gateway says it ran (§D `resolved_workflow`)
+                // reaches the HEADER through the workflow update below; no
+                // transcript notice repeats it (operator ask 2026-10-10).
                 let resolved = started.resolved;
                 let sent_default = flow_id == crate::discovery::GATEWAY_DEFAULT_SENTINEL;
                 let note_session = session_id.clone();
@@ -1752,11 +1751,6 @@ impl Runner {
                                     w.description = desc;
                                 }
                             });
-                        }
-                        if let Some(note) = resolved_note {
-                            store
-                                .fold
-                                .update(|f| f.push_item(Item::Info { text: note }));
                         }
                     }
                 });
@@ -1814,6 +1808,14 @@ impl Runner {
     }
 
     fn probe_attach(&mut self, session_id: &str, replay_turns: usize) {
+        // The fold below needs the catalog (its agent and goal workflow ids:
+        // without them a live goal run reattaches as a plain run). The boot
+        // loads it first on this thread; when that load failed, try once
+        // more here rather than fold blind.
+        if self.catalog_attempted && !self.catalog_loaded {
+            let (bundle, flow) = self.catalog_preference.clone();
+            self.load_catalog(bundle, flow);
+        }
         let store = self.store;
         // EVERY post in this probe is SESSION-GUARDED (adversarial
         // review 2026-08-28, F). The probe is a wide window — up to ~21
@@ -2081,8 +2083,62 @@ impl Runner {
                     &rid[..rid.len().min(8)]
                 ));
             });
-            self.attach(run_id, started_at, session_id.to_string());
+            let goal = self.derive_session_goal(&items, &run_id, session_id);
+            self.attach(run_id, started_at, session_id.to_string(), goal);
         }
+    }
+
+    /// The session's goal, from the gateway (operator ruling 2026-10-10:
+    /// the goal belongs to the session and is the same from every
+    /// client). A goal IS its run: when the session's live run is a goal
+    /// workflow (`abstractcode.goal.v1` in the catalog), its text is the
+    /// run's `input_data.goal` — the goal contract's own input. A goal run
+    /// whose record carries no goal text still binds by run identity (the
+    /// fold's goal mode and `/goal stop` need only that) and says so.
+    /// Returns whether the live run IS a goal run.
+    fn derive_session_goal(&self, items: &[Value], live_run_id: &str, session_id: &str) -> bool {
+        let workflow_id = items
+            .iter()
+            .find(|r| r.get("run_id").and_then(Value::as_str) == Some(live_run_id))
+            .and_then(|r| r.get("workflow_id").and_then(Value::as_str))
+            .unwrap_or("");
+        if !self.goal_workflow_ids.iter().any(|g| g == workflow_id) {
+            return false;
+        }
+        let text = self.client.input_data(live_run_id).map(|v| {
+            v.get("input_data")
+                .and_then(|i| i.get("goal"))
+                .and_then(Value::as_str)
+                .map(|t| t.trim().to_string())
+                .unwrap_or_default()
+        });
+        let store = self.store;
+        let probed = session_id.to_string();
+        let run_id = live_run_id.to_string();
+        self.post(move || {
+            if store.session_id.with_untracked(|s| *s != probed) {
+                return;
+            }
+            let short = run_id[..run_id.len().min(8)].to_string();
+            let text = match text {
+                Ok(t) if !t.is_empty() => t,
+                Ok(_) => {
+                    store.notify(format!(
+                        "goal run {short} carries no goal text on the gateway (input_data.goal) — /goal stop cancels it"
+                    ));
+                    String::new()
+                }
+                Err(e) => {
+                    store.notify(format!(
+                        "goal run {short}: its goal text could not be read ({}) — /goal stop cancels it",
+                        e.compact_reason()
+                    ));
+                    String::new()
+                }
+            };
+            store.goal.set(Some(crate::store::GoalState { text, run_id }));
+        });
+        true
     }
 
     /// `/history` — stream the PREVIOUS bloc (laurent's ruling): fetch
@@ -2293,6 +2349,7 @@ impl Runner {
         run_id: String,
         started_at: Option<std::time::Instant>,
         probed_session: String,
+        goal: bool,
     ) {
         self.stop_streams();
         let store = self.store;
@@ -2307,6 +2364,11 @@ impl Runner {
         if let Ok(bundle) = self.client.history_bundle(&run_id, false, 0) {
             let mut backlog = crate::transcript::Fold::new();
             backlog.set_agent_workflows(self.agent_workflow_ids.iter().cloned());
+            // This fold REPLACES the store's: a goal run's must be in goal
+            // mode from its first record (an iteration's answer is not the
+            // run's conclusion) — `wire_goal` set the flag on the fold
+            // being replaced, and does not re-run for a fold swap.
+            backlog.finish_on_root_only = goal;
             let mut effects: Vec<FoldEffect> = Vec::new();
             let report = rehydrate_live_backlog_into(&mut backlog, &run_id, &bundle, &mut effects);
             let backlog_finished = backlog.finished;
@@ -3194,6 +3256,14 @@ pub(crate) fn image_attachment_ref(r: &Value) -> Option<(String, String)> {
 /// the audit). The client must never imply the root completed; this line
 /// names the divergence exactly once, right where the turn concludes.
 /// (See docs/design/thin-client-conformance.md, class ii.)
+///
+/// Since 2026-10-10 the transcript no longer carries this sentence
+/// (operator ask: two rows per turn for a fact nobody acts on): the fact
+/// rides `Fold::root_open_at_conclusion` and renders as the discreet
+/// `ui::chrome::ROOT_OPEN_MARKER` on the bottom chrome line, explained in
+/// `/help`. Consequence, accepted: `/export` no longer records it (export
+/// still renders this exact text as a "Runtime wrapper note" section if a
+/// fold carries it, which none built by this client now does).
 pub const SUBRUN_CONCLUSION_NOTE: &str =
     "turn concluded — the wrapper root run stays open on the gateway and finalizes server-side";
 
@@ -3263,10 +3333,12 @@ pub(crate) fn apply_stream_records(
         // otherwise) — say so instead of silently freeing the composer
         // over a run other apps still see as waiting/running. Root-
         // stream conclusions render nothing (the root really ended).
+        // Since 2026-10-10 the overlay is a fold FLAG rendered as a
+        // discreet marker on the bottom chrome line, not a transcript
+        // notice: the full sentence cost two rows per turn and said
+        // nothing the operator acts on (`ui::chrome::footer_line`).
         if finished_now && rid != root {
-            f.push_item(Item::Info {
-                text: SUBRUN_CONCLUSION_NOTE.into(),
-            });
+            f.root_open_at_conclusion = true;
         }
         session = f.session;
     });
@@ -4377,8 +4449,8 @@ pub(crate) fn spawn_load_sessions(
             .and_then(Value::as_u64)
             .unwrap_or(0) as usize;
         let mut rows = fold_session_rows(&items);
-        // Prompts are fetched in the order the BOARD renders — live
-        // sessions first, then newest — not the fold's order. They
+        // Prompts are fetched in the order the BOARD renders (newest
+        // first, `session_board_order`) — not the fold's order. They
         // differed, so on a busy gateway the row at the top of the
         // screen (a session waiting on a human since last month) went
         // unlabeled while forty finished sessions below it were
@@ -4448,14 +4520,19 @@ pub(crate) fn session_prompt(client: &GatewayClient, run_id: &str) -> Option<Str
 
 /// THE board's row order, shared by the renderer and the prompt
 /// fetcher so the rows you can SEE are the rows that get labeled:
-/// sessions that want a human first, then newest.
+/// NEWEST first, by the field the gateway pages on (operator report
+/// 2026-10-10: the conversations just created were not visible). It was
+/// "live first, then newest" — but asks nobody answers stay `waiting`
+/// forever (on the operator's gateway: 32 of 1474 sessions, March to
+/// August, each ending in an unanswered human ask — 7 directly on the
+/// root, 26 through the root's `subworkflow` wait on its agent child), so
+/// they held the whole first screen above today's work. A session's
+/// state stays on its row ("waiting on you", true for every one of them).
 pub(crate) fn session_board_order(
     a: &crate::store::SessionRow,
     b: &crate::store::SessionRow,
 ) -> std::cmp::Ordering {
-    (!a.state.is_live())
-        .cmp(&!b.state.is_live())
-        .then_with(|| b.last_at.cmp(&a.last_at))
+    b.last_at.cmp(&a.last_at)
 }
 
 /// One-shot `/host/state` fetch on its own thread (modal open + `r`).
@@ -4625,13 +4702,13 @@ mod tests {
             tx,
             stream_stops: Vec::new(),
             agent_workflow_ids: Vec::new(),
+            goal_workflow_ids: Vec::new(),
             soft_failures: 0,
             catalog_attempted: false,
             catalog_loaded: false,
             catalog_preference: (None, None),
             requested_workflow: None,
             last_workspace_note: None,
-            last_workflow_note: None,
             workspace_notice_posted: false,
             same_machine_probed: false,
         }
@@ -6076,6 +6153,188 @@ mod tests {
         false
     }
 
+    /// The goal belongs to the session on the gateway (operator ruling
+    /// 2026-10-10): attaching to a session whose live run is a goal
+    /// workflow derives the goal — text from the run's `input_data.goal`,
+    /// identity from the run. Nothing is read from local prefs.
+    #[test]
+    fn the_attach_probe_derives_the_goal_from_the_live_goal_run() {
+        let list = json!({"items": [
+            {"run_id": "t1", "workflow_id": "basic-agent@0.0.5:main", "status": "completed",
+             "created_at": "2026-10-10T09:00:00Z"},
+            {"run_id": "g1", "workflow_id": "goal-agent@0.0.1:main", "status": "running",
+             "created_at": "2026-10-10T10:00:00Z"}
+        ]})
+        .to_string();
+        let input =
+            json!({"input_data": {"goal": "make the suite green", "max_cycles": 8}}).to_string();
+        // The live run's history: the reattach REPLACES the fold with one
+        // rebuilt from it — that fold must be in goal mode.
+        let bundle = json!({"input_data": {"prompt": "make the suite green"}}).to_string();
+        let url = fake_gateway(vec![
+            ("/runs/g1/input_data", input),
+            ("/runs/g1/history_bundle", bundle),
+            ("/runs?", list),
+        ]);
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = Store::create(cx);
+            store.session_id.set("s1".into());
+            let mut runner = runner_for(&url, store);
+            runner.goal_workflow_ids = vec!["goal-agent@0.0.1:main".into()];
+            runner.probe_attach("s1", 0);
+            assert!(
+                drain_until(|| store.goal.get_untracked().is_some()),
+                "the live goal run became the session's goal"
+            );
+            assert_eq!(
+                store.goal.get_untracked(),
+                Some(crate::store::GoalState {
+                    text: "make the suite green".into(),
+                    run_id: "g1".into(),
+                })
+            );
+            assert!(
+                drain_until(|| store.fold.with_untracked(|f| f.root_run_id() == "g1")),
+                "reattached to the goal run"
+            );
+            assert!(
+                store.fold.with_untracked(|f| f.finish_on_root_only),
+                "the reattached fold is in goal mode: an iteration's answer must not conclude the run"
+            );
+            runner.stop_streams();
+        });
+        root.dispose();
+    }
+
+    #[test]
+    fn a_live_run_that_is_not_a_goal_workflow_gives_no_goal() {
+        let input = json!({"input_data": {"goal": "not a goal run"}}).to_string();
+        let url = fake_gateway(vec![("/runs/r1/input_data", input)]);
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = Store::create(cx);
+            store.session_id.set("s1".into());
+            let mut runner = runner_for(&url, store);
+            runner.goal_workflow_ids = vec!["goal-agent@0.0.1:main".into()];
+            let items = vec![
+                json!({"run_id": "r1", "workflow_id": "basic-agent@0.0.5:main",
+                                    "status": "running"}),
+            ];
+            runner.derive_session_goal(&items, "r1", "s1");
+            abstracttui::reactive::drain_posted();
+            assert!(store.goal.get_untracked().is_none());
+        });
+        root.dispose();
+    }
+
+    /// A probe whose boot catalog load failed (`/bundles` down while
+    /// `/runs` answers) loads the catalog itself before folding, so a live
+    /// goal run reattaches as a goal run — once, without re-rendering.
+    #[test]
+    fn a_probe_loads_a_catalog_the_boot_could_not() {
+        let list = json!({"items": [
+            {"run_id": "g1", "workflow_id": "goal-agent@0.0.1:main", "status": "running",
+             "created_at": "2026-10-10T10:00:00Z"}
+        ]})
+        .to_string();
+        let input = json!({"input_data": {"goal": "make the suite green"}}).to_string();
+        let bundle = json!({"input_data": {"prompt": "make the suite green"}}).to_string();
+        let bundles = json!({"items": [{"bundle_id": "goal-agent", "bundle_version": "0.0.1",
+            "entrypoints": [{"flow_id": "main", "workflow_id": "goal-agent@0.0.1:main",
+                             "interfaces": [crate::discovery::GOAL_INTERFACE_V1]}]}]})
+        .to_string();
+        let url = fake_gateway(vec![
+            ("/runs/g1/input_data", input),
+            ("/runs/g1/history_bundle", bundle),
+            ("/runs?", list),
+            ("/bundles", bundles),
+        ]);
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = Store::create(cx);
+            store.session_id.set("s1".into());
+            let mut runner = runner_for(&url, store);
+            // The boot's load was attempted and failed.
+            runner.catalog_attempted = true;
+            runner.handle(Cmd::ProbeAttach {
+                session_id: "s1".into(),
+                replay_turns: 0,
+            });
+            assert!(runner.catalog_loaded, "the probe loaded the catalog");
+            assert!(
+                drain_until(|| store.goal.get_untracked().is_some()
+                    && store.fold.with_untracked(|f| f.finish_on_root_only)),
+                "the goal run reattached in goal mode"
+            );
+            let users = store.fold.with_untracked(|f| {
+                f.items
+                    .iter()
+                    .filter(|i| matches!(i, Item::User { .. }))
+                    .count()
+            });
+            assert_eq!(users, 1, "the run is rendered once");
+            runner.stop_streams();
+        });
+        root.dispose();
+    }
+
+    /// A probe for session s1 that lands after a switch to s2 must not
+    /// hand s1's goal to s2.
+    #[test]
+    fn a_goal_derived_for_another_session_is_dropped() {
+        let input = json!({"input_data": {"goal": "s1's goal"}}).to_string();
+        let url = fake_gateway(vec![("/runs/g1/input_data", input)]);
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = Store::create(cx);
+            store.session_id.set("s2".into());
+            let mut runner = runner_for(&url, store);
+            runner.goal_workflow_ids = vec!["goal-agent@0.0.1:main".into()];
+            let items = vec![
+                json!({"run_id": "g1", "workflow_id": "goal-agent@0.0.1:main",
+                                    "status": "running"}),
+            ];
+            assert!(
+                runner.derive_session_goal(&items, "g1", "s1"),
+                "it is a goal run"
+            );
+            abstracttui::reactive::drain_posted();
+            assert!(store.goal.get_untracked().is_none());
+        });
+        root.dispose();
+    }
+
+    #[test]
+    fn a_goal_run_without_goal_text_binds_by_identity_and_says_so() {
+        let url = fake_gateway(vec![(
+            "/runs/g1/input_data",
+            json!({"input_data": {}}).to_string(),
+        )]);
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = Store::create(cx);
+            store.session_id.set("s1".into());
+            let mut runner = runner_for(&url, store);
+            runner.goal_workflow_ids = vec!["goal-agent@0.0.1:main".into()];
+            let items = vec![
+                json!({"run_id": "g1", "workflow_id": "goal-agent@0.0.1:main",
+                                    "status": "running"}),
+            ];
+            runner.derive_session_goal(&items, "g1", "s1");
+            assert!(drain_until(|| store.goal.get_untracked().is_some()));
+            assert_eq!(
+                store.goal.get_untracked().map(|g| (g.text, g.run_id)),
+                Some((String::new(), "g1".to_string()))
+            );
+            assert!(
+                store
+                    .notices
+                    .get_untracked()
+                    .iter()
+                    .any(|n| n.contains("carries no goal text")),
+                "said loudly: {:?}",
+                store.notices.get_untracked()
+            );
+        });
+        root.dispose();
+    }
+
     #[test]
     fn a_root_done_frame_clears_an_open_bubble_without_delta_end() {
         // The live frame rides the SAME connection as the `done` (a bubble
@@ -6238,31 +6497,30 @@ mod tests {
             );
             assert!(matches!(rx.try_recv(), Ok(Cmd::StopFollows)));
             store.fold.with_untracked(|f| {
-                let answer_at = f
-                    .items
-                    .iter()
-                    .position(|i| {
-                        matches!(
-                            i,
-                            Item::Assistant {
-                                final_answer: true,
-                                ..
-                            }
-                        )
-                    })
-                    .expect("the answer card folded");
-                let note_at = f
-                    .items
-                    .iter()
-                    .position(
-                        |i| matches!(i, Item::Info { text } if text == SUBRUN_CONCLUSION_NOTE),
-                    )
-                    .expect("the root-still-open overlay renders");
                 assert!(
-                    note_at > answer_at,
-                    "the overlay follows the answer it annotates"
+                    f.items.iter().any(|i| matches!(
+                        i,
+                        Item::Assistant {
+                            final_answer: true,
+                            ..
+                        }
+                    )),
+                    "the answer card folded"
+                );
+                // The overlay is a FLAG for the chrome marker now — never
+                // a transcript notice (operator ask 2026-10-10).
+                assert!(f.root_open_at_conclusion, "the root-still-open flag is set");
+                assert!(
+                    !f.items.iter().any(
+                        |i| matches!(i, Item::Info { text } if text == SUBRUN_CONCLUSION_NOTE)
+                    ),
+                    "no transcript notice: {:#?}",
+                    f.items
                 );
             });
+            // The next turn starts clean.
+            apply_start_binding(&store, &tx, "root2", "s1");
+            assert!(!store.fold.with_untracked(|f| f.root_open_at_conclusion));
         });
         root.dispose();
     }
@@ -6290,6 +6548,10 @@ mod tests {
             assert_eq!(store.phase.get_untracked(), Phase::Idle);
             store.fold.with_untracked(|f| {
                 assert!(f.finished);
+                assert!(
+                    !f.root_open_at_conclusion,
+                    "no flag for a genuinely-ended root"
+                );
                 assert!(
                     !f.items.iter().any(
                         |i| matches!(i, Item::Info { text } if text == SUBRUN_CONCLUSION_NOTE)

@@ -6,11 +6,11 @@
 //!   guidance for the CYCLING run, buffered until a cycling target
 //!   exists (never dropped, never sent to a dead run);
 //! - the queue quartet (`enqueue_prompt`/`queue_preview`/
-//!   `swap_queue_for_session`/`restore_session_queue`): FIFO prompts
-//!   persisted per session (write-through; restores land PAUSED so a
-//!   restart never auto-spends);
-//! - the wiring trio (`wire_queue_persistence`/`wire_queue_drain`/
-//!   `wire_pending_steer`) root installs once.
+//!   `swap_queue_for_session`/`restore_session_queue`): FIFO prompts held
+//!   in memory for the app's lifetime (stashed per conversation on a
+//!   switch, restored PAUSED; never on disk);
+//! - the wiring pair (`wire_queue_drain`/`wire_pending_steer`) root
+//!   installs once.
 //!
 //! `queue_preview` is re-exported from `ui` (three external consumers);
 //! everything else routes through `ui::submit`/`reset_session_state`.
@@ -24,7 +24,7 @@ use abstracttui::reactive::{after, Scope};
 use crate::runner::Cmd;
 use crate::store::{Phase, Store};
 use crate::transcript::Item;
-use crate::ui::{load_session_tool_prefs, persist_prefs, start_run, UiCtx};
+use crate::ui::{load_session_tool_prefs, start_run, UiCtx};
 
 /// Deliver a steer to a KNOWN cycling run (the only target a guidance
 /// inbox is actually drained from — wrapper bundles run the agent loop in
@@ -98,19 +98,28 @@ pub fn queue_preview(text: &str) -> String {
     out
 }
 
-/// Session-boundary queue swap (cycle-2: STASH, never drop): the leaving
-/// session's queue is already durable in its prefs slot (write-through on
-/// every mutation — `wire_queue_persistence`); this echoes the stash
-/// visibly, drops the moment-bound steer buffer with an echo, and loads
-/// the TARGET session's stash PAUSED (a restore never auto-starts).
+/// Session-boundary queue swap (STASH, never drop): the leaving session's
+/// queue goes to the in-memory stash (`Store::queue_stash`, this app run
+/// only) with a visible echo, the moment-bound steer buffer is dropped
+/// with an echo, and the TARGET session's stash loads PAUSED (a restore
+/// never auto-starts).
 pub(crate) fn swap_queue_for_session(store: Store, ctx: &UiCtx, old_sid: &str, new_sid: &str) {
-    let stashed = store.queue.with_untracked(|q| q.len());
+    let leaving: Vec<String> = store
+        .queue
+        .with_untracked(|q| q.iter().map(|p| p.text.clone()).collect());
+    let stashed = leaving.len();
+    if stashed > 0 && !old_sid.is_empty() {
+        store.queue_stash.update(|s| {
+            s.retain(|(id, _)| id != old_sid);
+            s.insert(0, (old_sid.to_string(), leaving));
+        });
+    }
     if stashed > 0 {
         let short = &old_sid[..old_sid.len().min(18)];
         store.fold.update(|f| {
             f.push_item(Item::Info {
                 text: format!(
-                    "{stashed} queued prompt(s) stashed with session {short} — they restore (paused) when you return"
+                    "{stashed} queued prompt(s) kept with session {short} until you quit — they restore (paused) if you return"
                 ),
             })
         });
@@ -127,29 +136,29 @@ pub(crate) fn swap_queue_for_session(store: Store, ctx: &UiCtx, old_sid: &str, n
             })
         });
     }
-    restore_session_queue(store, ctx, new_sid);
+    restore_session_queue(store, new_sid);
     // The tools-modal config follows its session too (operator ask): load
     // the target's saved slot, or seed a fresh one (camera default-off
     // arms for when the inventory is already loaded — the effect re-runs
     // on the flag flip because it reads `store.tools`, which is non-empty
     // by now on a live switch).
     load_session_tool_prefs(store, ctx, new_sid);
-    // The goal follows its session: load the target's slot (label only —
-    // the fold flag re-derives from run identity in `wire_goal`).
-    let goal = ctx
-        .prefs
-        .borrow()
-        .session_goal(new_sid)
-        .map(|(text, run_id)| crate::store::GoalState { text, run_id });
-    store.goal.set(goal);
+    // The goal belongs to its session on the gateway: the reattach probe
+    // of the target derives it from the session's live goal run.
+    store.goal.set(None);
 }
 
-/// Load a session's stashed queue: items restore PAUSED with a visible
-/// notice; an empty stash resets the lane. NEVER auto-starts (the one
-/// rule tying quit/reopen and session switches together: a queue only
-/// auto-drains within the session + process continuity it was armed in).
-pub fn restore_session_queue(store: Store, ctx: &UiCtx, sid: &str) {
-    let stash = ctx.prefs.borrow().session_queue(sid);
+/// Load a session's in-memory stash (this app run only): items restore
+/// PAUSED with a visible notice; no stash resets the lane. NEVER
+/// auto-starts (a queue only auto-drains within the session + process
+/// continuity it was armed in).
+pub fn restore_session_queue(store: Store, sid: &str) {
+    let mut stash: Vec<String> = Vec::new();
+    store.queue_stash.update(|s| {
+        if let Some(i) = s.iter().position(|(id, _)| id == sid) {
+            stash = s.remove(i).1;
+        }
+    });
     let items: Vec<crate::store::QueuedPrompt> = stash
         .into_iter()
         .map(|text| crate::store::QueuedPrompt {
@@ -194,26 +203,6 @@ pub fn enqueue_prompt(store: Store, text: &str) {
     } else {
         store.notify(format!("queued #{n}: {}", queue_preview(text)));
     }
-}
-
-/// Write-through queue persistence (cycle-2: the queue PERSISTS per
-/// session — "piling up requests that each gets executed sequentially"
-/// is a promise a silent quit-drop broke). Tracks the QUEUE only; the
-/// session id is read untracked, so a session switch (which sets the id
-/// FIRST, then swaps the queue) never files the old queue under the new
-/// id. Every restore path loads PAUSED, so persistence costs zero
-/// unattended token spend on stale context.
-pub(crate) fn wire_queue_persistence(cx: Scope, store: Store, ctx: UiCtx) {
-    cx.effect(move || {
-        let texts: Vec<String> = store
-            .queue
-            .with(|q| q.iter().map(|p| p.text.clone()).collect());
-        let sid = store.session_id.get_untracked();
-        if sid.is_empty() {
-            return; // pre-boot: nothing to key the slot on
-        }
-        persist_prefs(&ctx, |p| p.set_session_queue(&sid, &texts));
-    });
 }
 
 /// The queue drain: ONE effect owns every queue transition so pausing

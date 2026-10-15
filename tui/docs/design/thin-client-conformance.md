@@ -62,7 +62,6 @@ Operational consequences the audit enforces:
 | Theme, details toggle, key bindings, scroll, composer | `src/commands.rs`, `src/ui/*` | pure rendering/input |
 | Connection resolution + login store (flag > env > store > default) | `src/config.rs `resolve_gateway_url`/`resolve_gateway_token`` | client credentials; `doctor` names the winning source |
 | Session id minting | `src/config.rs `mint_session_id`` | session ids are client-chosen by the gateway contract |
-| Recent-session picker labels (first prompt, MRU) | `src/config.rs `SessionEntry`/`recent_sessions`` | local convenience naming; history itself stays server-side |
 | Operator-DECLARED context window | `src/config.rs `Prefs::context_window``, `--max-tokens` | always labeled "declared"; rides runs as `_limits.max_tokens`; never a client capability table |
 | Run-start request parameters (workspace scope, `/tools` allowlist, `/skills`, provider/model, `max_iterations`) | `src/run_input.rs `build_input_data`` | requests the SERVER enforces (policy may clamp); absent keys keep server defaults |
 | Tool-approval tier + per-tool pins (the user's standing policy) | `src/config.rs `Prefs::tool_accepted_tier`/`tool_overrides``, `src/tool_policy.rs` | expanded server-side per run (see class ii); pins are explicit user acts |
@@ -84,10 +83,16 @@ Operational consequences the audit enforces:
    stay `waiting` forever on a status-poller subflow (44 live waiting
    roots on the audit gateway; `docs/roadmap/lane-a-diagnosis.md` §3/§5).
    Honesty labels:
-   - TUI, subrun-concluded turns render `SUBRUN_CONCLUSION_NOTE`
-     (`src/runner.rs:1127`): *"turn concluded — the wrapper root run
-     stays open on the gateway and finalizes server-side"*. Root-stream
-     conclusions render nothing (the root really ended). Test-pinned.
+   - TUI, subrun-concluded turns set `Fold::root_open_at_conclusion`
+     (`src/runner.rs`, `apply_stream_records`), rendered as the discreet
+     `◌ root finalizes on gateway` marker on the bottom chrome line
+     (`ui::chrome::footer_line`; `/help` spells out
+     `SUBRUN_CONCLUSION_NOTE`). It was a transcript notice until
+     2026-10-10 (operator ask: two rows per turn for a fact nobody acts
+     on); `/export` no longer records it. Cleared at the next
+     `begin_run`. Root-stream conclusions set nothing (the root really
+     ended). Test-pinned (runner unit tests + headless
+     `bottom_line_marker_follows_the_root_open_flag`).
    - Failed answer-source: *"the agent run ended: failed — … the wrapper
      run may keep polling on the gateway"* (`src/transcript.rs `subrun_terminal``).
    - exec prints *"done · … (run {id} finalizes on the gateway)"*.
@@ -111,7 +116,7 @@ Operational consequences the audit enforces:
    the seed learns answered-but-open roots), the client half should be
    deleted. Ask on the record.
 3. **The prompt queue (`/queue`)** — `src/store.rs `Store::queue``,
-   `src/config.rs `Prefs::session_queues`` (`session_queues`), drain in
+   `Store::queue_stash` (in memory only since 2026-10-10), drain in
    `src/ui/mod.rs `wire_queue_drain``. CLIENT-HELD future work: un-submitted prompts,
    drained as normal traceable gateway runs one at a time by this
    client. Verified server-side: the gateway has **no completion-chained
@@ -119,16 +124,20 @@ Operational consequences the audit enforces:
    start_at/interval/repeat only), so nothing server-side could hold
    these today. Labels: `/help` names the locality ("held by THIS
    CLIENT per session — other apps see runs only once started"); every
-   restore lands PAUSED; the quit echo lists what stays. The laptop
+   restore lands PAUSED; the quit echo lists what was not sent. The laptop
    dying pauses the queue — it never loses started work (runs are
    durable). Server-primitive ask on the record.
-4. **`/goal`** — `src/store.rs `Store::goal``, `src/config.rs `Prefs::session_goals``,
-   `src/ui/mod.rs `wire_goal`` (`wire_goal`). CONFORMANT by design: the loop
+4. **`/goal`** — `src/store.rs `Store::goal``, `src/ui/goal.rs `wire_goal``,
+   `src/runner.rs `derive_session_goal``. CONFORMANT by design: the loop
    runs SERVER-side (one durable run of a `abstractcode.goal.v1` bundle;
    `goal`/`max_cycles` ride `input_data`) — the client never relaunches
-   runs to iterate. Client-held state is a label + run pointer
-   (strip text, `finish_on_root_only` fold bookkeeping so iteration
-   subrun ends don't conclude the display). `/help` says the loop is
+   runs to iterate. The goal belongs to the SESSION on the gateway
+   (operator ruling 2026-10-10): nothing is kept at rest; on attach the
+   probe recognises the session's live goal run by its catalog
+   interface and reads its text from the run's `input_data.goal`.
+   In-memory state is a label + run pointer (strip text,
+   `finish_on_root_only` fold bookkeeping so iteration subrun ends don't
+   conclude the display). `/help` says the loop is
    server-side. The goal bundle itself is another seat's deliverable;
    `/goal` stays honestly dark until one is published.
 5. **Tool-approval policy expansion + client belt** —
@@ -164,7 +173,7 @@ Operational consequences the audit enforces:
    `src/runner.rs:agent_workflow_ids_from_bundles`); the live run is
    found by server status; the elapsed clock back-dates to the run's
    server `created_at`. **No transcript is persisted client-side**
-   (prefs hold ids/labels/queues/goals only).
+   (prefs hold client settings and per-session tool choices only).
 8. **`RunOutcome` mailbox** — `src/store.rs `RunOutcome``. Client scheduling
    state for the queue drain; `Success` = "the turn concluded with a
    usable conclusion", never a claim about the root's server status
@@ -192,9 +201,19 @@ closed:
 - ~~Client-side "finished" silently contradicting a waiting root~~ —
   now labeled (class ii item 1).
 - ~~Client transcript persisted and replayed as authority~~ — never
-  present in prefs (verified: `session_queues`/`session_goals`/
-  `recent_sessions` carry no message content beyond the first-prompt
-  label); in-memory context is ledger-derived (class ii item 2).
+  present in prefs (queued prompts and goals are not kept at rest at
+  all since 2026-10-10); in-memory context is ledger-derived (class ii item 2).
+- ~~A client-side recent-session list~~ — removed 2026-10-10 (operator
+  ruling: "zero local recent list; everything must go through the
+  gateway"). The `/sessions` board lists the gateway's sessions only, and
+  `--resume` asks the gateway for its newest session; `prefs.json` keeps no
+  session list and no "last session".
+- **OPEN: per-session tool choices kept in `prefs.json`**
+  (`session_tool_prefs`: disabled tools, approval pins, accepted level).
+  They are session state, so they must be the same from every client
+  (operator ruling 2026-10-10). The gateway has no per-session tool
+  record yet; adding one is a gateway change awaiting the operator's
+  authorization.
 
 ### Re-audit of 2026-08-21 (adversarial, `stop_reason` wave)
 

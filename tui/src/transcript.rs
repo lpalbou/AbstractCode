@@ -785,6 +785,14 @@ pub struct Fold {
     /// it: the runner's begin_run post races the effect, and the flag's
     /// truth depends only on run identity, which the effect re-derives).
     pub finish_on_root_only: bool,
+    /// The turn concluded from a SUBRUN's records while the wrapper ROOT
+    /// run had not reached a terminal status (thin-client doctrine,
+    /// docs/design/thin-client-conformance.md class ii). Rendered as a
+    /// discreet marker on the bottom chrome line — it used to be a
+    /// transcript notice (`runner::SUBRUN_CONCLUSION_NOTE`) that cost two
+    /// rows per turn (operator ask 2026-10-10). Per-turn: cleared at
+    /// `begin_run`.
+    pub root_open_at_conclusion: bool,
     truncated_notice_added: bool,
     /// The artifact id whose FINAL-answer card is still a placeholder or
     /// a fetch-failure label — the late-truth reconcile's gate. Set when
@@ -826,6 +834,7 @@ impl Fold {
         self.followed.insert(root_run_id.to_string());
         self.finished = false;
         self.failed = false;
+        self.root_open_at_conclusion = false;
         // Per-TURN verdict, cleared like `failed`. Leaving it latched made a
         // truncated turn poison every later turn in the session: turn 2 of a
         // clean run still rendered "stopped: iteration budget (N)" in the
@@ -1670,6 +1679,18 @@ impl Fold {
                 // end concludes. Images still fetch (interim artifacts
                 // are real output either way).
                 let concludes = !self.finish_on_root_only || rec_run == self.root_run_id;
+                // When the model answered without a tool call, the last
+                // cycle's words ARE the answer: show them once, as the
+                // answer, not as a "cycle N" row and again below it
+                // (operator 2026-10-14: "i don't want it repeated, makes
+                // no sense from a user standpoint").
+                if concludes {
+                    if let Some(Item::Thinking { content, .. }) = self.items.last() {
+                        if !text.trim().is_empty() && content.trim() == text.trim() {
+                            self.items.pop();
+                        }
+                    }
+                }
                 self.push_item(Item::Assistant {
                     text,
                     final_answer: concludes,
@@ -3102,6 +3123,39 @@ mod tests {
         assert_eq!(fold.stats.input_tokens, 100);
         assert_eq!(fold.stats.output_series, vec![7.0]);
         assert!(matches!(fold.items.last().unwrap(), Item::Thinking { .. }));
+    }
+
+    #[test]
+    fn the_last_cycle_that_is_the_answer_is_shown_once() {
+        // Operator 2026-10-14: the answer repeated the last cycle's words.
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        let cycle = |n: u32, words: &str| {
+            json!({"run_id": "root", "node_id": "reason", "status": "completed",
+                   "effect": {"type": "llm_call", "payload": {}},
+                   "result": {"content": words, "usage": {"input_tokens": 10, "output_tokens": n}}})
+        };
+        fold.apply("root", &cycle(1, "Let me look at the prices."));
+        fold.apply("root", &cycle(2, "Both configs are at MSRP."));
+        assert_eq!(fold.items.iter().filter(|i| matches!(i, Item::Thinking { .. })).count(), 2);
+        fold.apply(
+            "root",
+            &json!({"run_id": "root", "node_id": "done", "status": "completed",
+                    "result": {"completed": true, "output": {"response": "Both configs are at MSRP."}}}),
+        );
+        let thinking: Vec<&str> = fold
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Thinking { content, .. } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(thinking, vec!["Let me look at the prices."], "the answering cycle is not repeated");
+        assert!(fold
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Assistant { text, final_answer: true } if text == "Both configs are at MSRP.")));
     }
 
     #[test]

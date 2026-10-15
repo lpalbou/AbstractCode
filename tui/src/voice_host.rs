@@ -46,6 +46,9 @@ pub enum HostEvent {
     Level {
         gen: u64,
         rms: f32,
+        /// The CURRENT spectrum, `BAND_COUNT` bars in 0..1 (bridge
+        /// `Spectrum`); empty from a bridge that predates it.
+        bands: Vec<f32>,
     },
     Recorded {
         gen: u64,
@@ -97,6 +100,16 @@ impl HostEvent {
             "level" => HostEvent::Level {
                 gen,
                 rms: v.get("rms").and_then(Value::as_f64).unwrap_or(0.0) as f32,
+                bands: v
+                    .get("bands")
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(Value::as_f64)
+                            .map(|x| x.clamp(0.0, 1.0) as f32)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             },
             "recorded" => HostEvent::Recorded {
                 gen,
@@ -184,6 +197,22 @@ impl Host {
 
     pub fn is_current_speech(&self, gen: u64) -> bool {
         self.speech.load(Ordering::SeqCst) == gen
+    }
+
+    /// Send `op` (`pause` / `resume`) to the generation that is speaking.
+    /// False when nothing speaks. Never starts the bridge.
+    pub fn speech_op(&self, op: &str) -> bool {
+        let gen = self.speech.load(Ordering::SeqCst);
+        if gen == 0 {
+            return false;
+        }
+        let mut slot = self.transport.lock().unwrap_or_else(|e| e.into_inner());
+        match slot.as_mut() {
+            Some(t) => t
+                .send(&serde_json::json!({"op": op, "gen": gen}).to_string())
+                .is_ok(),
+            None => false,
+        }
     }
 
     /// Stop whatever is speaking: the queue is cleared at once on the bridge.

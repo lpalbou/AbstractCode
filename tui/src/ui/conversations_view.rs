@@ -11,10 +11,10 @@
 //! `archived_sessions`) opens the archived conversations inline, each with
 //! Unarchive.
 //!
-//! Existence comes from the GATEWAY (the `/runs` listing, fetched at the
-//! gesture and on `r`, never polled); this client's remembered labels only
-//! fill a missing title, and a remembered session the gateway did not list
-//! says what that absence means (proven / outside this listing / unknown).
+//! Every row comes from the GATEWAY (the `/runs` listing, fetched at the
+//! gesture and on `r`, never polled) — titles, states, counts. This client
+//! keeps no session list of its own (operator ruling 2026-10-10: "zero
+//! local recent list; everything must go through the gateway").
 
 use abstracttui::prelude::*;
 
@@ -23,9 +23,7 @@ use crate::gateway::rail::RailCmd;
 use crate::runner::Cmd;
 use crate::store::{SessionIndex, Store};
 use crate::ui::cards::{draw_cards, hint_bar, note_lines, Card, CardLine, Ink};
-use crate::ui::modals::{
-    merge_session_rows, modal_size, title_row, SessionPick, SESSION_LIST_LIMIT,
-};
+use crate::ui::modals::{modal_size, session_picks, title_row, SessionPick, SESSION_LIST_LIMIT};
 use crate::ui::UiCtx;
 
 const SPINNER: [char; 8] = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'];
@@ -38,32 +36,12 @@ pub enum BoardTarget {
     Archived(String),
 }
 
-/// What it MEANS that the gateway's listing did not contain a row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Absence {
-    Proven,
-    OutsideListing,
-    Unknown,
-}
-
-fn absence(index: &SessionIndex) -> Absence {
+/// The board's sessions in display order (newest first) — the gateway's
+/// listing, and nothing else (no local list exists).
+pub fn board_picks(index: &SessionIndex) -> Vec<SessionPick> {
     match index {
-        SessionIndex::Loaded {
-            truncated: false, ..
-        } => Absence::Proven,
-        SessionIndex::Loaded { .. } => Absence::OutsideListing,
-        _ => Absence::Unknown,
-    }
-}
-
-/// The board's sessions in display order (live ones first, then newest).
-pub fn board_picks(
-    index: &SessionIndex,
-    local: &[crate::config::SessionEntry],
-) -> Vec<SessionPick> {
-    match index {
-        SessionIndex::Loaded { rows, .. } => merge_session_rows(Some(rows), local),
-        _ => merge_session_rows(None, local),
+        SessionIndex::Loaded { rows, .. } => session_picks(rows),
+        _ => Vec::new(),
     }
 }
 
@@ -80,7 +58,7 @@ pub fn board_hint(index: &SessionIndex) -> String {
         SessionIndex::Unfetched | SessionIndex::Loading => {
             "asking the gateway which sessions exist…".into()
         }
-        SessionIndex::Failed(msg) => format!("gateway did not answer — local rows only · {msg}"),
+        SessionIndex::Failed(msg) => format!("the gateway did not answer · {msg}"),
         SessionIndex::Loaded {
             rows,
             truncated,
@@ -100,7 +78,7 @@ pub fn board_hint(index: &SessionIndex) -> String {
             } else {
                 String::new()
             };
-            format!("{} sessions on the gateway{more}{cut}", rows.len())
+            format!("{} sessions{more}{cut}", rows.len())
         }
     }
 }
@@ -112,7 +90,6 @@ pub fn board_cards(
     index: &SessionIndex,
     archived: &SessionIndex,
     archived_open: bool,
-    local: &[crate::config::SessionEntry],
     current: &str,
     confirm: Option<&str>,
     frame: usize,
@@ -128,7 +105,6 @@ pub fn board_cards(
         )));
         return (cards, targets);
     }
-    let gone = absence(index);
     let floor = matches!(
         index,
         SessionIndex::Loaded {
@@ -138,34 +114,23 @@ pub fn board_cards(
     );
     // R17.1: the search filters the conversations (title + id, the web's
     // rule); the `Archived · N` line below stays reachable.
-    let picks: Vec<SessionPick> = board_picks(index, local)
+    let picks: Vec<SessionPick> = board_picks(index)
         .into_iter()
         .filter(|p| conv::matches_search(&p.label, &p.id, query))
         .collect();
     for p in &picks {
         let marker = if p.id == current { "● " } else { "" };
-        let right = match (p.state, gone) {
-            (Some(s), _) if s.is_live() => s.label().to_string(),
-            (Some(_), _) => String::new(),
-            (None, Absence::Proven) => "not on the gateway".into(),
-            (None, Absence::OutsideListing) => "outside this listing".into(),
-            (None, Absence::Unknown) => "state unknown".into(),
+        let right = if p.state.is_live() {
+            p.state.label().to_string()
+        } else {
+            String::new()
         };
         let mut lines = vec![CardLine::new(
             format!("{marker}{}", conv::card_title(&p.label, &p.id)),
             Ink::Title,
         )
         .right(right)];
-        let meta = if p.from_gateway {
-            conv::meta_line(&p.when, p.turns, tools_of(index, &p.id), floor, offset_secs)
-        } else {
-            // A remembered session: its day is this client's memory.
-            format!(
-                "{} · remembered here",
-                conv::day_label(&p.when, offset_secs)
-                    .unwrap_or_else(|| "Saved conversation".into())
-            )
-        };
+        let meta = conv::meta_line(&p.when, p.turns, tools_of(index, &p.id), floor, offset_secs);
         lines.push(CardLine::new(meta, Ink::Faint).indent(2));
         if confirm == Some(p.id.as_str()) {
             lines.push(CardLine::new(conv::ARCHIVE_QUESTION, Ink::Accent).indent(2));
@@ -181,7 +146,7 @@ pub fn board_cards(
             SessionIndex::Loaded { .. } => {
                 "Your conversations will live here. Pick up where you left off, on any device."
             }
-            _ => "Nothing remembered here, and the gateway did not answer.",
+            _ => "The gateway did not answer — press r to ask again.",
         }));
     }
     let n = match index {
@@ -206,13 +171,7 @@ pub fn board_cards(
                 .indent(2)])),
                 SessionIndex::Loaded { rows, .. } => {
                     for r in rows {
-                        let label = r.prompt.clone().unwrap_or_else(|| {
-                            local
-                                .iter()
-                                .find(|e| e.id == r.id)
-                                .map(|e| e.label.clone())
-                                .unwrap_or_default()
-                        });
+                        let label = r.prompt.clone().unwrap_or_default();
                         cards.push(Card::new(vec![
                             CardLine::new(conv::card_title(&label, &r.id), Ink::Text)
                                 .indent(2)
@@ -328,9 +287,7 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
                 }
             });
         }
-        let local = std::rc::Rc::new(ctx2.prefs.borrow().recent_sessions.clone());
         let compute = {
-            let local = local.clone();
             move |tracked: bool, confirm_id: Option<String>| {
                 let index = if tracked {
                     store.session_index.get()
@@ -354,7 +311,6 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
                     &index,
                     &archived,
                     open,
-                    &local,
                     &store.session_id.get_untracked(),
                     confirm_id.as_deref(),
                     if tracked { frame.get() } else { 0 } as usize,
@@ -363,16 +319,9 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
                 )
             }
         };
-        let targets = {
-            let compute = compute.clone();
-            move || compute(false, None).1
-        };
-        let target = {
-            let targets = targets.clone();
-            move || targets().get(cursor.get_untracked()).cloned()
-        };
+        let targets = { move || compute(false, None).1 };
+        let target = { move || targets().get(cursor.get_untracked()).cloned() };
         let session_ids = {
-            let targets = targets.clone();
             move || -> Vec<String> {
                 targets()
                     .into_iter()
@@ -384,7 +333,6 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
             }
         };
         let move_cursor = {
-            let targets = targets.clone();
             move |delta: i64| {
                 confirm.set(None);
                 let n = targets().len();
@@ -395,8 +343,6 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
         };
         let enter = {
             let ctx = ctx2.clone();
-            let target = target.clone();
-            let session_ids = session_ids.clone();
             move || {
                 // Nothing is selectable while the board is waiting.
                 if matches!(
@@ -421,27 +367,14 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
             }
         };
         let archive = {
-            let target = target.clone();
-            let local = local.clone();
             move || {
                 if let Some(BoardTarget::Session(id)) = target() {
-                    let local_only = board_picks(&store.session_index.get_untracked(), &local)
-                        .iter()
-                        .any(|p| p.id == id && !p.from_gateway);
-                    if local_only {
-                        store.rail.update(|r| {
-                            r.board_error =
-                                "Not archived: the gateway does not list this conversation.".into()
-                        });
-                        return;
-                    }
                     confirm.set(Some(id));
                 }
             }
         };
         let confirm_yes = {
             let ctx = ctx2.clone();
-            let session_ids = session_ids.clone();
             move || {
                 if let Some(id) = confirm.get_untracked() {
                     confirm.set(None);
@@ -451,8 +384,6 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
         };
         let unarchive = {
             let ctx = ctx2.clone();
-            let target = target.clone();
-            let session_ids = session_ids.clone();
             move || {
                 if let Some(BoardTarget::Archived(id)) = target() {
                     set_archived(store, &ctx, &id, false, &session_ids());
@@ -460,6 +391,10 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
             }
         };
         let key = |c: char| KeyChord::plain(Key::Char(c));
+        // The mouse wheel moves the selection like ↑/↓ — the list windows
+        // around it (operator report 2026-10-10: the list could not be
+        // scrolled with the mouse).
+        let wheel = move_cursor;
         Element::new()
             .style(LayoutStyle::column().padding(Edges::all(1)))
             .focusable()
@@ -497,6 +432,26 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
                 confirm.set(None);
                 searching.set(true);
             })
+            .on(abstracttui::ui::Phase::Bubble, move |ectx, ev| {
+                let abstracttui::ui::UiEvent::Mouse(m) = ev else {
+                    return;
+                };
+                let delta = match m.kind {
+                    abstracttui::ui::MouseKind::ScrollUp => -1,
+                    abstracttui::ui::MouseKind::ScrollDown => 1,
+                    _ => return,
+                };
+                ectx.stop_propagation();
+                // Nothing to move through while the listing is in flight —
+                // and a stray trackpad tick must not cancel the question
+                // `/archive` opened the board with.
+                if !matches!(
+                    store.session_index.get_untracked(),
+                    SessionIndex::Unfetched | SessionIndex::Loading
+                ) {
+                    wheel(delta);
+                }
+            })
             .shortcut(KeyChord::plain(Key::Escape), {
                 let ctx = ctx2.clone();
                 move |_| {
@@ -512,7 +467,7 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
                 }
             })
             .shortcut(KeyChord::plain(Key::Up), {
-                let m = move_cursor.clone();
+                let m = move_cursor;
                 move |_| m(-1)
             })
             .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
@@ -542,7 +497,6 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
                 note_lines(&t2, &[board_hint(&store.session_index.get()), err], 8)
             }))
             .child(dyn_view(LayoutStyle::column().shrink(0.0), {
-                let local = local.clone();
                 move || {
                     let t2 = abstracttui::app::current_theme().tokens;
                     let q = query.get();
@@ -551,7 +505,7 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
                         return note_lines(&t2, &[], 8);
                     }
                     let line = {
-                        let all = board_picks(&store.session_index.get(), &local);
+                        let all = board_picks(&store.session_index.get());
                         let shown = all
                             .iter()
                             .filter(|p| conv::matches_search(&p.label, &p.id, &q))

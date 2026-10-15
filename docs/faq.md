@@ -89,7 +89,8 @@ sees the same automations. See [Automations](automations.md).
 
 - `~/.abstractcode/gateway.json` — gateway URL and token, written by
   `abstractcode login`
-- `~/.abstractcode/prefs.json` — theme, model, workflow, last session
+- `~/.abstractcode/prefs.json` — this client's settings: theme, model, workflow, voice devices. Sessions, their
+  history and their goals live on the gateway; `--resume` asks it for the newest session
 
 `ABSTRACTCODE_PREFS_FILE` relocates the second. An existing
 `~/.abstractcode-tui/prefs.json` is read once and saved forward to the current

@@ -480,6 +480,85 @@ pub(crate) fn quit_gates(phase: Phase) -> bool {
     phase != Phase::Idle
 }
 
+/// The post-teardown line telling the user how to come BACK to the
+/// conversation they just left (operator ask 2026-10-10: "when we quit, we
+/// must show a helper line back in the shell on how to relaunch/resume
+/// that session"). `--session <id>` reopens that exact conversation;
+/// `gateway` is the `--gateway-url` the user launched with, repeated so
+/// the command reaches the same gateway (never the token — a credential
+/// does not belong in shell scrollback; the saved login supplies it).
+pub fn resume_line(session_id: &str, gateway: Option<&str>) -> Option<String> {
+    let sid = session_id.trim();
+    if sid.is_empty() {
+        return None;
+    }
+    let gw = gateway
+        .map(str::trim)
+        .filter(|g| !g.is_empty())
+        .map(|g| format!(" --gateway-url {g}"))
+        .unwrap_or_default();
+    Some(format!(
+        "resume this conversation: abstractcode{gw} --session {sid}"
+    ))
+}
+
+/// Keep `slot` equal to the conversation that is open NOW — it changes
+/// in-session (`/sessions`, `n`) — so the post-teardown [`resume_line`]
+/// names the one the user is leaving. Signals die with the reactive root,
+/// hence a plain mirror read after `run()` returns.
+pub fn mirror_session_id(
+    cx: abstracttui::reactive::Scope,
+    store: crate::store::Store,
+    slot: std::rc::Rc<std::cell::RefCell<String>>,
+) {
+    cx.effect(move || {
+        *slot.borrow_mut() = store.session_id.get();
+    });
+}
+
+/// Queued prompts per session, `(session id, texts)`: the current
+/// session's queue first, then the in-memory stash of the sessions left
+/// this run. The queue lives in memory only, so [`unsent_prompt_lines`]
+/// lists what was not sent after teardown (same mirror rule as above).
+pub type UnsentPrompts = Vec<(String, Vec<String>)>;
+
+pub fn mirror_unsent_prompts(
+    cx: abstracttui::reactive::Scope,
+    store: crate::store::Store,
+    slot: std::rc::Rc<std::cell::RefCell<UnsentPrompts>>,
+) {
+    cx.effect(move || {
+        let current: Vec<String> = store
+            .queue
+            .with(|q| q.iter().map(|p| p.text.clone()).collect());
+        let mut groups: UnsentPrompts = Vec::new();
+        if !current.is_empty() {
+            groups.push((store.session_id.get(), current));
+        }
+        store.queue_stash.with(|s| {
+            groups.extend(s.iter().filter(|(_, p)| !p.is_empty()).cloned());
+        });
+        *slot.borrow_mut() = groups;
+    });
+}
+
+/// The quit listing of prompts that were not sent, whole and by session
+/// (each can be resumed with `--session`). Empty when nothing was queued.
+pub fn unsent_prompt_lines(groups: &[(String, Vec<String>)]) -> Vec<String> {
+    let total: usize = groups.iter().map(|(_, p)| p.len()).sum();
+    if total == 0 {
+        return Vec::new();
+    }
+    let mut lines = vec![format!(
+        "abstractcode: {total} queued prompt(s) were not sent (the queue lives only while the app runs):"
+    )];
+    for (session, prompts) in groups {
+        lines.push(format!("  session {session}:"));
+        lines.extend(prompts.iter().map(|t| format!("    · {t}")));
+    }
+    lines
+}
+
 /// The post-teardown echo line for the outcome the user chose (read by
 /// lib.rs AFTER the reactive root died — mirrored continuously there).
 pub fn quit_echo_line(state: &QuitState, phase: Phase, run_id: &str) -> Option<String> {
@@ -531,6 +610,69 @@ pub fn acked_echo_line(verb: QuitVerb, run_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_session_mirror_follows_a_switch() {
+        let slot = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+        let mirror = slot.clone();
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = crate::store::Store::create(cx);
+            store.session_id.set("acode-first".into());
+            mirror_session_id(cx, store, mirror);
+            assert_eq!(*slot.borrow(), "acode-first");
+            store.session_id.set("acode-switched".into());
+            assert_eq!(*slot.borrow(), "acode-switched", "a switch is followed");
+        });
+        root.dispose();
+        assert_eq!(*slot.borrow(), "acode-switched", "readable after teardown");
+    }
+
+    #[test]
+    fn unsent_prompts_are_listed_by_session_after_teardown() {
+        let slot = std::rc::Rc::new(std::cell::RefCell::new(UnsentPrompts::new()));
+        let mirror = slot.clone();
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = crate::store::Store::create(cx);
+            store.session_id.set("acode-now".into());
+            mirror_unsent_prompts(cx, store, mirror);
+            assert!(slot.borrow().is_empty());
+            store.queue.update(|q| {
+                q.push(crate::store::QueuedPrompt {
+                    id: 1,
+                    text: "run the suite".into(),
+                })
+            });
+            store
+                .queue_stash
+                .update(|s| s.push(("acode-left".into(), vec!["write the docs".into()])));
+        });
+        root.dispose();
+        let groups = slot.borrow().clone();
+        assert_eq!(
+            unsent_prompt_lines(&groups),
+            vec![
+                "abstractcode: 2 queued prompt(s) were not sent (the queue lives only while the app runs):",
+                "  session acode-now:",
+                "    · run the suite",
+                "  session acode-left:",
+                "    · write the docs",
+            ]
+        );
+        assert!(unsent_prompt_lines(&[]).is_empty());
+    }
+
+    #[test]
+    fn the_resume_line_names_the_session_and_the_explicit_gateway() {
+        assert_eq!(
+            resume_line("acode-dd819e7205e8", None).as_deref(),
+            Some("resume this conversation: abstractcode --session acode-dd819e7205e8")
+        );
+        assert_eq!(
+            resume_line("acode-1", Some("http://10.0.0.2:8080")).as_deref(),
+            Some("resume this conversation: abstractcode --gateway-url http://10.0.0.2:8080 --session acode-1")
+        );
+        assert_eq!(resume_line("  ", None), None);
+    }
 
     #[test]
     fn gate_predicate_and_echo_lines() {

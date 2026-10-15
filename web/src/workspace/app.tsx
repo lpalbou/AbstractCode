@@ -131,7 +131,7 @@ import {
 } from "./attachment_uploads";
 import { ComposerAttachments } from "./composer_attachments";
 import { RunStatusBar } from "./run_status_bar";
-import { CodeVoiceSettings, VoiceTools, useVoiceDefaults, useWorkspaceVoice } from "./voice_tools";
+import { CodeVoiceSettings, VoiceTools, spokenMessage, useVoiceDefaults, useWorkspaceVoice } from "./voice_tools";
 import { workflowPromptProperty, restoreWorkflowFields } from "./input_schema";
 import { resolveToolPermissions, intersectToolPermissions } from "./tool_permissions";
 import {
@@ -416,10 +416,7 @@ export function CodeWorkspace() {
     sessionId: session.sessionId,
     capability: voiceCapability,
     preferences: voicePreferences,
-    onTranscript: (text) =>
-      setDraft((previous) =>
-        previous ? `${previous.trimEnd()}\n${text}` : text,
-      ),
+    onTranscript: (text) => void sendSpoken(text),
     onError: setError,
   });
   // Read aloud (the Voice panel): each NEW reply is spoken once, after its
@@ -963,6 +960,23 @@ export function CodeWorkspace() {
         sendLock.current = false;
         setSending(false);
       }
+    }
+  }
+
+  // Press to talk (like the terminal's Space): releasing the microphone SENDS
+  // what was said, after anything already typed. While a start is in flight,
+  // or when the send fails, the words stay in the draft — never lost.
+  async function sendSpoken(transcript: string) {
+    const message = spokenMessage(draft, transcript);
+    if (sending) {
+      setDraft(message);
+      return;
+    }
+    try {
+      await send(message);
+    } catch (e) {
+      setDraft(message);
+      setError(formatError(e));
     }
   }
 
@@ -1987,7 +2001,6 @@ export function CodeWorkspace() {
                   {connection.connected ? (
                     <VoiceTools
                       key={`${identity}:${session.sessionId}:${session.runId}`}
-                      runId={session.runId}
                       voice={voice}
                       capability={voiceCapability}
                       route={sttRouteText(voicePreferences, voiceDefaults.value)}

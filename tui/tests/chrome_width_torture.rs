@@ -166,6 +166,18 @@ fn chrome_degrades_whole_item_at_every_width() {
         let lines: Vec<&str> = screen.lines().collect();
         let header = lines.first().copied().unwrap_or_default();
         let footer = lines.last().copied().unwrap_or_default();
+        // The folder is the header's (operator ask 2026-10-10), whole or
+        // tail-cut, never absent.
+        if width >= 120 {
+            assert!(
+                header.contains("⌂ ") && header.contains("ws"),
+                "[{width}] the header names the folder:\n{header}"
+            );
+        }
+        assert!(
+            !footer.contains("hold Sp") || footer.contains("hold Space to talk"),
+            "[{width}] the voice hint paints whole or not at all:\n{footer}"
+        );
 
         // Right clusters are NEVER sacrificed to the left span.
         assert!(
@@ -193,7 +205,13 @@ fn chrome_degrades_whole_item_at_every_width() {
         // it would show nothing — only the instrument tiers are bound to
         // whole-drop.) Pin: a fact prefix on screen implies the whole
         // fact on screen.
-        for fact in ["⌂ ws", "server-managed", "skills 2", "mcp 1", "128k tk"] {
+        for fact in [
+            "⌂ /tmp/ws",
+            "server-managed",
+            "skills 2",
+            "mcp 1",
+            "128k tk",
+        ] {
             let prefix: String = fact.chars().take(3).collect();
             assert!(
                 !header.contains(&prefix) || header.contains(fact),

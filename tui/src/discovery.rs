@@ -42,6 +42,15 @@ pub fn agent_workflows_from_bundles(v: &Value) -> Vec<Workflow> {
 /// selection filter. Absent/empty `workflow_id` fields contribute
 /// nothing (older serializations; the structural id contract covers them).
 pub fn agent_workflow_ids_from_bundles(v: &Value) -> Vec<String> {
+    workflow_ids_with_interface(v, AGENT_INTERFACE_V1)
+}
+
+/// The run-facing `workflow_id`s of every catalogued entrypoint that
+/// implements `interface_id` (deprecated rows included: a past run may
+/// have used one). This is how a run summary's `workflow_id` is matched
+/// to an interface — the agent fold contract above, and the attach
+/// probe's "is this session's live run a goal run?".
+pub fn workflow_ids_with_interface(v: &Value, interface_id: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for b in v
         .get("items")
@@ -53,12 +62,12 @@ pub fn agent_workflow_ids_from_bundles(v: &Value) -> Vec<String> {
             .and_then(Value::as_array)
             .unwrap_or(&Vec::new())
         {
-            let is_agent = ep
+            let implements = ep
                 .get("interfaces")
                 .and_then(Value::as_array)
-                .map(|ifs| ifs.iter().any(|i| i.as_str() == Some(AGENT_INTERFACE_V1)))
+                .map(|ifs| ifs.iter().any(|i| i.as_str() == Some(interface_id)))
                 .unwrap_or(false);
-            if !is_agent {
+            if !implements {
                 continue;
             }
             let id = ep
@@ -1119,6 +1128,19 @@ mod tests {
             ]
         );
         assert!(agent_workflow_ids_from_bundles(&json!({"items": []})).is_empty());
+        // The same collector by interface: goal ids are disjoint.
+        let g = json!({"items": [
+            {"bundle_id": "goal-agent", "entrypoints": [
+                {"flow_id": "main", "workflow_id": "goal-agent@0.0.1:main",
+                 "interfaces": ["abstractcode.goal.v1"]}]},
+            {"bundle_id": "basic-agent", "entrypoints": [
+                {"flow_id": "m", "workflow_id": "basic-agent@0.0.3:m",
+                 "interfaces": ["abstractcode.agent.v1"]}]}
+        ]});
+        assert_eq!(
+            workflow_ids_with_interface(&g, GOAL_INTERFACE_V1),
+            vec!["goal-agent@0.0.1:main".to_string()]
+        );
     }
 
     /// Which agent runs is the largest determinant of what a run means, so

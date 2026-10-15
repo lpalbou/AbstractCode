@@ -49,10 +49,11 @@ pub enum Command {
     /// separate `/session` command folded in — one surface, 2026-07-22).
     Sessions(Option<String>),
     /// `/details [full|fold]` — bare toggles transcript verbosity:
-    /// full tool calls (args + result bodies, expanded thinking) vs.
-    /// the collapsed view (one-line tool calls with status tags,
-    /// thinking gists — the default). Thinking and every called tool
-    /// stay visible in both states.
+    /// every cycle panel open (content, labelled reasoning, every tool
+    /// call with args + output) vs. folded (the default: one row per
+    /// cycle — first words, hidden-reasoning note, tool calls counted by
+    /// status, time + tokens). A click on a cycle row opens that one
+    /// cycle alone (`Store::expanded_cycles`).
     Details(Option<String>),
     /// `/reasoning [level]` — the effort dial for the current route
     /// (stage 3 of the model picker, opened directly); with an argument,
@@ -150,7 +151,7 @@ pub enum Command {
     Stance(Option<String>),
     /// Recovers from external screen clears the damage tracker cannot see.
     Redraw,
-    /// `/voice [read-aloud on|off]` — voice settings (engines = the
+    /// `/voice [read-aloud on|off | space on|off]` — voice settings (engines = the
     /// gateway's default routes, output/input device, tests, read aloud,
     /// latency); `read-aloud on|off` flips that switch without the screen.
     Voice(Option<String>),
@@ -323,7 +324,10 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
         "voice",
         "voice settings: engines (gateway default), devices, tests, read aloud",
     ),
-    ("speak", "read the latest reply aloud (Ctrl+P) · stop"),
+    (
+        "speak",
+        "read the latest reply aloud (Ctrl+P pauses / resumes) · stop",
+    ),
     (
         "dictate",
         "dictate into the composer with this computer's microphone (Ctrl+R)",
@@ -371,7 +375,10 @@ pub const COMPLETIONS: &[(&str, &str)] = &[
         "stream earlier session turns (boot loads the last bloc only)",
     ),
     ("sessions", "pick or set a session"),
-    ("details", "expand/collapse tool + thinking detail (Ctrl+D)"),
+    (
+        "details",
+        "open/fold every cycle panel (Ctrl+D); a click on a cycle row opens just that one",
+    ),
     (
         "attach",
         "attach a file to your next message · bare /attach manages · preview looks inside",
@@ -505,7 +512,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ),
     (
         "/details [full|fold]",
-        "transcript verbosity (Ctrl+D): `full` = tool args + results + expanded thinking; `fold` = one-line tool calls with status tags + thinking gists (default)",
+        "transcript verbosity (Ctrl+D): `fold` (default) = each reasoning cycle is ONE row — its first words, a `∴ N words` note when reasoning is hidden, its tool calls counted by status (✓ ok, ✗ failed, ? awaiting approval, » running), time and tokens; a click on a cycle row opens that cycle alone. `full` = every cycle open: the content, the labelled reasoning, every tool call with its args, output and error",
     ),
     (
         "/reasoning [level]",
@@ -536,7 +543,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
     ("/steer <text>", "explicitly steer the active run"),
     (
         "/queue [text]",
-        "queue a prompt (FIFO): auto-runs after the current run succeeds; halts on failure/cancel; held by THIS CLIENT per session (prefs.json — other apps see runs only once started) and restores PAUSED; bare /queue opens the manager",
+        "queue a prompt (FIFO): auto-runs after the current run succeeds; halts on failure/cancel; held in memory by this client while it runs (other apps see runs only once started; switching back to the conversation restores it PAUSED; quitting lists what was not sent); bare /queue opens the manager",
     ),
     (
         "/goal [text|stop]",
@@ -603,12 +610,12 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "New automation — the Code web's dialog in seven steps: What (the workflow and the task, a multiline text; default: your last prompt), When (Repeat, Daily, Weekly, Monthly, Once at…, or When an email arrives), Context, Tools (none selected until you choose; Select all / Unselect all, a box per category), Workspaces, Mailbox, Title and limits",
     ),
     (
-        "/voice [read-aloud on|off]",
-        "voice settings: Text → speech and Speech → text (Gateway default · the gateway's routes, or an override), output device + Test, reply volume, microphone + Test with a level meter, spoken language, Read aloud, voice latency; audio plays and records on THIS computer through AbstractVoice (--voice-python <path> picks the Python)",
+        "/voice [read-aloud on|off | space on|off]",
+        "`space on|off` = hold Space to talk (on by default: on an empty prompt hold Space, speak, release to send). Voice settings: Text → speech and Speech → text (Gateway default · the gateway's routes, or an override), output device + Test, reply volume, microphone + Test with a level meter, spoken language, Read aloud, voice latency; audio plays and records on THIS computer through AbstractVoice (--voice-python <path> picks the Python)",
     ),
     (
         "/speak [stop]",
-        "read the latest reply aloud — streamed sentence by sentence from the gateway (Ctrl+P toggles; Esc stops)",
+        "read the latest reply aloud — streamed sentence by sentence from the gateway (Ctrl+P: read, pause, resume; Esc stops; ▶ at the top right of any message reads that message)",
     ),
     (
         "/dictate",
@@ -643,14 +650,34 @@ pub const HELP_EXTRA: &[(&str, &str)] = &[
     ),
     ("Ctrl+T", "cycle theme"),
     (
+        "theme ▾",
+        "the theme name in the status bar: click, or Tab to it + Enter, for every theme — arrows / the wheel preview LIVE, Enter or a click keeps, Esc restores; the wheel on the closed name steps to the next theme",
+    ),
+    (
         "Ctrl+P",
-        "read the latest reply aloud / stop it (/speak); in one automation: the selected run's reply",
+        "read the latest reply aloud; while it plays, pause; paused, resume (/speak) — Esc stops; in one automation: the selected run's reply, again = stop",
+    ),
+    (
+        "click ▶ / ‖",
+        "top right of a message: read that message aloud / pause / resume",
+    ),
+    (
+        "hold Space",
+        "on an empty prompt: talk — release sends what you said (/voice space off turns it off)",
     ),
     (
         "Enter",
         "on an empty composer while the status line shows \"Automations · N waiting\": open the automation that waits for you",
     ),
     ("Ctrl+R", "dictate: start recording, press again to transcribe (/dictate)"),
+    (
+        "click a cycle row",
+        "open or fold that reasoning cycle (▸ folded, ▾ open); Ctrl+D opens or folds them all",
+    ),
+    (
+        "◌ root finalizes on gateway",
+        "bottom-line marker: the turn's answer came from an agent subrun while the wrapper root run was still open on the gateway; the gateway finalizes it server-side (nothing to do)",
+    ),
     (
         "select text",
         "drag to select in-app; release copies (OSC 52 clipboard) — Shift/Option-drag still selects natively",

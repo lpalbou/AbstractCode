@@ -238,6 +238,12 @@ impl Transport for FakeTransport {
                     self.started.push(gen);
                     sink(HostEvent::Started { gen });
                 }
+                // The speaker's level (the real bridge reports ~10/s).
+                sink(HostEvent::Level {
+                    gen,
+                    rms: 0.4,
+                    bands: vec![0.6; 24],
+                });
             }
             "end" => {
                 std::thread::spawn(move || {
@@ -259,7 +265,11 @@ impl Transport for FakeTransport {
                     .unwrap_or("")
                     .to_string();
                 self.recording = Some((gen, path));
-                sink(HostEvent::Level { gen, rms: 0.4 });
+                sink(HostEvent::Level {
+                    gen,
+                    rms: 0.4,
+                    bands: vec![0.6; 24],
+                });
                 if let Some(max) = cmd.get("max_s").and_then(Value::as_u64).filter(|m| *m <= 3) {
                     // The 3 s microphone test stops by itself.
                     let _ = max;
@@ -489,7 +499,7 @@ fn dictation_uploads_the_recording_and_uses_the_default_route() {
         h2.send_if_running(&json!({"op": "record_stop", "gen": gen}));
     });
     let mut levels = Vec::new();
-    let rec = voice::record_blocking(&host, gen, &VoicePrefs::default(), 120, &mut |l| {
+    let rec = voice::record_blocking(&host, gen, &VoicePrefs::default(), 120, &mut |l, _| {
         levels.push(l)
     })
     .expect("recorded");
@@ -647,6 +657,12 @@ struct Harness {
 }
 
 fn harness(gateway_url: &str) -> Harness {
+    harness_with(gateway_url, false)
+}
+
+/// `kitty`: the terminal speaks the kitty keyboard protocol (key-up
+/// events live — the full-fidelity hold path).
+fn harness_with(gateway_url: &str, kitty: bool) -> Harness {
     abstracttui::app::set_theme_by_id("abstract-dark");
     let size = Size::new(110, 34);
     let mut app = App::new(size);
@@ -691,6 +707,7 @@ fn harness(gateway_url: &str) -> Harness {
             c.truecolor = true;
             c.colors_256 = true;
             c.unicode_ok = true;
+            c.kitty_keyboard = kitty;
         })),
         ..RunConfig::default()
     };
@@ -785,7 +802,7 @@ fn voice_screen_names_the_gateway_routes_and_lists_host_devices() {
         "Test microphone",
         "Spoken language",
         "Input level",
-        "[ ] Read aloud — Speak each new reply.",
+        "[ ] Read aloud — Narrate each cycle as the agent works, then the reply.",
         "Voice latency",
     ] {
         assert!(s.contains(row), "missing {row:?}:\n{s}");
@@ -813,6 +830,57 @@ fn voice_screen_names_the_gateway_routes_and_lists_host_devices() {
     assert_eq!(saved.get("output_device"), Some(&json!("uid-speakers")));
 }
 
+/// A saved device that is not connected says what happens instead: the
+/// system default is used (operator, 2026-10-10: device choices are client
+/// settings the program adapts to).
+#[test]
+fn a_saved_device_that_is_not_connected_shows_the_system_default_in_use() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, _log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.prefs.borrow_mut().voice = Some(json!({
+        "output_device": "uid-airpods",
+        "input_device": "AirPods Microphone",
+    }));
+    h.with_reply("ok");
+    h.type_text("/voice\r");
+    let s = h.until("the devices resolved on the voice screen", |s| {
+        s.contains("saved speaker not connected") && s.contains("saved microphone not connected")
+    });
+    assert!(
+        s.contains("Output device     System default · saved speaker not connected"),
+        "{s}"
+    );
+    assert!(
+        s.contains("Input device      System default · saved microphone not connected"),
+        "{s}"
+    );
+}
+
+/// When the device list could not be read, nothing is known about a saved
+/// device: the screen names it without claiming it is disconnected.
+#[test]
+fn a_saved_device_is_not_called_disconnected_when_the_list_failed() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    voice_host::install(Arc::new(Host::new(Box::new(|_sink| {
+        Err("no Python with AbstractVoice".to_string())
+    }))));
+    let mut h = harness(&gw.url);
+    h.prefs.borrow_mut().voice = Some(json!({
+        "output_device": "uid-airpods",
+        "input_device": "AirPods Microphone",
+    }));
+    h.with_reply("ok");
+    h.type_text("/voice\r");
+    let s = h.until("the device list failure on the voice screen", |s| {
+        s.contains("Output device     Saved speaker")
+    });
+    assert!(s.contains("Input device      Saved microphone"), "{s}");
+    assert!(!s.contains("not connected"), "{s}");
+}
+
 #[test]
 fn read_aloud_switch_persists_from_the_command() {
     let _g = serial();
@@ -832,7 +900,7 @@ fn read_aloud_switch_persists_from_the_command() {
     );
     h.type_text("/voice\r");
     let s = h.until("the switch on the screen", |s| {
-        s.contains("[x] Read aloud — Speak each new reply.")
+        s.contains("[x] Read aloud — Narrate each cycle as the agent works, then the reply.")
     });
     assert!(s.contains("Voice ·"));
 }
@@ -849,8 +917,21 @@ fn ctrl_p_speaks_the_latest_reply_and_esc_stops_it() {
     let mut h = harness(&gw.url);
     h.with_reply("The answer is forty-two. That is all.");
     h.term.push_input(&[0x10]); // Ctrl+P
-    let s = h.until("speaking", |s| s.contains("♪ Speaking… · Esc stops"));
+    let s = h.until("speaking", |s| {
+        s.contains("♪ Speaking…") && s.contains("Ctrl+P pauses · Esc stops")
+    });
     assert!(!s.contains("Preparing"), "{s}");
+    // The answer's icon reads "pause" while it is the text being read.
+    assert!(
+        s.lines()
+            .any(|l| l.contains("══ assistant") && l.contains(" ‖ ")),
+        "{s}"
+    );
+    // The speaking meter shows the speaker's level (fake host: 0.4).
+    h.until("the speaker level on the meter", |s| {
+        s.lines()
+            .any(|l| l.contains("♪ Speaking…") && l.contains('▅'))
+    });
     let body: Value =
         serde_json::from_str(&gw.requests("/runs/run-ui/voice/tts/stream")[0].2).unwrap();
     assert_eq!(
@@ -899,7 +980,7 @@ fn ctrl_r_dictates_into_the_composer_with_the_route_shown() {
     h.turn();
     h.term.push_input(&[0x12]); // Ctrl+R starts
     h.until("recording", |s| {
-        s.contains("● Recording… 0 s · Ctrl+R transcribes · Esc cancels")
+        s.contains("● Recording… 0 s") && s.contains("Ctrl+R transcribes · Esc cancels")
     });
     // The defaults land while recording: the Transcribing line names the route.
     h.until("defaults fetched", |_| {
@@ -987,12 +1068,45 @@ fn esc_cancels_a_recording_and_nothing_is_transcribed() {
     assert!(gw.requests("/audio/transcribe").is_empty());
 }
 
+/// No run yet: dictation rides the SESSION's media run
+/// (`session_memory_<session id>`, created by the gateway on first use —
+/// the run Code web and Observer transcribe on), so the very first message
+/// can be spoken.
+#[test]
+fn dictation_before_the_first_run_rides_the_session_media_run() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, _log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.store.fold.update(|f| {
+        f.push_item(Item::User {
+            text: "settle".into(),
+        })
+    });
+    h.turn();
+    h.term.push_input(&[0x12]);
+    h.until("recording", |s| s.contains("● Recording…"));
+    h.term.push_input(&[0x12]);
+    h.until("the transcript in the composer", |s| {
+        s.contains("hello from the microphone")
+    });
+    assert_eq!(
+        gw.requests("/runs/session_memory_acode-voice-session/audio/transcribe")
+            .len(),
+        1,
+        "transcribed on the session media run"
+    );
+}
+
 #[test]
 fn dictation_without_a_conversation_says_what_to_do() {
     let _g = serial();
     let gw = serve(GatewayScript::default());
     let (_host, _log, spawns) = fake_host(false);
     let mut h = harness(&gw.url);
+    // A session id outside the gateway's run-id alphabet: no media run
+    // this client can name, so the old sentence stands.
+    h.store.session_id.set("not a safe id".into());
     h.store.fold.update(|f| {
         f.push_item(Item::User {
             text: "settle".into(),
@@ -1185,4 +1299,687 @@ fn voice_screen_shows_the_gateways_served_speech_input_hint() {
     for line in abstracttui::text::wrap(sentence, 80) {
         assert!(s.contains(line.trim_end()), "missing {line:?}:\n{s}");
     }
+}
+
+// -- hold Space to talk ---------------------------------------------------------
+
+/// Press Space `n` times, `gap` apart, turning the loop after each.
+fn spaces(h: &mut Harness, n: usize, gap: Duration) {
+    for _ in 0..n {
+        h.term.push_input(b" ");
+        h.turn();
+        std::thread::sleep(gap);
+    }
+}
+
+/// A selected agent workflow, so a sent message starts a run.
+fn with_workflow(h: &mut Harness) {
+    h.store.workflow.set(abstractcode::store::Workflow {
+        bundle_id: "basic-agent".into(),
+        flow_id: "basic".into(),
+        name: "basic-agent".into(),
+        description: String::new(),
+        ..Default::default()
+    });
+    h.turn();
+}
+
+/// The repeat delay the legacy-wire push-to-talk tests pin (generous: the
+/// first repeat they send comes after waits that can take a second under
+/// load).
+const PTT_TEST_REPEAT_DELAY: Duration = Duration::from_millis(2000);
+
+fn started_prompt(h: &Harness) -> Option<String> {
+    while let Ok(cmd) = h._rx.try_recv() {
+        if let Cmd::Start { prompt, .. } = cmd {
+            return Some(prompt);
+        }
+    }
+    None
+}
+
+/// Legacy wire (no key-up events): the FIRST press records at once —
+/// nothing typed, the listening meter up — the auto-repeat confirms the
+/// hold, and when the repeats stop the recording ends, transcribes, and
+/// the words are SENT as the next task (operator asks 2026-10-10: "we
+/// press, it records, we unpress, it sends"; no lag before listening).
+#[test]
+fn holding_space_records_and_releasing_sends() {
+    let _g = serial();
+    // The tap window is the OS repeat delay + a margin: pinned here, so the
+    // test's own waits (the meter, a loaded machine) never turn the hold
+    // into a tap, whatever this machine's keyboard setting is.
+    abstractcode::ui::push_to_talk::set_repeat_delay(PTT_TEST_REPEAT_DELAY);
+    let gw = serve(GatewayScript::default());
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("ready");
+    with_workflow(&mut h);
+    let s = h.turn();
+    assert!(
+        s.contains("hold Space to talk"),
+        "the footer teaches it:\n{s}"
+    );
+    // The press alone: listening at once, nothing typed.
+    h.term.push_input(b" ");
+    h.until("listening on the press", |s| s.contains("● Listening… 0 s"));
+    // The microphone's first level reaches the meter (fake host: 0.4).
+    let s = h.until("the level on the meter", |s| {
+        s.lines()
+            .any(|l| l.contains("● Listening…") && l.contains('▅'))
+    });
+    let meter = s
+        .lines()
+        .find(|l| l.contains("● Listening…"))
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        meter.contains("release Space to send · Esc cancels"),
+        "{meter}"
+    );
+    assert!(
+        meter.contains('▅'),
+        "the meter shows the microphone's level (fake host: 0.4):\n{meter}"
+    );
+    assert!(
+        h.store.voice.hold.get_untracked() && ops(&log).contains(&"record".to_string()),
+        "the recording started on the press"
+    );
+    // The OS repeat delay, then repeats every ~40 ms.
+    std::thread::sleep(Duration::from_millis(300));
+    spaces(&mut h, 12, Duration::from_millis(40));
+    // The repeats stop: released → transcribed → sent.
+    let store = h.store;
+    let s = h.until("sent", |_| {
+        gw.requests("/audio/transcribe").len() == 1
+            && !store.voice.hold.get_untracked()
+            && store.voice.hold_send.get_untracked().is_none()
+    });
+    let prompt = started_prompt(&h).unwrap_or_else(|| panic!("a task was started:\n{s}"));
+    assert_eq!(prompt, "hello from the microphone", "the words, no spaces");
+    assert!(ops(&log).contains(&"record_stop".to_string()));
+    assert!(
+        !s.contains("Listening…"),
+        "the status row clears after sending:\n{s}"
+    );
+}
+
+/// A tap (no auto-repeat within the OS repeat delay) is DISCARDED: the
+/// short recording is dropped unsent, nothing is typed, no sentence.
+/// Space inside a draft with words is typing, even at repeat speed;
+/// `/voice space off` turns the gesture off.
+#[test]
+fn taps_and_typing_never_send_and_the_gesture_can_be_turned_off() {
+    let _g = serial();
+    // The tap window is the OS repeat delay + a margin: pinned here, so the
+    // test's own waits (the meter, a loaded machine) never turn the hold
+    // into a tap, whatever this machine's keyboard setting is.
+    abstractcode::ui::push_to_talk::set_repeat_delay(PTT_TEST_REPEAT_DELAY);
+    let gw = serve(GatewayScript::default());
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("ready");
+    with_workflow(&mut h);
+    h.term.push_input(b" ");
+    h.until("listening", |s| s.contains("● Listening…"));
+    let store = h.store;
+    let s = h.until("the tap discarded", |_| !store.voice.hold.get_untracked());
+    std::thread::sleep(Duration::from_millis(200));
+    let s2 = h.turn();
+    assert!(
+        !s2.contains("Listening…") && !s2.contains("Too short"),
+        "{s}\n{s2}"
+    );
+    assert!(
+        gw.requests("/audio/transcribe").is_empty(),
+        "a tap is never transcribed"
+    );
+    assert!(started_prompt(&h).is_none(), "a tap sends nothing");
+    // Words, then a held Space inside them: typing.
+    let records = || ops(&log).iter().filter(|o| *o == "record").count();
+    let before = records();
+    h.type_text("fix the");
+    h.turn();
+    spaces(&mut h, 10, Duration::from_millis(30));
+    std::thread::sleep(Duration::from_millis(400));
+    h.turn();
+    assert_eq!(records(), before, "Space in a draft is typing");
+    // Off: a held Space on an empty prompt only types.
+    h.escape();
+    h.type_text("/voice space off\r");
+    let s = h.until("off", |s| s.contains("Ctrl+R speak"));
+    assert!(!s.contains("hold Space to talk"), "{s}");
+    spaces(&mut h, 1, Duration::from_millis(300));
+    spaces(&mut h, 10, Duration::from_millis(30));
+    std::thread::sleep(Duration::from_millis(400));
+    h.turn();
+    assert_eq!(records(), before, "the gesture is off");
+    let saved = h.prefs.borrow().voice.clone().unwrap_or_default();
+    assert_eq!(saved["space_to_talk"], json!(false), "persisted: {saved}");
+}
+
+/// Kitty keyboard protocol (key-up events live): the FIRST press records at
+/// once — nothing is typed — and the wire's key-up sends. No timeout:
+/// a hold with no repeats for a second keeps listening.
+#[test]
+fn kitty_wire_records_on_press_and_sends_on_key_up() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, _log, _) = fake_host(false);
+    let mut h = harness_with(&gw.url, true);
+    h.with_reply("ready");
+    with_workflow(&mut h);
+    assert_eq!(
+        abstracttui::app::key_state().fidelity_untracked(),
+        abstracttui::app::KeyFidelity::Full,
+        "the kitty harness reports key-ups"
+    );
+    h.term.push_input(b"\x1b[32u"); // Space down
+    h.until("listening", |s| s.contains("● Listening…"));
+    std::thread::sleep(Duration::from_millis(700));
+    h.turn();
+    assert!(
+        h.store.voice.hold.get_untracked(),
+        "no timeout on a wire that reports the key-up"
+    );
+    h.term.push_input(b"\x1b[32;1:3u"); // Space up
+    let store = h.store;
+    h.until("sent", |_| {
+        gw.requests("/audio/transcribe").len() == 1
+            && store.voice.hold_send.get_untracked().is_none()
+            && !store.voice.hold.get_untracked()
+    });
+    assert_eq!(
+        started_prompt(&h).as_deref(),
+        Some("hello from the microphone")
+    );
+}
+
+// -- play / pause, narration ------------------------------------------------------
+
+/// Ctrl+P while a reply plays PAUSES it (the player holds its place);
+/// again RESUMES it.
+#[test]
+fn ctrl_p_pauses_and_resumes_the_reply() {
+    let _g = serial();
+    let gw = serve(GatewayScript {
+        segment_delay: Duration::from_millis(300),
+        segments: vec![1, 2, 3, 4, 5, 6],
+        ..Default::default()
+    });
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("A reply long enough to pause.");
+    h.term.push_input(&[0x10]);
+    h.until("speaking", |s| s.contains("♪ Speaking…"));
+    h.term.push_input(&[0x10]);
+    let s = h.until("paused", |s| {
+        s.contains("‖ Paused") && s.contains("Ctrl+P resumes")
+    });
+    assert!(ops(&log).contains(&"pause".to_string()), "{:?}", ops(&log));
+    assert!(
+        s.lines()
+            .any(|l| l.contains("══ assistant") && l.contains(" ▶ ")),
+        "the icon offers resume:\n{s}"
+    );
+    h.term.push_input(&[0x10]);
+    h.until("resumed", |s| s.contains("♪ Speaking…"));
+    assert!(ops(&log).contains(&"resume".to_string()), "{:?}", ops(&log));
+    h.escape();
+}
+
+/// The icon at the top right of a message reads THAT message: a click
+/// on your own message's ▶ speaks its text; a second click pauses.
+#[test]
+fn a_message_icon_reads_that_message_and_pauses_it() {
+    let _g = serial();
+    let gw = serve(GatewayScript {
+        segment_delay: Duration::from_millis(300),
+        segments: vec![1, 2, 3, 4, 5, 6],
+        ..Default::default()
+    });
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("the reply");
+    let s = h.turn();
+    let row = s
+        .lines()
+        .position(|l| l.contains("▶") && l.starts_with(" ▌"))
+        .unwrap_or_else(|| panic!("the user card carries an icon:\n{s}"));
+    let line: Vec<char> = s.lines().nth(row).unwrap().chars().collect();
+    let col = line.iter().position(|c| *c == '▶').unwrap();
+    let click = |h: &mut Harness| {
+        h.term
+            .push_input(format!("\x1b[<0;{};{}M", col + 1, row + 1).as_bytes());
+        h.term
+            .push_input(format!("\x1b[<0;{};{}m", col + 1, row + 1).as_bytes());
+    };
+    click(&mut h);
+    let s = h.until("reading the user's message", |s| s.contains("♪ Speaking…"));
+    let body: Value = serde_json::from_str(&gw.requests("/voice/tts/stream")[0].2).unwrap();
+    assert_eq!(body.get("text"), Some(&json!("say something")), "{s}");
+    click(&mut h);
+    h.until("paused from the icon", |s| s.contains("‖ Paused"));
+    assert!(ops(&log).contains(&"pause".to_string()));
+    h.escape();
+}
+
+/// Read aloud narrates the turn AS IT RUNS: each cycle's words when the
+/// cycle lands, then the answer — queued in order; an answer that
+/// repeats the last cycle's words is not read twice; the reasoning
+/// channel is never read; a history that lands while idle is silent.
+#[test]
+fn read_aloud_narrates_cycles_then_the_answer() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, _log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("earlier");
+    h.type_text("/voice read-aloud on\r");
+    h.until("on", |s| s.contains("Read aloud [x]"));
+    let tts = |gw: &FakeGateway| -> Vec<String> {
+        gw.requests("/voice/tts/stream")
+            .iter()
+            .map(|r| {
+                serde_json::from_str::<Value>(&r.2).unwrap()["text"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect()
+    };
+    // Idle: a fold change is not narrated.
+    h.store.fold.update(|f| {
+        f.push_item(Item::Thinking {
+            iteration: 1,
+            content: "old history words".into(),
+            reasoning: String::new(),
+            call: Default::default(),
+        })
+    });
+    h.turn();
+    std::thread::sleep(Duration::from_millis(150));
+    assert!(tts(&gw).is_empty(), "history is silent");
+    // A live run: cycles are read as they land, then the answer.
+    h.store.phase.set(abstractcode::store::Phase::Running);
+    h.store.fold.update(|f| {
+        f.push_item(Item::Thinking {
+            iteration: 1,
+            content: "Let me search the web first.".into(),
+            reasoning: "SECRET reasoning".into(),
+            call: Default::default(),
+        })
+    });
+    h.until("the first cycle read", |_| tts(&gw).len() == 1);
+    h.store.fold.update(|f| {
+        f.push_item(Item::Thinking {
+            iteration: 2,
+            content: "Here is the summary.".into(),
+            reasoning: String::new(),
+            call: Default::default(),
+        });
+        f.push_item(Item::Assistant {
+            text: "Here is the summary.".into(),
+            final_answer: true,
+        });
+    });
+    h.until("the second cycle read", |_| tts(&gw).len() == 2);
+    std::thread::sleep(Duration::from_millis(400));
+    h.turn();
+    h.turn();
+    assert_eq!(
+        tts(&gw),
+        vec!["Let me search the web first.", "Here is the summary."],
+        "cycles in order; the repeated answer is not read twice; no reasoning"
+    );
+}
+
+/// Holding Space while the agent speaks silences it first — the microphone
+/// must not record the agent's own voice.
+#[test]
+fn holding_space_silences_the_agent_first() {
+    let _g = serial();
+    let gw = serve(GatewayScript {
+        segment_delay: Duration::from_millis(300),
+        segments: vec![1, 2, 3, 4, 5, 6],
+        ..Default::default()
+    });
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("a long spoken reply");
+    h.term.push_input(&[0x10]);
+    h.until("speaking", |s| s.contains("♪ Speaking…"));
+    h.term.push_input(b" ");
+    let s = h.until("listening", |s| s.contains("● Listening…"));
+    assert!(!s.contains("♪ Speaking…"), "{s}");
+    let o = ops(&log);
+    let stop = o
+        .iter()
+        .position(|x| x == "stop")
+        .expect("the speaker was stopped");
+    let rec = o
+        .iter()
+        .position(|x| x == "record")
+        .expect("then recording started");
+    assert!(stop < rec, "stop before record: {o:?}");
+    h.escape();
+}
+
+/// A bridge on `python3` (+ numpy) with stand-ins on its path, rooted at
+/// `dir`:
+/// - `abstractvoice`: a player that plays on the device it was given and
+///   appends it (or `system-default`) to `<dir>/played`. `old_av` = the
+///   AbstractVoice 0.11 player, which has no `output_device` at all. The
+///   speaker `dead-speaker` is listed but fails to open.
+/// - `sounddevice`: the microphones CONNECTED now are the lines of
+///   `<dir>/connected`; the LIST is a snapshot taken at start and on each
+///   `_terminate`/`_initialize` (PortAudio's frozen list). Opening a listed
+///   microphone that is no longer connected fails; `Flaky Mic` opens but
+///   fails to start. Each started input stream appends its device name (or
+///   `default`) to `<dir>/opened`; each re-read of the list appends a line
+///   to `<dir>/refreshed`.
+fn stand_in_bridge(
+    dir: &std::path::Path,
+    old_av: bool,
+    connected: &[&str],
+) -> (Box<dyn Transport>, mpsc::Receiver<HostEvent>) {
+    let tts = dir.join("abstractvoice").join("tts");
+    std::fs::create_dir_all(&tts).unwrap();
+    std::fs::write(
+        dir.join("abstractvoice").join("__init__.py"),
+        "__version__ = '0.0-stand-in'\n",
+    )
+    .unwrap();
+    if old_av {
+        std::fs::write(dir.join("old_av"), "").unwrap();
+    }
+    std::fs::write(dir.join("connected"), connected.join("\n")).unwrap();
+    std::fs::write(
+        tts.join("__init__.py"),
+        r#"import os, queue
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+class NonBlockingAudioPlayer:
+    def __init__(self, sample_rate=22050, debug_mode=False, **kw):
+        if kw and os.path.exists(os.path.join(ROOT, "old_av")):
+            raise TypeError("__init__() got an unexpected keyword argument 'output_device'")
+        self.device = kw.get("output_device")
+        self.audio_queue = queue.Queue()
+        self.is_playing = False
+        self.on_audio_start = None
+        self.playback_complete_callback = None
+    def play_audio(self, audio, sample_rate=None):
+        if self.device == "dead-speaker":
+            raise RuntimeError("Failed to start audio output stream on dead-speaker")
+        open(os.path.join(ROOT, "played"), "a").write((self.device or "system-default") + "\n")
+        if self.on_audio_start:
+            self.on_audio_start()
+    def clear_queue(self):
+        pass
+    def cleanup(self):
+        pass
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("sounddevice.py"),
+        r#"import os
+ROOT = os.path.dirname(__file__)
+def _connected():
+    return [l for l in open(os.path.join(ROOT, "connected")).read().splitlines() if l]
+class PortAudioError(Exception):
+    pass
+_LISTED = []
+def _initialize():
+    global _LISTED
+    _LISTED = [{"name": n, "max_input_channels": 1, "max_output_channels": 0} for n in _connected()]
+def _terminate():
+    open(os.path.join(ROOT, "refreshed"), "a").write("x\n")
+_initialize()
+def query_devices(*a, **k):
+    return _LISTED
+class InputStream:
+    def __init__(self, device=None, **kw):
+        self.name = "default" if device is None else _LISTED[device]["name"]
+        if self.name != "default" and self.name not in _connected():
+            raise RuntimeError("Error opening InputStream: Internal PortAudio error")
+    def start(self):
+        if self.name == "Flaky Mic":
+            raise RuntimeError("Error starting stream")
+        open(os.path.join(ROOT, "opened"), "a").write(self.name + "\n")
+    def stop(self):
+        pass
+    def close(self):
+        pass
+"#,
+    )
+    .unwrap();
+    let real = std::env::var("ACODE_TEST_PYTHON").unwrap_or_else(|_| "python3".into());
+    let wrapper = dir.join("py");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nPYTHONPATH='{}' exec '{real}' \"$@\"\n",
+            dir.display()
+        ),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let (tx, rx) = mpsc::channel::<HostEvent>();
+    let tx = Mutex::new(tx);
+    let sink: EventSink = Arc::new(move |ev| {
+        let _ = tx.lock().unwrap().send(ev);
+    });
+    let t = voice_host::spawn_bridge_with(&wrapper, &[], sink).expect("bridge ready");
+    (t, rx)
+}
+
+/// Every non-level event until `last` matches (10 s at most).
+fn events_until(
+    rx: &mpsc::Receiver<HostEvent>,
+    last: impl Fn(&HostEvent) -> bool,
+) -> Vec<HostEvent> {
+    let mut got = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if let Ok(ev) = rx.recv_timeout(Duration::from_millis(200)) {
+            let stop = last(&ev);
+            if !matches!(ev, HostEvent::Level { .. }) {
+                got.push(ev);
+            }
+            if stop {
+                break;
+            }
+        }
+    }
+    got
+}
+
+/// Operator, 2026-10-10: a saved speaker that cannot be used (unplugged
+/// AirPods, or an AbstractVoice too old to choose a device at all) plays on
+/// the SYSTEM DEFAULT, automatically — reading aloud never fails for it.
+/// `--ignored`: needs python3 + numpy (`ACODE_TEST_PYTHON` picks it).
+#[test]
+#[ignore = "needs python3 with numpy"]
+fn a_saved_speaker_the_player_cannot_choose_plays_on_the_system_default() {
+    let _g = serial();
+    let dir = std::env::temp_dir().join(format!("acode-voice-old-av-{}", std::process::id()));
+    let (mut t, rx) = stand_in_bridge(&dir, true, &[]);
+    let airpods = "AirPods-Pro-UID:output";
+    t.send(&json!({"op": "play", "gen": 5, "b64": voice_host::b64_encode(&wav(3)), "device": airpods, "volume": 1.0}).to_string()).unwrap();
+    t.send(&json!({"op": "end", "gen": 5}).to_string()).unwrap();
+    t.send(&json!({"op": "tone", "gen": 6, "device": airpods, "volume": 1.0}).to_string())
+        .unwrap();
+    let got = events_until(&rx, |e| {
+        matches!(
+            e,
+            HostEvent::ToneDone { .. } | HostEvent::Error { gen: 6, .. }
+        )
+    });
+    t.kill();
+    assert!(
+        !got.iter().any(|e| matches!(e, HostEvent::Error { .. })),
+        "no error for a speaker the player cannot choose: {got:?}"
+    );
+    assert!(got.contains(&HostEvent::Started { gen: 5 }), "{got:?}");
+    assert!(got.contains(&HostEvent::Done { gen: 5 }), "{got:?}");
+    assert!(got.contains(&HostEvent::ToneDone { gen: 6 }), "{got:?}");
+    let played = std::fs::read_to_string(dir.join("played")).unwrap_or_default();
+    assert_eq!(
+        played.lines().collect::<Vec<_>>(),
+        vec!["system-default", "system-default"],
+        "reply + chime both played on the system default"
+    );
+    assert_eq!(
+        played.lines().count(),
+        2,
+        "reply + chime both played: {played:?}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A newer AbstractVoice: a saved speaker that is listed but does not open
+/// plays on the system default (and keeps doing so for that device); a
+/// speaker that works is used.
+#[test]
+#[ignore = "needs python3 with numpy"]
+fn a_saved_speaker_that_does_not_open_plays_on_the_system_default() {
+    let _g = serial();
+    let dir = std::env::temp_dir().join(format!("acode-voice-dead-{}", std::process::id()));
+    let (mut t, rx) = stand_in_bridge(&dir, false, &[]);
+    for (gen, device) in [
+        (21u64, "dead-speaker"),
+        (22, "dead-speaker"),
+        (23, "uid-desk"),
+    ] {
+        t.send(&json!({"op": "play", "gen": gen, "b64": voice_host::b64_encode(&wav(3)), "device": device, "volume": 1.0}).to_string()).unwrap();
+        t.send(&json!({"op": "end", "gen": gen}).to_string())
+            .unwrap();
+        let got = events_until(
+            &rx,
+            |e| matches!(e, HostEvent::Done { gen: g } | HostEvent::Error { gen: g, .. } if *g == gen),
+        );
+        assert!(
+            got.contains(&HostEvent::Done { gen })
+                && !got.iter().any(|e| matches!(e, HostEvent::Error { .. })),
+            "{device}: played, no error: {got:?}"
+        );
+    }
+    t.kill();
+    let played = std::fs::read_to_string(dir.join("played")).unwrap_or_default();
+    assert_eq!(
+        played.lines().collect::<Vec<_>>(),
+        vec!["system-default", "system-default", "uid-desk"]
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Re-reading the device list closes every audio stream in the process, so
+/// it never happens while a reply plays or a recording is open; it does
+/// once both are over.
+#[test]
+#[ignore = "needs python3 with numpy"]
+fn the_device_list_is_never_re_read_while_audio_is_live() {
+    let _g = serial();
+    let dir = std::env::temp_dir().join(format!("acode-voice-busy-{}", std::process::id()));
+    let (mut t, rx) = stand_in_bridge(&dir, false, &["Built-in Microphone"]);
+    let refreshes = || {
+        std::fs::read_to_string(dir.join("refreshed"))
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    let devices = |t: &mut Box<dyn Transport>, gen: u64| {
+        t.send(&json!({"op": "devices", "gen": gen}).to_string())
+            .unwrap();
+        events_until(
+            &rx,
+            |e| matches!(e, HostEvent::Devices { gen: g, .. } if *g == gen),
+        );
+    };
+    // A reply is playing (its generation has not ended).
+    t.send(&json!({"op": "play", "gen": 31, "b64": voice_host::b64_encode(&wav(3)), "device": "", "volume": 1.0}).to_string()).unwrap();
+    devices(&mut t, 32);
+    assert_eq!(refreshes(), 0, "not while a reply plays");
+    t.send(&json!({"op": "end", "gen": 31}).to_string())
+        .unwrap();
+    events_until(&rx, |e| matches!(e, HostEvent::Done { gen: 31 }));
+    // A recording is open.
+    let path = dir.join("rec.wav");
+    t.send(&json!({"op": "record", "gen": 33, "device": "", "path": path.to_string_lossy(), "max_s": 0}).to_string()).unwrap();
+    devices(&mut t, 34);
+    assert_eq!(refreshes(), 0, "not while a recording is open");
+    t.send(&json!({"op": "record_stop", "gen": 33}).to_string())
+        .unwrap();
+    events_until(&rx, |e| matches!(e, HostEvent::Recorded { gen: 33, .. }));
+    // Both over: the Settings list is the current one.
+    devices(&mut t, 35);
+    assert_eq!(refreshes(), 1, "re-read once nothing is live");
+    t.kill();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The same rule for the microphone (operator, 2026-10-10: device choices
+/// are client settings "that may or not change and the program should auto
+/// adapt"). When the saved microphone is not listed or does not open, the
+/// device list is re-read once, so a microphone plugged in after the app
+/// started is used, and one unplugged since is no longer listed; a saved
+/// microphone that is missing or does not start records from the system
+/// default instead of failing.
+#[test]
+#[ignore = "needs python3 with numpy"]
+fn a_saved_microphone_that_is_gone_records_from_the_system_default() {
+    let _g = serial();
+    let dir = std::env::temp_dir().join(format!("acode-voice-mic-{}", std::process::id()));
+    let (mut t, rx) = stand_in_bridge(
+        &dir,
+        false,
+        &["Built-in Microphone", "Ghost Mic", "Flaky Mic"],
+    );
+    // After the bridge started: Ghost Mic unplugged, USB Mic plugged in.
+    std::fs::write(
+        dir.join("connected"),
+        "Built-in Microphone\nFlaky Mic\nUSB Mic",
+    )
+    .unwrap();
+    let mics = [
+        // First, before anything re-read the list: only a re-read finds it.
+        (11u64, "USB Mic"),
+        (12, "AirPods Microphone"),
+        (13, "Ghost Mic"),
+        (14, "Flaky Mic"),
+        (15, "Built-in Microphone"),
+    ];
+    for (gen, device) in mics {
+        let path = dir.join(format!("rec-{gen}.wav"));
+        t.send(&json!({"op": "record", "gen": gen, "device": device, "path": path.to_string_lossy(), "max_s": 0}).to_string()).unwrap();
+        t.send(&json!({"op": "record_stop", "gen": gen}).to_string())
+            .unwrap();
+        let got = events_until(
+            &rx,
+            |e| matches!(e, HostEvent::Recorded { gen: g, .. } | HostEvent::Error { gen: g, .. } if *g == gen),
+        );
+        assert!(
+            got.iter()
+                .any(|e| matches!(e, HostEvent::Recorded { gen: g, .. } if *g == gen)),
+            "{device}: recorded, no error: {got:?}"
+        );
+    }
+    t.kill();
+    let opened = std::fs::read_to_string(dir.join("opened")).unwrap_or_default();
+    assert_eq!(
+        opened.lines().collect::<Vec<_>>(),
+        vec![
+            "USB Mic",
+            "default",
+            "default",
+            "default",
+            "Built-in Microphone"
+        ],
+        "missing, unplugged and failing microphones fall back to the system default; \
+         one plugged in since start and one that works are used"
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }

@@ -84,6 +84,9 @@ pub struct VoicePrefs {
     pub input_gain: Option<f64>,
     pub reply_volume: Option<f64>,
     pub read_aloud: bool,
+    /// Hold Space to talk (`ui::push_to_talk`) is ON unless this is set —
+    /// stored as `"space_to_talk": false`, so the default needs no key.
+    pub space_to_talk_off: bool,
 }
 
 const TTS_KEYS: [&str; 7] = [
@@ -128,6 +131,7 @@ impl VoicePrefs {
                 .get("read_aloud")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            space_to_talk_off: v.get("space_to_talk").and_then(Value::as_bool) == Some(false),
         }
     }
 
@@ -161,6 +165,9 @@ impl VoicePrefs {
         }
         if self.read_aloud {
             m.insert("read_aloud".into(), json!(true));
+        }
+        if self.space_to_talk_off {
+            m.insert("space_to_talk".into(), json!(false));
         }
         Value::Object(m)
     }
@@ -395,6 +402,18 @@ pub enum Speaking {
     /// Asked the gateway; no audio yet.
     Preparing,
     Playing,
+    /// The player holds its place (`pause` op); resume continues the
+    /// same reply where it stopped.
+    Paused,
+}
+
+/// A spoken text's identity: the transcript's play/pause icon shows the
+/// pause state only on the message whose words are being read.
+pub fn text_key(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.trim().hash(&mut h);
+    h.finish()
 }
 
 /// Host device lists (from AbstractVoice through the bridge).
@@ -459,6 +478,42 @@ pub struct VoiceSignals {
     pub tick: Signal<u64>,
     /// The microphone test is running.
     pub mic_testing: Signal<bool>,
+    /// The current dictation was started by HOLDING Space
+    /// (`ui::push_to_talk`): its transcript is sent, not left in the draft.
+    pub hold: Signal<bool>,
+    /// A finished hold-to-talk transcription waiting to be SENT.
+    pub hold_send: Signal<Option<String>>,
+    /// The microphone's CURRENT spectrum while recording ([`meter_bands`];
+    /// ~20 updates a second) — the live histogram beside "Listening…".
+    pub levels: Signal<Vec<f32>>,
+    /// The SPEAKER's current spectrum while a reply is read.
+    pub speak_levels: Signal<Vec<f32>>,
+    /// [`text_key`] of the text being read (None when silent).
+    pub speaking_text: Signal<Option<u64>>,
+}
+
+/// One level report as the meter shows it: the bridge's spectrum bands
+/// when it sends them; from an older bridge (level only), the level on
+/// every bar — still the CURRENT value, just without the frequency split.
+pub fn meter_bands(rms: f32, bands: &[f32]) -> Vec<f32> {
+    if bands.is_empty() {
+        vec![rms.clamp(0.0, 1.0).sqrt(); 24]
+    } else {
+        bands.to_vec()
+    }
+}
+
+/// The meter's `n` cells from the current bands (low frequencies left):
+/// each cell takes the band under it, so any band count fills any width.
+/// Operator ask 2026-10-10: "a realtime histogram that updates the current
+/// values, not something that shows voice through time".
+pub fn meter_cells(bands: &[f32], n: usize) -> Vec<f32> {
+    if bands.is_empty() {
+        return vec![0.0; n];
+    }
+    (0..n)
+        .map(|i| bands[(i * bands.len() / n.max(1)).min(bands.len() - 1)].clamp(0.0, 1.0))
+        .collect()
 }
 
 impl VoiceSignals {
@@ -475,6 +530,11 @@ impl VoiceSignals {
             transcript: cx.signal(None),
             tick: cx.signal(0u64),
             mic_testing: cx.signal(false),
+            hold: cx.signal(false),
+            hold_send: cx.signal(None),
+            levels: cx.signal(Vec::new()),
+            speak_levels: cx.signal(Vec::new()),
+            speaking_text: cx.signal(None),
         }
     }
 }
@@ -757,6 +817,32 @@ pub fn speak_blocking(
     prefs: &VoicePrefs,
     on_started: &mut dyn FnMut(Duration),
 ) -> Result<SpokenReply, String> {
+    speak_blocking_levels(
+        host,
+        gw,
+        gen,
+        run_id,
+        text,
+        prefs,
+        on_started,
+        &mut |_, _| {},
+    )
+}
+
+/// [`speak_blocking`] that also reports the speaker's live level (~10/s,
+/// what the player outputs right now; 0 while paused) — the speaking
+/// meter's food.
+#[allow(clippy::too_many_arguments)]
+pub fn speak_blocking_levels(
+    host: &Host,
+    gw: &VoiceGateway,
+    gen: u64,
+    run_id: &str,
+    text: &str,
+    prefs: &VoicePrefs,
+    on_started: &mut dyn FnMut(Duration),
+    on_level: &mut dyn FnMut(f32, &[f32]),
+) -> Result<SpokenReply, String> {
     enum Msg {
         Audio(String),
         Done(Value),
@@ -808,6 +894,7 @@ pub fn speak_blocking(
                                 stopped: true,
                             });
                         }
+                        Ok(HostEvent::Level { rms, bands, .. }) => on_level(rms, &bands),
                         Ok(HostEvent::Error { message, .. }) => return Err(message),
                         Ok(HostEvent::Exited(why)) => return Err(why),
                         Ok(_) => {}
@@ -867,7 +954,7 @@ pub fn record_blocking(
     gen: u64,
     prefs: &VoicePrefs,
     max_s: u64,
-    on_level: &mut dyn FnMut(f32),
+    on_level: &mut dyn FnMut(f32, &[f32]),
 ) -> Result<Recording, String> {
     let events = host.subscribe(gen);
     let result = (|| {
@@ -882,7 +969,7 @@ pub fn record_blocking(
         }))?;
         loop {
             match events.recv_timeout(Duration::from_secs(max_s + 15)) {
-                Ok(HostEvent::Level { rms, .. }) => on_level(rms),
+                Ok(HostEvent::Level { rms, bands, .. }) => on_level(rms, &bands),
                 Ok(HostEvent::Recorded {
                     path,
                     duration_ms,
@@ -1054,6 +1141,22 @@ mod tests {
         assert_eq!(back.volume(), 1.0);
         assert_eq!(back.gain(), 0.5);
         assert_eq!(VoicePrefs::default().to_json(), json!({}));
+    }
+
+    #[test]
+    fn the_meter_shows_the_current_bands_at_any_width() {
+        let bands: Vec<f32> = (0..24).map(|i| i as f32 / 23.0).collect();
+        let cells = meter_cells(&bands, 12);
+        assert_eq!(cells.len(), 12);
+        assert!(
+            cells.windows(2).all(|w| w[0] <= w[1]),
+            "low bands left: {cells:?}"
+        );
+        assert_eq!(meter_cells(&bands, 48).len(), 48, "stretches too");
+        assert_eq!(meter_cells(&[], 5), vec![0.0; 5]);
+        // An older bridge (level only): the level on every bar.
+        assert_eq!(meter_bands(0.25, &[]), vec![0.5; 24]);
+        assert_eq!(meter_bands(0.25, &[0.1, 0.9]), vec![0.1, 0.9]);
     }
 
     #[test]

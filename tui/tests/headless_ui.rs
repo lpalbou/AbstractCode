@@ -188,15 +188,29 @@ impl Harness {
 }
 
 /// The board refuses activation until the gateway answers (the D1
-/// guard). These harnesses have no worker, so answer for them: an
-/// empty COMPLETE listing still offers the local rows, marked.
-fn settle_session_board(h: &mut Harness) {
+/// guard). These harnesses have no worker, so answer for them with the
+/// gateway's sessions — `(id, opening prompt)`, newest first. The board
+/// has no other source: this client keeps no session list.
+fn settle_session_board(h: &mut Harness, sessions: &[(&str, &str)]) {
+    let rows = sessions
+        .iter()
+        .enumerate()
+        .map(|(i, (id, prompt))| abstractcode::store::SessionRow {
+            id: (*id).into(),
+            state: abstractcode::store::SessionState::Done,
+            last_at: format!("2026-10-10T12:{:02}:00+00:00", 59 - i),
+            turns: 1,
+            first_run: String::new(),
+            prompt: Some((*prompt).into()),
+            tools: None,
+        })
+        .collect();
     h.store
         .session_index
         .set(abstractcode::store::SessionIndex::Loaded {
-            rows: Vec::new(),
+            rows,
             truncated: false,
-            labeled: 0,
+            labeled: sessions.len(),
             archived: 0,
         });
     h.turn();
@@ -438,8 +452,31 @@ fn typing_a_prompt_sends_start_and_renders_user_card() {
     // the custom body block paints from the settled geometry).
     h.turn();
     let screen = h.turn();
-    assert!(screen.contains("you"), "user card header:\n{screen}");
-    assert!(screen.contains("write a haiku"), "prompt text:\n{screen}");
+    assert!(
+        screen.contains("❯ write a haiku"),
+        "the ask opens its card:\n{screen}"
+    );
+    // The card is a TINTED GROUND (operator ask 2026-10-10): the cells of
+    // the ask, and the row above it, sit on a background distinct from
+    // the transcript's own — findable while scrolling.
+    let shot = h.term.screen().screenshot();
+    let (row, col) = screen
+        .lines()
+        .enumerate()
+        .find_map(|(y, l)| {
+            l.find("write a haiku")
+                .map(|b| (y as i32, l[..b].chars().count() as i32))
+        })
+        .expect("the ask is on screen");
+    let card_bg = shot.cell(col, row).and_then(|c| c.bg());
+    let page_bg = shot.cell(col, row - 3).and_then(|c| c.bg());
+    assert!(card_bg.is_some(), "the ask sits on a painted ground");
+    assert_ne!(card_bg, page_bg, "the card ground differs from the page's");
+    assert_eq!(
+        shot.cell(col, row - 1).and_then(|c| c.bg()),
+        card_bg,
+        "the pad row above the ask belongs to the card"
+    );
     match h.rx.try_recv() {
         Ok(Cmd::Start {
             prompt,
@@ -902,15 +939,13 @@ fn model_picker_defaults_row_and_empty_provider_apply_without_stage_two() {
     h.turn();
     let screen = h.turn();
     // No model is resolved for "gateway defaults" here, so there is no MTP
-    // step — and the transcript says why.
+    // step — and, silently: a notice an end user cannot act on is clutter
+    // (operator ask 2026-10-10).
     assert!(
         !screen.contains("MTP (multi-token prediction) —"),
         "{screen}"
     );
-    assert!(
-        screen.contains("MTP support unknown: no model is resolved"),
-        "{screen}"
-    );
+    assert!(!screen.contains("MTP support unknown"), "{screen}");
     assert_eq!(h.store.provider.get_untracked(), "");
     assert_eq!(h.store.model.get_untracked(), "");
     let notices = h.store.notices.get_untracked();
@@ -1096,27 +1131,26 @@ fn details_toggle_keeps_thinking_visible_and_start_carries_no_client_history() {
     h.turn();
     h.turn();
     let screen = h.turn();
-    // Operator directive 2026-08-19: the thinking LEADS its cycle in
-    // BOTH detail states — the collapsed default shows the gist under
-    // the cycle rule, and Ctrl+D only changes verbosity.
+    // The cycle is a FOLDED panel by default (operator ask 2026-10-10):
+    // one row with the model's first words and the call's key facts.
     assert!(
-        screen.contains("xyzzy"),
-        "thinking gist visible in the collapsed default:\n{screen}"
+        screen.contains("▸ cycle 1  let me think about xyzzy"),
+        "the folded cycle row leads with the model's words:\n{screen}"
     );
-    assert!(
-        screen.contains("── cycle 1"),
-        "the cycle rule delimits the turn:\n{screen}"
-    );
-    // Provider-reported cache reuse rides the rule (operator ask
+    // Provider-reported cache reuse rides the row (operator ask
     // 2026-08-19): 9k of 10k prompt tokens served from cache = 90%.
     assert!(
-        screen.contains("90% cached"),
-        "the rule names the cache reuse when the provider reports it:\n{screen}"
+        screen.contains("5s · 10k↑ 250↓ tk · 90% cached"),
+        "the folded row carries the call's facts:\n{screen}"
     );
 
-    // Ctrl+D expands detail; thinking and answers BOTH stay.
+    // Ctrl+D opens every cycle; thinking and answers BOTH stay.
     h.term.push_input(&[0x04]); // Ctrl+D
     let screen = h.turn();
+    assert!(
+        screen.contains("▾ cycle 1 ─"),
+        "details open the cycle panel:\n{screen}"
+    );
     assert!(
         screen.contains("xyzzy"),
         "thinking stays visible with details on:\n{screen}"
@@ -2066,29 +2100,66 @@ fn details_command_immediately_rerenders_mixed_content() {
     h.turn();
     h.turn();
     let screen = h.turn();
-    // Collapsed default: the thinking gist leads its cycle; the tool
-    // row is the call + its status word; bodies are folded.
+    // Collapsed default (operator ask 2026-10-10): the cycle is ONE row —
+    // its first words, then a tool summary whose chips name every status,
+    // so the failure stays visible while its card is folded away.
     assert!(
-        screen.contains("xyzzy"),
-        "thinking gist visible by default:\n{screen}"
+        screen.contains("▸ cycle 1  pondering the xyzzy strategy"),
+        "the folded cycle row leads with the model's words:\n{screen}"
     );
     assert!(
-        screen.contains("execute_command") && screen.contains("ok"),
-        "the collapsed tool row carries the call + its status word:\n{screen}"
+        screen.contains("2 tools ✗1 ✓1"),
+        "the folded row counts the calls and names the failure:\n{screen}"
     );
     assert!(
-        !screen.contains("result-plugh-lines"),
-        "tool result body folded by default:\n{screen}"
-    );
-    assert!(
-        screen.contains("cargo test"),
-        "the collapsed row keeps a one-line args hint (which call was this):\n{screen}"
-    );
-    assert!(
-        screen.contains("broken_tool") && screen.contains("exploded"),
-        "failed tools show their error in the collapsed view (honesty):\n{screen}"
+        !screen.contains("result-plugh-lines") && !screen.contains("execute_command"),
+        "the calls fold into the cycle row:\n{screen}"
     );
     assert!(screen.contains("all green"), "answer stays:\n{screen}");
+
+    // A click on the cycle row opens THAT cycle: every call in full —
+    // args, output and error.
+    let row = screen
+        .lines()
+        .position(|l| l.contains("▸ cycle 1"))
+        .expect("the cycle row is on screen");
+    h.term
+        .push_input(format!("\x1b[<0;10;{}M", row + 1).as_bytes());
+    h.term
+        .push_input(format!("\x1b[<0;10;{}m", row + 1).as_bytes());
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("▾ cycle 1 ─"),
+        "the click opens the cycle:\n{screen}"
+    );
+    for needle in [
+        "execute_command",
+        "cargo test",
+        "result-plugh-lines",
+        "broken_tool",
+        "exploded",
+    ] {
+        assert!(
+            screen.contains(needle),
+            "the open cycle shows {needle:?}:\n{screen}"
+        );
+    }
+    // A second click on the (now open) header row folds it again.
+    let row = screen
+        .lines()
+        .position(|l| l.contains("▾ cycle 1"))
+        .expect("the open header is on screen");
+    h.term
+        .push_input(format!("\x1b[<0;10;{}M", row + 1).as_bytes());
+    h.term
+        .push_input(format!("\x1b[<0;10;{}m", row + 1).as_bytes());
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("▸ cycle 1") && !screen.contains("result-plugh-lines"),
+        "a second click folds it:\n{screen}"
+    );
 
     // /details: args + result bodies appear immediately.
     h.type_text("/details");
@@ -2114,12 +2185,502 @@ fn details_command_immediately_rerenders_mixed_content() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        !screen.contains("result-plugh-lines"),
-        "result body collapses again:\n{screen}"
+        !screen.contains("result-plugh-lines") && screen.contains("▸ cycle 1"),
+        "the cycle folds again:\n{screen}"
     );
     assert!(
         screen.contains("xyzzy"),
         "thinking still visible collapsed:\n{screen}"
+    );
+}
+
+fn click_row(h: &mut Harness, col: i32, row: usize) {
+    h.term
+        .push_input(format!("\x1b[<0;{col};{}M", row + 1).as_bytes());
+    h.term
+        .push_input(format!("\x1b[<0;{col};{}m", row + 1).as_bytes());
+}
+
+/// Cycle panels under the mouse (adversarial review 2026-10-10):
+/// opening a cycle at the bottom of a follow-tail transcript keeps the
+/// clicked header on screen; a folded row after an open panel carries a
+/// blank of air and is hit on its DRAWN row, not the blank; a press on a
+/// full tool card's blank lead row inside an open panel is not a tool
+/// disclosure toggle.
+#[test]
+fn cycle_panels_anchor_on_click_and_hit_their_drawn_rows() {
+    use abstractcode::transcript::{CallCost, Item, ToolStatus};
+    let mut h = harness_sized(Size::new(90, 30));
+    h.turn();
+    h.store.fold.update(|f| {
+        f.begin_run("r");
+        f.push_item(Item::User { text: "ask".into() });
+        for n in 1..=40u32 {
+            f.push_item(Item::Thinking {
+                iteration: n,
+                content: format!("words of cycle number {n}"),
+                reasoning: String::new(),
+                call: CallCost::default(),
+            });
+            f.push_item(Item::Tool {
+                key: format!("call:r:t{n}"),
+                name: "read_file".into(),
+                args_preview: format!("f{n}.rs"),
+                args_full: format!("path: f{n}.rs"),
+                status: ToolStatus::Ok,
+                result: format!("result-t{n}"),
+                error: String::new(),
+                sandbox: None,
+            });
+        }
+    });
+    h.turn();
+    h.turn();
+    let screen = h.turn();
+    // The tail is pinned: the last folded rows are on screen.
+    let row = screen
+        .lines()
+        .position(|l| l.contains("▸ cycle 37 "))
+        .expect(&screen);
+    click_row(&mut h, 20, row);
+    h.turn();
+    h.turn();
+    let screen = h.turn();
+    let after = screen
+        .lines()
+        .position(|l| l.contains("▾ cycle 37 "))
+        .unwrap_or_else(|| panic!("the clicked header stays on screen:\n{screen}"));
+    // The header and the whole panel below it are on screen (the scroll
+    // brings the header toward the top, bounded by the content's end).
+    let result_at = screen
+        .lines()
+        .position(|l| l.contains("result-t37"))
+        .unwrap_or_else(|| panic!("the panel reads below its header:\n{screen}"));
+    assert!(
+        after <= row && result_at > after,
+        "header at {after} (clicked at {row}), output at {result_at}:\n{screen}"
+    );
+    // The folded row after the open panel: one blank of air above it.
+    let lines: Vec<&str> = screen.lines().collect();
+    let next = lines
+        .iter()
+        .position(|l| l.contains("▸ cycle 38 "))
+        .expect(&screen);
+    assert!(
+        lines[next - 1]
+            .trim_matches(|c: char| c == ' ' || c == '█' || c == '▏')
+            .is_empty(),
+        "a blank row separates the folded row from the open panel:\n{screen}"
+    );
+    // A press on that BLANK row toggles nothing…
+    click_row(&mut h, 20, next - 1);
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("▸ cycle 38 "),
+        "the blank is not a control:\n{screen}"
+    );
+    // …while a press on the drawn row opens cycle 38.
+    click_row(&mut h, 20, next);
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("▾ cycle 38 "),
+        "the drawn row is the control:\n{screen}"
+    );
+    // The blank lead row of a full tool card, pressed at the far right
+    // (where a folded row's disclosure marker would sit), is no toggle.
+    let lines: Vec<&str> = screen.lines().collect();
+    let card = lines
+        .iter()
+        .position(|l| l.contains("✓ read_file · ok"))
+        .unwrap_or_else(|| panic!("an open cycle shows its full tool card:\n{screen}"));
+    click_row(&mut h, 86, card - 1);
+    h.turn();
+    h.turn();
+    assert!(
+        h.store.expanded_tools.get_untracked().is_empty(),
+        "no tool disclosure toggles inside an open cycle"
+    );
+}
+
+/// The root-still-open marker on the bottom line follows the fold flag
+/// (adversarial review 2026-10-10: a footer ignoring the flag survived
+/// the suite) and clears with the next turn.
+#[test]
+fn bottom_line_marker_follows_the_root_open_flag() {
+    // The marker and the voice hint ride the STATUS BAR, the last line
+    // (operator ask 2026-10-10: no extra line; the folder is the header's).
+    // 200 columns: the conveniences get a third of the row — the theme
+    // trigger first, then the hint.
+    let mut h = harness_sized(Size::new(200, 30));
+    h.turn();
+    let screen = h.turn();
+    let last = screen.lines().last().unwrap_or_default().to_string();
+    assert!(
+        last.contains("hold Space to talk") && last.contains("127.0.0.1:8080"),
+        "{last}"
+    );
+    assert!(
+        screen
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .contains("⌂ /tmp/ws"),
+        "the folder is the header's:\n{screen}"
+    );
+    assert!(!last.contains("root finalizes"), "{last}");
+    h.store.fold.update(|f| f.root_open_at_conclusion = true);
+    let screen = h.turn();
+    let last = screen.lines().last().unwrap_or_default().to_string();
+    assert!(
+        last.contains("◌ root finalizes on gateway"),
+        "the marker shows while the flag is set:\n{last}"
+    );
+    h.store.fold.update(|f| f.begin_run("next"));
+    let screen = h.turn();
+    let last = screen.lines().last().unwrap_or_default().to_string();
+    assert!(
+        !last.contains("root finalizes"),
+        "the next turn clears it:\n{last}"
+    );
+}
+
+/// Exactly ONE blank row between a header and the words under it — the
+/// final answer under its `══ assistant ══` rule, an open cycle's words
+/// under its `▾ cycle` header (operator report 2026-10-10: "one too many
+/// line between the ==assistant== and its answer"). The engine sets two
+/// blank rows between a drawn block and a markdown block in one item, so
+/// the words are their own feed entry; a right-click on them still names
+/// the item.
+#[test]
+fn one_blank_row_between_a_header_and_its_words() {
+    use abstractcode::transcript::{CallCost, Item};
+    let mut h = harness();
+    h.turn();
+    h.store.fold.update(|f| {
+        f.push_item(Item::User {
+            text: "who?".into(),
+        });
+        f.push_item(Item::Thinking {
+            iteration: 1,
+            content: "CYCLEWORDS here".into(),
+            reasoning: String::new(),
+            call: CallCost::default(),
+        });
+        f.push_item(Item::Assistant {
+            text: "ANSWERWORDS here".into(),
+            final_answer: true,
+        });
+    });
+    let key = h
+        .store
+        .fold
+        .with_untracked(|f| abstractcode::ui::transcript_view::cycle_keys(&f.items)[1].clone())
+        .unwrap();
+    h.store.expanded_cycles.set(vec![key]);
+    h.turn();
+    h.turn();
+    let screen = h.turn();
+    let lines: Vec<&str> = screen.lines().collect();
+    let blank = |l: &str| {
+        l.trim_matches(|c: char| c == ' ' || c == '█' || c == '▏')
+            .is_empty()
+    };
+    for (header, words) in [("══ assistant", "ANSWERWORDS"), ("▾ cycle 1", "CYCLEWORDS")] {
+        let hi = lines
+            .iter()
+            .position(|l| l.contains(header))
+            .unwrap_or_else(|| panic!("{header} on screen:\n{screen}"));
+        let wi = lines
+            .iter()
+            .position(|l| l.contains(words))
+            .unwrap_or_else(|| panic!("{words} on screen:\n{screen}"));
+        assert_eq!(
+            wi,
+            hi + 2,
+            "one row between {header} and its words:\n{screen}"
+        );
+        assert!(blank(lines[hi + 1]), "that row is blank:\n{screen}");
+    }
+}
+
+/// The status bar's theme is a dropdown (operator ask 2026-10-10): a
+/// click on its name opens every theme grouped Dark / Light; the wheel
+/// inside moves the highlight and applies the theme LIVE; Escape restores
+/// the one active at open; Enter keeps (and saves) the highlighted one;
+/// the wheel on the CLOSED name steps to the next theme and saves it; Tab
+/// reaches the name and Enter opens it.
+#[test]
+fn the_theme_name_is_a_dropdown_with_live_preview() {
+    abstracttui::app::set_theme_by_id("abstract-dark");
+    let mut h = harness_sized(Size::new(140, 40));
+    h.turn();
+    let screen = h.turn();
+    let last_row = screen.lines().count() - 1;
+    let label_col = |screen: &str| -> usize {
+        let last = screen.lines().last().unwrap_or_default();
+        let b = last
+            .find("Dark (Abstract) ▾")
+            .unwrap_or_else(|| panic!("the trigger:\n{last}"));
+        last[..b].chars().count()
+    };
+    let col = label_col(&screen);
+    let mouse = |h: &mut Harness, button: u32, col: usize, row: usize| {
+        h.term
+            .push_input(format!("\x1b[<{button};{};{}M", col + 1, row + 1).as_bytes());
+        if button < 64 {
+            h.term
+                .push_input(format!("\x1b[<{button};{};{}m", col + 1, row + 1).as_bytes());
+        }
+    };
+    // Click → the dropdown.
+    mouse(&mut h, 0, col + 2, last_row);
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("☾ Dark")
+            && screen
+                .lines()
+                .any(|l| l.contains("Dark (Abstract)") && l.contains('●')),
+        "the dropdown lists the themes, the active one marked:\n{screen}"
+    );
+    let list_row = screen
+        .lines()
+        .position(|l| l.contains("☾ Dark"))
+        .expect("a row of the list");
+    let list_col = screen
+        .lines()
+        .nth(list_row)
+        .unwrap()
+        .find("☾ Dark")
+        .unwrap();
+    let list_col = screen.lines().nth(list_row).unwrap()[..list_col]
+        .chars()
+        .count();
+    // Wheel down inside: live preview.
+    for _ in 0..3 {
+        mouse(&mut h, 65, list_col, list_row);
+        h.turn();
+    }
+    let previewed = abstracttui::app::current_theme().id;
+    assert_ne!(previewed, "abstract-dark", "the wheel previews live");
+    // Escape restores.
+    h.press_escape();
+    h.turn();
+    let screen = h.turn();
+    assert_eq!(
+        abstracttui::app::current_theme().id,
+        "abstract-dark",
+        "Escape restores"
+    );
+    assert!(!screen.contains("☾ Dark"), "the dropdown closed:\n{screen}");
+    assert!(h.prefs.borrow().theme.is_none(), "nothing saved on Escape");
+    // Reopen, step twice with the keyboard, Enter keeps + saves.
+    let col = label_col(&screen);
+    mouse(&mut h, 0, col + 2, last_row);
+    h.turn();
+    h.turn();
+    h.term.push_input(b"\x1b[B\x1b[B");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let kept = abstracttui::app::current_theme().id;
+    assert_ne!(kept, "abstract-dark");
+    assert_eq!(
+        h.prefs.borrow().theme.as_deref(),
+        Some(kept),
+        "Enter keeps and saves"
+    );
+    // The wheel on the CLOSED name steps to the next theme and saves it.
+    let screen = h.turn();
+    let last = screen.lines().last().unwrap_or_default().to_string();
+    let label = abstracttui::app::current_theme().label;
+    let b = last
+        .find(label)
+        .unwrap_or_else(|| panic!("{label} on the bar:\n{last}"));
+    let col = last[..b].chars().count();
+    mouse(&mut h, 65, col + 1, last_row);
+    h.turn();
+    let stepped = abstracttui::app::current_theme().id;
+    assert_ne!(stepped, kept, "the wheel on the name switches");
+    assert_eq!(
+        h.prefs.borrow().theme.as_deref(),
+        Some(stepped),
+        "and saves"
+    );
+    // Tab reaches the name; Enter opens the dropdown.
+    let mut opened = false;
+    for _ in 0..10 {
+        h.term.push_input(b"\t");
+        h.turn();
+        h.press_enter();
+        h.turn();
+        let s = h.turn();
+        if s.contains("☾ Dark") {
+            opened = true;
+            break;
+        }
+    }
+    assert!(opened, "Tab reaches the theme trigger and Enter opens it");
+    h.press_escape();
+    h.turn();
+    abstracttui::app::set_theme_by_id("abstract-dark");
+}
+
+/// Quitting with the theme dropdown OPEN tears down cleanly: the popup
+/// lives on the root scope, and its teardown dismissal must not write the
+/// root's already-disposed signals (it panicked before the guard).
+#[test]
+fn quitting_with_the_theme_dropdown_open_does_not_panic() {
+    let mut h = harness_sized(Size::new(140, 40));
+    h.turn();
+    let screen = h.turn();
+    let last = screen.lines().last().unwrap_or_default().to_string();
+    let b = last.find("Dark (Abstract) ▾").expect("the trigger");
+    let col = last[..b].chars().count() + 2;
+    let row = screen.lines().count();
+    h.term
+        .push_input(format!("\x1b[<0;{};{row}M\x1b[<0;{};{row}m", col + 1, col + 1).as_bytes());
+    h.turn();
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    let screen = h.turn();
+    assert!(screen.contains("☾ Dark"), "open:\n{screen}");
+    drop(h);
+    abstracttui::app::set_theme_by_id("abstract-dark");
+}
+
+/// The conversations board lists the NEWEST conversations first — a
+/// stale session whose root still reports `waiting` (a wrapper root
+/// waiting on its own sub-run, months old) no longer holds the first
+/// screen above today's work; it keeps its "waiting on you" tag in its
+/// date slot. And the mouse wheel moves through the list like ↑/↓,
+/// scrolling past the first screen (operator report 2026-10-10).
+#[test]
+fn the_board_lists_newest_first_and_scrolls_with_the_wheel() {
+    let mut h = harness_sized(Size::new(120, 40));
+    h.turn();
+    h.type_text("/sessions");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    let row = |id: &str, state, at: &str, prompt: &str| abstractcode::store::SessionRow {
+        id: id.into(),
+        state,
+        last_at: at.into(),
+        turns: 1,
+        first_run: String::new(),
+        prompt: Some(prompt.into()),
+        tools: None,
+    };
+    use abstractcode::store::SessionState::{Done, Waiting};
+    let mut rows = vec![row(
+        "acode-stale",
+        Waiting,
+        "2026-08-17T10:00:00+00:00",
+        "STALE WAITING",
+    )];
+    for i in 0..30 {
+        rows.push(row(
+            &format!("acode-new-{i:02}"),
+            Done,
+            &format!("2026-10-10T{:02}:00:00.000001+00:00", 23 - i / 2),
+            &format!("RECENT {i:02}"),
+        ));
+    }
+    h.store
+        .session_index
+        .set(abstractcode::store::SessionIndex::Loaded {
+            rows,
+            truncated: false,
+            labeled: 31,
+            archived: 0,
+        });
+    h.turn();
+    let screen = h.turn();
+    let selected = |screen: &str| -> String {
+        screen
+            .lines()
+            .find(|l| l.contains('▸'))
+            .unwrap_or_default()
+            .to_string()
+    };
+    assert!(
+        selected(&screen).contains("RECENT 00"),
+        "the newest conversation leads:\n{screen}"
+    );
+    assert!(
+        !screen.contains("STALE WAITING"),
+        "the stale waiting session is no longer on the first screen:\n{screen}"
+    );
+    // The wheel moves the selection, and the list scrolls with it.
+    let (row_y, col) = screen
+        .lines()
+        .enumerate()
+        .find_map(|(y, l)| l.find("RECENT 01").map(|b| (y, l[..b].chars().count())))
+        .expect("a second row");
+    h.term
+        .push_input(format!("\x1b[<65;{};{}M", col + 1, row_y + 1).as_bytes());
+    let screen = h.turn();
+    assert!(
+        selected(&screen).contains("RECENT 01"),
+        "one wheel notch down moves one row:\n{screen}"
+    );
+    for _ in 0..40 {
+        h.term
+            .push_input(format!("\x1b[<65;{};{}M", col + 1, row_y + 1).as_bytes());
+        h.turn();
+    }
+    let screen = h.turn();
+    assert!(
+        selected(&screen).contains("STALE WAITING") && screen.contains("waiting on you"),
+        "the wheel reaches the oldest row, still tagged:\n{screen}"
+    );
+    h.term
+        .push_input(format!("\x1b[<64;{};{}M", col + 1, row_y + 1).as_bytes());
+    let screen = h.turn();
+    assert!(
+        selected(&screen).contains("RECENT 29"),
+        "wheel up moves back:\n{screen}"
+    );
+}
+
+/// A wheel tick while the board's listing is still loading moves nothing
+/// and cancels nothing: `/archive` opens the board with its question
+/// asked, and a stray trackpad tick before the listing landed used to
+/// discard it (adversarial review 2026-10-10).
+#[test]
+fn a_wheel_tick_while_loading_keeps_the_archive_question() {
+    let mut h = harness_sized(Size::new(160, 50));
+    h.turn();
+    h.type_text("/archive");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[<65;60;20M");
+    h.turn();
+    h.store
+        .session_index
+        .set(abstractcode::store::SessionIndex::Loaded {
+            rows: vec![abstractcode::store::SessionRow {
+                id: "acode-test-session".into(),
+                state: abstractcode::store::SessionState::Done,
+                last_at: "2026-10-10T12:00:00+00:00".into(),
+                turns: 1,
+                first_run: String::new(),
+                prompt: Some("the open conversation".into()),
+                tools: None,
+            }],
+            truncated: false,
+            labeled: 1,
+            archived: 0,
+        });
+    h.turn();
+    let screen = h.turn();
+    assert!(
+        screen.contains("y Archive"),
+        "the question survives:\n{screen}"
     );
 }
 
@@ -2185,27 +2746,19 @@ fn skills_selector_attaches_and_start_carries_skills() {
 fn sessions_picker_switches_to_a_recent_session() {
     let mut h = harness();
     h.turn();
-    {
-        let mut prefs = h.prefs.borrow_mut();
-        prefs.touch_session("acode-old-session", Some("fix the parser"));
-        prefs.touch_session("acode-test-session", Some("current work"));
-    }
     h.type_text("/sessions");
     h.turn();
     h.press_enter();
     h.turn();
     // The board waits on the gateway before it renders rows; this
-    // harness has no worker, so answer for it. An empty LOADED listing
-    // is the "gateway has nothing" case, which still offers the local
-    // rows (marked) so a switch is possible.
-    h.store
-        .session_index
-        .set(abstractcode::store::SessionIndex::Loaded {
-            rows: Vec::new(),
-            truncated: false,
-            labeled: 0,
-            archived: 0,
-        });
+    // harness has no worker, so answer for it.
+    settle_session_board(
+        &mut h,
+        &[
+            ("acode-test-session", "current work"),
+            ("acode-old-session", "fix the parser"),
+        ],
+    );
     let screen = h.turn();
     assert!(
         screen.contains("fix the parser"),
@@ -2239,16 +2792,17 @@ fn sessions_picker_switches_to_a_recent_session() {
 fn session_pick_shows_the_animated_loading_screen_until_history_lands() {
     let mut h = harness();
     h.turn();
-    {
-        let mut prefs = h.prefs.borrow_mut();
-        prefs.touch_session("acode-old-session", Some("fix the parser"));
-        prefs.touch_session("acode-test-session", Some("current work"));
-    }
     h.type_text("/sessions");
     h.turn();
     h.press_enter();
     h.turn();
-    settle_session_board(&mut h);
+    settle_session_board(
+        &mut h,
+        &[
+            ("acode-test-session", "current work"),
+            ("acode-old-session", "fix the parser"),
+        ],
+    );
     h.term.push_input(b"\x1b[B");
     h.turn();
     h.press_enter();
@@ -2606,10 +3160,6 @@ fn a_press_off_the_marker_never_toggles_the_card() {
 fn the_sessions_board_shows_gateway_sessions_and_names_its_sources() {
     let mut h = harness();
     h.turn();
-    {
-        let mut prefs = h.prefs.borrow_mut();
-        prefs.touch_session("acode-test-session", Some("current work"));
-    }
     h.type_text("/sessions");
     h.turn();
     h.press_enter();
@@ -2655,22 +3205,19 @@ fn the_sessions_board_shows_gateway_sessions_and_names_its_sources() {
     let screen = h.turn();
     assert!(
         screen.contains("never-seen"),
-        "a gateway session absent from the local file is offered:\n{screen}"
+        "every gateway session is offered:\n{screen}"
     );
     assert!(
         screen.contains("waiting on you"),
         "its live state is the gateway's word:\n{screen}"
     );
     assert!(
-        screen.contains("current work"),
-        "the locally-remembered prompt still labels the row it belongs to:\n{screen}"
+        screen.contains("2 sessions · complete listing"),
+        "the count and completeness of the gateway's listing:\n{screen}"
     );
-    // Provenance is stated — server state vs client memory — and short
-    // enough to actually FIT the hint row (review D5: the long form
-    // ellipsized away at every terminal width).
     assert!(
-        screen.contains("sessions on the gateway"),
-        "provenance is stated — server state vs client memory:\n{screen}"
+        !screen.contains("remembered here") && !screen.contains("not on the gateway"),
+        "no row comes from anywhere but the gateway:\n{screen}"
     );
 }
 
@@ -2744,10 +3291,6 @@ fn a_narrow_pane_that_cannot_draw_the_marker_has_no_hidden_control() {
 fn the_board_waits_before_it_claims_anything_about_the_gateway() {
     let mut h = harness();
     h.turn();
-    {
-        let mut prefs = h.prefs.borrow_mut();
-        prefs.touch_session("acode-remembered", Some("older work"));
-    }
     h.type_text("/sessions");
     h.turn();
     h.press_enter();
@@ -2760,12 +3303,8 @@ fn the_board_waits_before_it_claims_anything_about_the_gateway() {
         !screen.contains("not on the gateway"),
         "NOTHING is claimed about the gateway before it answers:\n{screen}"
     );
-    assert!(
-        !screen.contains("older work"),
-        "and no half-populated table leaks through the wait:\n{screen}"
-    );
-    // The answer lands: now the board renders, and the local row is
-    // marked with what the listing actually proved.
+    // The answer lands with no sessions: the board says so — it has no
+    // other source to fill itself from.
     h.store
         .session_index
         .set(abstractcode::store::SessionIndex::Loaded {
@@ -2776,9 +3315,10 @@ fn the_board_waits_before_it_claims_anything_about_the_gateway() {
         });
     let screen = h.turn();
     assert!(
-        screen.contains("older work") && screen.contains("not on the gateway"),
-        "a COMPLETE listing makes absence provable, so now it may be said:\n{screen}"
+        screen.contains("Your conversations will live here"),
+        "an empty gateway is an empty board:\n{screen}"
     );
+    assert!(!screen.contains("not on the gateway"), "{screen}");
 }
 
 /// A truncated listing may not call a missing session absent — it only
@@ -2789,10 +3329,6 @@ fn the_board_waits_before_it_claims_anything_about_the_gateway() {
 fn a_truncated_listing_never_claims_a_session_is_missing() {
     let mut h = harness();
     h.turn();
-    {
-        let mut prefs = h.prefs.borrow_mut();
-        prefs.touch_session("acode-elsewhere", Some("older work"));
-    }
     h.type_text("/sessions");
     h.turn();
     h.press_enter();
@@ -2815,12 +3351,12 @@ fn a_truncated_listing_never_claims_a_session_is_missing() {
         });
     let screen = h.turn();
     assert!(
-        screen.contains("outside this listing"),
-        "a session missing from a TRUNCATED page is not proven absent:\n{screen}"
+        !screen.contains("outside this listing") && !screen.contains("not on the gateway"),
+        "the board claims nothing about sessions it was not given:\n{screen}"
     );
     assert!(
-        !screen.contains("not on the gateway"),
-        "…and must never be called absent:\n{screen}"
+        screen.contains("partial: +older runs"),
+        "a truncated listing says so:\n{screen}"
     );
     assert!(
         screen.contains("2+ turns"),
@@ -3015,17 +3551,6 @@ fn not_signed_in_is_said_plainly_instead_of_no_workflow_and_retrying() {
 fn enter_on_the_waiting_board_cannot_switch_or_cancel() {
     let mut h = harness();
     h.turn();
-    {
-        let mut prefs = h.prefs.borrow_mut();
-        // Ordered so the CURRENT session sorts LAST: rows 0 and 1 —
-        // the only indices the 2-row placeholder can clamp to — are
-        // both other sessions. With the current session at row 0,
-        // `switch_session` early-returns on "same id" and the test
-        // passes for the wrong reason (measured: the first cut did).
-        prefs.touch_session("acode-test-session", Some("current work"));
-        prefs.touch_session("acode-elsewhere", Some("older work"));
-        prefs.touch_session("acode-yak", Some("yak shaving"));
-    }
     // A run is in flight — the thing a stray switch would destroy.
     h.store.phase.set(abstractcode::store::Phase::Running);
     h.store.run_id.set("run-live".into());
@@ -3127,16 +3652,12 @@ fn a_truncated_session_listing_says_so_on_screen() {
     );
 }
 
-/// A gateway that will not answer leaves the board honest: local rows
-/// render, the failure is named, and no row claims a live state.
+/// A gateway that will not answer leaves the board honest: the failure
+/// is named, and nothing else is listed — there is no other source.
 #[test]
 fn a_failed_session_fetch_says_so_instead_of_showing_an_empty_gateway() {
     let mut h = harness();
     h.turn();
-    {
-        let mut prefs = h.prefs.borrow_mut();
-        prefs.touch_session("acode-remembered", Some("older work"));
-    }
     h.type_text("/sessions");
     h.turn();
     h.press_enter();
@@ -3152,13 +3673,8 @@ fn a_failed_session_fetch_says_so_instead_of_showing_an_empty_gateway() {
         "the refusal is named:\n{screen}"
     );
     assert!(
-        screen.contains("older work"),
-        "remembered sessions still render:\n{screen}"
-    );
-    assert!(
-        screen.contains("state unknown"),
-        "…marked as UNKNOWN — a fetch that never answered proves nothing \
-         about whether the session is there:\n{screen}"
+        screen.contains("The gateway did not answer — press r to ask again."),
+        "the board offers the retry, and nothing invented:\n{screen}"
     );
 }
 
@@ -3499,11 +4015,6 @@ fn details_shrink_while_scrolled_up_never_blanks_the_pane() {
 fn session_switch_while_scrolled_up_shows_the_new_transcript() {
     let mut h = harness();
     h.turn();
-    {
-        let mut prefs = h.prefs.borrow_mut();
-        prefs.touch_session("acode-other-session", Some("older work"));
-        prefs.touch_session("acode-test-session", Some("current work"));
-    }
     // Non-Info filler, deliberately: an Info-only fold takes the pane's
     // EMPTY-STATE branch (guidance + centered notices — no scroll), so
     // Info filler would never mount the feed this test means to scroll
@@ -3530,7 +4041,13 @@ fn session_switch_while_scrolled_up_shows_the_new_transcript() {
     h.turn();
     h.press_enter();
     h.turn();
-    settle_session_board(&mut h);
+    settle_session_board(
+        &mut h,
+        &[
+            ("acode-test-session", "current work"),
+            ("acode-other-session", "older work"),
+        ],
+    );
     h.term.push_input(b"\x1b[B"); // Down -> the other session
     h.turn();
     h.press_enter();
@@ -5042,9 +5559,10 @@ fn queue_starting_phase_buffer_error_cards_when_the_start_fails() {
 
 #[test]
 fn queue_stashes_on_session_switch_and_restores_paused() {
-    // Cycle-2 REVERSAL (was: cleared with drop echoes): the queue is
-    // STASHED per session (write-through already made it durable) and the
-    // target session's stash loads PAUSED — a restore never auto-starts.
+    // The queue is STASHED per session IN MEMORY on a switch (never on
+    // disk — operator ruling 2026-10-10: a client stores no session
+    // information locally) and the target session's stash loads PAUSED —
+    // a restore never auto-starts.
     let mut h = harness();
     h.turn();
     let store = h.store;
@@ -5062,11 +5580,9 @@ fn queue_stashes_on_session_switch_and_restores_paused() {
         });
     });
     h.turn();
-    // Write-through filed the queue under the CURRENT session already.
-    assert_eq!(
-        h.prefs.borrow().session_queue("acode-test-session"),
-        vec!["queued one".to_string(), "queued two".to_string()],
-        "every mutation writes through to the session slot"
+    assert!(
+        store.queue_stash.with_untracked(|s| s.is_empty()),
+        "nothing is stashed while the queue's own session is open"
     );
 
     abstractcode::ui::switch_session(store, &h.ctx, "acode-other-session");
@@ -5081,13 +5597,16 @@ fn queue_stashes_on_session_switch_and_restores_paused() {
         "the new session starts with its own (empty) stash"
     );
     assert_eq!(
-        h.prefs.borrow().session_queue("acode-test-session"),
-        vec!["queued one".to_string(), "queued two".to_string()],
-        "the old session's stash SURVIVES the switch"
+        store.queue_stash.with_untracked(|s| s.clone()),
+        vec![(
+            "acode-test-session".to_string(),
+            vec!["queued one".to_string(), "queued two".to_string()]
+        )],
+        "the old session's queue is kept IN MEMORY across the switch"
     );
     let screen = h.turn();
     assert!(
-        screen.contains("stashed with session"),
+        screen.contains("kept with session"),
         "the stash is echoed visibly:\n{screen}"
     );
 
@@ -5118,38 +5637,37 @@ fn queue_stashes_on_session_switch_and_restores_paused() {
     );
 }
 
+/// A stash kept in memory by a session switch restores PAUSED and never
+/// starts on its own (the queue lives only while the app runs).
 #[test]
-fn queue_boot_restore_loads_paused_and_never_starts() {
-    // The quit/reopen half of the same rule (lib.rs calls
-    // restore_session_queue at mount): a pre-seeded prefs slot loads
-    // PAUSED with a visible notice; the drain never fires.
+fn queue_restores_only_from_memory_paused_and_never_starts() {
     let mut h = harness();
     h.turn();
     let store = h.store;
-    h.prefs
-        .borrow_mut()
-        .set_session_queue("acode-test-session", &["saved task".to_string()]);
-    abstractcode::ui::restore_session_queue(store, &h.ctx, "acode-test-session");
+    // Nothing is loaded at launch: there is no queue at rest
+    // (config test `no_session_list_is_kept_at_rest`). The stash is this
+    // app run's memory of a session left earlier.
+    store.queue_stash.set(vec![(
+        "acode-test-session".to_string(),
+        vec!["kept task".to_string()],
+    )]);
+    abstractcode::ui::restore_session_queue(store, "acode-test-session");
     h.turn();
     h.turn();
     assert_eq!(
         store
             .queue
             .with_untracked(|q| q.iter().map(|p| p.text.clone()).collect::<Vec<_>>()),
-        vec!["saved task".to_string()]
+        vec!["kept task".to_string()]
     );
-    assert!(store.queue_paused.get_untracked(), "boot restore is PAUSED");
+    assert!(
+        store.queue_stash.with_untracked(|s| s.is_empty()),
+        "the stash entry is consumed"
+    );
+    assert!(store.queue_paused.get_untracked(), "the restore is PAUSED");
     assert!(
         h.find_cmd(|c| matches!(c, Cmd::Start { .. })).is_none(),
         "restore never auto-starts"
-    );
-    assert!(
-        store
-            .notices
-            .get_untracked()
-            .iter()
-            .any(|n| n.contains("restored (paused")),
-        "the restore announces itself"
     );
 }
 
@@ -5489,11 +6007,6 @@ fn goal_start_binds_the_run_and_sets_finish_on_root_only() {
         store.fold.with_untracked(|f| f.finish_on_root_only),
         "the P0 defense arms with the binding"
     );
-    assert_eq!(
-        h.prefs.borrow().session_goal("acode-test-session"),
-        Some(("make the suite green".to_string(), "goalrun".to_string())),
-        "the bound goal persists for restart/reattach"
-    );
 
     // Iteration 1's agent subrun answers: NON-final card, composer stays
     // captured (fold not finished, phase still Running).
@@ -5542,15 +6055,10 @@ fn goal_start_binds_the_run_and_sets_finish_on_root_only() {
         store.goal.get_untracked().is_none(),
         "an observed end retires the goal"
     );
-    assert_eq!(
-        h.prefs.borrow().session_goal("acode-test-session"),
-        None,
-        "the prefs slot clears with it"
-    );
 }
 
 #[test]
-fn goal_stop_cancels_durably_and_clears_the_slot() {
+fn goal_stop_cancels_the_goal_run_durably() {
     let mut h = harness();
     h.turn();
     let store = h.store;
@@ -5560,10 +6068,6 @@ fn goal_stop_cancels_durably_and_clears_the_slot() {
     }));
     store.run_id.set("goalrun".into());
     store.phase.set(Phase::Running);
-    h.prefs.borrow_mut().set_session_goal(
-        "acode-test-session",
-        Some(("long goal".into(), "goalrun".into())),
-    );
     h.turn();
 
     h.type_text("/goal stop");
@@ -5576,7 +6080,6 @@ fn goal_stop_cancels_durably_and_clears_the_slot() {
         "/goal stop cancels the goal run durably"
     );
     assert!(store.goal.get_untracked().is_none());
-    assert_eq!(h.prefs.borrow().session_goal("acode-test-session"), None);
 }
 
 // ---------------------------------------------------------------------------
@@ -6048,9 +6551,6 @@ fn session_boundaries_reset_exactly_the_right_lanes() {
         text: "long goal".into(),
         run_id: "goalrun".into(),
     }));
-    h.prefs
-        .borrow_mut()
-        .set_session_goal(&old_sid, Some(("long goal".into(), "goalrun".into())));
     h.turn();
     // Two queued prompts (held by the running phase, unpaused):
     h.type_text("/queue task one");
@@ -6100,9 +6600,12 @@ fn session_boundaries_reset_exactly_the_right_lanes() {
     // Queue: stashed with the OLD session, empty + unpaused here, and it
     // NEVER drained through the boundary (the deferred job re-checks).
     assert_eq!(
-        h.prefs.borrow().session_queue(&old_sid),
-        vec!["task one".to_string(), "task two".to_string()],
-        "the old session's queue is stashed, not dropped"
+        store.queue_stash.with_untracked(|s| s.clone()),
+        vec![(
+            old_sid.clone(),
+            vec!["task one".to_string(), "task two".to_string()]
+        )],
+        "the old session's queue is stashed in memory, not dropped"
     );
     assert_eq!(store.queue.with_untracked(|q| q.len()), 0);
     assert!(!store.queue_paused.get_untracked());
@@ -6117,17 +6620,12 @@ fn session_boundaries_reset_exactly_the_right_lanes() {
         screen.contains("buffered guidance dropped"),
         "the drop is echoed, never silent:\n{screen}"
     );
-    // Goal: the slot follows its session — cleared here, retained in the
-    // OLD session's prefs (restart insurance; /goal stop clears a stale
-    // label after its run died).
+    // Goal: it belongs to the session on the gateway — cleared here; the
+    // target session's own goal comes from its attach probe.
     assert!(store.goal.get_untracked().is_none());
     assert!(
         !store.fold.with_untracked(|f| f.finish_on_root_only),
         "the goal flag never survives into the fresh session"
-    );
-    assert_eq!(
-        h.prefs.borrow().session_goal(&old_sid),
-        Some(("long goal".to_string(), "goalrun".to_string()))
     );
     // The permissions LEVEL survives the boundary (c5028 semantics: a
     // level — `all` included — persists per session and seeds new
@@ -6142,8 +6640,11 @@ fn session_boundaries_reset_exactly_the_right_lanes() {
         abstractcode::convo::Focus::Agent
     );
 
-    // Switch BACK to the old session: the stash restores PAUSED, the goal
-    // label returns, and a reattach probe goes out. Still nothing starts.
+    // Switch BACK to the old session: the stash restores PAUSED and a
+    // reattach probe goes out — the goal comes back from the GATEWAY
+    // through that probe (runner test
+    // `the_attach_probe_derives_the_goal_from_the_live_goal_run`), never
+    // from local state. Still nothing starts.
     h.type_text(&format!("/sessions {old_sid}"));
     h.turn();
     h.press_enter();
@@ -6157,11 +6658,8 @@ fn session_boundaries_reset_exactly_the_right_lanes() {
     );
     assert_eq!(
         store.goal.get_untracked(),
-        Some(abstractcode::store::GoalState {
-            text: "long goal".into(),
-            run_id: "goalrun".into(),
-        }),
-        "the goal label follows its session back"
+        None,
+        "no goal is restored from local state"
     );
     assert!(
         h.find_cmd(|c| matches!(c, Cmd::ProbeAttach { session_id, .. } if *session_id == old_sid))
@@ -6185,9 +6683,16 @@ fn header_carries_cockpit_facts_and_footer_carries_instruments() {
     // status bar is the instrument row (legend behind `?`).
     let mut h = harness();
     let screen = h.turn();
+    // The header names the FOLDER, home-relative (operator ask
+    // 2026-10-10); the workspace mode joins it when the row has room.
+    let header = screen.lines().next().unwrap_or_default();
     assert!(
-        screen.contains("⌂ ws") && screen.contains("server-managed"),
-        "header names directory + workspace mode:\n{screen}"
+        header.contains("⌂ /tmp/ws"),
+        "header names the folder:\n{screen}"
+    );
+    assert!(
+        !header.contains("server-man") || header.contains("server-managed"),
+        "facts paint whole:\n{header}"
     );
     assert!(
         screen.contains("? keys"),
@@ -6795,8 +7300,9 @@ fn status_bar_drops_whole_segments_never_self_ellipsis() {
          fragment — overflow drops segments whole:\n{footer}"
     );
     assert!(
-        !footer.contains("skills") && !footer.contains("mcp"),
-        "overflowing tail segments vanish WHOLE (right-to-left), \
+        (!footer.contains("skil") || footer.contains("skills 2"))
+            && (!footer.contains("mc") || footer.contains("mcp 1")),
+        "tail segments paint WHOLE or vanish whole (right-to-left), \
          never as fragments:\n{footer}"
     );
     // The right cluster (theme · host) is never sacrificed to the left.
@@ -6838,8 +7344,8 @@ fn header_facts_drop_whole_before_workflow_and_route() {
         "workflow + route never yield to facts:\n{header}"
     );
     assert!(
-        header.contains("⌂ ws") && header.contains("server-managed"),
-        "leading facts fill the middle:\n{header}"
+        header.contains("⌂ /tmp/ws"),
+        "the folder leads the facts:\n{header}"
     );
     assert!(
         !header.contains('…'),
@@ -10212,8 +10718,8 @@ fn thinking_cards_fold_by_default_and_expand_with_details_on() {
         "reasoning stays folded by default:\n{screen}"
     );
     assert!(
-        screen.contains("words of reasoning"),
-        "the fold NAMES what expansion holds:\n{screen}"
+        screen.contains("▸ cycle 3  I will edit the file next.") && screen.contains("∴ 4 words"),
+        "the folded row NAMES the hidden reasoning and its size:\n{screen}"
     );
     // Examine: /details full.
     h.type_text("/details full");
@@ -10226,7 +10732,7 @@ fn thinking_cards_fold_by_default_and_expand_with_details_on() {
         "full mode reveals the reasoning channel:\n{screen}"
     );
     assert!(
-        screen.contains("— reasoning —"),
+        screen.contains("∴ reasoning  4 words"),
         "channels stay labeled, never coalesced:\n{screen}"
     );
     // Back to gists.
@@ -12963,20 +13469,16 @@ fn model_flow_offers_mtp_only_for_a_capable_model_and_says_why_otherwise() {
         !screen.contains("MTP (multi-token prediction) —"),
         "no step:\n{screen}"
     );
-    assert_eq!(
-        infos,
-        "qwen3-4b cannot use MTP — /mtp still lets you set it"
-    );
+    // A model without MTP skips the step SILENTLY (operator ask
+    // 2026-10-10: "there is no mtp for openai — and so what?").
+    assert!(infos.is_empty(), "no notice: {infos}");
 
     let (screen, infos) = run(serde_json::json!({"error": "gateway timed out"}));
     assert!(
         !screen.contains("MTP (multi-token prediction) —"),
         "no step:\n{screen}"
     );
-    assert_eq!(
-        infos,
-        "MTP support unknown: gateway timed out — /mtp still lets you set it"
-    );
+    assert!(infos.is_empty(), "no notice: {infos}");
 }
 
 fn run_mtp_offer_scenario(payload: Value) -> (String, String) {

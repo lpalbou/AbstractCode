@@ -72,7 +72,7 @@ gateway until you answer.
 2. **Sessions are durable and server-side.** Each conversation has a session
    id (shown in the header); the gateway replays prior turns into new runs.
    Launching starts a **fresh** session; continuity is explicit — `--resume`
-   (or `--continue`) reopens the last session, `--session <id>` opens a named
+   (or `--continue`) reopens the gateway's newest session, `--session <id>` opens a named
    one, and `/sessions` switches in-app (and archives). `/new` starts a fresh session
    mid-flight. When you reopen a session whose run is still active, the app
    reattaches to it automatically.

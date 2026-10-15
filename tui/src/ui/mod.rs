@@ -13,11 +13,13 @@ pub mod entity_actions;
 pub mod entity_modals;
 pub mod goal;
 pub mod item_menu;
+pub mod json_view;
 pub mod linkify;
 pub mod loading;
 pub mod logo;
 pub mod modals;
 pub mod preview;
+pub mod push_to_talk;
 pub mod queue_lane;
 pub mod queue_modal;
 pub mod quit;
@@ -25,6 +27,7 @@ pub mod rail_view;
 pub mod schedule_view;
 pub mod splash;
 pub mod stance;
+pub mod theme_menu;
 pub mod thinking;
 pub mod transcript_view;
 pub mod voice_view;
@@ -32,7 +35,6 @@ pub mod workspace_view;
 
 use queue_lane::{
     buffer_steer, steer_or_buffer, swap_queue_for_session, wire_pending_steer, wire_queue_drain,
-    wire_queue_persistence,
 };
 pub use queue_lane::{enqueue_prompt, queue_preview, restore_session_queue};
 
@@ -294,9 +296,8 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     wire_wait_modals(cx, store, ctx.clone());
     modals::wire_mtp_offer(cx, store, ctx.clone());
     wire_queue_drain(cx, store, ctx.clone());
-    wire_queue_persistence(cx, store, ctx.clone());
     wire_pending_steer(cx, store, ctx.clone());
-    goal::wire_goal(cx, store, ctx.clone());
+    goal::wire_goal(cx, store);
     automations_view::wire_automations(cx, store, ctx.clone());
     attention_chip::wire(cx, store, ctx.clone());
     account_workflow::wire(cx, store, ctx.clone());
@@ -360,21 +361,67 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
         }
     };
 
+    // Hold Space to talk (`push_to_talk`): the detector, its release
+    // watchers, and the auto-send of what was said.
+    let ptt = Rc::new(RefCell::new(push_to_talk::HoldDetector::default()));
+    // The OS "Delay until repeat" sizes the legacy-wire tap window.
+    push_to_talk::calibrate();
+    {
+        // Full-fidelity wires report the key-up; a focus loss or a
+        // suspend ends a hold on every wire (a hold that can no longer
+        // be observed must stop listening — the engine's mic rule).
+        let keys = abstracttui::app::use_key_state(cx);
+        let ptt = ptt.clone();
+        cx.effect(move || {
+            let up =
+                keys.released(Key::Char(' ')) || keys.focus_cleared() || keys.suspend_cleared();
+            if !up {
+                return;
+            }
+            let now = std::time::Instant::now();
+            match ptt.borrow_mut().key_up(now) {
+                push_to_talk::Action::Release => voice_view::release_hold(store),
+                push_to_talk::Action::Discard => voice_view::discard_hold(store),
+                _ => {}
+            }
+        });
+        // The transcript of a hold is SENT, exactly as Enter would send it
+        // (a task, guidance mid-run, an entity message under entity focus);
+        // anything typed meanwhile leads it.
+        let on_submit = on_submit.clone();
+        let composer = composer.clone();
+        cx.effect(move || {
+            let Some(said) = store.voice.hold_send.get() else {
+                return;
+            };
+            store.voice.hold_send.set(None);
+            let draft = composer.text();
+            let text = if draft.trim().is_empty() {
+                said
+            } else {
+                format!("{} {said}", draft.trim_end())
+            };
+            composer.set_text("");
+            on_submit(&text);
+        });
+    }
+
+    // The status bar's theme trigger (`theme_menu`): its focus/hover/open
+    // state outlives the chrome's rebuilds.
+    let theme_trigger = theme_menu::TriggerState::new(cx);
+
     let root_ctx = ctx.clone();
     let esc_ctx = ctx.clone();
     let esc_composer = composer.clone();
-    // Header fact (HDR-1): the workspace directory's basename — computed
-    // once (the root never changes in-session; /workspace edits scope,
-    // not the root).
+    // Header fact (HDR-1): the workspace FOLDER, home-relative
+    // (`~/tmp/abstractframework`) — operator ask 2026-10-10: the full
+    // current folder belongs in the top bar, not on a line of its own.
+    // Computed once (the root never changes in-session; /workspace edits
+    // scope, not the root).
     let cwd_base: String = ctx
         .workspace_root
         .as_deref()
-        .map(|p| {
-            std::path::Path::new(p)
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| p.to_string())
-        })
+        .map(|p| chrome::display_folder(p, std::env::var("HOME").ok().as_deref()))
         .unwrap_or_default();
 
     // Shrink clamp: a feed REBUILD can shrink the content far below a
@@ -463,12 +510,72 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
         // model and paste hook own that input, `/` dropdown included),
         // and modals never reach here at all — a modal overlay swallows
         // keys inside its own layer tree.
+        // HOLD SPACE TO TALK (operator ask 2026-10-10): Space on an empty
+        // composer feeds the hold detector FIRST — before the composer's
+        // edit model and before the focus-return handler below — so a
+        // hold's repeats never type. A tap, or Space in a draft with
+        // words, passes through untouched. Modals never reach here (an
+        // overlay swallows keys in its own layer tree), so Space keeps
+        // its meaning in every picker.
+        .on(abstracttui::ui::Phase::Capture, {
+            let composer = composer.clone();
+            let ctx = ctx.clone();
+            let ptt = ptt.clone();
+            move |ectx: &mut abstracttui::ui::EventCtx, ev: &abstracttui::ui::UiEvent| {
+                let abstracttui::ui::UiEvent::Key(k) = ev else {
+                    return;
+                };
+                if k.key != Key::Char(' ')
+                    || k.mods.contains(Mods::CTRL)
+                    || k.mods.contains(Mods::ALT)
+                {
+                    return;
+                }
+                // The PROMPT's gesture: only while the composer holds
+                // focus (a first Space elsewhere hands focus back to it
+                // through the handler below, so a hold still engages).
+                if !composer.focused().get_untracked() && !ptt.borrow().active() {
+                    return;
+                }
+                if voice_view::prefs(&ctx).space_to_talk_off {
+                    return;
+                }
+                let blank = composer.text().trim().is_empty();
+                let full = abstracttui::app::key_state().fidelity_untracked()
+                    == abstracttui::app::KeyFidelity::Full;
+                let now = std::time::Instant::now();
+                let action = ptt.borrow_mut().press(now, blank, full);
+                match action {
+                    push_to_talk::Action::Consume => ectx.stop_propagation(),
+                    push_to_talk::Action::Start => {
+                        // Recording starts on the press itself: nothing
+                        // is typed, the first syllable is kept.
+                        ectx.stop_propagation();
+                        if !voice_view::start_hold(store, &ctx) {
+                            ptt.borrow_mut().reset();
+                            return;
+                        }
+                        if !full {
+                            arm_hold_release(store, ptt.clone());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        })
         .on(abstracttui::ui::Phase::Capture, {
             let composer = composer.clone();
             let anchor = composer_anchor.clone();
             move |ctx: &mut abstracttui::ui::EventCtx, ev: &abstracttui::ui::UiEvent| {
                 if composer.focused().get_untracked() {
                     return; // the composer already owns this input
+                }
+                // The focused theme trigger owns Space (it opens the
+                // dropdown); any other character still goes to the prompt.
+                if theme_trigger.focused.get_untracked()
+                    && matches!(ev, abstracttui::ui::UiEvent::Key(k) if k.key == Key::Char(' '))
+                {
+                    return;
                 }
                 // No anchor = the composer has never mounted. Do
                 // NOTHING (side effects included) rather than act for a
@@ -518,7 +625,8 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
         .shortcut(KeyChord::new(Mods::CTRL, Key::Char('t')), move |_| {
             cycle_theme(&root_ctx);
         })
-        // Voice: Ctrl+P reads the latest reply aloud (again = stop); Ctrl+R
+        // Voice: Ctrl+P reads the latest reply aloud (playing = pause,
+        // paused = resume); Ctrl+R
         // starts a dictation (again = transcribe). See `voice_view`.
         .shortcut(KeyChord::new(Mods::CTRL, Key::Char('p')), {
             let ctx = ctx.clone();
@@ -693,7 +801,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                         placeholder,
                         on_submit.clone(),
                     ))
-                    .child(chrome::status_bar(cx, &t, store, &ctx))
+                    .child(chrome::status_bar(&t, store, &ctx, cx, scx, theme_trigger))
                     .build()
             }
         }))
@@ -722,6 +830,24 @@ fn agent_placeholder(phase: Phase, kitty_keyboard: bool) -> String {
             format!("Enter steers the run · {newline} · /queue <text> lines up the next task")
         }
     }
+}
+
+/// Legacy-wire hold: re-check every 40 ms whether the first auto-repeat
+/// came (none within the tap window = a tap, discarded) and whether the
+/// repeats have stopped (released: the recording stops, transcribes and
+/// sends). The chain lives only while a hold does — idle costs nothing.
+fn arm_hold_release(store: Store, ptt: Rc<RefCell<push_to_talk::HoldDetector>>) {
+    abstracttui::reactive::after(std::time::Duration::from_millis(40), move || {
+        let action = ptt
+            .borrow_mut()
+            .tick(std::time::Instant::now(), push_to_talk::tap_window());
+        match action {
+            push_to_talk::Action::Release => voice_view::release_hold(store),
+            push_to_talk::Action::Discard => voice_view::discard_hold(store),
+            _ if ptt.borrow().active() => arm_hold_release(store, ptt),
+            _ => {}
+        }
+    });
 }
 
 fn submit(
@@ -1057,8 +1183,6 @@ pub(crate) fn send_start(
     // Starting window tick honestly from 0; `apply_start_binding`
     // re-anchors moments later when the run actually starts.
     store.run_started.set(Some(std::time::Instant::now()));
-    // The first prompt names the session in the /sessions picker.
-    persist_prefs(ctx, |p| p.touch_session(&session_id, Some(prompt)));
     // "Gateway default" sends the §D sentinel: the GATEWAY resolves which
     // workflow runs (its current setting), never the id this client last saw.
     let (flow_id, bundle_id) = if workflow.gateway_default {
@@ -1231,14 +1355,14 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
                 store.show_details.set(true);
                 persist_prefs(ctx, |p| p.show_details = Some(true));
                 store.notify(
-                    "details: full — tool args + results, thinking expanded · /details fold collapses",
+                    "details: full — every cycle open: content, reasoning, tool args + output · /details fold collapses",
                 );
             }
             Some("fold") | Some("gist") | Some("off") => {
                 store.show_details.set(false);
                 persist_prefs(ctx, |p| p.show_details = Some(false));
                 store.notify(
-                    "details: folded — one-line tool calls with status tags, thinking gists · /details full expands",
+                    "details: folded — one row per cycle (click a row to open it) · /details full opens all",
                 );
             }
             Some(other) => {
@@ -1616,10 +1740,6 @@ pub(crate) fn new_session(store: Store, ctx: &UiCtx) {
     let old_sid = store.session_id.get_untracked();
     let sid = crate::config::mint_session_id();
     store.session_id.set(sid.clone());
-    persist_prefs(ctx, |p| {
-        p.session_id = Some(sid.clone());
-        p.touch_session(&sid, None);
-    });
     reset_session_state(store, ctx, &old_sid, &sid, format!("new session {sid}"));
     // A new conversation starts on the account's default (R17.1).
     account_workflow::apply_to_fresh(store);
@@ -1633,9 +1753,10 @@ pub(crate) fn new_session(store: Store, ctx: &UiCtx) {
 /// - transcript fold (+ the caller's boundary note),
 /// - session totals + the last-call rate (the session's call history),
 /// - run identity + phase + pause state,
-/// - queue stash-and-restore, steer echo-drop, and the goal slot
-///   (`swap_queue_for_session` — AFTER the fold reset, so echoes render
-///   new-side),
+/// - queue stash-and-restore (in memory), steer echo-drop, and the goal
+///   (cleared; the new session's comes from its attach probe) —
+///   `swap_queue_for_session`, AFTER the fold reset, so echoes render
+///   new-side,
 /// - focus home to the agent lane (entity convos are server-side visits
 ///   and SURVIVE; session boundaries reset the AGENT conversation only).
 ///
@@ -1657,6 +1778,8 @@ fn reset_session_state(store: Store, ctx: &UiCtx, old_sid: &str, new_sid: &str, 
         f.push_item(Item::Info { text: note });
     });
     store.totals.set(Default::default());
+    // Opened cycle panels belong to the OLD session's transcript.
+    store.expanded_cycles.set(Vec::new());
     store.last_call_rate.set(None);
     store.run_id.set(String::new());
     store.phase.set(Phase::Idle);
@@ -1815,13 +1938,9 @@ pub fn switch_session(store: Store, ctx: &UiCtx, id: &str) {
     }
     let old_sid = store.session_id.get_untracked();
     store.session_id.set(id.clone());
-    persist_prefs(ctx, |p| {
-        p.session_id = Some(id.clone());
-        p.touch_session(&id, None);
-    });
-    // Ordering matters: session_id is already the target, so the queue
-    // persistence write-through inside the shared reset files the loaded
-    // stash under the right id.
+    // Ordering matters: session_id is already the target, so anything the
+    // OLD session's in-flight probe still posts is dropped by its session
+    // guard from here on.
     reset_session_state(
         store,
         ctx,
@@ -2187,9 +2306,9 @@ pub(crate) fn toggle_details(store: Store, ctx: &UiCtx) {
     store.show_details.set(now);
     persist_prefs(ctx, |p| p.show_details = Some(now));
     store.notify(if now {
-        "details: full — tool args + results, thinking expanded (Ctrl+D folds)"
+        "details: full — every cycle open: content, reasoning, tool args + output (Ctrl+D folds)"
     } else {
-        "details: folded — one-line tool calls with status tags, thinking gists (Ctrl+D expands)"
+        "details: folded — one row per cycle, click a row to open it (Ctrl+D opens all)"
     });
 }
 

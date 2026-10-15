@@ -5,6 +5,16 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Web: the microphone is **press to talk**, like Space in the terminal client: hold it while you speak and release to send what you said (after anything already typed); a quick tap records nothing and says to hold. Dictation now works from the first message of a new conversation (it transcribes on the session's media run, as the terminal client and Observer do).
+
+### Fixed
+
+- Web: pressing the greyed-out microphone of a conversation without a run reported "Voice recording is not supported in this browser". Browsers deliver pointer presses to disabled buttons, so the press itself now checks; with dictation available before the first run the button is no longer off there.
+
 ## [terminal 0.9.2 / web 0.11.2] - 2026-10-09
 
 Requires AbstractGateway with `schedule@2`, the served schedule fields and `POST /api/gateway/automations/schedule-preview` (round 16) and `@abstractframework/ui-kit` 0.8.7 for calendar schedules; the automations list and an automation's screen also read an older gateway (see Fixed).
@@ -37,7 +47,6 @@ Requires AbstractGateway with `schedule@2`, the served schedule fields and `POST
 - tui: `Esc` in a **New automation** step goes back to the previous step with its values kept (it closed the whole dialog); on the first step it closes, asking "Discard this new automation?" first when something was entered.
 - tui: the empty chat's logo is no longer drawn while any overlay (modal, rail, dialog, `/stance`) is open — it showed around and through the Automations overlay.
 - tui: automation actions (`space` Active, `g` Run now, `x` Stop, `a` Archive, `u` Unarchive) and revision saves show a pending state on their row (`[…] Active` · "Pausing…", `…` · "Saving…") until the gateway's state shows the change, then the result; input for them is ignored meanwhile.
-
 
 ## [terminal 0.9.1 / web 0.11.1] - 2026-10-08
 
@@ -154,7 +163,6 @@ builds against `@abstractframework/ui-kit` ^0.8.0 and
   is removed.
 
 ## [web 0.10.0] - 2026-10-01
-
 
 ### Changed
 

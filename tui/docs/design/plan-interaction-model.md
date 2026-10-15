@@ -125,6 +125,11 @@ before any subsequent keystroke is dispatched.)
   explicit resume; the transcript keeps the user card + error card as
   evidence either way
 - manual run while paused → proceeds; does NOT auto-resume the queue
+- **Superseded 2026-10-10** (operator: no session information at rest —
+  "the queue would then last only while the app runs"): the queue lives in
+  memory only. `/new` or a session switch stashes it in memory for that
+  session, restored PAUSED on return; at quit the prompts not sent are
+  printed, by session. The two cycle-2 entries below are history.
 - `/new` or session switch → (cycle-2:) queue STASHED to its session's prefs
   slot (was: cleared) with a visible echo; the target session's stash loads
   PAUSED

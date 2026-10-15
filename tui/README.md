@@ -54,7 +54,8 @@ Status: **0.9.1**, pre-alpha. Release history is in
 - **A prompt queue**: `/queue <text>` lines up the next task (FIFO); each
   queued prompt runs as its own turn after the current run succeeds, with
   the finished answer in its context. Failure or cancel pauses the queue;
-  it persists per session and always restores paused (`/queue` manages).
+  it lives only while the app runs, restores paused when you switch back to
+  its conversation, and quitting lists what was not sent (`/queue` manages).
 - **Goal loops**: `/goal <text>` starts a self-verifying run that keeps
   cycling until its own checks pass or the cycle budget runs out; `/goal`
   shows status, `/goal stop` cancels durably. Requires a goal workflow
@@ -226,9 +227,11 @@ Inside the app:
   (server-side) until you answer — even across client restarts
 - `@name` talks with a summoned entity when the gateway hosts them
   (`/entities` lists the roster); `Alt+E` cycles conversation focus
-- `Ctrl+P` reads the latest reply aloud (streamed sentence by sentence from
-  the gateway's voice route; `Esc` stops), `Ctrl+R` dictates into the
-  composer with the gateway's default speech-to-text route, `/voice` shows
+- `Ctrl+P` reads the latest reply aloud, pauses and resumes it (`▶` at the
+  top right of any message reads that one; streamed sentence by sentence from
+  the gateway's voice route; `Esc` stops); on an empty prompt, HOLD
+  `Space`, speak and release to send what you said; `Ctrl+R` dictates into
+  the composer with the gateway's default speech-to-text route, `/voice` shows
   the engines ("Gateway default · supertonic / supertonic-3"), this
   computer's speaker and microphone (each with a Test) and **Read aloud**.
   Audio plays and records through AbstractVoice on this computer
@@ -257,7 +260,7 @@ and does not print it a second time at the end.
 ```
 --gateway-url <URL> --token <TOK> connection (flag > env > login store; --gateway is an alias)
 --session <ID>                    durable session id (default: fresh session)
---resume                          reopen the last session (`--continue` alias)
+--resume                          reopen the gateway's newest session (`--continue` alias)
 --workflow <bundle[:flow]|default>  agent workflow (default: your /workflow
                                   choice, else the gateway's default)
 --provider <P> --model <M>        route override (default: gateway defaults)

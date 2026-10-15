@@ -40,10 +40,11 @@ pub struct Args {
     pub gateway: Option<String>,
     pub token: Option<String>,
     pub session: Option<String>,
-    /// `--resume` — reopen the LAST session instead of starting fresh
-    /// (operator ruling 2026-07-26: launch starts a NEW session by
-    /// default; continuity is explicit, via this flag, `--session`, or
-    /// the in-app `/sessions` picker).
+    /// `--resume` — reopen the gateway's NEWEST session instead of
+    /// starting fresh (operator ruling 2026-07-26: launch starts a NEW
+    /// session by default; continuity is explicit, via this flag,
+    /// `--session`, or the in-app `/sessions` board). The gateway answers
+    /// which session is newest — this client keeps no list of its own.
     pub resume: bool,
     pub workflow: Option<String>,
     pub provider: Option<String>,
@@ -159,7 +160,7 @@ OPTIONS:
   --token <TOKEN>         bearer token (default: the legacy env alias, else the
                           login store)
   --session <ID>          durable session id (default: a fresh session)
-  --resume                reopen the last session (also: --continue)
+  --resume                reopen the gateway's newest session (also: --continue)
   --reasoning <LEVEL>     reasoning effort: none|minimal|low|medium|high|xhigh|auto
   --mtp <DEPTH|off|inherit>  multi-token prediction (MTP) draft depth for runs;
                           needs native support on the selected host (/mtp in

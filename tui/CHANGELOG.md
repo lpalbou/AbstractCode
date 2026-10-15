@@ -4,6 +4,29 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- **Sessions come from the gateway only.** The local recent-session list and
+  the saved "last session" are gone: `/sessions` lists the gateway's sessions,
+  newest first, and `--resume` asks the gateway for its newest session. On quit,
+  the shell shows how to resume the session.
+- **The queue lives in memory only**, for the app's lifetime: switching
+  sessions keeps it and restores it paused on return; prompts not sent are
+  printed at quit. It is no longer written to `prefs.json`.
+- **`/goal` belongs to the session on the gateway.** Nothing is saved locally;
+  opening a session whose live run is a goal run shows that goal, read from the
+  run. Older `session_queues` / `session_goals` / `recent_sessions` keys are
+  dropped from `prefs.json` on the next save.
+- **Voice devices adapt.** A saved speaker or microphone that is missing, no
+  longer opens, or cannot be chosen by the installed AbstractVoice is replaced
+  by the system default automatically. When the saved microphone is not found,
+  the device list is re-read, so one plugged in after launch is used.
+
+### Fixed
+
+- The answer is no longer shown twice. When the model answered without a tool call, the last cycle's words are the answer: the transcript used to show them as a folded "cycle N" row and again as the answer below it. The cycle row now goes; the answer stays.
+
 ## [0.9.2] - 2026-10-09
 
 Needs AbstractGateway with round-16 calendar schedules (`schedule@2`, the
@@ -206,7 +229,6 @@ email trigger, and the calendar kinds say they need 0.14 (see Fixed).
   gateway's sentence. A revision save in an automation's Edit panel marks
   the row being saved with `…` next to "Saving…", ignores further changes
   until the gateway answers, then shows "Saved as revision N" (or why not).
-
 
 ## [0.9.1] - 2026-10-08
 
@@ -1101,7 +1123,6 @@ GGUF case the old remainder got wrong).
   genuine budget exhaustion keeps its original wording and remedy.
   Full investigation, the two upstream defects it uncovered, and the live
   A/B evidence: `docs/reports/2026-08-21-phantom-attachment-index-and-stuck-streak-policy.md`.
-
 
 ### Parked (ambient run animations, 2026-08-21)
 

@@ -14,8 +14,8 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 | State | Items | IDs |
 |---|---|---|
-| Planned | 2 | 0001 |
-| Proposed | 0 | |
+| Planned | 3 | 0001, 0002, 0003 |
+| Proposed | 1 | 0004 |
 | Completed | 0 | |
 | Deprecated | 0 | |
 | Recurrent | 0 | |
@@ -23,19 +23,26 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 ## Next Recommended Work
 
 1. [0001](planned/0001_automations_wui_section_and_tui_commands.md) — Automations in the WUI and TUI. Phase after v1:
-| 0002 | [TUI session fold defects](planned/0002_tui_session_fold_defects.md) | planned | child runs counted as turns; id-less runs; string timestamp ordering; first run by page order — align with the web fold |
    starts only after the gateway API (G), ui-kit panel and fixtures (U), and the Observer and Assistant integrations
    have shipped. Root parent: `abstractframework backlog 0928`.
+2. [0003](planned/0003_mermaid_diagrams_in_the_transcript.md) — Mermaid diagrams in the TUI transcript. Deferred by
+   the operator (2026-10-10); starts with the ENGINE half in abstracttui (a `Feed` fence hook), then the app wiring.
+3. [0004](proposed/0004_session_tool_choices_on_the_gateway.md) — a session's tool choices are still stored per client
+   (the TUI's last local session state). Waiting on an operator decision; no gateway change before an explicit go.
 
 ## Planned
 
 | ID | Item | Area | Depends on |
 |---|---|---|---|
 | 0001 | [Automations: WUI section and TUI `/automations` + `/schedule`](planned/0001_automations_wui_section_and_tui_commands.md) | web, tui | Surfaces built on `wave2/automations` (2026-09-28, unreleased); the session-kind filter/toggle on both session lists remains. |
+| 0002 | [TUI session fold defects](planned/0002_tui_session_fold_defects.md) | tui | child runs counted as turns; id-less runs; string timestamp ordering; first run by page order — align with the web fold |
+| 0003 | [Mermaid diagrams in the TUI transcript](planned/0003_mermaid_diagrams_in_the_transcript.md) | tui + abstracttui | an abstracttui release adding a `Feed` fence hook (+ `abstracttui-mermaid` multi-diagram cache); operator to lift the read-only rule on abstracttui |
 
 ## Proposed
 
-None.
+| ID | Item | Area | Depends on |
+|---|---|---|---|
+| 0004 | [A session's tool choices live on the gateway](proposed/0004_session_tool_choices_on_the_gateway.md) | gateway + tui + web | operator decision (deferred 2026-10-10): store-and-serve record vs. also applied at run start; whether a run may override its session; what a new session starts with |
 
 ## Completed
 

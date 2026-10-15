@@ -943,7 +943,7 @@ pub fn panel_cards(
                     &mut cards,
                     Card::new(vec![CardLine::new(
                         format!(
-                            "{}Read aloud — Speak each new reply.",
+                            "{}Read aloud — Narrate each cycle as the agent works, then the reply.",
                             if s.voice_prefs.read_aloud {
                                 "[x] "
                             } else {

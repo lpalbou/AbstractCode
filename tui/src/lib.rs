@@ -174,6 +174,31 @@ fn signin_preflight(conn: &config::Connection) -> Option<String> {
     signin_preflight_verdict(conn, &answer)
 }
 
+/// `--resume`: the session of the gateway's most recently updated root run
+/// — the same listing, and the same order, as the `/sessions` board (one
+/// session pool for every client).
+fn newest_gateway_session(conn: &config::Connection) -> Result<String, String> {
+    let client = gateway::GatewayClient::new(&conn.base_url, conn.token.as_deref());
+    let page = client.list_recent_runs(20).map_err(|e| {
+        format!(
+            "the gateway's sessions could not be read ({})",
+            e.compact_reason()
+        )
+    })?;
+    page.get("items")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .find_map(|run| {
+            run.get("session_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
+        .ok_or_else(|| "the gateway holds no conversation to resume yet".to_string())
+}
+
 fn run_tui(args: &cli::Args) -> i32 {
     // Host audio (speak replies, dictate): which Python runs AbstractVoice.
     voice_host::configure(args.voice_python.clone());
@@ -211,26 +236,25 @@ fn run_tui(args: &cli::Args) -> i32 {
         .trim_end_matches('/')
         .to_string();
 
-    // Session: explicit `--session` > explicit `--resume` (last saved)
-    // > a FRESH mint. Launch starts a NEW conversation by default
-    // (operator ruling 2026-07-26: "launching code-tui should start on
-    // a new session and not automatically reattach to the last one");
-    // continuity is always an explicit act — the flags here or the
-    // in-app `/sessions` picker. The minted id is still saved so
-    // `--resume` and the picker know what "last" was.
-    let session_id = args
-        .session
-        .clone()
-        .or_else(|| {
-            if args.resume {
-                prefs.session_id.clone()
-            } else {
-                None
+    // Session: explicit `--session` > `--resume` (the gateway's NEWEST
+    // session) > a FRESH mint. Launch starts a NEW conversation by default
+    // (operator ruling 2026-07-26); continuity is always an explicit act —
+    // the flags here or the in-app `/sessions` board. Which sessions exist,
+    // and which is newest, is the GATEWAY's answer alone: this client keeps
+    // no session list and no "last session" of its own (operator ruling
+    // 2026-10-10: "zero local recent list; everything must go through the
+    // gateway").
+    let session_id = match (&args.session, args.resume) {
+        (Some(id), _) => id.clone(),
+        (None, true) => match newest_gateway_session(&conn) {
+            Ok(id) => id,
+            Err(why) => {
+                eprintln!("abstractcode: --resume: {why}");
+                return 1;
             }
-        })
-        .unwrap_or_else(config::mint_session_id);
-    prefs.session_id = Some(session_id.clone());
-    prefs.touch_session(&session_id, None);
+        },
+        (None, false) => config::mint_session_id(),
+    };
     let _ = prefs.save();
 
     // Workflow preference: flag > saved (resolution happens against the
@@ -329,19 +353,23 @@ fn run_tui(args: &cli::Args) -> i32 {
     let shutdown_tx = tx.clone();
     let mut rx_slot = Some(rx);
 
-    // Queue quit-echo mirror (courtesy): the queue PERSISTS per session
-    // (prefs write-through) and restores PAUSED on the next launch — the
-    // quit line says so where the user can still read it (post-teardown
-    // stderr; an in-altscreen eprintln is invisible). Mirrored
-    // continuously because signals die with the app's reactive root and
-    // cannot be read after run() returns.
-    let queue_echo: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+    // Queue quit-echo mirror: the queue lives in memory only, so quitting
+    // discards it — the quit line lists every prompt that was not sent
+    // (the open conversation's queue and the ones stashed by switches),
+    // where the user can still read and copy them (post-teardown stderr).
+    // Mirrored continuously because signals die with the app's reactive
+    // root and cannot be read after run() returns.
+    let queue_echo: Rc<RefCell<ui::quit::UnsentPrompts>> = Rc::new(RefCell::new(Vec::new()));
     let queue_echo_ui = queue_echo.clone();
     // Quit-outcome echo (quit-modal design §3.6): the run/quit state at
     // teardown, mirrored continuously (signals die with the reactive
     // root). `None` = quit was silent (idle) — no line.
     let quit_echo: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let quit_echo_ui = quit_echo.clone();
+    // The conversation open at quit (it can change in-session: /sessions,
+    // `n`), mirrored for the post-teardown resume line.
+    let session_echo: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+    let session_echo_ui = session_echo.clone();
 
     let pointer_warning = conn.warning.clone();
     let mount_result = app.mount(move |cx| {
@@ -350,12 +378,7 @@ fn run_tui(args: &cli::Args) -> i32 {
         if let Some(w) = pointer_warning.clone() {
             store.notify(w);
         }
-        cx.effect(move || {
-            let texts: Vec<String> = store
-                .queue
-                .with(|q| q.iter().map(|p| ui::queue_preview(&p.text)).collect());
-            *queue_echo_ui.borrow_mut() = texts;
-        });
+        ui::quit::mirror_unsent_prompts(cx, store, queue_echo_ui);
         cx.effect(move || {
             let state = store.quit_state.get();
             let phase = store.phase.get();
@@ -367,6 +390,7 @@ fn run_tui(args: &cli::Args) -> i32 {
             // teardown with no ack" reads as not-confirmed (quit-anyway).
             *quit_echo_ui.borrow_mut() = ui::quit::quit_echo_line(&state, phase, &run_id);
         });
+        ui::quit::mirror_session_id(cx, store, session_echo_ui);
         store.session_id.set(session_id.clone());
         store.provider.set(provider.clone());
         store.model.set(model.clone());
@@ -465,11 +489,9 @@ fn run_tui(args: &cli::Args) -> i32 {
             replay_turns: args_replay_turns,
         });
 
-        store.fold.update(|f| {
-            f.push_item(Item::Info {
-                text: format!("session {session_id} · durable memory lives on the gateway"),
-            })
-        });
+        // No "session … · durable memory lives on the gateway" notice
+        // (operator ask 2026-10-10): the session id is the header's right
+        // cluster already, and a notice repeating chrome is clutter.
         if let Some(note) = workspace_note.clone() {
             store
                 .fold
@@ -494,18 +516,9 @@ fn run_tui(args: &cli::Args) -> i32 {
             dismissed_wait: Rc::new(RefCell::new(None)),
             wait_modal_for: Rc::new(RefCell::new(None)),
         };
-        // Cycle-2 queue persistence: restore this session's stash PAUSED
-        // (a restore never auto-starts — the one rule tying quit/reopen
-        // and session switches together), plus the recorded goal (its
-        // strip label; `wire_goal` restores `finish_on_root_only` when
-        // the reattach probe lands on the goal run).
-        ui::restore_session_queue(store, &ctx, &session_id);
-        let goal = ctx
-            .prefs
-            .borrow()
-            .session_goal(&session_id)
-            .map(|(text, run_id)| store::GoalState { text, run_id });
-        store.goal.set(goal);
+        // No goal and no queue at boot: a session's goal is its live goal
+        // run on the gateway (the reattach probe derives it), and the
+        // queue lives in memory only.
         ui::root(cx, store, ctx, &actions)
     });
     if let Err(e) = mount_result {
@@ -527,20 +540,10 @@ fn run_tui(args: &cli::Args) -> i32 {
     // reap them anyway; being explicit keeps shutdown race-free).
     let _ = shutdown_tx.send(runner::Cmd::Shutdown);
     voice_host::shutdown();
-    // Queue persistence honesty (cycle-2: REVERSED from drop-on-quit —
-    // the queue is saved per session by write-through): a courtesy line
-    // where the user can still read it (post-teardown stderr).
-    {
-        let leftover = queue_echo.borrow();
-        if !leftover.is_empty() {
-            eprintln!(
-                "abstractcode: {} queued prompt(s) saved with this session — they restore PAUSED on the next launch (/queue then r resumes):",
-                leftover.len()
-            );
-            for text in leftover.iter() {
-                eprintln!("  · {text}");
-            }
-        }
+    // The queue lives in memory only: list what was NOT sent, whole, so
+    // nothing queued is lost silently.
+    for line in ui::quit::unsent_prompt_lines(&queue_echo.borrow()) {
+        eprintln!("{line}");
     }
     // Quit-outcome honesty (quit-modal design §3.6; audit P1: the
     // mirror existed but was never READ — a successful pause-then-quit
@@ -549,19 +552,91 @@ fn run_tui(args: &cli::Args) -> i32 {
     if let Some(line) = quit_echo.borrow().as_ref() {
         eprintln!("abstractcode: {line}");
     }
-    match outcome {
+    let code = match outcome {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("abstractcode: {e:?}");
             1
         }
+    };
+    // Last, so it is the line under the prompt: how to come back.
+    if let Some(line) = ui::quit::resume_line(&session_echo.borrow(), args.gateway.as_deref()) {
+        eprintln!("abstractcode: {line}");
     }
+    code
 }
 
 #[cfg(test)]
 mod tests {
     use super::resolve_animation;
     use crate::config::Prefs;
+
+    /// A one-shot local HTTP server answering every request with `body`,
+    /// and the request line it received.
+    fn fake_gateway(body: &'static str) -> (String, std::sync::mpsc::Receiver<String>) {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                let _ = reader.read_line(&mut line);
+                let _ = tx.send(line);
+                loop {
+                    let mut h = String::new();
+                    if reader.read_line(&mut h).is_err() || h.trim().is_empty() {
+                        break;
+                    }
+                }
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        (url, rx)
+    }
+
+    fn conn(url: &str) -> crate::config::Connection {
+        crate::config::Connection {
+            base_url: url.to_string(),
+            token: None,
+            warning: None,
+            url_to_save: None,
+        }
+    }
+
+    /// `--resume` asks the GATEWAY for its newest session (the board's
+    /// own listing): the first root run that carries a session id.
+    #[test]
+    fn resume_reopens_the_gateways_newest_session() {
+        let (url, rx) = fake_gateway(
+            r#"{"items":[{"run_id":"r0","session_id":""},{"run_id":"r1","session_id":"acode-newest"},{"run_id":"r2","session_id":"acode-older"}],"has_more":false}"#,
+        );
+        assert_eq!(
+            super::newest_gateway_session(&conn(&url)).as_deref(),
+            Ok("acode-newest")
+        );
+        let line = rx.recv().unwrap();
+        assert!(
+            line.contains("/runs?") && line.contains("root_only=true"),
+            "{line}"
+        );
+    }
+
+    /// No session on the gateway, or no gateway: `--resume` says so — it
+    /// never falls back to anything this client remembers.
+    #[test]
+    fn resume_says_why_when_the_gateway_has_nothing() {
+        let (url, _rx) = fake_gateway(r#"{"items":[],"has_more":false}"#);
+        let err = super::newest_gateway_session(&conn(&url)).unwrap_err();
+        assert!(err.contains("no conversation to resume"), "{err}");
+        let err = super::newest_gateway_session(&conn("http://127.0.0.1:1")).unwrap_err();
+        assert!(err.contains("could not be read"), "{err}");
+    }
 
     /// The flag decides AND sticks; without it the saved preference
     /// decides; never-chosen is ON. (The seam this pins is the one that

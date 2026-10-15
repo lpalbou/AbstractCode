@@ -107,8 +107,10 @@ terminal offers with `abstractcode --caps`.
 **Where are my settings?**
 Connection: `~/.abstractcode/gateway.json`.
 Preferences (theme, workflow, route, reasoning, MTP, Stream replies,
-`send_local_workspace`, session, tool/skill selections, recent sessions):
-`~/.abstractcode/prefs.json`.
+`send_local_workspace`, voice devices, skills, and the per-session tool
+selections, which are due to move to the gateway — backlog 0004):
+`~/.abstractcode/prefs.json`. Sessions, their history and goals live on the
+gateway; queued prompts live in memory while the app runs.
 
 **Why does the workflow in the header end with "(gateway default)"?**
 You have not pinned a workflow, so each new turn runs the gateway's default
@@ -118,8 +120,10 @@ Pick a named workflow in `/workflow` to pin one.
 **Why did my queued prompt not start?**
 The queue only advances after the current run **succeeds** — a failure or a
 cancel pauses it (running the follow-up anyway would build on a turn that
-never finished). It also always restores **paused** after a relaunch or a
-session switch: a restore never auto-starts work. Open `/queue` and press
+never finished). The queue lives only while the app runs: switching to
+another conversation keeps it in memory and switching back restores it
+**paused** (a restore never auto-starts work); quitting discards it and lists
+the prompts that were not sent. Open `/queue` and press
 `r` to resume; the strip shows `N queued (paused — /queue resumes)`
 whenever prompts are waiting on you.
 

@@ -450,7 +450,7 @@ fn conversation_cards_archive_and_unarchive_through_the_gateway() {
         // (cursor back at the top), then walk down to it.
         l.escape();
         l.command("/sessions");
-        l.until("the listing", |s| s.contains("sessions on the gateway"));
+        l.until("the listing", |s| s.contains(" sessions · "));
         let screen = l.select_any(&[prompt.as_str(), tail.as_str()]);
         assert!(screen.contains("2 turns · 1 tool"), "{screen}");
         assert_eq!(

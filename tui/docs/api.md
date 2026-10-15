@@ -66,7 +66,7 @@ abstractcode --help | --version
 | --- | --- |
 | `/help` | Command + key reference modal |
 | `/new` | Fresh session (new durable id, cleared view) |
-| `/voice [read-aloud on\|off]` | Voice settings (see [Voice](#voice-voice-speak-dictate)); `read-aloud on\|off` flips that switch without the screen |
+| `/voice [read-aloud on\|off \| space on\|off]` | Voice settings (see [Voice](#voice-voice-speak-dictate)); `read-aloud on\|off` flips that switch without the screen; `space on\|off` turns hold-Space-to-talk on or off (on by default) |
 | `/speak [stop]` | Read the latest reply aloud (`/say` too; `Ctrl+P`); `stop` stops it (so does `Esc`) |
 | `/dictate` | Record from this computer's microphone and put the transcript in the composer (`/mic` too; `Ctrl+R` starts, `Ctrl+R` again transcribes, `Esc` cancels) |
 | `/theme [id]` | Live-preview theme picker, or set directly |
@@ -95,7 +95,7 @@ abstractcode --help | --version
 | `/settings [panel]` | The settings panels (`/panels`, `/rail` too), see [Settings panels](#settings-panels-settings). `panel` = `activity`, `files`, `model`, `workflow`, `workspace`, `tools`, `skills` or `voice` |
 | `/activity` | The settings panels on **Activity**: this conversation's work in foldable groups, one per model step |
 | `/session [id]` | Show or switch the session id (switching probes for a live run to reattach) |
-| `/details [full\|fold]` | Toggle transcript verbosity (`Ctrl+D`): `fold` (the default) renders each tool call as ONE line — glyph, name, status word (`ok`/`failed`/`running`/…), faint args hint — and thinking as a capped gist; `full` expands the whole card UNCUT (arguments in full on their own rows, the `│`-guttered result body entire, thinking content plus the labeled reasoning channel — nothing shortened). Thinking and every called tool stay visible in BOTH states — the toggle gates detail, never existence; errors always keep their `↳` bodies |
+| `/details [full\|fold]` | Toggle transcript verbosity (`Ctrl+D`): `fold` (the default) renders each reasoning cycle as ONE row — its first words, a `∴ N words` note when its reasoning is hidden, its tool calls counted by status (`✓` ok, `✗` failed, `?` awaiting approval, `»` running, …), duration and tokens; a click on a cycle row opens that one cycle. `full` opens every cycle UNCUT: the content as markdown, the labeled reasoning, and every tool call as a full card (arguments on their own rows, the `↳` error, the `│`-guttered output entire) — nothing shortened |
 | `/gating [auto\|wait]` | Approval gating for gating-capable workflows (the multi-agent coder): `auto` runs unattended (skips the workflow's human-approval pauses), `wait` re-gates (the default). Selecting the coder also opens a gated/unattended choice. Rides `input_data.gating_mode`; tool approval is a SEPARATE axis (`/permissions`) |
 | `/reasoning [level]` | Reasoning effort for the current route (`none\|minimal\|low\|medium\|high\|xhigh\|auto`; `default` clears). Bare `/reasoning` opens the dial — also stage 3 of `/model`: pick provider, then model, then effort. Non-reasoning models show a locked `none` (set-anyway override available while capability provenance is unserved); the choice is pair-coupled — changing provider or model resets it. Rides the run as `_runtime.thinking` (absent = gateway default) |
 | `/export [md\|jsonl] [--details] [path]` | Export the agent transcript to a file: `md` (default) = archival markdown; `jsonl` = SFT training lines. `--details` adds reasoning + full tool cards. Bare `/export` auto-names in the cwd; never overwrites — see "Transcript export" below |
@@ -106,7 +106,7 @@ abstractcode --help | --version
 | `/cancel` | Cancel the active run |
 | `/conclude [note]` | Ask the agent to **wrap up now** and answer from what it already has — the missing verb between `/pause` (freeze) and `/cancel` (throw away). The loop stops reasoning at its next boundary and runs its tool-free conclusion, so the turn ends with a real answer plus what is left to do. A `note` is quoted to the model verbatim. Server-side verb (`POST /commands {type:"conclude"}`): the same request from AbstractObserver, the console or a chat bridge behaves identically, and the turn reports `stop_reason.code = "operator_conclude"` — not a failure, not a spent budget |
 | `/steer <text>` | Explicit steering (plain Enter during a run steers too; buffered until the run's first reasoning cycle when it has not started cycling yet). A send that hits a transport failure is retried once with the same command id — the gateway dedups on it, so the retry is exactly-once — and if it still fails your words are kept: they ride the error card and return to the composer when it is empty |
-| `/queue [text]` | Queue a prompt (FIFO): auto-runs after the current run **succeeds**; halts on failure/cancel (explicit resume). Persists per session and restores **paused** — a restore never auto-starts. Bare `/queue` opens the manager (keys under "Modal keys" below). Agent-lane only: under entity focus the visit's held-draft lane is the queue |
+| `/queue [text]` | Queue a prompt (FIFO): auto-runs after the current run **succeeds**; halts on failure/cancel (explicit resume). Lives only while the app runs (kept in memory per conversation across switches, restored **paused** — a restore never auto-starts; quitting lists what was not sent). Bare `/queue` opens the manager (keys under "Modal keys" below). Agent-lane only: under entity focus the visit's held-draft lane is the queue |
 | `/goal [text\|stop]` | Start a goal run on a goal workflow (`abstractcode.goal.v1`): loops until verified done or `max_cycles` (prefs `goal_max_cycles`, default 8). Bare `/goal` shows status; `/goal stop` cancels durably. Ships dark until a goal bundle is published on the gateway |
 | `/context [n\|off]` | Declare the model's context window in tokens (`262144`, `262k`, `1m`) — the footer meter becomes `ctx used/window tk (%, declared)`, warn ≥75% / error ≥90%, and the declaration rides runs as `_limits.max_tokens`. Bare `/context` reports; `off` clears. Persisted (`context_window`); `--max-tokens` declares for one session. Source-labeled "declared" — never a client capability table |
 | `/gpu` | Toggle the gateway-host GPU meter in the footer |
@@ -310,16 +310,45 @@ computer.
   could not be asked ("The gateway's default voice routes could not be
   read. Requests still use them."). `Enter` on a row offers Gateway default
   or an override for this app from `GET /voice/voices?compact=true`.
-- **Speaking a reply** (`Ctrl+P`, `/speak`, or **Read aloud** after each
-  turn): `POST /api/gateway/runs/{run_id}/voice/tts/stream` with the text
+- **Speaking a reply** (`Ctrl+P`, `/speak`, the `▶` at the top right of
+  any message, or **Read aloud**): `POST
+  /api/gateway/runs/{run_id}/voice/tts/stream` (before the first run, the
+  session's media run `session_memory_<session id>`) with the text
   and only the fields you overrode (an empty request = the gateway's
   route). The gateway splits the text at sentence boundaries and sends each
   WAV segment as soon as it is synthesised; each segment goes to the
   speaker while the next one is synthesised. `♪ Preparing speech… · Esc
-  stops` becomes `♪ Speaking… · Esc stops` at the first audio. `Esc` (or
-  `Ctrl+P` again) stops at once and drops the stream, which ends the
-  synthesis on the gateway. A refusal reads as one sentence, e.g.
-  `Reading aloud failed: <the gateway's reason>.`
+  stops` becomes a live histogram of what the SPEAKER plays at the first
+  audio —
+  `♪ Speaking… ▂▅▇▅▃ Ctrl+P pauses · Esc stops`. `Ctrl+P` (or the
+  message's `‖`) PAUSES the reply where it is (`‖ Paused · Ctrl+P
+  resumes`) and again RESUMES it; `Esc` stops at once and drops the
+  stream, which ends the synthesis on the gateway. A refusal reads as one
+  sentence, e.g. `Reading aloud failed: <the gateway's reason>.`
+- **Message icons**: your messages and each final answer carry `▶` at
+  their top right — a click reads THAT message; while it plays the icon
+  is `‖` (pause), paused it is a lit `▶` (resume).
+- **Read aloud narrates the run**: with Read aloud on, each reasoning
+  cycle's own words are read as the cycle lands, then the answer, queued
+  one after the other (the agent explaining what it does as it works).
+  The reasoning channel is never read; an answer identical to the last
+  cycle's words is read once; a restored history is never read.
+- **Hold Space to talk** (on by default; `/voice space off` turns it
+  off): on an EMPTY prompt, hold `Space`, speak, release — the words are
+  transcribed and SENT, exactly as `Enter` would send them (a task when
+  idle, guidance while a run streams, a message under entity focus).
+  Recording starts on the press itself (nothing is typed), and the row
+  above the prompt shows a live histogram of your voice (its spectrum,
+  updated ~20 times a second):
+  `● Listening… 3 s ▂▃▅▇▅▃ release Space to send · Esc cancels`. A TAP
+  is discarded unsent, and `Space` in a draft with words is ordinary
+  typing. On terminals that speak the kitty keyboard protocol (kitty,
+  Ghostty, WezTerm, foot, iTerm2 ≥ 3.5) the key-up ends the recording.
+  Elsewhere (Terminal.app, …) only presses arrive: the key's auto-repeat
+  tells a hold from a tap (no repeat within macOS's "Delay until repeat",
+  read from your settings, plus 0.25 s = a tap), and the release is the
+  moment the repeats stop — the approach Claude Code's `/voice` takes on
+  the same terminals.
 - **Dictation** (`Ctrl+R`, `/dictate`): `● Recording… 3 s · Ctrl+R
   transcribes · Esc cancels`, then `Transcribing… 4 s · faster-whisper /
   large-v3` (the override, else the gateway default). The 16 kHz WAV is
@@ -329,8 +358,11 @@ computer.
   of the draft. Too short, silent ("Nothing was heard. Check the
   microphone in Settings → Voice (Test), then try again."), no answer
   within 180 s, or a refusal: one sentence each, never a silent spinner.
-  Dictation needs a conversation (a run id): "Start a conversation to
-  enable dictation."
+  Before the first run of a session, transcription rides the session's
+  media run, `session_memory_<session id>` (the gateway creates it on
+  first use; Code web and Observer use the same run), so the first message
+  can be spoken. Only a session id outside the gateway's run-id alphabet
+  still answers "Start a conversation to enable dictation."
 - **The screen** (`/voice`): Output device (this computer's speakers, from
   AbstractVoice) + Test speaker (a short chime), Reply volume (`←`/`→`),
   Input device + Test microphone (3 s recorded with a live level meter,
@@ -339,6 +371,11 @@ computer.
   reply.`, Voice latency (`quality_preset`), and the last reply's
   `first audio 0.41 s · engine on cpu`. Saved in `prefs.json` under `voice`
   with the kit's `VoiceClientPreferences` keys.
+  The devices are this client's settings: a saved speaker or microphone that
+  is not connected (or no longer opens) is replaced by the system default
+  automatically, and the screen says so (`System default · saved speaker not
+  connected`). An AbstractVoice too old to choose a speaker plays on the
+  system default.
 - **Host audio.** A terminal cannot play or record, and this crate ships no
   audio engine: the client runs `assets/voice_bridge.py` with the Python
   that has AbstractVoice (`--voice-python`, else the one next to the
@@ -521,8 +558,7 @@ durable command (up to 8s) — a failure shows an honest state offering
 quit-anyway/stay instead of pretending delivery. Repeat quit gestures
 always resolve to the safe verb (leave): `Ctrl+C`×3 or `Ctrl+Q`×2 leaves
 the run going and quits, and cancel is never reachable by repetition. A run concluding while the modal is open
-auto-quits (queued prompts are held back and restore paused next
-launch). Entity visits never gate — visits park on quit by design;
+auto-quits (queued prompts are not started; the quit line lists them). Entity visits never gate — visits park on quit by design;
 reopening resumes them. Honest limit: closing the terminal window
 (SIGHUP/SIGKILL) shows no modal — the run continues and boot reattach
 recovers it.
@@ -544,7 +580,9 @@ recovers it.
 | `Ctrl+D` | anywhere | Toggle detail view (thinking + tool results vs answers only) |
 | `Alt+E` | anywhere | Cycle conversation focus: agent → entity visit 1 → … → agent. Cycle order is the order conversations were opened — it never changes with how the header paints chips. Option+E on macOS with "Option as Meta/Esc+"; `/focus <name\|agent>` needs no modifier setting. (`Ctrl+E` is move-to-line-end in the composer) |
 | `Ctrl+T` | anywhere | Cycle theme |
-| `Ctrl+P` | anywhere | Read the latest reply aloud; again = stop (`/speak`). In one automation (`/automations <id>`): the selected run's reply |
+| click / `Tab`+`Enter` on the theme name | status bar | Theme dropdown: every theme grouped Dark / Light; arrows, Page Up/Down and the mouse wheel preview LIVE; `Enter` or a click keeps it (saved like `Ctrl+T`); `Esc` restores. The wheel on the closed name steps to the next theme |
+| `Ctrl+P` | anywhere | Read the latest reply aloud; while it plays = pause; paused = resume (`/speak`; `Esc` stops). In one automation (`/automations <id>`): the selected run's reply; again = stop |
+| `Space` (held) | empty prompt | Hold to talk: speak, release to SEND (`/voice space off` turns it off) |
 | `Enter` | empty composer, status line shows **Automations · N waiting** | Open the automation that waits for you (a pending approval or question first, else unseen results); a click on the chip does the same |
 | `Ctrl+R` | anywhere | Dictate: start recording; again = transcribe into the composer (`/dictate`) |
 | `Esc` | while speaking / recording | Stop the spoken reply / cancel the recording — that press is consumed (it never clears the draft or arms cancel) |
@@ -585,35 +623,56 @@ recovers it.
 
 ## Transcript vocabulary
 
-The transcript reads as TURNS: a `══ you ══…` rule opens each one, a
-`══ assistant ══…` rule closes it with the answer (markdown), and the
-reasoning cycles between them are delimited by `── cycle N · 41s ·
-29k↑ 512↓ tk · 92% cached ──…` rules carrying that model call's
-duration, token cost, and — when the provider reports it — how much of
-the prompt was served from cache instead of recomputed. The model's own
-thinking leads every cycle; the cycle's tool calls stack directly
-beneath it, one line each.
+The transcript reads as TURNS. Your message opens each one as a tinted
+CARD (`▌ ❯ …` on the theme's raised surface, an accent bar down its left
+edge) so it stands out while you scroll; a `══ assistant ══…` rule closes
+the turn with the answer (markdown). Between them, each reasoning cycle is
+a collapsible PANEL, folded by default to one row:
+
+```
+▸ cycle 3  I'll read the manifest, then run the tests   2 tools ✗1 ✓1 · ∴ 12 words · 4.1s · 9.8k↑ 210↓ tk
+```
+
+— the model's first words (or, for a cycle that only called tools, the
+names of its calls), its calls counted by status, a `∴ N words` note when
+the row hides a reasoning channel, and the model call's duration, token
+cost and — when the provider reports it — how much of the prompt was
+served from cache. When the row is narrow, the stats drop first, then the
+note; the status counts always stay. A click on the row opens the panel
+(`▾ cycle 3 ──── …`) with the content as markdown, the labeled reasoning,
+and every tool call of the cycle as a full card; a second click folds it.
+Opening scrolls the header toward the top of the view. `Ctrl+D` /
+`/details full` opens every cycle at once (there the rows are not
+toggles).
 
 | Element | Item |
 | --- | --- |
-| `══ you ══…` | Your task (turn opener) |
-| `── cycle N · cost ──…` | One reasoning cycle: the thinking, then its tools |
-| `✓ name · ok  args…` | Tool call: glyph, name, status word, faint args hint |
+| `▌ ❯ …` (tinted card) | Your task (turn opener) |
+| `▸ cycle N  words…  chips · stats` | One reasoning cycle, folded (click to open) |
+| `▾ cycle N ──── chips · stats` | The same cycle, open |
+| `∴ reasoning  N words` | The cycle's reasoning channel (open panels) |
+| `✓ name · ok` | Tool call: glyph, name (info ink), status word; args below |
 | `? · awaiting approval` / `» · running` | Tool paused / executing |
 | `✗ · failed` / `⊘ · denied` / `◌ · interrupted` | Failed / denied / run ended first |
-| `↳ …` | A tool error, attached under its row (error ink) |
-| `│ …` | Tool result output (full mode gutter) |
+| `↳ …` | A tool error, attached under its card (error ink) |
+| `│ …` | Tool result output (JSON output is laid out instead: indented, keys / strings / numbers in the theme's syntax inks) |
+| `▶` / `‖` (top right) | Read this message aloud / pause it |
 | `══ assistant ══…` | The answer (markdown; `✦ assistant (update)` mid-run) |
 | `↪ steer` | Guidance you sent mid-run |
 | `▦` | Generated image (unicode mosaic) |
 | `·` | Informational notice |
 
-Three voices, three markings: bare indented prose is the model
-thinking, `│` is tool output, `↳` is an error. `/details` (or `Ctrl+D`)
-toggles verbosity — folded shows one-line tool calls with status tags
-and thinking gists; full shows args, result bodies, and the labeled
-reasoning channel. Thinking and every called tool stay visible in BOTH
-states.
+Three voices, three markings: prose is the model's (content as markdown,
+reasoning in the muted ink under its label), `│` is tool output, `↳` is an
+error. A tool call that ran before any cycle in its turn stands alone as a
+one-line row with its own `▸ N lines` disclosure.
+
+The bottom line of the window shows the folder this session was launched
+for (`⌂ ~/…`; the `--workspace` root, else the current directory), the
+`hold Space to talk` hint (`Ctrl+R speak` with the gesture off), and — when a turn's answer came from an
+agent subrun while the wrapper root run was still open on the gateway —
+the discreet `◌ root finalizes on gateway` marker (nothing to do: the
+gateway finalizes the root server-side).
 
 **`/details full` truncates nothing.** *Every* body renders
 whole: your own prompts and steers, tool arguments, result bodies, tool
@@ -626,11 +685,12 @@ so the full view has everything to show; use the scrollback (or
 read a long one. A failed tool shows its error AND its output: the
 error says that it failed, the body says why.
 
-The FOLDED view is a summary by definition: there, bodies are bounded
-and anything cut is labeled (`… (+N more lines)`, `… (+N words of
-reasoning · /details)`) — result bodies elide middle-out so their final
-lines (the `wc` total, the test verdict) survive, and a tool row stays
-one line. Asks TO you are never truncated in either mode, and neither
+The FOLDED view is a summary by definition: a cycle is one row, and
+what it hides is named on it — the calls counted by status (a failure or
+a pending approval stays visible as `✗1` / `?1`), the reasoning as
+`∴ N words`. Bodies outside cycles are bounded and anything cut is
+labeled (`… (+N more lines)`); result bodies elide middle-out so their
+final lines (the `wc` total, the test verdict) survive. Asks TO you are never truncated in either mode, and neither
 is the approval modal's `f` JSON view — a question you cannot fully
 read is a question you cannot answer.
 

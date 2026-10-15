@@ -1,4 +1,4 @@
-//! Fixed chrome: header, activity strip, composer, status bar.
+//! Fixed chrome: header, activity strip, composer, status bar, folder line.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -253,6 +253,30 @@ pub fn header(t: &TokenSet, store: Store, spin: Signal<u64>, cwd_base: String) -
                     let sep = if i == 0 { "  ·  " } else { " · " };
                     x += canvas.print(Point::new(x, rect.y), sep, t.text_faint, t.surface);
                     x += canvas.print(Point::new(x, rect.y), fact, t.text_muted, t.surface);
+                }
+                // The FOLDER is identity, not an instrument: when its whole
+                // path does not fit, it keeps its TAIL (`⌂ …/project`)
+                // rather than vanishing — the basename is the part that
+                // names it.
+                if fit == 0 {
+                    if let Some(path) = facts.first().and_then(|f| f.strip_prefix("⌂ ")) {
+                        let avail = clip_to - x - 5 - 2;
+                        if avail >= 10 {
+                            x += canvas.print(
+                                Point::new(x, rect.y),
+                                "  ·  ",
+                                t.text_faint,
+                                t.surface,
+                            );
+                            x += canvas.print(Point::new(x, rect.y), "⌂ ", t.text_muted, t.surface);
+                            canvas.print(
+                                Point::new(x, rect.y),
+                                &tail_fit(path, avail),
+                                t.text_muted,
+                                t.surface,
+                            );
+                        }
+                    }
                 }
 
                 let mut x2 = rx;
@@ -682,7 +706,7 @@ pub fn activity_strip(t: &TokenSet, store: Store, spin: Signal<u64>, follow: Sig
             // captured for the whole loop — the strip says why).
             if let Some(g) = store.goal.get() {
                 if !g.run_id.is_empty() && g.run_id == store.run_id.get() {
-                    parts.insert(0, format!("goal: {}", crate::ui::queue_preview(&g.text)));
+                    parts.insert(0, crate::ui::goal::goal_label(&g.text));
                 }
             }
             if cycle > 0 && !base_names_cycle {
@@ -1176,165 +1200,416 @@ pub(crate) fn mem_segment(state: &crate::store::HostState) -> Option<(String, u8
 /// permanent dead weight (it truncated itself at 120 cols carrying
 /// zero facts). Segments render when KNOWN; absence is omission, never
 /// a fabricated zero.
-pub fn status_bar(cx: Scope, t: &TokenSet, store: Store, ctx: &UiCtx) -> View {
+pub fn status_bar(
+    t: &TokenSet,
+    store: Store,
+    ctx: &UiCtx,
+    root: Scope,
+    scx: Scope,
+    theme_st: crate::ui::theme_menu::TriggerState,
+) -> View {
     let tokens = *t;
     let gateway = ctx.gateway_label.clone();
-    let ctx = ctx.clone();
-    dyn_view(LayoutStyle::line(1), move || {
-        let t = tokens;
-        let conn = store.conn.get();
+    // THREE parts, each re-rendering on its OWN inputs (operator ask
+    // 2026-10-10: the theme name is a focusable dropdown trigger): the
+    // facts + markers (they move with every ledger record), the theme
+    // trigger (rebuilt only when its visibility changes — a rebuild would
+    // drop its focus), and the gateway. They share one PLAN of what the
+    // right cluster shows, from narrow, rarely-changing inputs.
+    let root_open = scx.memo(move || store.fold.with(|f| f.root_open_at_conclusion));
+    let viewport = abstracttui::app::use_viewport(scx);
+    let plan_ctx = ctx.clone();
+    let plan_gateway = gateway.clone();
+    let plan = Rc::new(move || -> (RightPlan, Option<&'static str>, String) {
+        let dictation_idle = store
+            .voice
+            .dictation
+            .with(|d| matches!(d, crate::voice::Dictation::Idle));
+        // `/voice space on|off` saves prefs and bumps the voice tick.
+        let _ = store.voice.tick.get();
+        let space_on = !crate::ui::voice_view::prefs(&plan_ctx).space_to_talk_off;
+        let voice_hint = dictation_idle.then(|| crate::ui::push_to_talk::hint(space_on));
+        let gw = match store.conn.get() {
+            Conn::Down(msg, _) => format!("{plan_gateway} · {}", text::truncate_ellipsis(&msg, 40)),
+            _ => plan_gateway.clone(),
+        };
         let theme_label = abstracttui::app::current_theme().label;
-        let gateway = gateway.clone();
-        // Facts, left to right. Each is (text, ink-class): 0 normal
-        // (muted), 1 warn, 2 error — the ctx meter is the only graded one.
-        let mut segs: Vec<(String, u8)> = Vec::new();
-        // R17.1: "Automations · N waiting" FIRST (it needs you; segments
-        // drop right-to-left, so it is the last to go). Enter on an empty
-        // prompt or a click on it opens the automation that waits.
-        let chip = crate::ui::attention_chip::chip_text(store);
-        if let Some(c) = &chip {
-            segs.push((c.clone(), 3));
-        }
-        // Where the chip was painted (x from, x to) — the click target.
-        let chip_span: Rc<Cell<(i32, i32)>> = Rc::new(Cell::new((0, 0)));
-        let chip_span_draw = chip_span.clone();
-        let pressed = Rc::new(Cell::new(false));
-        let ctx_click = ctx.clone();
-        let last_ctx = store.fold.with(|f| f.stats.last_input_tokens);
-        if let Some(seg) = ctx_meter(last_ctx, store.context_window.get()) {
-            segs.push(seg);
-        }
-        // Session tokens: the in/out split when the provider reports one
-        // (the strip's ↑/↓ vocabulary); splitless providers show the
-        // honest total (never fabricated zeros — bug (e) class).
-        let totals = store.totals.get();
-        if totals.input_tokens > 0 || totals.output_tokens > 0 {
-            segs.push((
-                format!(
-                    "{}↑ {}↓ tk session",
-                    fmt_tokens(totals.input_tokens),
-                    fmt_tokens(totals.output_tokens)
-                ),
-                0,
-            ));
-        } else if totals.total_tokens > 0 {
-            segs.push((format!("{} tk session", fmt_tokens(totals.total_tokens)), 0));
-        }
-        // The /gpu meter (OBS-6 seam): worker-owned poller fills the
-        // signal; this row renders it. Off/Unsupported = omitted (the
-        // /gpu toggle toasts the reason once — never a fabricated number).
-        match store.gpu.get() {
-            crate::store::GpuMeter::Ready(s) => {
-                segs.push((format!("gpu {:.0}%", s.util_pct), 0));
+        let plan = right_plan(
+            root_open.get(),
+            voice_hint,
+            &crate::ui::theme_menu::trigger_text(theme_label),
+            &gw,
+            viewport.get().w,
+        );
+        (plan, voice_hint, gw)
+    });
+    let left_plan = plan.clone();
+    let left_ctx = ctx.clone();
+    let left = dyn_view(
+        LayoutStyle::default()
+            .grow(1.0)
+            .basis(Dimension::Cells(0))
+            .height(Dimension::Cells(1)),
+        move || {
+            let t = tokens;
+            let (plan, voice_hint, _) = left_plan();
+            // The markers, right-aligned in this part, joined to the trigger.
+            let mut markers: Vec<&str> = Vec::new();
+            if plan.marker {
+                markers.push(ROOT_OPEN_MARKER);
             }
-            crate::store::GpuMeter::Pending => segs.push(("gpu …".into(), 0)),
-            crate::store::GpuMeter::Error(_) => segs.push(("gpu err".into(), 1)),
-            crate::store::GpuMeter::Off | crate::store::GpuMeter::Unsupported(_) => {}
-        }
-        // Host RAM from the LAST /resources fetch (see `mem_segment`).
-        if let Some(seg) = mem_segment(&store.host_state.get()) {
-            segs.push(seg);
-        }
-        let skills = store.selected_skills.with(|s| s.len());
-        if skills > 0 {
-            segs.push((format!("skills {skills}"), 0));
-        }
-        let mcp = store.mcp_servers.with(|m| m.len());
-        if mcp > 0 {
-            segs.push((format!("mcp {mcp}"), 0));
-        }
-        Element::new()
-            .style(LayoutStyle::line(1))
-            .on(abstracttui::ui::Phase::Bubble, move |ectx, ev| {
-                let abstracttui::ui::UiEvent::Mouse(m) = ev else {
-                    return;
-                };
-                let (x0, x1) = chip_span.get();
-                let on_chip = x1 > x0 && m.pos.x >= x0 && m.pos.x < x1;
-                match m.kind {
-                    abstracttui::ui::MouseKind::Down(abstracttui::ui::MouseButton::Left)
-                        if on_chip =>
-                    {
-                        pressed.set(true);
-                        ectx.stop_propagation();
-                    }
-                    abstracttui::ui::MouseKind::Up(abstracttui::ui::MouseButton::Left) => {
-                        let clicks = pressed.replace(false) && on_chip;
-                        if clicks {
+            if plan.hint {
+                markers.extend(voice_hint);
+            }
+            let pre = if markers.is_empty() {
+                String::new()
+            } else {
+                format!("{} ·", markers.join(" · "))
+            };
+            // Facts, left to right. Each is (text, ink-class): 0 normal
+            // (muted), 1 warn, 2 error — the ctx meter is the only graded one.
+            let mut segs: Vec<(String, u8)> = Vec::new();
+            // R17.1: "Automations · N waiting" FIRST (it needs you; segments
+            // drop right-to-left, so it is the last to go). Enter on an empty
+            // prompt or a click on it opens the automation that waits.
+            let chip = crate::ui::attention_chip::chip_text(store);
+            if let Some(c) = &chip {
+                segs.push((c.clone(), 3));
+            }
+            // Where the chip was painted (x from, x to) — the click target.
+            let chip_span: Rc<Cell<(i32, i32)>> = Rc::new(Cell::new((0, 0)));
+            let chip_span_draw = chip_span.clone();
+            let pressed = Rc::new(Cell::new(false));
+            let ctx_click = left_ctx.clone();
+            let last_ctx = store.fold.with(|f| f.stats.last_input_tokens);
+            if let Some(seg) = ctx_meter(last_ctx, store.context_window.get()) {
+                segs.push(seg);
+            }
+            // Session tokens: the in/out split when the provider reports one
+            // (the strip's ↑/↓ vocabulary); splitless providers show the
+            // honest total (never fabricated zeros — bug (e) class).
+            let totals = store.totals.get();
+            if totals.input_tokens > 0 || totals.output_tokens > 0 {
+                segs.push((
+                    format!(
+                        "{}↑ {}↓ tk session",
+                        fmt_tokens(totals.input_tokens),
+                        fmt_tokens(totals.output_tokens)
+                    ),
+                    0,
+                ));
+            } else if totals.total_tokens > 0 {
+                segs.push((format!("{} tk session", fmt_tokens(totals.total_tokens)), 0));
+            }
+            // The /gpu meter (OBS-6 seam): worker-owned poller fills the
+            // signal; this row renders it. Off/Unsupported = omitted (the
+            // /gpu toggle toasts the reason once — never a fabricated number).
+            match store.gpu.get() {
+                crate::store::GpuMeter::Ready(s) => {
+                    segs.push((format!("gpu {:.0}%", s.util_pct), 0));
+                }
+                crate::store::GpuMeter::Pending => segs.push(("gpu …".into(), 0)),
+                crate::store::GpuMeter::Error(_) => segs.push(("gpu err".into(), 1)),
+                crate::store::GpuMeter::Off | crate::store::GpuMeter::Unsupported(_) => {}
+            }
+            // Host RAM from the LAST /resources fetch (see `mem_segment`).
+            if let Some(seg) = mem_segment(&store.host_state.get()) {
+                segs.push(seg);
+            }
+            let skills = store.selected_skills.with(|s| s.len());
+            if skills > 0 {
+                segs.push((format!("skills {skills}"), 0));
+            }
+            let mcp = store.mcp_servers.with(|m| m.len());
+            if mcp > 0 {
+                segs.push((format!("mcp {mcp}"), 0));
+            }
+            Element::new()
+                .style(LayoutStyle::line(1))
+                .on(abstracttui::ui::Phase::Bubble, move |ectx, ev| {
+                    let abstracttui::ui::UiEvent::Mouse(m) = ev else {
+                        return;
+                    };
+                    let (x0, x1) = chip_span.get();
+                    let on_chip = x1 > x0 && m.pos.x >= x0 && m.pos.x < x1;
+                    match m.kind {
+                        abstracttui::ui::MouseKind::Down(abstracttui::ui::MouseButton::Left)
+                            if on_chip =>
+                        {
+                            pressed.set(true);
                             ectx.stop_propagation();
-                            crate::ui::attention_chip::open_waiting(cx, store, &ctx_click);
+                        }
+                        abstracttui::ui::MouseKind::Up(abstracttui::ui::MouseButton::Left) => {
+                            let clicks = pressed.replace(false) && on_chip;
+                            if clicks {
+                                ectx.stop_propagation();
+                                crate::ui::attention_chip::open_waiting(root, store, &ctx_click);
+                            }
+                        }
+                        _ => {}
+                    }
+                })
+                .draw(move |canvas, rect| {
+                    canvas.fill(rect, ' ', t.text, t.surface);
+                    // Right side measured FIRST so the facts yield to it
+                    // instead of overprinting mid-word at 80 cols
+                    // (adversary P3, 2026-07-22 — same rule as the header).
+                    // Flush against the trigger, whose own padding is the gap.
+                    let w = text::width(&pre);
+                    let rx = (rect.right() - w).max(rect.x);
+                    let clip_to = (rx - 1).max(rect.x);
+                    let mut x = rect.x + 1;
+                    // Segments drop WHOLE, right-to-left, when the row is
+                    // tight (POLISH-1): an instrument row must never
+                    // self-truncate into `…` fragments — the old key legend
+                    // rendered "/help comm…" at 120 cols and read as broken
+                    // (SYNTHESIS §2 baseline capture). The keys pointer is
+                    // the LAST segment, so it is the first to yield.
+                    let hint = "? keys + commands";
+                    let seg_widths: Vec<usize> = segs
+                        .iter()
+                        .map(|(s, _)| text::width(s).max(0) as usize)
+                        .chain(std::iter::once(text::width(hint).max(0) as usize))
+                        .collect();
+                    let fit = prefix_fit(&seg_widths, 0, 5, (clip_to - x).max(0) as usize);
+                    for (i, (seg, sev)) in segs.iter().take(fit).enumerate() {
+                        if i > 0 {
+                            x += canvas.print(
+                                Point::new(x, rect.y),
+                                "  ·  ",
+                                t.text_faint,
+                                t.surface,
+                            );
+                        }
+                        let ink = match sev {
+                            3 => t.accent,
+                            2 => t.error,
+                            1 => t.warn,
+                            _ => t.text_muted,
+                        };
+                        let from = x;
+                        x += canvas.print(Point::new(x, rect.y), seg, ink, t.surface);
+                        if *sev == 3 {
+                            chip_span_draw.set((from, x));
                         }
                     }
-                    _ => {}
-                }
-            })
-            .draw(move |canvas, rect| {
-                canvas.fill(rect, ' ', t.text, t.surface);
-                // Right side measured FIRST so the facts yield to it
-                // instead of overprinting mid-word at 80 cols
-                // (adversary P3, 2026-07-22 — same rule as the header).
-                let right = match &conn {
-                    Conn::Down(msg, _) => format!(
-                        "{theme_label} · {gateway} · {}",
-                        text::truncate_ellipsis(msg, 40)
-                    ),
-                    _ => format!("{theme_label} · {gateway}"),
-                };
-                let w = text::width(&right) + 1;
-                let rx = (rect.right() - w).max(rect.x);
-                let clip_to = (rx - 1).max(rect.x);
-                let mut x = rect.x + 1;
-                // Segments drop WHOLE, right-to-left, when the row is
-                // tight (POLISH-1): an instrument row must never
-                // self-truncate into `…` fragments — the old key legend
-                // rendered "/help comm…" at 120 cols and read as broken
-                // (SYNTHESIS §2 baseline capture). The keys pointer is
-                // the LAST segment, so it is the first to yield.
-                let hint = "? keys + commands";
-                let seg_widths: Vec<usize> = segs
-                    .iter()
-                    .map(|(s, _)| text::width(s).max(0) as usize)
-                    .chain(std::iter::once(text::width(hint).max(0) as usize))
-                    .collect();
-                let fit = prefix_fit(&seg_widths, 0, 5, (clip_to - x).max(0) as usize);
-                for (i, (seg, sev)) in segs.iter().take(fit).enumerate() {
-                    if i > 0 {
-                        x += canvas.print(Point::new(x, rect.y), "  ·  ", t.text_faint, t.surface);
+                    // The keys pointer — the whole legend lives behind it.
+                    if fit > segs.len() {
+                        if !segs.is_empty() {
+                            x += canvas.print(
+                                Point::new(x, rect.y),
+                                "  ·  ",
+                                t.text_faint,
+                                t.surface,
+                            );
+                        }
+                        x += canvas.print(Point::new(x, rect.y), "?", t.accent, t.surface);
+                        canvas.print(
+                            Point::new(x, rect.y),
+                            " keys + commands",
+                            t.text_muted,
+                            t.surface,
+                        );
                     }
-                    let ink = match sev {
-                        3 => t.accent,
-                        2 => t.error,
-                        1 => t.warn,
-                        _ => t.text_muted,
-                    };
-                    let from = x;
-                    x += canvas.print(Point::new(x, rect.y), seg, ink, t.surface);
-                    if *sev == 3 {
-                        chip_span_draw.set((from, x));
+                    if !pre.is_empty() {
+                        canvas.print(Point::new(rx, rect.y), &pre, t.text_faint, t.surface);
                     }
-                }
-                // The keys pointer — the whole legend lives behind it.
-                if fit > segs.len() {
-                    if !segs.is_empty() {
-                        x += canvas.print(Point::new(x, rect.y), "  ·  ", t.text_faint, t.surface);
+                })
+                .build()
+        },
+    );
+    // The theme trigger: mounted while the plan shows the theme. Its
+    // builder reads only the plan's `theme` bit (a memo), so ledger
+    // traffic never rebuilds — and never unfocuses — it.
+    let theme_plan = plan.clone();
+    let show_theme = scx.memo(move || theme_plan().0.theme);
+    let trigger_ctx = ctx.clone();
+    let trigger = dyn_view(
+        LayoutStyle::default()
+            .height(Dimension::Cells(1))
+            .shrink(0.0),
+        move || {
+            if show_theme.get() {
+                crate::ui::theme_menu::trigger(root, &trigger_ctx, theme_st)
+            } else {
+                Element::new().build()
+            }
+        },
+    );
+    let gw_plan = plan.clone();
+    let right = dyn_view(
+        LayoutStyle::default()
+            .height(Dimension::Cells(1))
+            .shrink(0.0),
+        move || {
+            let t = tokens;
+            let (plan, _, gw) = gw_plan();
+            let down = matches!(store.conn.get(), Conn::Down(..));
+            let shown = if plan.theme {
+                format!("· {gw} ")
+            } else {
+                format!(" {gw} ")
+            };
+            let ink = if down { t.error } else { t.text_faint };
+            let sep_ink = t.text_faint;
+            Element::new()
+                .style(
+                    LayoutStyle::default()
+                        .width(Dimension::Cells(text::width(&shown)))
+                        .height(Dimension::Cells(1)),
+                )
+                .draw(move |canvas, rect| {
+                    canvas.fill(rect, ' ', t.text, t.surface);
+                    if let Some(rest) = shown.strip_prefix("· ") {
+                        let x = rect.x
+                            + canvas.print(Point::new(rect.x, rect.y), "· ", sep_ink, t.surface);
+                        canvas.print(Point::new(x, rect.y), rest, ink, t.surface);
+                    } else {
+                        canvas.print(Point::new(rect.x, rect.y), &shown, ink, t.surface);
                     }
-                    x += canvas.print(Point::new(x, rect.y), "?", t.accent, t.surface);
-                    canvas.print(
-                        Point::new(x, rect.y),
-                        " keys + commands",
-                        t.text_muted,
-                        t.surface,
-                    );
-                }
-                let ink = if matches!(conn, Conn::Down(..)) {
-                    t.error
-                } else {
-                    t.text_faint
-                };
-                canvas.print(Point::new(rx, rect.y), &right, ink, t.surface);
-            })
-            .build()
-    })
+                })
+                .build()
+        },
+    );
+    Element::new()
+        .style(
+            LayoutStyle::row()
+                .width(Dimension::Percent(1.0))
+                .height(Dimension::Cells(1)),
+        )
+        .child(left)
+        .child(trigger)
+        .child(right)
+        .build()
+}
+
+/// The folder shown on the bottom line: home-relative (`~/…`) when it
+/// sits under `home`, the path verbatim otherwise. Pure for tests.
+pub fn display_folder(path: &str, home: Option<&str>) -> String {
+    if let Some(home) = home
+        .map(|h| h.trim_end_matches('/'))
+        .filter(|h| !h.is_empty())
+    {
+        if path == home {
+            return "~".to_string();
+        }
+        if let Some(rest) = path.strip_prefix(home) {
+            if rest.starts_with('/') {
+                return format!("~{rest}");
+            }
+        }
+    }
+    path.to_string()
+}
+
+/// Keep the TAIL of `s` within `cols` display COLUMNS, `…`-prefixed when
+/// cut. Column-true where [`tail_ellipsis`] counts chars: a path with
+/// wide (CJK) characters measured by chars ran twice its budget and
+/// overprinted the markers beside it (adversarial review 2026-10-10).
+pub fn tail_fit(s: &str, cols: i32) -> String {
+    if text::width(s) <= cols {
+        return s.to_string();
+    }
+    let budget = cols - 1; // the `…`
+    let mut kept: Vec<char> = Vec::new();
+    let mut used = 0;
+    for ch in s.chars().rev() {
+        let w = text::width(ch.encode_utf8(&mut [0u8; 4]));
+        if used + w > budget {
+            break;
+        }
+        used += w;
+        kept.push(ch);
+    }
+    kept.reverse();
+    format!("…{}", kept.into_iter().collect::<String>())
+}
+
+/// The marker for a turn that concluded from a SUBRUN while the wrapper
+/// ROOT run was still open on the gateway (`Fold::root_open_at_conclusion`).
+/// It replaced a full-width transcript notice
+/// (`runner::SUBRUN_CONCLUSION_NOTE`), which cost two rows per turn for a
+/// fact nobody acts on (operator ask 2026-10-10). `/help` spells it out.
+pub const ROOT_OPEN_MARKER: &str = "◌ root finalizes on gateway";
+
+/// Which optional segments the status bar's right cluster shows (see
+/// [`status_right`] for the rules). `theme` is the theme TRIGGER
+/// (`theme_menu::trigger_text`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RightPlan {
+    pub marker: bool,
+    pub hint: bool,
+    pub theme: bool,
+}
+
+/// The plan behind [`status_right`]: the root marker (STATE) may take the
+/// cluster to `row_w / 2`; the conveniences — the theme trigger (a control
+/// since 2026-10-10, so it outranks a static hint), then the voice hint —
+/// only to `row_w / 3`, in PRIORITY order: a higher segment takes its room
+/// first, and a lower one shows only in what is left (when the theme
+/// cannot fit, the shorter hint still may), so the instruments on the
+/// left keep their room. The gateway always shows.
+pub fn right_plan(
+    root_open: bool,
+    voice_hint: Option<&str>,
+    theme: &str,
+    gateway: &str,
+    row_w: i32,
+) -> RightPlan {
+    let sep = text::width(" · ");
+    let mut width = text::width(gateway);
+    let mut plan = RightPlan {
+        marker: false,
+        hint: false,
+        theme: false,
+    };
+    if root_open {
+        let w = text::width(ROOT_OPEN_MARKER) + sep;
+        if width + w <= row_w / 2 {
+            width += w;
+            plan.marker = true;
+        }
+    }
+    if !theme.trim().is_empty() {
+        let w = text::width(theme) + sep;
+        if width + w <= row_w / 3 {
+            width += w;
+            plan.theme = true;
+        }
+    }
+    if let Some(h) = voice_hint {
+        if width + text::width(h) + sep <= row_w / 3 {
+            plan.hint = true;
+        }
+    }
+    plan
+}
+
+/// The status bar's right cluster as one string, left to right: the root
+/// marker, the voice hint, the theme, the gateway (moved here from a
+/// separate last line, operator ask 2026-10-10). The bar itself draws it
+/// in three parts — the theme is a focusable dropdown trigger — from the
+/// same [`right_plan`].
+pub fn status_right(
+    root_open: bool,
+    voice_hint: Option<&'static str>,
+    theme_label: &str,
+    gateway: &str,
+    row_w: i32,
+) -> String {
+    let plan = right_plan(root_open, voice_hint, theme_label, gateway, row_w);
+    let mut out: Vec<String> = Vec::new();
+    if plan.marker {
+        out.push(ROOT_OPEN_MARKER.to_string());
+    }
+    if plan.hint {
+        out.extend(voice_hint.map(str::to_string));
+    }
+    if plan.theme {
+        out.push(theme_label.to_string());
+    }
+    out.push(gateway.to_string());
+    out.join(" · ")
 }
 
 /// Keep the TAIL of an identifier, `…`-prefixed, when it exceeds
@@ -1612,5 +1887,63 @@ mod tests {
         assert_eq!(mem_segment(&HostState::Pending), None);
         assert_eq!(mem_segment(&HostState::Unsupported("no".into())), None);
         assert_eq!(mem_segment(&HostState::Error("boom".into())), None);
+    }
+
+    #[test]
+    fn display_folder_is_home_relative_only_under_home() {
+        assert_eq!(
+            display_folder("/Users/a/tmp/x", Some("/Users/a")),
+            "~/tmp/x"
+        );
+        assert_eq!(display_folder("/Users/a", Some("/Users/a/")), "~");
+        assert_eq!(
+            display_folder("/Users/ab/x", Some("/Users/a")),
+            "/Users/ab/x",
+            "a sibling sharing the prefix is not under home"
+        );
+        assert_eq!(display_folder("/srv/x", None), "/srv/x");
+        assert_eq!(display_folder("/srv/x", Some("")), "/srv/x");
+    }
+
+    #[test]
+    fn tail_fit_counts_columns_not_chars() {
+        assert_eq!(tail_fit("/tmp/ws", 20), "/tmp/ws");
+        assert_eq!(tail_fit("/a/bcdef", 5), "…cdef");
+        // Four CJK characters are EIGHT columns.
+        let cut = tail_fit("/x/子目录名", 6);
+        assert!(text::width(&cut) <= 6, "{cut:?}");
+        assert_eq!(cut, "…录名");
+    }
+
+    #[test]
+    fn status_right_adds_markers_by_priority_within_its_budget() {
+        let hint = Some("hold Space to talk");
+        // A wide row (240): everything, in display order.
+        assert_eq!(
+            status_right(true, hint, "Tokyo Night", "127.0.0.1:8080", 240),
+            "◌ root finalizes on gateway · hold Space to talk · Tokyo Night · 127.0.0.1:8080"
+        );
+        // 120 columns: conveniences get a third (40) — the theme (a
+        // control) fits first, the hint does not.
+        assert_eq!(
+            status_right(false, hint, "Tokyo Night", "127.0.0.1:8080", 120),
+            "Tokyo Night · 127.0.0.1:8080"
+        );
+        assert_eq!(
+            status_right(true, hint, "Tokyo Night", "127.0.0.1:8080", 100),
+            "◌ root finalizes on gateway · 127.0.0.1:8080",
+            "the marker alone fills the conveniences' third"
+        );
+        // 110 columns: the theme trigger cannot fit; the shorter hint
+        // still does.
+        assert_eq!(
+            status_right(false, hint, " Dark (Abstract) ▾ ", "127.0.0.1:18731", 110),
+            "hold Space to talk · 127.0.0.1:18731"
+        );
+        assert_eq!(
+            status_right(false, None, "Tokyo Night", "127.0.0.1:8080", 10),
+            "127.0.0.1:8080",
+            "the gateway always shows"
+        );
     }
 }

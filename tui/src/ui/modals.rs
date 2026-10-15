@@ -1597,10 +1597,8 @@ pub fn offer_mtp_step(store: Store, ctx: &UiCtx) {
         }
     };
     if model.is_empty() {
-        let line = "MTP support unknown: no model is resolved for this route yet — /mtp still lets you set it".to_string();
-        store
-            .fold
-            .update(|f| f.push_item(crate::transcript::Item::Info { text: line }));
+        // No model resolved yet: nothing to offer, and nothing to say —
+        // `/mtp` opens the step directly whenever wanted.
         return;
     }
     let answered = store.execution_probe.with_untracked(|p| {
@@ -1635,11 +1633,11 @@ pub fn wire_mtp_offer(cx: Scope, store: Store, ctx: UiCtx) {
         store.mtp_step_pending.set(None);
         match crate::speculation::mtp_offer(&model, &payload) {
             crate::speculation::MtpOffer::Offer => open_mtp_stage(cx, store, &ctx),
-            crate::speculation::MtpOffer::Skip(line) => {
-                store
-                    .fold
-                    .update(|f| f.push_item(crate::transcript::Item::Info { text: line }));
-            }
+            // A model without MTP simply skips the step, SILENTLY
+            // (operator ask 2026-10-10: "there is no mtp for openai — and
+            // so what? don't clog the space"). `/mtp` still opens it, and
+            // its own rows say why a depth is not offered.
+            crate::speculation::MtpOffer::Skip(_) => {}
         }
     });
 }
@@ -3037,87 +3035,39 @@ pub fn open_skills(cx: Scope, store: Store, ctx: &UiCtx) {
     });
 }
 
-/// One row of the `/sessions` board: a session id, where the client
-/// learned of it, and everything either side knows about it.
+/// One row of the `/sessions` board — a session the GATEWAY lists, with
+/// what its listing says about it. There is no other source: every
+/// conversation lives in the runtime behind the gateway, and this client
+/// keeps no list of its own (operator ruling 2026-10-10: "there must be
+/// zero local recent list; everything must go through the gateway").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionPick {
     pub id: String,
-    /// The session's first prompt. Local knowledge only — the gateway's
-    /// run listing carries no prompt — so a gateway-only row has none
-    /// and renders as such rather than as a blank that reads like an
-    /// empty conversation.
+    /// The session's opening prompt as the gateway served it (empty until
+    /// fetched, or when the gateway had none).
     pub label: String,
-    /// `None` = the gateway did not list this session (either the fetch
-    /// has not answered, or it answered and this id was not in it).
-    pub state: Option<crate::store::SessionState>,
+    pub state: crate::store::SessionState,
     /// Turns (root runs) the gateway listed for this session.
     pub turns: usize,
-    /// The "when": the gateway's newest-run timestamp where it listed
-    /// one, else the client's own last-used stamp. `from_gateway` says
-    /// WHICH, so the column never passes local memory off as server
-    /// truth.
+    /// The gateway's newest-run timestamp for this session.
     pub when: String,
-    pub from_gateway: bool,
 }
 
-/// Merge what the GATEWAY says exists with what this client REMEMBERS
-/// being called what.
-///
-/// The rule that matters: existence comes from the gateway, labels come
-/// from prefs. A session the gateway lists and this client has never
-/// seen still appears — that is the whole point of the change, because
-/// pointing a fresh client at a remote gateway used to render an empty
-/// list over a gateway holding live work. A session prefs remembers and
-/// the gateway did not list still appears too, with no live state
-/// rather than a fabricated one.
-pub fn merge_session_rows(
-    gateway: Option<&[crate::store::SessionRow]>,
-    local: &[crate::config::SessionEntry],
-) -> Vec<SessionPick> {
-    let mut out: Vec<SessionPick> = Vec::new();
-    if let Some(rows) = gateway {
-        for r in rows {
-            // The GATEWAY's prompt outranks this client's memory of
-            // it: the gateway's is the session's real opening words,
-            // the local one is a cache that only exists for sessions
-            // this client itself started.
-            let label = r.prompt.clone().unwrap_or_else(|| {
-                local
-                    .iter()
-                    .find(|e| e.id == r.id)
-                    .map(|e| e.label.clone())
-                    .unwrap_or_default()
-            });
-            out.push(SessionPick {
-                id: r.id.clone(),
-                label,
-                state: Some(r.state),
-                turns: r.turns,
-                when: r.last_at.clone(),
-                from_gateway: true,
-            });
-        }
-    }
-    for e in local {
-        if out.iter().any(|p| p.id == e.id) {
-            continue;
-        }
-        out.push(SessionPick {
-            id: e.id.clone(),
-            label: e.label.clone(),
-            state: None,
-            turns: 0,
-            when: e.last_used.clone(),
-            from_gateway: false,
-        });
-    }
-    // Live sessions first (they want something), then newest — the
-    // SAME order `runner::session_board_order` fetches prompts in, so
-    // the rows you can see are the rows that get labeled.
-    out.sort_by(|a, b| {
-        let live = |p: &SessionPick| p.state.map(|s| !s.is_live()).unwrap_or(true);
-        live(a).cmp(&live(b)).then_with(|| b.when.cmp(&a.when))
-    });
+/// The board's rows from the gateway's session rows, newest first — the
+/// SAME order `runner::session_board_order` fetches prompts in, so the
+/// rows you can see are the rows that get labeled.
+pub fn session_picks(rows: &[crate::store::SessionRow]) -> Vec<SessionPick> {
+    let mut out: Vec<SessionPick> = rows
+        .iter()
+        .map(|r| SessionPick {
+            id: r.id.clone(),
+            label: r.prompt.clone().unwrap_or_default(),
+            state: r.state,
+            turns: r.turns,
+            when: r.last_at.clone(),
+        })
+        .collect();
+    out.sort_by(|a, b| b.when.cmp(&a.when));
     out
 }
 
@@ -5379,55 +5329,43 @@ mod tests {
     /// /sessions is reading from a local file, that's very bad since we
     /// should be able to connect to a remote gateway").
     ///
-    /// Existence comes from the GATEWAY; labels come from prefs. A
-    /// session the gateway lists and this client has never heard of
-    /// MUST appear — that is the remote-gateway case, where the old
-    /// picker rendered an empty local file over a gateway full of live
-    /// work.
+    /// The board's rows are the GATEWAY's sessions, newest first, with
+    /// the gateway's own prompt as the label — a session started by any
+    /// client appears (one session pool for all clients).
     #[test]
-    fn a_session_this_client_never_saw_still_appears() {
-        use super::merge_session_rows;
+    fn the_board_rows_are_the_gateways_sessions_newest_first() {
+        use super::session_picks;
         use crate::store::{SessionRow, SessionState};
-        let gateway = vec![
-            SessionRow {
-                id: "acode-remote".into(),
-                state: SessionState::Waiting,
-                last_at: "2026-08-28T12:00:00Z".into(),
-                turns: 3,
-                first_run: String::new(),
-                prompt: None,
-                tools: None,
-            },
-            SessionRow {
-                id: "acode-known".into(),
-                state: SessionState::Done,
-                last_at: "2026-08-28T09:00:00Z".into(),
-                turns: 1,
-                first_run: String::new(),
-                prompt: None,
-                tools: None,
-            },
-        ];
-        let local = vec![crate::config::SessionEntry {
-            id: "acode-known".into(),
-            label: "port the tests".into(),
-            last_used: "2026-08-28T09:00:00Z".into(),
-        }];
-        let picks = merge_session_rows(Some(&gateway), &local);
-        let remote = picks.iter().find(|p| p.id == "acode-remote").expect(
-            "a gateway session this client has never seen must be offered — the whole point",
-        );
-        assert!(remote.from_gateway);
-        assert_eq!(remote.state, Some(SessionState::Waiting));
+        let row = |id: &str, state, at: &str, prompt: Option<&str>| SessionRow {
+            id: id.into(),
+            state,
+            last_at: at.into(),
+            turns: 1,
+            first_run: String::new(),
+            prompt: prompt.map(str::to_string),
+            tools: None,
+        };
+        let picks = session_picks(&[
+            row(
+                "acode-old-waiting",
+                SessionState::Waiting,
+                "2026-08-28T12:00:00+00:00",
+                None,
+            ),
+            row(
+                "acode-new",
+                SessionState::Done,
+                "2026-10-10T09:00:00+00:00",
+                Some("port the tests"),
+            ),
+        ]);
+        assert_eq!(picks[0].id, "acode-new", "newest first, whatever the state");
+        assert_eq!(picks[0].label, "port the tests", "the gateway's prompt");
+        assert_eq!(picks[1].state, SessionState::Waiting);
         assert!(
-            remote.label.is_empty(),
-            "no label is honest: the run listing carries no prompt"
+            picks[1].label.is_empty(),
+            "no prompt served: no label, never a guess"
         );
-        // The known one keeps its locally-remembered prompt.
-        let known = picks.iter().find(|p| p.id == "acode-known").unwrap();
-        assert_eq!(known.label, "port the tests");
-        // Live sessions sort above finished ones.
-        assert_eq!(picks[0].id, "acode-remote");
     }
 
     /// The CONSTANT the board actually sends, not just the string
@@ -5454,27 +5392,6 @@ mod tests {
             p.contains(&format!("limit={}", super::SESSION_LIST_LIMIT)),
             "{p}"
         );
-    }
-
-    /// A session prefs remembers but the gateway did not list is NOT
-    /// dropped and NOT given an invented state — it is marked.
-    #[test]
-    fn a_local_session_the_gateway_did_not_list_is_marked_never_faked() {
-        use super::merge_session_rows;
-        let local = vec![crate::config::SessionEntry {
-            id: "acode-orphan".into(),
-            label: "old work".into(),
-            last_used: "2026-08-01T09:00:00Z".into(),
-        }];
-        // Gateway answered, and this id was not in it.
-        let picks = merge_session_rows(Some(&[]), &local);
-        assert_eq!(picks.len(), 1);
-        assert!(!picks[0].from_gateway);
-        assert_eq!(picks[0].state, None, "absent state, never a fabricated one");
-        // Gateway has not answered at all: same rows, still unmarked as
-        // live — the hint line is what says the fetch is pending.
-        let picks = merge_session_rows(None, &local);
-        assert_eq!(picks[0].state, None);
     }
 
     #[test]

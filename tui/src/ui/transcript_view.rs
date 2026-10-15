@@ -30,13 +30,7 @@ use crate::store::Store;
 use crate::transcript::{Item, ToolStatus};
 
 const IMAGE_ROWS: i32 = 14;
-const THINKING_MAX_ROWS: usize = 10;
 const TOOL_RESULT_MAX_ROWS: usize = 6;
-/// Collapsed-view cap for the thinking gist: enough rows for the
-/// model's actual words to lead the cycle (operator directive
-/// 2026-08-19: "the first thing we should see in the turn is the
-/// actual thinking"), few enough that a 30-cycle run still scans.
-const THINKING_GIST_ROWS: usize = 4;
 
 // ---------------------------------------------------------------------------
 // Card rendering: rich span HEADERS (engine 0.2.3 — the span model our
@@ -110,23 +104,64 @@ fn carded(
 /// (rich lines wrap; a rule must fill exactly one row); the blank is
 /// baked in because the typeset rhythm never blanks before an item's
 /// first block.
-fn rule_block(ch: char, label: String, label_ink: Rgba, line_ink: Rgba) -> FeedBlock {
+///
+/// Since 2026-10-10 the only rule left is the final answer's, drawn by
+/// [`rule_block_with_icon`] (the user's message is a card, a cycle a
+/// panel row); this is its paint — row 1 of a 2-row block, row 0 the air.
+fn draw_rule(
+    canvas: &mut dyn abstracttui::ui::StyledCanvas,
+    rect: Rect,
+    ch: char,
+    label: &str,
+    label_ink: Rgba,
+    line_ink: Rgba,
+) {
+    if rect.w <= 0 || rect.h < 2 {
+        return;
+    }
+    let y = rect.y + 1;
+    let lead = format!("{ch}{ch} ");
+    canvas.print(Point::new(rect.x, y), &lead, line_ink, Rgba::TRANSPARENT);
+    let lx = rect.x + text::width(&lead);
+    let fitted = text::truncate_ellipsis(label, (rect.w - text::width(&lead) - 4).max(4));
+    canvas.print(Point::new(lx, y), &fitted, label_ink, Rgba::TRANSPARENT);
+    let tx = lx + text::width(&fitted) + 1;
+    if rect.right() > tx {
+        let tail: String = ch.to_string().repeat((rect.right() - tx) as usize);
+        canvas.print(Point::new(tx, y), &tail, line_ink, Rgba::TRANSPARENT);
+    }
+}
+
+/// [`rule_block`] with the message's play/pause icon at its right end
+/// (the final answer's `══ assistant ══ ▶ ═`).
+fn rule_block_with_icon(
+    ch: char,
+    label: String,
+    label_ink: Rgba,
+    line_ink: Rgba,
+    icon: VoiceIcon,
+    icon_ink: Rgba,
+    icon_lit: Rgba,
+) -> FeedBlock {
+    // THREE rows — air, the rule, air — because the answer's markdown is
+    // its own feed entry (`render_body`): the engine sets TWO blank rows
+    // between a custom block and a markdown block in one item (measured:
+    // operator report 2026-10-10, "one too many line"), and none between
+    // items, so the air below the rule is drawn here, exactly one row.
     FeedBlock::Custom(CustomBlock::new(
-        |_| 2,
+        |_| 3,
         move |canvas, rect| {
-            if rect.w <= 0 || rect.h < 2 {
-                return;
-            }
-            let y = rect.y + 1;
-            let lead = format!("{ch}{ch} ");
-            canvas.print(Point::new(rect.x, y), &lead, line_ink, Rgba::TRANSPARENT);
-            let lx = rect.x + text::width(&lead);
-            let fitted = text::truncate_ellipsis(&label, (rect.w - text::width(&lead) - 4).max(4));
-            canvas.print(Point::new(lx, y), &fitted, label_ink, Rgba::TRANSPARENT);
-            let tx = lx + text::width(&fitted) + 1;
-            if rect.right() > tx {
-                let tail: String = ch.to_string().repeat((rect.right() - tx) as usize);
-                canvas.print(Point::new(tx, y), &tail, line_ink, Rgba::TRANSPARENT);
+            draw_rule(canvas, rect, ch, &label, label_ink, line_ink);
+            if rect.h >= 2 {
+                paint_icon(
+                    canvas,
+                    rect,
+                    rect.y + 1,
+                    icon,
+                    icon_ink,
+                    icon_lit,
+                    Rgba::TRANSPARENT,
+                );
             }
         },
     ))
@@ -189,6 +224,18 @@ fn tool_body_rows(result: &str, width: i32) -> Vec<String> {
         .iter()
         .map(|l| format!("│ {l}"))
         .collect()
+}
+
+/// The tool output as the transcript shows it: JSON laid out
+/// (`ui::json_view`), anything else verbatim. ONE function for the folded
+/// row's body, its `▸ N lines` marker and the marker's hit-test, so the
+/// three count the same rows.
+pub(crate) fn shown_result(result: &str) -> std::borrow::Cow<'_, str> {
+    if crate::ui::json_view::is_json(result) {
+        std::borrow::Cow::Owned(crate::ui::json_view::pretty(result))
+    } else {
+        std::borrow::Cow::Borrowed(result)
+    }
 }
 
 fn marker_text(rows: usize, expanded: bool) -> Option<String> {
@@ -514,10 +561,6 @@ struct CappedBody {
     /// whose first block this is (the typeset rhythm blanks only
     /// between blocks, never before an item's first).
     lead: bool,
-    /// One extra row AFTER the capped lines, its own ink, never
-    /// capped away (the collapsed thinking card's "+reasoning …"
-    /// note — ADR 0001: a hidden channel is named, never dropped).
-    suffix: Option<(String, Rgba)>,
     /// `│ ` gutter on EVERY line (adversarial review finding 10):
     /// result bodies wear it so a scrolled-into screenful of output is
     /// identifiable as TOOL OUTPUT — bare indent stays the model's
@@ -551,7 +594,6 @@ impl CappedBody {
             indent: 2,
             prefix: String::new(),
             lead: false,
-            suffix: None,
             bar: false,
             keep_tail: false,
             uncapped: false,
@@ -585,11 +627,6 @@ impl CappedBody {
 
     fn lead(mut self) -> CappedBody {
         self.lead = true;
-        self
-    }
-
-    fn suffix(mut self, s: &str, ink: Rgba) -> CappedBody {
-        self.suffix = Some((s.to_string(), ink));
         self
     }
 
@@ -654,9 +691,6 @@ impl CappedBody {
                 if h_spec.lead {
                     h += 1;
                 }
-                if h_spec.suffix.is_some() {
-                    h += 1;
-                }
                 h
             },
             move |canvas, rect| {
@@ -690,15 +724,6 @@ impl CappedBody {
                     } else {
                         canvas.print(p, line, spec.ink, Rgba::TRANSPARENT);
                     }
-                }
-                if let Some((s, ink)) = &spec.suffix {
-                    let fitted = text::truncate_ellipsis(s, (rect.w - spec.indent).max(4));
-                    canvas.print(
-                        Point::new(rect.x + spec.indent, top + lines.len() as i32),
-                        &fitted,
-                        *ink,
-                        Rgba::TRANSPARENT,
-                    );
                 }
             },
         ))
@@ -814,6 +839,593 @@ fn fmt_call_secs(ms: f64) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Play / pause per message (operator ask 2026-10-10: "for any message, we
+// should be able to play/pause the reading voice — icons on the top right
+// of a message")
+// ---------------------------------------------------------------------------
+
+/// The read-aloud state of ONE message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VoiceIcon {
+    /// Not being read: `▶` reads it.
+    Idle,
+    /// Being read (or preparing): `‖` pauses it.
+    Playing,
+    /// Paused mid-read: `▶` resumes it.
+    Paused,
+}
+
+/// The text a message's icon reads: your messages and the assistant's
+/// final answers. `None` for every other item (no icon).
+pub(crate) fn speakable(item: &Item) -> Option<&str> {
+    match item {
+        Item::User { text }
+        | Item::Assistant {
+            text,
+            final_answer: true,
+        } if !text.trim().is_empty() => Some(text),
+        _ => None,
+    }
+}
+
+/// The icon state of `item` from the voice signals (untracked reads: the
+/// sync effect subscribes to them once per pass).
+pub(crate) fn voice_icon(store: &Store, item: &Item) -> VoiceIcon {
+    let Some(text) = speakable(item) else {
+        return VoiceIcon::Idle;
+    };
+    if store.voice.speaking_text.get_untracked() != Some(crate::voice::text_key(text)) {
+        return VoiceIcon::Idle;
+    }
+    match store.voice.speaking.get_untracked() {
+        crate::voice::Speaking::Playing | crate::voice::Speaking::Preparing => VoiceIcon::Playing,
+        crate::voice::Speaking::Paused => VoiceIcon::Paused,
+        crate::voice::Speaking::Idle => VoiceIcon::Idle,
+    }
+}
+
+/// Columns the icon zone takes at the right edge of a message's top row:
+/// ` ▶ ` plus one cell of the row's own edge.
+const ICON_ZONE: i32 = 4;
+
+/// The icon's glyph and whether it is lit (this message is being read).
+fn icon_glyph(icon: VoiceIcon) -> (&'static str, bool) {
+    match icon {
+        VoiceIcon::Idle => ("▶", false),
+        VoiceIcon::Playing => ("‖", true),
+        VoiceIcon::Paused => ("▶", true),
+    }
+}
+
+/// Paint the icon zone (` ▶ `) on row `y` at the right edge of `rect`,
+/// over `ground` — the SAME cells [`speak_icon_at`] treats as the control.
+fn paint_icon(
+    canvas: &mut dyn abstracttui::ui::StyledCanvas,
+    rect: Rect,
+    y: i32,
+    icon: VoiceIcon,
+    ink: Rgba,
+    lit: Rgba,
+    ground: Rgba,
+) {
+    if rect.w < ICON_ZONE + 8 {
+        return;
+    }
+    let (glyph, on) = icon_glyph(icon);
+    let x = rect.right() - ICON_ZONE;
+    canvas.print(Point::new(x, y), " ", ink, ground);
+    canvas.print(
+        Point::new(x + 1, y),
+        glyph,
+        if on { lit } else { ink },
+        ground,
+    );
+    canvas.print(Point::new(x + 2, y), " ", ink, ground);
+}
+
+// ---------------------------------------------------------------------------
+// The user card (operator ask 2026-10-10: "a card with a distinct
+// background color so it's easy to spot when we scroll")
+// ---------------------------------------------------------------------------
+
+/// The user card's ground: three quarters of the way from the page
+/// background to the theme's RAISED surface. A designed token, so it is
+/// calm in every theme — tinting toward the accent read as an error
+/// banner where the accent is red (abstract-dark; adversarial review
+/// 2026-10-10) — and distinct enough to find while scrolling; the accent
+/// bar on the left edge carries the colour.
+pub(crate) fn user_card_bg(t: &TokenSet) -> Rgba {
+    t.bg.lerp(t.surface_raised, 0.75)
+}
+
+/// The user's message as a tinted card: one blank row of air, then a pad
+/// row, the text (`❯ ` on the first line, continuations hang-indented),
+/// and a closing pad row — all on [`user_card_bg`], with an accent bar
+/// down the left edge. Replaces the `══ you ═══` rule, which looked like
+/// every other section delimiter once scrolled.
+struct UserCard {
+    body: String,
+    cap: usize,
+    uncapped: bool,
+    icon: VoiceIcon,
+    icon_ink: Rgba,
+    icon_lit: Rgba,
+    bg: Rgba,
+    bar_ink: Rgba,
+    glyph_ink: Rgba,
+    text_ink: Rgba,
+    faint_ink: Rgba,
+}
+
+impl UserCard {
+    /// Columns before the text: bar, space, `❯`, space.
+    const LEFT: i32 = 4;
+
+    fn lines_at(&self, width: i32) -> Vec<String> {
+        let w = (width - Self::LEFT - 1).max(4);
+        if self.uncapped {
+            wrap_rows(&self.body, w)
+        } else {
+            wrap_capped(&self.body, w, self.cap).0
+        }
+    }
+
+    /// Lead blank + top pad + text rows + bottom pad. Named so a test can
+    /// call the arithmetic the engine is handed.
+    fn height_at(&self, width: i32) -> i32 {
+        3 + self.lines_at(width).len().max(1) as i32
+    }
+
+    fn block(self) -> FeedBlock {
+        let spec = Rc::new(self);
+        let h_spec = spec.clone();
+        FeedBlock::Custom(CustomBlock::new(
+            move |width| h_spec.height_at(width),
+            move |canvas, rect| {
+                if rect.w <= 0 || rect.h < 3 {
+                    return;
+                }
+                let lines = spec.lines_at(rect.w);
+                let rows = lines.len().max(1) as i32;
+                let top = rect.y + 1;
+                let card = Rect::new(rect.x, top, rect.w, rows + 2);
+                canvas.fill(card, ' ', spec.text_ink, spec.bg);
+                for y in top..top + rows + 2 {
+                    canvas.print(Point::new(rect.x, y), "▌", spec.bar_ink, spec.bg);
+                }
+                // Top-right of the card: its play/pause icon.
+                paint_icon(
+                    canvas,
+                    rect,
+                    top,
+                    spec.icon,
+                    spec.icon_ink,
+                    spec.icon_lit,
+                    spec.bg,
+                );
+                let clip = canvas.clip_rect();
+                for (i, line) in lines.iter().enumerate() {
+                    let y = top + 1 + i as i32;
+                    if y < clip.y || y >= clip.bottom() {
+                        continue;
+                    }
+                    if i == 0 {
+                        canvas.print(Point::new(rect.x + 2, y), "❯", spec.glyph_ink, spec.bg);
+                    }
+                    // The cap's own marker line reads in the faint voice.
+                    let ink = if !spec.uncapped && line.starts_with("… (+") {
+                        spec.faint_ink
+                    } else {
+                        spec.text_ink
+                    };
+                    canvas.print(Point::new(rect.x + UserCard::LEFT, y), line, ink, spec.bg);
+                }
+            },
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cycle panels (operator ask 2026-10-10: "the cycle to be a collapsible
+// panel, folded by default, and only showing the first few words + key
+// stats. when unfolded, we should see ALL the texts & tools")
+// ---------------------------------------------------------------------------
+
+/// Where an item sits relative to the reasoning cycles around it —
+/// computed per sync pass by [`cycle_slots`] and handed to
+/// `render_item`, `is_visible` and `fingerprint` alike, so the three can
+/// never disagree about what a folded cycle hides.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Slot {
+    /// Not inside a cycle panel: renders on its own, as before.
+    Plain,
+    /// A cycle's head (its `Thinking` item) and the calls it owns, in
+    /// order — the folded row summarises them.
+    Head {
+        open: bool,
+        tools: Vec<(ToolStatus, String)>,
+        /// A FOLDED head right after an open panel takes one blank row
+        /// of air, so it does not sit flush under the panel's last
+        /// output line. Consecutive folded heads pack (one row each).
+        lead: bool,
+        /// The open-state key a click stores (base + first tool-call key
+        /// when the cycle has a call) and the base key (see
+        /// [`cycle_base_key`]). Identity only: no render reads them.
+        key: String,
+        base: String,
+    },
+    /// A tool call owned by the nearest cycle head above it.
+    Member { open: bool },
+}
+
+/// The base identity of a cycle for [`Store::expanded_cycles`]: its
+/// TURN (the hash of the user message that opened it), its ordinal among
+/// that turn's cycles, its number, and its words. A `Thinking` card
+/// carries no ledger key, and the feed's `i{index}` keys are positions a
+/// truncation drain shifts, so identity is derived. Cycle numbers restart
+/// every run and a tool-only cycle has no words, so number + words alone
+/// collided across turns (adversarial review 2026-10-10: one click on
+/// turn 2's `cycle 1` opened turn 1's as well) — hence the turn and the
+/// ordinal. [`cycle_slots`] adds the cycle's first tool-call key, which
+/// carries the run id, when the cycle has one.
+fn cycle_base_key(turn_user: &str, ordinal: usize, item: &Item) -> Option<String> {
+    let Item::Thinking {
+        iteration,
+        content,
+        reasoning,
+        ..
+    } = item
+    else {
+        return None;
+    };
+    let mut h = Fnv::new();
+    h.body(turn_user);
+    h.u64(ordinal as u64);
+    h.u64(*iteration as u64);
+    h.body(content);
+    h.body(reasoning);
+    Some(format!("cycle:{:016x}", h.finish()))
+}
+
+/// The open-state key of every cycle head in `items` (`None` for every
+/// other item) — what a click stores in [`Store::expanded_cycles`].
+pub fn cycle_keys(items: &[Item]) -> Vec<Option<String>> {
+    cycle_slots(items, &[], false)
+        .into_iter()
+        .map(|s| match s {
+            Slot::Head { key, .. } => Some(key),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Assign every item its [`Slot`]. Ownership is positional — the ledger
+/// folds a cycle's `Thinking` card before the calls it requested — and
+/// a turn boundary (the user's message, a steer, the final answer) ends
+/// the open cycle, so a later stray call never folds into an earlier
+/// turn's panel. `details` (`/details full`) opens every cycle.
+///
+/// A cycle is open when `open_keys` holds its full key (base + first
+/// tool-call key) OR its base key: a cycle opened before its first call
+/// landed was stored under the base key and must stay open when the
+/// call arrives.
+pub(crate) fn cycle_slots(items: &[Item], open_keys: &[String], details: bool) -> Vec<Slot> {
+    struct Acc {
+        idx: usize,
+        base: String,
+        first_tool: Option<String>,
+        tools: Vec<(ToolStatus, String)>,
+    }
+    let n = items.len();
+    let mut owner: Vec<Option<usize>> = vec![None; n];
+    let mut head_of: Vec<Option<usize>> = vec![None; n];
+    let mut accs: Vec<Acc> = Vec::new();
+    let mut cur: Option<usize> = None;
+    let mut turn_user = "";
+    let mut ordinal = 0usize;
+    for (i, item) in items.iter().enumerate() {
+        match item {
+            Item::Thinking { .. } => {
+                ordinal += 1;
+                let base = cycle_base_key(turn_user, ordinal, item).unwrap_or_default();
+                head_of[i] = Some(accs.len());
+                cur = Some(accs.len());
+                accs.push(Acc {
+                    idx: i,
+                    base,
+                    first_tool: None,
+                    tools: Vec::new(),
+                });
+            }
+            Item::Tool {
+                key, status, name, ..
+            } => {
+                if let Some(a) = cur {
+                    let acc = &mut accs[a];
+                    if acc.first_tool.is_none() {
+                        acc.first_tool = Some(key.clone());
+                    }
+                    acc.tools.push((*status, name.clone()));
+                    owner[i] = Some(a);
+                }
+            }
+            Item::User { text } => {
+                cur = None;
+                turn_user = text;
+                ordinal = 0;
+            }
+            Item::Steer { .. }
+            | Item::Assistant {
+                final_answer: true, ..
+            } => cur = None,
+            _ => {}
+        }
+    }
+    let opens: Vec<(String, bool)> = accs
+        .iter()
+        .map(|a| {
+            let key = match &a.first_tool {
+                Some(t) => format!("{}|{t}", a.base),
+                None => a.base.clone(),
+            };
+            let open = details || open_keys.contains(&key) || open_keys.contains(&a.base);
+            (key, open)
+        })
+        .collect();
+    // Second pass, in order: the lead blank depends on whether the
+    // previous item belongs to an OPEN panel (its head or a shown member).
+    let mut slots = Vec::with_capacity(n);
+    let mut after_open = false;
+    for i in 0..n {
+        if let Some(k) = head_of[i] {
+            let (key, open) = &opens[k];
+            slots.push(Slot::Head {
+                open: *open,
+                tools: std::mem::take(&mut accs[k].tools),
+                lead: !*open && after_open,
+                key: key.clone(),
+                base: accs[k].base.clone(),
+            });
+            after_open = *open;
+        } else if let Some(k) = owner[i] {
+            let open = opens[k].1;
+            slots.push(Slot::Member { open });
+            // A hidden member keeps whatever came before it.
+            if open {
+                after_open = true;
+            }
+        } else {
+            slots.push(Slot::Plain);
+            after_open = false;
+        }
+    }
+    debug_assert!(accs.iter().all(|a| head_of[a.idx].is_some()));
+    slots
+}
+
+/// The per-call facts the cycle row carries, most important first (the
+/// folded row drops them from the END when squeezed).
+fn cycle_stats(call: &crate::transcript::CallCost) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(ms) = call.gen_time_ms {
+        out.push(fmt_call_secs(ms));
+    }
+    if call.input_tokens > 0 || call.output_tokens > 0 {
+        out.push(format!(
+            "{}↑ {}↓ tk",
+            crate::ui::chrome::fmt_tokens(call.input_tokens),
+            crate::ui::chrome::fmt_tokens(call.output_tokens)
+        ));
+    }
+    // Cache reuse, PROVIDER-REPORTED only (operator ask 2026-08-19):
+    // unreported (0) renders nothing — never the prev-input derivation
+    // dressed up as a measurement (/cache owns the labeled estimate).
+    if call.cached_tokens > 0 && call.input_tokens > 0 {
+        let pct = (call.cached_tokens * 100 / call.input_tokens).min(100);
+        out.push(format!("{pct}% cached"));
+    }
+    out
+}
+
+/// The tool summary chips: `N tools` then one glyph+count per status
+/// present, in a fixed order, each in its status ink — a failure or a
+/// pending approval stays visible on the folded row.
+fn tool_chips(t: &TokenSet, tools: &[(ToolStatus, String)]) -> Vec<(String, Rgba)> {
+    if tools.is_empty() {
+        return Vec::new();
+    }
+    let unit = if tools.len() == 1 { "tool" } else { "tools" };
+    let mut out = vec![(format!("{} {unit}", tools.len()), t.text_faint)];
+    for status in [
+        ToolStatus::AwaitingApproval,
+        ToolStatus::Running,
+        ToolStatus::Failed,
+        ToolStatus::Denied,
+        ToolStatus::Interrupted,
+        ToolStatus::Ok,
+    ] {
+        let n = tools.iter().filter(|(s, _)| *s == status).count();
+        if n > 0 {
+            out.push((
+                format!("{}{n}", tool_glyph_str(status)),
+                tool_glyph_ink(t, status),
+            ));
+        }
+    }
+    out
+}
+
+/// The cycle's first words for the folded row: its content, else its
+/// reasoning, on one line (the draw ellipsizes to the room it has).
+///
+/// The emphasis and code markers (`**`, `` ` ``) are dropped: the row is
+/// plain text, so `**Cargo.toml**` read as markup noise (adversarial
+/// review 2026-10-10); the open panel renders the same words as
+/// markdown. A cycle with no words at all (a tool-only call) leads with
+/// the names of the calls it made instead of an empty row.
+fn cycle_gist(content: &str, reasoning: &str, tools: &[(ToolStatus, String)]) -> String {
+    let src = if content.trim().is_empty() {
+        reasoning
+    } else {
+        content
+    };
+    if src.trim().is_empty() {
+        let names: Vec<&str> = tools.iter().map(|(_, n)| n.as_str()).collect();
+        return crate::transcript::one_line(&names.join(", "), 400);
+    }
+    let plain = src.trim().replace("**", "").replace('`', "");
+    crate::transcript::one_line(&plain, 400)
+}
+
+/// The cycle's header row. Folded: ONE row, no lead blank, so a run of
+/// thirty folded cycles stacks as thirty scannable rows —
+/// `▸ cycle 3  first words…   2 tools ✓2 · 4.1s · 9.8k↑ 210↓ tk`.
+/// Open: a blank row of air, then `▾ cycle 3 ──────── chips · stats` as a
+/// section rule. The row is the panel's toggle (`toggle_cycle_at`).
+struct CycleHeader {
+    open: bool,
+    /// One blank row above a FOLDED header (see `Slot::Head::lead`).
+    lead: bool,
+    /// One blank row BELOW an open header whose words follow as their own
+    /// feed entry (`render_body`) — the air the engine would otherwise
+    /// double (see `rule_block_with_icon`).
+    trail: bool,
+    label: String,
+    gist: String,
+    /// The hidden-reasoning note (`∴ N words`), first in the right group
+    /// and never dropped.
+    note: Option<String>,
+    chips: Vec<(String, Rgba)>,
+    stats: Vec<String>,
+    arrow_ink: Rgba,
+    label_ink: Rgba,
+    gist_ink: Rgba,
+    stat_ink: Rgba,
+    rule_ink: Rgba,
+}
+
+impl CycleHeader {
+    /// The row (within the item) that carries the header — and the
+    /// toggle. Open panels and lead-blank folded rows put it on row 1.
+    fn header_row(open: bool, lead: bool) -> i32 {
+        i32::from(open || lead)
+    }
+
+    /// The right-hand group with the first `n` stats kept, as painted
+    /// segments: (text, ink — `None` = separator ink). ` · ` separates
+    /// the note, the chip run and each stat; chips are space-joined.
+    ///
+    /// ORDER = priority: the tool chips first (an approval or a failure
+    /// must survive any width — adversarial review 2026-10-10 found `?1`
+    /// clipped at 40 columns behind the note), then the hidden-reasoning
+    /// note, then the stats. Squeezing drops from the END.
+    fn right_segments(&self, n: usize, note: bool) -> Vec<(String, Option<Rgba>)> {
+        let mut out: Vec<(String, Option<Rgba>)> = Vec::new();
+        let group = |out: &mut Vec<(String, Option<Rgba>)>| {
+            if !out.is_empty() {
+                out.push((" · ".into(), None));
+            }
+        };
+        if !self.chips.is_empty() {
+            group(&mut out);
+            for (i, (c, ink)) in self.chips.iter().enumerate() {
+                if i > 0 {
+                    out.push((" ".into(), None));
+                }
+                out.push((c.clone(), Some(*ink)));
+            }
+        }
+        if let Some(text) = self.note.as_ref().filter(|_| note) {
+            group(&mut out);
+            out.push((text.clone(), Some(self.stat_ink)));
+        }
+        for st in self.stats.iter().take(n) {
+            group(&mut out);
+            out.push((st.clone(), Some(self.stat_ink)));
+        }
+        out
+    }
+
+    fn right_width(&self, n: usize, note: bool) -> i32 {
+        self.right_segments(n, note)
+            .iter()
+            .map(|(s, _)| text::width(s))
+            .sum()
+    }
+
+    fn block(self) -> FeedBlock {
+        let spec = Rc::new(self);
+        let row = CycleHeader::header_row(spec.open, spec.lead);
+        let trail = i32::from(spec.trail);
+        FeedBlock::Custom(CustomBlock::new(
+            move |_| 1 + row + trail,
+            move |canvas, rect| {
+                if rect.w <= 0 || rect.h <= 0 {
+                    return;
+                }
+                let y = rect.y + row;
+                let arrow = if spec.open { "▾ " } else { "▸ " };
+                let mut x = rect.x;
+                x += canvas.print(Point::new(x, y), arrow, spec.arrow_ink, Rgba::TRANSPARENT);
+                x += canvas.print(
+                    Point::new(x, y),
+                    &spec.label,
+                    spec.label_ink,
+                    Rgba::TRANSPARENT,
+                );
+                // Room left of the right group: the folded row keeps at
+                // least 12 columns of the model's words before it gives
+                // up stats (from the END); chips always stay.
+                let min_mid = if spec.open { 4 } else { 14 };
+                let mut keep = spec.stats.len();
+                let mut note = spec.note.is_some();
+                while rect.right() - (x + 1) - spec.right_width(keep, note) - 1 < min_mid {
+                    if keep > 0 {
+                        keep -= 1;
+                    } else if note {
+                        note = false;
+                    } else {
+                        break;
+                    }
+                }
+                let rw = spec.right_width(keep, note);
+                let rx = (rect.right() - rw).max(x + 1);
+                // Middle: the gist (folded) or the rule (open).
+                let mid_x = x + 2;
+                let mid_w = rx - 2 - mid_x;
+                if spec.open {
+                    let start = x + 1;
+                    let n = (rx - 1 - start).max(0);
+                    if n > 0 {
+                        let rule: String = "─".repeat(n as usize);
+                        canvas.print(
+                            Point::new(start, y),
+                            &rule,
+                            spec.rule_ink,
+                            Rgba::TRANSPARENT,
+                        );
+                    }
+                } else if mid_w >= 4 && !spec.gist.is_empty() {
+                    let fitted = text::truncate_ellipsis(&spec.gist, mid_w);
+                    canvas.print(
+                        Point::new(mid_x, y),
+                        &fitted,
+                        spec.gist_ink,
+                        Rgba::TRANSPARENT,
+                    );
+                }
+                // Right: the note, the chips (status inks), the stats.
+                let mut cx = rx;
+                for (seg, ink) in spec.right_segments(keep, note) {
+                    let ink = ink.unwrap_or(spec.rule_ink);
+                    cx += canvas.print(Point::new(cx, y), &seg, ink, Rgba::TRANSPARENT);
+                }
+            },
+        ))
+    }
+}
+
 /// Mosaic image block: bitmap → colored half/quadrant cells, aspect-
 /// corrected for the ~1:2 terminal cell. Protocol-grade (kitty/iTerm2)
 /// images cannot ride Feed custom blocks yet (engine backlog 0280);
@@ -855,7 +1467,9 @@ fn image_block(bitmap: Arc<abstracttui::widgets::Bitmap>) -> FeedBlock {
 /// `expanded` = this ONE item's per-card override (the disclosure
 /// marker was activated). Meaningful only for a folded tool card;
 /// `/details` outranks it, so under full detail everything is expanded
-/// and no marker renders.
+/// and no marker renders. `slot` = the item's place in the cycle panels
+/// ([`cycle_slots`]): a folded cycle hides its calls, an open one shows
+/// them as full cards.
 fn render_item(
     t: &TokenSet,
     item: &Item,
@@ -863,15 +1477,29 @@ fn render_item(
     details: bool,
     link_root: Option<&Rc<str>>,
     expanded: bool,
+    slot: &Slot,
 ) -> Option<FeedItem> {
     match item {
-        // TURN-weight rule (adversarial review finding 3): the user's
-        // ask opens the turn and must outrank the cycle rules inside
-        // it — '═' vs. their '─'.
+        // The user's ask opens the turn as a tinted CARD (operator ask
+        // 2026-10-10) — the one item findable at a glance while
+        // scrolling, which a '═' rule shared with the answer was not.
         Item::User { text: body } => Some(
-            FeedItem::new()
-                .block(rule_block('═', "you".into(), t.accent, t.text_faint))
-                .block(CappedBody::new(body, t.text, 200).uncapped(details).block()),
+            FeedItem::new().block(
+                UserCard {
+                    body: body.clone(),
+                    cap: 200,
+                    uncapped: details,
+                    icon: voice_icon(&store, item),
+                    icon_ink: t.text_faint,
+                    icon_lit: t.accent,
+                    bg: user_card_bg(t),
+                    bar_ink: t.accent,
+                    glyph_ink: t.accent,
+                    text_ink: t.text,
+                    faint_ink: t.text_muted,
+                }
+                .block(),
+            ),
         ),
         Item::Steer { text: body } => Some(
             carded("↪", t.warn, "steer", t.warn, "", t.warn).block(
@@ -896,74 +1524,42 @@ fn render_item(
             // capped gist; full = content AND the reasoning channel as
             // a labeled block (never coalesced — the old render dropped
             // reasoning whenever content existed).
-            let mut label = format!("cycle {iteration}");
-            if let Some(ms) = call.gen_time_ms {
-                label.push_str(&format!(" · {}", fmt_call_secs(ms)));
-            }
-            if call.input_tokens > 0 || call.output_tokens > 0 {
-                label.push_str(&format!(
-                    " · {}↑ {}↓ tk",
-                    crate::ui::chrome::fmt_tokens(call.input_tokens),
-                    crate::ui::chrome::fmt_tokens(call.output_tokens)
-                ));
-            }
-            // Cache reuse, PROVIDER-REPORTED only (operator ask
-            // 2026-08-19): how much of this prompt was served from
-            // cache instead of recomputed. Unreported (0) renders
-            // nothing — never the prev-input derivation dressed up as
-            // a measurement (/cache owns the labeled estimate).
-            if call.cached_tokens > 0 && call.input_tokens > 0 {
-                let pct = (call.cached_tokens * 100 / call.input_tokens).min(100);
-                label.push_str(&format!(" · {pct}% cached"));
-            }
-            // Label in full ink (operator report 2026-08-19: tool rows
-            // out-shouted the cycle rules — the delimiter must win the
-            // glance); the line stays faint so thirty rules delimit
-            // without shouting.
-            let mut fi = FeedItem::new().block(rule_block('─', label, t.text, t.text_faint));
-            if details {
-                let mut body = content.trim().to_string();
-                if !reasoning.trim().is_empty() {
-                    if !body.is_empty() {
-                        body.push_str("\n— reasoning —\n");
-                    }
-                    body.push_str(reasoning.trim());
-                }
-                if !body.is_empty() {
-                    fi = fi.block(
-                        CappedBody::new(&body, t.text_muted, THINKING_MAX_ROWS * 3)
-                            .uncapped(true)
-                            .block(),
-                    );
-                }
-            } else {
-                let src = if content.trim().is_empty() {
-                    reasoning
-                } else {
-                    content
-                };
-                // The hidden reasoning channel is NAMED as a suffix
-                // row inside the same block (ADR 0001: never a silent
-                // drop; a separate block would buy a rhythm blank).
-                // Words, not chars (adversarial review finding 8): a
-                // human gauges a hidden paragraph by words; "441 ch"
-                // gauged nothing.
-                let note = if !content.trim().is_empty() && !reasoning.trim().is_empty() {
-                    Some(format!(
-                        "… (+{} words of reasoning · /details)",
-                        reasoning.split_whitespace().count()
-                    ))
-                } else {
-                    None
-                };
-                if !src.trim().is_empty() {
-                    let mut body = CappedBody::new(src.trim(), t.text_muted, THINKING_GIST_ROWS);
-                    if let Some(n) = &note {
-                        body = body.suffix(n, t.text_faint);
-                    }
-                    fi = fi.block(body.block());
-                }
-            }
+            // A COLLAPSIBLE PANEL (operator ask 2026-10-10), folded by
+            // default: one row of the model's first words + the call's
+            // facts + its tool summary. Open (a click on the row, or
+            // `/details full` for every cycle): the content as markdown,
+            // the reasoning channel under its own label, and — as their
+            // own feed items below — every call in full.
+            let (open, tools, lead): (bool, &[(ToolStatus, String)], bool) = match slot {
+                Slot::Head {
+                    open, tools, lead, ..
+                } => (*open, tools.as_slice(), *lead),
+                _ => (details, &[], false),
+            };
+            // A folded row that shows CONTENT hides the reasoning channel:
+            // it is NAMED with its size (house rule: a hidden channel is
+            // named, never dropped). When the content is empty the gist
+            // IS the reasoning, so nothing more is hidden.
+            let note = (!open && !content.trim().is_empty() && !reasoning.trim().is_empty())
+                .then(|| format!("∴ {} words", reasoning.split_whitespace().count()));
+            let header = CycleHeader {
+                open,
+                lead,
+                trail: open && (!content.trim().is_empty() || !reasoning.trim().is_empty()),
+                label: format!("cycle {iteration}"),
+                gist: cycle_gist(content, reasoning, tools),
+                note,
+                chips: tool_chips(t, tools),
+                stats: cycle_stats(call),
+                arrow_ink: t.accent,
+                label_ink: t.text,
+                gist_ink: t.text_muted,
+                stat_ink: t.text_muted,
+                rule_ink: t.text_faint,
+            };
+            // The panel's words (content + labelled reasoning) are the
+            // item's BODY entry (`render_body`) when it is open.
+            let fi = FeedItem::new().block(header.block());
             Some(fi)
         }
         Item::Tool {
@@ -984,6 +1580,16 @@ fn render_item(
             // group; /details is the full card (span-wrapped args, the
             // result body). Errors render in BOTH views (honesty over
             // tidiness).
+            // Inside a FOLDED cycle the call is summarised on the cycle's
+            // row (its status chip) and renders nothing of its own; inside
+            // an OPEN cycle it renders as the full card, whatever the
+            // `/details` mode — "when unfolded, we should see ALL the
+            // texts & tools" (operator ask 2026-10-10).
+            let full = match slot {
+                Slot::Member { open: false } => return None,
+                Slot::Member { open: true } => true,
+                _ => details,
+            };
             let (glyph, ink) = tool_glyph(t, *status);
             let word = tool_status_word(*status);
             // Tool rows are SUBORDINATE to the cycle rule (operator
@@ -997,7 +1603,7 @@ fn render_item(
             } else {
                 ink
             };
-            if !details {
+            if !full {
                 // The error rides INSIDE the row block (`↳` voice,
                 // no rhythm blank between a `✗` and its reason).
                 return Some(
@@ -1017,7 +1623,7 @@ fn render_item(
                             error: crate::transcript::one_line(error, 200),
                             error_ink: t.error,
                             link_root: link_root.cloned(),
-                            result: result.clone(),
+                            result: shown_result(result).into_owned(),
                             result_ink: t.text_faint,
                             marker_ink: t.text_faint,
                             status: *status,
@@ -1037,9 +1643,12 @@ fn render_item(
                     fi
                 });
             }
+            // The full card: the tool's NAME in the info ink so a call
+            // stands out of the prose and output around it; arguments in
+            // the muted voice, output in the faint `│` voice below them.
             let spans = vec![
                 Span::new(format!("{glyph} "), Style::new().fg(ink)),
-                Span::new(name.clone(), Style::new().fg(t.text_muted)),
+                Span::new(name.clone(), Style::new().fg(t.info)),
                 Span::new(format!(" · {word}"), Style::new().fg(word_ink)),
             ];
             let mut fi = FeedItem::new().rich_block(RichText::from_lines(vec![
@@ -1062,7 +1671,7 @@ fn render_item(
             };
             if !args_body.is_empty() {
                 fi = fi.block(
-                    CappedBody::new(args_body, t.text_faint, TOOL_RESULT_MAX_ROWS)
+                    CappedBody::new(args_body, t.text_muted, TOOL_RESULT_MAX_ROWS)
                         .uncapped(true)
                         .linked(link_root)
                         .block(),
@@ -1084,7 +1693,15 @@ fn render_item(
             // silently, in every view. The output of a failed build is
             // precisely what the operator opens details for; the error
             // says THAT it failed, the body says WHY.
-            if !result.is_empty() && *status != ToolStatus::Running {
+            if !result.is_empty()
+                && *status != ToolStatus::Running
+                && crate::ui::json_view::is_json(result)
+            {
+                // JSON output, laid out in the syntax inks (operator ask
+                // 2026-10-10): indented, long strings wrapping inside the
+                // transcript width instead of running off it.
+                fi = fi.block(crate::ui::json_view::block(result, t));
+            } else if !result.is_empty() && *status != ToolStatus::Running {
                 // `│` gutter: a scrolled-into screenful of output is
                 // identifiable as TOOL OUTPUT without its header
                 // (adversarial review finding 10).
@@ -1107,11 +1724,15 @@ fn render_item(
             // that opened it (adversarial review finding 3). Interim
             // updates stay minor cards.
             if *final_answer {
-                return Some(
-                    FeedItem::new()
-                        .block(rule_block('═', "assistant".into(), t.ok, t.text_faint))
-                        .block(FeedBlock::Markdown(body.clone())),
-                );
+                return Some(FeedItem::new().block(rule_block_with_icon(
+                    '═',
+                    "assistant".into(),
+                    t.ok,
+                    t.text_faint,
+                    voice_icon(&store, item),
+                    t.text_muted,
+                    t.accent,
+                )));
             }
             let ink = t.text_muted;
             Some(
@@ -1173,6 +1794,86 @@ fn render_item(
     }
 }
 
+/// The second feed entry of an item whose markdown follows a drawn header
+/// — the final answer under its rule, an open cycle's words under its
+/// header. Split because the engine sets two blank rows between a custom
+/// block and a markdown block inside ONE item (operator report
+/// 2026-10-10: "one too many line between ==assistant== and its answer")
+/// and none between items; the header draws the one row of air itself.
+/// Keyed `i{index}~body` right after the item's own key.
+fn render_body(t: &TokenSet, item: &Item, slot: &Slot) -> Option<FeedItem> {
+    match item {
+        Item::Assistant {
+            text,
+            final_answer: true,
+        } if !text.trim().is_empty() => {
+            Some(FeedItem::new().block(FeedBlock::Markdown(text.clone())))
+        }
+        Item::Thinking {
+            content, reasoning, ..
+        } if matches!(slot, Slot::Head { open: true, .. }) => {
+            let mut fi = FeedItem::new();
+            let mut any = false;
+            if !content.trim().is_empty() {
+                fi = fi.block(FeedBlock::Markdown(content.trim().to_string()));
+                any = true;
+            }
+            if !reasoning.trim().is_empty() {
+                // The reasoning channel, NAMED and never coalesced into
+                // the content. Label and body in ONE block, so no blank
+                // row splits the label from what it labels; its own
+                // blank row separates it from the content above.
+                let mut lines = Vec::new();
+                if any {
+                    lines.push(RichLine::new());
+                }
+                lines.push(RichLine::from_spans(vec![
+                    Span::new("∴ reasoning", Style::new().fg(t.accent_alt)),
+                    Span::new(
+                        format!("  {} words", reasoning.split_whitespace().count()),
+                        Style::new().fg(t.text_faint),
+                    ),
+                ]));
+                for line in reasoning.trim().lines() {
+                    lines.push(RichLine::from_spans(vec![Span::new(
+                        line.to_string(),
+                        Style::new().fg(t.text_muted),
+                    )]));
+                }
+                fi = fi.rich_block(RichText::from_lines(lines));
+                any = true;
+            }
+            any.then_some(fi)
+        }
+        _ => None,
+    }
+}
+
+/// Mirror of [`render_body`]'s `is_some()` without building anything —
+/// the sync's "does this item own a body entry" bookkeeping.
+fn has_body(item: &Item, slot: &Slot) -> bool {
+    match item {
+        Item::Assistant {
+            text,
+            final_answer: true,
+        } => !text.trim().is_empty(),
+        Item::Thinking {
+            content, reasoning, ..
+        } => {
+            matches!(slot, Slot::Head { open: true, .. })
+                && (!content.trim().is_empty() || !reasoning.trim().is_empty())
+        }
+        _ => false,
+    }
+}
+
+/// The fold index a feed key names: `i{index}` (the item) or
+/// `i{index}~body` (its body entry, [`render_body`]).
+pub(crate) fn item_index(key: &str) -> Option<usize> {
+    let rest = key.strip_prefix('i')?;
+    rest.split('~').next()?.parse().ok()
+}
+
 /// Cheap content fingerprint (FNV-1a) over everything `render_item`
 /// reads, so the sync effect re-renders exactly the items that changed.
 /// `expanded` rides the fingerprint so a disclosure toggle repaints
@@ -1180,8 +1881,32 @@ fn render_item(
 /// its visibility, so the sync stays on the keyed fast path — the
 /// `clear()` rebuild is reserved for visibility flips, where feed order
 /// (push order) would otherwise strand a mid-list key.
-fn fingerprint(item: &Item, store: &Store, expanded: bool) -> u64 {
+fn fingerprint(item: &Item, store: &Store, expanded: bool, slot: &Slot) -> u64 {
     let mut h = Fnv::new();
+    // The message's play/pause icon (a voice state change repaints only
+    // the message being read).
+    h.byte(voice_icon(store, item) as u8);
+    // The cycle panel state: a head renders its open state and its calls'
+    // status chips; a member renders (or hides) by its head's state.
+    match slot {
+        Slot::Plain => h.byte(0),
+        Slot::Head {
+            open, tools, lead, ..
+        } => {
+            h.byte(1);
+            h.byte(u8::from(*open));
+            h.byte(u8::from(*lead));
+            h.u64(tools.len() as u64);
+            for (status, name) in tools {
+                h.byte(*status as u8);
+                h.str(name);
+            }
+        }
+        Slot::Member { open } => {
+            h.byte(2);
+            h.byte(u8::from(*open));
+        }
+    }
     match item {
         Item::User { text } => {
             h.byte(1);
@@ -1346,6 +2071,10 @@ pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState, link_root: Option<Rc
     struct SyncState {
         /// (fingerprint, visible) per source item index.
         seen: Vec<(u64, bool)>,
+        /// Whether each item owns a body entry (`i{index}~body`). A flip
+        /// of an EXISTING item rebuilds (a body key can only be appended
+        /// at the tail, like any key).
+        bodies: Vec<bool>,
         details: bool,
         theme: &'static str,
         /// WHICH conversation the seen bookkeeping describes. A focus
@@ -1358,6 +2087,7 @@ pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState, link_root: Option<Rc
     }
     let state = Rc::new(RefCell::new(SyncState {
         seen: Vec::new(),
+        bodies: Vec::new(),
         details: true,
         theme: "",
         focus: Focus::Agent,
@@ -1376,6 +2106,12 @@ pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState, link_root: Option<Rc
         // holds a handful of keys and cloning it per card would be the
         // most expensive thing in the sync.
         let expanded_keys = store.expanded_tools.get();
+        // Open cycle panels — one tracked read per pass, like the tools.
+        let open_cycles = store.expanded_cycles.get();
+        // The play/pause icons follow the voice state (read per item
+        // untracked in `voice_icon`; subscribed here once).
+        let _ = store.voice.speaking.get();
+        let _ = store.voice.speaking_text.get();
         // `/details` outranks the per-card override: under full detail
         // every card already shows its body, so nothing is "expanded"
         // and no marker renders.
@@ -1392,6 +2128,7 @@ pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState, link_root: Option<Rc
         // fast path no-ops (trivial at chat scale).
         let sync_items = |items: &[Item]| {
             let mut st = state.borrow_mut();
+            let slots = cycle_slots(items, &open_cycles, details);
             let mut rebuild = theme_id != st.theme
                 || details != st.details
                 || focus != st.focus
@@ -1400,8 +2137,10 @@ pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState, link_root: Option<Rc
                 // A mid-list visibility flip cannot be expressed with
                 // keyed appends (order is push order) — rebuild instead.
                 for (i, item) in items.iter().enumerate().take(st.seen.len()) {
-                    let visible = is_visible(item, details);
-                    if st.seen[i].1 != visible {
+                    let visible = is_visible(item, details, &slots[i]);
+                    let body = visible && has_body(item, &slots[i]);
+                    if st.seen[i].1 != visible || st.bodies.get(i).copied().unwrap_or(false) != body
+                    {
                         rebuild = true;
                         break;
                     }
@@ -1412,16 +2151,25 @@ pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState, link_root: Option<Rc
                 st.details = details;
                 st.focus = focus.clone();
                 st.seen.clear();
+                st.bodies.clear();
                 feed.clear();
                 for (i, item) in items.iter().enumerate() {
                     let ex = is_expanded(item);
-                    let fp = fingerprint(item, &store, ex);
-                    match render_item(&t, item, store, details, link_root.as_ref(), ex) {
+                    let fp = fingerprint(item, &store, ex, &slots[i]);
+                    match render_item(&t, item, store, details, link_root.as_ref(), ex, &slots[i]) {
                         Some(fi) => {
                             feed.push(format!("i{i}"), fi);
                             st.seen.push((fp, true));
+                            let body = render_body(&t, item, &slots[i]);
+                            st.bodies.push(body.is_some());
+                            if let Some(b) = body {
+                                feed.push(format!("i{i}~body"), b);
+                            }
                         }
-                        None => st.seen.push((fp, false)),
+                        None => {
+                            st.seen.push((fp, false));
+                            st.bodies.push(false);
+                        }
                     }
                 }
                 return;
@@ -1429,27 +2177,39 @@ pub fn wire_feed(cx: Scope, store: Store, feed: &FeedState, link_root: Option<Rc
             for (i, item) in items.iter().enumerate() {
                 let known = i < st.seen.len();
                 let ex = is_expanded(item);
-                let fp = fingerprint(item, &store, ex);
-                if known && st.seen[i] == (fp, is_visible(item, details)) {
+                let fp = fingerprint(item, &store, ex, &slots[i]);
+                if known && st.seen[i] == (fp, is_visible(item, details, &slots[i])) {
                     continue; // unchanged
                 }
-                match render_item(&t, item, store, details, link_root.as_ref(), ex) {
+                match render_item(&t, item, store, details, link_root.as_ref(), ex, &slots[i]) {
                     Some(fi) => {
                         // Existing key -> in-place replace; new key ->
                         // append (source items only ever append, so a new
-                        // visible key always lands at the tail).
+                        // visible key always lands at the tail). The body
+                        // entry follows its item the same way (a body
+                        // appearing or vanishing on a KNOWN item rebuilt
+                        // above).
                         feed.push(format!("i{i}"), fi);
+                        let body = render_body(&t, item, &slots[i]);
+                        let has = body.is_some();
+                        if let Some(b) = body {
+                            feed.push(format!("i{i}~body"), b);
+                        }
                         if known {
                             st.seen[i] = (fp, true);
+                            st.bodies[i] = has;
                         } else {
                             st.seen.push((fp, true));
+                            st.bodies.push(has);
                         }
                     }
                     None => {
                         if known {
                             st.seen[i] = (fp, false);
+                            st.bodies[i] = false;
                         } else {
                             st.seen.push((fp, false));
+                            st.bodies.push(false);
                         }
                     }
                 }
@@ -1705,7 +2465,11 @@ pub fn wire_live_feed(cx: Scope, store: Store, live_feed: &FeedState) {
 /// `render_item` returning `Some` for an item this predicate calls
 /// hidden would append a mid-list key at the feed tail (feed order is
 /// push order). Pinned by `tests::visibility_mirror_matches_render_item`.
-fn is_visible(item: &Item, details: bool) -> bool {
+fn is_visible(item: &Item, details: bool, slot: &Slot) -> bool {
+    // A call inside a FOLDED cycle panel is summarised on the cycle row.
+    if matches!(slot, Slot::Member { open: false }) {
+        return false;
+    }
     match item {
         // Entity probe bodies stay details-gated; thinking and tools
         // are ALWAYS visible (operator directives 2026-07-26 and
@@ -1761,6 +2525,8 @@ pub fn pane(
     // the menu's "Copy path" row.
     let overlays = ctx.overlays.clone();
     let link_root: Option<Rc<str>> = ctx.workspace_root.as_deref().map(Rc::from);
+    // The message play/pause icons read through the voice lane.
+    let speak_ctx = ctx.clone();
     // `basis(Cells(0))` beside `grow(1.0)` (2026-08-20): without it this
     // wrapper's basis is AUTO — measured from its content, i.e. the whole
     // transcript — so the chrome column overflowed by hundreds of rows the
@@ -1869,6 +2635,7 @@ pub fn pane(
             // the engine's own formula in `Feed::on_item_press`, immune
             // to the pin lag by construction.
             let ui_feed = feed.clone();
+            let speak_ctx = speak_ctx.clone();
             let menu_overlays = overlays.clone();
             let menu_root = link_root.clone();
             let content = Element::new()
@@ -1889,7 +2656,14 @@ pub fn pane(
                         m.kind
                     {
                         let rect = ectx.current_rect();
-                        if toggle_marker_at(store, &ui_feed, rect, m.pos) {
+                        if let Some(text) = speak_icon_at(store, &ui_feed, rect, m.pos) {
+                            crate::ui::voice_view::toggle_message(store, &speak_ctx, &text);
+                            ectx.stop_propagation();
+                            return;
+                        }
+                        if toggle_cycle_at(store, &ui_feed, follow, offset, rect, m.pos)
+                            || toggle_marker_at(store, &ui_feed, rect, m.pos)
+                        {
                             ectx.stop_propagation();
                         }
                         return;
@@ -1903,8 +2677,7 @@ pub fn pane(
                     let Some((key, _)) = ui_feed.item_at_row(row) else {
                         return; // a gap or past-the-end press affords nothing
                     };
-                    let Some(ix) = key.strip_prefix('i').and_then(|s| s.parse::<usize>().ok())
-                    else {
+                    let Some(ix) = item_index(&key) else {
                         return;
                     };
                     // Agent lane only: entity conversations use other
@@ -1959,6 +2732,125 @@ pub fn pane(
     )
 }
 
+/// A left press on a message's play/pause icon: the message's text, to
+/// read / pause / resume (`voice_view::toggle_message`). `None` for every
+/// other cell — the icon zone is the ONLY control, so selection keeps
+/// working on the rest of the row. Geometry mirrors [`paint_icon`]: the
+/// zone's three cells at the right edge, on the message's top row (row 1
+/// of both the user card and the answer rule; row 0 is the air above).
+fn speak_icon_at(
+    store: Store,
+    feed: &FeedState,
+    rect: abstracttui::base::Rect,
+    pos: Point,
+) -> Option<String> {
+    if rect.w < ICON_ZONE + 8 {
+        return None;
+    }
+    let x0 = rect.right() - ICON_ZONE;
+    if pos.x < x0 || pos.x >= x0 + 3 {
+        return None;
+    }
+    let (key, within) = feed.item_at_row(pos.y - rect.y)?;
+    // The icon lives on the item's own entry, never on its body entry.
+    if within != 1 || key.contains('~') {
+        return None;
+    }
+    let ix = item_index(&key)?;
+    let text_at = |items: &[Item]| items.get(ix).and_then(speakable).map(str::to_string);
+    match store.focus.get_untracked() {
+        Focus::Agent => store.fold.with_untracked(|f| text_at(&f.items)),
+        Focus::Entity(name) => store.convos.with_untracked(|cs| {
+            cs.iter()
+                .find(|c| c.name == name)
+                .and_then(|c| text_at(&c.items))
+        }),
+    }
+}
+
+/// A left press on a cycle panel's HEADER ROW opens or folds that cycle
+/// (operator ask 2026-10-10). Returns whether the press was CONSUMED —
+/// only the header row is a control; every body row stays selectable.
+/// Inert under `/details full`, where every cycle is open and the rows
+/// are not toggles (the global mode outranks the per-panel one).
+///
+/// Works in whichever conversation has focus: the feed renders the
+/// focused item source, so the hit row is resolved against that same
+/// source.
+fn toggle_cycle_at(
+    store: Store,
+    feed: &FeedState,
+    follow: Signal<bool>,
+    offset: Signal<i32>,
+    rect: abstracttui::base::Rect,
+    pos: Point,
+) -> bool {
+    if store.show_details.get_untracked() {
+        return false;
+    }
+    let Some((key, within)) = feed.item_at_row(pos.y - rect.y) else {
+        return false;
+    };
+    // The header is on the item's own entry; its body entry (the panel's
+    // words) is text, never a toggle.
+    if key.contains('~') {
+        return false;
+    }
+    let Some(ix) = item_index(&key) else {
+        return false;
+    };
+    // The item and its slot from the SAME computation the sync used, so
+    // the hit row and the drawn row cannot disagree (a folded row after
+    // an open panel carries a lead blank).
+    let open_cycles = store.expanded_cycles.get_untracked();
+    let at = |items: &[Item]| -> Option<Slot> {
+        cycle_slots(items, &open_cycles, false).get(ix).cloned()
+    };
+    let hit = match store.focus.get_untracked() {
+        Focus::Agent => store.fold.with_untracked(|f| at(&f.items)),
+        Focus::Entity(name) => store.convos.with_untracked(|cs| {
+            cs.iter()
+                .find(|c| c.name == name)
+                .and_then(|c| at(&c.items))
+        }),
+    };
+    let Some(Slot::Head {
+        open,
+        lead,
+        key: cycle,
+        base,
+        ..
+    }) = hit
+    else {
+        return false;
+    };
+    if within != CycleHeader::header_row(open, lead) {
+        return false;
+    }
+    // Folding removes BOTH forms (a cycle opened before its first call
+    // landed was stored under its base key); opening stores the full one.
+    store.expanded_cycles.update(|e| {
+        if open {
+            e.retain(|k| *k != cycle && *k != base);
+        } else {
+            e.push(cycle);
+        }
+    });
+    // Release follow-tail: with the tail pinned, a panel growing in
+    // place pushed everything above it UP and the clicked header off the
+    // top of the viewport (adversarial review 2026-10-10). Opening also
+    // scrolls the header to the TOP of the view (one row of context above
+    // it), so the panel reads downward from it instead of unfolding below
+    // the visible area when the row sat near the bottom. Folding keeps
+    // the view where it is. The press row IS the header's content row:
+    // `rect` is the scrolled content rect (see the handler in `pane`).
+    follow.set(false);
+    if !open {
+        offset.set((pos.y - rect.y - 1).max(0));
+    }
+    true
+}
+
 /// A left press on a folded tool card's disclosure marker toggles that
 /// card's output. Returns whether the press was CONSUMED — false for
 /// every other cell, which is what keeps drag-to-select alive over the
@@ -1991,9 +2883,22 @@ fn toggle_marker_at(
     if within != 0 {
         return false;
     }
-    let Some(ix) = key.strip_prefix('i').and_then(|s| s.parse::<usize>().ok()) else {
+    let Some(ix) = item_index(&key) else {
         return false;
     };
+    // Only a PLAIN tool row draws the marker: a call inside a cycle panel
+    // is either hidden (folded cycle) or a full card (open cycle), and a
+    // full card's row 0 is its blank lead — pressing there must stay a
+    // text-selection press.
+    let open_cycles = store.expanded_cycles.get_untracked();
+    let plain = store.fold.with_untracked(|f| {
+        cycle_slots(&f.items, &open_cycles, false)
+            .get(ix)
+            .is_some_and(|s| *s == Slot::Plain)
+    });
+    if !plain {
+        return false;
+    }
     let Some((tool_key, marker, name, status)) =
         store.fold.with_untracked(|f| match f.items.get(ix) {
             Some(Item::Tool {
@@ -2006,7 +2911,7 @@ fn toggle_marker_at(
                 let expanded = store
                     .expanded_tools
                     .with_untracked(|e| e.iter().any(|k| k == key));
-                tool_marker(result, *status, expanded, rect.w)
+                tool_marker(&shown_result(result), *status, expanded, rect.w)
                     .map(|m| (key.clone(), m, name.clone(), *status))
             }
             _ => None,
@@ -2628,13 +3533,22 @@ mod tests {
                     body: "[episode] a prior check\n  digest".into(),
                 },
             ];
+            // Every slot an item can hold: the cycle folded, the cycle
+            // opened by key, and the item rendered as if it stood alone.
+            let open_key = vec![cycle_keys(&items)[2].clone().expect("a cycle")];
             for details in [true, false] {
-                for item in &items {
-                    assert_eq!(
-                        is_visible(item, details),
-                        render_item(&t, item, store, details, None, false).is_some(),
-                        "visibility mirror diverged for {item:?} details={details}"
-                    );
+                for open in [Vec::new(), open_key.clone()] {
+                    let slots = cycle_slots(&items, &open, details);
+                    for (item, slot) in items.iter().zip(&slots) {
+                        for slot in [slot.clone(), Slot::Plain] {
+                            assert_eq!(
+                                is_visible(item, details, &slot),
+                                render_item(&t, item, store, details, None, false, &slot)
+                                    .is_some(),
+                                "visibility mirror diverged for {item:?} details={details} slot={slot:?}"
+                            );
+                        }
+                    }
                 }
             }
         });
@@ -2702,7 +3616,7 @@ mod tests {
                 error: String::new(),
                 sandbox: None,
             };
-            let fp = |i: &Item| fingerprint(i, &store, false);
+            let fp = |i: &Item| fingerprint(i, &store, false, &Slot::Plain);
             let mut m = base.clone();
             if let Item::Tool { name, .. } = &mut m {
                 *name = "n2".into();
@@ -2730,5 +3644,359 @@ mod tests {
             assert_ne!(fp(&base), fp(&m), "error changes must re-render");
         });
         root.dispose();
+    }
+
+    fn thinking(iteration: u32, content: &str) -> Item {
+        Item::Thinking {
+            iteration,
+            content: content.into(),
+            reasoning: String::new(),
+            call: crate::transcript::CallCost::default(),
+        }
+    }
+
+    fn tool_item(key: &str, status: ToolStatus) -> Item {
+        Item::Tool {
+            key: key.into(),
+            name: "read_file".into(),
+            args_preview: "a.rs".into(),
+            args_full: "path: a.rs".into(),
+            status,
+            result: "fn main() {}".into(),
+            error: String::new(),
+            sandbox: None,
+        }
+    }
+
+    /// Cycle ownership is positional and stops at turn boundaries: the
+    /// calls after a `Thinking` card belong to it; a user message, a steer
+    /// or the final answer ends the open cycle, so a stray later call
+    /// stays a plain row instead of folding into an earlier turn's panel.
+    #[test]
+    fn cycle_slots_group_calls_under_their_cycle_and_stop_at_turn_boundaries() {
+        let items = vec![
+            Item::User { text: "q".into() },
+            tool_item("orphan", ToolStatus::Ok),
+            thinking(1, "first"),
+            tool_item("t1", ToolStatus::Ok),
+            Item::Info {
+                text: "note".into(),
+            },
+            tool_item("t2", ToolStatus::Failed),
+            thinking(2, "second"),
+            tool_item("t3", ToolStatus::Running),
+            Item::Assistant {
+                text: "answer".into(),
+                final_answer: true,
+            },
+            tool_item("late", ToolStatus::Ok),
+        ];
+        let slots = cycle_slots(&items, &[], false);
+        assert_eq!(slots[0], Slot::Plain);
+        assert_eq!(
+            slots[1],
+            Slot::Plain,
+            "a call before any cycle stands alone"
+        );
+        match &slots[2] {
+            Slot::Head {
+                open: false,
+                tools,
+                lead: false,
+                ..
+            } => assert_eq!(
+                tools,
+                &vec![
+                    (ToolStatus::Ok, "read_file".into()),
+                    (ToolStatus::Failed, "read_file".into())
+                ]
+            ),
+            other => panic!("cycle 1 heads its calls: {other:?}"),
+        }
+        assert_eq!(slots[3], Slot::Member { open: false });
+        assert_eq!(slots[4], Slot::Plain, "notices are never hidden by a fold");
+        assert_eq!(slots[5], Slot::Member { open: false });
+        assert_eq!(slots[7], Slot::Member { open: false });
+        assert_eq!(slots[9], Slot::Plain, "the final answer closes the cycle");
+        // Opening ONE cycle by key opens only that one.
+        let keys = cycle_keys(&items);
+        let open = vec![keys[6].clone().unwrap()];
+        let slots = cycle_slots(&items, &open, false);
+        assert!(matches!(slots[2], Slot::Head { open: false, .. }));
+        assert!(matches!(slots[6], Slot::Head { open: true, .. }));
+        assert_eq!(slots[3], Slot::Member { open: false });
+        assert_eq!(slots[7], Slot::Member { open: true });
+        // A folded head right after an OPEN panel takes a blank of air;
+        // folded heads after folded ones pack.
+        let open_first = vec![keys[2].clone().unwrap()];
+        let slots = cycle_slots(&items, &open_first, false);
+        assert!(matches!(
+            slots[6],
+            Slot::Head {
+                open: false,
+                lead: true,
+                ..
+            }
+        ));
+        let slots = cycle_slots(&items, &[], false);
+        assert!(matches!(
+            slots[6],
+            Slot::Head {
+                open: false,
+                lead: false,
+                ..
+            }
+        ));
+        // `/details full` opens every cycle.
+        let slots = cycle_slots(&items, &[], true);
+        assert!(slots.iter().all(|s| !matches!(
+            s,
+            Slot::Head { open: false, .. } | Slot::Member { open: false }
+        )));
+    }
+
+    /// A user message mid-list ends the cycle above it: a call after it
+    /// stands alone (adversarial review 2026-10-10, mutant M6 survived a
+    /// test whose only user message was the first item).
+    #[test]
+    fn a_user_message_ends_the_cycle_above_it() {
+        let items = vec![
+            thinking(1, "a"),
+            tool_item("t1", ToolStatus::Ok),
+            Item::User { text: "q2".into() },
+            tool_item("t2", ToolStatus::Ok),
+        ];
+        let slots = cycle_slots(&items, &[], false);
+        assert_eq!(slots[1], Slot::Member { open: false });
+        assert_eq!(slots[3], Slot::Plain);
+    }
+
+    /// Identity is scoped to the TURN and the cycle's calls: the same
+    /// `cycle 1` with the same (empty) words in two turns gets two keys,
+    /// even when both turns were opened by the same user text — the
+    /// first call's key carries the run (adversarial review 2026-10-10:
+    /// one click opened both).
+    #[test]
+    fn cycle_keys_differ_across_turns_with_identical_cycles() {
+        let turn = |user: &str, call: &str| {
+            vec![
+                Item::User { text: user.into() },
+                thinking(1, ""),
+                tool_item(call, ToolStatus::Ok),
+                Item::Assistant {
+                    text: "done".into(),
+                    final_answer: true,
+                },
+            ]
+        };
+        let mut items = turn("continue", "call:runA:c1");
+        items.extend(turn("continue", "call:runB:c1"));
+        let keys = cycle_keys(&items);
+        assert_ne!(keys[1], keys[5], "same text, same number, different runs");
+        let mut items = turn("q1", "");
+        items.extend(turn("q2", ""));
+        let keys = cycle_keys(&items);
+        assert_ne!(keys[1], keys[5], "different turns");
+        // Opening turn 2's cycle opens only turn 2's.
+        let slots = cycle_slots(&items, &[keys[5].clone().unwrap()], false);
+        assert!(matches!(slots[1], Slot::Head { open: false, .. }));
+        assert!(matches!(slots[5], Slot::Head { open: true, .. }));
+        // A cycle opened BEFORE its first call landed (stored under the
+        // base key) stays open when the call arrives.
+        let early = vec![thinking(1, "plan")];
+        let stored = cycle_keys(&early)[0].clone().unwrap();
+        let mut later = early.clone();
+        later.push(tool_item("call:r:c9", ToolStatus::Running));
+        let slots = cycle_slots(&later, &[stored], false);
+        assert!(matches!(slots[0], Slot::Head { open: true, .. }));
+        assert_eq!(slots[1], Slot::Member { open: true });
+    }
+
+    /// Chips outrank the note and the stats for room: at a narrow width
+    /// the awaiting-approval and failure chips stay whole.
+    #[test]
+    fn narrow_cycle_rows_keep_their_status_chips() {
+        let t = abstracttui::theme::themes()[0].tokens;
+        let header = CycleHeader {
+            open: false,
+            lead: false,
+            trail: false,
+            label: "cycle 12".into(),
+            gist: "Some content".into(),
+            note: Some("∴ 120 words".into()),
+            chips: tool_chips(
+                &t,
+                &[
+                    (ToolStatus::Ok, "a".into()),
+                    (ToolStatus::Failed, "b".into()),
+                    (ToolStatus::AwaitingApproval, "c".into()),
+                ],
+            ),
+            stats: vec!["4s".into(), "9.8k↑ 210↓ tk".into()],
+            arrow_ink: t.accent,
+            label_ink: t.text,
+            gist_ink: t.text_muted,
+            stat_ink: t.text_muted,
+            rule_ink: t.text_faint,
+        };
+        let segs: String = header
+            .right_segments(0, false)
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect();
+        assert_eq!(segs, "3 tools ?1 ✗1 ✓1", "chips are the floor");
+        let full: String = header
+            .right_segments(2, true)
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect();
+        assert!(
+            full.starts_with("3 tools ?1 ✗1 ✓1 · ∴ 120 words · 4s"),
+            "chips lead, then the note, then stats: {full}"
+        );
+    }
+
+    /// A tool-only cycle leads with its calls' names; markdown markers
+    /// never reach the plain-text row.
+    #[test]
+    fn cycle_gist_is_plain_words_or_the_call_names() {
+        assert_eq!(
+            cycle_gist("read **Cargo.toml** then `cargo test`", "", &[]),
+            "read Cargo.toml then cargo test"
+        );
+        assert_eq!(
+            cycle_gist(
+                "",
+                "",
+                &[
+                    (ToolStatus::Ok, "read_file".into()),
+                    (ToolStatus::Ok, "grep".into())
+                ]
+            ),
+            "read_file, grep"
+        );
+        assert_eq!(cycle_gist("", "thinking aloud", &[]), "thinking aloud");
+    }
+
+    /// The folded head must repaint when a call it summarises changes
+    /// status, when a call joins it, and when it opens.
+    #[test]
+    fn cycle_head_fingerprint_tracks_its_calls_and_open_state() {
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = crate::store::Store::create(cx);
+            let head = thinking(1, "c");
+            let fp = |slot: Slot| fingerprint(&head, &store, false, &slot);
+            let base = fp(Slot::Head {
+                open: false,
+                tools: vec![(ToolStatus::Running, "x".into())],
+                lead: false,
+                key: String::new(),
+                base: String::new(),
+            });
+            assert_ne!(
+                base,
+                fp(Slot::Head {
+                    open: false,
+                    tools: vec![(ToolStatus::Ok, "x".into())],
+                    lead: false,
+                    key: String::new(),
+                    base: String::new(),
+                }),
+                "a call's status change repaints the chips"
+            );
+            assert_ne!(
+                base,
+                fp(Slot::Head {
+                    open: false,
+                    tools: vec![
+                        (ToolStatus::Running, "x".into()),
+                        (ToolStatus::Ok, "y".into())
+                    ],
+                    lead: false,
+                    key: String::new(),
+                    base: String::new(),
+                }),
+                "a new call repaints the count"
+            );
+            assert_ne!(
+                base,
+                fp(Slot::Head {
+                    open: true,
+                    tools: vec![(ToolStatus::Running, "x".into())],
+                    lead: false,
+                    key: String::new(),
+                    base: String::new(),
+                }),
+                "opening repaints"
+            );
+            assert_ne!(
+                base,
+                fp(Slot::Head {
+                    open: false,
+                    tools: vec![(ToolStatus::Running, "x".into())],
+                    lead: true,
+                    key: String::new(),
+                    base: String::new(),
+                }),
+                "a lead blank changes the height and repaints"
+            );
+        });
+        root.dispose();
+    }
+
+    /// The tool chips name every status present, failures and pending
+    /// approvals included, so the folded row never hides one.
+    #[test]
+    fn tool_chips_count_each_status() {
+        let t = abstracttui::theme::themes()[0].tokens;
+        let chips: Vec<String> = tool_chips(
+            &t,
+            &[
+                (ToolStatus::Ok, "a".into()),
+                (ToolStatus::Ok, "b".into()),
+                (ToolStatus::Failed, "c".into()),
+                (ToolStatus::AwaitingApproval, "d".into()),
+            ],
+        )
+        .into_iter()
+        .map(|(s, _)| s)
+        .collect();
+        assert_eq!(chips, vec!["4 tools", "?1", "✗1", "✓2"]);
+        assert!(tool_chips(&t, &[]).is_empty());
+    }
+
+    /// The user card's declared height covers every row it paints: the
+    /// lead blank, both pad rows, and one row per wrapped line.
+    #[test]
+    fn user_card_height_covers_its_rows() {
+        let t = abstracttui::theme::themes()[0].tokens;
+        let card = |body: &str| UserCard {
+            body: body.into(),
+            cap: 200,
+            uncapped: false,
+            icon: VoiceIcon::Idle,
+            icon_ink: t.text_faint,
+            icon_lit: t.accent,
+            bg: user_card_bg(&t),
+            bar_ink: t.accent,
+            glyph_ink: t.accent,
+            text_ink: t.text,
+            faint_ink: t.text_muted,
+        };
+        assert_eq!(card("hi").height_at(80), 4);
+        assert_eq!(card("a\nb\nc").height_at(80), 6);
+        assert_eq!(
+            card("").height_at(80),
+            4,
+            "an empty ask still draws its card"
+        );
+        let long = "word ".repeat(100);
+        let c = card(&long);
+        assert_eq!(c.height_at(40), 3 + c.lines_at(40).len() as i32);
+        assert_ne!(
+            user_card_bg(&t),
+            t.bg,
+            "the card ground differs from the page"
+        );
     }
 }

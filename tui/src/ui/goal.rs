@@ -13,7 +13,7 @@ use abstracttui::reactive::Scope;
 use crate::runner::Cmd;
 use crate::store::{Phase, Store};
 use crate::transcript::Item;
-use crate::ui::{agent_start_opts, persist_prefs, queue_preview, send_start, UiCtx};
+use crate::ui::{agent_start_opts, queue_preview, send_start, UiCtx};
 
 /// `/goal` router: bare = status, the exact word `stop` = durable cancel,
 /// anything else = the goal text.
@@ -35,7 +35,7 @@ fn start_goal_run(store: Store, ctx: &UiCtx, text: &str) {
         return;
     }
     if store.goal.get_untracked().is_some() {
-        store.notify("a goal is already recorded — /goal shows it, /goal stop clears it");
+        store.notify("this session already has a goal — /goal shows it, /goal stop cancels it");
         return;
     }
     // Discovery by interface (abstractcode.goal.v1): the honest dark
@@ -92,6 +92,16 @@ fn start_goal_run(store: Store, ctx: &UiCtx, text: &str) {
     }));
 }
 
+/// The goal's one-line name: its text, or — for a goal run whose record
+/// on the gateway carries none — that it is a goal run.
+pub(crate) fn goal_label(text: &str) -> String {
+    if text.trim().is_empty() {
+        "goal run".to_string()
+    } else {
+        format!("goal: {}", queue_preview(text))
+    }
+}
+
 fn goal_status(store: Store) {
     match store.goal.get_untracked() {
         None => store.notify(
@@ -124,7 +134,7 @@ fn goal_status(store: Store) {
                     (f.cycle, tokens)
                 });
                 let mut parts = vec![
-                    format!("goal: {}", queue_preview(&g.text)),
+                    goal_label(&g.text),
                     format!("cycle {cycle}"),
                     crate::convo::fmt_elapsed(store.elapsed_secs.get_untracked()),
                 ];
@@ -137,17 +147,16 @@ fn goal_status(store: Store) {
                 store.notify(format!("goal starting: {}", queue_preview(&g.text)));
             } else {
                 store.notify(format!(
-                    "goal recorded ({}) but its run is not live here — /goal stop clears it",
-                    queue_preview(&g.text)
+                    "{} — its run is not live here; /goal stop cancels it",
+                    goal_label(&g.text)
                 ));
             }
         }
     }
 }
 
-/// `/goal stop` — durable cancel of the goal run + slot clear. Also the
-/// escape hatch for a stale recorded goal whose run died while the app
-/// was away (the clear-on-end effect only fires for OBSERVED ends).
+/// `/goal stop` — durable cancel of the goal run on the gateway. The goal
+/// IS that run: once it is cancelled, no client derives a goal from it.
 fn stop_goal(store: Store, ctx: &UiCtx) {
     let Some(g) = store.goal.get_untracked() else {
         store.notify("no active goal to stop");
@@ -162,8 +171,6 @@ fn stop_goal(store: Store, ctx: &UiCtx) {
         store.notify("goal cleared");
     }
     store.goal.set(None);
-    let sid = store.session_id.get_untracked();
-    persist_prefs(ctx, |p| p.set_session_goal(&sid, None));
 }
 
 /// The goal lifecycle effect: binds a pending goal to the run that
@@ -171,10 +178,11 @@ fn stop_goal(store: Store, ctx: &UiCtx) {
 /// run), owns `fold.finish_on_root_only` (re-derived from run identity —
 /// `begin_run` deliberately never touches it: the runner's begin_run post
 /// and this effect race, and identity is the only stable truth), clears
-/// a pending goal whose start failed, and retires the slot when the goal
-/// run's end is OBSERVED (fold followed it to finished — a restored slot
-/// at boot survives until the reattach probe decides).
-pub(crate) fn wire_goal(cx: Scope, store: Store, ctx: UiCtx) {
+/// a pending goal whose start failed, and drops the goal when the goal
+/// run's end is OBSERVED (fold followed it to finished). Nothing is kept
+/// locally: a session's goal is its live goal run on the gateway, derived
+/// by the reattach probe (operator ruling 2026-10-10).
+pub(crate) fn wire_goal(cx: Scope, store: Store) {
     cx.effect(move || {
         let rid = store.run_id.get();
         let phase = store.phase.get();
@@ -191,10 +199,6 @@ pub(crate) fn wire_goal(cx: Scope, store: Store, ctx: UiCtx) {
             None => set_flag(false),
             Some(g) if g.run_id.is_empty() => {
                 if phase == Phase::Running && !rid.is_empty() {
-                    let sid = store.session_id.get_untracked();
-                    persist_prefs(&ctx, |p| {
-                        p.set_session_goal(&sid, Some((g.text.clone(), rid.clone())))
-                    });
                     store.goal.set(Some(crate::store::GoalState {
                         text: g.text.clone(),
                         run_id: rid.clone(),
@@ -217,9 +221,7 @@ pub(crate) fn wire_goal(cx: Scope, store: Store, ctx: UiCtx) {
                         .with_untracked(|f| f.root_run_id() == g.run_id && f.finished);
                     if observed_end {
                         store.goal.set(None);
-                        let sid = store.session_id.get_untracked();
-                        persist_prefs(&ctx, |p| p.set_session_goal(&sid, None));
-                        store.notify(format!("goal run finished: {}", queue_preview(&g.text)));
+                        store.notify(format!("{} — finished", goal_label(&g.text)));
                     }
                 }
             }

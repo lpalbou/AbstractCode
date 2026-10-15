@@ -7,9 +7,11 @@
 //! faster-whisper / large-v3" and lands in the composer. Audio plays and
 //! records on this computer through AbstractVoice (`crate::voice_host`).
 //!
-//! Keys: Ctrl+P reads the latest reply aloud (again = stop), Ctrl+R starts
-//! a dictation (again = transcribe), Esc stops speech / cancels a
-//! recording. Commands: `/voice`, `/speak [stop]`, `/dictate`.
+//! Keys: Ctrl+P reads the latest reply aloud (playing = pause, paused =
+//! resume), Ctrl+R starts a dictation (again = transcribe), a held Space on
+//! an empty prompt talks (`ui::push_to_talk`), Esc stops speech / cancels a
+//! recording. Each message's `▶` reads it; Read aloud narrates the cycles
+//! as they land. Commands: `/voice`, `/speak [stop]`, `/dictate`.
 //!
 //! Threads: every gateway call and every bridge wait runs on a named voice
 //! thread; results come back as posted closures. The UI thread only flips
@@ -106,11 +108,23 @@ pub fn latest_reply(store: Store) -> Option<String> {
     })
 }
 
-/// Ctrl+P / `/speak`: read the latest reply aloud, or stop the one playing.
+/// Ctrl+P / `/speak`: read the latest reply aloud; while one is playing,
+/// PAUSE it; while paused, RESUME it. (Esc stops.)
 pub fn toggle_speak(store: Store, ctx: &UiCtx) {
-    if store.voice.speaking.get_untracked() != Speaking::Idle {
-        stop_speaking(store);
-        return;
+    match store.voice.speaking.get_untracked() {
+        Speaking::Playing => {
+            pause_speaking(store);
+            return;
+        }
+        Speaking::Paused => {
+            resume_speaking(store);
+            return;
+        }
+        Speaking::Preparing => {
+            stop_speaking(store);
+            return;
+        }
+        Speaking::Idle => {}
     }
     match latest_reply(store) {
         Some(text) => speak_text(store, ctx, text),
@@ -118,14 +132,82 @@ pub fn toggle_speak(store: Store, ctx: &UiCtx) {
     }
 }
 
+/// The play/pause icon of ONE message (operator ask 2026-10-10): idle →
+/// read it; this message playing → pause; paused → resume; another text
+/// speaking or queued → that stops and this one is read.
+pub fn toggle_message(store: Store, ctx: &UiCtx, text: &str) {
+    let key = voice::text_key(text);
+    if store.voice.speaking_text.get_untracked() == Some(key) {
+        match store.voice.speaking.get_untracked() {
+            Speaking::Playing => return pause_speaking(store),
+            Speaking::Paused => return resume_speaking(store),
+            Speaking::Preparing => {
+                stop_speaking(store);
+                return;
+            }
+            Speaking::Idle => {}
+        }
+    }
+    stop_speaking(store);
+    speak_text(store, ctx, text.to_string());
+}
+
+/// Pause the reply being read (the player holds its place).
+pub fn pause_speaking(store: Store) {
+    if store.voice.speaking.get_untracked() == Speaking::Playing
+        && voice_host::host().speech_op("pause")
+    {
+        store.voice.speaking.set(Speaking::Paused);
+    }
+}
+
+/// Resume a paused reply where it stopped.
+pub fn resume_speaking(store: Store) {
+    if store.voice.speaking.get_untracked() == Speaking::Paused
+        && voice_host::host().speech_op("resume")
+    {
+        store.voice.speaking.set(Speaking::Playing);
+    }
+}
+
+thread_local! {
+    /// Read-aloud narration waiting for the speaker (UI thread only): the
+    /// cycles' words as they land, then the answer — one at a time, in
+    /// order, never interrupting each other.
+    static NARRATION: RefCell<std::collections::VecDeque<String>> =
+        const { RefCell::new(std::collections::VecDeque::new()) };
+}
+
+/// Queue `text` for read-aloud narration; it starts at once when nothing
+/// speaks.
+pub fn narrate(store: Store, ctx: &UiCtx, text: String) {
+    NARRATION.with(|q| q.borrow_mut().push_back(text));
+    if store.voice.speaking.get_untracked() == Speaking::Idle {
+        speak_next(store, ctx);
+    }
+}
+
+fn speak_next(store: Store, ctx: &UiCtx) {
+    if let Some(next) = NARRATION.with(|q| q.borrow_mut().pop_front()) {
+        speak_text(store, ctx, next);
+    }
+}
+
 /// Speak `text` through the gateway's streaming voice route.
 pub fn speak_text(store: Store, ctx: &UiCtx, text: String) {
-    speak_text_for(store, ctx, store.run_id.get_untracked(), text)
+    // Before the first run, the session's media run carries the voice
+    // route (the run dictation uses — see `transcription_run_id`).
+    let session_id = store.session_id.get_untracked();
+    let run_id = transcription_run_id(&store.run_id.get_untracked(), &session_id)
+        .filter(|_| !session_id.is_empty())
+        .unwrap_or_default();
+    speak_text_for(store, ctx, run_id, text)
 }
 
 /// Speak `text` through the voice route of `run_id` (the conversation's
-/// run, or an automation's: the Code web reads an automation's messages
-/// through the automation's own run, `automations_view.tsx:284-286`).
+/// run — before its first run, the session's media run — or an
+/// automation's: the Code web reads an automation's messages through the
+/// automation's own run, `automations_view.tsx:284-286`).
 pub fn speak_text_for(store: Store, ctx: &UiCtx, run_id: String, text: String) {
     if run_id.is_empty() {
         post_error(
@@ -139,26 +221,45 @@ pub fn speak_text_for(store: Store, ctx: &UiCtx, run_id: String, text: String) {
     let gen = host.next_gen();
     host.claim_speech(gen);
     store.voice.speaking.set(Speaking::Preparing);
+    store.voice.speaking_text.set(Some(voice::text_key(&text)));
+    store.voice.speak_levels.set(Vec::new());
     let p = prefs(ctx);
     let gw = VoiceGateway::new(&ctx.client);
     let wake = abstracttui::reactive::wake_handle();
     spawn("voice-speak", move || {
         let started_wake = wake.clone();
+        let level_wake = wake.clone();
         let host2 = host.clone();
-        let result = voice::speak_blocking(&host, &gw, gen, &run_id, &text, &p, &mut |_d| {
-            if host2.is_current_speech(gen) {
-                started_wake.post(move || {
-                    if store.voice.speaking.get_untracked() == Speaking::Preparing {
-                        store.voice.speaking.set(Speaking::Playing);
-                    }
-                });
-            }
-        });
+        let host3 = host.clone();
+        let result = voice::speak_blocking_levels(
+            &host,
+            &gw,
+            gen,
+            &run_id,
+            &text,
+            &p,
+            &mut |_d| {
+                if host2.is_current_speech(gen) {
+                    started_wake.post(move || {
+                        if store.voice.speaking.get_untracked() == Speaking::Preparing {
+                            store.voice.speaking.set(Speaking::Playing);
+                        }
+                    });
+                }
+            },
+            &mut |rms, bands| {
+                if host3.is_current_speech(gen) {
+                    let bands = voice::meter_bands(rms, bands);
+                    level_wake.post(move || store.voice.speak_levels.set(bands));
+                }
+            },
+        );
         let current = host.is_current_speech(gen);
         host.release_speech(gen);
         wake.post(move || {
             if current {
                 store.voice.speaking.set(Speaking::Idle);
+                store.voice.speaking_text.set(None);
             }
             match result {
                 Ok(reply) => {
@@ -179,13 +280,16 @@ pub fn speak_text_for(store: Store, ctx: &UiCtx, run_id: String, text: String) {
     });
 }
 
-/// Stop the spoken reply at once. Returns false when nothing was speaking.
+/// Stop the spoken reply at once and drop the queued narration. Returns
+/// false when nothing was speaking.
 pub fn stop_speaking(store: Store) -> bool {
+    NARRATION.with(|q| q.borrow_mut().clear());
     let was = store.voice.speaking.get_untracked() != Speaking::Idle;
     voice_host::host().stop_speech();
     if was {
         store.voice.speaking.set(Speaking::Idle);
     }
+    store.voice.speaking_text.set(None);
     was
 }
 
@@ -194,7 +298,9 @@ pub fn stop_speaking(store: Store) -> bool {
 /// Ctrl+R / `/dictate`: start recording, or stop and transcribe.
 pub fn toggle_dictation(store: Store, ctx: &UiCtx) {
     match store.voice.dictation.get_untracked() {
-        Dictation::Idle => start_dictation(store, ctx),
+        Dictation::Idle => {
+            start_dictation(store, ctx, false);
+        }
         Dictation::Recording { gen, .. } => {
             voice_host::host().send_if_running(&json!({"op": "record_stop", "gen": gen}));
         }
@@ -202,13 +308,85 @@ pub fn toggle_dictation(store: Store, ctx: &UiCtx) {
     }
 }
 
-fn start_dictation(store: Store, ctx: &UiCtx) {
-    let run_id = store.run_id.get_untracked();
-    let session_id = store.session_id.get_untracked();
-    if run_id.is_empty() || session_id.is_empty() {
-        post_error(store, "Start a conversation to enable dictation.".into());
+/// Hold Space (`ui::push_to_talk`): start a recording whose transcript is
+/// SENT. False when it could not start (another dictation is running, or
+/// no session) — the caller forgets the hold.
+pub fn start_hold(store: Store, ctx: &UiCtx) -> bool {
+    match store.voice.dictation.get_untracked() {
+        Dictation::Idle => {}
+        Dictation::Recording { .. } => {
+            store.notify("A dictation is already recording (Ctrl+R stops it).");
+            return false;
+        }
+        Dictation::Transcribing { .. } => {
+            store.notify("Still transcribing the last recording.");
+            return false;
+        }
+    }
+    // Talking over the agent: silence it first (and drop its queued
+    // narration), or the microphone would record the agent's own voice.
+    stop_speaking(store);
+    start_dictation(store, ctx, true)
+}
+
+/// The held Space went up: stop the hold's recording (it then transcribes
+/// and sends). A no-op when Esc already cancelled it.
+pub fn release_hold(store: Store) {
+    if !store.voice.hold.get_untracked() {
         return;
     }
+    if let Dictation::Recording { gen, .. } = store.voice.dictation.get_untracked() {
+        voice_host::host().send_if_running(&json!({"op": "record_stop", "gen": gen}));
+    }
+}
+
+/// A press that turned out to be a TAP (no hold): drop its recording
+/// silently — nothing is transcribed or sent, and no notice, since a tap
+/// on an empty prompt is not a mistake worth a sentence.
+pub fn discard_hold(store: Store) {
+    if !store.voice.hold.get_untracked() {
+        return;
+    }
+    if let Dictation::Recording { gen, .. } = store.voice.dictation.get_untracked() {
+        DICTATION.store(0, Ordering::SeqCst);
+        voice_host::host().send_if_running(&json!({"op": "record_stop", "gen": gen}));
+        store.voice.dictation.set(Dictation::Idle);
+        store.voice.level.set(0.0);
+        store.voice.hold.set(false);
+    }
+}
+
+/// The run a transcription rides. The current run when there is one;
+/// otherwise the SESSION's media run, `session_memory_<session id>`, which
+/// the gateway creates on first use (`_load_or_create_session_memory_owner_run`
+/// in abstractgateway routes/gateway.py) — the run Code web
+/// (`session_memory_owner_run_id`) and Observer already transcribe on. It
+/// lets the very first message of a session be spoken. `None` for a
+/// session id outside the gateway's safe run-id alphabet, whose hashed
+/// form this client does not compute.
+pub fn transcription_run_id(run_id: &str, session_id: &str) -> Option<String> {
+    if !run_id.is_empty() {
+        return Some(run_id.to_string());
+    }
+    let safe = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    };
+    safe(session_id).then(|| format!("session_memory_{session_id}"))
+}
+
+fn start_dictation(store: Store, ctx: &UiCtx, hold: bool) -> bool {
+    let session_id = store.session_id.get_untracked();
+    let run_id = match transcription_run_id(&store.run_id.get_untracked(), &session_id) {
+        Some(r) if !session_id.is_empty() => r,
+        _ => {
+            post_error(store, "Start a conversation to enable dictation.".into());
+            return false;
+        }
+    };
+    store.voice.hold.set(hold);
+    store.voice.levels.set(Vec::new());
     load_defaults(store, ctx);
     let host = voice_host::host();
     let gen = host.next_gen();
@@ -225,9 +403,14 @@ fn start_dictation(store: Store, ctx: &UiCtx) {
     // again after the recording (the defaults may land meanwhile).
     spawn("voice-dictate", move || {
         let level_wake = wake.clone();
-        let recorded = voice::record_blocking(&host, gen, &p, voice::MAX_RECORDING_S, &mut |rms| {
-            level_wake.post(move || store.voice.level.set(rms));
-        });
+        let recorded =
+            voice::record_blocking(&host, gen, &p, voice::MAX_RECORDING_S, &mut |rms, bands| {
+                let bands = voice::meter_bands(rms, bands);
+                level_wake.post(move || {
+                    store.voice.level.set(rms);
+                    store.voice.levels.set(bands);
+                });
+            });
         let live = || DICTATION.load(Ordering::SeqCst) == gen;
         let finish = move |wake: &abstracttui::reactive::WakeHandle,
                            err: Option<String>,
@@ -239,11 +422,16 @@ fn start_dictation(store: Store, ctx: &UiCtx) {
                 DICTATION.store(0, Ordering::SeqCst);
                 store.voice.dictation.set(Dictation::Idle);
                 store.voice.level.set(0.0);
+                store.voice.hold.set(false);
                 if let Some(e) = err {
                     post_error(store, e);
                 }
                 if let Some(t) = text {
-                    store.voice.transcript.set(Some(t));
+                    if hold {
+                        store.voice.hold_send.set(Some(t));
+                    } else {
+                        store.voice.transcript.set(Some(t));
+                    }
                 }
             });
         };
@@ -264,11 +452,12 @@ fn start_dictation(store: Store, ctx: &UiCtx) {
             return;
         }
         if rec.duration_ms < voice::MIN_RECORDING_MS {
-            return finish(
-                &wake,
-                Some("The recording was too short. Press Ctrl+R, speak, then press Ctrl+R again to transcribe.".into()),
-                None,
-            );
+            let msg = if hold {
+                "Too short to hear: hold Space while you speak, release to send."
+            } else {
+                "The recording was too short. Press Ctrl+R, speak, then press Ctrl+R again to transcribe."
+            };
+            return finish(&wake, Some(msg.into()), None);
         }
         if rec.peak < voice::SILENT_LEVEL {
             return finish(
@@ -314,6 +503,7 @@ fn start_dictation(store: Store, ctx: &UiCtx) {
             Err(e) => finish(&wake, Some(error_sentence("Transcription failed", &e)), None),
         }
     });
+    true
 }
 
 /// Esc: cancel a recording, else stop the spoken reply. Consumes the press
@@ -324,6 +514,7 @@ pub fn escape(store: Store) -> bool {
         voice_host::host().send_if_running(&json!({"op": "record_stop", "gen": gen}));
         store.voice.dictation.set(Dictation::Idle);
         store.voice.level.set(0.0);
+        store.voice.hold.set(false);
         store.notify("Recording cancelled.");
         return true;
     }
@@ -351,28 +542,54 @@ pub fn wire(cx: Scope, store: Store, ctx: &UiCtx, composer: abstracttui::widgets
         };
         composer.set_text(joined);
     });
-    // Read aloud: when a turn ends with a reply, speak it once.
-    let prev = Rc::new(Cell::new(store.phase.get_untracked()));
-    let spoken: Rc<RefCell<String>> =
-        Rc::new(RefCell::new(latest_reply(store).unwrap_or_default()));
+    // READ ALOUD narrates the turn as it happens (operator ask
+    // 2026-10-10: "the ai explaining what it does as it works"): each
+    // reasoning cycle's own words when its record folds, then the final
+    // answer — queued, one after the other. Only items that land while
+    // a run is live in the agent lane are read (a restored or replayed
+    // history is never narrated), and the answer is skipped when it
+    // repeats the last cycle's words verbatim (the last cycle usually IS
+    // the answer). The reasoning channel is never read.
+    let seen = Rc::new(Cell::new(store.fold.with_untracked(|f| f.items.len())));
+    let last_read: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     let rctx = ctx.clone();
     cx.effect(move || {
-        let phase = store.phase.get();
-        let was = prev.replace(phase);
-        if phase != Phase::Idle || was == Phase::Idle {
+        let len = store.fold.with(|f| f.items.len());
+        let before = seen.replace(len);
+        let live = store.phase.get_untracked() != Phase::Idle
+            && matches!(store.focus.get_untracked(), crate::convo::Focus::Agent);
+        if len <= before || !live || !prefs(&rctx).read_aloud {
             return;
         }
-        if !prefs(&rctx).read_aloud {
-            return;
+        let fresh: Vec<String> = store.fold.with_untracked(|f| {
+            f.items[before..]
+                .iter()
+                .filter_map(|i| match i {
+                    Item::Thinking { content, .. } if !content.trim().is_empty() => {
+                        Some(content.trim().to_string())
+                    }
+                    Item::Assistant {
+                        text,
+                        final_answer: true,
+                    } if !text.trim().is_empty() => Some(text.trim().to_string()),
+                    _ => None,
+                })
+                .collect()
+        });
+        for text in fresh {
+            if *last_read.borrow() == text {
+                continue;
+            }
+            *last_read.borrow_mut() = text.clone();
+            narrate(store, &rctx, text);
         }
-        let Some(text) = latest_reply(store) else {
-            return;
-        };
-        if *spoken.borrow() == text {
-            return;
+    });
+    // The next narration starts when the speaker goes quiet.
+    let qctx = ctx.clone();
+    cx.effect(move || {
+        if store.voice.speaking.get() == Speaking::Idle {
+            speak_next(store, &qctx);
         }
-        *spoken.borrow_mut() = text.clone();
-        speak_text(store, &rctx, text);
     });
     // Elapsed seconds for "Recording… 3 s" / "Transcribing… 4 s".
     let _ = abstracttui::reactive::interval(cx, Duration::from_millis(500), move || {
@@ -386,36 +603,148 @@ pub fn wire(cx: Scope, store: Store, ctx: &UiCtx, composer: abstracttui::widgets
     });
 }
 
-/// The status line shown above the composer while voice is busy:
-/// "♪ Speaking… · Esc stops", "● Recording… 3 s · Ctrl+R transcribes · Esc
-/// cancels", "Transcribing… 4 s · faster-whisper / large-v3".
+/// The status line shown above the composer while voice is busy (the
+/// RECORDING states render as the live meter instead — see
+/// [`recording_parts`]): "♪ Speaking… · Esc stops", "Transcribing… 4 s ·
+/// faster-whisper / large-v3" (a hold adds "· sends when ready").
 pub fn status_text(store: Store, now: Instant) -> Option<String> {
     match store.voice.dictation.get() {
-        Dictation::Recording { since, .. } => {
-            return Some(format!(
-                "● Recording… {} · Ctrl+R transcribes · Esc cancels",
-                voice::elapsed_seconds(since, now)
-            ))
+        Dictation::Recording { .. } => {
+            return recording_parts(store, now).map(|(l, h)| format!("{l} · {h}"))
         }
         Dictation::Transcribing { since, route } => {
-            return Some(transcribing_line(since, now, &route))
+            let line = transcribing_line(since, now, &route);
+            return Some(if store.voice.hold.get() {
+                format!("{line} · sends when ready")
+            } else {
+                line
+            });
         }
         Dictation::Idle => {}
     }
     match store.voice.speaking.get() {
         Speaking::Preparing => Some("♪ Preparing speech… · Esc stops".into()),
-        Speaking::Playing => Some("♪ Speaking… · Esc stops".into()),
+        Speaking::Playing | Speaking::Paused => {
+            speaking_parts(store).map(|(l, h)| format!("{l} · {h}"))
+        }
         Speaking::Idle => None,
     }
+}
+
+/// While a reply is READ: ("♪ Speaking…", "Ctrl+P pauses · Esc stops") or,
+/// paused, ("‖ Paused", "Ctrl+P resumes · Esc stops") — rendered as the
+/// meter row over the speaker's levels. `None` otherwise.
+pub fn speaking_parts(store: Store) -> Option<(String, &'static str)> {
+    match store.voice.speaking.get() {
+        Speaking::Playing => Some(("♪ Speaking…".into(), "Ctrl+P pauses · Esc stops")),
+        Speaking::Paused => Some(("‖ Paused".into(), "Ctrl+P resumes · Esc stops")),
+        _ => None,
+    }
+}
+
+/// A recording's label and hint: ("● Listening… 3 s", "release Space to
+/// send · Esc cancels") for a hold, ("● Recording… 3 s", "Ctrl+R
+/// transcribes · Esc cancels") for Ctrl+R. `None` when not recording.
+pub fn recording_parts(store: Store, now: Instant) -> Option<(String, &'static str)> {
+    let Dictation::Recording { since, .. } = store.voice.dictation.get() else {
+        return None;
+    };
+    let secs = voice::elapsed_seconds(since, now);
+    Some(if store.voice.hold.get() {
+        (
+            format!("● Listening… {secs}"),
+            "release Space to send · Esc cancels",
+        )
+    } else {
+        (
+            format!("● Recording… {secs}"),
+            "Ctrl+R transcribes · Esc cancels",
+        )
+    })
+}
+
+/// Meter width in cells: wide enough to read as a voice trace (~3 s at
+/// the bridge's 10 levels a second), narrow enough for 80 columns.
+pub const METER_CELLS: usize = 28;
+
+/// One voice meter row: `<glyph><label>  ▂▃▅▇▅▃  <hint>`. The glyph (the
+/// label's first char) takes `glyph_ink` — red for a live microphone,
+/// accent for the speaker. The bars are a LIVE HISTOGRAM of the sound
+/// right now — its spectrum, low frequencies left (`voice::meter_cells`),
+/// updated ~20 times a second (operator ask 2026-10-10: current values,
+/// not a trace through time) — in the thinking wave's block glyphs and
+/// inks (trough → floored crest). The meter yields to the hint's 12-column
+/// floor, then shrinks; the hint ellipsizes last.
+fn meter_row(
+    t: &TokenSet,
+    label: String,
+    glyph_ink: Rgba,
+    levels: Vec<f32>,
+    hint: &'static str,
+) -> View {
+    let label_ink = t.text;
+    let hint_ink = t.text_faint;
+    let trough = t.text_faint;
+    let crest = crate::ui::logo::floored_highlights(t).1;
+    Element::new()
+        .style(LayoutStyle::line(1).shrink(0.0))
+        .draw(move |canvas, rect| {
+            if rect.w <= 2 {
+                return;
+            }
+            let mut x = rect.x + 1;
+            let split = label.char_indices().nth(1).map_or(label.len(), |(i, _)| i);
+            let (glyph, rest) = label.split_at(split);
+            x += canvas.print(Point::new(x, rect.y), glyph, glyph_ink, Rgba::TRANSPARENT);
+            x += canvas.print(Point::new(x, rect.y), rest, label_ink, Rgba::TRANSPARENT);
+            x += 2;
+            let room = (rect.right() - 1 - x - 2 - 12).max(0) as usize;
+            let n = METER_CELLS.min(room);
+            for (i, w) in voice::meter_cells(&levels, n).into_iter().enumerate() {
+                canvas.put(
+                    Point::new(x + i as i32, rect.y),
+                    crate::ui::thinking::glyph_for(w),
+                    crate::ui::logo::lerp_ink(trough, crest, w),
+                    Rgba::TRANSPARENT,
+                );
+            }
+            if n > 0 {
+                x += n as i32 + 2;
+            }
+            let avail = rect.right() - 1 - x;
+            if avail >= 4 {
+                let fitted = text::truncate_ellipsis(hint, avail);
+                canvas.print(Point::new(x, rect.y), &fitted, hint_ink, Rgba::TRANSPARENT);
+            }
+        })
+        .build()
 }
 
 pub fn status_row(store: Store) -> View {
     dyn_view(LayoutStyle::default().shrink(0.0), move || {
         let _ = store.voice.tick.get();
+        let t = abstracttui::app::current_theme().tokens;
+        // RECORDING: the live voice meter (operator ask 2026-10-10: "a
+        // widget, like for thinking, but based on the voice being
+        // recorded") — `● Listening… 3 s ▂▃▅▇▅▃▂ release Space to send ·
+        // Esc cancels`. The bars are the microphone's own levels, newest
+        // at the right, in the thinking wave's block glyphs and inks
+        // (trough → floored crest), so a quiet room reads flat and
+        // speech visibly moves. Re-renders per level (~10/s) only while
+        // recording.
+        if let Some((label, hint)) = recording_parts(store, Instant::now()) {
+            let levels = store.voice.levels.get();
+            return meter_row(&t, label, t.error, levels, hint);
+        }
+        // SPEAKING: the same meter over the SPEAKER's levels (operator ask
+        // 2026-10-10: "when the ai speaks, show that histogram of voice").
+        if let Some((label, hint)) = speaking_parts(store) {
+            let levels = store.voice.speak_levels.get();
+            return meter_row(&t, label, t.accent, levels, hint);
+        }
         let Some(line) = status_text(store, Instant::now()) else {
             return Element::new().build();
         };
-        let t = abstracttui::app::current_theme().tokens;
         let ink = t.accent;
         Element::new()
             .style(LayoutStyle::line(1).shrink(0.0))
@@ -458,9 +787,19 @@ pub fn command_voice(cx: Scope, store: Store, ctx: &UiCtx, arg: Option<String>) 
                 if p.read_aloud { "[x]" } else { "[ ]" }
             ));
         }
+        ["space", v] | ["hold-space", v] | ["space-to-talk", v] if matches!(*v, "on" | "off") => {
+            let mut p = prefs(ctx);
+            p.space_to_talk_off = *v == "off";
+            save_prefs(store, ctx, &p);
+            store.notify(if p.space_to_talk_off {
+                "Hold Space to talk: off (Ctrl+R still dictates into the draft)"
+            } else {
+                "Hold Space to talk: on — on an empty prompt, hold Space, speak, release to send"
+            });
+        }
         _ => post_error(
             store,
-            format!("/voice takes no argument or read-aloud on|off (got {arg:?})."),
+            format!("/voice takes no argument, read-aloud on|off, or space on|off (got {arg:?})."),
         ),
     }
 }
@@ -541,6 +880,17 @@ fn settings_rows(store: Store, p: &VoicePrefs) -> Vec<(String, Row)> {
         Devices::Loading | Devices::Unknown => (Vec::new(), Vec::new(), None),
     };
     let loading = matches!(devices, Devices::Loading | Devices::Unknown);
+    // "Not connected" is a claim only a loaded list can make; when the list
+    // failed, nothing is known about the saved device.
+    let listed = matches!(devices, Devices::Loaded { .. });
+    let (out_missing, in_missing) = if listed {
+        (
+            "System default · saved speaker not connected",
+            "System default · saved microphone not connected",
+        )
+    } else {
+        ("Saved speaker", "Saved microphone")
+    };
     let label = |name: &str, value: String| format!("  {name:<17} {value}");
     let mut rows: Vec<(String, Row)> = Vec::new();
     rows.push((
@@ -586,7 +936,7 @@ fn settings_rows(store: Store, p: &VoicePrefs) -> Vec<(String, Row)> {
     let out_value = if loading && !p.output_device.is_empty() {
         "…".into()
     } else {
-        device_name(&outs, &p.output_device, "Saved speaker (not connected)")
+        device_name(&outs, &p.output_device, out_missing)
     };
     rows.push((label("Output device", out_value), Row::Output));
     let speaker = v
@@ -603,7 +953,7 @@ fn settings_rows(store: Store, p: &VoicePrefs) -> Vec<(String, Row)> {
     let in_value = if loading && !p.input_device.is_empty() {
         "…".into()
     } else {
-        device_name(&ins, &p.input_device, "Saved microphone (not connected)")
+        device_name(&ins, &p.input_device, in_missing)
     };
     rows.push((label("Input device", in_value), Row::Input));
     let mic = match v.mic_note.get() {
@@ -628,7 +978,7 @@ fn settings_rows(store: Store, p: &VoicePrefs) -> Vec<(String, Row)> {
     rows.push(("Replies".into(), Row::None));
     rows.push((
         format!(
-            "  {} Read aloud — Speak each new reply.",
+            "  {} Read aloud — Narrate each cycle as the agent works, then the reply.",
             if p.read_aloud { "[x]" } else { "[ ]" }
         ),
         Row::ReadAloud,
@@ -849,7 +1199,7 @@ fn test_microphone(store: Store, p: &VoicePrefs) {
         let host = voice_host::host();
         let gen = host.next_gen();
         let lw = wake.clone();
-        let rec = voice::record_blocking(&host, gen, &p, 3, &mut |rms| {
+        let rec = voice::record_blocking(&host, gen, &p, 3, &mut |rms, _| {
             lw.post(move || store.voice.level.set(rms))
         });
         let note = match rec {

@@ -123,7 +123,7 @@ Useful while a run is in flight:
 | Approve or reject a tool | the prompt in the transcript |
 | Steer without restarting | type guidance and send |
 | Pause or cancel | `/pause`, `/cancel` |
-| Reattach to the last session | `abstractcode --resume` |
+| Reopen the gateway's newest session | `abstractcode --resume` |
 | List the commands | `/help` |
 
 ## Choosing a workflow and model

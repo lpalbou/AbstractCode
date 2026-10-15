@@ -369,21 +369,16 @@ pub(crate) fn civil_from_days(z: i64) -> (i64, u32, u32) {
 // Preferences (theme, workflow, provider/model, session, tools, skills)
 // ---------------------------------------------------------------------------
 
-/// One remembered session for the `/sessions` picker.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SessionEntry {
-    pub id: String,
-    /// First prompt of the session (its human name in the picker).
-    pub label: String,
-    /// ISO timestamp of the last time this session was active.
-    pub last_used: String,
-}
-
-pub const RECENT_SESSIONS_MAX: usize = 15;
+/// How many sessions keep a tool-choice slot here — newest kept. This is
+/// SESSION state that belongs on the gateway (operator ruling 2026-10-10);
+/// it stays here only until the gateway can hold it. This client keeps NO list of
+/// sessions: which conversations exist, and which is newest, is the
+/// gateway's answer alone (operator ruling 2026-10-10: "there must be zero
+/// local recent list").
+pub const SESSION_SLOTS_MAX: usize = 15;
 
 /// A session's remembered tools-modal configuration (operator ask
-/// 2026-07-23: "those preferences should be sticky per session"). Mirrors
-/// the `session_queues`/`session_goals` slot pattern — one slot per
+/// 2026-07-23: "those preferences should be sticky per session"). One slot per
 /// session id, recency-ordered, capped. A session with no slot inherits
 /// the global baseline (the top-level `tool_*`/`disabled_tools` fields)
 /// on first use and then diverges independently.
@@ -421,7 +416,6 @@ pub struct Prefs {
     pub speculation: Option<Value>,
     pub reasoning_provider: Option<String>,
     pub reasoning_model: Option<String>,
-    pub session_id: Option<String>,
     pub workspace_mode: Option<String>,
     /// Extra allowlisted root directories sent as
     /// `workspace_allowed_paths` with every run (used by the gateway in
@@ -461,22 +455,9 @@ pub struct Prefs {
     pub disabled_tools: Vec<String>,
     /// Gateway skills attached to every run (`/skills` -> input_data.skills).
     pub skills: Vec<String>,
-    /// Recently used sessions, newest first (the `/sessions` picker).
-    pub recent_sessions: Vec<SessionEntry>,
-    /// Per-session prompt-queue stash, most-recently-written first
-    /// (`session_queues`): the `/queue` FIFO persists keyed by session id
-    /// (the `touch_session` slot pattern) and RESTORES PAUSED — it never
-    /// auto-starts on any restore. Empty queues drop their slot; slots cap
-    /// at `RECENT_SESSIONS_MAX`.
-    pub session_queues: Vec<(String, Vec<String>)>,
-    /// Per-session active `/goal`, most-recently-written first:
-    /// `(session_id, (goal_text, run_id))`. The run id lets a restart
-    /// restore `finish_on_root_only` when it reattaches to a live goal
-    /// run; the text labels the strip + `/goal` status.
-    pub session_goals: Vec<(String, (String, String))>,
     /// Per-session tools-modal config, most-recently-written first
     /// (`session_tool_prefs`): the disabled set + approval pins + tier
-    /// persist keyed by session id (same slot discipline as queues/goals),
+    /// persist keyed by session id (one slot per session, newest first),
     /// so each session remembers its own tool activation independently.
     pub session_tool_prefs: Vec<(String, SessionToolPrefs)>,
     /// `/goal` cycle budget sent as `input_data.max_cycles`
@@ -580,38 +561,6 @@ impl Prefs {
                 })
                 .unwrap_or_default()
         };
-        let mut seen_ids = std::collections::HashSet::new();
-        let sessions = v
-            .get("recent_sessions")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(|e| {
-                        let id = e.get("id")?.as_str()?.trim().to_string();
-                        // First occurrence wins; duplicates (hand-edits,
-                        // merge bugs) must not survive into the picker.
-                        if id.is_empty() || !seen_ids.insert(id.clone()) {
-                            return None;
-                        }
-                        Some(SessionEntry {
-                            id,
-                            label: e
-                                .get("label")
-                                .and_then(Value::as_str)
-                                .unwrap_or("")
-                                .trim()
-                                .to_string(),
-                            last_used: e
-                                .get("last_used")
-                                .and_then(Value::as_str)
-                                .unwrap_or("")
-                                .trim()
-                                .to_string(),
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
         // tool_approval: {accepted_tier, overrides:{name: "auto"|"ask"}}.
         // Unknown tier spellings normalize to the STRICTEST ("read") at
         // load — a typo in a hand-edited prefs.json must never widen
@@ -638,60 +587,6 @@ impl Prefs {
                             return None;
                         }
                         Some((name.to_string(), d))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        // Per-session queue stash: `[{"id": sid, "prompts": [...]}, ...]`
-        // (a LIST, not an object — recency order is load-bearing and
-        // serde_json objects sort keys). Blank ids/prompts drop at load.
-        let mut seen_queue_ids = std::collections::HashSet::new();
-        let session_queues: Vec<(String, Vec<String>)> = v
-            .get("session_queues")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(|e| {
-                        let id = e.get("id")?.as_str()?.trim().to_string();
-                        if id.is_empty() || !seen_queue_ids.insert(id.clone()) {
-                            return None;
-                        }
-                        let prompts: Vec<String> = e
-                            .get("prompts")?
-                            .as_array()?
-                            .iter()
-                            .filter_map(Value::as_str)
-                            .filter(|p| !p.trim().is_empty())
-                            .map(str::to_string)
-                            .collect();
-                        if prompts.is_empty() {
-                            return None; // an empty stash carries nothing
-                        }
-                        Some((id, prompts))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        // Per-session goals: `[{"id": sid, "text": ..., "run_id": ...}]`.
-        let mut seen_goal_ids = std::collections::HashSet::new();
-        let session_goals: Vec<(String, (String, String))> = v
-            .get("session_goals")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(|e| {
-                        let id = e.get("id")?.as_str()?.trim().to_string();
-                        let text = e.get("text")?.as_str()?.trim().to_string();
-                        if id.is_empty() || text.is_empty() || !seen_goal_ids.insert(id.clone()) {
-                            return None;
-                        }
-                        let run_id = e
-                            .get("run_id")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        Some((id, (text, run_id)))
                     })
                     .collect()
             })
@@ -763,7 +658,6 @@ impl Prefs {
             voice: v.get("voice").filter(|x| x.is_object()).cloned(),
             reasoning_provider: s("reasoning_provider"),
             reasoning_model: s("reasoning_model"),
-            session_id: s("session_id"),
             workspace_mode: s("workspace_mode"),
             workspace_allowed: string_list("workspace_allowed"),
             show_details: v.get("show_details").and_then(Value::as_bool),
@@ -781,9 +675,6 @@ impl Prefs {
             disabled_tools: string_list("disabled_tools"),
             skills: string_list("skills"),
             session_tool_prefs,
-            recent_sessions: sessions,
-            session_queues,
-            session_goals,
             goal_max_cycles: v
                 .get("goal_max_cycles")
                 .and_then(Value::as_u64)
@@ -831,7 +722,6 @@ impl Prefs {
             "voice": self.voice,
             "reasoning_provider": self.reasoning_provider,
             "reasoning_model": self.reasoning_model,
-            "session_id": self.session_id,
             "workspace_mode": self.workspace_mode,
             "workspace_allowed": self.workspace_allowed,
             "show_details": self.show_details,
@@ -857,22 +747,6 @@ impl Prefs {
             },
             "disabled_tools": self.disabled_tools,
             "skills": self.skills,
-            "recent_sessions": self.recent_sessions.iter().map(|e| json!({
-                "id": e.id,
-                "label": e.label,
-                "last_used": e.last_used,
-            })).collect::<Vec<_>>(),
-            // Queue stash + goals persist as LISTS (recency order matters;
-            // JSON objects would sort keys at rest).
-            "session_queues": self.session_queues.iter().map(|(id, prompts)| json!({
-                "id": id,
-                "prompts": prompts,
-            })).collect::<Vec<_>>(),
-            "session_goals": self.session_goals.iter().map(|(id, (text, run_id))| json!({
-                "id": id,
-                "text": text,
-                "run_id": run_id,
-            })).collect::<Vec<_>>(),
             "session_tool_prefs": self.session_tool_prefs.iter().map(|(id, tp)| json!({
                 "id": id,
                 "disabled_tools": tp.disabled_tools,
@@ -899,81 +773,6 @@ impl Prefs {
         fs::rename(&tmp, path)
     }
 
-    /// Record a session as just-used: upsert to the front, keep the newest
-    /// label when one exists (the first prompt names a session for life),
-    /// cap the list.
-    pub fn touch_session(&mut self, id: &str, label: Option<&str>) {
-        let id = id.trim();
-        if id.is_empty() {
-            return;
-        }
-        let mut entry = SessionEntry {
-            id: id.to_string(),
-            label: String::new(),
-            last_used: now_iso_utc(),
-        };
-        if let Some(pos) = self.recent_sessions.iter().position(|e| e.id == id) {
-            entry.label = self.recent_sessions.remove(pos).label;
-        }
-        if let Some(l) = label {
-            let l = l.trim();
-            if !l.is_empty() && entry.label.is_empty() {
-                entry.label = l.chars().take(60).collect();
-            }
-        }
-        self.recent_sessions.insert(0, entry);
-        self.recent_sessions.truncate(RECENT_SESSIONS_MAX);
-    }
-
-    /// The stashed prompt queue for a session (empty = no stash).
-    pub fn session_queue(&self, id: &str) -> Vec<String> {
-        self.session_queues
-            .iter()
-            .find(|(sid, _)| sid == id)
-            .map(|(_, q)| q.clone())
-            .unwrap_or_default()
-    }
-
-    /// Write-through slot for a session's queue: upsert to front (the
-    /// `touch_session` pattern), remove the slot when the queue empties,
-    /// cap slot count so abandoned sessions never grow the file forever.
-    pub fn set_session_queue(&mut self, id: &str, prompts: &[String]) {
-        let id = id.trim();
-        if id.is_empty() {
-            return;
-        }
-        self.session_queues.retain(|(sid, _)| sid != id);
-        if !prompts.is_empty() {
-            self.session_queues
-                .insert(0, (id.to_string(), prompts.to_vec()));
-            self.session_queues.truncate(RECENT_SESSIONS_MAX);
-        }
-    }
-
-    /// The persisted goal for a session: `(text, run_id)`.
-    pub fn session_goal(&self, id: &str) -> Option<(String, String)> {
-        self.session_goals
-            .iter()
-            .find(|(sid, _)| sid == id)
-            .map(|(_, g)| g.clone())
-    }
-
-    /// Set/clear a session's goal slot (same slot discipline as queues).
-    pub fn set_session_goal(&mut self, id: &str, goal: Option<(String, String)>) {
-        let id = id.trim();
-        if id.is_empty() {
-            return;
-        }
-        self.session_goals.retain(|(sid, _)| sid != id);
-        if let Some((text, run_id)) = goal {
-            if !text.trim().is_empty() {
-                self.session_goals
-                    .insert(0, (id.to_string(), (text, run_id)));
-                self.session_goals.truncate(RECENT_SESSIONS_MAX);
-            }
-        }
-    }
-
     /// A session's remembered tools-modal config (`None` = never touched;
     /// the caller seeds from the global baseline).
     pub fn session_tool_prefs(&self, id: &str) -> Option<SessionToolPrefs> {
@@ -996,7 +795,7 @@ impl Prefs {
         self.session_tool_prefs.retain(|(sid, _)| sid != id);
         self.session_tool_prefs
             .insert(0, (id.to_string(), tp.clone()));
-        self.session_tool_prefs.truncate(RECENT_SESSIONS_MAX);
+        self.session_tool_prefs.truncate(SESSION_SLOTS_MAX);
     }
 
     /// The `/goal` cycle budget: the persisted value, else the default 8
@@ -1270,9 +1069,6 @@ mod tests {
             path: Some(path.clone()),
             ..Prefs::default()
         };
-        p.touch_session("acode-aaa", Some("first prompt of session"));
-        p.touch_session("acode-bbb", None);
-        p.touch_session("acode-aaa", Some("late label must not overwrite"));
         // Per-session tool prefs (operator ask): each session's slot
         // round-trips independently.
         p.set_session_tool_prefs(
@@ -1318,10 +1114,6 @@ mod tests {
         );
         assert_eq!(loaded.disabled_tools, vec!["fetch_url".to_string()]);
         assert_eq!(loaded.skills, vec!["coredoc".to_string()]);
-        // Newest first; the FIRST label sticks (a session is named once).
-        assert_eq!(loaded.recent_sessions[0].id, "acode-aaa");
-        assert_eq!(loaded.recent_sessions[0].label, "first prompt of session");
-        assert_eq!(loaded.recent_sessions[1].id, "acode-bbb");
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -1377,7 +1169,7 @@ mod tests {
         // full save→load round trip. A new pref field must extend this.
         let dir = std::env::temp_dir().join(format!("acode-prefs-full-{}", std::process::id()));
         let path = dir.join("prefs.json");
-        let mut p = Prefs {
+        let p = Prefs {
             theme: Some("nord".into()),
             bundle_id: Some("basic-agent".into()),
             flow_id: Some("81795ea9".into()),
@@ -1389,7 +1181,6 @@ mod tests {
             voice: Some(json!({"stt_language": "fr", "read_aloud": true, "reply_volume": 0.6})),
             reasoning_provider: Some("lmstudio".into()),
             reasoning_model: Some("qwen3-4b".into()),
-            session_id: Some("acode-full".into()),
             workspace_mode: Some("workspace_or_allowed".into()),
             workspace_allowed: vec!["/srv/data".into(), "/opt/shared".into()],
             show_details: Some(false),
@@ -1400,18 +1191,12 @@ mod tests {
             tool_overrides: vec![("fetch_url".into(), "auto".into())],
             disabled_tools: vec!["fetch_url".into()],
             skills: vec!["coredoc".into()],
-            recent_sessions: Vec::new(),
-            session_queues: Vec::new(),
-            session_goals: Vec::new(),
             session_tool_prefs: Vec::new(),
             goal_max_cycles: 12,
             context_window: 262_144,
             max_iterations: 60,
             path: Some(path.clone()),
         };
-        p.touch_session("acode-full", Some("first prompt"));
-        p.set_session_queue("acode-full", &["queued one".into(), "queued two".into()]);
-        p.set_session_goal("acode-full", Some(("ship it".into(), "run-9".into())));
         p.save().expect("save");
 
         // Human-readable at rest: pretty-printed JSON, the documented
@@ -1424,7 +1209,6 @@ mod tests {
             "\"flow_id\"",
             "\"provider\"",
             "\"model\"",
-            "\"session_id\"",
             "\"workspace_mode\"",
             "\"workspace_allowed\"",
             "\"show_details\"",
@@ -1435,9 +1219,6 @@ mod tests {
             "\"overrides\"",
             "\"disabled_tools\"",
             "\"skills\"",
-            "\"recent_sessions\"",
-            "\"session_queues\"",
-            "\"session_goals\"",
             "\"goal_max_cycles\"",
             "\"context_window\"",
         ] {
@@ -1450,7 +1231,6 @@ mod tests {
         assert_eq!(l.flow_id.as_deref(), Some("81795ea9"));
         assert_eq!(l.provider.as_deref(), Some("lmstudio"));
         assert_eq!(l.model.as_deref(), Some("qwen3-4b"));
-        assert_eq!(l.session_id.as_deref(), Some("acode-full"));
         assert_eq!(l.workspace_mode.as_deref(), Some("workspace_or_allowed"));
         assert_eq!(
             l.animation,
@@ -1472,16 +1252,6 @@ mod tests {
         );
         assert_eq!(l.disabled_tools, vec!["fetch_url".to_string()]);
         assert_eq!(l.skills, vec!["coredoc".to_string()]);
-        assert_eq!(l.recent_sessions[0].id, "acode-full");
-        assert_eq!(l.recent_sessions[0].label, "first prompt");
-        assert_eq!(
-            l.session_queue("acode-full"),
-            vec!["queued one".to_string(), "queued two".to_string()]
-        );
-        assert_eq!(
-            l.session_goal("acode-full"),
-            Some(("ship it".to_string(), "run-9".to_string()))
-        );
         assert_eq!(l.goal_max_cycles, 12);
         assert_eq!(l.context_window, 262_144);
         assert_eq!(l.max_iterations, 60);
@@ -1531,17 +1301,6 @@ mod tests {
         assert!(l.tool_overrides.is_empty());
         assert!(l.disabled_tools.is_empty());
         assert!(l.skills.is_empty());
-        assert!(l.recent_sessions.is_empty());
-        // Malformed queue slots drop; the well-formed one survives.
-        assert!(l.session_queue("a").is_empty());
-        assert!(l.session_queue("b").is_empty());
-        assert_eq!(l.session_queue("c"), vec!["kept".to_string()]);
-        // Malformed goal slots drop; a wrong-typed run_id degrades to "".
-        assert!(l.session_goal("a").is_none());
-        assert_eq!(
-            l.session_goal("g"),
-            Some(("kept goal".to_string(), String::new()))
-        );
         assert_eq!(l.goal_max_cycles, 0);
         assert_eq!(l.goal_cycles(), 8, "unset budget resolves to the default");
         assert_eq!(l.context_window, 0, "wrong-typed window reads as unset");
@@ -1566,7 +1325,7 @@ mod tests {
             fs::write(&path, junk).expect("write junk root");
             let l = Prefs::load_from(path.clone());
             assert_eq!(l.theme, None, "junk root {junk:?} reads as defaults");
-            assert!(l.session_queues.is_empty());
+            assert!(l.session_tool_prefs.is_empty());
         }
         let _ = fs::remove_dir_all(dir);
     }
@@ -1584,81 +1343,45 @@ mod tests {
         }
     }
 
+    /// This client keeps NO session list and no "last session": which
+    /// conversations exist is the gateway's answer alone (operator ruling
+    /// 2026-10-10). A prefs file written by an older build carries both;
+    /// the next save drops them.
     #[test]
-    fn recent_sessions_are_capped() {
-        let mut p = Prefs::default();
-        for i in 0..30 {
-            p.touch_session(&format!("acode-{i:03}"), None);
-        }
-        assert_eq!(p.recent_sessions.len(), RECENT_SESSIONS_MAX);
-        assert_eq!(p.recent_sessions[0].id, "acode-029");
-    }
-
-    #[test]
-    fn session_queue_slots_round_trip_upsert_and_gc() {
-        let dir = std::env::temp_dir().join(format!("acode-prefs-queue-{}", std::process::id()));
+    fn no_session_list_is_kept_at_rest() {
+        let dir = std::env::temp_dir().join(format!("acode-prefs-nolist-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
         let path = dir.join("prefs.json");
-        let mut p = Prefs {
-            path: Some(path.clone()),
-            ..Prefs::default()
-        };
-        p.set_session_queue("acode-a", &["one".into(), "two".into()]);
-        p.set_session_queue("acode-b", &["b-task".into()]);
-        // Rewriting a slot moves it to the front (recency order).
-        p.set_session_queue("acode-a", &["one".into(), "two".into(), "three".into()]);
-        assert_eq!(p.session_queues[0].0, "acode-a");
-        p.save().expect("save");
-        let loaded = Prefs::load_from(path.clone());
-        assert_eq!(
-            loaded.session_queue("acode-a"),
-            vec!["one".to_string(), "two".to_string(), "three".to_string()],
-            "queue stash round-trips in order"
-        );
-        assert_eq!(loaded.session_queue("acode-b"), vec!["b-task".to_string()]);
-        assert!(loaded.session_queue("acode-ghost").is_empty());
-
-        // Emptying a queue removes its slot (no dead stash clutter).
-        let mut loaded = loaded;
-        loaded.set_session_queue("acode-b", &[]);
-        loaded.save().expect("save");
-        let reloaded = Prefs::load_from(path);
-        assert!(reloaded.session_queue("acode-b").is_empty());
-        assert_eq!(
-            reloaded.session_queues.len(),
-            1,
-            "empty stash slots are removed at rest"
+        fs::write(
+            &path,
+            r#"{"theme":"nord","session_id":"acode-old","recent_sessions":[{"id":"acode-old","label":"x","last_used":"2026-10-10T10:00:00Z"}],"session_queues":[{"id":"acode-old","prompts":["queued"]}],"session_goals":[{"id":"acode-old","text":"ship it","run_id":"run-9"}]}"#,
+        )
+        .unwrap();
+        let l = Prefs::load_from(path.clone());
+        assert_eq!(l.theme.as_deref(), Some("nord"), "the rest still loads");
+        l.save().expect("save");
+        let raw = fs::read_to_string(&path).unwrap();
+        assert!(
+            !raw.contains("recent_sessions")
+                && !raw.contains("\"session_id\"")
+                && !raw.contains("session_queues")
+                && !raw.contains("session_goals"),
+            "no session list, no last session, no queued prompts, no goal at rest:\n{raw}"
         );
         let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn session_queue_slots_are_capped() {
-        let mut p = Prefs::default();
-        for i in 0..30 {
-            p.set_session_queue(&format!("acode-{i:03}"), &[format!("task {i}")]);
-        }
-        assert_eq!(p.session_queues.len(), RECENT_SESSIONS_MAX);
-        assert_eq!(p.session_queues[0].0, "acode-029", "newest first");
-    }
-
-    #[test]
-    fn session_goal_slots_round_trip_and_clear() {
+    fn goal_cycle_budget_round_trips() {
         let dir = std::env::temp_dir().join(format!("acode-prefs-goal-{}", std::process::id()));
         let path = dir.join("prefs.json");
-        let mut p = Prefs {
+        let p = Prefs {
             goal_max_cycles: 12,
             path: Some(path.clone()),
             ..Prefs::default()
         };
-        p.set_session_goal("acode-a", Some(("ship the release".into(), String::new())));
-        // Binding the run id rewrites the same slot.
-        p.set_session_goal("acode-a", Some(("ship the release".into(), "run-9".into())));
         p.save().expect("save");
-        let loaded = Prefs::load_from(path.clone());
-        assert_eq!(
-            loaded.session_goal("acode-a"),
-            Some(("ship the release".to_string(), "run-9".to_string()))
-        );
+        let loaded = Prefs::load_from(path);
         assert_eq!(loaded.goal_max_cycles, 12);
         assert_eq!(loaded.goal_cycles(), 12);
         assert_eq!(
@@ -1666,11 +1389,6 @@ mod tests {
             8,
             "unset budget resolves to the plan default"
         );
-        // Clearing removes the slot at rest.
-        let mut loaded = loaded;
-        loaded.set_session_goal("acode-a", None);
-        loaded.save().expect("save");
-        assert!(Prefs::load_from(path).session_goal("acode-a").is_none());
         let _ = fs::remove_dir_all(dir);
     }
 

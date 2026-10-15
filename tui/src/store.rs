@@ -201,8 +201,9 @@ impl SessionState {
         }
     }
 
-    /// True where the session still wants something from you — the
-    /// rows the picker sorts to the top.
+    /// True where the session still wants something from you (waiting
+    /// or running). The board no longer sorts by it — newest first, see
+    /// `runner::session_board_order`.
     pub fn is_live(self) -> bool {
         matches!(self, SessionState::Waiting | SessionState::Running)
     }
@@ -250,8 +251,7 @@ pub struct SessionRow {
 pub enum SessionIndex {
     /// Never asked (the picker asks at open).
     Unfetched,
-    /// A request is in flight — the picker shows local rows and says
-    /// the live column is still arriving.
+    /// A request is in flight — the board shows its waiting surface.
     Loading,
     /// The gateway answered. `truncated` = the listing hit its limit,
     /// so older sessions exist beyond these rows and the picker says so.
@@ -780,12 +780,12 @@ pub struct ImageEntry {
     pub error: String,
 }
 
-/// One queued prompt (`/queue <text>`): FIFO. PERSISTED per session id
-/// (prefs `session_queues` slot, write-through on every mutation) — the
-/// queue contract is "piling up requests that each gets executed", and a
-/// silent drop at quit broke it. Safety is the RESTORE POSTURE, not
-/// non-persistence: any restore (boot, session switch) lands PAUSED and
-/// never auto-starts, so persistence costs zero unattended token spend.
+/// One queued prompt (`/queue <text>`): FIFO. Held IN MEMORY for the app's
+/// lifetime only — never written to disk (operator ruling 2026-10-10: a
+/// client stores no session information locally). A session switch stashes
+/// the leaving conversation's queue in memory (`Store::queue_stash`) and a
+/// switch back restores it PAUSED; quitting discards it, and the quit line
+/// lists what was not sent.
 ///
 /// Thin-client conformance (class ii, 2026-07-23): queued prompts are
 /// CLIENT-HELD future work — un-submitted composer text, plural. The
@@ -1069,15 +1069,14 @@ pub struct Store {
     pub notices: Signal<Vec<String>>,
     /// Bumped by Esc; two within a second cancels the run.
     pub last_esc: Signal<Option<Instant>>,
-    /// Transcript VERBOSITY (operator directive 2026-08-19: /details
-    /// toggles the full tool call vs. just the call + a status tag).
-    /// true = full cards — wrapped args, result bodies, thinking
-    /// content + the labeled reasoning channel. false (default) = the
-    /// collapsed view — cycle rules + thinking gists + one-line tool
-    /// calls with right-aligned status words. The thinking itself and
-    /// every called tool stay visible in BOTH states; this signal
-    /// gates detail, never existence. Toggled by Ctrl+D / /details;
-    /// /details full|fold set it directly.
+    /// Transcript VERBOSITY. true = every reasoning cycle OPEN (content,
+    /// the labeled reasoning channel, every tool call as a full card —
+    /// args, output, error) and every body uncapped. false (default) =
+    /// each cycle FOLDED to one row (operator ask 2026-10-10, superseding
+    /// the 2026-08-19 one-line-per-call view): first words, a named
+    /// hidden-reasoning note, the calls counted by status, time and
+    /// tokens; `expanded_cycles` opens single cycles. Toggled by Ctrl+D /
+    /// /details; /details full|fold set it directly.
     /// `/animation` — 0 = the transcript, N = ambient variant N showing
     /// in its place. Session-scoped and opt-in: nothing else writes it,
     /// and Esc or a click puts it back to 0.
@@ -1098,6 +1097,14 @@ pub struct Store {
     /// gesture, not a preference. `/details full` outranks it (every
     /// card is expanded, and the markers stop rendering).
     pub expanded_tools: Signal<Vec<String>>,
+    /// Reasoning cycles the operator OPENED (operator ask 2026-10-10: a
+    /// cycle is a collapsible panel, folded by default to one row of
+    /// first words + key stats; open = all its text and every tool call
+    /// in full). Keyed by `ui::transcript_view::cycle_key` — a content
+    /// identity, because the feed's `i{index}` keys are positions a
+    /// truncation drain shifts. Session-scoped, never persisted, like
+    /// `expanded_tools`; `/details full` opens every cycle.
+    pub expanded_cycles: Signal<Vec<String>>,
     /// The GATEWAY's session listing, fetched when `/sessions` opens
     /// and on `r` — never polled (the `/resources` rule). See
     /// [`SessionIndex`] for why absence is its own state.
@@ -1213,9 +1220,12 @@ pub struct Store {
     pub workspace_allowed: Signal<Vec<String>>,
     // -- queue / steer lane ---------------------------------------------
     /// FIFO prompt queue (`/queue <text>`); drains as NEW runs when a run
-    /// completes successfully. Persisted per session (prefs
-    /// `session_queues`, write-through); every restore lands PAUSED.
+    /// completes successfully. In memory only (see [`QueuedPrompt`]).
     pub queue: Signal<Vec<QueuedPrompt>>,
+    /// The queues of conversations switched away from IN THIS RUN of the
+    /// app, `(session id, prompts)` — restored PAUSED on a switch back.
+    /// In memory only: gone at quit, never on disk.
+    pub queue_stash: Signal<Vec<(String, Vec<String>)>>,
     /// Halted after a failure/cancel/restore; explicit resume (`r`).
     pub queue_paused: Signal<bool>,
     /// Text submitted with no cycling target yet (Starting, or Running
@@ -1332,6 +1342,7 @@ impl Store {
             // gists + tagged one-line tool calls); /details expands.
             show_details: cx.signal(false),
             expanded_tools: cx.signal(Vec::new()),
+            expanded_cycles: cx.signal(Vec::new()),
             session_index: cx.signal(SessionIndex::Unfetched),
             paused: cx.signal(false),
             quit_state: cx.signal(QuitState::None),
@@ -1354,6 +1365,7 @@ impl Store {
             workspace_mode: cx.signal(String::new()),
             workspace_allowed: cx.signal(Vec::new()),
             queue: cx.signal(Vec::new()),
+            queue_stash: cx.signal(Vec::new()),
             queue_paused: cx.signal(false),
             pending_steer: cx.signal(None),
             last_outcome: cx.signal(RunOutcome::None),
@@ -1388,9 +1400,9 @@ impl Store {
     /// Reset the STEER half of the lane at a session boundary (/new,
     /// session switch). Returns the dropped buffer so callers can echo it
     /// visibly. The QUEUE is deliberately NOT touched here: it is stashed
-    /// per session (prefs write-through) and swapped by the session
-    /// boundary itself — a pending steer is moment-bound guidance for a
-    /// run that no longer matters, a queue is durable work.
+    /// per session in memory and swapped by the session boundary itself —
+    /// a pending steer is moment-bound guidance for a run that no longer
+    /// matters, a queue is work the user asked for.
     pub fn reset_steer_lane(&self) -> Option<PendingSteer> {
         let dropped = self.pending_steer.get_untracked();
         self.pending_steer.set(None);
