@@ -38,7 +38,7 @@ pub enum Command {
     /// `/automation [task]` — "New automation": create an automation that
     /// runs the current workflow (the Code web's dialog, seven steps); the
     /// task defaults to the conversation's last prompt. `/schedule` stays a
-    /// silent alias for one release (0.9.2 → removed in the next).
+    /// silent alias for one release (0.10.0 → removed in the next).
     NewAutomation(Option<String>),
     /// `/workspace` — root / access mode / allowed paths modal.
     Workspace,

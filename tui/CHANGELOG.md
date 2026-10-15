@@ -4,30 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
-## [Unreleased]
-
-### Changed
-- **Sessions come from the gateway only.** The local recent-session list and
-  the saved "last session" are gone: `/sessions` lists the gateway's sessions,
-  newest first, and `--resume` asks the gateway for its newest session. On quit,
-  the shell shows how to resume the session.
-- **The queue lives in memory only**, for the app's lifetime: switching
-  sessions keeps it and restores it paused on return; prompts not sent are
-  printed at quit. It is no longer written to `prefs.json`.
-- **`/goal` belongs to the session on the gateway.** Nothing is saved locally;
-  opening a session whose live run is a goal run shows that goal, read from the
-  run. Older `session_queues` / `session_goals` / `recent_sessions` keys are
-  dropped from `prefs.json` on the next save.
-- **Voice devices adapt.** A saved speaker or microphone that is missing, no
-  longer opens, or cannot be chosen by the installed AbstractVoice is replaced
-  by the system default automatically. When the saved microphone is not found,
-  the device list is re-read, so one plugged in after launch is used.
-
-### Fixed
-
-- The answer is no longer shown twice. When the model answered without a tool call, the last cycle's words are the answer: the transcript used to show them as a folded "cycle N" row and again as the answer below it. The cycle row now goes; the answer stays.
-
-## [0.9.2] - 2026-10-09
+## [0.10.0] - 2026-10-15
 
 Needs AbstractGateway with round-16 calendar schedules (`schedule@2`, the
 served `next_run_at` / `next_run_local` / `time_zone` / `schedule_text` /
@@ -38,6 +15,49 @@ email trigger, and the calendar kinds say they need 0.14 (see Fixed).
 
 ### Added
 
+- **Turns and cycle panels.** Your message opens each turn as a tinted
+  card (`▌ ❯ …` on the theme's raised surface, an accent bar down its left
+  edge); between it and the answer, each reasoning cycle is a collapsible
+  panel folded to ONE row — the model's first words (or the names of its
+  tool calls), its calls counted by status (`✓` ok, `✗` failed, `?`
+  awaiting approval, `»` running), a `∴ N words` note when the row hides a
+  reasoning channel, the model call's duration and tokens. A click opens
+  the cycle (the content as markdown, the labeled reasoning, every tool
+  call as a full card); a second click folds it. `/details fold` (the
+  default) keeps them folded; `/details full` (`Ctrl+D`) opens every cycle
+  uncut.
+- JSON tool output is laid out (indented, keys / strings / numbers in the
+  theme's syntax inks) instead of printed as one line.
+- **Hold Space to talk** (on by default; `/voice space off` turns it
+  off): on an empty prompt, hold `Space`, speak, release — the words are
+  transcribed and SENT, exactly as `Enter` would send them. Recording
+  starts on the press (nothing is typed) and the row above the prompt
+  shows a live histogram of your voice (`● Listening… 3 s ▂▃▅▇▅▃ release
+  Space to send · Esc cancels`); a tap is discarded unsent, and `Space` in
+  a draft with words is typing. Terminals that speak the kitty keyboard
+  protocol end the recording on the key-up; elsewhere the key's
+  auto-repeat tells a hold from a tap, and the release is the moment the
+  repeats stop.
+- **Theme dropdown**: the theme name in the status bar is a trigger
+  (click, or `Tab` to it + `Enter`) — every theme grouped Dark / Light;
+  arrows, Page Up/Down and the mouse wheel preview LIVE, `Enter` or a
+  click keeps it (saved like `Ctrl+T`), `Esc` restores; the wheel on the
+  closed name steps to the next theme.
+- **Speaking: pause and resume, per-message icons, narration.** `Ctrl+P`
+  pauses a playing reply where it is (`‖ Paused · Ctrl+P resumes`) and
+  again resumes it; `Esc` stops. Your messages and each final answer
+  carry `▶` at their top right — a click reads THAT message, `‖` pauses,
+  a lit `▶` resumes. With **Read aloud** on, each reasoning cycle's words
+  are read as the cycle lands, then the answer, one after the other. The
+  status row shows a live histogram of what the speaker plays
+  (`♪ Speaking… ▂▅▇▅▃ Ctrl+P pauses · Esc stops`).
+- Speaking and dictation work before the first run of a session: they
+  ride the session's media run (`session_memory_<session id>`, the run
+  Code web and Observer use), so the first message can be spoken and the
+  first reply read aloud.
+- The bottom line shows the folder this session was launched for
+  (`⌂ ~/…`; the `--workspace` root, else the current directory) and the
+  `hold Space to talk` hint (`Ctrl+R speak` with the gesture off).
 - `/automations`: a card gets a third line, in the error colour, only while the automation's last **Email result** failed — the gateway's `last_notification.text` verbatim plus "· 3 h ago"; the automation's header shows the same line under its timing line. A sent notice (a later success) clears it.
 - `/schedule`'s **When** step (2/7): **Repeat** (the UTC presets and every
   N m/h/d, unchanged), **Daily**, **Weekly** (the days as `[x] Mon`
@@ -98,6 +118,21 @@ email trigger, and the calendar kinds say they need 0.14 (see Fixed).
 
 ### Changed
 
+- **Sessions come from the gateway only.** The local recent-session list and
+  the saved "last session" are gone: `/sessions` lists the gateway's sessions,
+  newest first, and `--resume` asks the gateway for its newest session. On quit,
+  the shell shows how to resume the session.
+- **The queue lives in memory only**, for the app's lifetime: switching
+  sessions keeps it and restores it paused on return; prompts not sent are
+  printed at quit. It is no longer written to `prefs.json`.
+- **`/goal` belongs to the session on the gateway.** Nothing is saved locally;
+  opening a session whose live run is a goal run shows that goal, read from the
+  run. Older `session_queues` / `session_goals` / `recent_sessions` keys are
+  dropped from `prefs.json` on the next save.
+- **Voice devices adapt.** A saved speaker or microphone that is missing, no
+  longer opens, or cannot be chosen by the installed AbstractVoice is replaced
+  by the system default automatically. When the saved microphone is not found,
+  the device list is re-read, so one plugged in after launch is used.
 - **Behaviour change:** `/automation` now creates an automation — it used to
   open the list, which is `/automations [id]` (or `/autos`); `/schedule` is
   kept as an alias for this release.
@@ -165,6 +200,7 @@ email trigger, and the calendar kinds say they need 0.14 (see Fixed).
 
 ### Fixed
 
+- The answer is no longer shown twice. When the model answered without a tool call, the last cycle's words are the answer: the transcript used to show them as a folded "cycle N" row and again as the answer below it. The cycle row now goes; the answer stays.
 - `/automations` works again with a gateway that does not serve the
   round-16 schedule fields (AbstractGateway 0.13.x: only `next_fire_at`):
   it said "The automations could not be read: automation summary: `time_zone` is missing or not a string" and listed nothing. Each served schedule field is optional

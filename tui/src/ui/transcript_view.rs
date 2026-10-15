@@ -105,9 +105,11 @@ fn carded(
 /// baked in because the typeset rhythm never blanks before an item's
 /// first block.
 ///
-/// Since 2026-10-10 the only rule left is the final answer's, drawn by
+/// Since 2026-10-10 the rules left are the final answer's, drawn by
 /// [`rule_block_with_icon`] (the user's message is a card, a cycle a
-/// panel row); this is its paint — row 1 of a 2-row block, row 0 the air.
+/// panel row), and the run separators of a read-only transcript
+/// ([`rule_block`]); this is their paint — row 1 of a 2-row block, row 0
+/// the air.
 fn draw_rule(
     canvas: &mut dyn abstracttui::ui::StyledCanvas,
     rect: Rect,
@@ -130,6 +132,14 @@ fn draw_rule(
         let tail: String = ch.to_string().repeat((rect.right() - tx) as usize);
         canvas.print(Point::new(tx, y), &tail, line_ink, Rgba::TRANSPARENT);
     }
+}
+
+/// A labeled full-width rule, two rows: air, then `ch ch label ch…`.
+fn rule_block(ch: char, label: String, label_ink: Rgba, line_ink: Rgba) -> FeedBlock {
+    FeedBlock::Custom(CustomBlock::new(
+        |_| 2,
+        move |canvas, rect| draw_rule(canvas, rect, ch, &label, label_ink, line_ink),
+    ))
 }
 
 /// [`rule_block`] with the message's play/pause icon at its right end
@@ -2271,8 +2281,14 @@ pub fn read_only_transcript(
                 FeedItem::new().block(rule_block('━', label.clone(), t.accent, t.text_faint)),
             ),
             ChatEntry::Item(item) => {
-                if let Some(fi) = render_item(&t, item, store, true, None, false) {
+                // No cycle panels here: every item stands on its own.
+                if let Some(fi) = render_item(&t, item, store, true, None, false, &Slot::Plain) {
                     feed.push(format!("c{i}"), fi);
+                    // The answer's markdown is its own entry, after its rule
+                    // (the live transcript's `i{i}~body`).
+                    if let Some(b) = render_body(&t, item, &Slot::Plain) {
+                        feed.push(format!("c{i}~body"), b);
+                    }
                 }
             }
         }

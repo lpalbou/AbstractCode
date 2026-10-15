@@ -2695,8 +2695,8 @@ fn open_as_chat_renders_every_run_as_a_transcript() {
     // The newest run at the end, in the transcript's own cards.
     assert!(screen.contains("━━ #7"), "{screen}");
     assert!(
-        screen.contains("══ you"),
-        "the task is your turn:\n{screen}"
+        screen.contains("▌ ❯ "),
+        "the task is your turn (the tinted card):\n{screen}"
     );
     // Home: the oldest run; every separator is met on the way down.
     let mut seen = flat(&h.keys(b"\x1b[H"));

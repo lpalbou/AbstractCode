@@ -230,7 +230,7 @@ fn squash(s: &str) -> String {
 }
 
 /// The screen as one line of words (wrapped sentences read whole).
-/// An automation's rail sections (0.9.2), as the rail names them.
+/// An automation's rail sections (0.10.0), as the rail names them.
 const AUTOMATION_SECTIONS: [&str; 5] = [
     "Task and schedule",
     "Model and limits",
@@ -504,7 +504,7 @@ fn an_automation_workspace_panel_is_the_run_level() {
         h.assert_rows(&screen, &["Automation Inbox triage", "[ ] Use my default"]);
         // The sentence above the first row: in view, or one wheel away on a
         // small terminal (the automation's named sections take the right
-        // edge; the panel scrolls with the wheel since 0.9.2).
+        // edge; the panel scrolls with the wheel since 0.10.0).
         let read = if flatten(&screen).contains(&squash(
             "The workspaces this run uses, among the eligible ones.",
         )) {

@@ -5,22 +5,13 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Changed
-
-- Web: the microphone is **press to talk**, like Space in the terminal client: hold it while you speak and release to send what you said (after anything already typed); a quick tap records nothing and says to hold. Dictation now works from the first message of a new conversation (it transcribes on the session's media run, as the terminal client and Observer do).
-
-### Fixed
-
-- Web: pressing the greyed-out microphone of a conversation without a run reported "Voice recording is not supported in this browser". Browsers deliver pointer presses to disabled buttons, so the press itself now checks; with dictation available before the first run the button is no longer off there.
-
-## [terminal 0.9.2 / web 0.11.2] - 2026-10-09
+## [terminal 0.10.0 / web 0.11.2] - 2026-10-15
 
 Requires AbstractGateway with `schedule@2`, the served schedule fields and `POST /api/gateway/automations/schedule-preview` (round 16) and `@abstractframework/ui-kit` 0.8.7 for calendar schedules; the automations list and an automation's screen also read an older gateway (see Fixed).
 
 ### Added
 
+- tui: the transcript reads as turns — your message as a tinted card, each reasoning cycle a collapsible panel folded to one row (its first words, tool calls counted by status, `∴ N words`, duration, tokens; a click opens it), JSON tool output laid out; **hold Space to talk** (on by default; `/voice space off`): hold, speak, release to send; the theme dropdown in the status bar; `Ctrl+P` pauses and resumes a spoken reply, `▶` / `‖` on each message reads that one, Read aloud narrates each cycle as it lands; speaking and dictation from the first message of a session (the session's media run); the folder line — see [tui/CHANGELOG.md](tui/CHANGELOG.md).
 - Web and tui: an automation whose last **Email result** failed says so on its card and in its header — the gateway's `last_notification.text` verbatim ("Email result failed — <sentence>") and how long ago, in the kit's error pill on the web, as a third card line and a header line in the terminal. Nothing shows for a sent, queued or absent notice, so the line goes away once a later send succeeds. Needs AbstractGateway with `last_notification` on automation summaries (round 16); an older gateway shows nothing.
 - Web: calendar schedules. The schedule dialog's **When** offers **Repeat** (fixed UTC interval, as before), **Daily**, **Weekly** (day chips that show their state), **Monthly** (day 1–31 or the last day) at a time of day, and **Once at**; every schedule is written as `schedule@2`. For every schedule (Repeat with its bounds too) the line under **When** is the gateway's own sentence; for Daily, Weekly, Monthly and Once the time zone reads "in Europe/Paris (your account's time zone)" with **Change in preferences** (opens Settings → Workflow). An automation's Workflow settings edit its calendar rule, keeping its time zone and limits.
 - Web: Settings → Workflow → **Time zone**, your account's time zone kept by the gateway (`PUT /api/gateway/accounts/me/preferences` `{time_zone}`): the kit picker over the gateway's IANA list, **Gateway default (<zone>)** first, one PUT at once ("Saved." / "Not saved." + the gateway's sentence).
@@ -34,6 +25,9 @@ Requires AbstractGateway with `schedule@2`, the served schedule fields and `POST
 
 ### Changed
 
+- tui: sessions come from the gateway only (`/sessions`, `--resume`; no local recent list or saved last session), the queue lives in memory for the app's lifetime (kept across session switches, printed at quit) and `/goal` belongs to the session on the gateway (`session_queues` / `session_goals` / `recent_sessions` leave `prefs.json`); a saved voice device that is missing or will not open is replaced by the system default — see [tui/CHANGELOG.md](tui/CHANGELOG.md).
+- Web: the microphone is **press to talk**, like Space in the terminal client: hold it while you speak and release to send what you said (after anything already typed); a quick tap records nothing and says to hold. Dictation now works from the first message of a new conversation (it transcribes on the session's media run, as the terminal client and Observer do).
+- Web: dependencies after `npm audit` — DOMPurify 3.4.17 (bundled into the app; GHSA-p98j-92pf-mc4p, GHSA-6688-9rhm-gjv2), source-map-js 1.2.2 (build tooling; GHSA-68fv-2mgg-jv7q) and the test runner vitest 5.0.4 (tinypool GHSA-5gmw-xhrv-c9v3 / GHSA-85c8-ppgw-ccpr, @vitest/mocker GHSA-82fw-gwwq-j7x9); `npm audit` reports no vulnerability.
 - tui: **behaviour change** — `/automation` now creates an automation; it used to open the list, which is `/automations` (or `/autos`); `/schedule` is kept as an alias for this release.
 - tui: an automation's **Edit** panel offers only its definition's sections (**Sections (1–5)**: Task and schedule, Model and limits, Workspaces, Tools, Skills — named, highlighted, clickable), scrolls with the keys and the wheel so Mailbox and Title and limits are always reachable, and changes **Max growing context (tokens)** (one revision); `o` **Open as chat** (or `Enter` on a run) reads an automation's runs as a read-only conversation in the transcript view. `Esc` in an automation's Edit goes back to the automation (it used to close everything).
 - tui: `/automation [task]` opens **New automation** (`/schedule`, its old name, stays a silent alias for this release; `/automation` no longer opens the list — `/automations` does). Its **Task** is a multiline editor (the composer's widget: `Enter`/`Ctrl+J` newline, a visible **Continue** button); its **Tools** step starts with every tool deselected and **Use workflow default tools** off, with **Select all** / **Unselect all**, a state box per toolset (`[x]` all · `[ ]` none · `[~]` some) that toggles its tools, wheel and page-key scrolling, click-to-toggle, and the focus staying on the line you toggle. The web dialog's Tools section is unchanged (it starts from the conversation's tools) — see [tui/CHANGELOG.md](tui/CHANGELOG.md).
@@ -42,6 +36,8 @@ Requires AbstractGateway with `schedule@2`, the served schedule fields and `POST
 
 ### Fixed
 
+- tui: the answer is no longer shown twice when the model answered without a tool call (the last cycle's words were shown as a folded cycle row and again as the answer).
+- Web: pressing the greyed-out microphone of a conversation without a run reported "Voice recording is not supported in this browser". Browsers deliver pointer presses to disabled buttons, so the press itself now checks; with dictation available before the first run the button is no longer off there.
 - tui + web: the automations list works again with a gateway that does not serve the round-16 schedule fields (AbstractGateway 0.13.x serves only `next_fire_at`): the terminal said "The automations could not be read: automation summary: `time_zone` is missing or not a string" and showed no automation. `next_run_at`, `next_run_local`, `time_zone`, `schedule_text` and `schedule_rule_text` are optional on read — a missing or non-text one never fails the list: the schedule reads "—" and the next run is the gateway's `next_fire_at`, shown in UTC (e.g. "2026-10-10 19:53 UTC"). A served value is always shown as served.
 - tui: **New automation** works end to end on the released AbstractGateway 0.13.1 again (it showed "The gateway rejected the request as malformed. Method Not Allowed" twice and refused **Continue**): the round-16 schedule API is probed once per session; without it the When line reads "Not available on this gateway (needs AbstractGateway 0.14).", Daily/Weekly/Monthly are marked `needs 0.14` and refused with that sentence, Repeat and Once at… are created as `schedule@1`, and Continue always works — see [tui/CHANGELOG.md](tui/CHANGELOG.md).
 - tui: `Esc` in a **New automation** step goes back to the previous step with its values kept (it closed the whole dialog); on the first step it closes, asking "Discard this new automation?" first when something was entered.

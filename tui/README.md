@@ -7,7 +7,7 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.9.1**, pre-alpha. Release history is in
+Status: **0.10.0**, pre-alpha. Release history is in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## What it looks like
@@ -99,7 +99,7 @@ Status: **0.9.1**, pre-alpha. Release history is in
   line with **Unarchive**; open one to read its runs, approve its tool calls,
   browse its folder, discuss a run as a new chat in place, or hear a run's
   reply (`Ctrl+P`). `/automation [task]` (**New automation**; `/schedule`
-  still works in 0.9.2) creates one with the Code web's
+  still works in 0.10.0) creates one with the Code web's
   dialog: the workflow (the conversation's, or any workflow you may run),
   the task (a multiline editor), when (Repeat in UTC, Daily, Weekly, Monthly or Once at — the
   calendar rules on your account's time zone and worded by the gateway —

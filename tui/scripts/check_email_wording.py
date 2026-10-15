@@ -40,7 +40,7 @@ KIT_FILES = ["AfScheduleDialog.tsx", "email_fields.tsx", "automation_tools_picke
 
 # The dialog's non-table words the terminal shows (kit literals, verbatim). The dialog's NAME is not
 # the kit's default title ("Schedule a task", `props.title ?? …`): the terminal shows the title the Code
-# web passes to the kit dialog, "New automation" (WEB_WORDS below, since 0.9.2 autofix-1).
+# web passes to the kit dialog, "New automation" (WEB_WORDS below, since 0.10.0 autofix-1).
 DIALOG_WORDS = [
     "What",
     "Context",

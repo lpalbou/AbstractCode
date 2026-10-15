@@ -1,4 +1,4 @@
-//! `/automation` ("New automation"; `/schedule` until 0.9.2) — the kit's
+//! `/automation` ("New automation"; `/schedule` before 0.10.0) — the kit's
 //! AfScheduleDialog in the terminal (R17.2): seven
 //! visible steps, the kit's sections in the kit's order and words (no
 //! "Advanced"):

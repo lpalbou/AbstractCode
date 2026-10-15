@@ -3137,7 +3137,13 @@ mod tests {
         };
         fold.apply("root", &cycle(1, "Let me look at the prices."));
         fold.apply("root", &cycle(2, "Both configs are at MSRP."));
-        assert_eq!(fold.items.iter().filter(|i| matches!(i, Item::Thinking { .. })).count(), 2);
+        assert_eq!(
+            fold.items
+                .iter()
+                .filter(|i| matches!(i, Item::Thinking { .. }))
+                .count(),
+            2
+        );
         fold.apply(
             "root",
             &json!({"run_id": "root", "node_id": "done", "status": "completed",
@@ -3151,7 +3157,11 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(thinking, vec!["Let me look at the prices."], "the answering cycle is not repeated");
+        assert_eq!(
+            thinking,
+            vec!["Let me look at the prices."],
+            "the answering cycle is not repeated"
+        );
         assert!(fold
             .items
             .iter()

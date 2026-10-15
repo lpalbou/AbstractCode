@@ -65,7 +65,7 @@ conversation workflow. Choosing a different automation workflow leaves the conve
 | Email | **When an email arrives** (a When choice), **Email result** and **Recipients** — see [Email automations](#email-automations). |
 
 **Terminal.** `/automation [task]` (**New automation**; `/schedule` is the old
-name, still accepted in terminal 0.9.2) shows the browser dialog's sections as
+name, still accepted in terminal 0.10.0) shows the browser dialog's sections as
 seven steps, with the same words: **What** (the workflow — the conversation's, or
 any workflow you may run with **Gateway default** first — and the task, a
 multiline text: default your last prompt, or the text after `/automation`), **When** (Repeat,
