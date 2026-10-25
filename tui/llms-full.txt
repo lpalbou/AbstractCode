@@ -117,9 +117,10 @@ Status: **0.10.0**, pre-alpha. Release history is in
   or **When an email arrives**), context, tools, workspaces, **Mailbox**
   (**Email result**) and title and limits — with this conversation's model,
   tools and skills as the run input. An automation's **Edit** also changes
-  its calendar rule, run limits and email options. While one waits for you,
-  the status line says **Automations · N waiting** — `Enter` on an empty
-  prompt opens it.
+  its calendar rule, run limits and email options. While something waits
+  for you, the status line says so (**1 waiting for you · 2 new**, from your
+  event stream on the gateway) — `Enter` on an empty prompt opens the
+  automation that waits.
 - **Settings panels**: `/settings` — Activity, Files, Model, Workflow,
   Workspace, Tools, Skills, Voice — bound to this conversation, or to an
   automation's definition (each change saved as a new revision).
@@ -607,7 +608,9 @@ card reads the gateway's words, `↻ Every 24 hours (UTC) · last 3 h ago`, and 
 the automation: each change is saved as a new revision), `a` Archive; inside
 one, `Ctrl+P` reads the selected run's reply aloud. When an automation waits
 for you (an approval, a question, a result you have not seen), the status
-line says **Automations · N waiting**; `Enter` on an empty prompt opens it.
+line says so (**1 waiting for you**, **Automations · 2 new**, from your event
+stream on the gateway; **Automations · N waiting** on an older gateway);
+`Enter` on an empty prompt opens the automation that waits.
 `/workspace` opens this conversation's workspaces: **Use my default**, or
 your own rows with Read-only / Read & write / Refused, stored on the
 conversation by the gateway. `/automation` (**New automation**) walks
@@ -1450,7 +1453,7 @@ recovers it.
 | click / `Tab`+`Enter` on the theme name | status bar | Theme dropdown: every theme grouped Dark / Light; arrows, Page Up/Down and the mouse wheel preview LIVE; `Enter` or a click keeps it (saved like `Ctrl+T`); `Esc` restores. The wheel on the closed name steps to the next theme |
 | `Ctrl+P` | anywhere | Read the latest reply aloud; while it plays = pause; paused = resume (`/speak`; `Esc` stops). In one automation (`/automations <id>`): the selected run's reply; again = stop |
 | `Space` (held) | empty prompt | Hold to talk: speak, release to SEND (`/voice space off` turns it off) |
-| `Enter` | empty composer, status line shows **Automations · N waiting** | Open the automation that waits for you (a pending approval or question first, else unseen results); a click on the chip does the same |
+| `Enter` | empty composer, the status line shows the attention chip (**N waiting for you**, **Automations · M new**, or **Automations · N waiting** on an older gateway) | Open the automation that waits for you (a pending approval or question first, else unseen results); a click on the chip does the same |
 | `Ctrl+R` | anywhere | Dictate: start recording; again = transcribe into the composer (`/dictate`) |
 | `Esc` | while speaking / recording | Stop the spoken reply / cancel the recording — that press is consumed (it never clears the draft or arms cancel) |
 | `Ctrl+G` | anywhere | Fold / unfold the `/stance` panel |
@@ -1657,14 +1660,23 @@ in an automation's Edit panel marks the row being saved with `…` next to
   when reported) · tool count · per-cycle output sparkline. When idle:
   session totals + last context size; a fresh session shows its session
   line instead of a blank row.
-- **Status bar**: the persistent instrument row — first, while an
-  automation waits for you, **Automations · N waiting** (N = the
-  automations' `attention.pending_waits + attention.unseen_count` summed,
-  the badge on the Code web's Automations header; absent at 0; `Enter` on
-  an empty prompt or a click opens the automation that waits). It is read
-  at start and when the gateway comes back, then every 15 s ONLY while
-  something waits or an active automation asks before each tool call
-  (otherwise nothing polls; `/automations` refreshes it) — then `ctx used[/window] tk
+- **Status bar**: the persistent instrument row — first, while something
+  waits for you, the attention chip. On a gateway with your event stream
+  (`GET /api/gateway/me/events?after=`, `GET /api/gateway/me/events/stream`)
+  it follows that stream: **N waiting for you** (approvals and questions
+  raised and not yet answered, seen or ended), **Automations · M new**
+  (automation results raised above the last one seen), or both
+  (**N waiting for you · M new**); absent at 0. The stream is read at start
+  and when the gateway comes back; its live tail (SSE, resumed with
+  `Last-Event-ID`) stays open only while you are at the terminal (a key,
+  click or paste in the last 5 minutes), otherwise one catch-up read per
+  minute. An automation event re-reads the automation list (one read per
+  burst), so `Enter` on an empty prompt or a click opens the automation that
+  waits. On a gateway without the stream (404) the chip is
+  **Automations · N waiting** (N = the automations'
+  `attention.pending_waits + attention.unseen_count` summed, the badge on
+  the Code web's Automations header), read every 15 s ONLY while something
+  waits or an active automation asks before each tool call — then `ctx used[/window] tk
   ([%,] declared)` (the window comes from `/context`/`--max-tokens`;
   warn ink ≥75%, error ≥90%; no declaration = the honest absolute) ·
   session tokens (`N↑ N↓ tk session` when the provider reports the
@@ -2519,6 +2531,21 @@ FILE: CHANGELOG.md
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
+
+## [Unreleased]
+
+### Changed
+
+- **The attention chip follows your event stream.** On a gateway with
+  `/api/gateway/me/events`, the status line's chip is what waits for you
+  across every conversation and automation — **N waiting for you**
+  (approvals and questions) and **Automations · M new** (results not seen) —
+  instead of a 15 s read of the automation list. The live tail stays open
+  only while you are at the terminal (a key, click or paste in the last 5
+  minutes) and resumes with `Last-Event-ID`; otherwise one catch-up read a
+  minute. An automation event re-reads the list, so `Enter` still opens the
+  automation that waits. An older gateway keeps the list poll and its
+  **Automations · N waiting**.
 
 ## [0.10.0] - 2026-10-15
 
