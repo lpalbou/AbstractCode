@@ -583,7 +583,7 @@ recovers it.
 | click / `Tab`+`Enter` on the theme name | status bar | Theme dropdown: every theme grouped Dark / Light; arrows, Page Up/Down and the mouse wheel preview LIVE; `Enter` or a click keeps it (saved like `Ctrl+T`); `Esc` restores. The wheel on the closed name steps to the next theme |
 | `Ctrl+P` | anywhere | Read the latest reply aloud; while it plays = pause; paused = resume (`/speak`; `Esc` stops). In one automation (`/automations <id>`): the selected run's reply; again = stop |
 | `Space` (held) | empty prompt | Hold to talk: speak, release to SEND (`/voice space off` turns it off) |
-| `Enter` | empty composer, status line shows **Automations · N waiting** | Open the automation that waits for you (a pending approval or question first, else unseen results); a click on the chip does the same |
+| `Enter` | empty composer, the status line shows the attention chip (**N waiting for you**, **Automations · M new**, or **Automations · N waiting** on an older gateway) | Open the automation that waits for you (a pending approval or question first, else unseen results); a click on the chip does the same |
 | `Ctrl+R` | anywhere | Dictate: start recording; again = transcribe into the composer (`/dictate`) |
 | `Esc` | while speaking / recording | Stop the spoken reply / cancel the recording — that press is consumed (it never clears the draft or arms cancel) |
 | `Ctrl+G` | anywhere | Fold / unfold the `/stance` panel |
@@ -790,14 +790,23 @@ in an automation's Edit panel marks the row being saved with `…` next to
   when reported) · tool count · per-cycle output sparkline. When idle:
   session totals + last context size; a fresh session shows its session
   line instead of a blank row.
-- **Status bar**: the persistent instrument row — first, while an
-  automation waits for you, **Automations · N waiting** (N = the
-  automations' `attention.pending_waits + attention.unseen_count` summed,
-  the badge on the Code web's Automations header; absent at 0; `Enter` on
-  an empty prompt or a click opens the automation that waits). It is read
-  at start and when the gateway comes back, then every 15 s ONLY while
-  something waits or an active automation asks before each tool call
-  (otherwise nothing polls; `/automations` refreshes it) — then `ctx used[/window] tk
+- **Status bar**: the persistent instrument row — first, while something
+  waits for you, the attention chip. On a gateway with your event stream
+  (`GET /api/gateway/me/events?after=`, `GET /api/gateway/me/events/stream`)
+  it follows that stream: **N waiting for you** (approvals and questions
+  raised and not yet answered, seen or ended), **Automations · M new**
+  (automation results raised above the last one seen), or both
+  (**N waiting for you · M new**); absent at 0. The stream is read at start
+  and when the gateway comes back; its live tail (SSE, resumed with
+  `Last-Event-ID`) stays open only while you are at the terminal (a key,
+  click or paste in the last 5 minutes), otherwise one catch-up read per
+  minute. An automation event re-reads the automation list (one read per
+  burst), so `Enter` on an empty prompt or a click opens the automation that
+  waits. On a gateway without the stream (404) the chip is
+  **Automations · N waiting** (N = the automations'
+  `attention.pending_waits + attention.unseen_count` summed, the badge on
+  the Code web's Automations header), read every 15 s ONLY while something
+  waits or an active automation asks before each tool call — then `ctx used[/window] tk
   ([%,] declared)` (the window comes from `/context`/`--max-tokens`;
   warn ink ≥75%, error ≥90%; no declaration = the honest absolute) ·
   session tokens (`N↑ N↓ tk session` when the provider reports the

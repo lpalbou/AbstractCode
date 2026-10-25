@@ -30,7 +30,14 @@ fn listed(store: Store, tracked: bool) -> Vec<crate::automations::Summary> {
 }
 
 /// The chip's text (tracked: call inside a render); `None` = no chip.
+/// From the person's event stream while it is followed; from the list on a
+/// gateway without it.
 pub fn chip_text(store: Store) -> Option<String> {
+    if store.events_state.get() == attention::EventsState::Following {
+        return store
+            .event_attention
+            .with(|a| attention::chip_events(a.needs_you(), a.new_results()));
+    }
     attention::chip(attention::waiting_total(&listed(store, true)))
 }
 
@@ -60,16 +67,43 @@ pub fn wire(cx: Scope, store: Store, ctx: UiCtx) {
             let now = store.conn.get() == Conn::Ok && store.signed_out.with(Option::is_none);
             if now && !up.get() {
                 read(store, &ctx);
+                // The person's event stream (a newer follower retires the old).
+                ctx.send(Cmd::FollowEvents);
             }
             up.set(now);
         });
     }
-    // The light poll: armed only while something waits or an active
-    // automation asks before each tool call; cancelled otherwise (the
-    // engine's zero-wakeup idle rule — no timer at all).
+    // An automation event on the stream re-reads the list (coalesced: a
+    // burst of events is one read), so Enter opens what the chip counts.
+    {
+        let ctx = ctx.clone();
+        let last = Cell::new(0u64);
+        let pending = Rc::new(Cell::new(false));
+        cx.effect(move || {
+            let epoch = store.event_attention.with(|a| a.automation_epoch);
+            let following = store.events_state.get() == attention::EventsState::Following;
+            if epoch == last.get() || !following {
+                last.set(epoch);
+                return;
+            }
+            last.set(epoch);
+            if pending.replace(true) {
+                return;
+            }
+            let ctx = ctx.clone();
+            let pending = pending.clone();
+            abstracttui::reactive::after(std::time::Duration::from_millis(500), move || {
+                pending.set(false);
+                read(store, &ctx);
+            });
+        });
+    }
+    // The light poll, ONLY for a gateway without the event stream: armed
+    // while something waits or an active automation asks before each tool
+    // call; cancelled otherwise (the engine's zero-wakeup idle rule).
     let handle: Rc<RefCell<Option<IntervalHandle>>> = Rc::default();
     cx.effect(move || {
-        let poll = {
+        let poll = store.events_state.get() != attention::EventsState::Following && {
             let items = listed(store, true);
             store
                 .automation_ask

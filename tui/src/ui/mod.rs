@@ -517,6 +517,21 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
         // words, passes through untouched. Modals never reach here (an
         // overlay swallows keys in its own layer tree), so Space keeps
         // its meaning in every picker.
+        // Someone at the terminal (backlog 1047): every key, click and paste
+        // keeps the event stream's live tail open (`attention::foreground`).
+        .on(
+            abstracttui::ui::Phase::Capture,
+            |_ectx: &mut abstracttui::ui::EventCtx, ev: &abstracttui::ui::UiEvent| {
+                if matches!(
+                    ev,
+                    abstracttui::ui::UiEvent::Key(_)
+                        | abstracttui::ui::UiEvent::Mouse(_)
+                        | abstracttui::ui::UiEvent::Paste(_)
+                ) {
+                    crate::attention::note_input();
+                }
+            },
+        )
         .on(abstracttui::ui::Phase::Capture, {
             let composer = composer.clone();
             let ctx = ctx.clone();

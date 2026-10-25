@@ -407,6 +407,9 @@ pub enum Cmd {
     AutomationAttention {
         known: Vec<(String, u64)>,
     },
+    /// Follow the person's event stream (backlog 1047); a newer one
+    /// retires the older follower.
+    FollowEvents,
     Shutdown,
 }
 
@@ -981,6 +984,13 @@ impl Runner {
             }
             Cmd::AccountPrefs(cmd) => {
                 crate::gateway::preferences::spawn(&self.client, self.wake.clone(), self.store, cmd)
+            }
+            Cmd::FollowEvents => {
+                crate::gateway::me_events::spawn_follower(
+                    &self.client,
+                    self.wake.clone(),
+                    self.store,
+                );
             }
             Cmd::AutomationAttention { known } => {
                 crate::gateway::automations::spawn_attention(

@@ -106,9 +106,10 @@ Status: **0.10.0**, pre-alpha. Release history is in
   or **When an email arrives**), context, tools, workspaces, **Mailbox**
   (**Email result**) and title and limits — with this conversation's model,
   tools and skills as the run input. An automation's **Edit** also changes
-  its calendar rule, run limits and email options. While one waits for you,
-  the status line says **Automations · N waiting** — `Enter` on an empty
-  prompt opens it.
+  its calendar rule, run limits and email options. While something waits
+  for you, the status line says so (**1 waiting for you · 2 new**, from your
+  event stream on the gateway) — `Enter` on an empty prompt opens the
+  automation that waits.
 - **Settings panels**: `/settings` — Activity, Files, Model, Workflow,
   Workspace, Tools, Skills, Voice — bound to this conversation, or to an
   automation's definition (each change saved as a new revision).
