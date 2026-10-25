@@ -68,8 +68,9 @@ pub fn foreground_at(last_input_s: u64, now_s: u64) -> bool {
 pub struct EventAttention {
     /// The last sequence folded (the resume point).
     pub cursor: u64,
-    /// Open approvals/questions: (run id, wait key) -> session id.
-    pub waits: BTreeMap<(String, String), String>,
+    /// Open approvals/questions: (run id, wait key, step id) -> session id
+    /// (the same node asking again is a new wait).
+    pub waits: BTreeMap<(String, String, String), String>,
     /// Per automation: raised item seqs above the latest seen seq.
     pub raised: BTreeMap<String, Vec<u64>>,
     pub seen: BTreeMap<String, u64>,
@@ -117,11 +118,15 @@ impl EventAttention {
         match typ {
             "attention.raised" => {
                 if let (Some(run), Some(key)) = (s(data, "run_id"), s(data, "wait_key")) {
-                    if s(data, "record_key").is_some_and(|r| self.resolved.iter().any(|x| x == r)) {
+                    let step = s(data, "step_id").unwrap_or("");
+                    let step_mark = format!("step:{run}:{key}:{step}");
+                    if s(data, "record_key").is_some_and(|r| self.resolved.iter().any(|x| x == r))
+                        || (!step.is_empty() && self.resolved.contains(&step_mark))
+                    {
                         return;
                     }
                     self.waits.insert(
-                        (run.to_string(), key.to_string()),
+                        (run.to_string(), key.to_string(), step.to_string()),
                         s(data, "session_id").unwrap_or("").to_string(),
                     );
                 } else if let (Some(aid), Some(q)) = (
@@ -139,18 +144,19 @@ impl EventAttention {
             "attention.seen" => {
                 if let Some(r) = s(data, "record_key") {
                     self.resolved.push(r.to_string());
-                    if self.resolved.len() > 500 {
-                        self.resolved.remove(0);
-                    }
-                    let key = r
-                        .strip_prefix("wait:")
-                        .and_then(|rest| rest.split_once(':'));
-                    if let Some((run, wk)) = key {
-                        self.waits.remove(&(run.to_string(), wk.to_string()));
-                    }
                 }
+                // The gateway's seen of a wait: `{kind, run_id, wait_key, step_id, outcome}`.
                 if let (Some(run), Some(key)) = (s(data, "run_id"), s(data, "wait_key")) {
-                    self.waits.remove(&(run.to_string(), key.to_string()));
+                    let step = s(data, "step_id").unwrap_or("");
+                    if !step.is_empty() {
+                        self.resolved.push(format!("step:{run}:{key}:{step}"));
+                    }
+                    self.waits.retain(|(r, k, st), _| {
+                        !(r == run && k == key && (step.is_empty() || st.is_empty() || st == step))
+                    });
+                }
+                while self.resolved.len() > 500 {
+                    self.resolved.remove(0);
                 }
                 if let Some(aid) = s(data, "automation_id") {
                     let q = data.get("seq").and_then(Value::as_u64).unwrap_or(0);
@@ -166,7 +172,7 @@ impl EventAttention {
             "run.finished" | "run.started" => {
                 if typ == "run.finished" {
                     if let Some(run) = s(data, "run_id") {
-                        self.waits.retain(|(r, _), _| r != run);
+                        self.waits.retain(|(r, _, _), _| r != run);
                     }
                 }
                 let trigger =
@@ -372,8 +378,9 @@ mod tests {
             "attention.raised",
             json!({"automation_id": "x", "seq": 2, "kind": "failure"}),
         ));
-        a.apply(&ev(3, "attention.raised", json!({"kind": "approval", "run_id": "r1", "session_id": "s", "wait_key": "k1", "record_key": "wait:r1:k1"})));
-        a.apply(&ev(4, "attention.raised", json!({"kind": "question", "run_id": "r2", "session_id": "s", "wait_key": "k2", "record_key": "wait:r2:k2"})));
+        // The gateway's wait shapes (L3 item 4b): seen names the step, no record_key.
+        a.apply(&ev(3, "attention.raised", json!({"kind": "approval", "wait_kind": "tool_approval", "run_id": "r1", "session_id": "s", "wait_key": "k1", "step_id": "a", "record_key": "wait:r1:k1:a"})));
+        a.apply(&ev(4, "attention.raised", json!({"kind": "question", "wait_kind": "ask_user", "run_id": "r2", "session_id": "s", "wait_key": "k2", "step_id": "b", "record_key": "wait:r2:k2:b"})));
         assert_eq!((a.needs_you(), a.new_results()), (2, 2));
         assert_eq!(
             chip_events(a.needs_you(), a.new_results()).as_deref(),
@@ -388,7 +395,7 @@ mod tests {
         a.apply(&ev(
             6,
             "attention.seen",
-            json!({"record_key": "wait:r1:k1"}),
+            json!({"kind": "approval", "run_id": "r1", "wait_key": "k1", "step_id": "a", "outcome": "approved"}),
         ));
         a.apply(&ev(7, "run.finished", json!({"run_id": "r2", "status": "completed", "origin": {"kind": "trigger", "ref": {"automation_id": "x"}}})));
         assert_eq!((a.needs_you(), a.new_results()), (0, 1));
@@ -415,6 +422,16 @@ mod tests {
             json!({"automation_id": "x", "seq": 2}),
         ));
         assert_eq!(chip_events(a.needs_you(), a.new_results()), None);
+        // The same node asking again is a new wait; an older step's seen leaves it open.
+        a.apply(&ev(
+            10,
+            "attention.raised",
+            json!({"kind": "approval", "run_id": "r3", "wait_key": "k", "step_id": "s2"}),
+        ));
+        a.apply(&ev(11, "attention.seen", json!({"kind": "approval", "run_id": "r3", "wait_key": "k", "step_id": "s1", "outcome": "approved"})));
+        assert_eq!(a.needs_you(), 1);
+        a.apply(&ev(12, "attention.seen", json!({"kind": "approval", "run_id": "r3", "wait_key": "k", "step_id": "s2", "outcome": "denied"})));
+        assert_eq!(a.needs_you(), 0);
     }
 
     #[test]

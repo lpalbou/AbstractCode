@@ -905,7 +905,7 @@ fn the_chip_follows_the_event_stream_and_the_list_poll_stops() {
             event(
                 1,
                 "attention.raised",
-                serde_json::json!({"kind": "approval", "run_id": "r1", "session_id": "s", "wait_key": "k1", "record_key": "wait:r1:k1"}),
+                serde_json::json!({"kind": "approval", "run_id": "r1", "session_id": "s", "wait_key": "k1", "step_id": "a", "record_key": "wait:r1:k1:a"}),
             ),
             event(
                 2,
@@ -937,7 +937,7 @@ fn the_chip_follows_the_event_stream_and_the_list_poll_stops() {
             event(
                 3,
                 "attention.seen",
-                serde_json::json!({"record_key": "wait:r1:k1"}),
+                serde_json::json!({"kind": "approval", "run_id": "r1", "wait_key": "k1", "step_id": "a", "outcome": "approved"}),
             ),
             event(
                 4,

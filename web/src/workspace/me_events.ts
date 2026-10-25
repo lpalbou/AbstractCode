@@ -27,7 +27,7 @@ export type UserEvent = {
 /** Raised minus seen, folded in stream order. */
 export type AttentionFold = {
   cursor: number;
-  /** "run\u0000wait_key" → session id. */
+  /** "run\u0000wait_key\u0000step_id" → session id (the same node asking again is a new wait). */
   waits: Record<string, string>;
   raised: Record<string, number[]>;
   seen: Record<string, number>;
@@ -40,7 +40,7 @@ export const emptyFold = (): AttentionFold => ({ cursor: 0, waits: {}, raised: {
 
 const str = (d: Record<string, any>, k: string): string => (typeof d[k] === "string" && d[k] ? d[k] : "");
 const num = (d: Record<string, any>, k: string): number => (typeof d[k] === "number" ? d[k] : 0);
-const waitId = (run: string, key: string) => `${run}\u0000${key}`;
+const waitId = (run: string, key: string, step = "") => `${run}\u0000${key}\u0000${step}`;
 
 /** Fold one event (pure: returns a new fold; a sequence already folded changes nothing). */
 export function foldEvent(f: AttentionFold, ev: UserEvent): AttentionFold {
@@ -60,8 +60,10 @@ export function foldEvent(f: AttentionFold, ev: UserEvent): AttentionFold {
       const run = str(d, "run_id");
       const key = str(d, "wait_key");
       if (run && key) {
+        const step = str(d, "step_id");
         if (str(d, "record_key") && f.resolved.includes(str(d, "record_key"))) break;
-        out.waits[waitId(run, key)] = str(d, "session_id");
+        if (step && f.resolved.includes(`step:${waitId(run, key, step)}`)) break;
+        out.waits[waitId(run, key, step)] = str(d, "session_id");
       } else if (str(d, "automation_id") && num(d, "seq") > 0) {
         const aid = str(d, "automation_id");
         const q = num(d, "seq");
@@ -73,12 +75,17 @@ export function foldEvent(f: AttentionFold, ev: UserEvent): AttentionFold {
     }
     case "attention.seen": {
       const record = str(d, "record_key");
-      if (record) {
-        out.resolved = [...f.resolved, record].slice(-500);
-        const m = /^wait:([^:]+):(.+)$/.exec(record);
-        if (m) delete out.waits[waitId(m[1], m[2])];
+      if (record) out.resolved = [...out.resolved, record].slice(-500);
+      // The gateway's seen of a wait: {kind, run_id, wait_key, step_id, outcome}.
+      const run = str(d, "run_id");
+      const key = str(d, "wait_key");
+      if (run && key) {
+        const step = str(d, "step_id");
+        if (step) out.resolved = [...out.resolved, `step:${waitId(run, key, step)}`].slice(-500);
+        const prefix = `${run}\u0000${key}\u0000`;
+        for (const k of Object.keys(out.waits))
+          if (k.startsWith(prefix) && (!step || k === prefix || k === prefix + step)) delete out.waits[k];
       }
-      if (str(d, "run_id") && str(d, "wait_key")) delete out.waits[waitId(str(d, "run_id"), str(d, "wait_key"))];
       const aid = str(d, "automation_id");
       if (aid) {
         const s = Math.max(out.seen[aid] || 0, num(d, "seq"));

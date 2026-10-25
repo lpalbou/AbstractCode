@@ -12,13 +12,14 @@ describe("the person's event stream (backlog 1047)", () => {
     let f = emptyFold();
     for (const e of [
       ev(1, "attention.raised", { automation_id: "a", seq: 1, kind: "notify" }),
-      ev(2, "attention.raised", { kind: "approval", run_id: "r1", session_id: "s", wait_key: "k1", record_key: "wait:r1:k1" }),
-      ev(3, "attention.raised", { kind: "question", run_id: "r2", session_id: "s", wait_key: "k2", record_key: "wait:r2:k2" }),
+      // The gateway's wait shapes (L3 item 4b): seen names the step, no record_key.
+      ev(2, "attention.raised", { kind: "approval", wait_kind: "tool_approval", run_id: "r1", session_id: "s", wait_key: "k1", step_id: "a", record_key: "wait:r1:k1:a" }),
+      ev(3, "attention.raised", { kind: "question", wait_kind: "ask_user", run_id: "r2", session_id: "s", wait_key: "k2", step_id: "b", record_key: "wait:r2:k2:b" }),
     ])
       f = foldEvent(f, e);
     expect([needsYou(f), newResults(f)]).toEqual([2, 1]);
     const epoch = f.automationEpoch;
-    f = foldEvent(f, ev(4, "attention.seen", { record_key: "wait:r1:k1" }));
+    f = foldEvent(f, ev(4, "attention.seen", { kind: "approval", run_id: "r1", wait_key: "k1", step_id: "a", outcome: "approved" }));
     f = foldEvent(f, ev(5, "run.finished", { run_id: "r2", status: "completed", origin: { kind: "trigger" } }));
     f = foldEvent(f, ev(6, "attention.seen", { automation_id: "a", seq: 1 }));
     expect([needsYou(f), newResults(f)]).toEqual([0, 0]);
@@ -26,6 +27,12 @@ describe("the person's event stream (backlog 1047)", () => {
     // Replayed frames fold once; a seen item never returns.
     expect(foldEvent(f, ev(6, "attention.raised", { automation_id: "a", seq: 9 }))).toBe(f);
     expect(newResults(foldEvent(f, ev(7, "attention.raised", { automation_id: "a", seq: 1 })))).toBe(0);
+    // The same node asking again is a new wait; an older step's seen leaves it open.
+    f = foldEvent(f, ev(8, "attention.raised", { kind: "approval", run_id: "r3", wait_key: "k", step_id: "s2" }));
+    f = foldEvent(f, ev(9, "attention.seen", { kind: "approval", run_id: "r3", wait_key: "k", step_id: "s1", outcome: "approved" }));
+    expect(needsYou(f)).toBe(1);
+    f = foldEvent(f, ev(10, "attention.seen", { kind: "approval", run_id: "r3", wait_key: "k", step_id: "s2", outcome: "denied" }));
+    expect(needsYou(f)).toBe(0);
   });
 
   it("catches up, then tails with Last-Event-ID while the tab is visible; a hidden tab only catches up", async () => {
