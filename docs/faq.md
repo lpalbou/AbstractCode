@@ -85,6 +85,16 @@ use the **Automations** section of the sidebar. The gateway runs them whether
 or not a client is open, and every client (Assistant, Observer, AbstractCode)
 sees the same automations. See [Automations](automations.md).
 
+## How do I know something is waiting for me?
+
+Both clients count what waits for you across every conversation and automation:
+the approvals and questions that need an answer, and the automation results you
+have not opened. The terminal shows it in the status line (**1 waiting for you ·
+2 new**; Enter on an empty prompt opens the automation that waits), the browser
+on the Automations header badge. Both follow your event stream on the gateway,
+so an approval answered in one client disappears from the other. See
+[Architecture > Attention](architecture.md#attention-your-event-stream).
+
 ## Where are my settings stored?
 
 - `~/.abstractcode/gateway.json` — gateway URL and token, written by

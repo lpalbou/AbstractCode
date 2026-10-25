@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [terminal 0.11.0 / web 0.12.0] - 2026-10-25
+
+The live attention chip and badge need AbstractGateway with your event stream (`/api/gateway/me/events`); on an older gateway both keep the automation list's count and its poll.
+
 ### Changed
 
 - Terminal: the status-line attention chip follows your event stream on the

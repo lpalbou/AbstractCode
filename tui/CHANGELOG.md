@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-25
+
+The live attention chip needs AbstractGateway with your event stream (`/api/gateway/me/events`); on an older gateway the chip keeps the automation list's count.
+
 ### Changed
 
 - **The attention chip follows your event stream.** On a gateway with

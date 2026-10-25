@@ -70,6 +70,14 @@ and an agent can also ask a question. Look for the pending card in the
 transcript. Because waits are durable, you can also answer from the other
 client.
 
+**The attention count does not change after I answer.**
+On a gateway with your event stream the count follows `attention.seen`; give it
+a moment, or press `r` in `/automations` (terminal) or reload the list
+(browser). On a gateway without the stream (`/api/gateway/me/events` answers
+404) the count is the automation list's sum, read every 15 seconds in the
+terminal (only while something can change it) and every 30 seconds in a visible
+browser tab; update AbstractGateway for the live count.
+
 **A run seems stuck with no pending prompt.**
 Check the run on the gateway rather than trusting the client's view — server
 truth is authoritative. `/history` replays what the ledger actually recorded.

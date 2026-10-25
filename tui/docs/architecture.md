@@ -51,6 +51,21 @@ One rule, enforced everywhere: **the UI thread owns every reactive signal**.
   that their records belong to the fold's current run tree
   (`Fold::is_following`), so a stale stream can never contaminate a new run.
 
+## Attention follower
+
+The status-line chip follows your event stream on the gateway
+(`gateway/me_events.rs`, folded by `attention.rs`): one background thread reads
+the catch-up pages after its cursor (`GET /me/events?after=`), then tails
+`GET /me/events/stream` resumed with `Last-Event-ID` while you are at the
+terminal (a key, click or paste in the last 5 minutes); otherwise it reads one
+catch-up page a minute. The fold counts each wait (run, wait key, step) from its
+`attention.raised` to its `attention.seen`, plus the automation results you have
+not opened, and posts the result to the UI thread like every other worker. An
+automation event re-reads the automation list (coalesced). A reconnect retires
+the old follower by generation. On a gateway without the stream (HTTP 404) the
+chip keeps the automation list's sum, read every 15 seconds only while
+something can change it.
+
 ## The ledger fold
 
 A gateway run emits an append-only ledger of step records:
