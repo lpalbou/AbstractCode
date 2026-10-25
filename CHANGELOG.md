@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gateway (`/me/events` catch-up, SSE while you are at the terminal, one
   catch-up a minute otherwise): **N waiting for you** · **Automations · M new**;
   the 15 s automation-list poll is kept only for a gateway without the stream.
+- Web: the Automations header badge follows the same stream (approvals and
+  questions waiting for you + automation results not seen; live tail while the
+  tab is visible, one catch-up a minute when hidden), and the automation list
+  is re-read after automation events instead of every 30 seconds; a gateway
+  without the stream keeps the list's sum and the 30 s poll.
 
 ## [terminal 0.10.0 / web 0.11.2] - 2026-10-15
 

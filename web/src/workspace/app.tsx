@@ -83,6 +83,7 @@ import {
   useAutomations,
   type AutomationHost,
 } from "./automations_view";
+import { needsYou, newResults, useMeEvents } from "./me_events";
 import {
   readPreferences,
   writePreferences,
@@ -331,9 +332,13 @@ export function CodeWorkspace() {
   const [archivedOpen, toggleArchivedOpen] = useArchivedOpen();
   // Automations: the sidebar section and, for the selected one, the main view.
   const automationsAvailable = automationsAvailability(catalog.capabilities);
+  // The person's event stream (backlog 1047): the badge and the list refresh follow it.
+  const meEvents = useMeEvents(identity, connection.connected);
+  const eventsFollowing = meEvents.state === "following";
   const { ctl: automations, state: automationsState } = useAutomations(
     identity,
     connection.connected && automationsAvailable.available,
+    { following: eventsFollowing, epoch: meEvents.fold.automationEpoch },
   );
   // The automations' `Archived · N` footer lists the archived ones once opened (the gateway lists them only when asked).
   useEffect(() => {
@@ -1616,6 +1621,7 @@ export function CodeWorkspace() {
         <SidebarLists panels={panels}>
         <AutomationsSection
           state={automationsState}
+          attention={eventsFollowing ? { needsYou: needsYou(meEvents.fold), newResults: newResults(meEvents.fold) } : null}
           available={automationsAvailable}
           discovering={catalog.capabilitiesLoading}
           createDisabled={schemaLoading || !!schemaError || !workflow}
