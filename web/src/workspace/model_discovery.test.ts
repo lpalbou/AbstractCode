@@ -8,7 +8,8 @@ vi.mock("./transport", () => ({
     discovery_model_capabilities: vi.fn(),
   },
 }));
-import { defaultTextRoute, discoveryForInput } from "./model_discovery";
+import { readFileSync } from "node:fs";
+import { defaultTextRoute, discoveryForInput, modelDiscovery } from "./model_discovery";
 describe("model discovery routing", () => {
   beforeEach(() => request.mockReset());
   it("uses only configured text defaults", () => {
@@ -30,6 +31,17 @@ describe("model discovery routing", () => {
         ],
       }),
     ).toEqual({ provider: "endpoint:local", model: "local" });
+  });
+  it("the text picker uses the kit transport and names the gateway default", async () => {
+    request.mockResolvedValue({ routes: [{ key: "output.text", provider: "ollama", model: "qwen3", reasoning: "high", source: "config" }] });
+    expect(await modelDiscovery.fetchGatewayDefault()).toMatchObject({ provider: "ollama", model: "qwen3", reasoning: "high" });
+    expect(request).toHaveBeenCalledWith("api/gateway/config/capability-defaults");
+    request.mockResolvedValue({ items: [{ name: "ollama" }] });
+    await modelDiscovery.fetchProviders();
+    expect(request).toHaveBeenLastCalledWith("api/gateway/discovery/providers?include_models=false");
+    const settings = readFileSync(new URL("./settings_panel.tsx", import.meta.url), "utf8");
+    expect(settings).toContain("fetchGatewayDefault: modelDiscovery.fetchGatewayDefault");
+    expect(settings).not.toMatch(/discovery_providers|discovery_provider_models/);
   });
   it("never offers music model ids as providers", async () => {
     request.mockResolvedValue({ items: [{ id: "music-engine" }] });

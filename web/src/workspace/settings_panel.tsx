@@ -8,7 +8,6 @@ import {
 } from "@abstractframework/ui-kit";
 import { CodeWorkspaceFolders, type RunWorkspace } from "./workspace_folders";
 import type { ToolSpec } from "./catalog";
-import { gateway } from "./transport";
 import { SkillsPicker } from "./skills_picker";
 import { modelDiscovery } from "./model_discovery";
 import { resolveToolPermissions, type PermissionLevel } from "./tool_permissions";
@@ -120,35 +119,16 @@ export function SettingsContent({
                 onChange={update}
                 disabled={disabled}
                 effectiveDefault={defaultModel}
-                fetchModelCapabilities={modelDiscovery.fetchModelCapabilities}
                 enableSpeculation
                 inheritLabel="Gateway default"
-                defaultHint={
-                  defaultModel
-                    ? `${workflowDefault ? "Workflow" : "Gateway"} default: ${defaultModel.provider} · ${defaultModel.model}.`
-                    : undefined
-                }
-                fetchProviders={async () => {
-                  const data = await gateway.discovery_providers();
-                  return Array.isArray(data.providers)
-                    ? data.providers
-                    : Array.isArray(data.items)
-                      ? data.items
-                      : [];
-                }}
-                fetchModels={async (provider) => {
-                  const data =
-                    await gateway.discovery_provider_models(provider);
-                  return (
-                    Array.isArray(data.models)
-                      ? data.models
-                      : Array.isArray(data.items)
-                        ? data.items
-                        : []
-                  ).map((model: any) =>
-                    typeof model === "string" ? model : model.id || model.name,
-                  );
-                }}
+                fetchProviders={modelDiscovery.fetchProviders}
+                fetchModels={modelDiscovery.fetchModels}
+                fetchModelCapabilities={modelDiscovery.fetchModelCapabilities}
+                // The kit names the gateway default ("Gateway default · provider / model ·
+                // reasoning · MTP depth"); a workflow's own defaults are said here instead.
+                {...(workflowDefault
+                  ? { defaultHint: defaultModel ? `Workflow default: ${defaultModel.provider} · ${defaultModel.model}.` : undefined }
+                  : { fetchGatewayDefault: modelDiscovery.fetchGatewayDefault })}
               />
             </section>
             <section className="code-settings-section">
