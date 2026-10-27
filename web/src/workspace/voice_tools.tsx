@@ -13,7 +13,7 @@ import {
 import { gateway, gatewayRequest, newId, csrfHeaders } from "./transport";
 import { MEDIA_NEEDS_HTTPS, mediaAvailable } from "../lib/secure-context";
 import { session_memory_owner_run_id } from "../lib/session_memory";
-import type { VoiceClientPreferences, VoiceDefaults } from "@abstractframework/ui-kit";
+import type { VoiceClientPreferences, VoiceCreation, VoiceDefaults } from "@abstractframework/ui-kit";
 
 /** The gateway's default voice routes (output.voice / input.voice): what "Gateway default" names. */
 export function fetchVoiceDefaults(): Promise<VoiceDefaults> {
@@ -27,6 +27,33 @@ export function fetchVoiceCatalog(provider?: string, model?: string) {
   if (model) query.set("model", model);
   return gatewayRequest(gatewayApiPath(`voice/voices?${query.toString()}`));
 }
+
+type CreatedVoice = { voice_id: string; name?: string; engine?: string };
+
+/** `POST voice/design`: a voice from a written description, stored in the gateway's voice library.
+ * A refusal (403 shared store, 501 engine missing) throws the gateway's own sentence. */
+export function designVoice(request: { description: string; name?: string; language?: string }): Promise<CreatedVoice> {
+  const body: Record<string, string> = { description: request.description };
+  if (request.name) body.name = request.name;
+  if (request.language) body.language = request.language;
+  return gatewayRequest<CreatedVoice>(gatewayApiPath("voice/design"), { method: "POST", body: JSON.stringify(body) });
+}
+
+/** `POST voice/clones` (multipart): a voice from a recording, stored in the gateway's voice library. */
+export function cloneVoice(
+  file: Blob,
+  request: { name?: string; language?: string; reference_text?: string },
+): Promise<CreatedVoice> {
+  const form = new FormData();
+  form.set("file", file, (file as File).name || "recording.wav");
+  if (request.name) form.set("name", request.name);
+  if (request.language) form.set("language", request.language);
+  if (request.reference_text) form.set("reference_text", request.reference_text);
+  return gatewayRequest<CreatedVoice>(gatewayApiPath("voice/clones"), { method: "POST", body: form });
+}
+
+/** "Create a voice" in the kit's voice section, through this app's gateway proxy. */
+export const codeVoiceCreation: VoiceCreation = { design: designVoice, clone: cloneVoice };
 
 /** Default voice routes, read once per connection (null until known; `failed` when the gateway could not answer). */
 export function useVoiceDefaults(connected: boolean): { value: VoiceDefaults | null; failed: boolean } {
@@ -65,6 +92,7 @@ export function CodeVoiceSettings({
       defaults={defaults.value ?? undefined}
       overrideOwner="this app"
       nested
+      createVoice={codeVoiceCreation}
       unavailableReason={connected ? null : "Connect to a gateway to configure voice."}
     />
   );

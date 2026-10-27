@@ -8,6 +8,9 @@ import {
   TAP_MS,
   TRANSCRIBE_TIMEOUT_MS,
   VoiceTools,
+  cloneVoice,
+  codeVoiceCreation,
+  designVoice,
   fetchVoiceDefaults,
   releaseAction,
   spokenMessage,
@@ -136,6 +139,77 @@ describe("Code's Voice panel names the gateway's routes", () => {
       globalThis.fetch = realFetch;
       vi.unstubAllGlobals();
     }
+  });
+});
+
+// Create a voice (AbstractGateway 0.16.0 voice library, ui-kit 0.8.9 `createVoice`):
+// the kit's panel calls these through this app's authenticated gateway proxy.
+describe("Code's Voice panel creates voices in the gateway's voice library", () => {
+  const VOICE = { voice_id: "v-1", name: "Narrator", engine: "qwen3-tts" };
+  const withFetch = async (response: () => Response, run: (mock: ReturnType<typeof vi.fn>) => Promise<void>) => {
+    const fetchMock = vi.fn(async (_url: unknown, _init?: RequestInit) => response());
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    vi.stubGlobal("document", { cookie: "abstractcode_gateway_csrf=tok" });
+    try {
+      await run(fetchMock);
+    } finally {
+      globalThis.fetch = realFetch;
+      vi.unstubAllGlobals();
+    }
+  };
+  const ok = () => new Response(JSON.stringify(VOICE), { status: 200, headers: { "content-type": "application/json" } });
+  const refusal = (status: number, detail: string) => () =>
+    new Response(JSON.stringify({ detail }), { status, headers: { "content-type": "application/json" } });
+
+  it("hands the kit both creation functions", () => {
+    expect(codeVoiceCreation.design).toBe(designVoice);
+    expect(codeVoiceCreation.clone).toBe(cloneVoice);
+    const src = readFileSync(new URL("./voice_tools.tsx", import.meta.url), "utf8");
+    expect(src).toContain("createVoice={codeVoiceCreation}");
+  });
+  it("designs a voice: POST voice/design with the description, name and language", async () => {
+    await withFetch(ok, async (fetchMock) => {
+      const out = await designVoice({ description: "a calm, warm low female voice", name: "Narrator", language: "fr" });
+      expect(out).toEqual(VOICE);
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("api/gateway/voice/design");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(String(init.body))).toEqual({ description: "a calm, warm low female voice", name: "Narrator", language: "fr" });
+      const headers = new Headers(init.headers);
+      expect(headers.get("Content-Type")).toBe("application/json");
+      expect(headers.get("X-AbstractCode-CSRF")).toBe("tok");
+    });
+  });
+  it("clones a voice: POST voice/clones as multipart with the recording and its fields", async () => {
+    await withFetch(ok, async (fetchMock) => {
+      const recording = new File([new Uint8Array([1, 2, 3])], "me.wav", { type: "audio/wav" });
+      const out = await cloneVoice(recording, { name: "Me", language: "en", reference_text: "Hello there." });
+      expect(out.voice_id).toBe("v-1");
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("api/gateway/voice/clones");
+      expect(init.method).toBe("POST");
+      expect(init.body).toBeInstanceOf(FormData);
+      const form = init.body as FormData;
+      expect((form.get("file") as File).name).toBe("me.wav");
+      expect(form.get("name")).toBe("Me");
+      expect(form.get("language")).toBe("en");
+      expect(form.get("reference_text")).toBe("Hello there.");
+      // The browser sets the multipart boundary: no JSON content type.
+      expect(new Headers(init.headers).get("Content-Type")).toBeNull();
+    });
+  });
+  it("a gateway refusal (403, 501) surfaces as the gateway's own sentence", async () => {
+    const shared = "On this gateway every account shares one voice store, so creating, changing or deleting a voice is an administrator's act.";
+    await withFetch(refusal(403, shared), async () => {
+      await expect(designVoice({ description: "x" })).rejects.toThrow(shared);
+    });
+    const missing = "Voice design needs abstractvoice[qwen3-tts] where the voice capability runs.";
+    await withFetch(refusal(501, missing), async () => {
+      const err = await cloneVoice(new Blob([new Uint8Array([1])]), {}).catch((e) => e);
+      expect(err.message).toBe(missing);
+      expect(err.status).toBe(501);
+    });
   });
 });
 
