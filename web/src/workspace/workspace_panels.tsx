@@ -13,7 +13,7 @@ import {
 import { downloadArtifact, formatError, gateway, gatewayRequest } from "./transport";
 import type { WorkspacePolicy } from "./catalog";
 import { SessionFiles } from "./session_files";
-import type { PendingUpload } from "./attachment_uploads";
+import type { AttachChip } from "./session_files";
 import {
   activity_rows,
   type ActivityKind,
@@ -38,7 +38,7 @@ export type WorkspaceFilesContentProps = {
   isAdmin: boolean;
   refreshKey?: string;
   onAttach: (path: string) => Promise<void>;
-  onAttachFiles: (files: File[]) => PendingUpload[];
+  onAttachFiles: (files: File[]) => AttachChip[];
   includeArtifacts?: boolean;
 };
 

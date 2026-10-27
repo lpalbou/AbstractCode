@@ -40,6 +40,9 @@ import { ConversationCard } from "./sidebar_cards";
 import {
   WorkflowChat,
   WorkspaceBrowser,
+  uploadRefusal,
+  useAttachmentUploads,
+  type ComposerAttachment,
   chatToMarkdown,
   presentInteraction,
   downloadTextFile,
@@ -118,16 +121,6 @@ import {
   AgentWorkflowInputs,
 } from "./workflow_inputs";
 import type { AttachmentRef } from "../lib/types";
-import {
-  UPLOAD_CONCURRENCY,
-  queueUploads,
-  runBounded,
-  unattachedSendBlock,
-  uploadAnnouncement,
-  uploadFailure,
-  type PendingUpload,
-} from "./attachment_uploads";
-import { ComposerAttachments } from "./composer_attachments";
 import { RunStatusBar } from "./run_status_bar";
 import { CodeVoiceSettings, VoiceTools, spokenMessage, useVoiceDefaults, useWorkspaceVoice } from "./voice_tools";
 import { workflowPromptProperty, restoreWorkflowFields } from "./input_schema";
@@ -258,15 +251,8 @@ export function CodeWorkspace() {
   const [notice, setNotice] = useState("");
   const [sending, setSending] = useState(false);
   const sendLock = useRef(false);
+  // Workspace files attached by path (Files panel → `attachments_ingest`): already references.
   const [attachments, setAttachments] = useState<AttachmentRef[]>([]);
-  // Files dropped/pasted/picked that are not an AttachmentRef yet (queued,
-  // uploading, refused or failed). Completed uploads move to `attachments`.
-  const [uploads, setUploads] = useState<PendingUpload[]>([]);
-  const removedUploads = useRef(new Set<string>());
-  // Display-only sizes of files uploaded from this browser (the gateway's ref
-  // carries no size); never added to the AttachmentRef that rides the run.
-  const uploadedSizes = useRef(new Map<string, number>());
-  const [uploadNotice, setUploadNotice] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
   const [schema, setSchema] = useState<Record<string, any>>();
   const schemaRef = useRef(schema);
@@ -544,11 +530,44 @@ export function CodeWorkspace() {
   const skipPreferenceWrite = useRef(false);
   const sessionRef = useRef(session);
   sessionRef.current = session;
+  // Files picked, dropped or pasted: the kit's upload queue (panel-chat useAttachmentUploads,
+  // backlog 0030). Each becomes a chip at once; uploads run into the conversation's session
+  // attachment store; the gateway's maxAttachmentBytes is the only size rule (ADR-0026). The
+  // queue is cleared on every session/account change, so a late upload never lands elsewhere.
+  const uploads = useAttachmentUploads<AttachmentRef>({
+    upload: (file) => gateway.attachments_upload(sessionRef.current.sessionId, file),
+    maxBytes: catalog.policy?.maxAttachmentBytes,
+  });
+  /** What the next run carries: workspace files attached by path, then uploaded files. */
+  const runAttachments = [...attachments, ...uploads.attached];
+  /** The composer's chips: attached workspace files (references), then the upload queue. */
+  const attachmentItems: ComposerAttachment[] = [
+    ...attachments.map((ref, index) => ({
+      id: `ref:${index}:${ref.$artifact}`,
+      name: ref.filename || ref.path || "Attachment",
+      ...(typeof ref.size_bytes === "number" ? { size: ref.size_bytes } : {}),
+      state: "attached" as const,
+    })),
+    ...uploads.items,
+  ];
+  const removeAttachmentItem = (id: string) => {
+    if (!id.startsWith("ref:")) return uploads.remove(id);
+    const index = Number(id.split(":")[1]);
+    setAttachments((items) => items.filter((_, n) => n !== index));
+  };
+  /** Queue files (picked, dropped, pasted, or read from the workspace); returns each file's chip state. */
+  function attachUploads(files: File[]): Pick<ComposerAttachment, "name" | "state" | "error">[] {
+    uploads.add(files);
+    return files.map((file) => {
+      const refusal = uploadRefusal(file, catalog.policy?.maxAttachmentBytes);
+      return { name: file.name, state: refusal ? "refused" : "queued", ...(refusal ? { error: refusal } : {}) };
+    });
+  }
 
   useEffect(() => {
     sendLock.current = false;
     setSending(false);
-    setUploads([]);
+    uploads.clear();
     setError("");
     setNotice("");
     if (!identity) {
@@ -658,7 +677,7 @@ export function CodeWorkspace() {
     writeRoute(session.sessionId, session.runId);
     sendLock.current = false;
     setSending(false);
-    setUploads([]);
+    uploads.clear();
     setAttachments([]);
     // A conversation's form values belong to it: a new or other conversation
     // starts from the schema defaults, never from the fields restored out of
@@ -677,7 +696,7 @@ export function CodeWorkspace() {
       const next = route();
       sendLock.current = false;
       setSending(false);
-      setUploads([]);
+      uploads.clear();
       setQueue([]);
       setQueueRunning(false);
       setDraft("");
@@ -712,7 +731,7 @@ export function CodeWorkspace() {
   const openConversation = useCallback((sessionId: string, runId: string) => {
     sendLock.current = false;
     setSending(false);
-    setUploads([]);
+    uploads.clear();
     setSession({ sessionId, runId });
     writeRoute(sessionId, runId);
     setSidebarOpen(false);
@@ -842,8 +861,7 @@ export function CodeWorkspace() {
       setInputsOpen(true);
       throw new Error(inputEditorError);
     }
-    const uploadBlock = unattachedSendBlock(uploads);
-    if (uploadBlock) throw new Error(uploadBlock);
+    if (uploads.sendBlock) throw new Error(uploads.sendBlock);
     if (active) throw new Error("The current run is still active.");
     if (!isAgent && text.trim() && !promptProperty) {
       setInputsOpen(true);
@@ -860,7 +878,7 @@ export function CodeWorkspace() {
     };
     const values = isAgent
       ? promptValues
-      : withWorkflowAttachments(schema, promptValues, attachments);
+      : withWorkflowAttachments(schema, promptValues, runAttachments);
     for (const [label, value] of [
       ["Iteration limit", preferences.maxIterations],
       ["Context token limit", preferences.maxTokens],
@@ -878,7 +896,7 @@ export function CodeWorkspace() {
     const startedEpoch = authEpoch.current;
     let attachedRun = "";
     try {
-      const input = currentWorkflowInput(text, values, attachments);
+      const input = currentWorkflowInput(text, values, runAttachments);
       // Validate the actual outgoing payload, after composer context and
       // explicit Settings overrides. Empty optional pins stay absent so the
       // workflow/Gateway resolves them just as it does for the TUI/Assistant.
@@ -929,6 +947,7 @@ export function CodeWorkspace() {
       writeRoute(startedSession, result.run_id);
       setDraft("");
       setAttachments([]);
+      uploads.clear();
       setInputsOpen(false);
       if (result.runner_warning) setNotice(String(result.runner_warning));
       void catalog.refresh();
@@ -1067,73 +1086,6 @@ export function CodeWorkspace() {
     session.runId,
   ]);
 
-  // Every file (picked, dropped or pasted) becomes a chip at once. Uploads
-  // run UPLOAD_CONCURRENCY at a time into the session's attachment store;
-  // the gateway's maxAttachmentBytes is the only size rule (ADR-0026) and a
-  // refusal stays on its chip with both numbers — nothing is dropped silently.
-  async function uploadBatch(items: PendingUpload[]): Promise<void> {
-    const sid = session.sessionId;
-    const owner = identity;
-    const epoch = authEpoch.current;
-    // Attachments belong to the session, not to a run: a run starting or
-    // finishing mid-upload must not strand a spinning chip.
-    const stale = () =>
-      sessionRef.current.sessionId !== sid ||
-      identityRef.current !== owner ||
-      authEpoch.current !== epoch;
-    const patch = (id: string, change: Partial<PendingUpload>) =>
-      setUploads((list) =>
-        list.map((item) => (item.id === id ? { ...item, ...change } : item)),
-      );
-    let attached = 0;
-    let failed = 0;
-    await runBounded(items, UPLOAD_CONCURRENCY, async (item) => {
-      if (stale() || removedUploads.current.has(item.id)) return;
-      patch(item.id, { status: "uploading", message: undefined });
-      try {
-        const ref = await gateway.attachments_upload(sid, item.file);
-        if (stale() || removedUploads.current.has(item.id)) return;
-        uploadedSizes.current.set(ref.$artifact, item.size);
-        setUploads((list) => list.filter((entry) => entry.id !== item.id));
-        setAttachments((list) => [...list, ref]);
-        attached += 1;
-      } catch (e) {
-        if (stale() || removedUploads.current.has(item.id)) return;
-        patch(item.id, {
-          status: "failed",
-          message: uploadFailure(formatError(e)),
-        });
-        failed += 1;
-      }
-    });
-    if (!stale() && (attached || failed))
-      setUploadNotice(uploadAnnouncement(attached, failed));
-  }
-  function attachUploads(files: File[]): PendingUpload[] {
-    if (!files.length) return [];
-    const items = queueUploads(
-      files,
-      catalog.policy?.maxAttachmentBytes,
-      newId,
-    );
-    setUploads((list) => [...list, ...items]);
-    const refused = items.filter((item) => item.status === "refused").length;
-    if (refused)
-      setUploadNotice(uploadAnnouncement(0, refused));
-    void uploadBatch(items.filter((item) => item.status === "queued"));
-    return items;
-  }
-  function retryUpload(id: string) {
-    const item = uploads.find((entry) => entry.id === id);
-    if (!item || item.status !== "failed") return;
-    const again: PendingUpload = { ...item, status: "queued", message: undefined };
-    setUploads((list) => list.map((entry) => (entry.id === id ? again : entry)));
-    void uploadBatch([again]);
-  }
-  function removeUpload(id: string) {
-    removedUploads.current.add(id);
-    setUploads((list) => list.filter((entry) => entry.id !== id));
-  }
   async function cancelCurrentRun(): Promise<void> {
     const sid = session.sessionId;
     const rid = session.runId;
@@ -1911,22 +1863,9 @@ export function CodeWorkspace() {
               interaction={interaction}
               onAttach={() => fileInput.current?.click()}
               onFiles={(files) => { attachUploads(files); }}
-              attachments={
-                attachments.length || uploads.length ? (
-                  <ComposerAttachments
-                    attachments={attachments}
-                    uploads={uploads}
-                    sizes={uploadedSizes.current}
-                    onRemoveAttachment={(index) =>
-                      setAttachments((items) =>
-                        items.filter((_, n) => n !== index),
-                      )
-                    }
-                    onRemoveUpload={removeUpload}
-                    onRetryUpload={retryUpload}
-                  />
-                ) : null
-              }
+              attachmentItems={attachmentItems}
+              onRemoveAttachment={removeAttachmentItem}
+              onRetryAttachment={uploads.retry}
               placeholder={
                 active
                   ? composeMode === "queue"
@@ -2068,7 +2007,7 @@ export function CodeWorkspace() {
         </footer>
       </div>
       <div className="pc-sr-only" role="status" aria-live="polite">
-        {uploadNotice}
+        {uploads.announcement}
       </div>
       <input
         ref={fileInput}

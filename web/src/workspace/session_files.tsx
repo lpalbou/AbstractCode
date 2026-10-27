@@ -9,10 +9,14 @@ import {
   type GatewayFetch,
   type RunWorkspace,
   type WorkspaceEntry,
+  uploadRefusal,
+  type ComposerAttachment,
 } from "@abstractframework/panel-chat";
 import { formatError, gatewayRequest } from "./transport";
 import { copy_text } from "../lib/clipboard";
-import { uploadRefusal, type PendingUpload } from "./attachment_uploads";
+
+/** A file handed to the composer's upload queue, as the queue judged it (kit `ComposerAttachment`). */
+export type AttachChip = Pick<ComposerAttachment, "name" | "state" | "error">;
 
 // Round 4: the folder listing AND the preview are the shared panel-chat
 // `WorkspaceBrowser` (rows: name, size, generated date, download; a click
@@ -55,9 +59,9 @@ export function attachPrecheck(entry: WorkspaceEntry, maxBytes: number | undefin
 
 /** What the Files panel says after handing a file to the upload queue: a
  * refusal carries its reason; success is never claimed before the upload. */
-export function attachOutcomeNotice(name: string, chip: PendingUpload | undefined): string {
+export function attachOutcomeNotice(name: string, chip: AttachChip | undefined): string {
   if (!chip) return `${name} was not queued for upload.`;
-  if (chip.status === "refused") return `Not attached: ${chip.message || "refused by the gateway's attachment policy"}`;
+  if (chip.state === "refused") return `Not attached: ${chip.error || "refused by the gateway's attachment policy"}`;
   return `${name} is uploading; its chip in the message box shows when it is attached.`;
 }
 
@@ -66,7 +70,7 @@ export async function attachWorkspaceFile(
   runId: string,
   entry: WorkspaceEntry,
   maxAttachmentBytes: number | undefined,
-  onAttachFiles: (files: File[]) => PendingUpload[],
+  onAttachFiles: (files: File[]) => AttachChip[],
 ): Promise<string> {
   const refusal = attachPrecheck(entry, maxAttachmentBytes);
   if (refusal) return `Not attached: ${refusal}`;
@@ -100,7 +104,7 @@ export function SessionFiles({
   /** The gateway's attachment size limit, checked before any download. */
   maxAttachmentBytes?: number;
   /** Queue files for upload; returns their chips (refused ones included). */
-  onAttachFiles: (files: File[]) => PendingUpload[];
+  onAttachFiles: (files: File[]) => AttachChip[];
 }): React.ReactElement {
   const [notice, setNotice] = useState("");
   const [attaching, setAttaching] = useState("");
