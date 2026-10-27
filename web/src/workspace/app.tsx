@@ -98,6 +98,7 @@ import {
   readPreferences,
   writePreferences,
 } from "./preferences";
+// Kit gap K3 (ui-primitives 0030): the controller does not derive the "streaming unsupported" / malformed-delta notes.
 import {
   addStreamNote,
   effectiveStreamReplies,
@@ -1600,6 +1601,7 @@ export function CodeWorkspace() {
       <a className="code-skip-link" href="#code-conversation">
         Skip to conversation
       </a>
+      {/* Kit gap K1 (ui-primitives 0036): AfAppShell cannot host this full-height sidebar beside the header, nor the one-row landscape chrome. */}
       <SidebarDrawer isDrawer={panesAreDrawers} open={sidebarOpen}>
         <div className="code-brand">
           <span className="code-brand-mark" aria-hidden="true">
@@ -1857,6 +1859,7 @@ export function CodeWorkspace() {
                 </button>
               </div>
             ) : null}
+            {/* Kit gap K2 (ui-primitives 0030): WorkflowChat has no runStatus slot (metrics, pause/resume, activity). */}
             {active || terminal(snapshot.status) ? (
               <RunStatusBar
                 active={active}
@@ -2000,6 +2003,7 @@ export function CodeWorkspace() {
                 </>
               }
             />
+            {/* Kit gap K5 (ui-primitives 0030): WorkflowChat's steer has no queued-turns list. */}
             {queue.length ? (
               <div className="code-queue">
                 <div>
