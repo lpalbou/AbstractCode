@@ -360,25 +360,6 @@ button {
 .code-sidebar-bottom small {
   font-size: var(--font-size-xxs);
 }
-.code-gateway-foot {
-  border-top: 1px solid var(--ui-border-1);
-  margin-top: 13px;
-  padding: 14px 5px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: var(--font-size-xxs);
-  color: var(--text-secondary);
-}
-.code-gateway-foot > span:nth-child(2) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.code-gateway-foot > small {
-  margin-left: auto;
-  font-size: var(--font-size-xxs);
-}
 .code-main-shell {
   grid-area: main;
   min-width: 0;
@@ -2100,8 +2081,6 @@ select option {
     overflow: visible;
   }
 }
-/* Drawers (Run settings, workflow inputs, voice) open under the measured chrome: app.tsx passes
-   AfDrawer's topOffset from useChromeBottom() (layout.ts); no CSS override of the inline top. */
 /* Touch (coarse pointer): 44 px targets, 16 px inputs (no iOS focus zoom), comfortable rows. */
 @media (pointer: coarse) {
   .code-icon-button,
@@ -2916,7 +2895,6 @@ select option {
   .code-topbar > .code-breadcrumb { display: flex; }
 }
 
-.code-app-assistant { background: var(--bg-secondary); }
 @media (max-width: 767.98px) {
   .code-topbar { gap: 4px; padding-inline: 8px; }
   .code-topbar .af-topbar__pill { padding: 0; width: 44px; min-width: 44px; min-height: 44px; }

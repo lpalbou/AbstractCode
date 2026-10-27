@@ -1,4 +1,4 @@
-import { AppAssistantDrawer } from "./app_assistant";
+import { codeDocsPanel } from "./app_assistant";
 import { LoadingStatus } from "./loading_status";
 import { automationToolSelection, gatewayApiPath } from "@abstractframework/ui-kit";
 import React, {
@@ -9,7 +9,6 @@ import React, {
   useState,
 } from "react";
 import {
-  AfAppearanceDialog,
   AfMenu,
   AfTopBarActions,
   AfSwitch,
@@ -30,7 +29,6 @@ import {
   kitDialogOpen,
   paneModeFrom,
   sidebarOnModeChange,
-  useChromeBottom,
   useDrawerFocus,
   type PaneMode,
 } from "./layout";
@@ -70,11 +68,10 @@ import {
   type RunPreferences,
 } from "./settings_panel";
 import { WorkspaceFilesContent, WorkspaceActivityContent, AutomationActivity, activityAttention } from "./workspace_panels";
-import { CodeRightRail, useRailPanel, type RailPanel, type SettingsRailPanel } from "./right_rail";
+import { CodeRightRail, type CodePanel, type RailPanel, type SettingsRailPanel } from "./right_rail";
 import { AutomationBinding, AutomationDefinitionForm, useAutomationSettings } from "./automation_settings_view";
 import { proxyGatewayFetch, openRunFolder } from "./session_files";
 import { copy_text } from "../lib/clipboard";
-import { aboutVersions, type FetchOutcome } from "./about_rows";
 import { automationTarget, automationsAvailability, myEmailConsoleUrl } from "./automations";
 import {
   AutomationMain,
@@ -176,26 +173,10 @@ export function CodeWorkspace() {
   const [appearance, setAppearance] = useAppearanceSettings("abstractcode", {
     defaults: { theme: "observer-night" },
   });
-  const [assistantOpen, setAssistantOpen] = useState(false);
-  const [appearanceOpen, setAppearanceOpen] = useState(false);
   // "My default workspaces" (the account level); a saved change reloads the session panel's default.
   const [defaultWorkspacesOpen, setDefaultWorkspacesOpen] = useState(false);
   const [defaultWorkspacesRevision, setDefaultWorkspacesRevision] = useState(0);
   const bumpDefaultWorkspaces = useCallback(() => setDefaultWorkspacesRevision((n) => n + 1), []);
-  // `GET /api/gateway/about`, fetched each time the About dialog opens.
-  const [gatewayAbout, setGatewayAbout] = useState<FetchOutcome>();
-  const refreshGatewayAbout = useCallback(() => {
-    setGatewayAbout(undefined);
-    void gatewayRequest(gatewayApiPath("about"))
-      .then((value) => setGatewayAbout({ ok: true, value }))
-      .catch((reason) =>
-        setGatewayAbout({
-          ok: false,
-          status: reason?.status,
-          message: formatError(reason),
-        }),
-      );
-  }, []);
   const [voicePreferences, setVoicePreferences] = useState<VoiceClientPreferences>(
     {},
   );
@@ -210,7 +191,6 @@ export function CodeWorkspace() {
       setVoicePreferences({});
     }
     setPanelOpen(false);
-    setAssistantOpen(false);
   }, [identity]);
   const changeVoicePreferences = (next: VoiceClientPreferences) => {
     setVoicePreferences(next);
@@ -301,15 +281,20 @@ export function CodeWorkspace() {
     any
   > | null>(null);
   const [restoreError, setRestoreError] = useState("");
-  // The right panel: the kit's rail drawer (Activity, Files, Model, Workflow, Workspace, Tools, Skills, Voice).
-  const [railPanel, setRailPanel, railOverlay] = useRailPanel();
+  // The right side: the kit's drawer system (Activity, Files, Model, Workflow, Workspace, Tools,
+  // Skills, Voice on the rail; the Docs assistant from the top bar). It restores the docked panel.
+  const [railPanel, setRailPanel] = useState<CodePanel | null>(null);
+  const railOverlay = useAfMedia(AF_MEDIA.md);
+  // A phone always starts with the content visible: becoming an overlay folds the panel away.
+  useEffect(() => {
+    if (railOverlay) setRailPanel(null);
+  }, [railOverlay]);
   const panelOpen = railPanel !== null;
   /** Legacy "close the panel" call sites: only a FLOATING panel gets out of the way; a docked one stays. */
   const setPanelOpen = (open: boolean) => {
     if (!open && railOverlay) setRailPanel(null);
   };
   const openPanel = (section: RailPanel) => {
-    setAssistantOpen(false);
     setSidebarOpen(false);
     setRailPanel(section);
   };
@@ -323,8 +308,6 @@ export function CodeWorkspace() {
   const belowLg = useAfMedia(AF_MEDIA.lg);
   const paneMode: PaneMode = paneModeFrom(belowLg, panesAreDrawers);
   const paneModeRef = useRef<PaneMode>(paneMode);
-  // Kit drawers open under the measured chrome (top bar, or the one-row landscape chrome).
-  const drawerTop = useChromeBottom(60);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Collapsible Automations / Conversations panels, remembered per viewer.
   const [panels, togglePanelOpen] = useSidebarPanels();
@@ -531,7 +514,6 @@ export function CodeWorkspace() {
       void automations.select(automationId);
     }
     setSidebarOpen(false);
-    setAssistantOpen(false);
     setRailPanel("workflow");
   };
   /** The automation header's "Change workspaces": the same, on the rail's Workspace panel (its chooser). */
@@ -759,7 +741,7 @@ export function CodeWorkspace() {
         key: event.key,
         defaultPrevented: event.defaultPrevented,
         overlayOpen:
-          panelOpen || assistantOpen || newAutomationOpen || appearanceOpen || kitDialogOpen(),
+          panelOpen || newAutomationOpen || kitDialogOpen(),
         sidebarOpen,
         inspectorOpen: false,
         inspectorIsOverlay: false,
@@ -773,7 +755,6 @@ export function CodeWorkspace() {
       if (event.key.toLowerCase() === "k") {
         event.preventDefault();
         setPanelOpen(false);
-        setAssistantOpen(false);
         setSidebarOpen(true);
         window.setTimeout(() => searchInput.current?.focus(), 0);
       }
@@ -789,8 +770,6 @@ export function CodeWorkspace() {
     sidebarOpen,
     newAutomationOpen,
     panelOpen,
-    assistantOpen,
-    appearanceOpen,
   ]);
 
   function currentWorkflowInput(text: string, values: Record<string, unknown>, attachments: AttachmentRef[] = [], forAutomation = false, selectedWorkflow = workflow, selectedSchema = schema) {
@@ -1232,13 +1211,6 @@ export function CodeWorkspace() {
   const archiveConfirm = (
     <ArchiveConfirm busy={archiveBusy} error={archiveError} onConfirm={() => void confirmArchive()} onCancel={cancelArchive} />
   );
-  const gatewayName = (() => {
-    try {
-      return new URL(connection.status?.gateway_url || "").host;
-    } catch {
-      return "Your gateway";
-    }
-  })();
 
   // Settings: one renderer for a conversation (its run preferences) and an
   // automation (its definition, through AutomationSettingsPanel).
@@ -1522,7 +1494,8 @@ export function CodeWorkspace() {
     <CodeRightRail
       key={`rail:${identity}`}
       panel={railPanel}
-      onPanel={(next) => { setRailPanel(next); if (next) setAssistantOpen(false); }}
+      onPanel={setRailPanel}
+      docs={codeDocsPanel(connection.connected)}
       activityBadge={activityAttn.count}
       activityHint={activityAttn.hint}
       content={{
@@ -1714,17 +1687,6 @@ export function CodeWorkspace() {
           </ArchivedFooter>
         </ConversationsPanel>
         </SidebarLists>
-        <div className="code-sidebar-bottom">
-          <div className="code-gateway-foot">
-            <span
-              className={`code-status-dot ${connection.connected ? "is-online" : ""}`}
-            />
-            <span>{gatewayName}</span>
-            <small>
-              {connection.status?.gateway?.principal?.user_id || "Signed out"}
-            </small>
-          </div>
-        </div>
       </SidebarDrawer>
       {sidebarOpen ? (
         <button
@@ -1738,7 +1700,7 @@ export function CodeWorkspace() {
           <button
             className="code-mobile-nav code-icon-button"
             aria-label="Open conversation navigation"
-            onClick={() => { setPanelOpen(false); setAssistantOpen(false); setSidebarOpen(true); }}
+            onClick={() => { setPanelOpen(false); setSidebarOpen(true); }}
           >
             <Icon name="list" size={19} />
           </button>
@@ -1758,11 +1720,11 @@ export function CodeWorkspace() {
             />
           ) : null}
           <AfTopBarActions
-            docs={{ open: assistantOpen, onToggle: () => { setAssistantOpen(open => !open); setPanelOpen(false); setSidebarOpen(false); }, label: "Docs assistant" }}
-            appearance={{ onOpen: () => setAppearanceOpen(true) }}
-            about={{ identity: APP_IDENTITY, versions: aboutVersions(gatewayAbout), onOpen: refreshGatewayAbout }}
-            connection={{ phase: connection.phase, signingOut: connection.signingOut,
-              onConnect: connection.openModal, onDisconnect: () => void connection.signOut() }}
+            docs={{ open: railPanel === "docs", onToggle: () => { setRailPanel((open) => (open === "docs" ? null : "docs")); setSidebarOpen(false); }, label: "Docs assistant" }}
+            appearance={{ value: appearance, onChange: setAppearance }}
+            about={{ identity: APP_IDENTITY, fetch: proxyGatewayFetch }}
+            identity="menu"
+            connection={connection}
           />
         </header>
         <div className="code-content">
@@ -1788,14 +1750,12 @@ export function CodeWorkspace() {
           >
             {error ||
             snapshot.error ||
-            connection.signOutError ||
             restoreError ? (
               <div className="code-alert" role="alert">
                 <Icon name="warning" size={16} />
                 <span>
                   {error ||
                     snapshot.error ||
-                    connection.signOutError ||
                     restoreError}
                 </span>
                 {snapshot.error || restoreError ? (
@@ -2162,8 +2122,6 @@ export function CodeWorkspace() {
         }}
       />
       <GatewayConnectModal {...connection.modalProps} />
-      <AppAssistantDrawer key={`assistant:${identity}`} open={assistantOpen} onClose={() => setAssistantOpen(false)} connected={connection.connected} topOffset={drawerTop} />
-      <AfAppearanceDialog open={appearanceOpen} onClose={() => setAppearanceOpen(false)} value={appearance} onChange={setAppearance} />
       <CodeDefaultWorkspacesDialog
         open={defaultWorkspacesOpen}
         onClose={() => setDefaultWorkspacesOpen(false)}

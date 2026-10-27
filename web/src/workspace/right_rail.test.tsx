@@ -9,7 +9,8 @@ import type { ActivityRow } from "../lib/activity_rows";
 import { automationRunPreferences, automationSettingsChanges, withAutomationRunPreferences } from "./automation_settings";
 import { saveErrorText, saveStateText } from "./automation_settings_view";
 import { ActivityGroups, AutomationActivity } from "./workspace_panels";
-import { CodeRightRail, RAIL_ITEMS, RAIL_PANEL_KEY, RAIL_PANEL_KEY_V1, readRailPanel, type RailPanel } from "./right_rail";
+import { CodeRightRail, RAIL_ITEMS, RAIL_WIDTH_KEY, type RailPanel } from "./right_rail";
+import { codeDocsPanel } from "./app_assistant";
 import { DEFAULT_PREFERENCES } from "./settings_panel";
 
 const appSource = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
@@ -40,7 +41,7 @@ describe("header: no gear (round 6 — the rail icons open the panels)", () => {
 describe("the rail drawer", () => {
   const content = Object.fromEntries(RAIL_ITEMS.map((item) => [item.id, <p key={item.id}>{item.id.toUpperCase()}</p>])) as Record<RailPanel, React.ReactNode>;
   it("renders the kit rail with one icon per subject, in order, and no horizontal tab strip", () => {
-    const html = renderToStaticMarkup(<CodeRightRail panel="files" onPanel={() => {}} content={content} activityBadge={2} />);
+    const html = renderToStaticMarkup(<CodeRightRail panel="files" onPanel={() => {}} content={content} activityBadge={2} docs={codeDocsPanel(true)} />);
     expect(html).toContain('role="tablist"');
     expect(html).toContain('aria-orientation="vertical"');
     const names = [...html.matchAll(/role="tab"[^>]*aria-label="([^"]+)"|aria-label="([^"]+)"[^>]*role="tab"/g)].map((m) => m[1] || m[2]);
@@ -58,14 +59,16 @@ describe("the rail drawer", () => {
   it("app.tsx gives every rail panel its own content", () => {
     for (const id of ["activity", "files", "model", "workflow", "workspace", "tools", "skills", "voice"]) expect(appSource).toMatch(new RegExp(`\\n\\s+${id}: `));
   });
-  it("restores the remembered panel; a round-4 'settings' opens Model", () => {
-    const store = (values: Record<string, string>) => ({ getItem: (k: string) => (k in values ? values[k] : null) });
-    expect(readRailPanel(store({ [RAIL_PANEL_KEY]: "skills" }))).toBe("skills");
-    expect(readRailPanel(store({ [RAIL_PANEL_KEY]: "" }))).toBeNull();
-    expect(readRailPanel(store({ [RAIL_PANEL_KEY_V1]: "settings" }))).toBe("model");
-    expect(readRailPanel(store({ [RAIL_PANEL_KEY_V1]: "files" }))).toBe("files");
-    expect(readRailPanel(store({ [RAIL_PANEL_KEY]: "bogus" }))).toBeNull();
-    expect(readRailPanel(null)).toBeNull();
+  it("is the kit's drawer system: widths and the docked open panel under ONE key (no app-side persistence)", () => {
+    const html = renderToStaticMarkup(<CodeRightRail panel="docs" onPanel={() => {}} content={content} docs={codeDocsPanel(true)} />);
+    expect(html).toContain('data-side="right"');
+    // The Docs assistant is a drawer-mode panel: open, labelled, no rail tab of its own.
+    expect(html).toMatch(/id="code-rail-panel-docs" role="tabpanel" aria-label="Docs assistant"/);
+    expect(html).not.toContain('data-rail="docs"');
+    expect(html).toContain("Grounded on AbstractCode");
+    expect(RAIL_WIDTH_KEY).toBe("abstractcode.rail.width.v1");
+    expect(appSource).not.toContain("abstractcode.rail.panel");
+    expect(appSource).not.toMatch(/localStorage\.setItem\(RAIL/);
   });
   it("is mounted inside the content area (beside the conversation), not as an overlay drawer", () => {
     expect(appSource).toMatch(/<\/main>\s*\)\}\s*\{railElement\}\s*<\/div>/);

@@ -134,11 +134,11 @@ describe("sidebar panels DOM", () => {
     expect(html).toMatch(/<div class="code-auto-rows"[^>]*hidden=""/);
   });
 
-  it("app.tsx renders both drawers from the persisted state inside the drawers frame, the bottom block after it", () => {
+  it("app.tsx renders both drawers from the persisted state inside the drawers frame (who is signed in lives in the top bar)", () => {
     expect(appSource).toMatch(/useSidebarPanels\(\)/);
     expect(appSource).toMatch(/<ConversationsPanel\s+open=\{panels\.conversations\}/);
     expect(appSource).toMatch(/open=\{panels\.automations\}\s+onToggle=/);
-    const lists = /<SidebarLists panels=\{panels\}>([\s\S]*?)<\/SidebarLists>\s*<div className="code-sidebar-bottom">/.exec(appSource)?.[1] ?? "";
+    const lists = /<SidebarLists panels=\{panels\}>([\s\S]*?)<\/SidebarLists>\s*<\/SidebarDrawer>/.exec(appSource)?.[1] ?? "";
     expect(lists).toMatch(/^\s*<AutomationsSection[\s\S]*<ConversationsPanel[\s\S]*<\/ConversationsPanel>\s*$/);
     expect(renderToStaticMarkup(<SidebarLists panels={{ automations: true, conversations: false }}>x</SidebarLists>)).toBe(
       '<div class="code-sidebar-lists" data-automations="open" data-conversations="closed">x</div>',

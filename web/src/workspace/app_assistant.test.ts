@@ -8,8 +8,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DocsAssistantPanel, makeDocsQaAsk } from "@abstractframework/panel-chat";
-import { AppAssistantDrawer, CODE_DOCS_SOURCE, docsGatewayFetch } from "./app_assistant";
+import { DocsAssistantPanel, DocsAssistantPanelContent, makeDocsQaAsk } from "@abstractframework/panel-chat";
+import { CODE_DOCS_SOURCE, codeDocsPanel, docsGatewayFetch } from "./app_assistant";
 // @ts-expect-error bin/server.js is plain ESM JavaScript without types
 import { createCodeRequestHandler } from "../../bin/server.js";
 
@@ -70,21 +70,22 @@ describe("Code Docs assistant (kit DocsAssistantDrawer)", () => {
     expect(html).toContain("Grounded on AbstractCode’s documentation (llms.txt) · docs-qa");
   });
 
-  it("the drawer: compact header, icon-only New conversation, close, keep-alive", () => {
-    const html = renderToStaticMarkup(React.createElement(AppAssistantDrawer, { open: true, onClose: () => {}, connected: true, topOffset: 48 }));
-    expect(html).toContain("code-app-assistant");
-    expect(html).toContain("Docs assistant");
+  it("is the kit's docs panel: drawer mode, kept alive, icon-only New conversation, attachments", () => {
+    const panel = codeDocsPanel(true);
+    expect(panel).toMatchObject({ id: "docs", label: "Docs assistant", icon: "book", mode: "drawer", keepAlive: "always" });
+    const html = renderToStaticMarkup(panel.content as React.ReactElement);
     expect(html).toMatch(/aria-label="New conversation"[^>]*><svg/);
     expect(html).not.toMatch(/>New conversation</);
-    expect(html).toContain('aria-label="Close panel"');
     expect(html).toContain('aria-label="Attach files"');
-    const signedOut = renderToStaticMarkup(React.createElement(AppAssistantDrawer, { open: true, onClose: () => {}, connected: false, topOffset: 48 }));
+    expect(html).toContain("Ask about AbstractCode…");
+    const signedOut = renderToStaticMarkup(React.createElement(DocsAssistantPanelContent, { ...(codeDocsPanel(false).content as React.ReactElement).props }));
     expect(signedOut).toContain("Connect to the gateway to use the docs assistant.");
   });
 
-  it("the top bar opens it from the shared docs slot (book icon)", () => {
-    expect(appSource).toContain('docs={{ open: assistantOpen,');
-    expect(appSource).not.toContain('assistant={{ open: assistantOpen');
+  it("the top bar opens it from the shared docs slot (book icon) as the right side's docs panel", () => {
+    expect(appSource).toContain('docs={{ open: railPanel === "docs",');
+    expect(appSource).not.toContain("assistant={{");
+    expect(appSource).toContain("docs={codeDocsPanel(connection.connected)}");
   });
 
   it("the app serves its llms.txt as text/plain (what the gateway reads)", async () => {

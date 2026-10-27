@@ -4,7 +4,7 @@
 // conversation sidebar and the workspace inspector are overlay drawers; from `md`
 // to `lg` (1024-1439 px) at most two panes are docked, so the inspector starts
 // closed (a toggle); from `xl` (>= 1440 px) all three panes are docked.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 /**
  * Focus management for an overlay drawer: on open, focus `focusInside()`; on close,
@@ -130,40 +130,4 @@ export function installKeyboardFlag(): () => void {
     keyboardCleanup = null;
   };
   return keyboardCleanup;
-}
-
-// ---- Drawer top -------------------------------------------------------------------------
-/**
- * Where the app's kit drawers (Run settings, workflow inputs, voice) start: under the top bar,
- * or under the one-row chrome of phone landscape (the top bar is `display: contents` there).
- * Measured, so header density, the safe-area inset and the short layout are all honoured;
- * AfDrawer takes it as its `topOffset` prop.
- */
-export function chromeBottom(doc: Document): number | null {
-  const topbar = doc.querySelector<HTMLElement>(".code-topbar");
-  if (!topbar) return null;
-  const merged = getComputedStyle(topbar).display === "contents";
-  const row = merged ? doc.querySelector<HTMLElement>(".code-toolbar") : topbar;
-  const bottom = row?.getBoundingClientRect().bottom;
-  return typeof bottom === "number" && bottom > 0 ? Math.round(bottom) : null;
-}
-
-export function useChromeBottom(fallback: number): number {
-  const [top, setTop] = useState(fallback);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const sync = () => setTop(chromeBottom(document) ?? fallback);
-    sync();
-    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(sync) : null;
-    const topbar = document.querySelector(".code-topbar");
-    const toolbar = document.querySelector(".code-toolbar");
-    if (ro && topbar) ro.observe(topbar);
-    if (ro && toolbar) ro.observe(toolbar);
-    window.addEventListener("resize", sync);
-    return () => {
-      ro?.disconnect();
-      window.removeEventListener("resize", sync);
-    };
-  }, [fallback]);
-  return top;
 }

@@ -188,9 +188,7 @@ test.describe("AbstractCode sidebar", () => {
           const hit = document.elementFromPoint(last.left + 4, last.top + last.height / 2);
           if (!hit || !row.contains(hit)) hidden.push(row.textContent || "");
         }
-        const sidebar = document.querySelector(".code-sidebar")!.getBoundingClientRect();
-        const bottom = document.querySelector(".code-sidebar-bottom")!.getBoundingClientRect();
-        return { newChat, headers, lists, hidden, bottomPinned: bottom.bottom <= sidebar.bottom + 1 };
+        return { newChat, headers, lists, hidden };
       });
       expect(g.headers, `${width}`).toHaveLength(2);
       for (const h of g.headers) {
@@ -206,7 +204,6 @@ test.describe("AbstractCode sidebar", () => {
         expect(l.overflowY, `${width} list scrolls inside its drawer`).toBe("auto");
       }
       expect(g.hidden, `${width} rows hidden under a header`).toEqual([]);
-      expect(g.bottomPinned, `${width} bottom block pinned`).toBe(true);
       // Keyboard: Enter on the focused header folds the list; the state survives a reload.
       await page.locator("#code-panel-automations-toggle").focus();
       await page.keyboard.press("Enter");
