@@ -319,7 +319,6 @@ export function CodeWorkspace() {
   const switchNotice = useRef("");
   const [search, setSearch] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
-  const [composeMode, setComposeMode] = useState<"steer" | "queue">("steer");
   const [queue, setQueue] = useState<QueueIntent[]>([]);
   const [queueRunning, setQueueRunning] = useState(false);
   const [optimistic, setOptimistic] = useState<ChatMessage[]>([]);
@@ -426,8 +425,6 @@ export function CodeWorkspace() {
       }),
     [pendingInteraction, snapshot.records, snapshot.run, controller],
   );
-  const interactionBlocksSteer =
-    Boolean(interaction) && composeMode === "steer";
   const promptProperty = isAgent
     ? "prompt"
     : workflowPromptProperty(schema);
@@ -983,42 +980,52 @@ export function CodeWorkspace() {
     }
   }
 
+  // While a run is busy the composer steers it or queues the next turn (kit WorkflowChat `steer`,
+  // backlog 0030): "Guide this run" posts inject_guidance; "Queue next turn" holds the message
+  // here and starts it when the run ends. A pending question/approval leaves only Queue.
+  async function guideRun(text: string): Promise<{ accepted: boolean; seq?: number; duplicate?: boolean }> {
+    if (interaction) throw new Error("Answer the pending workflow request above, or queue the next turn.");
+    const sid = session.sessionId;
+    const rid = session.runId;
+    const epoch = authEpoch.current;
+    const answer = (await controller.sendCommand("inject_guidance", { guidance: text })) as { accepted?: boolean; seq?: number; duplicate?: boolean } | null;
+    if (sessionRef.current.sessionId !== sid || sessionRef.current.runId !== rid || authEpoch.current !== epoch) throw staleSendAbort();
+    return {
+      accepted: answer?.accepted !== false,
+      ...(typeof answer?.seq === "number" ? { seq: answer.seq } : {}),
+      ...(answer?.duplicate === true ? { duplicate: true } : {}),
+    };
+  }
+  function queueNextTurn(text: string): { accepted: boolean } {
+    setQueue((items) => [
+      ...items,
+      {
+        id: newId(),
+        text,
+        sessionId: session.sessionId,
+        sourceRunId: session.runId,
+        authEpoch: authEpoch.current,
+      },
+    ]);
+    setQueueRunning(true);
+    return { accepted: true };
+  }
+  const steer =
+    active && !sending
+      ? {
+          modes: (interaction ? ["queue"] : ["guide", "queue"]) as ("guide" | "queue")[],
+          parked: snapshot.status === "waiting" && !interaction,
+          onSteer: async (text: string, mode: "guide" | "queue") => (mode === "queue" ? queueNextTurn(text) : guideRun(text)),
+        }
+      : undefined;
+
+  /** A message from outside the composer (the microphone): starts a turn, or steers / queues a busy run. */
   async function send(text: string) {
     if (!active) return startTurn(text);
-    if (composeMode === "queue") {
-      setQueue((items) => [
-        ...items,
-        {
-          id: newId(),
-          text,
-          sessionId: session.sessionId,
-          sourceRunId: session.runId,
-          authEpoch: authEpoch.current,
-        },
-      ]);
-      setQueueRunning(true);
-      setDraft("");
-      setNotice("Queued for the next turn.");
-    } else {
-      if (interaction)
-        throw new Error(
-          "Answer the pending workflow request above, or choose Queue next turn.",
-        );
-      const sid = session.sessionId;
-      const rid = session.runId;
-      const epoch = authEpoch.current;
-      await controller.sendCommand("inject_guidance", { guidance: text });
-      if (
-        sessionRef.current.sessionId !== sid ||
-        sessionRef.current.runId !== rid ||
-        authEpoch.current !== epoch
-      )
-        return;
-      setDraft("");
-      setNotice(
-        "Guidance queued. The workflow will read it at its next supported boundary.",
-      );
-    }
+    const result = interaction ? queueNextTurn(text) : await guideRun(text);
+    if (!result.accepted) throw new Error("The gateway did not accept this message.");
+    setDraft("");
+    setNotice(interaction ? "Queued for the next turn." : "Guidance queued. The workflow will read it at its next supported boundary.");
   }
   async function executeQueuedIntent(intent: QueueIntent): Promise<void> {
     const snapshotRunId = String(snapshot.run?.run_id || "");
@@ -1844,19 +1851,8 @@ export function CodeWorkspace() {
               onDraftChange={setDraft}
               onSend={send}
               busy={locked}
-              busyLabel={
-                interactionBlocksSteer
-                  ? "Waiting for you"
-                  : sending
-                    ? "Starting…"
-                    : paused
-                      ? "Paused"
-                      : "Working…"
-              }
-              sendWhileBusy={active && !sending && !interactionBlocksSteer}
-              sendLabel={
-                active ? (composeMode === "queue" ? "Queue" : "Steer") : "Send"
-              }
+              busyLabel={sending ? "Starting…" : paused ? "Paused" : "Working…"}
+              steer={steer}
               onCancel={cancelCurrentRun}
               stopState={snapshot.stop ?? null}
               disabled={!connection.connected}
@@ -1868,11 +1864,9 @@ export function CodeWorkspace() {
               onRetryAttachment={uploads.retry}
               placeholder={
                 active
-                  ? composeMode === "queue"
-                    ? "Queue the next task after this run…"
-                    : interaction
-                      ? "Answer the request above, or choose Queue next turn…"
-                      : "Guide the current workflow…"
+                  ? interaction
+                    ? "Answer the request above, or queue the next task…"
+                    : "Guide the current workflow, or queue the next task…"
                   : "Describe what you want to build, fix, or explore…"
               }
               emptyState={
@@ -1910,20 +1904,6 @@ export function CodeWorkspace() {
                       capability={voiceCapability}
                       route={sttRouteText(voicePreferences, voiceDefaults.value)}
                     />
-                  ) : null}
-                  {active ? (
-                    <select
-                      aria-label="Message destination"
-                      value={composeMode}
-                      onChange={(e) =>
-                        setComposeMode(e.target.value as "steer" | "queue")
-                      }
-                    >
-                      <option value="steer" disabled={Boolean(interaction)}>
-                        Guide this run{interaction ? " (answer above)" : ""}
-                      </option>
-                      <option value="queue">Queue next turn</option>
-                    </select>
                   ) : null}
                 </>
               }

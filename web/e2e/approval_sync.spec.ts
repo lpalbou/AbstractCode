@@ -86,9 +86,10 @@ async function expectGate(page: Page, who: string): Promise<void> {
   const strip = page.locator(".code-run-strip");
   await expect(strip, `${who}: the run strip`).toContainText("Approval needed");
   await expect(strip, `${who}: never "Running a tool" while parked`).not.toContainText("Running a tool");
-  // The composer waits for the decision: its send button says so and the
-  // textarea points at the card (not "Guide the current workflow… / Steer").
-  await expect(page.locator(".pc-composer").getByRole("button", { name: "Waiting for you" }), `${who}: the composer waits for the decision`).toBeVisible();
+  // The composer cannot steer past the decision: only "Queue" (the next turn) is offered
+  // (kit WorkflowChat steer, modes ["queue"]) and the textarea points at the card.
+  await expect(page.locator(".pc-composer").getByRole("button", { name: "Queue", exact: true }), `${who}: only the next turn can be queued`).toBeVisible();
+  await expect(page.locator(".pc-composer").getByRole("button", { name: "Steer", exact: true }), `${who}: never steer past the decision`).toHaveCount(0);
   await expect(page.locator(".code-conversation .pc-composer textarea"), `${who}: the composer points at the request`).toHaveAttribute("placeholder", /Answer the request above/);
 }
 
