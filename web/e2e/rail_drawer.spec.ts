@@ -139,7 +139,7 @@ for (const [name, width, height] of [["desktop", 1440, 960], ["tablet", 834, 111
       for (const [panelName, probe] of [
         ["Workflow", (p: ReturnType<Page["locator"]>) => p.getByRole("combobox", { name: "Workflow", exact: true })],
         ["Workspace", (p: ReturnType<Page["locator"]>) => p.getByText("Current workspace")],
-        ["Tools", (p: ReturnType<Page["locator"]>) => p.getByRole("textbox", { name: "Search tools" })],
+        ["Tools", (p: ReturnType<Page["locator"]>) => p.getByRole("searchbox", { name: "Search tools" })],
         ["Skills", (p: ReturnType<Page["locator"]>) => p.locator("#code-settings-skills")],
       ] as const) {
         const panelLocator = await openWorkspaceSection(page, panelName);

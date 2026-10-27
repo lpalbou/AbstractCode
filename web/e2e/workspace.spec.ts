@@ -936,7 +936,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await openWorkspaceSection(page, "Tools");
     const settings = page.locator(".code-rail .af-rail__panel");
     // The kit ToolModeEditor (backlog 0033): Off / Ask / Auto per tool.
-    await settings.getByRole("textbox", { name: "Search tools" }).fill("write_file");
+    await settings.getByRole("searchbox", { name: "Search tools" }).fill("write_file");
     await settings.locator('[data-tool-mode="write_file:off"]').click();
     await capture(page, "tool-off");
     await settings.getByRole("button", { name: /^Collapse / }).click();
@@ -951,7 +951,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     // The previous turn's immutable ceiling must not prevent an explicit
     // enablement for the next run in the same conversation.
     await openWorkspaceSection(page, "Tools");
-    await settings.getByRole("textbox", { name: "Search tools" }).fill("write_file");
+    await settings.getByRole("searchbox", { name: "Search tools" }).fill("write_file");
     await settings.locator('[data-tool-mode="write_file:auto"]').click();
     await settings.getByRole("button", { name: /^Collapse / }).click();
     await openWorkflowInputs(page);
