@@ -43,9 +43,7 @@ import {
   uploadRefusal,
   useAttachmentUploads,
   type ComposerAttachment,
-  chatToMarkdown,
   presentInteraction,
-  downloadTextFile,
   useWorkflowSession,
   workflowPendingInteraction,
   type ChatMessage,
@@ -1502,7 +1500,6 @@ export function CodeWorkspace() {
                   setAttachments((items) => [...items, ref]);
               }}
             />
-          {messages.length ? <button className="code-subtle-button" onClick={() => downloadTextFile({ filename: "conversation.md", text: chatToMarkdown(messages) })}>Export conversation</button> : null}
         </>
       ),
       model: modelPanel,
@@ -1853,6 +1850,7 @@ export function CodeWorkspace() {
               busy={locked}
               busyLabel={sending ? "Starting…" : paused ? "Paused" : "Working…"}
               steer={steer}
+              toolbar={messages.length ? { exportTranscript: { filename: "conversation.md" } } : undefined}
               onCancel={cancelCurrentRun}
               stopState={snapshot.stop ?? null}
               disabled={!connection.connected}
