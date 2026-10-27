@@ -9,8 +9,10 @@
 //   MTP                   _runtime.speculation
 //   iteration/token limit _limits.max_iterations / _limits.max_tokens
 //   instructions          _runtime.system_prompt_extra
-//   tools                 input.tools + _runtime.allowed_tools (kit withAutomationTools)
-//   approvals             _runtime.tool_policy {auto_approve_tools, require_approval_tools}
+//   tools + approvals     the kit's tool layer (backlog 0033): input.tools + _runtime.allowed_tools
+//                         (Off = outside) + _runtime.tool_policy {auto_approve_tools,
+//                         require_approval_tools}, written by planRunTools/withRunTools only
+//                         when the panel changed them (tool_layers.ts withToolLayer)
 //   workspaces            workspace {posture, default_mode, folders} (R11 run
 //                         level, the same payload a one-off run sends; absent =
 //                         "Use my default"; a chosen payload replaces the R9
@@ -19,8 +21,9 @@
 //   skills                input.skills
 // An unset value is REMOVED (never written as ""), so the gateway default
 // applies again — "Gateway default" until overridden.
-import { automationToolSelection, withAutomationTools, type AutomationChanges, type AutomationDefinition, type ToolPolicySelection } from "@abstractframework/ui-kit";
+import { effectiveToolLayers, type AutomationChanges, type AutomationDefinition, type ToolCatalogItem } from "@abstractframework/ui-kit";
 import { DEFAULT_PREFERENCES, type RunPreferences, type RunWorkspace } from "./settings_panel";
+import { inputToolLayer, withToolLayer } from "./tool_layers";
 
 type Json = Record<string, any>;
 
@@ -28,19 +31,13 @@ const obj = (v: unknown): Json => (v && typeof v === "object" && !Array.isArray(
 const str = (v: unknown): string => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim() !== "") : []);
 
-/** The panel's preferences for an automation definition's input. */
-export function automationRunPreferences(input: Json | undefined): RunPreferences {
+/** The panel's preferences for an automation definition's input (`catalog`: GET discovery/tools, for the tools). */
+export function automationRunPreferences(input: Json | undefined, catalog: readonly ToolCatalogItem[] = []): RunPreferences {
   const data = obj(input);
   const runtime = obj(data._runtime);
   const limits = obj(data._limits);
   const provider = str(data.provider) || str(runtime.provider);
   const model = str(data.model) || str(runtime.model);
-  const selected = automationToolSelection(data);
-  const policy = obj(runtime.tool_policy);
-  const approval: ToolPolicySelection["approval"] = {};
-  for (const name of strings(policy.auto_approve_tools)) approval[name] = "approve";
-  for (const name of strings(policy.require_approval_tools)) approval[name] = "ask";
-  const customized = selected !== null || Object.keys(approval).length > 0;
   return {
     ...DEFAULT_PREFERENCES,
     provider: provider && model ? provider : "",
@@ -52,9 +49,7 @@ export function automationRunPreferences(input: Json | undefined): RunPreference
     system: str(runtime.system_prompt_extra),
     // A payload has `folders`; the gateway's `{configured: false}` ("follow my default at each run") is "Use my default".
     workspace: data.workspace && typeof data.workspace === "object" && Array.isArray((data.workspace as RunWorkspace).folders) ? (data.workspace as RunWorkspace) : null,
-    tools: selected === null ? { mode: "all", selected: [], approval } : { mode: "custom", selected, approval },
-    toolsCustomized: customized,
-    permissions: "default",
+    toolLayer: inputToolLayer(data, catalog),
     skills: strings(data.skills),
     workflow: DEFAULT_PREFERENCES.workflow,
     streamReplies: "gateway_default",
@@ -72,7 +67,7 @@ function positiveInt(value: string): number | undefined {
 }
 
 /** The definition's input with the panel's preferences applied (everything else kept). */
-export function withAutomationRunPreferences(input: Json | undefined, prefs: RunPreferences): Json {
+export function withAutomationRunPreferences(input: Json | undefined, prefs: RunPreferences, catalog: readonly ToolCatalogItem[] = []): Json {
   let next = obj(input);
   const runtime = obj(next._runtime);
   const limits = obj(next._limits);
@@ -86,12 +81,6 @@ export function withAutomationRunPreferences(input: Json | undefined, prefs: Run
   setOrDelete(runtime, "system_prompt_extra", prefs.system.trim());
   setOrDelete(limits, "max_iterations", positiveInt(prefs.maxIterations));
   setOrDelete(limits, "max_tokens", positiveInt(prefs.maxTokens));
-  const approve = Object.entries(prefs.tools.approval || {}).filter(([, v]) => v === "approve").map(([k]) => k);
-  const ask = Object.entries(prefs.tools.approval || {}).filter(([, v]) => v === "ask").map(([k]) => k);
-  const policy = prefs.toolsCustomized && (approve.length || ask.length)
-    ? { ...(approve.length ? { auto_approve_tools: approve } : {}), ...(ask.length ? { require_approval_tools: ask } : {}) }
-    : undefined;
-  setOrDelete(runtime, "tool_policy", policy);
   if (Object.keys(runtime).length) next._runtime = runtime;
   else delete next._runtime;
   if (Object.keys(limits).length) next._limits = limits;
@@ -113,14 +102,17 @@ export function withAutomationRunPreferences(input: Json | undefined, prefs: Run
     delete next.workspace_allowed_paths;
   }
   setOrDelete(next, "skills", prefs.skills);
-  next = withAutomationTools(next as any, prefs.toolsCustomized && prefs.tools.mode === "custom" ? prefs.tools.selected : null) as Json;
+  // Tools: rewritten only when the panel changed them (a read-only round trip is no revision).
+  const before = inputToolLayer(input, catalog);
+  const after = effectiveToolLayers(catalog, { app: prefs.toolLayer }).app;
+  if (stableJson(before) !== stableJson(after)) next = withToolLayer(next, prefs.toolLayer, catalog);
   return next;
 }
 
 /** The PATCH `changes` for new preferences, or null when the input would not change. */
-export function automationSettingsChanges(definition: Pick<AutomationDefinition, "target">, prefs: RunPreferences): AutomationChanges | null {
+export function automationSettingsChanges(definition: Pick<AutomationDefinition, "target">, prefs: RunPreferences, catalog: readonly ToolCatalogItem[] = []): AutomationChanges | null {
   const before = obj(definition.target.input_data);
-  const after = withAutomationRunPreferences(before, prefs);
+  const after = withAutomationRunPreferences(before, prefs, catalog);
   if (stableJson(before) === stableJson(after)) return null;
   return { target: { bundle_ref: definition.target.bundle_ref, flow_id: definition.target.flow_id, input_data: after as any } };
 }

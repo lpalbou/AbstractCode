@@ -1455,11 +1455,6 @@ select option {
   margin: 4px 0 0;
   overflow-wrap: anywhere;
 }
-.code-disabled-tools {
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary);
-  margin: 20px 0;
-}
 .code-text-button {
   background: transparent;
   border: 0;

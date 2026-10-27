@@ -121,7 +121,7 @@ export function RunStatusBar({
       {permissionsAll ? (
         <div className="code-run-strip__consent">
           <Icon name="check" size={13} />
-          <span>Permissions: all · enabled tools only</span>
+          <span>Auto: every enabled tool · this browser</span>
           <button onClick={onRevokeApproval}>Revoke</button>
         </div>
       ) : null}

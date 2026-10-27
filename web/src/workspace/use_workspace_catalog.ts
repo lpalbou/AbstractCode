@@ -1,4 +1,4 @@
-import { sessionToolPolicyCapability, type SessionToolPolicyCapability } from "@abstractframework/ui-kit";
+import { sessionToolPolicyCapability, normalizeToolCatalog as kitToolCatalog, toolCatalogWarnings, type SessionToolPolicyCapability, type ToolCatalogItem } from "@abstractframework/ui-kit";
 import {
   executableWorkflowsPath,
   gatewayApiPath,
@@ -53,6 +53,10 @@ type CatalogState = {
    */
   sessionToolPolicy: SessionToolPolicyCapability | null;
   capabilitiesError: string;
+  /** The same `GET discovery/tools` answer as the kit reads it (ToolModeEditor, planRunTools). */
+  toolCatalog: ToolCatalogItem[];
+  /** The catalog's warnings in the gateway's words (plugin load failures, MCP). */
+  toolWarnings: string[];
   /** Live-reply support (`capabilities.streaming`) for "Stream replies". */
   streaming: StreamingCapability;
   loading: boolean;
@@ -79,6 +83,8 @@ const empty: CatalogState = {
   capabilitiesLoading: true,
   sessionToolPolicy: null,
   capabilitiesError: "",
+  toolCatalog: [],
+  toolWarnings: [],
   streaming: STREAMING_LOADING,
   loading: false,
   sessionsLoaded: false,
@@ -228,6 +234,14 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
         `${["Workflows", "Workspace policy", "Tools", "Conversations", "Capabilities", "Shared workflows", "Gateway defaults"][index]}: ${formatError(item.reason)}`,
       );
     });
+    let toolCatalog: ToolCatalogItem[] = [];
+    if (result[2].status === "fulfilled") {
+      try {
+        toolCatalog = kitToolCatalog(value(2));
+      } catch (reason) {
+        errors.push(`Tools: ${formatError(reason)}`);
+      }
+    }
     // A "Load more" started while this refresh was in flight owns the list now.
     const listCurrent = listGeneration.current === listGen;
     const page = pageOf(value(3));
@@ -252,6 +266,8 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       capabilities: capabilityContracts(value(4)),
       capabilitiesLoading: false,
       sessionToolPolicy: sessionToolPolicyCapability(value(4)),
+      toolCatalog,
+      toolWarnings: toolCatalogWarnings(value(2)),
       capabilitiesError: result[4].status === "rejected" ? `Could not read the gateway's capabilities: ${formatError((result[4] as PromiseRejectedResult).reason)}` : "",
       streaming: streamingCapability(
         value(4),

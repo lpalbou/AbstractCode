@@ -528,7 +528,8 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await capture(page, "compact-tool-supervision-mobile-question");
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.reload();
-    await expect(page.locator(".code-run-strip")).toContainText("Permissions: all");
+    // "Allow all enabled tools" made every bulk-reachable enabled tool Auto in this app's tool layer.
+    await expect(page.locator(".code-run-strip")).toContainText("Auto: every enabled tool");
     await expect(page.getByRole("heading", { name: "A question for you" })).toBeVisible();
     await page.getByRole("button", { name: "Revoke", exact: true }).click();
     await expect(
@@ -925,7 +926,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await page.keyboard.press("Escape");
   });
 
-  test("permissions all never executes a tool unchecked in the enabled selection", async ({ page }) => {
+  test("a tool set to Off is never offered to the run, and is offered again when set back", async ({ page }) => {
     const submissions: any[] = [];
     page.on("request", request => {
       if (request.method() === "POST" && request.url().endsWith("/api/gateway/runs/start")) submissions.push(request.postDataJSON());
@@ -934,13 +935,10 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await selectWorkflow(page, "Native tool approval");
     await openWorkspaceSection(page, "Tools");
     const settings = page.locator(".code-rail .af-rail__panel");
-    await settings.getByLabel("Permissions", { exact: true }).selectOption("all");
-    await settings.getByRole("button", { name: "Custom allowlist", exact: true }).click();
-    await settings.getByRole("button", { name: "Select all", exact: true }).click();
-    await settings.getByPlaceholder("Filter tools...").fill("write_file");
-    const row = settings.locator(".af-tool-row").filter({ hasText: "write_file" });
-    await row.getByRole("switch").uncheck();
-    await capture(page, "permissions-all-enabled-tools");
+    // The kit ToolModeEditor (backlog 0033): Off / Ask / Auto per tool.
+    await settings.getByRole("textbox", { name: "Search tools" }).fill("write_file");
+    await settings.locator('[data-tool-mode="write_file:off"]').click();
+    await capture(page, "tool-off");
     await settings.getByRole("button", { name: /^Collapse / }).click();
     await sendTurn(page);
     await expectPersistedCompletion(page);
@@ -948,37 +946,35 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await expect(page.locator(".pc-workflow-interaction")).toHaveCount(0);
     expect(submissions[0].input_data._runtime.allowed_tools).not.toContain("write_file");
     expect(submissions[0].input_data._runtime.tool_policy.require_approval_tools).not.toContain("write_file");
+    expect(submissions[0].input_data._runtime.tool_policy.auto_approve_tools).not.toContain("write_file");
     await capture(page, "unchecked-tool-denied");
     // The previous turn's immutable ceiling must not prevent an explicit
     // enablement for the next run in the same conversation.
     await openWorkspaceSection(page, "Tools");
-    await settings.getByPlaceholder("Filter tools...").fill("write_file");
-    await settings.getByRole("switch", { name: "write_file", exact: true }).check();
+    await settings.getByRole("textbox", { name: "Search tools" }).fill("write_file");
+    await settings.locator('[data-tool-mode="write_file:auto"]').click();
     await settings.getByRole("button", { name: /^Collapse / }).click();
     await openWorkflowInputs(page);
     await sendTurn(page);
     await expect.poll(() => submissions.length).toBe(2);
     await expectPersistedCompletion(page);
     expect(submissions[1].input_data._runtime.allowed_tools).toContain("write_file");
+    // Auto runs without a client: the gateway gets it in auto_approve_tools (decision 2026-10-27).
+    expect(submissions[1].input_data._runtime.tool_policy.auto_approve_tools).toContain("write_file");
     await expect(page.locator(".pc-tool-activity--completed")).toHaveCount(1);
   });
 
-  test("revokes a permission level selected before starting the run", async ({ page }) => {
+  test("an Ask tool waits for the person; Revoke takes back the Auto choices of Allow all enabled tools", async ({ page }) => {
     const submissions: any[] = [];
     page.on("request", request => {
       if (request.method() === "POST" && request.url().endsWith("/api/gateway/runs/start")) submissions.push(request.postDataJSON());
     });
     await signIn(page);
     await selectWorkflow(page, "Tool supervision");
-    await openWorkspaceSection(page, "Tools");
-    const settings = page.locator(".code-rail .af-rail__panel");
-    await settings.getByLabel("Permissions", { exact: true }).selectOption("all");
-    await settings.getByRole("button", { name: /^Collapse / }).click();
     await sendTurn(page);
     await expect(page.getByRole("heading", { name: "A question for you" })).toBeVisible();
-    expect(submissions[0].input_data._runtime.tool_policy.require_approval_tools).toContain("write_file");
-    expect(submissions[0].input_data._runtime.tool_policy).not.toHaveProperty("auto_approve_tools");
-    await page.getByRole("button", { name: "Revoke", exact: true }).click();
+    // No tool choice yet: nothing is sent, the gateway's grant applies.
+    expect(submissions[0].input_data._runtime?.tool_policy).toBeUndefined();
     await page.getByRole("button", { name: "continue", exact: true }).click();
     await expect(page.getByRole("heading", { name: "1 action needs permission" })).toBeVisible();
     await page.getByRole("button", { name: "Deny", exact: true }).click();

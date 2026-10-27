@@ -1,6 +1,16 @@
 import { codeDocsPanel } from "./app_assistant";
 import { LoadingStatus } from "./loading_status";
-import { automationToolSelection, createSessionToolPolicyClient, gatewayApiPath } from "@abstractframework/ui-kit";
+import {
+  automationToolSelection,
+  createSessionToolPolicyClient,
+  createToolLayerStore,
+  gatewayApiPath,
+  hasToolChoices,
+  planRunTools,
+  toWorkflowApprovalPolicy,
+  withRunTools,
+  type ToolModeLayer,
+} from "@abstractframework/ui-kit";
 import React, {
   useCallback,
   useEffect,
@@ -122,7 +132,7 @@ import type { AttachmentRef } from "../lib/types";
 import { RunStatusBar } from "./run_status_bar";
 import { CodeVoiceSettings, VoiceTools, spokenMessage, useVoiceDefaults, useWorkspaceVoice } from "./voice_tools";
 import { workflowPromptProperty, restoreWorkflowFields } from "./input_schema";
-import { resolveToolPermissions, intersectToolPermissions } from "./tool_permissions";
+import { TOOLS_MIGRATION_NOTICE, allEnabledAuto, migrateLegacyTools, toolsMigrationKey, withAllEnabledAuto, withoutAutoChoices } from "./tool_layers";
 import {
   advanceQueueIntents,
   queueIntentMatches,
@@ -199,6 +209,36 @@ export function CodeWorkspace() {
     useState<RunPreferences>(DEFAULT_PREFERENCES);
   const preferencesRef = useRef(preferences);
   preferencesRef.current = preferences;
+  // This app's tool choices (backlog 0033): the kit's tool layer store, per account, in this
+  // browser. Auto tools are sent to the gateway with each run (they run without a client open).
+  const toolStore = useMemo(() => (identity ? createToolLayerStore(identity) : null), [identity]);
+  const [appToolLayer, setAppToolLayerState] = useState<ToolModeLayer>({});
+  const [toolsNoticePending, setToolsNoticePending] = useState(false);
+  useEffect(() => {
+    setAppToolLayerState(toolStore ? toolStore.readApp(CODE_AGENT_INTERFACE) : {});
+    let pending = false;
+    try {
+      pending = Boolean(identity) && localStorage.getItem(toolsMigrationKey(identity)) === "pending";
+    } catch {
+      /* no storage: no notice */
+    }
+    setToolsNoticePending(pending);
+  }, [toolStore, identity]);
+  const setAppToolLayer = useCallback(
+    (next: ToolModeLayer) => {
+      setAppToolLayerState(next);
+      toolStore?.writeApp(CODE_AGENT_INTERFACE, Object.keys(next).length ? next : null);
+    },
+    [toolStore],
+  );
+  const dismissToolsNotice = () => {
+    setToolsNoticePending(false);
+    try {
+      localStorage.setItem(toolsMigrationKey(identity), "dismissed");
+    } catch {
+      /* the notice stays dismissed for this page */
+    }
+  };
   // "Stream replies" as sent with the next run (nothing when the gateway does
   // not advertise live replies; the setting then says why).
   const streamReplies = effectiveStreamReplies(
@@ -320,7 +360,26 @@ export function CodeWorkspace() {
   const [queue, setQueue] = useState<QueueIntent[]>([]);
   const [queueRunning, setQueueRunning] = useState(false);
   const [optimistic, setOptimistic] = useState<ChatMessage[]>([]);
-  const toolPermissions = useMemo(() => resolveToolPermissions(catalog.tools, preferences.tools, preferences.permissions), [catalog.tools, preferences.tools, preferences.permissions]);
+  // The one-time migration of the Permissions tier / tool picker into this app's tool layer
+  // (decision 2026-10-27): labeled, never silent — the Tools panel says so until dismissed.
+  useEffect(() => {
+    const legacy = preferences.legacyTools;
+    if (!legacy || !toolStore || catalog.loading || !catalog.toolCatalog.length) return;
+    if (!Object.keys(toolStore.readApp(CODE_AGENT_INTERFACE)).length) {
+      const migrated = migrateLegacyTools(legacy, catalog.toolCatalog);
+      if (Object.keys(migrated).length) {
+        setAppToolLayer(migrated);
+        setToolsNoticePending(true);
+        try {
+          localStorage.setItem(toolsMigrationKey(identity), "pending");
+        } catch {
+          /* shown for this page only */
+        }
+        setNotice(`${TOOLS_MIGRATION_NOTICE} in Tools.`);
+      }
+    }
+    setPreferences(({ legacyTools: _done, ...rest }) => rest);
+  }, [preferences.legacyTools, toolStore, catalog.loading, catalog.toolCatalog, identity, setAppToolLayer]);
   // The input this page itself posted for the run it just started. Until the
   // Gateway's filtered copy (`/input_data`) arrives, it scopes the approver,
   // so a first batch that lands inside that fetch is not shown as a question.
@@ -330,11 +389,10 @@ export function CodeWorkspace() {
     const ownStart = startedRunInput.current?.runId === session.runId ? startedRunInput.current.input : null;
     if (session.runId && !restoredInputs && !ownStart) return { enabledTools: [], autoApproveTools: [] };
     const runInput = restoredInputs ? restoredInputs.input_data : ownStart;
-    const policy = intersectToolPermissions(toolPermissions, (runInput as any)?._runtime?.allowed_tools);
-    // Untouched defaults remain Gateway-owned; explicit per-tool/tier choices
-    // use the same policy in the browser and the next run's Runtime namespace.
-    return { ...policy, autoApproveTools: preferences.toolsCustomized || preferences.permissions !== "default" ? policy.autoApproveTools : [] };
-  }, [toolPermissions, restoredInputs, session.runId, preferences.toolsCustomized, preferences.permissions]);
+    // The run's own ceiling (its `_runtime.allowed_tools`) narrows what this client approves for it.
+    const ceiling = (runInput as any)?._runtime?.allowed_tools;
+    return toWorkflowApprovalPolicy(planRunTools(catalog.toolCatalog, { app: appToolLayer }, { ceiling: Array.isArray(ceiling) ? ceiling : null }));
+  }, [catalog.toolCatalog, appToolLayer, restoredInputs, session.runId]);
   // Notes about the live-reply lane (a malformed frame from the gateway),
   // scoped to the conversation they were raised in.
   const streamScope = `${identity}:${session.sessionId}:${session.runId}`;
@@ -439,16 +497,19 @@ export function CodeWorkspace() {
       presentInteraction(pendingInteraction, controller, {
         records: snapshot.records,
         currentRun: snapshot.run,
+        // "Allow all enabled tools": every enabled tool the kit's bulk rule reaches becomes Auto in
+        // this app's tool layer (this browser), so later runs of every chat send it as Auto.
         onPermissionsAll: async () => {
-          setPreferences((previous) => ({ ...previous, permissions: "all" }));
+          setAppToolLayer(withAllEnabledAuto(catalog.toolCatalog, appToolLayer));
         },
+        approveAllScope: "in this browser",
         sessionPolicy: {
           toolsetOf: (name: string) => catalog.tools.find((tool) => tool.name === name)?.toolset,
-          ask: Object.entries(preferences.tools.approval || {}).filter(([, mode]) => mode === "ask").map(([name]) => name),
+          ask: Object.entries(appToolLayer).filter(([, mode]) => mode === "ask").map(([name]) => name),
         },
       }),
     // The chat-policy mode is the controller's: re-present when it (or what it stored) changes.
-    [pendingInteraction, snapshot.records, snapshot.run, snapshot.sessionPolicyMode, snapshot.sessionPolicy, snapshot.sessionPolicyClamped, controller, catalog.tools, preferences.tools.approval],
+    [pendingInteraction, snapshot.records, snapshot.run, snapshot.sessionPolicyMode, snapshot.sessionPolicy, snapshot.sessionPolicyClamped, controller, catalog.tools, catalog.toolCatalog, appToolLayer, setAppToolLayer],
   );
   const promptProperty = isAgent
     ? "prompt"
@@ -814,7 +875,7 @@ export function CodeWorkspace() {
   ]);
 
   function currentWorkflowInput(text: string, values: Record<string, unknown>, attachments: AttachmentRef[] = [], forAutomation = false, selectedWorkflow = workflow, selectedSchema = schema) {
-    const input = buildWorkflowInput({
+    let input = buildWorkflowInput({
       workflow: selectedWorkflow || undefined,
       inputSchema: selectedSchema,
       schemaInputs: values,
@@ -837,15 +898,14 @@ export function CodeWorkspace() {
       // Round 9: a turn sends only its conversation folder (continuity); the
       // gateway scopes the run to the account's effective folders.
       workspace: effectiveWorkspace ? { root: effectiveWorkspace } : undefined,
-      tools: preferences.toolsCustomized ? toolPermissions.enabledTools : undefined,
-      toolPolicy: preferences.toolsCustomized || preferences.permissions !== "default"
-        // Keep consent revocable by this host. The durable server policy
-        // asks; the controller approves only currently enabled, permitted
-        // tools. Closing the client parks an asking call safely.
-        ? { autoApproveTools: [], requireApprovalTools: toolPermissions.enabledTools }
-        : undefined,
       skills: preferences.skills.length ? preferences.skills : undefined,
     });
+    // This app's tool choices (kit planRunTools/withRunTools, backlog 0033): Auto tools in
+    // `_runtime.tool_policy.auto_approve_tools` (they run without a client open), Ask tools in
+    // `require_approval_tools`, Off tools outside `allowed_tools`. No choice: nothing is sent and
+    // the gateway's grant applies.
+    if (hasToolChoices(catalog.toolCatalog, { app: appToolLayer }))
+      input = withRunTools(input, planRunTools(catalog.toolCatalog, { app: appToolLayer })) as typeof input;
     if (forAutomation) {
       // Automations own their workspace and consent policy; never inherit a
       // conversation's directory or its client-dependent approval policy.
@@ -1203,7 +1263,10 @@ export function CodeWorkspace() {
             // matching flat pins are not proof they were host-authored.
             const reset: string[] = [];
             if ((preferences.provider || preferences.model) && !next.provider && !next.model) reset.push("provider", "model");
-            if (preferences.toolsCustomized && !next.toolsCustomized) reset.push("tools");
+            // The tool choices live in this app's tool layer (kit store), not in the preferences.
+            const layerCleared = Object.keys(appToolLayer).length > 0 && !Object.keys(next.toolLayer).length;
+            if (layerCleared) reset.push("tools");
+            if (next.toolLayer !== appToolLayer) setAppToolLayer(next.toolLayer);
             if (preferences.maxIterations && !next.maxIterations) reset.push("max_iterations");
             if (reset.length) setInputs(previous => {
               const values = { ...previous }, defaults = schemaDefaults(schema);
@@ -1213,11 +1276,11 @@ export function CodeWorkspace() {
               }
               return values;
             });
-            setPreferences(next);
+            setPreferences({ ...next, toolLayer: {} });
   };
   const renderSettings = (
     section: "model" | "workspace" | "tools" | "skills",
-    value: RunPreferences = preferences,
+    value: RunPreferences = { ...preferences, toolLayer: appToolLayer },
     onChange: (next: RunPreferences) => void = conversationSettingsChange,
     automation?: { root: string },
   ) => (
@@ -1226,7 +1289,10 @@ export function CodeWorkspace() {
       lockedReasonId={`code-${section}-locked`}
       value={value}
       onChange={onChange}
-      tools={catalog.tools}
+      toolCatalog={catalog.toolCatalog}
+      toolWarnings={catalog.toolWarnings}
+      automationTools={Boolean(automation)}
+      toolsNotice={!automation && toolsNoticePending ? { text: TOOLS_MIGRATION_NOTICE, onDismiss: dismissToolsNotice } : null}
       connected={connection.connected}
       automationFolders={Boolean(automation)}
       defaultModel={
@@ -1258,6 +1324,7 @@ export function CodeWorkspace() {
   const automationSettings = useAutomationSettings(
     automationView && automationDetail?.definition ? { summary: automationDetail.summary, definition: automationDetail.definition } : null,
     (automationId, changes, expected) => automations.revise(automationId, changes, expected),
+    catalog.toolCatalog,
   );
   /**
    * One settings panel of the rail, bound to the selection: an automation's
@@ -1808,7 +1875,7 @@ export function CodeWorkspace() {
                 active={active}
                 paused={paused}
                 snapshot={snapshot}
-                permissionsAll={preferences.permissions === "all"}
+                permissionsAll={allEnabledAuto(catalog.toolCatalog, appToolLayer)}
                 onInteraction={
                   interaction && !paused
                     ? () => {
@@ -1831,7 +1898,7 @@ export function CodeWorkspace() {
                 }
                 onRevokeApproval={() => {
                   controller.revokeToolApproval();
-                  setPreferences(previous => ({ ...previous, permissions: "default" }));
+                  setAppToolLayer(withoutAutoChoices(catalog.toolCatalog, appToolLayer));
                 }}
                 onCommand={(command) =>
                   act(() => controller.sendCommand(command, {}))
@@ -2036,7 +2103,7 @@ export function CodeWorkspace() {
         }}
         target={automationTarget(selection, workflow)}
         availableTools={catalog.tools.filter(t => t.enabled).map(t => t.name)}
-        initialTools={automationToolSelection(preferences.toolsCustomized ? { ...inputs, tools: toolPermissions.enabledTools } : inputs)}
+        initialTools={automationToolSelection(hasToolChoices(catalog.toolCatalog, { app: appToolLayer }) ? { ...inputs, tools: planRunTools(catalog.toolCatalog, { app: appToolLayer }).tools } : inputs)}
         buildInput={async (prompt, target) => {
           if (!target) return currentWorkflowInput(prompt, { ...schemaDefaults(schema), ...inputs }, [], true);
           const next = target.flow_id === "@default" ? defaultWorkflow : catalog.workflows.find(w => `${w.bundleId}@${w.bundleVersion}` === ("bundle_ref" in target ? target.bundle_ref : "") && w.flowId === target.flow_id);
