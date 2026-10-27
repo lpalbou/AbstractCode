@@ -1,3 +1,4 @@
+import { sessionToolPolicyCapability, type SessionToolPolicyCapability } from "@abstractframework/ui-kit";
 import {
   executableWorkflowsPath,
   gatewayApiPath,
@@ -46,6 +47,12 @@ type CatalogState = {
   sessions: SessionSummary[];
   capabilities: Record<string, any>;
   capabilitiesLoading: boolean;
+  /**
+   * The chat tool policy (`capabilities.session_tool_policy`, kit `sessionToolPolicyCapability`):
+   * null when the gateway does not serve it; `capabilitiesError` says why the read failed.
+   */
+  sessionToolPolicy: SessionToolPolicyCapability | null;
+  capabilitiesError: string;
   /** Live-reply support (`capabilities.streaming`) for "Stream replies". */
   streaming: StreamingCapability;
   loading: boolean;
@@ -70,6 +77,8 @@ const empty: CatalogState = {
   sessions: [],
   capabilities: {},
   capabilitiesLoading: true,
+  sessionToolPolicy: null,
+  capabilitiesError: "",
   streaming: STREAMING_LOADING,
   loading: false,
   sessionsLoaded: false,
@@ -242,6 +251,8 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       sessionsLoaded: previous.sessionsLoaded || Boolean(listCurrent && value(3)),
       capabilities: capabilityContracts(value(4)),
       capabilitiesLoading: false,
+      sessionToolPolicy: sessionToolPolicyCapability(value(4)),
+      capabilitiesError: result[4].status === "rejected" ? `Could not read the gateway's capabilities: ${formatError((result[4] as PromiseRejectedResult).reason)}` : "",
       streaming: streamingCapability(
         value(4),
         result[4].status === "rejected"

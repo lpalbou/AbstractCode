@@ -1,6 +1,6 @@
 import { codeDocsPanel } from "./app_assistant";
 import { LoadingStatus } from "./loading_status";
-import { automationToolSelection, gatewayApiPath } from "@abstractframework/ui-kit";
+import { automationToolSelection, createSessionToolPolicyClient, gatewayApiPath } from "@abstractframework/ui-kit";
 import React, {
   useCallback,
   useEffect,
@@ -365,6 +365,28 @@ export function CodeWorkspace() {
     authScopeKey: identity,
     toolApprovalPolicy: currentToolPermissions,
   });
+  // "Allow for this chat" is stored on the gateway when it serves the chat tool policy
+  // (capabilities.session_tool_policy.supported; backlog 0032, contract v1): the kit client is
+  // bound to this conversation's session. Otherwise the kit's local fallback says what it does
+  // ("Allow for this run", this browser only); a failed capability read says why.
+  const sessionPolicyCapability = catalog.sessionToolPolicy;
+  useEffect(() => {
+    if (!connection.connected || catalog.capabilitiesLoading) return;
+    if (catalog.capabilitiesError) {
+      controller.setSessionToolPolicyClient(null, { reason: catalog.capabilitiesError });
+      return;
+    }
+    controller.setSessionToolPolicyClient(
+      sessionPolicyCapability?.supported === true && session.sessionId
+        ? createSessionToolPolicyClient(
+            (path, init) => gatewayRequest(path, { method: init.method, ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }) }),
+            session.sessionId,
+            sessionPolicyCapability,
+            { client: "abstractcode-web" },
+          )
+        : null,
+    );
+  }, [controller, connection.connected, catalog.capabilitiesLoading, catalog.capabilitiesError, sessionPolicyCapability, session.sessionId]);
   const active =
     Boolean(session.runId) &&
     !terminal(snapshot.status) &&
@@ -420,8 +442,13 @@ export function CodeWorkspace() {
         onPermissionsAll: async () => {
           setPreferences((previous) => ({ ...previous, permissions: "all" }));
         },
+        sessionPolicy: {
+          toolsetOf: (name: string) => catalog.tools.find((tool) => tool.name === name)?.toolset,
+          ask: Object.entries(preferences.tools.approval || {}).filter(([, mode]) => mode === "ask").map(([name]) => name),
+        },
       }),
-    [pendingInteraction, snapshot.records, snapshot.run, controller],
+    // The chat-policy mode is the controller's: re-present when it (or what it stored) changes.
+    [pendingInteraction, snapshot.records, snapshot.run, snapshot.sessionPolicyMode, snapshot.sessionPolicy, snapshot.sessionPolicyClamped, controller, catalog.tools, preferences.tools.approval],
   );
   const promptProperty = isAgent
     ? "prompt"

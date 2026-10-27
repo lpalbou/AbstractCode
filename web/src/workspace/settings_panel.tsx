@@ -230,7 +230,7 @@ export function SettingsContent({
                 <option value="all">All enabled tools</option>
               </select>
             </label>
-            <p className="code-field-help">Saved for this Gateway account and future turns. Permissions never enable an unchecked tool. Explicit Ask overrides still ask, even with permissions: all.</p>
+            <p className="code-field-help">Saved in this browser for this account and its future turns (not on the gateway). Permissions never enable an unchecked tool. Explicit Ask overrides still ask, even with permissions: all.</p>
             <ToolPolicyEditor
               tools={tools
                 .filter((tool) => tool.enabled)
