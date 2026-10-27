@@ -71,6 +71,14 @@ The sidebar holds two stacking drawers, **Automations** above **Conversations**,
 | closed | open | Conversations fills everything below its header. |
 | open | open | An even split; the Conversations header stays mid-height. |
 
+The Automations header's badge counts what waits for you. On a gateway with your event stream
+(`/api/gateway/me/events`, read through this app's proxy) it is the approvals and questions waiting
+for you plus the automation results you have not seen (its tooltip says "1 waiting for you · 2 new");
+the stream's live tail stays open while the tab is visible and resumes with `Last-Event-ID`, a hidden
+tab reads it once a minute, and the automation list is re-read after each automation event instead
+of every 30 seconds. On a gateway without the stream the badge is the list's `pending_waits +
+unseen_count` sum, read every 30 seconds while the tab is visible.
+
 Each list scrolls inside its own drawer. Fold choices are remembered in this browser (`abstractcode.sidebar.panels`). On a short landscape phone screen the whole drawer scrolls instead. The current workspace is shown in the **Workspace** panel and in **Files**.
 
 At the end of each list a quiet line **Archived · N** appears when the gateway reports archived items (N is the gateway's count: `archived_automations` of `GET /automations`, `archived_sessions` of `GET /runs?root_only=true`; no line at 0). Click it to show the archived automations or conversations inline, each with **Unarchive** (an automation comes back paused, with its history; a conversation comes back to the list). Clicking an archived item's name opens it. Whether each line is open is remembered in this browser (`abstractcode.sidebar.archived`). Archived items never appear among the live rows.

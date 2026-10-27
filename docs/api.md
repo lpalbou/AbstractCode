@@ -65,6 +65,7 @@ Both clients use the same endpoints. This is the integration contract:
 | Session history | `GET` the session's history bundle for replay |
 | Conversations | `GET` root runs per session (with per-turn tool totals and the `archived_sessions` count); `POST` a session's archive or unarchive |
 | Automations | `GET`, create, `PATCH` (a new revision, guarded by `expected_revision`) and the lifecycle commands — pause, resume, run now, stop, archive, unarchive; `GET` the archived list with its `archived_automations` count |
+| Your event stream | `GET /me/events?after=` (catch-up pages) and `GET /me/events/stream` (SSE, resumed with `Last-Event-ID`) for the attention chip and badge; HTTP 404 on a gateway without it |
 | Voice | `GET` the gateway's default voice routes; `POST` a reply's text for streamed speech, and recorded audio for transcription |
 | Discovery | `GET` the available workflows (with the gateway's default agent workflow), providers, models, tools, skills, and capabilities such as live replies |
 | Workspace files | `GET` a run's workspace location, a folder listing, and file content (with `Range`) |

@@ -857,3 +857,96 @@ fn the_wording_is_the_code_webs() {
         "st.items.reduce((n, s) => n + s.attention.pending_waits + s.attention.unseen_count, 0)"
     ));
 }
+
+// -- the person's event stream (backlog 1047) -------------------------------------
+
+fn post_events(h: &mut H, events: Vec<Value>) {
+    let store = h.store;
+    abstracttui::reactive::wake_handle().post(move || {
+        store
+            .events_state
+            .set(abstractcode::attention::EventsState::Following);
+        store.event_attention.update(|a| {
+            for e in &events {
+                a.apply(e);
+            }
+        })
+    });
+    h.turn();
+    h.turn();
+}
+
+fn event(seq: u64, typ: &str, data: Value) -> Value {
+    serde_json::json!({"specversion": "1.0", "id": format!("{typ}:{seq}"), "type": typ, "data": data, "sequence": seq})
+}
+
+#[test]
+fn the_chip_follows_the_event_stream_and_the_list_poll_stops() {
+    let mut h = harness(Size::new(80, 24));
+    h.connect();
+    let cmds = h.cmds();
+    assert!(
+        cmds.iter().any(|c| matches!(c, Cmd::FollowEvents)),
+        "reachable + signed in: the stream is followed"
+    );
+    // An automation that asks before each tool call would arm the 15 s list
+    // poll — but the stream is followed, so nothing polls.
+    let items = auto::parse_list_page(&quiet_list()).unwrap().items;
+    h.answer_list(&quiet_list());
+    let store = h.store;
+    abstracttui::reactive::wake_handle().post(move || {
+        store
+            .automation_ask
+            .update(|a| a.merge(vec![(NEWS.into(), 1, true)], &items))
+    });
+    post_events(
+        &mut h,
+        vec![
+            event(
+                1,
+                "attention.raised",
+                serde_json::json!({"kind": "approval", "run_id": "r1", "session_id": "s", "wait_key": "k1", "step_id": "a", "record_key": "wait:r1:k1:a"}),
+            ),
+            event(
+                2,
+                "attention.raised",
+                serde_json::json!({"automation_id": NEWS, "seq": 4, "kind": "notify"}),
+            ),
+        ],
+    );
+    h.cmds();
+    let line = h.status_line();
+    assert!(line.contains("1 waiting for you · 1 new"), "{line}");
+    // The automation event re-reads the list once (coalesced), then quiet.
+    h.advance(Duration::from_millis(600));
+    std::thread::sleep(Duration::from_millis(20));
+    h.advance(Duration::from_millis(10));
+    assert_eq!(attention_reads(&h.cmds()), 1, "one list read for the burst");
+    for _ in 0..12 {
+        h.advance(Duration::from_secs(5));
+    }
+    assert_eq!(
+        attention_reads(&h.cmds()),
+        0,
+        "the stream is followed: no 15 s list poll even though an active one asks"
+    );
+    // Answered and seen elsewhere: the chip goes.
+    post_events(
+        &mut h,
+        vec![
+            event(
+                3,
+                "attention.seen",
+                serde_json::json!({"kind": "approval", "run_id": "r1", "wait_key": "k1", "step_id": "a", "outcome": "approved"}),
+            ),
+            event(
+                4,
+                "attention.seen",
+                serde_json::json!({"automation_id": NEWS, "seq": 4}),
+            ),
+        ],
+    );
+    let line = h.status_line();
+    assert!(!line.contains("waiting") && !line.contains("new"), "{line}");
+    h.shot("chip-from-the-stream-cleared");
+}

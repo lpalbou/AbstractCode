@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+## [0.11.0] - 2026-10-25
+
+The live attention chip needs AbstractGateway with your event stream (`/api/gateway/me/events`); on an older gateway the chip keeps the automation list's count.
+
+### Changed
+
+- **The attention chip follows your event stream.** On a gateway with
+  `/api/gateway/me/events`, the status line's chip is what waits for you
+  across every conversation and automation — **N waiting for you**
+  (approvals and questions) and **Automations · M new** (results not seen) —
+  instead of a 15 s read of the automation list. The live tail stays open
+  only while you are at the terminal (a key, click or paste in the last 5
+  minutes) and resumes with `Last-Event-ID`; otherwise one catch-up read a
+  minute. An automation event re-reads the list, so `Enter` still opens the
+  automation that waits. An older gateway keeps the list poll and its
+  **Automations · N waiting**.
+
 ## [0.10.0] - 2026-10-15
 
 Needs AbstractGateway with round-16 calendar schedules (`schedule@2`, the

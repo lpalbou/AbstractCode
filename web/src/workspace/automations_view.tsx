@@ -48,8 +48,17 @@ import { CodeWorkspaceFolders, codeWorkspaceRequest } from "./workspace_folders"
 import { AutomationWorkspacesLine, automationWorkspace, withAutomationWorkspace } from "./automation_workspaces";
 import type { RunWorkspace } from "./settings_panel";
 
-/** One controller per signed-in identity; polls while visible and available. */
-export function useAutomations(identity: string, available: boolean): { ctl: AutomationsController; state: AutomationsState } {
+/**
+ * One controller per signed-in identity. While the person's event stream is
+ * followed (`stream.following`), the list is read once and then again after
+ * each automation event (`stream.epoch`, one read per burst); otherwise it is
+ * polled while visible and available.
+ */
+export function useAutomations(
+  identity: string,
+  available: boolean,
+  stream: { following: boolean; epoch: number } = { following: false, epoch: 0 },
+): { ctl: AutomationsController; state: AutomationsState } {
   const ctl = useMemo(() => new AutomationsController(codeAutomationsClient(), proxyAnswerWait(newId)), [identity]);
   const state = useSyncExternalStore(
     (fn) => ctl.subscribe(fn),
@@ -62,12 +71,25 @@ export function useAutomations(identity: string, available: boolean): { ctl: Aut
     return () => document.removeEventListener("visibilitychange", on);
   }, []);
   useEffect(() => {
-    if (!identity || !available || !visible) return;
+    if (!identity || !available || !visible || stream.following) return;
     void ctl.refresh();
     const t = window.setInterval(() => void ctl.refresh(), AUTOMATIONS_POLL_MS);
     return () => window.clearInterval(t);
-  }, [ctl, identity, available, visible]);
+  }, [ctl, identity, available, visible, stream.following]);
+  useEffect(() => {
+    if (!identity || !available || !stream.following) return;
+    const t = window.setTimeout(() => void ctl.refresh(), stream.epoch ? 500 : 0);
+    return () => window.clearTimeout(t);
+  }, [ctl, identity, available, stream.following, stream.epoch]);
   return { ctl, state };
+}
+
+/** The badge's words: "1 waiting for you · 2 new" (the terminal's chip). */
+export function attentionBadgeTitle(needsYou: number, newResults: number): string {
+  const parts: string[] = [];
+  if (needsYou) parts.push(`${needsYou} waiting for you`);
+  if (newResults) parts.push(`${newResults} new`);
+  return parts.join(" · ");
 }
 
 function ErrorLine({ error }: { error: ApiError | null }): React.ReactElement | null {
@@ -98,6 +120,8 @@ export function AutomationsSection(props: {
   /** The card's Active switch (pause / resume through the gateway). */
   onToggleActive?(s: AutomationSummary): void;
   nowMs?: number;
+  /** From the person's event stream (backlog 1047): replaces the list's sum when given. */
+  attention?: { needsYou: number; newResults: number } | null;
   /** Collapsible panel (sidebar_panels.tsx): open by default. */
   open?: boolean;
   onToggle?(): void;
@@ -107,7 +131,11 @@ export function AutomationsSection(props: {
   const st = props.state;
   const rows = visibleAutomations(st.items);
   const archived = st.archived ?? [];
-  const waiting = st.items.reduce((n, s) => n + s.attention.pending_waits + s.attention.unseen_count, 0);
+  const attention = props.attention;
+  const waiting = attention
+    ? attention.needsYou + attention.newResults
+    : st.items.reduce((n, s) => n + s.attention.pending_waits + s.attention.unseen_count, 0);
+  const waitingTitle = attention ? attentionBadgeTitle(attention.needsYou, attention.newResults) : `${waiting} waiting`;
   return (
     <section
       className="code-panel code-automations"
@@ -118,7 +146,7 @@ export function AutomationsSection(props: {
         panel="automations"
         open={open}
         onToggle={() => props.onToggle?.()}
-        label={<>Automations{waiting ? <span className="code-auto-badge" data-field="attention-total">{waiting}</span> : null}</>}
+        label={<>Automations{waiting ? <span className="code-auto-badge" data-field="attention-total" title={waitingTitle} aria-label={waitingTitle}>{waiting}</span> : null}</>}
         actions={<span className="code-auto-actions">
           <button className="code-icon-button" aria-label="New automation" title="New automation (choose a workflow and schedule)" disabled={!props.available.available || props.createDisabled} onClick={props.onNew}>
             <Icon name="plus" size={13} />

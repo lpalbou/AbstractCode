@@ -259,7 +259,9 @@ card reads the gateway's words, `↻ Every 24 hours (UTC) · last 3 h ago`, and 
 the automation: each change is saved as a new revision), `a` Archive; inside
 one, `Ctrl+P` reads the selected run's reply aloud. When an automation waits
 for you (an approval, a question, a result you have not seen), the status
-line says **Automations · N waiting**; `Enter` on an empty prompt opens it.
+line says so (**1 waiting for you**, **Automations · 2 new**, from your event
+stream on the gateway; **Automations · N waiting** on an older gateway);
+`Enter` on an empty prompt opens the automation that waits.
 `/workspace` opens this conversation's workspaces: **Use my default**, or
 your own rows with Read-only / Read & write / Refused, stored on the
 conversation by the gateway. `/automation` (**New automation**) walks

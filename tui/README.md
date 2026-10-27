@@ -7,7 +7,7 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.10.0**, pre-alpha. Release history is in
+Status: **0.11.0**, pre-alpha. Release history is in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## What it looks like
@@ -99,16 +99,17 @@ Status: **0.10.0**, pre-alpha. Release history is in
   line with **Unarchive**; open one to read its runs, approve its tool calls,
   browse its folder, discuss a run as a new chat in place, or hear a run's
   reply (`Ctrl+P`). `/automation [task]` (**New automation**; `/schedule`
-  still works in 0.10.0) creates one with the Code web's
+  still works in 0.11.0) creates one with the Code web's
   dialog: the workflow (the conversation's, or any workflow you may run),
   the task (a multiline editor), when (Repeat in UTC, Daily, Weekly, Monthly or Once at — the
   calendar rules on your account's time zone and worded by the gateway —
   or **When an email arrives**), context, tools, workspaces, **Mailbox**
   (**Email result**) and title and limits — with this conversation's model,
   tools and skills as the run input. An automation's **Edit** also changes
-  its calendar rule, run limits and email options. While one waits for you,
-  the status line says **Automations · N waiting** — `Enter` on an empty
-  prompt opens it.
+  its calendar rule, run limits and email options. While something waits
+  for you, the status line says so (**1 waiting for you · 2 new**, from your
+  event stream on the gateway) — `Enter` on an empty prompt opens the
+  automation that waits.
 - **Settings panels**: `/settings` — Activity, Files, Model, Workflow,
   Workspace, Tools, Skills, Voice — bound to this conversation, or to an
   automation's definition (each change saved as a new revision).

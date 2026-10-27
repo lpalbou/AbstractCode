@@ -81,6 +81,41 @@ setting: nothing for "Gateway default" (the gateway's own default applies),
 replies. See [`web.md`](web.md#stream-replies) and the terminal client's
 [`/stream` reference](../tui/docs/api.md#streamed-replies-stream).
 
+## Attention: your event stream
+
+What waits for you (an approval, a question, an automation result you have not
+seen) reaches both clients through your own event stream on the gateway. The
+terminal shows it as the status-line chip, the browser as the Automations header
+badge, with the same words: **1 waiting for you · 2 new**.
+
+```mermaid
+sequenceDiagram
+    participant C as Client (terminal or browser)
+    participant G as AbstractGateway
+    C->>G: GET /me/events?after=<cursor> (catch-up pages)
+    G-->>C: events, next_after
+    C->>G: GET /me/events/stream (Last-Event-ID: <cursor>)
+    G-->>C: attention.raised / attention.seen / automation events
+    Note over C: fold: raised minus seen, per wait (run, wait key, step)
+    C->>G: GET /automations (after an automation event)
+```
+
+- **Catch-up, then a live tail.** A client reads the pages after its cursor,
+  then keeps the stream open and resumes it with `Last-Event-ID`. The terminal
+  keeps the tail open while you are at it (a key, click or paste in the last
+  5 minutes), the browser while its tab is visible; otherwise each reads one
+  catch-up page a minute.
+- **One fold.** A wait is identified by its run, wait key and step: it counts
+  from its `attention.raised` until the matching `attention.seen`, and the same
+  node asking again is a new wait. Automation results count until you open
+  them.
+- **An automation event re-reads the automation list**, so the terminal chip's
+  Enter opens the automation that waits and the browser's list stays current.
+- **A gateway without the stream** (HTTP 404) keeps the automation list's sum
+  (`pending_waits + unseen_count`): the terminal reads it every 15 seconds while
+  something can change it, the browser every 30 seconds while its tab is
+  visible.
+
 ## The thin-client contract
 
 Everything a client does goes through the gateway, and therefore the runtime.

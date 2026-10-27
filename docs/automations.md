@@ -35,7 +35,7 @@ controls. The **Archived · N** line with **Unarchive** needs AbstractGateway
 | **When:** "Every 8 hours (UTC)", "Every Mon and Fri at 07:30 (Europe/Paris)" | the gateway's `schedule_rule_text`, verbatim, for every schedule (Repeat with its bounds too) |
 | **Next:** "2026-10-09 07:30 Europe/Paris (in 12 h)", "none while paused" | only the gateway's `next_run_local` (date and time cut from it) and `next_run_at` (the relative part); neither client computes a next run |
 | The automation's folder | the gateway's `workspace_root`, browsed through the gateway's workspace routes |
-| Attention: "2 unseen · 1 waiting for you" | the gateway's attention items and pending waits |
+| Attention: "1 waiting for you · 2 new" (terminal status-line chip, browser Automations badge) | your event stream on the gateway (`/me/events`): the approvals and questions waiting for you plus the automation results you have not seen; on a gateway without the stream, the automation list's pending waits and unseen items |
 
 Schedules are **Repeat** (a fixed UTC interval: every N minutes, hours or days),
 **Daily**, **Weekly** (on the days you pick) or **Monthly** (day 1 to 31, or the
@@ -65,7 +65,7 @@ conversation workflow. Choosing a different automation workflow leaves the conve
 | Email | **When an email arrives** (a When choice), **Email result** and **Recipients** — see [Email automations](#email-automations). |
 
 **Terminal.** `/automation [task]` (**New automation**; `/schedule` is the old
-name, still accepted in terminal 0.10.0) shows the browser dialog's sections as
+name, still accepted in terminal 0.11.0) shows the browser dialog's sections as
 seven steps, with the same words: **What** (the workflow — the conversation's, or
 any workflow you may run with **Gateway default** first — and the task, a
 multiline text: default your last prompt, or the text after `/automation`), **When** (Repeat,

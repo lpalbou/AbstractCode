@@ -31,8 +31,8 @@ Ground rules for reading this repository:
 
 - [README](README.md): what AbstractCode is, the two clients, and a quick start
 - [Getting started](docs/getting-started.md): running a gateway, installing a client, credentials, first run
-- [Architecture](docs/architecture.md): the clients, the browser app server, the gateway, the terminal's voice bridge, the run stream with live reply deltas, the thin-client contract, and repository layout
-- [API and integration points](docs/api.md): the command-line surface, the library surface, and the gateway contract (runs, streams, discovery, workspace files, conversations and archiving, automations, voice, about)
+- [Architecture](docs/architecture.md): the clients, the browser app server, the gateway, the terminal's voice bridge, the run stream with live reply deltas, attention from your event stream (`/me/events` catch-up + SSE: the terminal chip and the browser badge, "N waiting for you · M new"), the thin-client contract, and repository layout
+- [API and integration points](docs/api.md): the command-line surface, the library surface, and the gateway contract (runs, streams, your event stream, discovery, workspace files, conversations and archiving, automations, voice, about)
 - [Workflows](docs/workflows.md): the gateway default agent workflow, selecting a workflow, and the `abstractcode.agent.v1` interface
 - [Automations](docs/automations.md): Repeat, Daily, Weekly, Monthly and Once schedules on the account's time zone (the gateway words each rule and computes each next run); configurable growing-context budgets and result email; creating, managing, answering and discussing gateway automations from the terminal (`/automations`, `/automation`, Edit in `/settings`) and the browser (the Automations sidebar section)
 - [Interface events](docs/ui_events.md): the workflow-driven event contract

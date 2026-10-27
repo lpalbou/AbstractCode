@@ -15,8 +15,8 @@
 > gateway automations (`/automation` with Repeat / Daily / Weekly / Monthly /
 > Once at, worded and scheduled by the gateway, or When an email arrives;
 > `/automations`: cards with the Active switch, Run now / Stop / Edit /
-> Archive, Archived · N with Unarchive; "Automations · N waiting" in the
-> status line while one waits for you), keeps your account's default
+> Archive, Archived · N with Unarchive; "N waiting for you · M new" in the
+> status line from your event stream), keeps your account's default
 > workflow on the gateway ("Default for new conversations"), edits the run
 > settings of the conversation or of an automation's
 > definition in eight panels (`/settings`; an automation change is saved as
@@ -39,8 +39,10 @@
   exports, and attachments.
 - [Architecture](docs/architecture.md): The thin-client design — threading
   contract (UI thread owns signals; a worker owns HTTP; WakeHandle posts),
-  the ledger fold, SSE/polling transports, live reply deltas, wait
-  resolution, module map, testing model, known limits.
+  the ledger fold, SSE/polling transports, live reply deltas, the attention
+  follower (your event stream: `/me/events` catch-up, SSE tail while you are
+  at the terminal; "N waiting for you · M new"), wait resolution, module map,
+  testing model, known limits.
 - [Reference](docs/api.md): Every CLI option and env var (including
   `--workflow default`, `--stream`, `--mtp`), slash commands
   (including `/settings`, `/activity`, `/archive`, `/sessions`, `/voice`, `/speak`, `/dictate`, `/workflow`, `/files`, `/automations`, `/automation`, `/stream`, `/about`, `/model`, `/mtp`,
@@ -71,7 +73,7 @@
 ## Project
 
 - [Changelog](CHANGELOG.md): Release history, from 0.1.0 (the first
-  application built on AbstractTUI) through 0.10.0 (turns as cards and folded cycle panels, hold Space to talk,
+  application built on AbstractTUI) through 0.11.0 (the attention chip from your event stream; 0.10.0: turns as cards and folded cycle panels, hold Space to talk,
   the theme dropdown, pause / resume and per-message read-aloud, sessions and the queue off `prefs.json`, calendar
   schedules and the seven-step New automation; 0.9.1: the workspace chooser per conversation and automation, the
   command-sandbox line per command; 0.9.0: settings panels, Archive / Unarchive, voice through the gateway's routes).

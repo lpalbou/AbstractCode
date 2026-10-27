@@ -5,6 +5,24 @@ All notable changes to AbstractCode will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [terminal 0.11.0 / web 0.12.0] - 2026-10-25
+
+The live attention chip and badge need AbstractGateway with your event stream (`/api/gateway/me/events`); on an older gateway both keep the automation list's count and its poll.
+
+### Changed
+
+- Terminal: the status-line attention chip follows your event stream on the
+  gateway (`/me/events` catch-up, SSE while you are at the terminal, one
+  catch-up a minute otherwise): **N waiting for you** · **Automations · M new**;
+  the 15 s automation-list poll is kept only for a gateway without the stream.
+- Web: the Automations header badge follows the same stream (approvals and
+  questions waiting for you + automation results not seen; live tail while the
+  tab is visible, one catch-up a minute when hidden), and the automation list
+  is re-read after automation events instead of every 30 seconds; a gateway
+  without the stream keeps the list's sum and the 30 s poll.
+
 ## [terminal 0.10.0 / web 0.11.2] - 2026-10-15
 
 Requires AbstractGateway with `schedule@2`, the served schedule fields and `POST /api/gateway/automations/schedule-preview` (round 16) and `@abstractframework/ui-kit` 0.8.7 for calendar schedules; the automations list and an automation's screen also read an older gateway (see Fixed).

@@ -1004,6 +1004,10 @@ pub struct Store {
     /// Which automations run in Ask mode (`definition.tool_approval`),
     /// read once per revision for the ambient attention poll (R17.1).
     pub automation_ask: Signal<crate::attention::AskModes>,
+    /// The person's event stream folded (backlog 1047): what waits for you.
+    pub event_attention: Signal<crate::attention::EventAttention>,
+    /// Whether that stream is followed (else the list poll rules the chip).
+    pub events_state: Signal<crate::attention::EventsState>,
     /// The GATEWAY's verdict on whether this terminal is on its machine
     /// (`host.caller_is_this_machine` from `GET /runs/{rid}/workspace`);
     /// `None` until a run's workspace has been read.
@@ -1316,6 +1320,8 @@ impl Store {
             workspaces: cx.signal(crate::workspaces::WsData::default()),
             account_workflow: cx.signal(crate::account_prefs::View::default()),
             automation_ask: cx.signal(crate::attention::AskModes::default()),
+            event_attention: cx.signal(crate::attention::EventAttention::default()),
+            events_state: cx.signal(crate::attention::EventsState::default()),
             gateway_same_machine: cx.signal(None),
             send_local_workspace: cx.signal(Default::default()),
             workspace_explicit: cx.signal(false),
