@@ -446,25 +446,6 @@ export class GatewayClient {
     return await r.json();
   }
 
-  async voice_tts(run_id: string, req: { text: string; voice?: string | null; format?: string | null; request_id?: string | null }): Promise<any> {
-    const rid = String(run_id || "").trim();
-    if (!rid) throw new Error("voice_tts: run_id is required");
-    const body: any = { text: String(req?.text || "") };
-    const voice = req?.voice === null || req?.voice === undefined ? "" : String(req.voice || "").trim();
-    const format = req?.format === null || req?.format === undefined ? "" : String(req.format || "").trim();
-    const request_id = req?.request_id === null || req?.request_id === undefined ? "" : String(req.request_id || "").trim();
-    if (voice) body.voice = voice;
-    if (format) body.format = format;
-    if (request_id) body.request_id = request_id;
-    const r = await fetch(joinBaseUrl(this._cfg.base_url.trim(), gatewayApiPath(`runs/${encodeURIComponent(rid)}/voice/tts`)), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ..._auth_headers(this._cfg.auth_token) },
-      body: JSON.stringify(body),
-    });
-    if (!r.ok) return await _throw_http(r, "voice_tts failed");
-    return await r.json();
-  }
-
   async submit_command(command: { command_id: string; run_id: string; type: string; payload?: any; ts?: string; client_id?: string }): Promise<any> {
     const body: any = {
       command_id: String(command?.command_id || "").trim(),

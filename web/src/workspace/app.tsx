@@ -25,6 +25,8 @@ import {
   GatewayConnectModal,
   Icon,
   useAppearanceSettings,
+  useVoiceDefaults,
+  useVoicePreferences,
   useGatewayConnection,
   sttRouteText,
   appIdentity,
@@ -130,7 +132,7 @@ import {
 } from "./workflow_inputs";
 import type { AttachmentRef } from "../lib/types";
 import { RunStatusBar } from "./run_status_bar";
-import { CodeVoiceSettings, VoiceTools, spokenMessage, useVoiceDefaults, useWorkspaceVoice } from "./voice_tools";
+import { CODE_CAPTURE_DEFAULTS, CodeVoiceSettings, VoiceTools, fetchVoiceDefaults, spokenMessage, useWorkspaceVoice } from "./voice_tools";
 import { workflowPromptProperty, restoreWorkflowFields } from "./input_schema";
 import { TOOLS_MIGRATION_NOTICE, allEnabledAuto, migrateLegacyTools, toolsMigrationKey, withAllEnabledAuto, withoutAutoChoices } from "./tool_layers";
 import {
@@ -178,33 +180,12 @@ export function CodeWorkspace() {
   const [defaultWorkspacesOpen, setDefaultWorkspacesOpen] = useState(false);
   const [defaultWorkspacesRevision, setDefaultWorkspacesRevision] = useState(0);
   const bumpDefaultWorkspaces = useCallback(() => setDefaultWorkspacesRevision((n) => n + 1), []);
-  const [voicePreferences, setVoicePreferences] = useState<VoiceClientPreferences>(
-    {},
-  );
+  // Voice preferences in this browser, per account, shared by the Voice panel and the composer
+  // microphone (kit useVoicePreferences: same tab and other tabs).
+  const [voicePreferences, changeVoicePreferences] = useVoicePreferences(identity ? `abstractcode.voice:${identity}` : null);
   useEffect(() => {
-    try {
-      setVoicePreferences(
-        JSON.parse(
-          localStorage.getItem(`abstractcode.voice:${identity}`) || "{}",
-        ),
-      );
-    } catch {
-      setVoicePreferences({});
-    }
     setPanelOpen(false);
   }, [identity]);
-  const changeVoicePreferences = (next: VoiceClientPreferences) => {
-    setVoicePreferences(next);
-    if (identity)
-      try {
-        localStorage.setItem(
-          `abstractcode.voice:${identity}`,
-          JSON.stringify(next),
-        );
-      } catch {
-        /* In-memory preferences still work. */
-      }
-  };
   const [preferences, setPreferences] =
     useState<RunPreferences>(DEFAULT_PREFERENCES);
   const preferencesRef = useRef(preferences);
@@ -460,14 +441,18 @@ export function CodeWorkspace() {
     ...(streamNotes.scope === streamScope ? streamNotes.notes : []),
   ]);
   const voiceCapability = catalog.capabilities?.assistant?.voice || {};
-  const voiceDefaults = useVoiceDefaults(connection.connected);
+  const voiceDefaults = useVoiceDefaults(connection.connected ? fetchVoiceDefaults : null, identity);
   const voice = useWorkspaceVoice({
     scope: `${identity}:${session.sessionId}:${session.runId}:${automationView}`,
     runId: identity ? session.runId : "",
     sessionId: session.sessionId,
     capability: voiceCapability,
     preferences: voicePreferences,
-    onTranscript: (text) => void sendSpoken(text),
+    // "Send what you say automatically" (Code's default: on): send it, else add it to the draft.
+    onTranscript: (text) => {
+      if ((voicePreferences.auto_send ?? CODE_CAPTURE_DEFAULTS.auto_send) === false) setDraft((d) => spokenMessage(d, text));
+      else void sendSpoken(text);
+    },
     onError: setError,
   });
   // Read aloud (the Voice panel): each NEW reply is spoken once, after its
@@ -1317,6 +1302,8 @@ export function CodeWorkspace() {
         onChange={(next) => { voice.stop_tts(); changeVoicePreferences(next); }}
         defaults={voiceDefaults}
         connected={connection.connected}
+        isAdmin={connection.status?.gateway?.principal?.admin === true}
+        levelSource={voice}
       />
   );
   const automationDetail = automationsState.detail;
@@ -1994,6 +1981,7 @@ export function CodeWorkspace() {
                       key={`${identity}:${session.sessionId}:${session.runId}`}
                       voice={voice}
                       capability={voiceCapability}
+                      preferences={voicePreferences}
                       route={sttRouteText(voicePreferences, voiceDefaults.value)}
                     />
                   ) : null}

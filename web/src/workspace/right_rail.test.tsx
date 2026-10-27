@@ -187,7 +187,8 @@ describe("voice", () => {
   it("TTS requests carry only the speech fields; transcription carries the STT override", () => {
     expect(voiceSource).toContain("...voiceTtsRequest(preferences)");
     expect(voiceSource).toContain("...voiceSttRequest(preferences)");
-    expect(voiceSource).toContain('output_device_id: preferences.output_device || ""');
+    // Devices, volume, mute, gain and the capture mode: the kit's gatewayVoiceOptions.
+    expect(voiceSource).toContain("...gatewayVoiceOptions({ ...CODE_CAPTURE_DEFAULTS, ...preferences })");
   });
   it("Settings → Voice is the kit's Assistant-layout section", () => {
     // Round 6: the kit section is mounted through CodeVoiceSettings (voice_tools.tsx) with the gateway's voice/defaults.

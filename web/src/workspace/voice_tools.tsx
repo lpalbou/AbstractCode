@@ -1,14 +1,19 @@
 import { gatewayApiPath } from "@abstractframework/ui-kit";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import {
+  AfVoiceMicButton,
   AfVoiceSection,
   Icon,
-  elapsedSeconds,
+  GATEWAY_VOICE_ROUTES,
+  gatewayVoiceOptions,
   streamTtsJsonl,
-  transcribingLine,
   useGatewayVoice,
+  voiceCaptureMode,
+  voiceCloneDeployPath,
+  voiceClonePath,
   voiceSttRequest,
   voiceTtsRequest,
+  type VoiceLibrary,
 } from "@abstractframework/ui-kit";
 import { gateway, gatewayRequest, newId, csrfHeaders } from "./transport";
 import { MEDIA_NEEDS_HTTPS, mediaAvailable } from "../lib/secure-context";
@@ -55,21 +60,23 @@ export function cloneVoice(
 /** "Create a voice" in the kit's voice section, through this app's gateway proxy. */
 export const codeVoiceCreation: VoiceCreation = { design: designVoice, clone: cloneVoice };
 
-/** Default voice routes, read once per connection (null until known; `failed` when the gateway could not answer). */
-export function useVoiceDefaults(connected: boolean): { value: VoiceDefaults | null; failed: boolean } {
-  const [state, setState] = useState<{ value: VoiceDefaults | null; failed: boolean }>({ value: null, failed: false });
-  useEffect(() => {
-    if (!connected) return;
-    let alive = true;
-    void fetchVoiceDefaults()
-      .then((value) => alive && setState({ value: value || {}, failed: false }))
-      .catch(() => alive && setState({ value: null, failed: true }));
-    return () => {
-      alive = false;
-    };
-  }, [connected]);
-  return state;
+/**
+ * The gateway's voice library (backlog 0035; routes/voice_library.py, gateway 0.16.0): creation,
+ * the person's voices (list / rename / remove) and, for an administrator only, Share with everyone.
+ * A refusal is the gateway's own sentence.
+ */
+export function codeVoiceLibrary(isAdmin: boolean): VoiceLibrary {
+  return {
+    ...codeVoiceCreation,
+    list: () => gatewayRequest(gatewayApiPath(GATEWAY_VOICE_ROUTES.clones)),
+    rename: (voiceId, patch) => gatewayRequest(gatewayApiPath(voiceClonePath(voiceId)), { method: "PATCH", body: JSON.stringify(patch) }),
+    remove: (voiceId) => gatewayRequest(gatewayApiPath(voiceClonePath(voiceId)), { method: "DELETE" }),
+    ...(isAdmin ? { share: (voiceId: string) => gatewayRequest(gatewayApiPath(voiceCloneDeployPath(voiceId)), { method: "POST" }) } : {}),
+  };
 }
+
+/** Code's microphone defaults (shown as the selected state while unset): hold to talk, send what was said. */
+export const CODE_CAPTURE_DEFAULTS = { capture_mode: "hold" as const, auto_send: true };
 
 /** Code's Voice panel: the kit's shared section, fed by this gateway. */
 export function CodeVoiceSettings({
@@ -77,11 +84,17 @@ export function CodeVoiceSettings({
   onChange,
   defaults,
   connected,
+  isAdmin = false,
+  levelSource,
 }: {
   value: VoiceClientPreferences;
   onChange: (next: VoiceClientPreferences) => void;
   defaults: { value: VoiceDefaults | null; failed: boolean };
   connected: boolean;
+  /** An administrator may share a voice with everyone. */
+  isAdmin?: boolean;
+  /** The composer's voice (the live microphone level while recording). */
+  levelSource?: React.ComponentProps<typeof AfVoiceSection>["levelSource"];
 }) {
   return (
     <AfVoiceSection
@@ -92,7 +105,11 @@ export function CodeVoiceSettings({
       defaults={defaults.value ?? undefined}
       overrideOwner="this app"
       nested
-      createVoice={codeVoiceCreation}
+      voiceLibrary={codeVoiceLibrary(isAdmin)}
+      // The composer microphone honours both: hold or tap, send at once or into the draft.
+      rows={{ capture: true }}
+      captureDefaults={CODE_CAPTURE_DEFAULTS}
+      levelSource={levelSource ?? null}
       unavailableReason={connected ? null : "Connect to a gateway to configure voice."}
     />
   );
@@ -125,7 +142,8 @@ export function useWorkspaceVoice({
   capability: Record<string, any>;
   scope: string;
   preferences: VoiceClientPreferences;
-  onTranscript: (text: string) => void;
+  /** Where a transcript goes. Absent = no recording at all (a TTS-only surface never records). */
+  onTranscript?: (text: string) => void;
   onError: (text: string) => void;
 }) {
   const mounted = useRef(true);
@@ -142,12 +160,8 @@ export function useWorkspaceVoice({
       throw new Error("Voice session changed.");
   };
   const voice = useGatewayVoice({
-    output_device_id: preferences.output_device || "",
-    input_device_id: preferences.input_device || "",
-    input_gain: preferences.input_gain,
-    volume: preferences.reply_volume,
-    // Tap to start / tap to stop, or hold: VoiceTools stops the recording itself.
-    stop_on_pointerup: false,
+    // Devices, volume, mute, input gain and the capture mode (hold / tap) the kit microphone uses.
+    ...gatewayVoiceOptions({ ...CODE_CAPTURE_DEFAULTS, ...preferences }),
     tts_stream:
       capability.tts?.available === true && runId
         ? async function* (text, signal) {
@@ -167,7 +181,7 @@ export function useWorkspaceVoice({
           }
         : undefined,
     transcribe:
-      capability.stt?.available === true && (runId || sessionId)
+      capability.stt?.available === true && (runId || sessionId) && onTranscript
         ? async (blob, mime) => {
             assertCurrent();
             const limit = Number(capability.stt?.max_upload_bytes || 0);
@@ -216,7 +230,7 @@ export function useWorkspaceVoice({
           }
         : undefined,
     on_transcript: (text) => {
-      if (mounted.current && activeScope.current === scope) onTranscript(text);
+      if (mounted.current && activeScope.current === scope) onTranscript?.(text);
     },
     on_error: (text) => {
       if (mounted.current && activeScope.current === scope) onError(text);
@@ -233,166 +247,41 @@ export function useWorkspaceVoice({
   return voice;
 }
 
-/** A press shorter than this is a tap: it is discarded, nothing is sent. */
-export const TAP_MS = 350;
-
-/** What releasing the microphone button does (press to talk, like the
- * terminal client's Space key): a hold sends what was said; a tap — too short
- * to be speech — is discarded. Pure, so it is tested without a browser. */
-export function releaseAction(heldMs: number): "send" | "discard" {
-  return heldMs < TAP_MS ? "discard" : "send";
-}
-
-/** The message a press-to-talk sends: what was already typed, then what was said. */
+/** The message a spoken transcript makes: what was already typed, then what was said. */
 export function spokenMessage(draft: string, transcript: string): string {
   const typed = draft.trimEnd();
   return typed ? `${typed}\n${transcript}` : transcript;
 }
 
-/** What the button teaches after a tap. */
-export const HOLD_HINT = "Hold the microphone while you speak — release to send.";
-
-/** Ticks once a second while `active` (the elapsed seconds of "Recording…" / "Transcribing…"). */
-function useNow(active: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [active]);
-  return now;
-}
-
+/**
+ * The composer's voice controls: the kit microphone (AfVoiceMicButton: "Hold to talk" /
+ * "Tap to talk", the live level, "Recording… 3 s" / "Transcribing… · route"), and Stop while a
+ * reply is spoken. The transcript goes where the hook sends it (useWorkspaceVoice onTranscript).
+ */
 export function VoiceTools({
   voice,
   capability,
+  preferences,
   route = "",
-  onSettings,
 }: {
   voice: ReturnType<typeof useWorkspaceVoice>;
   capability: Record<string, any>;
+  preferences: VoiceClientPreferences;
   /** The transcription route ("faster-whisper / large-v3": the override, else the gateway default). */
   route?: string;
-  onSettings?: () => void;
 }) {
-  const held = useRef(false);
-  const pressedAt = useRef(0);
-  const mounted = useRef(true);
-  const [tapHint, setTapHint] = useState(false);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-      held.current = false;
-    };
-  }, []);
-  useEffect(() => {
-    if (!tapHint) return;
-    const timer = setTimeout(() => setTapHint(false), 4000);
-    return () => clearTimeout(timer);
-  }, [tapHint]);
-  // Press: record at once. A disabled button still receives pointer events
-  // (only clicks are suppressed), so the press itself checks.
-  const begin = () => {
-    if (!voice.voice_ptt_supported || voice.voice_ptt_busy || held.current) return;
-    held.current = true;
-    pressedAt.current = Date.now();
-    setTapHint(false);
-    void voice.start_voice_ptt_recording().then(() => {
-      // A permission prompt may outlive the press; never leave the mic open.
-      if (!held.current) voice.cancel_voice_ptt_recording?.();
-      if (!mounted.current) voice.cancel_voice_ptt_recording?.();
-    });
-  };
-  // Release: a hold sends what was said; a tap is discarded.
-  const release = () => {
-    if (!held.current) return;
-    held.current = false;
-    if (releaseAction(Date.now() - pressedAt.current) === "discard") {
-      voice.cancel_voice_ptt_recording?.();
-      setTapHint(true);
-      return;
-    }
-    voice.stop_voice_ptt_recording();
-  };
-  // Focus left the page mid-hold: nothing is sent.
-  const abandon = () => {
-    if (!held.current) return;
-    held.current = false;
-    voice.cancel_voice_ptt_recording?.();
-  };
-  useEffect(() => {
-    window.addEventListener("pointerup", release);
-    window.addEventListener("pointercancel", release);
-    window.addEventListener("blur", abandon);
-    return () => {
-      window.removeEventListener("pointerup", release);
-      window.removeEventListener("pointercancel", release);
-      window.removeEventListener("blur", abandon);
-    };
-  }, [voice.stop_voice_ptt_recording, voice.cancel_voice_ptt_recording]);
-  const since = voice.voice_ptt_since || 0;
-  const now = useNow(Boolean(since));
   if (!capability.tts?.available && !capability.stt?.available) return null;
-  // Over plain http from another machine the browser withholds the microphone:
-  // say why on the control instead of a silently disabled button.
-  const micBlocked = !mediaAvailable();
-  const status = voice.voice_ptt_recording
-    ? `Recording… ${since ? elapsedSeconds(since, now) : ""}`.trim()
-    : voice.voice_ptt_busy
-      ? transcribingLine(since || now, now, route)
-      : tapHint
-        ? HOLD_HINT
-        : "";
   return (
     <>
-      {capability.stt?.available && micBlocked ? (
-        <>
-          <button
-            className="code-icon-button"
-            aria-label="Dictation unavailable"
-            aria-describedby="code-voice-https-note"
-            title={MEDIA_NEEDS_HTTPS}
-            disabled
-          >
-            <Icon name="mic" size={15} />
-          </button>
-          <span id="code-voice-https-note" className="code-voice-note" role="note">
-            {MEDIA_NEEDS_HTTPS}
-          </span>
-        </>
-      ) : null}
-      {capability.stt?.available && !micBlocked ? (
-        <button
-          className="code-icon-button"
-          aria-label={
-            voice.voice_ptt_recording ? "Recording — release to send" : "Hold to talk"
-          }
-          title="Hold to talk, release to send (or hold Space or Enter on the focused button)"
-          disabled={!voice.voice_ptt_supported || voice.voice_ptt_busy}
-          aria-pressed={voice.voice_ptt_recording}
-          onPointerDown={(event) => {
-            if (event.button === 0) begin();
-          }}
-          onPointerUp={release}
-          onPointerCancel={release}
-          onKeyDown={(event) => {
-            if ([" ", "Enter"].includes(event.key) && !event.repeat) {
-              event.preventDefault();
-              begin();
-            }
-          }}
-          onKeyUp={(event) => {
-            if ([" ", "Enter"].includes(event.key)) {
-              event.preventDefault();
-              release();
-            }
-          }}
-          onBlur={release}
-        >
-          <Icon name={voice.voice_ptt_busy ? "loader" : "mic"} size={15} className={voice.voice_ptt_busy ? "code-loading-spinner" : undefined} />
-        </button>
+      {capability.stt?.available ? (
+        <AfVoiceMicButton
+          voice={voice}
+          mode={voiceCaptureMode(preferences.capture_mode ?? CODE_CAPTURE_DEFAULTS.capture_mode)}
+          routeText={route}
+          // Over plain http from another machine the browser withholds the microphone: say why.
+          unavailableReason={mediaAvailable() ? null : MEDIA_NEEDS_HTTPS}
+          className="code-voice-mic"
+        />
       ) : null}
       {/* No composer speaker (round 6): each reply has its own speaker button; Stop stays while one plays. */}
       {voice.tts_playback.status !== "idle" ? (
@@ -403,21 +292,6 @@ export function VoiceTools({
         >
           <Icon name="x" size={14} />
         </button>
-      ) : null}
-      {onSettings && capability.tts?.available ? (
-        <button
-          className="code-icon-button"
-          aria-label="Voice settings"
-          title="Voice settings"
-          onClick={onSettings}
-        >
-          <Icon name="cog" size={14} />
-        </button>
-      ) : null}
-      {status ? (
-        <span role="status" className="code-voice-status" data-voice-status>
-          {status}
-        </span>
       ) : null}
     </>
   );

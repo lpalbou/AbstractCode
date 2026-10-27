@@ -114,7 +114,7 @@ test("conversation and automation reuse narration, stream early and use the avai
   await expect(answer.locator(".pc-chat-speak-spinner")).toBeVisible();
   await expect(answer.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
   expect(finished).toBe(false);
-  await main.getByRole("button", { name: "Stop audio", exact: true }).click();
+  await main.getByRole("button", { name: "Stop spoken reply", exact: true }).click();
   await expect.poll(() => disconnected).toBe(true);
   await page.screenshot({ path: "e2e/artifacts/voice-layout-desktop.png" });
   await page.setViewportSize({ width: 768, height: 1024 });
