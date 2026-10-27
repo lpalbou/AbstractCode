@@ -45,8 +45,8 @@
   "devDependencies": {
     "@abstractframework/monitor-flow": "^0.1.10",
     "@abstractframework/monitor-gpu": "^0.1.10",
-    "@abstractframework/panel-chat": "file:../../kit-tarballs-fix/abstractframework-panel-chat-0.4.1.tgz",
-    "@abstractframework/ui-kit": "file:../../kit-tarballs-fix/abstractframework-ui-kit-0.8.9.tgz",
+    "@abstractframework/panel-chat": "file:../../kit-tarballs-main/abstractframework-panel-chat-0.4.1.tgz",
+    "@abstractframework/ui-kit": "file:../../kit-tarballs-main/abstractframework-ui-kit-0.8.9.tgz",
     "@monaco-editor/react": "^4.6.0",
     "@playwright/test": "^1.63.0",
     "@types/react": "^18.2.48",
