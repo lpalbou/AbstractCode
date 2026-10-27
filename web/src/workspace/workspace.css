@@ -684,13 +684,6 @@ select option {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.code-conversation .pc-composer__actions select {
-  font-size: var(--font-size-xs);
-  padding: 4px;
-  border: 1px solid var(--ui-border-1);
-  border-radius: 5px;
-  background-color: var(--bg-primary);
-}
 .code-conversation .pc-workflow-chat__footer {
   display: flex;
   justify-content: space-between;
@@ -1967,7 +1960,6 @@ select option {
   .code-artifact,
   .code-activity-row summary,
   .code-composer-workspace,
-  .code-conversation .pc-composer__actions select,
   .code-alert button,
   .code-notice button,
   .code-discovery-errors button,
@@ -2001,8 +1993,7 @@ select option {
   .code-field > input,
   .code-field > select,
   .code-field > textarea,
-  .code-field > label + textarea,
-  .code-conversation .pc-composer__actions select {
+  .code-field > label + textarea {
     min-height: var(--tap-min, 44px);
     font-size: var(--font-size-input, 16px);
   }
@@ -2031,15 +2022,10 @@ select option {
   .code-composer-workspace span {
     display: none;
   }
-  .code-conversation .pc-composer__row select {
-    flex: 1 1 6em;
-    min-width: 0;
-    text-overflow: ellipsis;
-  }
 }
-/* Very narrow composer (< 360 px: 320-wide phones): the last row still holds select + Stop +
-   Send — Stop shows its icon only (its word stays the accessible name), the select and the
-   send label shrink with an ellipsis instead of pushing Send onto a third row. */
+/* Very narrow composer (< 360 px: 320-wide phones): the last row still holds Stop + Send —
+   Stop shows its icon only (its word stays the accessible name), the send label shrinks with an
+   ellipsis instead of pushing Send onto a third row. */
 @container pc-composer (max-width: 359.98px) {
   .code-conversation .pc-workflow-chat__stop {
     min-width: var(--tap-min, 32px);
@@ -2053,11 +2039,6 @@ select option {
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
-  }
-  /* 5em basis: too wide to squeeze in after the five icons, narrow enough to share the last
-     row with Stop and Send at 320 px. */
-  .code-conversation .pc-composer__row select {
-    flex: 1 1 5em;
   }
   .code-conversation .pc-composer__row > .pc-btn {
     min-width: 0;
@@ -2119,7 +2100,6 @@ select option {
   /* Touch selects take the kit's single-select rule (ui-kit >= 0.3.2: appearance none, 44 px,
      16 px, its own chevron). The app keeps only colours; its desktop paddings must leave room
      for the kit chevron. */
-  .code-conversation .pc-composer__actions select,
   .code-field > select {
     padding-right: 32px;
   }
