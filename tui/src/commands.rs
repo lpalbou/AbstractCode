@@ -651,7 +651,11 @@ pub const HELP_EXTRA: &[(&str, &str)] = &[
     ("Ctrl+T", "cycle theme"),
     (
         "theme ▾",
-        "the theme name in the status bar: click, or Tab to it + Enter, for every theme — arrows / the wheel preview LIVE, Enter or a click keeps, Esc restores; the wheel on the closed name steps to the next theme",
+        "the theme name at the status bar's right end: click (or Tab to the bar, → to it, Enter) for every theme — arrows / the wheel preview LIVE, Enter or a click keeps, Esc restores",
+    ),
+    (
+        "chrome",
+        "click the header's workflow (picker), provider/model (model picker) or gateway + light (/status); the status bar's ⌂ workspace (/workspace) or session id (/sessions) — or Tab to the header / status bar, ←→ between its widgets, Enter or Space opens",
     ),
     (
         "Ctrl+P",

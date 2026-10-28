@@ -320,6 +320,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     // Where the composer currently lives in the tree — the root's
     // type-to-focus handler needs it (see `chrome::ComposerAnchor`).
     let composer_anchor = chrome::ComposerAnchor::default();
+    let chrome_focus = chrome::ChromeFocus::new(cx, composer_anchor.clone());
     wire_ctrl_c(cx, actions, store, &ctx, &composer);
     // Voice: read-aloud, dictation text into the composer, elapsed tick.
     voice_view::wire(cx, store, &ctx, composer.clone());
@@ -408,7 +409,6 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
 
     // The status bar's theme trigger (`theme_menu`): its focus/hover/open
     // state outlives the chrome's rebuilds.
-    let theme_trigger = theme_menu::TriggerState::new(cx);
 
     let root_ctx = ctx.clone();
     let esc_ctx = ctx.clone();
@@ -581,13 +581,16 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
         .on(abstracttui::ui::Phase::Capture, {
             let composer = composer.clone();
             let anchor = composer_anchor.clone();
+            let chrome_focus = chrome_focus.clone();
             move |ctx: &mut abstracttui::ui::EventCtx, ev: &abstracttui::ui::UiEvent| {
                 if composer.focused().get_untracked() {
                     return; // the composer already owns this input
                 }
-                // The focused theme trigger owns Space (it opens the
-                // dropdown); any other character still goes to the prompt.
-                if theme_trigger.focused.get_untracked()
+                // A focused chrome widget owns Space (it activates the
+                // widget under the keyboard cursor: the header's
+                // workflow/model/gateway, the bar's workspace/session/
+                // theme); any other character still goes to the prompt.
+                if chrome_focus.any()
                     && matches!(ev, abstracttui::ui::UiEvent::Key(k) if k.key == Key::Char(' '))
                 {
                     return;
@@ -767,7 +770,15 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                             .width(Dimension::Percent(1.0))
                             .height(Dimension::Percent(1.0)),
                     )
-                    .child(chrome::header(&t, store, spin, cwd_base.clone(), cx, &ctx))
+                    .child(chrome::header(
+                        &t,
+                        store,
+                        spin,
+                        cx,
+                        scx,
+                        &ctx,
+                        chrome_focus.clone(),
+                    ))
                     .child(transcript_view::pane(
                         scx,
                         &t,
@@ -816,7 +827,15 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                         placeholder,
                         on_submit.clone(),
                     ))
-                    .child(chrome::status_bar(&t, store, &ctx, cx, scx, theme_trigger))
+                    .child(chrome::status_bar(
+                        &t,
+                        store,
+                        &ctx,
+                        cx,
+                        scx,
+                        cwd_base.clone(),
+                        chrome_focus.clone(),
+                    ))
                     .build()
             }
         }))
@@ -1233,6 +1252,65 @@ pub(crate) fn send_start(
     }
 }
 
+/// `/workflow`: refresh the catalog, then the workflow picker. Shared by
+/// the command and the header's workflow widget.
+fn open_workflow(cx: Scope, store: Store, ctx: &UiCtx) {
+    // Catalog freshness at the operator's gesture (the /tools /skills
+    // /mcp Load*-before-open pattern): the boot's LoadCatalog was the
+    // ONLY successful load a session ever ran, so a long-lived TUI
+    // pinned the launch-time snapshot and entrypoints registered
+    // afterwards never appeared (operator incident 2026-07-25).
+    // Preference mirrors the Down→Ok self-heal: prefs is the boot's
+    // own source, and `load_catalog` never clobbers a non-empty
+    // selection. The picker rows are LIVE (reactive-picker
+    // follow-up, flow's c5483 thread): a refresh landing while
+    // the picker is open renders in place — no reopen needed.
+    let (preferred_bundle, preferred_flow) = {
+        let p = ctx.prefs.borrow();
+        p.workflow_preference()
+    };
+    ctx.send(Cmd::LoadCatalog {
+        preferred_bundle,
+        preferred_flow,
+    });
+    modals::open_workflow_picker(cx, store, ctx);
+}
+
+/// `/status`: the gateway + connection modal. Shared by the command and
+/// the header's gateway widget (and the bar's connection-down message).
+fn open_status(cx: Scope, store: Store, ctx: &UiCtx) {
+    // Probe server truth at the gesture: the modal renders the
+    // client view immediately and the live get_run result when
+    // it lands (run-less sessions skip the probe).
+    store.run_status_probe.set(None);
+    let run_id = store.run_id.get_untracked();
+    if !run_id.is_empty() {
+        ctx.send(Cmd::ProbeRunStatus { run_id });
+    }
+    modals::open_status(cx, store, ctx);
+}
+
+/// Run the chrome widget `id` (`chrome::ACT_*`): each opens exactly the
+/// modal its slash command opens. Returns false for an unknown id —
+/// `ACT_THEME` included: the status bar opens the theme DROPDOWN itself,
+/// anchored on the theme item.
+pub(crate) fn chrome_action(cx: Scope, store: Store, ctx: &UiCtx, id: &str) -> bool {
+    match id {
+        chrome::ACT_WORKFLOW => open_workflow(cx, store, ctx),
+        chrome::ACT_MODEL => modals::open_model_picker(cx, store, ctx),
+        chrome::ACT_GATEWAY => open_status(cx, store, ctx),
+        chrome::ACT_WORKSPACE => {
+            rail_view::open_settings(cx, store, ctx, Some(crate::rail::Panel::Workspace))
+        }
+        chrome::ACT_SESSION => conversations_view::open_sessions(cx, store, ctx),
+        chrome::ACT_WAITING => {
+            attention_chip::open_waiting(cx, store, ctx);
+        }
+        _ => return false,
+    }
+    true
+}
+
 fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_mode: Signal<u8>) {
     match cmd {
         Command::Help => modals::open_help(cx, ctx),
@@ -1254,27 +1332,7 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
             }
         }
         Command::Theme(None) => modals::open_theme_picker(cx, store, ctx),
-        Command::Workflow => {
-            // Catalog freshness at the operator's gesture (the /tools /skills
-            // /mcp Load*-before-open pattern): the boot's LoadCatalog was the
-            // ONLY successful load a session ever ran, so a long-lived TUI
-            // pinned the launch-time snapshot and entrypoints registered
-            // afterwards never appeared (operator incident 2026-07-25).
-            // Preference mirrors the Down→Ok self-heal: prefs is the boot's
-            // own source, and `load_catalog` never clobbers a non-empty
-            // selection. The picker rows are LIVE (reactive-picker
-            // follow-up, flow's c5483 thread): a refresh landing while
-            // the picker is open renders in place — no reopen needed.
-            let (preferred_bundle, preferred_flow) = {
-                let p = ctx.prefs.borrow();
-                p.workflow_preference()
-            };
-            ctx.send(Cmd::LoadCatalog {
-                preferred_bundle,
-                preferred_flow,
-            });
-            modals::open_workflow_picker(cx, store, ctx);
-        }
+        Command::Workflow => open_workflow(cx, store, ctx),
         Command::Model => modals::open_model_picker(cx, store, ctx),
         Command::Tools => {
             ctx.send(Cmd::LoadTools);
@@ -1528,17 +1586,7 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
                 }
             }
         }
-        Command::Status => {
-            // Probe server truth at the gesture: the modal renders the
-            // client view immediately and the live get_run result when
-            // it lands (run-less sessions skip the probe).
-            store.run_status_probe.set(None);
-            let run_id = store.run_id.get_untracked();
-            if !run_id.is_empty() {
-                ctx.send(Cmd::ProbeRunStatus { run_id });
-            }
-            modals::open_status(cx, store, ctx);
-        }
+        Command::Status => open_status(cx, store, ctx),
         Command::Permissions(arg) => set_permissions(store, ctx, arg),
         // The conversation's workspaces (session level): the rail's Workspace panel.
         Command::Workspace => {

@@ -4,10 +4,11 @@
 //! with it … accessible through tab and mouse click/scroll").
 //!
 //! - The TRIGGER is the theme's name in the status bar, `Tokyo Night ▾`:
-//!   a focusable button (Tab reaches it; Enter or Space opens), a click
-//!   opens, and the mouse WHEEL over it steps to the previous / next
-//!   theme directly (applied and saved — the fastest way to flip
-//!   through looks without opening anything).
+//!   since 0.12.0 an action span of the bar (`chrome::ACT_THEME`,
+//!   abstracttui 0187) — a click opens, and Tab to the bar, → to the
+//!   name, Enter or Space opens. (The wheel over the CLOSED name no
+//!   longer steps the theme: the engine does not say which span a wheel
+//!   lands on.)
 //! - The DROPDOWN lists every theme grouped Dark / Light (the engine's
 //!   `themes_by_mode` order), anchored at the trigger (it opens upward
 //!   from the bottom bar). Moving the highlight — arrows, Page Up/Down,
@@ -39,22 +40,16 @@ use super::UiCtx;
 /// Rows shown at once before the list windows around the highlight.
 pub const MAX_VISIBLE: usize = 14;
 
-/// The trigger's state, created ONCE in the root (the status bar is
-/// rebuilt often; these must survive it). `focused` is also read by the
-/// root's type-to-compose handler, so Space on a focused trigger opens
-/// the menu instead of being typed into the prompt.
+/// The dropdown's state, created ONCE in the root (the status bar is
+/// rebuilt often; it must survive it): whether the dropdown is open.
 #[derive(Copy, Clone)]
 pub struct TriggerState {
-    pub focused: Signal<bool>,
-    pub hovered: Signal<bool>,
     pub open: Signal<bool>,
 }
 
 impl TriggerState {
     pub fn new(cx: Scope) -> TriggerState {
         TriggerState {
-            focused: cx.signal(false),
-            hovered: cx.signal(false),
             open: cx.signal(false),
         }
     }
@@ -124,15 +119,6 @@ pub fn window_top(top: usize, highlight: usize, visible: usize, len: usize) -> u
     top.min(len.saturating_sub(visible))
 }
 
-/// The theme `delta` steps from `current` in the dropdown's order,
-/// wrapping (the closed trigger's wheel).
-pub fn neighbour(current: &str, delta: i32) -> &'static Theme {
-    let list: Vec<&'static Theme> = entries().into_iter().filter_map(|e| e.0).collect();
-    let at = list.iter().position(|t| t.id == current).unwrap_or(0) as i64;
-    let n = list.len() as i64;
-    list[((at + delta as i64).rem_euclid(n)) as usize]
-}
-
 /// The trigger's text: the theme name and the dropdown chevron.
 pub fn trigger_text(label: &str) -> String {
     format!(" {label} ▾ ")
@@ -149,84 +135,6 @@ fn apply(theme: &'static Theme) {
 fn keep(ctx: &UiCtx, theme: &'static Theme) {
     apply(theme);
     crate::ui::save_theme_pref(ctx, theme.id);
-}
-
-/// The trigger button. `root` is the app's root scope — the dropdown
-/// opens there (see the module docs).
-pub fn trigger(root: Scope, ctx: &UiCtx, st: TriggerState) -> View {
-    let label = abstracttui::app::current_theme().label;
-    let shown = trigger_text(label);
-    let w = text::width(&shown);
-    let open_ctx = ctx.clone();
-    let wheel_ctx = ctx.clone();
-    Element::new()
-        .style(
-            LayoutStyle::default()
-                .width(Dimension::Cells(w))
-                .height(Dimension::Cells(1))
-                .shrink(0.0),
-        )
-        .role(abstracttui::ui::Role::Button)
-        .access_label("theme")
-        .access_value(move || abstracttui::app::current_theme().label.to_string())
-        .hover_signal(st.hovered)
-        .focus_signal(st.focused)
-        .focusable()
-        .on(abstracttui::ui::Phase::Bubble, move |ectx, ev| match ev {
-            abstracttui::ui::UiEvent::Key(k)
-                if (k.key == Key::Enter || k.key == Key::Char(' ')) && k.mods == Mods::NONE =>
-            {
-                if st.focused.get_untracked() {
-                    open(root, &open_ctx, st, ectx.current_rect_screen());
-                    ectx.stop_propagation();
-                }
-            }
-            abstracttui::ui::UiEvent::Mouse(m) => match m.kind {
-                abstracttui::ui::MouseKind::Down(abstracttui::ui::MouseButton::Left) => {
-                    open(root, &open_ctx, st, ectx.current_rect_screen());
-                    ectx.stop_propagation();
-                }
-                abstracttui::ui::MouseKind::ScrollUp | abstracttui::ui::MouseKind::ScrollDown => {
-                    let delta = if m.kind == abstracttui::ui::MouseKind::ScrollUp {
-                        -1
-                    } else {
-                        1
-                    };
-                    let now = abstracttui::app::current_theme().id;
-                    keep(&wheel_ctx, neighbour(now, delta));
-                    ectx.stop_propagation();
-                }
-                _ => {}
-            },
-            _ => {}
-        })
-        .child(dyn_view(
-            LayoutStyle::default()
-                .width(Dimension::Percent(1.0))
-                .height(Dimension::Cells(1)),
-            move || {
-                let t = abstracttui::app::current_theme().tokens;
-                let (fg, bg) = if st.focused.get() {
-                    (t.selection_fg, t.selection_bg)
-                } else if st.hovered.get() || st.open.get() {
-                    (t.accent, t.surface_raised)
-                } else {
-                    (t.text_muted, t.surface)
-                };
-                let shown = shown.clone();
-                let chevron = if st.focused.get() { fg } else { t.text_faint };
-                Element::new()
-                    .style(LayoutStyle::line(1))
-                    .draw(move |canvas, rect| {
-                        canvas.fill(rect, ' ', fg, bg);
-                        let body = shown.trim_end_matches(' ').trim_end_matches('▾');
-                        let x = rect.x + canvas.print(Point::new(rect.x, rect.y), body, fg, bg);
-                        canvas.print(Point::new(x, rect.y), "▾", chevron, bg);
-                    })
-                    .build()
-            },
-        ))
-        .build()
 }
 
 /// Open the dropdown against `anchor` (the trigger's screen rect).
@@ -469,12 +377,5 @@ mod tests {
         assert_eq!(window_top(0, 12, 10, 30), 3);
         assert_eq!(window_top(10, 4, 10, 30), 3, "the header above comes along");
         assert_eq!(window_top(0, 29, 10, 30), 20);
-    }
-
-    #[test]
-    fn the_closed_wheel_wraps_through_the_list() {
-        let list: Vec<&'static Theme> = entries().into_iter().filter_map(|e| e.0).collect();
-        assert_eq!(neighbour(list[0].id, -1).id, list[list.len() - 1].id);
-        assert_eq!(neighbour(list[0].id, 1).id, list[1].id);
     }
 }

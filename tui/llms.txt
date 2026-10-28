@@ -73,7 +73,7 @@
 ## Project
 
 - [Changelog](CHANGELOG.md): Release history, from 0.1.0 (the first
-  application built on AbstractTUI) through 0.11.0 (the attention chip from your event stream; 0.10.0: turns as cards and folded cycle panels, hold Space to talk,
+  application built on AbstractTUI) through 0.12.0 (the clickable chrome: workflow, model, gateway, workspace, session and theme widgets; 0.11.0: the attention chip from your event stream; 0.10.0: turns as cards and folded cycle panels, hold Space to talk,
   the theme dropdown, pause / resume and per-message read-aloud, sessions and the queue off `prefs.json`, calendar
   schedules and the seven-step New automation; 0.9.1: the workspace chooser per conversation and automation, the
   command-sandbox line per command; 0.9.0: settings panels, Archive / Unarchive, voice through the gateway's routes).
