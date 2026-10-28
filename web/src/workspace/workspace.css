@@ -2647,9 +2647,6 @@ select option {
   text-align: left;
 }
 
-/* Narration and copy remain discoverable without hovering over a reply. */
-.code-conversation .pc-chat-header-actions { opacity: 1; }
-
 /* The right panel (round 4): the kit's rail drawer (ui-kit AfRailDrawer) at the
  * right edge of the content area. Docked ≥ 1024 px (the panel takes its own
  * width beside the conversation); below, it floats over the content. */
