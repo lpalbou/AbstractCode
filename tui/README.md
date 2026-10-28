@@ -7,13 +7,13 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.11.0**, pre-alpha. Release history is in
+Status: **0.12.0**, pre-alpha. Release history is in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## What it looks like
 
 ```
- ▲ AbstractCode  basic-agent · lmstudio · qwen3.6-35b · ⌂ snake · skills 2   acode-93db824cec83 ●
+ ▲ AbstractCode  basic-agent  ·  lmstudio · qwen3.6-35b  ·  skills 2       127.0.0.1:8080 ●
  ❯ you
    Create a snake game in rust, then run the tests.
  ∴ cycle 1
@@ -24,7 +24,7 @@ Status: **0.11.0**, pre-alpha. Release history is in
    Done — the game builds clean and all 12 tests pass. …
  ⠹ cycle 3 · model call 4s · 39 tok/s (last call) · 42s · 8.1k↑ 612↓ tk   ▂▃▅▂▇
 ❯ ▐ describe a task — Enter sends · Ctrl+J newline · /help                    ▌
- ctx 8.1k/262k tk (3%, declared) · 12k tk session · skills 2 · ? keys   nord · …
+ ctx 8.1k/262k tk (3%) · 12k tk session   ⌂ ~/snake · acode-93db824cec83   Nord ▾
 ```
 
 - **Live activity**: reasoning cycles, tool cards that update in place

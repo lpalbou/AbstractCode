@@ -9,3 +9,8 @@
 [workspace]
 resolver = "2"
 members = ["tui"]
+
+# TEMPORARY (feat/chrome-widgets): abstracttui 0.7.0 (0187 hit targets +
+# 1260 StatusBar) is not on crates.io yet. Remove before release.
+[patch.crates-io]
+abstracttui = { git = "https://github.com/lpalbou/abstracttui", branch = "feat/chrome-slots-hit-targets" }

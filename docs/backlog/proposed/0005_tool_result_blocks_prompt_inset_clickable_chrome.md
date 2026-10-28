@@ -1,12 +1,13 @@
 # 0005 — Tool result envelopes render as JSON blocks; prompt inset "› text"; clickable chrome (workflow, model, session id)
 
-- **Status:** proposed
+- **Status:** proposed — item 3 (clickable chrome) completed in terminal 0.12.0; items 1–2 wait for abstracttui 0188 / 0186
 - **Created:** 2026-10-28
 - **Area:** TUI (`tui/src/ui/transcript_view.rs`, `tui/src/ui/json_view.rs`, `tui/src/ui/chrome.rs`, the composer)
 - **Work item:** `abstractcode-0005`
 - **Root link:** AbstractFramework backlog 1055
-- **Depends on (abstracttui, proposed):** 0188 JSON block (pretty-print + collapse over `CodeView`), 0186
-  TextInput/TextArea content inset, 0187 semantic hit targets for drawn spans, 1260 status bar with named slots.
+- **Depends on (abstracttui):** 0188 JSON block (pretty-print + collapse over `CodeView`, proposed), 0186
+  TextInput/TextArea content inset (proposed); 0187 semantic hit targets for drawn spans and 1260 status bar
+  with named slots (shipped in abstracttui 0.7.0).
 
 ## Evidence
 Operator screenshot, 2026-10-28 00:55: a sandbox tool-result envelope printed as flat, unindented text in the
@@ -34,3 +35,32 @@ transcript.
 ## Validation
 Headless renders of the screenshot's envelope (indented, coloured, collapsible), JSON-in-string and a prefixed
 envelope; composer caret tests at the inset; chrome clicks reach the three actions after a resize. Red without each.
+
+## Progress
+
+### Item 3 — clickable chrome: done (terminal 0.12.0, 2026-10-28)
+Operator layout (screenshot 2026-10-28 09:23), built on abstracttui 0.7.0:
+- Header (`chrome::header`): the workflow name and the provider/model are `print_action` spans
+  (`chrome::ACT_WORKFLOW`, `ACT_MODEL`); the gateway + connection light is ONE `mark_action` rect
+  (`ACT_GATEWAY`) with its own focus ring. A stable `Element::on_action` host (focusable) wraps the
+  per-tick line, so focus survives its rebuilds.
+- Status bar (`chrome::status_bar`, `status_bar_model`): an abstracttui `StatusBar` — LEFT the
+  instruments, CENTER the workspace path (`ACT_WORKSPACE`, `BarFit::TruncateStart`) and the session id
+  (`ACT_SESSION`), RIGHT the markers and the theme (`ACT_THEME`); priorities in `chrome::bar_priority`.
+- Every id maps in `ui::chrome_action` to the modal its slash command opens: `/workflow` (catalog
+  refresh + picker), `/model`, `/status`, `/workspace` (rail Workspace panel), `/sessions`, the theme
+  dropdown; the attention chip (`ACT_WAITING`) opens the waiting automation.
+- Removed: the attention chip's stored `(x0, x1)` click span (the last hard-coded cell coordinates in the
+  chrome), the bar's own right-cluster planner (`right_plan`/`status_right`/`footer_session`), the
+  focusable theme trigger view. Lost: the wheel over the CLOSED theme name (the engine does not expose
+  which span a wheel lands on; an `EventCtx` accessor would restore it).
+
+Evidence (`cargo test --workspace`, clippy `-D warnings`):
+- `tests/chrome_width_torture.rs::chrome_degrades_whole_item_at_every_width` — 60/80/100/120/200/271
+  cols: header right widget intact, workspace + session + theme kept in order at every width,
+  instruments drop whole in priority order, every action id is a drawn hit target.
+- `every_chrome_widget_opens_its_modal_on_click` (80 and 140 cols) and
+  `every_chrome_widget_opens_its_modal_from_the_keyboard` — the click lands on `UiTree::action_rect`
+  (no cell constant in the test either); red when a tag is removed (checked: without the
+  `ACT_GATEWAY` tag all three fail).
+- `r17w1_screens::a_click_on_the_chip_opens_the_same_automation` — the chip through its action id.

@@ -6,6 +6,34 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-28
+
+Needs AbstractTUI 0.7.0 (semantic hit targets and the status bar with named
+slots).
+
+### Changed
+
+- **The chrome is clickable.** The header's workflow name opens the workflow
+  picker, its provider/model the model picker, and the gateway beside its
+  connection light (now one widget) the `/status` connection modal. The
+  status bar's middle shows the workspace path (opens the conversation's
+  authorised workspaces, as `/workspace`) and the session id (opens the
+  Sessions modal); its right end is the theme selector (opens the theme
+  dropdown). From the keyboard: `Tab` to the header or the status bar, `←`/`→`
+  between its widgets, `Enter` or `Space` opens.
+- **The folder moved from the header to the status bar's middle**, beside
+  the session id; the session id is shown whole, cut from the left only when
+  the row is tight.
+- **The status bar keeps the session id, the theme, the attention chip and
+  the workspace path longest**; the instruments (ctx meter, session tokens,
+  gpu, memory, skills, mcp, then the `? keys` pointer) give way first, each
+  whole or not at all.
+
+### Removed
+
+- The mouse wheel over the closed theme name no longer steps to the next
+  theme (open the dropdown, or `Ctrl+T`).
+
 ## [0.11.0] - 2026-10-28
 
 The live attention chip needs AbstractGateway with your event stream (`/api/gateway/me/events`); on an older gateway the chip keeps the automation list's count.
