@@ -985,6 +985,7 @@ export type ViewActivity = {
   ended_at?: string | null;
   seqs?: number[];
   step_ids?: string[];
+  order?: unknown[];
   tool_calls?: Record<string, any>[];
   wait?: Record<string, any> | null;
   usage?: Record<string, any> | null;
@@ -995,22 +996,79 @@ export type ViewActivity = {
   [key: string]: unknown;
 };
 
+/** The parts of `replay_view_v1` the Activity rows read. */
+export type ActivityView = {
+  root_run_id: string;
+  session_id?: string | null;
+  activities?: readonly ViewActivity[];
+  messages?: readonly Record<string, any>[];
+  runs?: readonly Record<string, any>[];
+  interaction?: Record<string, any> | null;
+};
+
 const VIEW_ENDED = new Set(["completed", "failed", "cancelled", "denied", "partly_denied"]);
 
-/** A view activity's status in the ledger's words (what `status_label` reads). */
+/**
+ * A view activity's status in the ledger's words (what `status_label` reads): a batch the
+ * person or the chat's policy denied is a COMPLETED tool step whose calls failed (the ledger's
+ * completion record), a cancelled call stays "cancelled".
+ */
 function view_record_status(status: string): string {
-  if (status === "completed") return "completed";
-  if (status === "waiting") return "waiting";
-  if (VIEW_ENDED.has(status)) return "failed";
+  if (status === "completed" || status === "denied" || status === "partly_denied") return "completed";
+  if (status === "waiting" || status === "failed" || status === "cancelled") return status;
   return "started";
+}
+
+/** What `view_activity_record` reads besides the activity: the view's own text for it. */
+type ViewContext = {
+  sessionId: string;
+  /** The answer/question message of a step, by `${run}:${step}`. */
+  messageOf: (activity: ViewActivity, kinds: string[]) => string;
+  /** The open interaction's prompt for a wait key. */
+  promptOf: (waitKey: string) => string;
+  /** Tool calls the model asked for: the calls of the tool step that follows it in its run. */
+  callsAfter: Map<string, number>;
+};
+
+function view_context(view: ActivityView): ViewContext {
+  const byStep = new Map<string, Record<string, any>[]>();
+  for (const message of view.messages || [])
+    for (const step of message.step_ids || []) {
+      const key = `${message.run_id}:${step}`;
+      byStep.set(key, [...(byStep.get(key) || []), message]);
+    }
+  const callsAfter = new Map<string, number>();
+  const lastLlm = new Map<string, string>();
+  for (const activity of view.activities || []) {
+    if (activity.kind === "llm") lastLlm.set(activity.run_id, activity.id);
+    else if (activity.kind === "tool") {
+      const llm = lastLlm.get(activity.run_id);
+      if (llm && !callsAfter.has(llm)) callsAfter.set(llm, (activity.tool_calls || []).length);
+      lastLlm.delete(activity.run_id);
+    }
+  }
+  const interaction = obj(view.interaction);
+  return {
+    sessionId: String(view.session_id || ""),
+    messageOf: (activity, kinds) => {
+      for (const step of activity.step_ids || [])
+        for (const message of byStep.get(`${activity.run_id}:${step}`) || [])
+          if (kinds.includes(String(message.source || message.kind))) return String(message.text || "");
+      return "";
+    },
+    promptOf: (waitKey) => (interaction && waitKey && String(interaction.wait_key || "") === waitKey ? String(interaction.prompt || "") : ""),
+    callsAfter,
+  };
 }
 
 /**
  * The record a view activity stands for, in the shape `describe_record` reads: the same titles
- * and details as the ledger path, computed from the runtime's fold instead of raw records.
+ * and details as the ledger path, computed from the runtime's fold instead of raw records. What
+ * the view does not carry stays empty (see `activity_rows_view.test.ts` for the list).
  */
-export function view_activity_record(activity: ViewActivity): Record<string, any> {
+export function view_activity_record(activity: ViewActivity, context?: ViewContext): Record<string, any> {
   const a = activity;
+  const ctx = context || view_context({ root_run_id: a.run_id, activities: [a] });
   const type = String(a.effect_type || "");
   const status = view_record_status(String(a.status || ""));
   const ended = VIEW_ENDED.has(String(a.status || ""));
@@ -1018,8 +1076,9 @@ export function view_activity_record(activity: ViewActivity): Record<string, any
   let payload: Record<string, any> = {};
   let result: Record<string, any> | null = null;
   if (type === "llm_call") {
-    payload = { provider: a.provider || "", model: a.model || a.name || "" };
-    if (ended) result = { usage: a.usage || {}, model: a.model || a.name || "" };
+    payload = { provider: a.provider || "", model: a.model || "" };
+    const asked = ctx.callsAfter.get(a.id) || 0;
+    if (ended) result = { usage: a.usage || {}, model: a.model || "", ...(asked ? { tool_calls: Array.from({ length: asked }, () => ({})) } : {}) };
   } else if (type === "tool_calls") {
     payload = { tool_calls: calls.map((c) => ({ name: c.name, arguments: c.arguments, call_id: c.id })) };
     if (ended)
@@ -1028,21 +1087,39 @@ export function view_activity_record(activity: ViewActivity): Record<string, any
       };
   } else if (type === "start_subworkflow") {
     payload = { workflow_id: a.name || "" };
-    result = { wait: { details: { sub_run_id: a.child_run_id || "" } } };
+    // The ledger names the child only when the parent waited on it (a delegation wait).
+    if (a.wait && a.child_run_id) result = { wait: { details: { sub_run_id: a.child_run_id } } };
   } else if (type === "wait_until") {
-    payload = { until: a.wait?.until };
-  } else if (type === "wait_event" || type === "ask_user") {
-    payload = { prompt: a.wait?.prompt || a.name || "", wait_key: a.wait?.wait_key || "" };
+    if (a.wait?.until) payload = { until: a.wait.until };
+  } else if (type === "wait_event") {
+    const key = String(a.wait?.wait_key || "");
+    const prompt = ctx.promptOf(key) || ctx.messageOf(a, ["question"]);
+    payload = { ...(prompt ? { prompt } : {}), wait_key: key };
+  } else if (type === "ask_user") {
+    payload = { prompt: ctx.messageOf(a, ["question", "wait"]) || ctx.promptOf(String(a.wait?.wait_key || "")) };
   } else if (type === "answer_user") {
-    payload = { message: a.name || "" };
+    payload = { message: ctx.messageOf(a, ["answer_user"]) };
+  } else if (type === "emit_event" && a.kind === "tool_policy") {
+    // The runtime writes the decision run-scoped (session_tool_policy.py `record_decision`).
+    payload = {
+      name: "abstract.tool_policy_decision",
+      scope: "run",
+      payload: {
+        decision: a.decision,
+        source: a.source,
+        session_id: ctx.sessionId,
+        node_id: a.node_id,
+        tool_calls: calls.map((c) => ({ call_id: c.id, name: c.name, ...(c.matched ? { matched: c.matched } : {}) })),
+        ...(a.policy ? { policy: a.policy } : {}),
+      },
+    };
   } else if (type === "emit_event") {
-    payload = { name: a.kind === "tool_policy" ? "abstract.tool_policy_decision" : a.name || "", payload: { decision: a.decision, tools: calls.map((c) => c.name) } };
+    payload = { name: a.name || "" };
   }
   if (status === "waiting" && a.wait) {
     const approval = a.wait.kind === "tool_approval";
     result = { ...(result || {}), wait: { ...(result?.wait || {}), wait_key: a.wait.wait_key, reason: a.wait.kind === "timer" ? "until" : a.wait.kind, details: { ...(result?.wait?.details || {}), ...(approval ? { mode: "approval_required" } : {}) } } };
   }
-  const failedCall = calls.find((c) => c.status && c.status !== "completed" && c.error);
   return {
     run_id: a.run_id,
     step_id: a.step_ids?.[0] || "",
@@ -1051,47 +1128,108 @@ export function view_activity_record(activity: ViewActivity): Record<string, any
     started_at: a.started_at || null,
     ended_at: a.ended_at || null,
     effect: type ? { type, payload } : null,
-    result: !type && a.kind === "completion" ? { completed: true, output: {} } : result,
-    error: status === "failed" ? (failedCall?.error ?? (a.status === "cancelled" ? "cancelled" : a.status)) : null,
+    result,
+    error: status === "failed" ? (calls.find((c) => c.error)?.error ?? "failed") : null,
   };
+}
+
+/** Python-ordered comparison of two view `order` keys (strings, zero-padded ints, prefix first). */
+function order_parts(order: unknown): string[] {
+  return (Array.isArray(order) ? order : []).map((x) =>
+    typeof x === "number" && Number.isInteger(x) ? (x < 0 ? `-${String(-x).padStart(11, "0")}` : String(x).padStart(12, "0")) : x == null ? "None" : String(x),
+  );
+}
+function compare_order(a: unknown, b: unknown): number {
+  const x = order_parts(a);
+  const y = order_parts(b);
+  for (let i = 0; i < Math.min(x.length, y.length); i += 1) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+  return x.length - y.length;
 }
 
 /**
  * The replay view → the rows the Activity tab renders (the view mode of `activity_rows`): one
- * row per node execution, in the view's order. `entries` holds the view activity itself (what
- * the expanded row shows); `tools` the activity's tool calls as panel-chat tool rows.
+ * row per node execution, plus one "run finished" / "subflow finished" row per completed run (the
+ * runtime folds a completion record into no activity), in the view's order. `entries` holds the
+ * view item itself (what the expanded row shows); `tools` the activity's tool calls as panel-chat
+ * tool rows.
  */
 export function activity_rows_from_view(
-  view: { root_run_id: string; activities?: readonly ViewActivity[] } | null | undefined,
+  view: ActivityView | null | undefined,
   toolRows?: (activity: ViewActivity) => unknown[],
 ): ActivityRow[] {
   if (!view) return [];
   const root = String(view.root_run_id || "");
-  return (view.activities || []).map((activity) => {
-    const merged = view_activity_record(activity);
+  const ctx = view_context(view);
+  const items: { order: unknown; row: ActivityRow }[] = [];
+  for (const activity of view.activities || []) {
+    const merged = view_activity_record(activity, ctx);
     const description = describe_record(merged);
+    // A timer the view knows no deadline of (the runtime keeps `until` only while it waits).
+    if (description.kind === "wait" && activity.effect_type === "wait_until" && !activity.wait?.until) {
+      description.title = "wait · timer";
+      description.detail = "";
+    }
     const state = status_label(merged, description.kind, false);
     const progress = obj(activity.progress);
     const seqs = Array.isArray(activity.seqs) ? activity.seqs : [];
-    return {
-      key: activity.id,
-      runId: activity.run_id,
-      cursor: seqs.length ? Math.max(...seqs) : 0,
-      kind: description.kind,
-      title: description.kind === "run" && root && activity.run_id !== root ? "subflow finished" : description.title,
-      detail: description.detail,
-      status: state.status,
-      statusLabel: state.statusLabel,
-      nodeId: String(activity.node_id || ""),
-      stepIds: [...new Set((activity.step_ids || []).filter(Boolean))],
-      progress: progress ? format_progress([progress]) : "",
-      progressFinal: Boolean(progress && (progress.final === true || String(progress.phase || "") === "complete")),
-      entries: [{ cursor: seqs.length ? Math.max(...seqs) : 0, record: activity, runId: activity.run_id }],
-      progressEvents: progress ? [progress] : [],
-      merged,
-      ...(toolRows && activity.kind === "tool" ? { tools: toolRows(activity) } : {}),
-    };
-  });
+    items.push({
+      order: activity.order,
+      row: {
+        key: activity.id,
+        runId: activity.run_id,
+        cursor: seqs.length ? Math.max(...seqs) : 0,
+        kind: description.kind,
+        title: description.title,
+        detail: description.detail,
+        status: state.status,
+        statusLabel: state.statusLabel,
+        nodeId: String(activity.node_id || ""),
+        stepIds: [...new Set((activity.step_ids || []).filter(Boolean))],
+        progress: progress ? format_progress([progress]) : "",
+        progressFinal: Boolean(progress && (progress.final === true || String(progress.phase || "") === "complete")),
+        entries: [{ cursor: seqs.length ? Math.max(...seqs) : 0, record: activity, runId: activity.run_id }],
+        progressEvents: progress ? [progress] : [],
+        merged,
+        ...(toolRows && activity.kind === "tool" ? { tools: toolRows(activity) } : {}),
+      },
+    });
+  }
+  // A completed run's end: the root's final answer is its detail; a child's answer is not in the view.
+  for (const run of view.runs || []) {
+    if (String(run.status || "") !== "completed") continue;
+    const runId = String(run.run_id || "");
+    const final = (view.messages || []).find((m) => m.id === `${runId}:final`);
+    const own = (view.activities || []).filter((a) => a.run_id === runId);
+    // A child ends when its last step does, or (no step of its own) when its parent's delegation does.
+    const last = own[own.length - 1] || (view.activities || []).find((a) => a.child_run_id === runId);
+    const order = final?.order || [String(last?.ended_at || last?.started_at || ""), runId, Number(run.last_seq || 0)];
+    const text = final ? String(final.text || "") : "";
+    const merged = { run_id: runId, status: "completed", effect: null, result: { completed: true, output: text ? { answer: text } : {} } };
+    items.push({
+      order,
+      row: {
+        key: `${runId}:finished`,
+        runId,
+        cursor: Number(run.last_seq || 0),
+        kind: "run",
+        title: runId === root ? "run finished" : "subflow finished",
+        detail: text ? one_line(text, 110) : "",
+        status: "completed",
+        statusLabel: "completed",
+        nodeId: "",
+        stepIds: final?.step_ids ? [...final.step_ids] : [],
+        progress: "",
+        progressFinal: false,
+        entries: [{ cursor: Number(run.last_seq || 0), record: final || run, runId }],
+        progressEvents: [],
+        merged,
+      },
+    });
+  }
+  return items
+    .map((item, index) => ({ ...item, index }))
+    .sort((x, y) => compare_order(x.order, y.order) || x.index - y.index)
+    .map((item) => item.row);
 }
 
 /**

@@ -8,12 +8,16 @@ import { activity_rows, activity_rows_from_view, view_progress_records, type Act
 import { activity_groups } from "./activity_groups";
 import { llm_phase_text } from "./llm_phase";
 import { activityRowsOf } from "../workspace/workspace_panels";
+import { readdirSync, readFileSync } from "node:fs";
+import { parity } from "./activity_rows_parity";
+import { EXPECTED_DIFFERENCES, REASONS } from "./activity_rows_parity_expected";
 import aView from "./fixtures/replay_view/a_delegated_child_approval/view.json";
 import a2View from "./fixtures/replay_view/a2_delegated_approval_completed/view.json";
 import a2Records from "./fixtures/replay_view/a2_delegated_approval_completed/records.json";
 import mView from "./fixtures/replay_view/m_session_tool_policy/view.json";
 
 type View = { root_run_id: string; activities: ViewActivity[] };
+const FIXTURES = `${__dirname}/fixtures/replay_view`;
 const tools = (activity: ViewActivity) => replayToolActivities(activity as unknown as ReplayViewActivity);
 
 /** The case's ledger as the controller's records (arrival order: by time, then run, then seq). */
@@ -29,26 +33,46 @@ function ledgerEntries(records: Record<string, Record<string, any>[]>): Activity
 }
 
 describe("activity_rows_from_view", () => {
-  it("one row per node execution, in the view's order", () => {
-    const view = a2View as unknown as View;
+  it("one row per node execution in the view's order, plus one per completed run", () => {
+    const view = a2View as unknown as View & { runs: { run_id: string; status: string }[] };
     const rows = activity_rows_from_view(view, tools);
-    expect(rows).toHaveLength(view.activities.length);
-    expect(rows.map((row) => row.key)).toEqual(view.activities.map((a) => a.id));
-    expect(rows.every((row) => row.entries.length === 1 && row.entries[0].record === view.activities.find((a) => a.id === row.key))).toBe(true);
+    const finished = rows.filter((row) => row.kind === "run");
+    expect(finished.map((row) => row.runId).sort()).toEqual(view.runs.filter((r) => r.status === "completed").map((r) => r.run_id).sort());
+    expect(finished.find((row) => row.runId === view.root_run_id)?.title).toBe("run finished");
+    expect(rows.at(-1)?.title).toBe("run finished");
+    const steps = rows.filter((row) => row.kind !== "run");
+    expect(steps.map((row) => row.key)).toEqual(view.activities.map((a) => a.id));
+    expect(steps.every((row) => row.entries.length === 1 && row.entries[0].record === view.activities.find((a) => a.id === row.key))).toBe(true);
   });
 
-  it("describes model steps, tool batches and sub-flows as the ledger path does", () => {
-    const view = a2View as unknown as View;
-    const fromView = activity_rows_from_view(view, tools);
-    const fromLedger = activity_rows(ledgerEntries(a2Records as never), view.root_run_id);
-    const titles = (rows: typeof fromView, kind: string) => rows.filter((row) => row.kind === kind).map((row) => row.title).sort();
-    for (const kind of ["llm", "tools", "subflow"]) {
-      expect(titles(fromView, kind).length).toBeGreaterThan(0);
-      expect(titles(fromView, kind)).toEqual(titles(fromLedger, kind));
+  it("matches the ledger path on every conformance case, except the differences listed with their reason", () => {
+    const cases = readdirSync(FIXTURES, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
+    expect(cases).toHaveLength(15);
+    expect(Object.keys(EXPECTED_DIFFERENCES).sort()).toEqual(cases);
+    for (const name of cases) {
+      const view = JSON.parse(readFileSync(`${FIXTURES}/${name}/view.json`, "utf8"));
+      const records = JSON.parse(readFileSync(`${FIXTURES}/${name}/records.json`, "utf8"));
+      const got = parity(view, records);
+      const want = EXPECTED_DIFFERENCES[name];
+      expect({ case: name, ledgerOnly: got.ledgerOnly, viewOnly: got.viewOnly, groups: got.groups }).toEqual({
+        case: name,
+        ledgerOnly: want.ledgerOnly.map(([row]) => row),
+        viewOnly: want.viewOnly.map(([row]) => row),
+        groups: want.groups ? { ledger: want.groups.ledger, view: want.groups.view } : undefined,
+      });
+      for (const [, why] of [...want.ledgerOnly, ...want.viewOnly]) expect(REASONS[why]).toBeTruthy();
     }
-    // Same iterations ("Step N" groups) and every step finished.
-    expect(activity_groups(fromView).map((g) => g.title)).toEqual(activity_groups(fromLedger).map((g) => g.title));
-    expect(fromView.filter((row) => row.kind === "tools").every((row) => row.status === "completed")).toBe(true);
+  });
+
+  it("ask, message and event-wait rows carry the view's own text, never the effect type", () => {
+    const rows = (name: string) => activity_rows_from_view(JSON.parse(readFileSync(`${FIXTURES}/${name}/view.json`, "utf8")), tools);
+    const texts = [...rows("g_ask_user"), ...rows("j_event_answered_then_pause"), ...rows("i_wait_kinds"), ...rows("l_answer_then_completion")]
+      .filter((row) => ["ask", "message", "wait"].includes(row.kind))
+      .map((row) => row.detail);
+    expect(texts.length).toBeGreaterThan(6);
+    for (const detail of texts) expect(detail).not.toMatch(/^(ask_user|answer_user|wait_event)$/);
+    expect(rows("i_wait_kinds").some((row) => row.detail === "Which colour should the chart use?")).toBe(true);
+    expect(rows("l_answer_then_completion").map((row) => row.title)).toContain("run finished");
   });
 
   it("a delegated approval waits on the child, as approval needed", () => {
@@ -69,7 +93,7 @@ describe("activity_rows_from_view", () => {
 
   it("the workspace reads the view when the snapshot has one, the records otherwise", () => {
     const view = a2View as unknown as View;
-    expect(activityRowsOf([], view.root_run_id, view as never).length).toBe(view.activities.length);
+    expect(activityRowsOf([], view.root_run_id, view as never)).toEqual(activity_rows_from_view(view as never, tools));
     expect(activityRowsOf([], view.root_run_id, null)).toEqual([]);
     const ledger = ledgerEntries(a2Records as never);
     expect(activityRowsOf(ledger as never, view.root_run_id, null).length).toBeGreaterThan(0);
