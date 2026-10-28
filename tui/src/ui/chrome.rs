@@ -126,10 +126,12 @@ pub fn header(
     store: Store,
     spin: Signal<u64>,
     cwd_base: String,
-    root: Scope,
+    _root: Scope,
     ctx: &UiCtx,
 ) -> View {
     let tokens = *t;
+    // Owned before the 'static render closure: `ctx` is only borrowed.
+    let gateway = ctx.gateway_label.clone();
     dyn_view(LayoutStyle::line(1), move || {
         let t = tokens;
         let signed_out = store.signed_out.with(|s| s.is_some());
@@ -144,9 +146,8 @@ pub fn header(
                 w.label()
             }
         });
-        let session = store.session_id.get();
         let conn = store.conn.get();
-        let gateway = ctx.gateway_label.clone();
+        let gateway = gateway.clone();
         // Entity chips (inside this same line — no CHROME_ROWS change).
         // spin is read ONLY while a turn/run is active, so the elapsed
         // repaints without waking the header every frame otherwise.

@@ -868,7 +868,11 @@ fn result_digest(result: &str) -> Option<String> {
             continue;
         };
         let (size, bytes, path) = if let Some(bytes) = size_bytes(first) {
-            (first.to_string(), bytes, words.collect::<Vec<_>>().join(" "))
+            (
+                first.to_string(),
+                bytes,
+                words.collect::<Vec<_>>().join(" "),
+            )
         } else if let Some(unit) = words.next() {
             let combined = format!("{first}{unit}");
             match size_bytes(&combined) {
@@ -886,7 +890,7 @@ fn result_digest(result: &str) -> Option<String> {
             continue;
         }
         locations += 1;
-        if largest.as_ref().map_or(true, |(old, _, _)| bytes > *old) {
+        if largest.as_ref().is_none_or(|(old, _, _)| bytes > *old) {
             largest = Some((bytes, size, path));
         }
     }
@@ -898,7 +902,9 @@ fn result_digest(result: &str) -> Option<String> {
     } else {
         path
     };
-    Some(format!("result: {locations} locations · largest {path} ({size})"))
+    Some(format!(
+        "result: {locations} locations · largest {path} ({size})"
+    ))
 }
 
 /// Parse ordinary `du`/human-readable size prefixes (`114G`, `114.1 GB`).
@@ -3350,10 +3356,6 @@ fn empty_state(
 mod tests {
     use super::*;
 
-    /// The disclosure marker is a MEASUREMENT, not decoration: it
-    /// appears only where output actually exists, its number is the
-    /// result's own line count, and a running call — which has produced
-    /// nothing yet — never claims hidden output.
     #[test]
     fn tool_titles_lead_with_actions_not_implementation_names() {
         assert_eq!(tool_title("execute_command"), "run command");
@@ -3371,6 +3373,10 @@ mod tests {
         assert_eq!(result_digest("version 1.2G"), None);
     }
 
+    /// The disclosure marker is a MEASUREMENT, not decoration: it
+    /// appears only where output actually exists, its number is the
+    /// result's own line count, and a running call — which has produced
+    /// nothing yet — never claims hidden output.
     #[test]
     fn the_marker_counts_only_output_that_exists() {
         // The gap this closes: a finished call with output.
