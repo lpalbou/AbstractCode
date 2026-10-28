@@ -6,11 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.11.0] - 2026-10-25
+## [0.11.0] - 2026-10-28
 
 The live attention chip needs AbstractGateway with your event stream (`/api/gateway/me/events`); on an older gateway the chip keeps the automation list's count.
 
 ### Changed
+
+- **The gateway sits at the header's top right**, cut to 28 columns, beside
+  its connection orb, where the session id was. The session id moves to the
+  status bar's right end (tail-kept, at most 15 columns, omitted below 30
+  columns); the gateway is no longer repeated there. When the gateway is
+  down, the status bar's right end gives the session id and the reason.
+- **Tool rows lead with what the call does**: `execute_command` reads
+  **run command**, `read_file` **read file**, `fetch_url` **fetch page**,
+  `web_search` **search web** (the other built-in tools likewise; any other
+  tool's name with spaces for underscores). An open tool card keeps the raw
+  name beside the title: `run command  (execute_command) · ok`.
+- **A size report gets a one-line digest.** A tool result with at least two
+  `du`-style lines (`114.1 GB  models`) shows
+  `result: 3 locations · largest untracked/models (114.1 GB)` above its
+  output; any other output is shown as before, and the full result stays
+  below the digest.
 
 - **The attention chip follows your event stream.** On a gateway with
   `/api/gateway/me/events`, the status line's chip is what waits for you

@@ -33,11 +33,15 @@ The web app is now composed from the AbstractFramework UI kit: `@abstractframewo
 
 - App code the kit now provides (net about 1,700 lines) (tool picker, multi-select, attachment uploads, composer attachments, about rows, tool permissions, dead runtime helpers) and their CSS.
 
-## [terminal 0.11.0] - 2026-10-25
+## [terminal 0.11.0] - 2026-10-28
 
 The live attention chip needs AbstractGateway with your event stream (`/api/gateway/me/events`); on an older gateway it keeps the automation list's count and its poll.
 
 ### Changed
+
+- Terminal: the header's top right shows the gateway you are connected to (cut to 28 columns), beside its connection orb, where the session id was. The session id moves to the status bar's right end (tail-kept, at most 15 columns, omitted below 30 columns); the gateway is no longer repeated there. When the gateway is down, the status bar's right end gives the session id and the reason.
+- Terminal: tool rows lead with what the call does: `execute_command` reads **run command**, `read_file` **read file**, `fetch_url` **fetch page**, `web_search` **search web** (and the other built-in tools likewise; any other tool's name with spaces for underscores). An open tool card keeps the raw name beside the title, `run command  (execute_command) · ok`.
+- Terminal: a tool result shaped like a size report (`du`-style lines such as `114.1 GB  models`, at least two of them) gets a one-line digest above its output, `result: 3 locations · largest untracked/models (114.1 GB)`; any other output is shown as before, and the full result stays below the digest.
 
 - Terminal: the status-line attention chip follows your event stream on the
   gateway (`/me/events` catch-up, SSE while you are at the terminal, one

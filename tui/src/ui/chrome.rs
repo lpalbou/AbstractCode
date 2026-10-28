@@ -1202,7 +1202,7 @@ pub(crate) fn mem_segment(state: &crate::store::HostState) -> Option<(String, u8
 
 /// Status bar: the always-visible instrument row (REST-1) —
 /// `ctx used/window (%) · session tokens · gpu · skills · mcp · ? help`
-/// — plus theme + gateway on the right. The key legend moved behind `?`
+/// — plus theme + session id on the right. The key legend moved behind `?`
 /// (and /help): the Python predecessor's law, written after its own
 /// adversary review, is "the footer is the only always-visible surface"
 /// — it must carry NUMBERS, not a legend that is useful once and then
@@ -1218,17 +1218,16 @@ pub fn status_bar(
     theme_st: crate::ui::theme_menu::TriggerState,
 ) -> View {
     let tokens = *t;
-    let gateway = ctx.gateway_label.clone();
     // THREE parts, each re-rendering on its OWN inputs (operator ask
     // 2026-10-10: the theme name is a focusable dropdown trigger): the
     // facts + markers (they move with every ledger record), the theme
     // trigger (rebuilt only when its visibility changes — a rebuild would
-    // drop its focus), and the gateway. They share one PLAN of what the
+    // drop its focus), and the session id (the gateway itself is the
+    // header's, top right, beside its connection orb). They share one PLAN of what the
     // right cluster shows, from narrow, rarely-changing inputs.
     let root_open = scx.memo(move || store.fold.with(|f| f.root_open_at_conclusion));
     let viewport = abstracttui::app::use_viewport(scx);
     let plan_ctx = ctx.clone();
-    let plan_gateway = gateway.clone();
     let plan = Rc::new(move || -> (RightPlan, Option<&'static str>, String) {
         let dictation_idle = store
             .voice
@@ -1238,9 +1237,12 @@ pub fn status_bar(
         let _ = store.voice.tick.get();
         let space_on = !crate::ui::voice_view::prefs(&plan_ctx).space_to_talk_off;
         let voice_hint = dictation_idle.then(|| crate::ui::push_to_talk::hint(space_on));
+        let row_w = viewport.get().w;
+        let sid = footer_session(&store.session_id.get(), row_w);
         let gw = match store.conn.get() {
-            Conn::Down(msg, _) => format!("{plan_gateway} · {}", text::truncate_ellipsis(&msg, 40)),
-            _ => plan_gateway.clone(),
+            Conn::Down(msg, _) if sid.is_empty() => text::truncate_ellipsis(&msg, 40),
+            Conn::Down(msg, _) => format!("{sid} · {}", text::truncate_ellipsis(&msg, 40)),
+            _ => sid,
         };
         let theme_label = abstracttui::app::current_theme().label;
         let plan = right_plan(
@@ -1248,7 +1250,7 @@ pub fn status_bar(
             voice_hint,
             &crate::ui::theme_menu::trigger_text(theme_label),
             &gw,
-            viewport.get().w,
+            row_w,
         );
         (plan, voice_hint, gw)
     });
@@ -1454,6 +1456,9 @@ pub fn status_bar(
             let t = tokens;
             let (plan, _, gw) = gw_plan();
             let down = matches!(store.conn.get(), Conn::Down(..));
+            if gw.is_empty() {
+                return Element::new().build();
+            }
             let shown = if plan.theme {
                 format!("· {gw} ")
             } else {
@@ -1557,7 +1562,8 @@ pub struct RightPlan {
 /// only to `row_w / 3`, in PRIORITY order: a higher segment takes its room
 /// first, and a lower one shows only in what is left (when the theme
 /// cannot fit, the shorter hint still may), so the instruments on the
-/// left keep their room. The gateway always shows.
+/// left keep their room. The last segment (the session id,
+/// [`footer_session`]) always shows.
 pub fn right_plan(
     root_open: bool,
     voice_hint: Option<&str>,
@@ -1595,8 +1601,8 @@ pub fn right_plan(
 }
 
 /// The status bar's right cluster as one string, left to right: the root
-/// marker, the voice hint, the theme, the gateway (moved here from a
-/// separate last line, operator ask 2026-10-10). The bar itself draws it
+/// marker, the voice hint, the theme, the session id (the gateway, here
+/// from 2026-10-10, moved to the header's top right on 2026-10-28). The bar itself draws it
 /// in three parts — the theme is a focusable dropdown trigger — from the
 /// same [`right_plan`].
 pub fn status_right(
@@ -1619,6 +1625,20 @@ pub fn status_right(
     }
     out.push(gateway.to_string());
     out.join(" · ")
+}
+
+/// The status bar's last segment: the session id, tail-kept
+/// ([`tail_ellipsis`] at 17: at most 15 columns, the width of the
+/// `127.0.0.1:18731` gateway label it replaces, so the right cluster's
+/// budget for the theme and the voice hint is unchanged), cut further to a third of the
+/// row when narrow, and omitted below 30 columns, where a third cannot
+/// hold a readable tail. An empty id shows nothing.
+pub fn footer_session(session_id: &str, row_w: i32) -> String {
+    let budget = (row_w / 3).min(17);
+    if session_id.is_empty() || budget < 10 {
+        return String::new();
+    }
+    tail_ellipsis(session_id, budget as usize)
 }
 
 /// Keep the TAIL of an identifier, `…`-prefixed, when it exceeds
@@ -1952,7 +1972,22 @@ mod tests {
         assert_eq!(
             status_right(false, None, "Tokyo Night", "127.0.0.1:8080", 10),
             "127.0.0.1:8080",
-            "the gateway always shows"
+            "the last segment always shows"
         );
+    }
+
+    #[test]
+    fn footer_session_keeps_the_tail_and_yields_when_narrow() {
+        assert_eq!(footer_session("acode-test-session", 120), "…e-test-session");
+        assert_eq!(
+            footer_session("acode-0123456789abcdefghij", 120),
+            "…6789abcdefghij"
+        );
+        assert_eq!(
+            footer_session("acode-0123456789abcdefghij", 36),
+            "…bcdefghij"
+        );
+        assert_eq!(footer_session("acode-test-session", 29), "");
+        assert_eq!(footer_session("", 120), "");
     }
 }

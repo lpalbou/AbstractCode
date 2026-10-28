@@ -2293,7 +2293,7 @@ fn cycle_panels_anchor_on_click_and_hit_their_drawn_rows() {
     let lines: Vec<&str> = screen.lines().collect();
     let card = lines
         .iter()
-        .position(|l| l.contains("✓ read_file · ok"))
+        .position(|l| l.contains("✓ read file  (read_file) · ok"))
         .unwrap_or_else(|| panic!("an open cycle shows its full tool card:\n{screen}"));
     click_row(&mut h, 86, card - 1);
     h.turn();
@@ -2318,7 +2318,7 @@ fn bottom_line_marker_follows_the_root_open_flag() {
     let screen = h.turn();
     let last = screen.lines().last().unwrap_or_default().to_string();
     assert!(
-        last.contains("hold Space to talk") && last.contains("127.0.0.1:8080"),
+        last.contains("hold Space to talk") && last.contains("-test-session"),
         "{last}"
     );
     assert!(
@@ -2945,7 +2945,7 @@ fn right_click_on_a_tool_row_opens_its_action_menu() {
     );
     let row0 = screen
         .lines()
-        .position(|l| l.contains("read_file"))
+        .position(|l| l.contains("read file"))
         .expect("tool row on screen");
     let (x, y) = (4, row0 as i32 + 1); // SGR coordinates are 1-based
     h.term.push_input(format!("\x1b[<2;{x};{y}M").as_bytes());
@@ -3005,7 +3005,7 @@ fn a_right_click_with_nothing_to_offer_says_so() {
     let screen = h.turn();
     let row = screen
         .lines()
-        .position(|l| l.contains("list_entities"))
+        .position(|l| l.contains("list entities"))
         .expect("tool row on screen") as i32
         + 1;
     h.term.push_input(format!("\x1b[<2;4;{row}M").as_bytes());
@@ -3232,10 +3232,10 @@ fn the_sessions_board_shows_gateway_sessions_and_names_its_sources() {
 /// this pins that the wiring honors it.
 #[test]
 fn a_narrow_pane_that_cannot_draw_the_marker_has_no_hidden_control() {
-    // 34 pane columns is the measured drop threshold for this row
-    // (glyph + `execute_command` + `· ok` + a 9-cell marker); the
-    // terminal is wider than the pane by its padding and scrollbar.
-    let mut h = harness_sized(Size::new(36, 24));
+    // 30 pane columns is under the drop threshold for this row (glyph +
+    // its title `run command` + `· ok` + a 9-cell marker); the terminal
+    // is wider than the pane by its padding and scrollbar.
+    let mut h = harness_sized(Size::new(32, 24));
     h.turn();
     h.leave_splash();
     h.store.fold.update(|f| {
@@ -7294,8 +7294,10 @@ fn status_bar_drops_whole_segments_never_self_ellipsis() {
         footer.contains("128k tk session") && footer.contains("gpu 42%"),
         "session (splitless: honest total) + gpu fit at 100 cols:\n{footer}"
     );
+    // The session id (last, tail-cut by design) is the one exception.
+    let sid = abstractcode::ui::chrome::footer_session("acode-test-session", 100);
     assert!(
-        !footer.contains('…'),
+        !footer.replace(&sid, "").contains('…'),
         "the footer never self-truncates a segment into an ellipsis \
          fragment — overflow drops segments whole:\n{footer}"
     );
@@ -7305,10 +7307,10 @@ fn status_bar_drops_whole_segments_never_self_ellipsis() {
         "tail segments paint WHOLE or vanish whole (right-to-left), \
          never as fragments:\n{footer}"
     );
-    // The right cluster (theme · host) is never sacrificed to the left.
+    // The right cluster (theme · session id) is never sacrificed to the left.
     assert!(
-        footer.contains("127.0.0.1:8080"),
-        "gateway host survives on the right:\n{footer}"
+        footer.contains("-test-session"),
+        "session id survives on the right:\n{footer}"
     );
 }
 
@@ -7359,10 +7361,10 @@ fn header_facts_drop_whole_before_workflow_and_route() {
         !header.contains("skills") && !header.contains("mcp"),
         "overflowing facts drop whole from the header:\n{header}"
     );
-    // Session id + orb keep the right edge.
+    // Gateway + orb keep the right edge.
     assert!(
-        header.contains("acode-test-session"),
-        "session id survives on the right:\n{header}"
+        header.contains("127.0.0.1:8080"),
+        "the gateway survives on the right:\n{header}"
     );
 }
 
@@ -11632,7 +11634,7 @@ fn folded_view_stays_a_bounded_labelled_summary() {
     );
     // The folded tool row is one line + at most its 3 error rows.
     assert!(
-        screen.contains("broken_tool") && screen.contains("line one"),
+        screen.contains("broken tool") && screen.contains("line one"),
         "the folded row still names the call and its error:\n{screen}"
     );
 }
