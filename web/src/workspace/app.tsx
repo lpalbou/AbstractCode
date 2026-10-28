@@ -1305,6 +1305,7 @@ export function CodeWorkspace() {
         connected={connection.connected}
         isAdmin={connection.status?.gateway?.principal?.admin === true}
         levelSource={voice}
+        sampleRun={{ runId: identity ? session.runId : "", sessionId: session.sessionId }}
       />
   );
   const automationDetail = automationsState.detail;

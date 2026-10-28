@@ -75,6 +75,38 @@ export function codeVoiceLibrary(isAdmin: boolean): VoiceLibrary {
   };
 }
 
+/** What a voice sample says. */
+export const VOICE_SAMPLE_TEXT = "Hello, this is how I sound.";
+
+/**
+ * Choosing a voice plays it (the kit's `previewVoice`; every gateway TTS route needs a run):
+ * `POST runs/{run}/voice/tts` on the conversation's run, else the session's media run
+ * (abstractgateway routes/gateway.py `voice_tts`: `{audio_artifact}`), then the artifact's bytes
+ * (`runs/{run}/artifacts/{id}/content`), both through this app's authenticated proxy.
+ */
+export function codeVoicePreview(runId: string, sessionId: string) {
+  return async (prefs: VoiceClientPreferences, text?: string, opts?: { signal?: AbortSignal }): Promise<ArrayBuffer> => {
+    if (!runId && !sessionId) throw new Error("Open a conversation to hear a voice sample.");
+    const run = await transcriptionRunId(runId, sessionId);
+    const signal = opts?.signal;
+    const res: any = await gatewayRequest(gatewayApiPath(`runs/${encodeURIComponent(run)}/voice/tts`), {
+      method: "POST",
+      body: JSON.stringify({ text: text || VOICE_SAMPLE_TEXT, request_id: newId(), ...voiceTtsRequest(prefs) }),
+      ...(signal ? { signal } : {}),
+    });
+    const ref = res?.audio_artifact;
+    const id = String(ref?.$artifact || ref?.artifact_id || ref?.id || "").trim();
+    if (!id) throw new Error("The synthesis returned no audio.");
+    const audio = await fetch(gatewayApiPath(`runs/${encodeURIComponent(run)}/artifacts/${encodeURIComponent(id)}/content`), {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      ...(signal ? { signal } : {}),
+    });
+    if (!audio.ok) throw new Error(`The voice sample could not be downloaded (HTTP ${audio.status}).`);
+    return await audio.arrayBuffer();
+  };
+}
+
 /** Code's microphone defaults (shown as the selected state while unset): hold to talk, send what was said. */
 export const CODE_CAPTURE_DEFAULTS = { capture_mode: "hold" as const, auto_send: true };
 
@@ -86,6 +118,7 @@ export function CodeVoiceSettings({
   connected,
   isAdmin = false,
   levelSource,
+  sampleRun,
 }: {
   value: VoiceClientPreferences;
   onChange: (next: VoiceClientPreferences) => void;
@@ -95,6 +128,8 @@ export function CodeVoiceSettings({
   isAdmin?: boolean;
   /** The composer's voice (the live microphone level while recording). */
   levelSource?: React.ComponentProps<typeof AfVoiceSection>["levelSource"];
+  /** Where a voice sample is synthesized (the conversation's run, else the session's media run). */
+  sampleRun?: { runId: string; sessionId: string };
 }) {
   return (
     <AfVoiceSection
@@ -110,6 +145,8 @@ export function CodeVoiceSettings({
       rows={{ capture: true }}
       captureDefaults={CODE_CAPTURE_DEFAULTS}
       levelSource={levelSource ?? null}
+      // Choosing a voice plays it (D2: the picker was silent in Code).
+      previewVoice={connected && sampleRun ? codeVoicePreview(sampleRun.runId, sampleRun.sessionId) : undefined}
       unavailableReason={connected ? null : "Connect to a gateway to configure voice."}
     />
   );
