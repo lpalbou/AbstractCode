@@ -528,7 +528,8 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await capture(page, "compact-tool-supervision-mobile-question");
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.reload();
-    await expect(page.locator(".code-run-strip")).toContainText("Permissions: all");
+    // "Allow all enabled tools" made every bulk-reachable enabled tool Auto in this app's tool layer.
+    await expect(page.locator(".code-run-strip")).toContainText("Auto: every enabled tool");
     await expect(page.getByRole("heading", { name: "A question for you" })).toBeVisible();
     await page.getByRole("button", { name: "Revoke", exact: true }).click();
     await expect(
@@ -925,7 +926,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await page.keyboard.press("Escape");
   });
 
-  test("permissions all never executes a tool unchecked in the enabled selection", async ({ page }) => {
+  test("a tool set to Off is never offered to the run, and is offered again when set back", async ({ page }) => {
     const submissions: any[] = [];
     page.on("request", request => {
       if (request.method() === "POST" && request.url().endsWith("/api/gateway/runs/start")) submissions.push(request.postDataJSON());
@@ -934,13 +935,10 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await selectWorkflow(page, "Native tool approval");
     await openWorkspaceSection(page, "Tools");
     const settings = page.locator(".code-rail .af-rail__panel");
-    await settings.getByLabel("Permissions", { exact: true }).selectOption("all");
-    await settings.getByRole("button", { name: "Custom allowlist", exact: true }).click();
-    await settings.getByRole("button", { name: "Select all", exact: true }).click();
-    await settings.getByPlaceholder("Filter tools...").fill("write_file");
-    const row = settings.locator(".af-tool-row").filter({ hasText: "write_file" });
-    await row.getByRole("switch").uncheck();
-    await capture(page, "permissions-all-enabled-tools");
+    // The kit ToolModeEditor (backlog 0033): Off / Ask / Auto per tool.
+    await settings.getByRole("searchbox", { name: "Search tools" }).fill("write_file");
+    await settings.locator('[data-tool-mode="write_file:off"]').click();
+    await capture(page, "tool-off");
     await settings.getByRole("button", { name: /^Collapse / }).click();
     await sendTurn(page);
     await expectPersistedCompletion(page);
@@ -948,41 +946,55 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await expect(page.locator(".pc-workflow-interaction")).toHaveCount(0);
     expect(submissions[0].input_data._runtime.allowed_tools).not.toContain("write_file");
     expect(submissions[0].input_data._runtime.tool_policy.require_approval_tools).not.toContain("write_file");
+    expect(submissions[0].input_data._runtime.tool_policy.auto_approve_tools).not.toContain("write_file");
     await capture(page, "unchecked-tool-denied");
     // The previous turn's immutable ceiling must not prevent an explicit
     // enablement for the next run in the same conversation.
     await openWorkspaceSection(page, "Tools");
-    await settings.getByPlaceholder("Filter tools...").fill("write_file");
-    await settings.getByRole("switch", { name: "write_file", exact: true }).check();
+    await settings.getByRole("searchbox", { name: "Search tools" }).fill("write_file");
+    await settings.locator('[data-tool-mode="write_file:auto"]').click();
     await settings.getByRole("button", { name: /^Collapse / }).click();
     await openWorkflowInputs(page);
     await sendTurn(page);
     await expect.poll(() => submissions.length).toBe(2);
     await expectPersistedCompletion(page);
     expect(submissions[1].input_data._runtime.allowed_tools).toContain("write_file");
+    // Auto runs without a client: the gateway gets it in auto_approve_tools (decision 2026-10-27).
+    expect(submissions[1].input_data._runtime.tool_policy.auto_approve_tools).toContain("write_file");
     await expect(page.locator(".pc-tool-activity--completed")).toHaveCount(1);
   });
 
-  test("revokes a permission level selected before starting the run", async ({ page }) => {
+  test("an Auto tool runs with no gate (the gateway holds it); an Ask tool waits for the person", async ({ page }) => {
     const submissions: any[] = [];
     page.on("request", request => {
       if (request.method() === "POST" && request.url().endsWith("/api/gateway/runs/start")) submissions.push(request.postDataJSON());
     });
     await signIn(page);
     await selectWorkflow(page, "Tool supervision");
-    await openWorkspaceSection(page, "Tools");
     const settings = page.locator(".code-rail .af-rail__panel");
-    await settings.getByLabel("Permissions", { exact: true }).selectOption("all");
-    await settings.getByRole("button", { name: /^Collapse / }).click();
+    const setMode = async (mode: "auto" | "ask") => {
+      await openWorkspaceSection(page, "Tools");
+      await settings.getByRole("searchbox", { name: "Search tools" }).fill("write_file");
+      await settings.locator(`[data-tool-mode="write_file:${mode}"]`).click();
+      await settings.getByRole("button", { name: /^Collapse / }).click();
+    };
+    // Auto (decision 2026-10-27, option a): sent in auto_approve_tools, so the gateway runs the
+    // write batches without a wait; the first question is the flow's own.
+    await setMode("auto");
     await sendTurn(page);
     await expect(page.getByRole("heading", { name: "A question for you" })).toBeVisible();
-    expect(submissions[0].input_data._runtime.tool_policy.require_approval_tools).toContain("write_file");
-    expect(submissions[0].input_data._runtime.tool_policy).not.toHaveProperty("auto_approve_tools");
-    await page.getByRole("button", { name: "Revoke", exact: true }).click();
+    expect(submissions[0].input_data._runtime.tool_policy.auto_approve_tools).toContain("write_file");
+    await expect(page.getByRole("heading", { name: /needs? permission$/ })).toHaveCount(0);
     await page.getByRole("button", { name: "continue", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "1 action needs permission" })).toBeVisible();
-    await page.getByRole("button", { name: "Deny", exact: true }).click();
     await expectPersistedCompletion(page);
+    // Ask (write_file's gateway default here, so the choice reduces to "no choice" and nothing is
+    // sent): the gateway waits for the person.
+    await setMode("ask");
+    await openWorkflowInputs(page);
+    await sendTurn(page);
+    await expect.poll(() => submissions.length).toBe(2);
+    expect(submissions[1].input_data._runtime?.tool_policy?.auto_approve_tools ?? []).not.toContain("write_file");
+    await expect(page.getByRole("heading", { name: "3 actions need permission" })).toBeVisible();
   });
 
   test("cascades typed provider, model and reasoning controls without changing authored defaults", async ({
@@ -1254,8 +1266,10 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await selectWorkflow(page, "Assistant contract");
     await page.locator(".code-conversation .pc-composer textarea").fill("Prepare dictation");
     await page.getByRole("button", { name: "Send", exact: true }).click();
+    // The run exists (its id is the voice scope: a scope change cancels a capture by design).
+    await expect(page).toHaveURL(/(?:#|&)run=/);
     const mic = page.getByRole("button", {
-      name: "Hold to dictate",
+      name: "Hold to talk",
       exact: true,
     });
     await expect(mic).toBeEnabled();
@@ -1274,7 +1288,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await expect(page.locator(".code-conversation .pc-composer textarea")).toHaveValue("");
     await expect(
       page.getByRole("button", {
-        name: "Recording — release to transcribe",
+        name: "Recording — release to send",
         exact: true,
       }),
     ).toHaveCount(0);
@@ -1336,43 +1350,47 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await signIn(page);
     await selectWorkflow(page, "Assistant contract");
     const start = async (prompt: string) => {
+      // A new conversation starts on the default workflow: choose it again (its inputs loaded).
+      await selectWorkflow(page, "Assistant contract");
       await page.locator(".code-conversation .pc-composer textarea").fill(prompt);
       await page.getByRole("button", { name: "Send", exact: true }).click();
+      // The run exists (its id is the voice scope: a scope change cancels a capture by design).
+      await expect(page).toHaveURL(/(?:#|&)run=/);
       await expect(
-        page.getByRole("button", { name: "Hold to dictate", exact: true }),
+        page.getByRole("button", { name: "Hold to talk", exact: true }),
       ).toBeEnabled();
     };
     await start("First microphone owner");
     await page
-      .getByRole("button", { name: "Hold to dictate", exact: true })
+      .getByRole("button", { name: "Hold to talk", exact: true })
       .dispatchEvent("pointerdown", { button: 0 });
     await expect(
       page.getByRole("button", {
-        name: "Recording — release to transcribe",
+        name: "Recording — release to send",
         exact: true,
       }),
     ).toBeVisible();
     await page
       .getByRole("button", {
-        name: "Recording — release to transcribe",
+        name: "Recording — release to send",
         exact: true,
       })
       .dispatchEvent("pointerup", { button: 0 });
     await page.locator(".code-new-chat").click();
     await start("Second microphone owner");
     await page
-      .getByRole("button", { name: "Hold to dictate", exact: true })
+      .getByRole("button", { name: "Hold to talk", exact: true })
       .dispatchEvent("pointerdown", { button: 0 });
     await expect(
       page.getByRole("button", {
-        name: "Recording — release to transcribe",
+        name: "Recording — release to send",
         exact: true,
       }),
     ).toBeVisible();
     await page.evaluate(() => (window as any).__recorderFixture.queued[0]());
     await expect(
       page.getByRole("button", {
-        name: "Recording — release to transcribe",
+        name: "Recording — release to send",
         exact: true,
       }),
     ).toBeVisible();
@@ -1395,7 +1413,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     // lives in the operator's shared workspace.
     await page
       .getByRole("group", { name: "Files source" })
-      .getByRole("button", { name: "Shared workspace (admin)", exact: true })
+      .getByRole("button", { name: "Gateway files (admin)", exact: true })
       .click();
     const fileSearch = page.getByLabel("Search workspace files");
     await fileSearch.fill("welcome.md");
@@ -1408,7 +1426,8 @@ test.describe("AbstractCode isolated gateway workspace", () => {
         .getByText("welcome.md", { exact: true }),
     ).toBeVisible();
 
-    await page.locator('input[type="file"]').setInputFiles({
+    // The composer's file input (the docs assistant drawer has its own).
+    await page.locator('input[type="file"]:not(#code-rail-panel-docs input)').setInputFiles({
       name: "browser-upload.txt",
       mimeType: "text/plain",
       buffer: Buffer.from("AbstractCode isolated browser upload\n"),

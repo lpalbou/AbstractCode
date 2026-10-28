@@ -71,10 +71,9 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   await page.getByRole("button", { name: "New automation" }).click();
   const dialog = page.getByRole("dialog", { name: "Schedule a task" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("combobox", { name: "Automation workflow", exact: true })).toContainText("Native tool approval");
+  await expect(dialog.getByRole("combobox", { name: "Automation flow", exact: true })).toContainText("Native tool approval");
   await dialog.getByLabel("Task").fill("Write the fixture file");
   await dialog.getByText("Ask me before each tool call").click();
-  await dialog.getByText("Advanced").click();
   await dialog.getByLabel("Title").fill(title);
   await dialog.getByRole("button", { name: "Create automation" }).click();
   await expect(dialog).toBeHidden();
@@ -84,7 +83,7 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   await expect(row).toBeVisible();
   // The kit's state label: the word, then its icon.
   await expect(row.getByRole("switch", { name: "Active" })).toHaveAttribute("aria-checked", "true");
-  await expect(row.locator('[data-field="timing"]')).toContainText(/^every /);
+  await expect(row.locator('[data-field="timing"]')).toContainText(/^every /i);
 
   // The first run starts now and parks on a typed tool approval.
   const main = page.locator(".code-automation-main");
@@ -169,7 +168,6 @@ test("the automation detail's lists collapse, stay collapsed after a reload, and
   await page.getByRole("button", { name: "New automation" }).click();
   const dialog = page.getByRole("dialog", { name: "Schedule a task" });
   await dialog.getByLabel("Task").fill("Write the fixture file");
-  await dialog.getByText("Advanced").click();
   await dialog.getByLabel("Title").fill(title);
   await dialog.getByRole("button", { name: "Create automation" }).click();
   await expect(dialog).toBeHidden();
@@ -222,7 +220,6 @@ test("creates and edits a custom growing context budget", async ({ page }) => {
   await expect(budget).toHaveValue("50000");
   await budget.fill("30000");
   await dialog.getByText("Ask me before each tool call").click();
-  await dialog.getByText("Advanced").click();
   await dialog.getByLabel("Title").fill(title);
   const posted = page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/automations"));
   await dialog.getByRole("button", { name: "Create automation" }).click();
@@ -256,6 +253,9 @@ test("creates and edits a custom growing context budget", async ({ page }) => {
 
 test("list refreshes preserve sidebar rows without adding loading messages", async ({ page }) => {
   await signIn(page);
+  // The first loads have landed (a refresh held below must not be the first one: that one says Loading).
+  await expect(page.locator(".code-auto-card").or(page.getByText("No automations yet", { exact: false })).first()).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: /Loading (automations|conversations)…/ })).toHaveCount(0);
   for (const [label, endpoint, message] of [
     ["Refresh automations", /\/automations\?/, "Loading automations…"],
     ["Refresh conversations", /\/runs\?/, "Loading conversations…"],

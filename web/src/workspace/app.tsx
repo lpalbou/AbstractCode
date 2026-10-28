@@ -1,6 +1,16 @@
-import { AppAssistantDrawer } from "./app_assistant";
+import { codeDocsPanel } from "./app_assistant";
 import { LoadingStatus } from "./loading_status";
-import { automationToolSelection, gatewayApiPath } from "@abstractframework/ui-kit";
+import {
+  automationToolSelection,
+  createSessionToolPolicyClient,
+  createToolLayerStore,
+  gatewayApiPath,
+  hasToolChoices,
+  planRunTools,
+  toWorkflowApprovalPolicy,
+  withRunTools,
+  type ToolModeLayer,
+} from "@abstractframework/ui-kit";
 import React, {
   useCallback,
   useEffect,
@@ -9,13 +19,14 @@ import React, {
   useState,
 } from "react";
 import {
-  AfAppearanceDialog,
   AfMenu,
   AfTopBarActions,
   AfSwitch,
   GatewayConnectModal,
   Icon,
   useAppearanceSettings,
+  useVoiceDefaults,
+  useVoicePreferences,
   useGatewayConnection,
   sttRouteText,
   appIdentity,
@@ -30,7 +41,6 @@ import {
   kitDialogOpen,
   paneModeFrom,
   sidebarOnModeChange,
-  useChromeBottom,
   useDrawerFocus,
   type PaneMode,
 } from "./layout";
@@ -42,9 +52,10 @@ import { ConversationCard } from "./sidebar_cards";
 import {
   WorkflowChat,
   WorkspaceBrowser,
-  chatToMarkdown,
+  uploadRefusal,
+  useAttachmentUploads,
+  type ComposerAttachment,
   presentInteraction,
-  downloadTextFile,
   useWorkflowSession,
   workflowPendingInteraction,
   type ChatMessage,
@@ -70,11 +81,10 @@ import {
   type RunPreferences,
 } from "./settings_panel";
 import { WorkspaceFilesContent, WorkspaceActivityContent, AutomationActivity, activityAttention } from "./workspace_panels";
-import { CodeRightRail, useRailPanel, type RailPanel, type SettingsRailPanel } from "./right_rail";
+import { CodeRightRail, type CodePanel, type RailPanel, type SettingsRailPanel } from "./right_rail";
 import { AutomationBinding, AutomationDefinitionForm, useAutomationSettings } from "./automation_settings_view";
 import { proxyGatewayFetch, openRunFolder } from "./session_files";
 import { copy_text } from "../lib/clipboard";
-import { aboutVersions, type FetchOutcome } from "./about_rows";
 import { automationTarget, automationsAvailability, myEmailConsoleUrl } from "./automations";
 import {
   AutomationMain,
@@ -88,6 +98,7 @@ import {
   readPreferences,
   writePreferences,
 } from "./preferences";
+// Kit gap K3 (ui-primitives 0030): the controller does not derive the "streaming unsupported" / malformed-delta notes.
 import {
   addStreamNote,
   effectiveStreamReplies,
@@ -121,20 +132,10 @@ import {
   AgentWorkflowInputs,
 } from "./workflow_inputs";
 import type { AttachmentRef } from "../lib/types";
-import {
-  UPLOAD_CONCURRENCY,
-  queueUploads,
-  runBounded,
-  unattachedSendBlock,
-  uploadAnnouncement,
-  uploadFailure,
-  type PendingUpload,
-} from "./attachment_uploads";
-import { ComposerAttachments } from "./composer_attachments";
 import { RunStatusBar } from "./run_status_bar";
-import { CodeVoiceSettings, VoiceTools, spokenMessage, useVoiceDefaults, useWorkspaceVoice } from "./voice_tools";
+import { CODE_CAPTURE_DEFAULTS, CodeVoiceSettings, VoiceTools, fetchVoiceDefaults, spokenMessage, useWorkspaceVoice } from "./voice_tools";
 import { workflowPromptProperty, restoreWorkflowFields } from "./input_schema";
-import { resolveToolPermissions, intersectToolPermissions } from "./tool_permissions";
+import { TOOLS_MIGRATION_NOTICE, allEnabledAuto, migrateLegacyTools, toolsMigrationKey, withAllEnabledAuto, withoutAutoChoices } from "./tool_layers";
 import {
   advanceQueueIntents,
   queueIntentMatches,
@@ -176,58 +177,50 @@ export function CodeWorkspace() {
   const [appearance, setAppearance] = useAppearanceSettings("abstractcode", {
     defaults: { theme: "observer-night" },
   });
-  const [assistantOpen, setAssistantOpen] = useState(false);
-  const [appearanceOpen, setAppearanceOpen] = useState(false);
   // "My default workspaces" (the account level); a saved change reloads the session panel's default.
   const [defaultWorkspacesOpen, setDefaultWorkspacesOpen] = useState(false);
   const [defaultWorkspacesRevision, setDefaultWorkspacesRevision] = useState(0);
   const bumpDefaultWorkspaces = useCallback(() => setDefaultWorkspacesRevision((n) => n + 1), []);
-  // `GET /api/gateway/about`, fetched each time the About dialog opens.
-  const [gatewayAbout, setGatewayAbout] = useState<FetchOutcome>();
-  const refreshGatewayAbout = useCallback(() => {
-    setGatewayAbout(undefined);
-    void gatewayRequest(gatewayApiPath("about"))
-      .then((value) => setGatewayAbout({ ok: true, value }))
-      .catch((reason) =>
-        setGatewayAbout({
-          ok: false,
-          status: reason?.status,
-          message: formatError(reason),
-        }),
-      );
-  }, []);
-  const [voicePreferences, setVoicePreferences] = useState<VoiceClientPreferences>(
-    {},
-  );
+  // Voice preferences in this browser, per account, shared by the Voice panel and the composer
+  // microphone (kit useVoicePreferences: same tab and other tabs).
+  const [voicePreferences, changeVoicePreferences] = useVoicePreferences(identity ? `abstractcode.voice:${identity}` : null);
   useEffect(() => {
-    try {
-      setVoicePreferences(
-        JSON.parse(
-          localStorage.getItem(`abstractcode.voice:${identity}`) || "{}",
-        ),
-      );
-    } catch {
-      setVoicePreferences({});
-    }
     setPanelOpen(false);
-    setAssistantOpen(false);
   }, [identity]);
-  const changeVoicePreferences = (next: VoiceClientPreferences) => {
-    setVoicePreferences(next);
-    if (identity)
-      try {
-        localStorage.setItem(
-          `abstractcode.voice:${identity}`,
-          JSON.stringify(next),
-        );
-      } catch {
-        /* In-memory preferences still work. */
-      }
-  };
   const [preferences, setPreferences] =
     useState<RunPreferences>(DEFAULT_PREFERENCES);
   const preferencesRef = useRef(preferences);
   preferencesRef.current = preferences;
+  // This app's tool choices (backlog 0033): the kit's tool layer store, per account, in this
+  // browser. Auto tools are sent to the gateway with each run (they run without a client open).
+  const toolStore = useMemo(() => (identity ? createToolLayerStore(identity) : null), [identity]);
+  const [appToolLayer, setAppToolLayerState] = useState<ToolModeLayer>({});
+  const [toolsNoticePending, setToolsNoticePending] = useState(false);
+  useEffect(() => {
+    setAppToolLayerState(toolStore ? toolStore.readApp(CODE_AGENT_INTERFACE) : {});
+    let pending = false;
+    try {
+      pending = Boolean(identity) && localStorage.getItem(toolsMigrationKey(identity)) === "pending";
+    } catch {
+      /* no storage: no notice */
+    }
+    setToolsNoticePending(pending);
+  }, [toolStore, identity]);
+  const setAppToolLayer = useCallback(
+    (next: ToolModeLayer) => {
+      setAppToolLayerState(next);
+      toolStore?.writeApp(CODE_AGENT_INTERFACE, Object.keys(next).length ? next : null);
+    },
+    [toolStore],
+  );
+  const dismissToolsNotice = () => {
+    setToolsNoticePending(false);
+    try {
+      localStorage.setItem(toolsMigrationKey(identity), "dismissed");
+    } catch {
+      /* the notice stays dismissed for this page */
+    }
+  };
   // "Stream replies" as sent with the next run (nothing when the gateway does
   // not advertise live replies; the setting then says why).
   const streamReplies = effectiveStreamReplies(
@@ -278,15 +271,8 @@ export function CodeWorkspace() {
   const [notice, setNotice] = useState("");
   const [sending, setSending] = useState(false);
   const sendLock = useRef(false);
+  // Workspace files attached by path (Files panel → `attachments_ingest`): already references.
   const [attachments, setAttachments] = useState<AttachmentRef[]>([]);
-  // Files dropped/pasted/picked that are not an AttachmentRef yet (queued,
-  // uploading, refused or failed). Completed uploads move to `attachments`.
-  const [uploads, setUploads] = useState<PendingUpload[]>([]);
-  const removedUploads = useRef(new Set<string>());
-  // Display-only sizes of files uploaded from this browser (the gateway's ref
-  // carries no size); never added to the AttachmentRef that rides the run.
-  const uploadedSizes = useRef(new Map<string, number>());
-  const [uploadNotice, setUploadNotice] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
   const [schema, setSchema] = useState<Record<string, any>>();
   const schemaRef = useRef(schema);
@@ -301,15 +287,20 @@ export function CodeWorkspace() {
     any
   > | null>(null);
   const [restoreError, setRestoreError] = useState("");
-  // The right panel: the kit's rail drawer (Activity, Files, Model, Workflow, Workspace, Tools, Skills, Voice).
-  const [railPanel, setRailPanel, railOverlay] = useRailPanel();
+  // The right side: the kit's drawer system (Activity, Files, Model, Workflow, Workspace, Tools,
+  // Skills, Voice on the rail; the Docs assistant from the top bar). It restores the docked panel.
+  const [railPanel, setRailPanel] = useState<CodePanel | null>(null);
+  const railOverlay = useAfMedia(AF_MEDIA.md);
+  // A phone always starts with the content visible: becoming an overlay folds the panel away.
+  useEffect(() => {
+    if (railOverlay) setRailPanel(null);
+  }, [railOverlay]);
   const panelOpen = railPanel !== null;
   /** Legacy "close the panel" call sites: only a FLOATING panel gets out of the way; a docked one stays. */
   const setPanelOpen = (open: boolean) => {
     if (!open && railOverlay) setRailPanel(null);
   };
   const openPanel = (section: RailPanel) => {
-    setAssistantOpen(false);
     setSidebarOpen(false);
     setRailPanel(section);
   };
@@ -323,8 +314,6 @@ export function CodeWorkspace() {
   const belowLg = useAfMedia(AF_MEDIA.lg);
   const paneMode: PaneMode = paneModeFrom(belowLg, panesAreDrawers);
   const paneModeRef = useRef<PaneMode>(paneMode);
-  // Kit drawers open under the measured chrome (top bar, or the one-row landscape chrome).
-  const drawerTop = useChromeBottom(60);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Collapsible Automations / Conversations panels, remembered per viewer.
   const [panels, togglePanelOpen] = useSidebarPanels();
@@ -350,11 +339,29 @@ export function CodeWorkspace() {
   const switchNotice = useRef("");
   const [search, setSearch] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
-  const [composeMode, setComposeMode] = useState<"steer" | "queue">("steer");
   const [queue, setQueue] = useState<QueueIntent[]>([]);
   const [queueRunning, setQueueRunning] = useState(false);
   const [optimistic, setOptimistic] = useState<ChatMessage[]>([]);
-  const toolPermissions = useMemo(() => resolveToolPermissions(catalog.tools, preferences.tools, preferences.permissions), [catalog.tools, preferences.tools, preferences.permissions]);
+  // The one-time migration of the Permissions tier / tool picker into this app's tool layer
+  // (decision 2026-10-27): labeled, never silent — the Tools panel says so until dismissed.
+  useEffect(() => {
+    const legacy = preferences.legacyTools;
+    if (!legacy || !toolStore || catalog.loading || !catalog.toolCatalog.length) return;
+    if (!Object.keys(toolStore.readApp(CODE_AGENT_INTERFACE)).length) {
+      const migrated = migrateLegacyTools(legacy, catalog.toolCatalog);
+      if (Object.keys(migrated).length) {
+        setAppToolLayer(migrated);
+        setToolsNoticePending(true);
+        try {
+          localStorage.setItem(toolsMigrationKey(identity), "pending");
+        } catch {
+          /* shown for this page only */
+        }
+        setNotice(`${TOOLS_MIGRATION_NOTICE} in Tools.`);
+      }
+    }
+    setPreferences(({ legacyTools: _done, ...rest }) => rest);
+  }, [preferences.legacyTools, toolStore, catalog.loading, catalog.toolCatalog, identity, setAppToolLayer]);
   // The input this page itself posted for the run it just started. Until the
   // Gateway's filtered copy (`/input_data`) arrives, it scopes the approver,
   // so a first batch that lands inside that fetch is not shown as a question.
@@ -364,11 +371,10 @@ export function CodeWorkspace() {
     const ownStart = startedRunInput.current?.runId === session.runId ? startedRunInput.current.input : null;
     if (session.runId && !restoredInputs && !ownStart) return { enabledTools: [], autoApproveTools: [] };
     const runInput = restoredInputs ? restoredInputs.input_data : ownStart;
-    const policy = intersectToolPermissions(toolPermissions, (runInput as any)?._runtime?.allowed_tools);
-    // Untouched defaults remain Gateway-owned; explicit per-tool/tier choices
-    // use the same policy in the browser and the next run's Runtime namespace.
-    return { ...policy, autoApproveTools: preferences.toolsCustomized || preferences.permissions !== "default" ? policy.autoApproveTools : [] };
-  }, [toolPermissions, restoredInputs, session.runId, preferences.toolsCustomized, preferences.permissions]);
+    // The run's own ceiling (its `_runtime.allowed_tools`) narrows what this client approves for it.
+    const ceiling = (runInput as any)?._runtime?.allowed_tools;
+    return toWorkflowApprovalPolicy(planRunTools(catalog.toolCatalog, { app: appToolLayer }, { ceiling: Array.isArray(ceiling) ? ceiling : null }));
+  }, [catalog.toolCatalog, appToolLayer, restoredInputs, session.runId]);
   // Notes about the live-reply lane (a malformed frame from the gateway),
   // scoped to the conversation they were raised in.
   const streamScope = `${identity}:${session.sessionId}:${session.runId}`;
@@ -399,6 +405,28 @@ export function CodeWorkspace() {
     authScopeKey: identity,
     toolApprovalPolicy: currentToolPermissions,
   });
+  // "Allow for this chat" is stored on the gateway when it serves the chat tool policy
+  // (capabilities.session_tool_policy.supported; backlog 0032, contract v1): the kit client is
+  // bound to this conversation's session. Otherwise the kit's local fallback says what it does
+  // ("Allow for this run", this browser only); a failed capability read says why.
+  const sessionPolicyCapability = catalog.sessionToolPolicy;
+  useEffect(() => {
+    if (!connection.connected || catalog.capabilitiesLoading) return;
+    if (catalog.capabilitiesError) {
+      controller.setSessionToolPolicyClient(null, { reason: catalog.capabilitiesError });
+      return;
+    }
+    controller.setSessionToolPolicyClient(
+      sessionPolicyCapability?.supported === true && session.sessionId
+        ? createSessionToolPolicyClient(
+            (path, init) => gatewayRequest(path, { method: init.method, ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }) }),
+            session.sessionId,
+            sessionPolicyCapability,
+            { client: "abstractcode-web" },
+          )
+        : null,
+    );
+  }, [controller, connection.connected, catalog.capabilitiesLoading, catalog.capabilitiesError, sessionPolicyCapability, session.sessionId]);
   const active =
     Boolean(session.runId) &&
     !terminal(snapshot.status) &&
@@ -414,14 +442,18 @@ export function CodeWorkspace() {
     ...(streamNotes.scope === streamScope ? streamNotes.notes : []),
   ]);
   const voiceCapability = catalog.capabilities?.assistant?.voice || {};
-  const voiceDefaults = useVoiceDefaults(connection.connected);
+  const voiceDefaults = useVoiceDefaults(connection.connected ? fetchVoiceDefaults : null, identity);
   const voice = useWorkspaceVoice({
     scope: `${identity}:${session.sessionId}:${session.runId}:${automationView}`,
     runId: identity ? session.runId : "",
     sessionId: session.sessionId,
     capability: voiceCapability,
     preferences: voicePreferences,
-    onTranscript: (text) => void sendSpoken(text),
+    // "Send what you say automatically" (Code's default: on): send it, else add it to the draft.
+    onTranscript: (text) => {
+      if ((voicePreferences.auto_send ?? CODE_CAPTURE_DEFAULTS.auto_send) === false) setDraft((d) => spokenMessage(d, text));
+      else void sendSpoken(text);
+    },
     onError: setError,
   });
   // Read aloud (the Voice panel): each NEW reply is spoken once, after its
@@ -451,14 +483,20 @@ export function CodeWorkspace() {
       presentInteraction(pendingInteraction, controller, {
         records: snapshot.records,
         currentRun: snapshot.run,
+        // "Allow all enabled tools": every enabled tool the kit's bulk rule reaches becomes Auto in
+        // this app's tool layer (this browser), so later runs of every chat send it as Auto.
         onPermissionsAll: async () => {
-          setPreferences((previous) => ({ ...previous, permissions: "all" }));
+          setAppToolLayer(withAllEnabledAuto(catalog.toolCatalog, appToolLayer));
+        },
+        approveAllScope: "in this browser",
+        sessionPolicy: {
+          toolsetOf: (name: string) => catalog.tools.find((tool) => tool.name === name)?.toolset,
+          ask: Object.entries(appToolLayer).filter(([, mode]) => mode === "ask").map(([name]) => name),
         },
       }),
-    [pendingInteraction, snapshot.records, snapshot.run, controller],
+    // The chat-policy mode is the controller's: re-present when it (or what it stored) changes.
+    [pendingInteraction, snapshot.records, snapshot.run, snapshot.sessionPolicyMode, snapshot.sessionPolicy, snapshot.sessionPolicyClamped, controller, catalog.tools, catalog.toolCatalog, appToolLayer, setAppToolLayer],
   );
-  const interactionBlocksSteer =
-    Boolean(interaction) && composeMode === "steer";
   const promptProperty = isAgent
     ? "prompt"
     : workflowPromptProperty(schema);
@@ -531,7 +569,6 @@ export function CodeWorkspace() {
       void automations.select(automationId);
     }
     setSidebarOpen(false);
-    setAssistantOpen(false);
     setRailPanel("workflow");
   };
   /** The automation header's "Change workspaces": the same, on the rail's Workspace panel (its chooser). */
@@ -562,11 +599,44 @@ export function CodeWorkspace() {
   const skipPreferenceWrite = useRef(false);
   const sessionRef = useRef(session);
   sessionRef.current = session;
+  // Files picked, dropped or pasted: the kit's upload queue (panel-chat useAttachmentUploads,
+  // backlog 0030). Each becomes a chip at once; uploads run into the conversation's session
+  // attachment store; the gateway's maxAttachmentBytes is the only size rule (ADR-0026). The
+  // queue is cleared on every session/account change, so a late upload never lands elsewhere.
+  const uploads = useAttachmentUploads<AttachmentRef>({
+    upload: (file) => gateway.attachments_upload(sessionRef.current.sessionId, file),
+    maxBytes: catalog.policy?.maxAttachmentBytes,
+  });
+  /** What the next run carries: workspace files attached by path, then uploaded files. */
+  const runAttachments = [...attachments, ...uploads.attached];
+  /** The composer's chips: attached workspace files (references), then the upload queue. */
+  const attachmentItems: ComposerAttachment[] = [
+    ...attachments.map((ref, index) => ({
+      id: `ref:${index}:${ref.$artifact}`,
+      name: ref.filename || ref.path || "Attachment",
+      ...(typeof ref.size_bytes === "number" ? { size: ref.size_bytes } : {}),
+      state: "attached" as const,
+    })),
+    ...uploads.items,
+  ];
+  const removeAttachmentItem = (id: string) => {
+    if (!id.startsWith("ref:")) return uploads.remove(id);
+    const index = Number(id.split(":")[1]);
+    setAttachments((items) => items.filter((_, n) => n !== index));
+  };
+  /** Queue files (picked, dropped, pasted, or read from the workspace); returns each file's chip state. */
+  function attachUploads(files: File[]): Pick<ComposerAttachment, "name" | "state" | "error">[] {
+    uploads.add(files);
+    return files.map((file) => {
+      const refusal = uploadRefusal(file, catalog.policy?.maxAttachmentBytes);
+      return { name: file.name, state: refusal ? "refused" : "queued", ...(refusal ? { error: refusal } : {}) };
+    });
+  }
 
   useEffect(() => {
     sendLock.current = false;
     setSending(false);
-    setUploads([]);
+    uploads.clear();
     setError("");
     setNotice("");
     if (!identity) {
@@ -676,7 +746,7 @@ export function CodeWorkspace() {
     writeRoute(session.sessionId, session.runId);
     sendLock.current = false;
     setSending(false);
-    setUploads([]);
+    uploads.clear();
     setAttachments([]);
     // A conversation's form values belong to it: a new or other conversation
     // starts from the schema defaults, never from the fields restored out of
@@ -695,7 +765,7 @@ export function CodeWorkspace() {
       const next = route();
       sendLock.current = false;
       setSending(false);
-      setUploads([]);
+      uploads.clear();
       setQueue([]);
       setQueueRunning(false);
       setDraft("");
@@ -730,7 +800,7 @@ export function CodeWorkspace() {
   const openConversation = useCallback((sessionId: string, runId: string) => {
     sendLock.current = false;
     setSending(false);
-    setUploads([]);
+    uploads.clear();
     setSession({ sessionId, runId });
     writeRoute(sessionId, runId);
     setSidebarOpen(false);
@@ -759,7 +829,7 @@ export function CodeWorkspace() {
         key: event.key,
         defaultPrevented: event.defaultPrevented,
         overlayOpen:
-          panelOpen || assistantOpen || newAutomationOpen || appearanceOpen || kitDialogOpen(),
+          panelOpen || newAutomationOpen || kitDialogOpen(),
         sidebarOpen,
         inspectorOpen: false,
         inspectorIsOverlay: false,
@@ -773,7 +843,6 @@ export function CodeWorkspace() {
       if (event.key.toLowerCase() === "k") {
         event.preventDefault();
         setPanelOpen(false);
-        setAssistantOpen(false);
         setSidebarOpen(true);
         window.setTimeout(() => searchInput.current?.focus(), 0);
       }
@@ -789,12 +858,10 @@ export function CodeWorkspace() {
     sidebarOpen,
     newAutomationOpen,
     panelOpen,
-    assistantOpen,
-    appearanceOpen,
   ]);
 
   function currentWorkflowInput(text: string, values: Record<string, unknown>, attachments: AttachmentRef[] = [], forAutomation = false, selectedWorkflow = workflow, selectedSchema = schema) {
-    const input = buildWorkflowInput({
+    let input = buildWorkflowInput({
       workflow: selectedWorkflow || undefined,
       inputSchema: selectedSchema,
       schemaInputs: values,
@@ -817,15 +884,14 @@ export function CodeWorkspace() {
       // Round 9: a turn sends only its conversation folder (continuity); the
       // gateway scopes the run to the account's effective folders.
       workspace: effectiveWorkspace ? { root: effectiveWorkspace } : undefined,
-      tools: preferences.toolsCustomized ? toolPermissions.enabledTools : undefined,
-      toolPolicy: preferences.toolsCustomized || preferences.permissions !== "default"
-        // Keep consent revocable by this host. The durable server policy
-        // asks; the controller approves only currently enabled, permitted
-        // tools. Closing the client parks an asking call safely.
-        ? { autoApproveTools: [], requireApprovalTools: toolPermissions.enabledTools }
-        : undefined,
       skills: preferences.skills.length ? preferences.skills : undefined,
     });
+    // This app's tool choices (kit planRunTools/withRunTools, backlog 0033): Auto tools in
+    // `_runtime.tool_policy.auto_approve_tools` (they run without a client open), Ask tools in
+    // `require_approval_tools`, Off tools outside `allowed_tools`. No choice: nothing is sent and
+    // the gateway's grant applies.
+    if (hasToolChoices(catalog.toolCatalog, { app: appToolLayer }))
+      input = withRunTools(input, planRunTools(catalog.toolCatalog, { app: appToolLayer })) as typeof input;
     if (forAutomation) {
       // Automations own their workspace and consent policy; never inherit a
       // conversation's directory or its client-dependent approval policy.
@@ -863,8 +929,7 @@ export function CodeWorkspace() {
       setInputsOpen(true);
       throw new Error(inputEditorError);
     }
-    const uploadBlock = unattachedSendBlock(uploads);
-    if (uploadBlock) throw new Error(uploadBlock);
+    if (uploads.sendBlock) throw new Error(uploads.sendBlock);
     if (active) throw new Error("The current run is still active.");
     if (!isAgent && text.trim() && !promptProperty) {
       setInputsOpen(true);
@@ -881,7 +946,7 @@ export function CodeWorkspace() {
     };
     const values = isAgent
       ? promptValues
-      : withWorkflowAttachments(schema, promptValues, attachments);
+      : withWorkflowAttachments(schema, promptValues, runAttachments);
     for (const [label, value] of [
       ["Iteration limit", preferences.maxIterations],
       ["Context token limit", preferences.maxTokens],
@@ -899,7 +964,7 @@ export function CodeWorkspace() {
     const startedEpoch = authEpoch.current;
     let attachedRun = "";
     try {
-      const input = currentWorkflowInput(text, values, attachments);
+      const input = currentWorkflowInput(text, values, runAttachments);
       // Validate the actual outgoing payload, after composer context and
       // explicit Settings overrides. Empty optional pins stay absent so the
       // workflow/Gateway resolves them just as it does for the TUI/Assistant.
@@ -950,6 +1015,7 @@ export function CodeWorkspace() {
       writeRoute(startedSession, result.run_id);
       setDraft("");
       setAttachments([]);
+      uploads.clear();
       setInputsOpen(false);
       if (result.runner_warning) setNotice(String(result.runner_warning));
       void catalog.refresh();
@@ -985,42 +1051,52 @@ export function CodeWorkspace() {
     }
   }
 
+  // While a run is busy the composer steers it or queues the next turn (kit WorkflowChat `steer`,
+  // backlog 0030): "Guide this run" posts inject_guidance; "Queue next turn" holds the message
+  // here and starts it when the run ends. A pending question/approval leaves only Queue.
+  async function guideRun(text: string): Promise<{ accepted: boolean; seq?: number; duplicate?: boolean }> {
+    if (interaction) throw new Error("Answer the pending workflow request above, or queue the next turn.");
+    const sid = session.sessionId;
+    const rid = session.runId;
+    const epoch = authEpoch.current;
+    const answer = (await controller.sendCommand("inject_guidance", { guidance: text })) as { accepted?: boolean; seq?: number; duplicate?: boolean } | null;
+    if (sessionRef.current.sessionId !== sid || sessionRef.current.runId !== rid || authEpoch.current !== epoch) throw staleSendAbort();
+    return {
+      accepted: answer?.accepted !== false,
+      ...(typeof answer?.seq === "number" ? { seq: answer.seq } : {}),
+      ...(answer?.duplicate === true ? { duplicate: true } : {}),
+    };
+  }
+  function queueNextTurn(text: string): { accepted: boolean } {
+    setQueue((items) => [
+      ...items,
+      {
+        id: newId(),
+        text,
+        sessionId: session.sessionId,
+        sourceRunId: session.runId,
+        authEpoch: authEpoch.current,
+      },
+    ]);
+    setQueueRunning(true);
+    return { accepted: true };
+  }
+  const steer =
+    active && !sending
+      ? {
+          modes: (interaction ? ["queue"] : ["guide", "queue"]) as ("guide" | "queue")[],
+          parked: snapshot.status === "waiting" && !interaction,
+          onSteer: async (text: string, mode: "guide" | "queue") => (mode === "queue" ? queueNextTurn(text) : guideRun(text)),
+        }
+      : undefined;
+
+  /** A message from outside the composer (the microphone): starts a turn, or steers / queues a busy run. */
   async function send(text: string) {
     if (!active) return startTurn(text);
-    if (composeMode === "queue") {
-      setQueue((items) => [
-        ...items,
-        {
-          id: newId(),
-          text,
-          sessionId: session.sessionId,
-          sourceRunId: session.runId,
-          authEpoch: authEpoch.current,
-        },
-      ]);
-      setQueueRunning(true);
-      setDraft("");
-      setNotice("Queued for the next turn.");
-    } else {
-      if (interaction)
-        throw new Error(
-          "Answer the pending workflow request above, or choose Queue next turn.",
-        );
-      const sid = session.sessionId;
-      const rid = session.runId;
-      const epoch = authEpoch.current;
-      await controller.sendCommand("inject_guidance", { guidance: text });
-      if (
-        sessionRef.current.sessionId !== sid ||
-        sessionRef.current.runId !== rid ||
-        authEpoch.current !== epoch
-      )
-        return;
-      setDraft("");
-      setNotice(
-        "Guidance queued. The workflow will read it at its next supported boundary.",
-      );
-    }
+    const result = interaction ? queueNextTurn(text) : await guideRun(text);
+    if (!result.accepted) throw new Error("The gateway did not accept this message.");
+    setDraft("");
+    setNotice(interaction ? "Queued for the next turn." : "Guidance queued. The workflow will read it at its next supported boundary.");
   }
   async function executeQueuedIntent(intent: QueueIntent): Promise<void> {
     const snapshotRunId = String(snapshot.run?.run_id || "");
@@ -1088,73 +1164,6 @@ export function CodeWorkspace() {
     session.runId,
   ]);
 
-  // Every file (picked, dropped or pasted) becomes a chip at once. Uploads
-  // run UPLOAD_CONCURRENCY at a time into the session's attachment store;
-  // the gateway's maxAttachmentBytes is the only size rule (ADR-0026) and a
-  // refusal stays on its chip with both numbers — nothing is dropped silently.
-  async function uploadBatch(items: PendingUpload[]): Promise<void> {
-    const sid = session.sessionId;
-    const owner = identity;
-    const epoch = authEpoch.current;
-    // Attachments belong to the session, not to a run: a run starting or
-    // finishing mid-upload must not strand a spinning chip.
-    const stale = () =>
-      sessionRef.current.sessionId !== sid ||
-      identityRef.current !== owner ||
-      authEpoch.current !== epoch;
-    const patch = (id: string, change: Partial<PendingUpload>) =>
-      setUploads((list) =>
-        list.map((item) => (item.id === id ? { ...item, ...change } : item)),
-      );
-    let attached = 0;
-    let failed = 0;
-    await runBounded(items, UPLOAD_CONCURRENCY, async (item) => {
-      if (stale() || removedUploads.current.has(item.id)) return;
-      patch(item.id, { status: "uploading", message: undefined });
-      try {
-        const ref = await gateway.attachments_upload(sid, item.file);
-        if (stale() || removedUploads.current.has(item.id)) return;
-        uploadedSizes.current.set(ref.$artifact, item.size);
-        setUploads((list) => list.filter((entry) => entry.id !== item.id));
-        setAttachments((list) => [...list, ref]);
-        attached += 1;
-      } catch (e) {
-        if (stale() || removedUploads.current.has(item.id)) return;
-        patch(item.id, {
-          status: "failed",
-          message: uploadFailure(formatError(e)),
-        });
-        failed += 1;
-      }
-    });
-    if (!stale() && (attached || failed))
-      setUploadNotice(uploadAnnouncement(attached, failed));
-  }
-  function attachUploads(files: File[]): PendingUpload[] {
-    if (!files.length) return [];
-    const items = queueUploads(
-      files,
-      catalog.policy?.maxAttachmentBytes,
-      newId,
-    );
-    setUploads((list) => [...list, ...items]);
-    const refused = items.filter((item) => item.status === "refused").length;
-    if (refused)
-      setUploadNotice(uploadAnnouncement(0, refused));
-    void uploadBatch(items.filter((item) => item.status === "queued"));
-    return items;
-  }
-  function retryUpload(id: string) {
-    const item = uploads.find((entry) => entry.id === id);
-    if (!item || item.status !== "failed") return;
-    const again: PendingUpload = { ...item, status: "queued", message: undefined };
-    setUploads((list) => list.map((entry) => (entry.id === id ? again : entry)));
-    void uploadBatch([again]);
-  }
-  function removeUpload(id: string) {
-    removedUploads.current.add(id);
-    setUploads((list) => list.filter((entry) => entry.id !== id));
-  }
   async function cancelCurrentRun(): Promise<void> {
     const sid = session.sessionId;
     const rid = session.runId;
@@ -1232,13 +1241,6 @@ export function CodeWorkspace() {
   const archiveConfirm = (
     <ArchiveConfirm busy={archiveBusy} error={archiveError} onConfirm={() => void confirmArchive()} onCancel={cancelArchive} />
   );
-  const gatewayName = (() => {
-    try {
-      return new URL(connection.status?.gateway_url || "").host;
-    } catch {
-      return "Your gateway";
-    }
-  })();
 
   // Settings: one renderer for a conversation (its run preferences) and an
   // automation (its definition, through AutomationSettingsPanel).
@@ -1247,7 +1249,10 @@ export function CodeWorkspace() {
             // matching flat pins are not proof they were host-authored.
             const reset: string[] = [];
             if ((preferences.provider || preferences.model) && !next.provider && !next.model) reset.push("provider", "model");
-            if (preferences.toolsCustomized && !next.toolsCustomized) reset.push("tools");
+            // The tool choices live in this app's tool layer (kit store), not in the preferences.
+            const layerCleared = Object.keys(appToolLayer).length > 0 && !Object.keys(next.toolLayer).length;
+            if (layerCleared) reset.push("tools");
+            if (next.toolLayer !== appToolLayer) setAppToolLayer(next.toolLayer);
             if (preferences.maxIterations && !next.maxIterations) reset.push("max_iterations");
             if (reset.length) setInputs(previous => {
               const values = { ...previous }, defaults = schemaDefaults(schema);
@@ -1257,11 +1262,11 @@ export function CodeWorkspace() {
               }
               return values;
             });
-            setPreferences(next);
+            setPreferences({ ...next, toolLayer: {} });
   };
   const renderSettings = (
     section: "model" | "workspace" | "tools" | "skills",
-    value: RunPreferences = preferences,
+    value: RunPreferences = { ...preferences, toolLayer: appToolLayer },
     onChange: (next: RunPreferences) => void = conversationSettingsChange,
     automation?: { root: string },
   ) => (
@@ -1270,7 +1275,10 @@ export function CodeWorkspace() {
       lockedReasonId={`code-${section}-locked`}
       value={value}
       onChange={onChange}
-      tools={catalog.tools}
+      toolCatalog={catalog.toolCatalog}
+      toolWarnings={catalog.toolWarnings}
+      automationTools={Boolean(automation)}
+      toolsNotice={!automation && toolsNoticePending ? { text: TOOLS_MIGRATION_NOTICE, onDismiss: dismissToolsNotice } : null}
       connected={connection.connected}
       automationFolders={Boolean(automation)}
       defaultModel={
@@ -1295,6 +1303,8 @@ export function CodeWorkspace() {
         onChange={(next) => { voice.stop_tts(); changeVoicePreferences(next); }}
         defaults={voiceDefaults}
         connected={connection.connected}
+        isAdmin={connection.status?.gateway?.principal?.admin === true}
+        levelSource={voice}
       />
   );
   const automationDetail = automationsState.detail;
@@ -1302,6 +1312,7 @@ export function CodeWorkspace() {
   const automationSettings = useAutomationSettings(
     automationView && automationDetail?.definition ? { summary: automationDetail.summary, definition: automationDetail.definition } : null,
     (automationId, changes, expected) => automations.revise(automationId, changes, expected),
+    catalog.toolCatalog,
   );
   /**
    * One settings panel of the rail, bound to the selection: an automation's
@@ -1522,7 +1533,8 @@ export function CodeWorkspace() {
     <CodeRightRail
       key={`rail:${identity}`}
       panel={railPanel}
-      onPanel={(next) => { setRailPanel(next); if (next) setAssistantOpen(false); }}
+      onPanel={setRailPanel}
+      docs={codeDocsPanel(connection.connected)}
       activityBadge={activityAttn.count}
       activityHint={activityAttn.hint}
       content={{
@@ -1570,7 +1582,6 @@ export function CodeWorkspace() {
                   setAttachments((items) => [...items, ref]);
               }}
             />
-          {messages.length ? <button className="code-subtle-button" onClick={() => downloadTextFile({ filename: "conversation.md", text: chatToMarkdown(messages) })}>Export conversation</button> : null}
         </>
       ),
       model: modelPanel,
@@ -1590,6 +1601,7 @@ export function CodeWorkspace() {
       <a className="code-skip-link" href="#code-conversation">
         Skip to conversation
       </a>
+      {/* Kit gap K1 (ui-primitives 0036): AfAppShell cannot host this full-height sidebar beside the header, nor the one-row landscape chrome. */}
       <SidebarDrawer isDrawer={panesAreDrawers} open={sidebarOpen}>
         <div className="code-brand">
           <span className="code-brand-mark" aria-hidden="true">
@@ -1714,17 +1726,6 @@ export function CodeWorkspace() {
           </ArchivedFooter>
         </ConversationsPanel>
         </SidebarLists>
-        <div className="code-sidebar-bottom">
-          <div className="code-gateway-foot">
-            <span
-              className={`code-status-dot ${connection.connected ? "is-online" : ""}`}
-            />
-            <span>{gatewayName}</span>
-            <small>
-              {connection.status?.gateway?.principal?.user_id || "Signed out"}
-            </small>
-          </div>
-        </div>
       </SidebarDrawer>
       {sidebarOpen ? (
         <button
@@ -1738,7 +1739,7 @@ export function CodeWorkspace() {
           <button
             className="code-mobile-nav code-icon-button"
             aria-label="Open conversation navigation"
-            onClick={() => { setPanelOpen(false); setAssistantOpen(false); setSidebarOpen(true); }}
+            onClick={() => { setPanelOpen(false); setSidebarOpen(true); }}
           >
             <Icon name="list" size={19} />
           </button>
@@ -1758,11 +1759,11 @@ export function CodeWorkspace() {
             />
           ) : null}
           <AfTopBarActions
-            docs={{ open: assistantOpen, onToggle: () => { setAssistantOpen(open => !open); setPanelOpen(false); setSidebarOpen(false); }, label: "Docs assistant" }}
-            appearance={{ onOpen: () => setAppearanceOpen(true) }}
-            about={{ identity: APP_IDENTITY, versions: aboutVersions(gatewayAbout), onOpen: refreshGatewayAbout }}
-            connection={{ phase: connection.phase, signingOut: connection.signingOut,
-              onConnect: connection.openModal, onDisconnect: () => void connection.signOut() }}
+            docs={{ open: railPanel === "docs", onToggle: () => { setRailPanel((open) => (open === "docs" ? null : "docs")); setSidebarOpen(false); }, label: "Docs assistant" }}
+            appearance={{ value: appearance, onChange: setAppearance }}
+            about={{ identity: APP_IDENTITY, fetch: proxyGatewayFetch }}
+            identity="menu"
+            connection={connection}
           />
         </header>
         <div className="code-content">
@@ -1788,14 +1789,12 @@ export function CodeWorkspace() {
           >
             {error ||
             snapshot.error ||
-            connection.signOutError ||
             restoreError ? (
               <div className="code-alert" role="alert">
                 <Icon name="warning" size={16} />
                 <span>
                   {error ||
                     snapshot.error ||
-                    connection.signOutError ||
                     restoreError}
                 </span>
                 {snapshot.error || restoreError ? (
@@ -1860,12 +1859,13 @@ export function CodeWorkspace() {
                 </button>
               </div>
             ) : null}
+            {/* Kit gap K2 (ui-primitives 0030): WorkflowChat has no runStatus slot (metrics, pause/resume, activity). */}
             {active || terminal(snapshot.status) ? (
               <RunStatusBar
                 active={active}
                 paused={paused}
                 snapshot={snapshot}
-                permissionsAll={preferences.permissions === "all"}
+                permissionsAll={allEnabledAuto(catalog.toolCatalog, appToolLayer)}
                 onInteraction={
                   interaction && !paused
                     ? () => {
@@ -1888,7 +1888,7 @@ export function CodeWorkspace() {
                 }
                 onRevokeApproval={() => {
                   controller.revokeToolApproval();
-                  setPreferences(previous => ({ ...previous, permissions: "default" }));
+                  setAppToolLayer(withoutAutoChoices(catalog.toolCatalog, appToolLayer));
                 }}
                 onCommand={(command) =>
                   act(() => controller.sendCommand(command, {}))
@@ -1932,48 +1932,23 @@ export function CodeWorkspace() {
               onDraftChange={setDraft}
               onSend={send}
               busy={locked}
-              busyLabel={
-                interactionBlocksSteer
-                  ? "Waiting for you"
-                  : sending
-                    ? "Starting…"
-                    : paused
-                      ? "Paused"
-                      : "Working…"
-              }
-              sendWhileBusy={active && !sending && !interactionBlocksSteer}
-              sendLabel={
-                active ? (composeMode === "queue" ? "Queue" : "Steer") : "Send"
-              }
+              busyLabel={sending ? "Starting…" : paused ? "Paused" : "Working…"}
+              steer={steer}
+              toolbar={messages.length ? { exportTranscript: { filename: "conversation.md" } } : undefined}
               onCancel={cancelCurrentRun}
               stopState={snapshot.stop ?? null}
               disabled={!connection.connected}
               interaction={interaction}
               onAttach={() => fileInput.current?.click()}
               onFiles={(files) => { attachUploads(files); }}
-              attachments={
-                attachments.length || uploads.length ? (
-                  <ComposerAttachments
-                    attachments={attachments}
-                    uploads={uploads}
-                    sizes={uploadedSizes.current}
-                    onRemoveAttachment={(index) =>
-                      setAttachments((items) =>
-                        items.filter((_, n) => n !== index),
-                      )
-                    }
-                    onRemoveUpload={removeUpload}
-                    onRetryUpload={retryUpload}
-                  />
-                ) : null
-              }
+              attachmentItems={attachmentItems}
+              onRemoveAttachment={removeAttachmentItem}
+              onRetryAttachment={uploads.retry}
               placeholder={
                 active
-                  ? composeMode === "queue"
-                    ? "Queue the next task after this run…"
-                    : interaction
-                      ? "Answer the request above, or choose Queue next turn…"
-                      : "Guide the current workflow…"
+                  ? interaction
+                    ? "Answer the request above, or queue the next task…"
+                    : "Guide the current workflow, or queue the next task…"
                   : "Describe what you want to build, fix, or explore…"
               }
               emptyState={
@@ -2009,22 +1984,9 @@ export function CodeWorkspace() {
                       key={`${identity}:${session.sessionId}:${session.runId}`}
                       voice={voice}
                       capability={voiceCapability}
+                      preferences={voicePreferences}
                       route={sttRouteText(voicePreferences, voiceDefaults.value)}
                     />
-                  ) : null}
-                  {active ? (
-                    <select
-                      aria-label="Message destination"
-                      value={composeMode}
-                      onChange={(e) =>
-                        setComposeMode(e.target.value as "steer" | "queue")
-                      }
-                    >
-                      <option value="steer" disabled={Boolean(interaction)}>
-                        Guide this run{interaction ? " (answer above)" : ""}
-                      </option>
-                      <option value="queue">Queue next turn</option>
-                    </select>
                   ) : null}
                 </>
               }
@@ -2041,6 +2003,7 @@ export function CodeWorkspace() {
                 </>
               }
             />
+            {/* Kit gap K5 (ui-primitives 0030): WorkflowChat's steer has no queued-turns list. */}
             {queue.length ? (
               <div className="code-queue">
                 <div>
@@ -2108,7 +2071,7 @@ export function CodeWorkspace() {
         </footer>
       </div>
       <div className="pc-sr-only" role="status" aria-live="polite">
-        {uploadNotice}
+        {uploads.announcement}
       </div>
       <input
         ref={fileInput}
@@ -2132,7 +2095,7 @@ export function CodeWorkspace() {
         }}
         target={automationTarget(selection, workflow)}
         availableTools={catalog.tools.filter(t => t.enabled).map(t => t.name)}
-        initialTools={automationToolSelection(preferences.toolsCustomized ? { ...inputs, tools: toolPermissions.enabledTools } : inputs)}
+        initialTools={automationToolSelection(hasToolChoices(catalog.toolCatalog, { app: appToolLayer }) ? { ...inputs, tools: planRunTools(catalog.toolCatalog, { app: appToolLayer }).tools } : inputs)}
         buildInput={async (prompt, target) => {
           if (!target) return currentWorkflowInput(prompt, { ...schemaDefaults(schema), ...inputs }, [], true);
           const next = target.flow_id === "@default" ? defaultWorkflow : catalog.workflows.find(w => `${w.bundleId}@${w.bundleVersion}` === ("bundle_ref" in target ? target.bundle_ref : "") && w.flowId === target.flow_id);
@@ -2162,8 +2125,6 @@ export function CodeWorkspace() {
         }}
       />
       <GatewayConnectModal {...connection.modalProps} />
-      <AppAssistantDrawer key={`assistant:${identity}`} open={assistantOpen} onClose={() => setAssistantOpen(false)} connected={connection.connected} topOffset={drawerTop} />
-      <AfAppearanceDialog open={appearanceOpen} onClose={() => setAppearanceOpen(false)} value={appearance} onChange={setAppearance} />
       <CodeDefaultWorkspacesDialog
         open={defaultWorkspacesOpen}
         onClose={() => setDefaultWorkspacesOpen(false)}

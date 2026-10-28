@@ -24,6 +24,7 @@ import {
   type MyEmailStatus,
   type PreviewSchedule,
   type ReviseForm,
+  type ToolCatalogItem,
 } from "@abstractframework/ui-kit";
 import type { RunPreferences } from "./settings_panel";
 import { automationRunPreferences, automationSettingsChanges } from "./automation_settings";
@@ -75,11 +76,15 @@ export type AutomationSettings = {
 export function useAutomationSettings(
   detail: AutomationDetailLike | null | undefined,
   onRevise: (automationId: string, changes: AutomationChanges, expectedRevision: number) => Promise<CommandReceipt>,
+  /** The gateway's tools (kit ToolCatalogItem[]): the definition's tool layer is read against it. */
+  toolCatalog: readonly ToolCatalogItem[] = [],
 ): AutomationSettings | null {
+  const catalogRef = useRef(toolCatalog);
+  catalogRef.current = toolCatalog;
   const definition = detail?.definition ?? null;
   const automationId = detail?.summary.automation_id ?? "";
   const revision = definition?.revision ?? 0;
-  const [draft, setDraft] = useState<RunPreferences>(() => automationRunPreferences(definition?.target.input_data));
+  const [draft, setDraft] = useState<RunPreferences>(() => automationRunPreferences(definition?.target.input_data, catalogRef.current));
   const [save, setSave] = useState<SaveState>({ status: "idle" });
   const pending = useRef<{ prefs: RunPreferences; automationId: string } | null>(null);
   const timer = useRef<number | null>(null);
@@ -100,7 +105,7 @@ export function useAutomationSettings(
     // The definition the edit was made on: the current one only while the same automation is shown.
     const def = job.automationId === idRef.current ? definitionRef.current : savedFor.current.id === job.automationId ? savedFor.current.def : null;
     if (!def) return;
-    const changes = automationSettingsChanges(def, job.prefs);
+    const changes = automationSettingsChanges(def, job.prefs, catalogRef.current);
     if (!changes) return;
     const sameView = () => job.automationId === idRef.current;
     if (sameView()) setSave({ status: "saving" });
@@ -110,7 +115,7 @@ export function useAutomationSettings(
     } catch (e) {
       if (!sameView()) return;
       setSave({ status: "error", message: saveErrorText(e) });
-      setDraft(automationRunPreferences(definitionRef.current?.target.input_data));
+      setDraft(automationRunPreferences(definitionRef.current?.target.input_data, catalogRef.current));
     }
   };
 
@@ -119,12 +124,16 @@ export function useAutomationSettings(
     if (pending.current && pending.current.automationId !== automationId) void flush();
     savedFor.current = { id: automationId, def: definition };
     setSave({ status: "idle" });
-    setDraft(automationRunPreferences(definition?.target.input_data));
+    setDraft(automationRunPreferences(definition?.target.input_data, catalogRef.current));
   }, [automationId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     savedFor.current = { id: automationId, def: definition };
-    if (!pending.current) setDraft(automationRunPreferences(definition?.target.input_data));
+    if (!pending.current) setDraft(automationRunPreferences(definition?.target.input_data, catalogRef.current));
   }, [revision]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The tools arrived (or changed): re-read the definition's tool layer against them.
+  useEffect(() => {
+    if (!pending.current) setDraft(automationRunPreferences(definition?.target.input_data, catalogRef.current));
+  }, [toolCatalog]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => {
     if (timer.current) window.clearTimeout(timer.current);
   }, []);

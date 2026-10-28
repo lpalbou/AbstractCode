@@ -510,39 +510,6 @@ body::before {
   white-space: nowrap;
 }
 
-/* Tool picker */
-.tool_picker {
-  margin-top: 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--ui-surface-1);
-  padding: 12px;
-}
-
-.tool_picker_top {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.tool_picker_filter {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.tool_picker_actions {
-  display: inline-flex;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-
-.tool_picker_list {
-  margin-top: 10px;
-  max-height: 280px;
-  overflow: auto;
-  padding-right: 4px;
-}
-
 .tool_group {
   margin-top: 10px;
 }
@@ -1135,69 +1102,6 @@ select {
   border-color: var(--border-default);
   color: var(--text-secondary);
   background: transparent;
-}
-
-/* ===============================
-   MULTI SELECT
-   =============================== */
-
-.multi_select {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.multi_select_row {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.multi_select_row > .btn:first-child {
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  justify-content: flex-start;
-}
-
-.multi_select_panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--bg-elevated);
-  max-height: 240px;
-  overflow-y: auto;
-}
-
-.multi_select_list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.multi_select_item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
-  background: var(--bg-deep);
-  cursor: pointer;
-  user-select: none;
-  transition: all var(--transition-fast);
-}
-
-.multi_select_item:hover {
-  background: var(--glass-highlight);
-}
-
-.multi_select_item.checked {
-  border-color: var(--border-accent);
-  background: var(--accent-subtle);
 }
 
 /* ===============================

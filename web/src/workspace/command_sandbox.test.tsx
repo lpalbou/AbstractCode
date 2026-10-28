@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import discovery from "./fixtures/discovery_tools_command_sandbox.json";
 import ledger from "./fixtures/sandbox_ledger.json";
 import { normalizeToolCatalog } from "./catalog";
+import { normalizeToolCatalog as kitToolCatalog } from "@abstractframework/ui-kit";
 import { DEFAULT_PREFERENCES, SettingsContent } from "./settings_panel";
 import { ActivityGroups } from "./workspace_panels";
 import { activity_rows } from "../lib/activity_rows";
@@ -33,14 +34,18 @@ function payload(state: "sandboxed" | "refused" | "unsandboxed") {
   return p;
 }
 
-function toolsTab(tools = normalizeToolCatalog(payload("sandboxed"))) {
-  // Every tool enabled, so the kit renders every card.
-  const enabled = tools.map((t) => ({ ...t, enabled: true, servedDisabled: false }));
-  return renderToStaticMarkup(<SettingsContent tab="tools" value={DEFAULT_PREFERENCES} onChange={() => {}} tools={enabled} disabled={false} />);
+function toolsTab(p = payload("sandboxed")) {
+  // Every tool offered, so the kit's ToolModeEditor renders every row (the Tools panel, backlog 0033).
+  const offered = JSON.parse(JSON.stringify(p));
+  for (const item of offered.items) item.enabled = true;
+  return renderToStaticMarkup(<SettingsContent tab="tools" value={DEFAULT_PREFERENCES} onChange={() => {}} toolCatalog={kitToolCatalog(offered)} disabled={false} />);
 }
 
 function card(html: string, name: string): string {
-  return html.split(/<div class="af-tool-row(?: is-enabled)?">/).find((r) => r.includes(`aria-label="${name}"`)) || "";
+  const at = html.indexOf(`data-tool="${name}"`);
+  if (at < 0) return "";
+  const next = html.indexOf(`data-tool="`, at + 1);
+  return html.slice(at, next < 0 ? undefined : next);
 }
 
 describe("tool cards: the gateway's command-sandbox state", () => {
@@ -60,7 +65,7 @@ describe("tool cards: the gateway's command-sandbox state", () => {
     ["unsandboxed", "Not sandboxed: unsandboxed commands allowed (flag)", "is-danger"],
   ] as const)("%s: the state on each spawning card, verbatim, with the sentence in the kit tooltip", (state, label, tone) => {
     const p = payload(state);
-    const html = toolsTab(normalizeToolCatalog(p));
+    const html = toolsTab(p);
     for (const name of SPAWNING) {
       const c = card(html, name);
       expect(c).toContain(`data-tool-state="${name}"`);
@@ -75,7 +80,7 @@ describe("tool cards: the gateway's command-sandbox state", () => {
   it("a tool the gateway does not mark gets no state (no client-side guess)", () => {
     const p = payload("sandboxed");
     for (const item of p.items) if (item.name === "execute_command") { delete item.sandboxed; delete item.sandbox; }
-    const html = toolsTab(normalizeToolCatalog(p));
+    const html = toolsTab(p);
     expect(card(html, "execute_command")).not.toContain("af-tool-row__state");
     expect(card(html, "shell_exec")).toContain("af-tool-row__state");
   });

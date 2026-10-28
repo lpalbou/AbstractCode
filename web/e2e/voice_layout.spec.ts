@@ -99,7 +99,6 @@ test("conversation and automation reuse narration, stream early and use the avai
   await page.getByRole("button", { name: "New automation", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Schedule a task" });
   await dialog.getByLabel("Task").fill("A visually distinct automation trigger.");
-  await dialog.getByText("Advanced", { exact: true }).click();
   await dialog.getByLabel("Title").fill(`Voice layout ${Date.now()}`);
   await dialog.getByRole("button", { name: "Create automation", exact: true }).click();
   const main = page.getByRole("main", { name: "Automation", exact: true });
@@ -114,7 +113,7 @@ test("conversation and automation reuse narration, stream early and use the avai
   await expect(answer.locator(".pc-chat-speak-spinner")).toBeVisible();
   await expect(answer.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
   expect(finished).toBe(false);
-  await main.getByRole("button", { name: "Stop audio", exact: true }).click();
+  await main.getByRole("button", { name: "Stop spoken reply", exact: true }).click();
   await expect.poll(() => disconnected).toBe(true);
   await page.screenshot({ path: "e2e/artifacts/voice-layout-desktop.png" });
   await page.setViewportSize({ width: 768, height: 1024 });

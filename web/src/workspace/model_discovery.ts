@@ -1,48 +1,22 @@
-import { gatewayApiPath } from "@abstractframework/ui-kit";
-import { gateway, gatewayRequest } from "./transport";
-export const modelDiscovery = {
-  fetchProviders: async () => {
-    const data = await gateway.discovery_providers();
-    const items = data.providers || data.items;
-    return Array.isArray(items)
-      ? items.map((item: any) =>
-          typeof item === "string" ? { name: item } : item,
-        )
-      : [];
-  },
-  fetchModels: async (provider: string) => {
-    const data = await gateway.discovery_provider_models(provider);
-    const items = data.models || data.items;
-    return Array.isArray(items)
-      ? items
-          .map((item: any) =>
-            typeof item === "string" ? item : item.id || item.name,
-          )
-          .filter(Boolean)
-      : [];
-  },
-  fetchModelCapabilities: (model: string, provider = "") =>
-    gateway.discovery_model_capabilities(model, provider),
-};
-export function defaultTextRoute(
-  data: any,
-): { provider: string; model: string } | undefined {
-  for (const key of ["output.text", "input.text"]) {
-    const route = (Array.isArray(data?.routes) ? data.routes : []).find(
-      (item: any) =>
-        item.key === key &&
-        item.source !== "not_configured" &&
-        item.provider &&
-        item.model,
-    );
-    if (route) return { provider: route.provider, model: route.model };
+import { createGatewayModelTransport, gatewayApiPath, gatewayTextDefault } from "@abstractframework/ui-kit";
+import { gatewayRequest } from "./transport";
+
+/**
+ * The text model picker's transport is the kit's (backlog 0034): discovery/providers,
+ * discovery/providers/{p}/models?capability_route=output.text, discovery/models/capabilities and
+ * config/capability-defaults ("Gateway default · provider / model · reasoning · MTP").
+ */
+export const modelDiscovery = createGatewayModelTransport((path) => gatewayRequest(path));
+
+/** The text route the gateway defaults to (`GET config/capability-defaults`, read by the kit), or undefined. */
+export function defaultTextRoute(data: unknown): { provider: string; model: string } | undefined {
+  try {
+    const value = gatewayTextDefault(data);
+    return value ? { provider: value.provider, model: value.model } : undefined;
+  } catch {
+    return undefined;
   }
-  return undefined;
 }
-export const fetchDefaultModel = () =>
-  gatewayRequest(gatewayApiPath("config/capability-defaults")).then(
-    defaultTextRoute,
-  );
 
 /** Match media pins to their own task catalogs, never to the text-model list. */
 export function discoveryForInput(providerPin: string, semanticType?: string) {

@@ -135,15 +135,15 @@ describe("attach from the workspace", () => {
   const big = { name: "dump.bin", path: "dump.bin", type: "file" as const, size_bytes: 5 * 1024 * 1024 };
 
   it("applies the gateway's size limit before downloading", () => {
-    expect(attachPrecheck(big, 1024 * 1024)).toBe("dump.bin is 5 MB; the gateway accepts files up to 1 MB.");
+    expect(attachPrecheck(big, 1024 * 1024)).toBe("dump.bin is 5.0 MiB; the gateway accepts files up to 1.0 MiB.");
     expect(attachPrecheck(big, undefined)).toBeNull();
     expect(attachPrecheck({ ...big, size_bytes: 10 }, 1024)).toBeNull();
   });
 
   it("never claims success for a refused file and names the reason", () => {
-    const refused = { id: "1", name: "a", size: 9, status: "refused" as const, file: new File(["x"], "a"), message: "a is 9 B; the gateway accepts files up to 1 B." };
+    const refused = { name: "a", state: "refused" as const, error: "a is 9 B; the gateway accepts files up to 1 B." };
     expect(attachOutcomeNotice("a", refused)).toBe("Not attached: a is 9 B; the gateway accepts files up to 1 B.");
-    expect(attachOutcomeNotice("a", { ...refused, status: "queued", message: undefined })).not.toContain("added");
+    expect(attachOutcomeNotice("a", { name: "a", state: "queued" })).not.toContain("added");
     expect(attachOutcomeNotice("a", undefined)).toContain("not queued");
   });
 });

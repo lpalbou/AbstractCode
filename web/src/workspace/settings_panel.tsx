@@ -1,17 +1,17 @@
 import React from "react";
 import {
   ProviderModelPicker,
-  ToolPolicyEditor,
-  type ToolPolicySelection,
+  ToolModeEditor,
+  TOOL_LAYER_STORE_WHERE,
+  type ToolCatalogItem,
+  type ToolModeLayer,
   type SpeculationValue,
   type WorkspaceRequest,
 } from "@abstractframework/ui-kit";
 import { CodeWorkspaceFolders, type RunWorkspace } from "./workspace_folders";
-import type { ToolSpec } from "./catalog";
-import { gateway } from "./transport";
 import { SkillsPicker } from "./skills_picker";
 import { modelDiscovery } from "./model_discovery";
-import { resolveToolPermissions, type PermissionLevel } from "./tool_permissions";
+import type { LegacyToolPreferences } from "./tool_layers";
 import {
   gatewayDefaultStreamLabel,
   STREAMING_LOADING,
@@ -34,9 +34,14 @@ export type RunPreferences = {
   system: string;
   /** An automation's workspaces (input_data.workspace, the run-level payload); null = "Use my default". Conversations keep null: their workspaces live on the session in the gateway. */
   workspace: RunWorkspace | null;
-  tools: ToolPolicySelection;
-  toolsCustomized: boolean;
-  permissions: PermissionLevel;
+  /**
+   * The person's tool choices (Off / Ask / Auto per tool, sparse; kit ToolModeLayer). A
+   * conversation's lives in the kit's tool layer store (this app, this browser), an automation's in
+   * its definition (`_runtime.allowed_tools` / `tool_policy`). Empty = the gateway's defaults.
+   */
+  toolLayer: ToolModeLayer;
+  /** A pre-0033 Permissions tier / tool picker kept until its one-time migration (tool_layers.ts). */
+  legacyTools?: LegacyToolPreferences;
   skills: string[];
   /** Workflow for new conversations: "@default" (the gateway's default agent
    * workflow, resolved by the server at run start) or a catalog workflow id. */
@@ -52,9 +57,7 @@ export const DEFAULT_PREFERENCES: RunPreferences = {
   maxTokens: "",
   system: "",
   workspace: null,
-  tools: { mode: "all", selected: [], approval: {} },
-  toolsCustomized: false,
-  permissions: "default",
+  toolLayer: {},
   skills: [],
   workflow: "@default",
   streamReplies: "gateway_default",
@@ -67,7 +70,14 @@ export type SettingsContentProps = {
   tab: SettingsTab;
   value: RunPreferences;
   onChange: (value: RunPreferences) => void;
-  tools: ToolSpec[];
+  /** The gateway's tools as the kit reads them (GET discovery/tools). */
+  toolCatalog: readonly ToolCatalogItem[];
+  /** The catalog's warnings in the gateway's words. */
+  toolWarnings?: readonly string[];
+  /** Tools tab: a one-time notice above the editor (the Permissions migration), with its dismiss. */
+  toolsNotice?: { text: string; onDismiss: () => void } | null;
+  /** Tools tab: an automation (its definition) instead of this app's defaults. */
+  automationTools?: boolean;
   disabled: boolean;
   lockedReasonId?: string;
   defaultModel?: { provider: string; model: string };
@@ -94,7 +104,7 @@ export type SettingsContentProps = {
 };
 
 export function SettingsContent({
-  tab, value, onChange, tools, disabled, defaultModel,
+  tab, value, onChange, toolCatalog, toolWarnings, toolsNotice, automationTools, disabled, defaultModel,
   workflowDefault, streaming = STREAMING_LOADING,
   lockedReasonId = SETTINGS_LOCKED_ID,
   workspaceRootFixed, hideStreamReplies, lockedText,
@@ -120,35 +130,16 @@ export function SettingsContent({
                 onChange={update}
                 disabled={disabled}
                 effectiveDefault={defaultModel}
-                fetchModelCapabilities={modelDiscovery.fetchModelCapabilities}
                 enableSpeculation
                 inheritLabel="Gateway default"
-                defaultHint={
-                  defaultModel
-                    ? `${workflowDefault ? "Workflow" : "Gateway"} default: ${defaultModel.provider} · ${defaultModel.model}.`
-                    : undefined
-                }
-                fetchProviders={async () => {
-                  const data = await gateway.discovery_providers();
-                  return Array.isArray(data.providers)
-                    ? data.providers
-                    : Array.isArray(data.items)
-                      ? data.items
-                      : [];
-                }}
-                fetchModels={async (provider) => {
-                  const data =
-                    await gateway.discovery_provider_models(provider);
-                  return (
-                    Array.isArray(data.models)
-                      ? data.models
-                      : Array.isArray(data.items)
-                        ? data.items
-                        : []
-                  ).map((model: any) =>
-                    typeof model === "string" ? model : model.id || model.name,
-                  );
-                }}
+                fetchProviders={modelDiscovery.fetchProviders}
+                fetchModels={modelDiscovery.fetchModels}
+                fetchModelCapabilities={modelDiscovery.fetchModelCapabilities}
+                // The kit names the gateway default ("Gateway default · provider / model ·
+                // reasoning · MTP depth"); a workflow's own defaults are said here instead.
+                {...(workflowDefault
+                  ? { defaultHint: defaultModel ? `Workflow default: ${defaultModel.provider} · ${defaultModel.model}.` : undefined }
+                  : { fetchGatewayDefault: modelDiscovery.fetchGatewayDefault })}
               />
             </section>
             <section className="code-settings-section">
@@ -221,66 +212,29 @@ export function SettingsContent({
           </section>
         ) : tab === "tools" ? (
           <section className="code-settings-section">
-            <label className="code-field">
-              Permissions
-              <select aria-label="Permissions" value={value.permissions} disabled={disabled} onChange={event => update({ permissions: event.target.value as PermissionLevel })}>
-                <option value="default">Gateway default</option>
-                <option value="read">Read</option>
-                <option value="write">Write</option>
-                <option value="all">All enabled tools</option>
-              </select>
-            </label>
-            <p className="code-field-help">Saved for this Gateway account and future turns. Permissions never enable an unchecked tool. Explicit Ask overrides still ask, even with permissions: all.</p>
-            <ToolPolicyEditor
-              tools={tools
-                .filter((tool) => tool.enabled)
-                .map((tool) => ({
-                  ...tool,
-                  // The gateway's command-sandbox state of a process-spawning tool, on its card.
-                  ...(tool.sandboxState ? { state: tool.sandboxState } : {}),
-                  default_approval:
-                    resolveToolPermissions(tools, value.tools, value.permissions).autoApproveTools.includes(tool.name)
-                      ? "approve"
-                      : "ask",
-                }))}
-              value={value.tools}
-              onChange={(next) =>
-                update({ tools: next, toolsCustomized: true })
-              }
-              disabled={disabled}
-              subtitle="Choose available tools and when they should ask you. Gateway restrictions always apply."
-              note="An empty custom selection disables every tool. Approvals follow the permissions level and each tool's override."
-            />
-            {tools.some((tool) => !tool.enabled) ? (
-              <details className="code-disabled-tools">
-                <summary>
-                  {tools.filter((tool) => !tool.enabled).length} tools
-                  unavailable under gateway policy
-                </summary>
-                {tools
-                  .filter((tool) => !tool.enabled)
-                  .map((tool) => (
-                    <p key={tool.name}>
-                      <strong>{tool.name}</strong>
-                      <br />
-                      {tool.whyDisabled || "Disabled by the gateway"}
-                    </p>
-                  ))}
-              </details>
+            {toolsNotice ? (
+              <p className="code-notice" role="status">
+                {toolsNotice.text}
+                <button type="button" aria-label="Dismiss notice" onClick={toolsNotice.onDismiss}>
+                  Dismiss
+                </button>
+              </p>
             ) : null}
-            <button
-              className="code-text-button"
+            <ToolModeEditor
+              catalog={toolCatalog}
+              layer="app"
+              value={value.toolLayer}
+              onChange={(toolLayer) => update({ toolLayer })}
+              onReset={() => update({ toolLayer: {} })}
               disabled={disabled}
-              onClick={() =>
-                update({
-                  toolsCustomized: false,
-                  tools: DEFAULT_PREFERENCES.tools,
-                  permissions: "default",
-                })
+              warnings={toolWarnings}
+              savedWhere={automationTools ? "Saved in this automation's definition" : TOOL_LAYER_STORE_WHERE}
+              note={
+                automationTools
+                  ? "Auto tools run without asking at every occurrence; Ask tools wait for you; Off tools are not offered. Gateway restrictions always apply."
+                  : "Auto tools run without asking, also when this app is closed; Ask tools wait for you; Off tools are not offered. Gateway restrictions always apply."
               }
-            >
-              Use gateway default
-            </button>
+            />
           </section>
         ) : (
           <SkillsPicker

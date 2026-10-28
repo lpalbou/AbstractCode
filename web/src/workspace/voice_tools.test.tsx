@@ -3,16 +3,15 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import {
+  CODE_CAPTURE_DEFAULTS,
   CodeVoiceSettings,
-  HOLD_HINT,
-  TAP_MS,
   TRANSCRIBE_TIMEOUT_MS,
   VoiceTools,
   cloneVoice,
   codeVoiceCreation,
+  codeVoiceLibrary,
   designVoice,
   fetchVoiceDefaults,
-  releaseAction,
   spokenMessage,
   transcriptionRunId,
 } from "./voice_tools";
@@ -20,9 +19,7 @@ import { MEDIA_NEEDS_HTTPS } from "../lib/secure-context";
 
 describe("gateway voice controls", () => {
   const base = {
-    sessionId: "session",
-    onTranscript: () => {},
-    onError: () => {},
+    preferences: {},
     voice: {
       tts_supported: false,
       tts_playback: { key: "", status: "idle" as const },
@@ -56,22 +53,23 @@ describe("gateway voice controls", () => {
   afterEach(() => {
     if (realNavigator) Object.defineProperty(globalThis, "navigator", realNavigator);
   });
-  it("disables the microphone while the kit cannot record, and says how to use it when it can", () => {
+  const mic = (markup: string) => /<button[^>]*data-action="voice-mic"[^>]*>/.exec(markup)?.[0] || "";
+  it("is the kit microphone (AfVoiceMicButton): disabled with the reason while it cannot record", () => {
     setNavigator({ mediaDevices: { getUserMedia: async () => ({}) } });
-    const off = renderToStaticMarkup(
-      <VoiceTools {...base} capability={{ tts: { available: true }, stt: { available: true } }} />,
+    const off = renderToStaticMarkup(<VoiceTools {...base} capability={{ tts: { available: true }, stt: { available: true } }} />);
+    expect(mic(off)).toContain('aria-label="Hold to talk"');
+    expect(mic(off)).toContain('disabled=""');
+    const on = renderToStaticMarkup(<VoiceTools {...base} voice={{ ...base.voice, voice_ptt_supported: true }} capability={{ stt: { available: true } }} />);
+    expect(mic(on)).toContain('aria-label="Hold to talk"');
+    expect(mic(on)).not.toContain('disabled=""');
+  });
+  it("Tap to talk when the person chose it (capture_mode)", () => {
+    setNavigator({ mediaDevices: { getUserMedia: async () => ({}) } });
+    const tap = renderToStaticMarkup(
+      <VoiceTools {...base} preferences={{ capture_mode: "toggle" }} voice={{ ...base.voice, voice_ptt_supported: true }} capability={{ stt: { available: true } }} />,
     );
-    expect(off).toContain("Hold to talk");
-    expect(off.match(/disabled=""/g)?.length).toBe(1);
-    const on = renderToStaticMarkup(
-      <VoiceTools
-        {...base}
-        voice={{ ...base.voice, voice_ptt_supported: true }}
-        capability={{ stt: { available: true } }}
-      />,
-    );
-    expect(on).toContain("Hold to talk, release to send");
-    expect(on).not.toContain('disabled=""');
+    expect(mic(tap)).toContain('aria-label="Tap to talk"');
+    expect(CODE_CAPTURE_DEFAULTS).toEqual({ capture_mode: "hold", auto_send: true });
   });
   it("has no composer speaker: replies carry their own (round 6); the mic stays", () => {
     setNavigator({ mediaDevices: { getUserMedia: async () => ({}) } });
@@ -85,12 +83,11 @@ describe("gateway voice controls", () => {
   it("says why dictation is off when the browser withholds the microphone", () => {
     setNavigator({});
     const markup = renderToStaticMarkup(
-      <VoiceTools {...base} capability={{ stt: { available: true } }} />,
+      <VoiceTools {...base} voice={{ ...base.voice, voice_ptt_supported: true }} capability={{ stt: { available: true } }} />,
     );
     // The sentence itself (http: the kit's; secure context: browser lacks it): lib/media_sentence.test.ts.
     expect(markup).toContain(MEDIA_NEEDS_HTTPS);
-    expect(markup).not.toContain("Hold to talk");
-    expect(markup).toContain('disabled=""');
+    expect(mic(markup)).toContain('disabled=""');
   });
   it("shows elapsed seconds and the route while transcribing", () => {
     setNavigator({ mediaDevices: { getUserMedia: async () => ({}) } });
@@ -162,11 +159,22 @@ describe("Code's Voice panel creates voices in the gateway's voice library", () 
   const refusal = (status: number, detail: string) => () =>
     new Response(JSON.stringify({ detail }), { status, headers: { "content-type": "application/json" } });
 
-  it("hands the kit both creation functions", () => {
+  it("hands the kit the voice library: creation, list / rename / remove, and Share only for an administrator", async () => {
     expect(codeVoiceCreation.design).toBe(designVoice);
     expect(codeVoiceCreation.clone).toBe(cloneVoice);
+    const user = codeVoiceLibrary(false);
+    expect(user.design).toBe(designVoice);
+    expect(typeof user.list).toBe("function");
+    expect(user.share).toBeUndefined();
+    expect(typeof codeVoiceLibrary(true).share).toBe("function");
     const src = readFileSync(new URL("./voice_tools.tsx", import.meta.url), "utf8");
-    expect(src).toContain("createVoice={codeVoiceCreation}");
+    expect(src).toContain("voiceLibrary={codeVoiceLibrary(isAdmin)}");
+    await withFetch(ok, async (fetchMock) => {
+      await codeVoiceLibrary(true).rename!("v 1", { name: "N" });
+      await codeVoiceLibrary(true).share!("v 1");
+      const calls = fetchMock.mock.calls.map(([url, init]) => `${(init as RequestInit).method} ${url}`);
+      expect(calls).toEqual(["PATCH api/gateway/voice/clones/v%201", "POST api/gateway/voice/clones/v%201/deploy"]);
+    });
   });
   it("designs a voice: POST voice/design with the description, name and language", async () => {
     await withFetch(ok, async (fetchMock) => {
@@ -225,13 +233,6 @@ describe("dictation never spins forever", () => {
 // Press to talk (operator, 2026-10-10: "the mic button should also be a press
 // button, like the spacebar for the TUI"): press records, release sends.
 describe("press to talk", () => {
-  it("a hold sends; a tap is discarded", () => {
-    expect(releaseAction(TAP_MS + 1)).toBe("send");
-    expect(releaseAction(2_000)).toBe("send");
-    expect(releaseAction(TAP_MS - 1)).toBe("discard");
-    expect(releaseAction(0)).toBe("discard");
-    expect(HOLD_HINT).toContain("release to send");
-  });
   it("sends what was typed, then what was said", () => {
     expect(spokenMessage("", "bonjour")).toBe("bonjour");
     expect(spokenMessage("compare these:  \n", "the two GPUs")).toBe("compare these:\nthe two GPUs");
@@ -241,12 +242,14 @@ describe("press to talk", () => {
     // A new conversation has no run yet: its first message can be spoken too.
     expect(await transcriptionRunId("", "acode-abc")).toBe("session_memory_acode-abc");
   });
-  it("the composer sends the transcript; a disabled button's press is refused in code", () => {
+  it("the composer sends the transcript, or puts it in the draft when auto-send is off; the automation view never records", () => {
     const app = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
-    expect(app).toMatch(/onTranscript: \(text\) => void sendSpoken\(text\)/);
+    expect(app).toContain("setDraft((d) => spokenMessage(d, text))");
+    expect(app).toContain("else void sendSpoken(text);");
     const tools = readFileSync(new URL("./voice_tools.tsx", import.meta.url), "utf8");
-    expect(tools).toMatch(/if \(!voice\.voice_ptt_supported \|\| voice\.voice_ptt_busy \|\| held\.current\) return;/);
-    // Dictation is offered before the conversation's first run (the media run carries it).
-    expect(tools).toMatch(/capability\.stt\?\.available === true && \(runId \|\| sessionId\)/);
+    // Dictation is offered before the conversation's first run (the media run carries it); no recording without a destination.
+    expect(tools).toMatch(/capability\.stt\?\.available === true && \(runId \|\| sessionId\) && onTranscript/);
+    const automations = readFileSync(new URL("./automations_view.tsx", import.meta.url), "utf8");
+    expect(automations).not.toContain("onTranscript: () => {}");
   });
 });

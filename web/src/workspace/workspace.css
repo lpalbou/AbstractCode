@@ -360,25 +360,6 @@ button {
 .code-sidebar-bottom small {
   font-size: var(--font-size-xxs);
 }
-.code-gateway-foot {
-  border-top: 1px solid var(--ui-border-1);
-  margin-top: 13px;
-  padding: 14px 5px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: var(--font-size-xxs);
-  color: var(--text-secondary);
-}
-.code-gateway-foot > span:nth-child(2) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.code-gateway-foot > small {
-  margin-left: auto;
-  font-size: var(--font-size-xxs);
-}
 .code-main-shell {
   grid-area: main;
   min-width: 0;
@@ -702,13 +683,6 @@ select option {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.code-conversation .pc-composer__actions select {
-  font-size: var(--font-size-xs);
-  padding: 4px;
-  border: 1px solid var(--ui-border-1);
-  border-radius: 5px;
-  background-color: var(--bg-primary);
 }
 .code-conversation .pc-workflow-chat__footer {
   display: flex;
@@ -1330,148 +1304,6 @@ select option {
   border-radius: 7px;
   font-size: var(--font-size-xs);
 }
-/* Composer attachment chips (inside the composer box, above the field). */
-.code-attachments {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding-bottom: 10px;
-  font-size: var(--font-size-xs);
-}
-.code-attachment {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  max-width: min(100%, 300px);
-  padding: 5px 5px 5px 7px;
-  border: 1px solid var(--ui-border-1);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-primary) 55%, var(--bg-secondary));
-  color: var(--text-primary);
-  line-height: 1.3;
-}
-/* Only a chip's first appearance animates; an upload settling into an
- * attached chip must not blink. */
-.code-attachment.is-queued,
-.code-attachment.is-refused {
-  animation: code-attachment-in 0.14s ease-out;
-}
-.code-attachment:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-.code-attachment__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  flex-shrink: 0;
-  border-radius: 6px;
-  background: var(--accent-subtle);
-  color: var(--accent);
-}
-.code-attachment__body {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.code-attachment__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 550;
-}
-.code-attachment__meta {
-  color: var(--text-secondary);
-  font-size: var(--font-size-xxs, 10px);
-  font-variant-numeric: tabular-nums;
-}
-.code-attachment__action {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  padding: 4px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  cursor: pointer;
-}
-.code-attachment__action:hover {
-  background: var(--ui-overlay-bg-hover, var(--accent-subtle));
-  color: var(--text-primary);
-}
-.code-attachment__action:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-.code-attachment.is-queued,
-.code-attachment.is-uploading {
-  color: var(--text-secondary);
-}
-.code-attachment.is-queued .code-attachment__icon,
-.code-attachment.is-uploading .code-attachment__icon {
-  background: var(--ui-overlay-bg, var(--accent-subtle));
-}
-.code-attachment__spinner {
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
-  border-top-color: var(--accent);
-}
-.code-attachment.is-uploading .code-attachment__spinner {
-  animation: code-progress-spin 0.8s linear infinite;
-}
-/* A refusal/failure explains itself in full: the chip takes the row. */
-.code-attachment.is-refused,
-.code-attachment.is-failed {
-  max-width: 100%;
-  flex-basis: 100%;
-  border-color: var(--error-border);
-  background: var(--error-subtle);
-}
-.code-attachment.is-refused .code-attachment__icon,
-.code-attachment.is-failed .code-attachment__icon {
-  background: transparent;
-  color: var(--error);
-}
-.code-attachment.is-refused .code-attachment__body,
-.code-attachment.is-failed .code-attachment__body {
-  flex: 1;
-}
-.code-attachment.is-refused .code-attachment__meta,
-.code-attachment.is-failed .code-attachment__meta {
-  color: var(--error);
-  white-space: normal;
-  font-size: var(--font-size-xs);
-}
-.code-attachment__retry {
-  padding: 3px 8px;
-  border: 1px solid var(--error-border);
-  color: var(--text-primary);
-  font-size: var(--font-size-xs);
-}
-@keyframes code-attachment-in {
-  from {
-    opacity: 0;
-    transform: translateY(2px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .code-attachment,
-  .code-attachment.is-uploading .code-attachment__spinner {
-    animation: none;
-  }
-}
 .code-queue button:not(.af-switch) {
   display: inline-flex;
   padding: 3px;
@@ -1622,11 +1454,6 @@ select option {
 .code-facts dd {
   margin: 4px 0 0;
   overflow-wrap: anywhere;
-}
-.code-disabled-tools {
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary);
-  margin: 20px 0;
 }
 .code-text-button {
   background: transparent;
@@ -2100,15 +1927,12 @@ select option {
     overflow: visible;
   }
 }
-/* Drawers (Run settings, workflow inputs, voice) open under the measured chrome: app.tsx passes
-   AfDrawer's topOffset from useChromeBottom() (layout.ts); no CSS override of the inline top. */
 /* Touch (coarse pointer): 44 px targets, 16 px inputs (no iOS focus zoom), comfortable rows. */
 @media (pointer: coarse) {
   .code-icon-button,
   .code-mobile-nav,
   .code-mobile-close,
   .code-conversation .pc-workflow-chat__icon-button,
-  .code-attachment__action,
   .code-queue button:not(.af-switch) {
     min-width: var(--tap-min, 44px);
     min-height: var(--tap-min, 44px);
@@ -2131,7 +1955,6 @@ select option {
   .code-artifact,
   .code-activity-row summary,
   .code-composer-workspace,
-  .code-conversation .pc-composer__actions select,
   .code-alert button,
   .code-notice button,
   .code-discovery-errors button,
@@ -2165,8 +1988,7 @@ select option {
   .code-field > input,
   .code-field > select,
   .code-field > textarea,
-  .code-field > label + textarea,
-  .code-conversation .pc-composer__actions select {
+  .code-field > label + textarea {
     min-height: var(--tap-min, 44px);
     font-size: var(--font-size-input, 16px);
   }
@@ -2195,15 +2017,10 @@ select option {
   .code-composer-workspace span {
     display: none;
   }
-  .code-conversation .pc-composer__row select {
-    flex: 1 1 6em;
-    min-width: 0;
-    text-overflow: ellipsis;
-  }
 }
-/* Very narrow composer (< 360 px: 320-wide phones): the last row still holds select + Stop +
-   Send — Stop shows its icon only (its word stays the accessible name), the select and the
-   send label shrink with an ellipsis instead of pushing Send onto a third row. */
+/* Very narrow composer (< 360 px: 320-wide phones): the last row still holds Stop + Send —
+   Stop shows its icon only (its word stays the accessible name), the send label shrinks with an
+   ellipsis instead of pushing Send onto a third row. */
 @container pc-composer (max-width: 359.98px) {
   .code-conversation .pc-workflow-chat__stop {
     min-width: var(--tap-min, 32px);
@@ -2217,11 +2034,6 @@ select option {
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
-  }
-  /* 5em basis: too wide to squeeze in after the five icons, narrow enough to share the last
-     row with Stop and Send at 320 px. */
-  .code-conversation .pc-composer__row select {
-    flex: 1 1 5em;
   }
   .code-conversation .pc-composer__row > .pc-btn {
     min-width: 0;
@@ -2283,7 +2095,6 @@ select option {
   /* Touch selects take the kit's single-select rule (ui-kit >= 0.3.2: appearance none, 44 px,
      16 px, its own chevron). The app keeps only colours; its desktop paddings must leave room
      for the kit chevron. */
-  .code-conversation .pc-composer__actions select,
   .code-field > select {
     padding-right: 32px;
   }
@@ -2800,24 +2611,6 @@ select option {
     padding-inline: var(--gutter, 12px);
   }
 }
-/* Plain-http note beside the dictation control (the browser withholds the microphone there). */
-.code-voice-note {
-  font-size: 12px;
-  line-height: 1.3;
-  color: var(--text-secondary);
-  max-width: 34ch;
-}
-/* "Recording… 2 s" / "Transcribing… 12 s · faster-whisper / large-v3" beside the mic (round 6). */
-.code-voice-status {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-
 .code-loading-status { display: flex; align-items: center; gap: 8px; }
 .code-loading-spinner {
   width: 12px; height: 12px; flex: 0 0 12px;
@@ -2916,7 +2709,6 @@ select option {
   .code-topbar > .code-breadcrumb { display: flex; }
 }
 
-.code-app-assistant { background: var(--bg-secondary); }
 @media (max-width: 767.98px) {
   .code-topbar { gap: 4px; padding-inline: 8px; }
   .code-topbar .af-topbar__pill { padding: 0; width: 44px; min-width: 44px; min-height: 44px; }

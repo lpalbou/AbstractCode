@@ -132,7 +132,8 @@ describe("Escape closes one layer", () => {
 
   it("app.tsx counts every drawer and dialog above the panes as the owner of the key", () => {
     const call = appSource.slice(appSource.indexOf("escapeTarget({"), appSource.indexOf("});", appSource.indexOf("escapeTarget({")));
-    for (const owner of ["panelOpen", "assistantOpen", "newAutomationOpen", "appearanceOpen", "kitDialogOpen()"]) {
+    // The Docs assistant is a right-side panel (panelOpen); Appearance and About are kit dialogs (kitDialogOpen()).
+    for (const owner of ["panelOpen", "newAutomationOpen", "kitDialogOpen()"]) {
       expect(call, owner).toContain(owner);
     }
     expect(call).toContain("defaultPrevented: event.defaultPrevented");
@@ -196,9 +197,9 @@ describe("workspace.css responsive contract", () => {
     expect(css).toMatch(/:root\[data-keyboard="open"\] \.code-conversation \.pc-composer__textarea \{[^}]*max-height: calc\(var\(--vv-height[^;]*\* 0\.3\);/);
   });
 
-  it("never overrides the kit drawer's inline top with !important (topOffset is measured)", () => {
+  it("never overrides a kit drawer's top with !important; no app-side chrome measurer (the docs assistant is a drawer-system panel)", () => {
     expect(css).not.toMatch(/\.code-settings-drawer \{[^}]*!important/);
-    expect(appSource).toMatch(/topOffset=\{drawerTop\}/);
+    expect(appSource).not.toMatch(/useChromeBottom|drawerTop/);
   });
 });
 

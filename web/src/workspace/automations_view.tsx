@@ -316,7 +316,8 @@ export function AutomationMain(props: {
     sessionId: automationId,
     capability: props.voiceCapability || {},
     preferences: props.voicePreferences || {},
-    onTranscript: () => {},
+    // Replies are read aloud here; nothing records (the automation panel has no composer to dictate
+    // into: a recording would be transcribed and thrown away).
     onError: setVoiceError,
   });
   useEffect(() => setVoiceError(""), [automationId]);
@@ -336,7 +337,7 @@ export function AutomationMain(props: {
           <Icon name="chat" size={14} /> <span>Back to the conversation</span>
         </button>
         {voice.tts_playback.status !== "idle" ? (
-          <button type="button" className="code-subtle-button" onClick={voice.stop_tts}>Stop audio</button>
+          <button type="button" className="code-subtle-button" onClick={voice.stop_tts}>Stop spoken reply</button>
         ) : null}
         {st.notice ? (
           <p className="code-field-help" role="status">

@@ -29,7 +29,6 @@ test("works under /apps/code/: automations, approval, folder and discuss", async
   const dialog = page.getByRole("dialog", { name: "Schedule a task" });
   await dialog.getByLabel("Task").fill("Write the tick file");
   await dialog.getByText("Ask me before each tool call").click();
-  await dialog.getByText("Advanced").click();
   await dialog.getByLabel("Title").fill(title);
   await dialog.getByRole("button", { name: "Create automation" }).click();
   await expect(dialog).toBeHidden();

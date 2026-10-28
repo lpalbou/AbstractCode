@@ -9,8 +9,9 @@ import type { ActivityRow } from "../lib/activity_rows";
 import { automationRunPreferences, automationSettingsChanges, withAutomationRunPreferences } from "./automation_settings";
 import { saveErrorText, saveStateText } from "./automation_settings_view";
 import { ActivityGroups, AutomationActivity } from "./workspace_panels";
-import { CodeRightRail, RAIL_ITEMS, RAIL_PANEL_KEY, RAIL_PANEL_KEY_V1, readRailPanel, type RailPanel } from "./right_rail";
-import { DEFAULT_PREFERENCES } from "./settings_panel";
+import { CodeRightRail, RAIL_ITEMS, RAIL_WIDTH_KEY, type RailPanel } from "./right_rail";
+import { codeDocsPanel } from "./app_assistant";
+import { normalizeToolCatalog as kitToolCatalog } from "@abstractframework/ui-kit";
 
 const appSource = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
 const voiceSource = readFileSync(new URL("./voice_tools.tsx", import.meta.url), "utf8");
@@ -40,7 +41,7 @@ describe("header: no gear (round 6 — the rail icons open the panels)", () => {
 describe("the rail drawer", () => {
   const content = Object.fromEntries(RAIL_ITEMS.map((item) => [item.id, <p key={item.id}>{item.id.toUpperCase()}</p>])) as Record<RailPanel, React.ReactNode>;
   it("renders the kit rail with one icon per subject, in order, and no horizontal tab strip", () => {
-    const html = renderToStaticMarkup(<CodeRightRail panel="files" onPanel={() => {}} content={content} activityBadge={2} />);
+    const html = renderToStaticMarkup(<CodeRightRail panel="files" onPanel={() => {}} content={content} activityBadge={2} docs={codeDocsPanel(true)} />);
     expect(html).toContain('role="tablist"');
     expect(html).toContain('aria-orientation="vertical"');
     const names = [...html.matchAll(/role="tab"[^>]*aria-label="([^"]+)"|aria-label="([^"]+)"[^>]*role="tab"/g)].map((m) => m[1] || m[2]);
@@ -58,14 +59,16 @@ describe("the rail drawer", () => {
   it("app.tsx gives every rail panel its own content", () => {
     for (const id of ["activity", "files", "model", "workflow", "workspace", "tools", "skills", "voice"]) expect(appSource).toMatch(new RegExp(`\\n\\s+${id}: `));
   });
-  it("restores the remembered panel; a round-4 'settings' opens Model", () => {
-    const store = (values: Record<string, string>) => ({ getItem: (k: string) => (k in values ? values[k] : null) });
-    expect(readRailPanel(store({ [RAIL_PANEL_KEY]: "skills" }))).toBe("skills");
-    expect(readRailPanel(store({ [RAIL_PANEL_KEY]: "" }))).toBeNull();
-    expect(readRailPanel(store({ [RAIL_PANEL_KEY_V1]: "settings" }))).toBe("model");
-    expect(readRailPanel(store({ [RAIL_PANEL_KEY_V1]: "files" }))).toBe("files");
-    expect(readRailPanel(store({ [RAIL_PANEL_KEY]: "bogus" }))).toBeNull();
-    expect(readRailPanel(null)).toBeNull();
+  it("is the kit's drawer system: widths and the docked open panel under ONE key (no app-side persistence)", () => {
+    const html = renderToStaticMarkup(<CodeRightRail panel="docs" onPanel={() => {}} content={content} docs={codeDocsPanel(true)} />);
+    expect(html).toContain('data-side="right"');
+    // The Docs assistant is a drawer-mode panel: open, labelled, no rail tab of its own.
+    expect(html).toMatch(/id="code-rail-panel-docs" role="tabpanel" aria-label="Docs assistant"/);
+    expect(html).not.toContain('data-rail="docs"');
+    expect(html).toContain("Grounded on AbstractCode");
+    expect(RAIL_WIDTH_KEY).toBe("abstractcode.rail.width.v1");
+    expect(appSource).not.toContain("abstractcode.rail.panel");
+    expect(appSource).not.toMatch(/localStorage\.setItem\(RAIL/);
   });
   it("is mounted inside the content area (beside the conversation), not as an overlay drawer", () => {
     expect(appSource).toMatch(/<\/main>\s*\)\}\s*\{railElement\}\s*<\/div>/);
@@ -106,6 +109,12 @@ describe("activity groups (one per iteration, newest open)", () => {
 });
 
 describe("automation settings = its definition", () => {
+  // The gateway's tools (discovery/tools as the kit reads it): read_file asks by default.
+  const catalog = kitToolCatalog({ items: [
+    { name: "read_file", toolset: "files", enabled: true, approval_default: "ask", risk_rank: 1 },
+    { name: "write_file", toolset: "files", enabled: true, approval_default: "ask", risk_rank: 2 },
+    { name: "web_search", toolset: "web", enabled: true, approval_default: "auto", risk_rank: 1 },
+  ] });
   const input = {
     prompt: "Summarize",
     provider: "lmstudio",
@@ -116,21 +125,21 @@ describe("automation settings = its definition", () => {
     workspace: { posture: "allowed_only", default_mode: "rw", folders: [{ path: "/data/projects", mode: "ro" }] },
   };
   it("reads the definition with the same keys a conversation turn writes", () => {
-    const p = automationRunPreferences(input);
+    const p = automationRunPreferences(input, catalog);
     expect([p.provider, p.model, p.reasoning, p.maxIterations]).toEqual(["lmstudio", "qwen", "high", "7"]);
     expect(p.workspace).toEqual({ posture: "allowed_only", default_mode: "rw", folders: [{ path: "/data/projects", mode: "ro" }] });
-    expect(p.tools).toEqual({ mode: "custom", selected: ["read_file"], approval: { read_file: "ask" } });
-    expect(p.toolsCustomized).toBe(true);
+    // The allowed-tools ceiling = the other tools Off; read_file's Ask is its gateway default (no diff).
+    expect(p.toolLayer).toEqual({ write_file: "off", web_search: "off" });
   });
   it("an empty definition reads as Gateway default everywhere", () => {
-    const p = automationRunPreferences({ prompt: "x" });
+    const p = automationRunPreferences({ prompt: "x" }, catalog);
     expect([p.provider, p.model, p.reasoning, p.maxIterations, p.maxTokens, p.system]).toEqual(["", "", "", "", "", ""]);
     expect(p.workspace).toBeNull();
-    expect(p.toolsCustomized).toBe(false);
+    expect(p.toolLayer).toEqual({});
   });
   it("round-trips without a change (no revision for nothing)", () => {
     const def = { target: { bundle_ref: "b@1", flow_id: "f", workflow_id: "b:f", input_data: input } } as any;
-    expect(automationSettingsChanges(def, automationRunPreferences(input))).toBeNull();
+    expect(automationSettingsChanges(def, automationRunPreferences(input, catalog), catalog)).toBeNull();
   });
   it("a reset REMOVES the override (the gateway default applies again); the task is kept", () => {
     const next = withAutomationRunPreferences(input, { ...automationRunPreferences(input), provider: "", model: "", reasoning: "", maxIterations: "" });
@@ -148,10 +157,16 @@ describe("automation settings = its definition", () => {
     expect((changes.target as any).input_data.model).toBe("llama");
   });
   it("tools back to the default drop the selection and the allowed-tools ceiling", () => {
-    const next = withAutomationRunPreferences(input, { ...automationRunPreferences(input), toolsCustomized: false, tools: DEFAULT_PREFERENCES.tools });
+    const next = withAutomationRunPreferences(input, { ...automationRunPreferences(input, catalog), toolLayer: {} }, catalog);
     expect(next.tools).toBeUndefined();
     expect(next._runtime.allowed_tools).toBeUndefined();
     expect(next._runtime.tool_policy).toBeUndefined();
+  });
+  it("a tool choice is written by the kit plan: Auto in auto_approve_tools, Ask in require_approval_tools, Off outside allowed_tools", () => {
+    const next = withAutomationRunPreferences(input, { ...automationRunPreferences(input, catalog), toolLayer: { read_file: "auto", web_search: "off" } }, catalog);
+    expect(next.tools).toEqual(["read_file", "write_file"]);
+    expect(next._runtime.allowed_tools).toEqual(["read_file", "write_file"]);
+    expect(next._runtime.tool_policy).toEqual({ auto_approve_tools: ["read_file"], require_approval_tools: ["write_file"] });
   });
   it("save outcomes say the revision, and a conflict is read from the typed code (no text guessing)", () => {
     expect(saveStateText({ status: "saved", revision: 5 })).toBe("Saved as revision 5; applies from the next run.");
@@ -172,7 +187,8 @@ describe("voice", () => {
   it("TTS requests carry only the speech fields; transcription carries the STT override", () => {
     expect(voiceSource).toContain("...voiceTtsRequest(preferences)");
     expect(voiceSource).toContain("...voiceSttRequest(preferences)");
-    expect(voiceSource).toContain('output_device_id: preferences.output_device || ""');
+    // Devices, volume, mute, gain and the capture mode: the kit's gatewayVoiceOptions.
+    expect(voiceSource).toContain("...gatewayVoiceOptions({ ...CODE_CAPTURE_DEFAULTS, ...preferences })");
   });
   it("Settings → Voice is the kit's Assistant-layout section", () => {
     // Round 6: the kit section is mounted through CodeVoiceSettings (voice_tools.tsx) with the gateway's voice/defaults.
