@@ -320,6 +320,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     // Where the composer currently lives in the tree — the root's
     // type-to-focus handler needs it (see `chrome::ComposerAnchor`).
     let composer_anchor = chrome::ComposerAnchor::default();
+    let chrome_focus = chrome::ChromeFocus::new(cx, composer_anchor.clone());
     wire_ctrl_c(cx, actions, store, &ctx, &composer);
     // Voice: read-aloud, dictation text into the composer, elapsed tick.
     voice_view::wire(cx, store, &ctx, composer.clone());
@@ -408,8 +409,6 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
 
     // The status bar's theme trigger (`theme_menu`): its focus/hover/open
     // state outlives the chrome's rebuilds.
-    let theme_trigger = theme_menu::TriggerState::new(cx);
-    let chrome_focus = chrome::ChromeFocus::new(cx);
 
     let root_ctx = ctx.clone();
     let esc_ctx = ctx.clone();
@@ -582,6 +581,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
         .on(abstracttui::ui::Phase::Capture, {
             let composer = composer.clone();
             let anchor = composer_anchor.clone();
+            let chrome_focus = chrome_focus.clone();
             move |ctx: &mut abstracttui::ui::EventCtx, ev: &abstracttui::ui::UiEvent| {
                 if composer.focused().get_untracked() {
                     return; // the composer already owns this input
@@ -770,7 +770,15 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                             .width(Dimension::Percent(1.0))
                             .height(Dimension::Percent(1.0)),
                     )
-                    .child(chrome::header(&t, store, spin, cx, &ctx, chrome_focus))
+                    .child(chrome::header(
+                        &t,
+                        store,
+                        spin,
+                        cx,
+                        scx,
+                        &ctx,
+                        chrome_focus.clone(),
+                    ))
                     .child(transcript_view::pane(
                         scx,
                         &t,
@@ -824,9 +832,9 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                         store,
                         &ctx,
                         cx,
+                        scx,
                         cwd_base.clone(),
-                        theme_trigger,
-                        chrome_focus,
+                        chrome_focus.clone(),
                     ))
                     .build()
             }
@@ -1283,7 +1291,9 @@ fn open_status(cx: Scope, store: Store, ctx: &UiCtx) {
 }
 
 /// Run the chrome widget `id` (`chrome::ACT_*`): each opens exactly the
-/// modal its slash command opens. Returns false for an unknown id.
+/// modal its slash command opens. Returns false for an unknown id —
+/// `ACT_THEME` included: the status bar opens the theme DROPDOWN itself,
+/// anchored on the theme item.
 pub(crate) fn chrome_action(cx: Scope, store: Store, ctx: &UiCtx, id: &str) -> bool {
     match id {
         chrome::ACT_WORKFLOW => open_workflow(cx, store, ctx),
@@ -1293,7 +1303,6 @@ pub(crate) fn chrome_action(cx: Scope, store: Store, ctx: &UiCtx, id: &str) -> b
             rail_view::open_settings(cx, store, ctx, Some(crate::rail::Panel::Workspace))
         }
         chrome::ACT_SESSION => conversations_view::open_sessions(cx, store, ctx),
-        chrome::ACT_THEME => modals::open_theme_picker(cx, store, ctx),
         chrome::ACT_WAITING => {
             attention_chip::open_waiting(cx, store, ctx);
         }

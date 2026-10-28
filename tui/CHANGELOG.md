@@ -20,7 +20,8 @@ slots).
   authorised workspaces, as `/workspace`) and the session id (opens the
   Sessions modal); its right end is the theme selector (opens the theme
   dropdown). From the keyboard: `Tab` to the header or the status bar, `←`/`→`
-  between its widgets, `Enter` or `Space` opens.
+  between its widgets, `Enter` or `Space` opens. After a widget opens its
+  modal, the keyboard goes back to the prompt.
 - **The folder moved from the header to the status bar's middle**, beside
   the session id; the session id is shown whole, cut from the left only when
   the row is tight.

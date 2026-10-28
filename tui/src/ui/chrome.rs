@@ -31,24 +31,56 @@ pub const ACT_WAITING: &str = "chrome.waiting";
 /// Focus of the two chrome action hosts (header, status bar). Root scope:
 /// it outlives the chrome's rebuilds. The root's type-to-prompt capture
 /// reads it so Space activates a focused chrome widget instead of being
-/// typed into the prompt.
-#[derive(Clone, Copy)]
+/// typed into the prompt. `composer` is where an activation hands the
+/// keyboard back (see [`ChromeFocus::activated`]); `theme` is the theme
+/// dropdown's state, which the bar's theme widget opens.
+#[derive(Clone)]
 pub struct ChromeFocus {
     pub header: Signal<bool>,
     pub bar: Signal<bool>,
+    pub composer: ComposerAnchor,
+    pub theme: crate::ui::theme_menu::TriggerState,
 }
 
 impl ChromeFocus {
-    pub fn new(cx: Scope) -> ChromeFocus {
+    pub fn new(cx: Scope, composer: ComposerAnchor) -> ChromeFocus {
         ChromeFocus {
             header: cx.signal(false),
             bar: cx.signal(false),
+            composer,
+            theme: crate::ui::theme_menu::TriggerState::new(cx),
         }
     }
 
     /// Either chrome host holds the keyboard focus.
     pub fn any(&self) -> bool {
-        self.header.get_untracked() || self.bar.get_untracked()
+        self.header.try_get_untracked().unwrap_or(false)
+            || self.bar.try_get_untracked().unwrap_or(false)
+    }
+
+    /// A host's focus flag must not outlive the host: the engine drops a
+    /// torn-down node's focus WITHOUT a FocusOut, so a chrome rebuild
+    /// (phase, focus, theme) while a host was focused would leave the flag
+    /// true and the root would keep swallowing Space. Cleared with the
+    /// build scope (`scx`) of the chrome that mounted the host.
+    fn clear_on_teardown(scx: Scope, flag: Signal<bool>) {
+        scx.on_cleanup(move || {
+            if flag.try_get_untracked().is_some() {
+                flag.set(false);
+            }
+        });
+    }
+
+    /// After a widget's activation (click, Enter, Space) the keyboard goes
+    /// back to the prompt: a click would otherwise leave the main tree's
+    /// focus on the host (a press focuses the nearest focusable), so the
+    /// next Space or Enter re-ran the widget instead of reaching the
+    /// prompt. The modal the widget opened is its own layer with its own
+    /// focus, so this never steals from it.
+    fn activated(&self, ectx: &mut abstracttui::ui::EventCtx) {
+        if let Some(id) = self.composer.get() {
+            ectx.request_focus(id);
+        }
     }
 }
 
@@ -169,9 +201,11 @@ pub fn header(
     store: Store,
     spin: Signal<u64>,
     root: Scope,
+    scx: Scope,
     ctx: &UiCtx,
     focus: ChromeFocus,
 ) -> View {
+    ChromeFocus::clear_on_teardown(scx, focus.header);
     let tokens = *t;
     // Owned before the 'static render closure: `ctx` is only borrowed.
     let gateway = ctx.gateway_label.clone();
@@ -360,9 +394,13 @@ pub fn header(
         .access_label("header: workflow, model, gateway")
         .focusable()
         .focus_signal(focus.header)
-        .on_action(move |ectx, id| {
-            if crate::ui::chrome_action(root, store, &action_ctx, id.as_str()) {
-                ectx.stop_propagation();
+        .on_action({
+            let focus = focus.clone();
+            move |ectx, id| {
+                if crate::ui::chrome_action(root, store, &action_ctx, id.as_str()) {
+                    ectx.stop_propagation();
+                    focus.activated(ectx);
+                }
             }
         })
         .child(line)
@@ -1287,10 +1325,12 @@ pub fn status_bar(
     store: Store,
     ctx: &UiCtx,
     root: Scope,
+    scx: Scope,
     workspace: String,
-    theme_st: crate::ui::theme_menu::TriggerState,
     focus: ChromeFocus,
 ) -> View {
+    let theme_st = focus.theme;
+    ChromeFocus::clear_on_teardown(scx, focus.bar);
     let tokens = *t;
     // abstracttui 1260: a StatusBar with named slots. LEFT = the
     // instruments (ctx meter, tokens, gpu, mem, skills, mcp, keys pointer),
@@ -1324,19 +1364,24 @@ pub fn status_bar(
         .access_label("status bar: workspace, session, theme")
         .focusable()
         .focus_signal(focus.bar)
-        .on_action(move |ectx, id| {
-            if id.as_str() == ACT_THEME {
-                // The theme dropdown anchors on the bar's right end, where
-                // the theme item is flush (the bar's padding is 1 cell).
-                let bar = ectx.current_rect_screen();
-                let w = text::width(&crate::ui::theme_menu::trigger_text(
-                    abstracttui::app::current_theme().label,
-                ));
-                let anchor = Rect::new((bar.right() - 1 - w).max(bar.x), bar.y, w, 1);
-                crate::ui::theme_menu::open(root, &action_ctx, theme_st, anchor);
-                ectx.stop_propagation();
-            } else if crate::ui::chrome_action(root, store, &action_ctx, id.as_str()) {
-                ectx.stop_propagation();
+        .on_action({
+            let focus = focus.clone();
+            move |ectx, id| {
+                if id.as_str() == ACT_THEME {
+                    // The theme dropdown anchors on the bar's right end, where
+                    // the theme item is flush (the bar's padding is 1 cell).
+                    let bar = ectx.current_rect_screen();
+                    let w = text::width(&crate::ui::theme_menu::trigger_text(
+                        abstracttui::app::current_theme().label,
+                    ));
+                    let anchor = Rect::new((bar.right() - 1 - w).max(bar.x), bar.y, w, 1);
+                    crate::ui::theme_menu::open(root, &action_ctx, theme_st, anchor);
+                    ectx.stop_propagation();
+                    focus.activated(ectx);
+                } else if crate::ui::chrome_action(root, store, &action_ctx, id.as_str()) {
+                    ectx.stop_propagation();
+                    focus.activated(ectx);
+                }
             }
         })
         .child(line)
@@ -1352,8 +1397,11 @@ pub mod bar_priority {
     /// "Automations · N waiting" needs you (R17.1): it outlives the
     /// workspace path, which first tail-truncates, then drops.
     pub const WAITING: i32 = 96;
-    pub const CONN_DOWN: i32 = 92;
     pub const WORKSPACE: i32 = 90;
+    /// The reason the gateway is down (cut to 40 columns, as before 0.12):
+    /// the header's red light already says DOWN, so the words yield to the
+    /// workspace path but not to the instruments.
+    pub const CONN_DOWN: i32 = 80;
     pub const CTX: i32 = 70;
     pub const ROOT_OPEN: i32 = 60;
     pub const TOKENS: i32 = 50;
@@ -1474,7 +1522,7 @@ pub fn status_bar_model(
     if let Conn::Down(msg, _) = store.conn.get() {
         bar = bar.center(
             BarItem::new()
-                .run(msg, t.error)
+                .run(text::truncate_ellipsis(&msg, 40), t.error)
                 .priority(bar_priority::CONN_DOWN)
                 .fit(BarFit::TruncateEnd { min: 12 })
                 .action(ACT_GATEWAY),

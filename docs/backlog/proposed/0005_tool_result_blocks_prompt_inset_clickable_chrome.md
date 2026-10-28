@@ -64,3 +64,10 @@ Evidence (`cargo test --workspace`, clippy `-D warnings`):
   (no cell constant in the test either); red when a tag is removed (checked: without the
   `ACT_GATEWAY` tag all three fail).
 - `r17w1_screens::a_click_on_the_chip_opens_the_same_automation` — the chip through its action id.
+- Adversarial review (Opus, read-only) fixes, each pinned: a click left the main tree's focus on the
+  host so the next Enter/Space re-ran the widget → every activation hands focus back to the composer
+  (`a_click_hands_the_keyboard_back_to_the_prompt`, red without it); a focus flag could outlive its torn-down
+  host and swallow Space → cleared on the chrome build scope's teardown; an uncapped gateway-down reason
+  cleared the bar → cut to 40 columns, priority below the workspace path
+  (`a_gateway_down_reason_never_clears_the_status_bar`); the workflow test now requires the picker to open
+  (catalog seeded), not just a catalog request; `/help` describes the widgets.

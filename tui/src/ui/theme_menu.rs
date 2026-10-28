@@ -119,15 +119,6 @@ pub fn window_top(top: usize, highlight: usize, visible: usize, len: usize) -> u
     top.min(len.saturating_sub(visible))
 }
 
-/// The theme `delta` steps from `current` in the dropdown's order,
-/// wrapping (the closed trigger's wheel).
-pub fn neighbour(current: &str, delta: i32) -> &'static Theme {
-    let list: Vec<&'static Theme> = entries().into_iter().filter_map(|e| e.0).collect();
-    let at = list.iter().position(|t| t.id == current).unwrap_or(0) as i64;
-    let n = list.len() as i64;
-    list[((at + delta as i64).rem_euclid(n)) as usize]
-}
-
 /// The trigger's text: the theme name and the dropdown chevron.
 pub fn trigger_text(label: &str) -> String {
     format!(" {label} ▾ ")
@@ -386,12 +377,5 @@ mod tests {
         assert_eq!(window_top(0, 12, 10, 30), 3);
         assert_eq!(window_top(10, 4, 10, 30), 3, "the header above comes along");
         assert_eq!(window_top(0, 29, 10, 30), 20);
-    }
-
-    #[test]
-    fn the_closed_wheel_wraps_through_the_list() {
-        let list: Vec<&'static Theme> = entries().into_iter().filter_map(|e| e.0).collect();
-        assert_eq!(neighbour(list[0].id, -1).id, list[list.len() - 1].id);
-        assert_eq!(neighbour(list[0].id, 1).id, list[1].id);
     }
 }

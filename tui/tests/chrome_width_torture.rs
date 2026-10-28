@@ -50,13 +50,16 @@ fn harness_sized(w: i32, h: i32) -> SizedHarness {
         *store_out.borrow_mut() = Some(store);
         store.session_id.set("acode-test-session".into());
         store.conn.set(Conn::Ok);
-        store.workflow.set(Workflow {
+        let wf = Workflow {
             bundle_id: "basic-agent".into(),
             flow_id: "81795ea9".into(),
             name: "basic-agent".into(),
             description: String::new(),
             ..Default::default()
-        });
+        };
+        // A discovered catalog, so the workflow widget's picker opens.
+        store.workflows.set(vec![wf.clone()]);
+        store.workflow.set(wf);
         let ctx = UiCtx {
             tx,
             client: abstractcode::gateway::GatewayClient::new("http://127.0.0.1:1", None),
@@ -113,16 +116,6 @@ impl SizedHarness {
             self.turn();
         }
         let _ = self._rx.try_iter().count();
-    }
-
-    /// The workflow widget's route: `/workflow` refreshes the catalog
-    /// first (the picker itself needs a loaded catalog to show rows).
-    fn asked_catalog(&self, id: &str) -> bool {
-        id == ui::chrome::ACT_WORKFLOW
-            && self
-                ._rx
-                .try_iter()
-                .any(|c| matches!(c, Cmd::LoadCatalog { .. }))
     }
 
     /// Which chrome action host holds the keyboard focus, by the focused
@@ -290,7 +283,7 @@ fn chrome_degrades_whole_item_at_every_width() {
                 "[{width}] chips + facts coexist at wide widths:\n{header}"
             );
         }
-        if width >= 120 {
+        if width >= 100 {
             assert!(
                 footer.contains("ctx 41k/262k tk (15%, declared)"),
                 "[{width}] ctx meter keeps its slot:\n{footer}"
@@ -342,11 +335,11 @@ fn click_action(h: &mut SizedHarness, id: &str) -> String {
 /// distinctive line of the modal (or its no-data notice) per action.
 fn opened(id: &str) -> &'static [&'static str] {
     match id {
-        ui::chrome::ACT_WORKFLOW => &["agent workflow", "no agent workflows discovered"],
+        ui::chrome::ACT_WORKFLOW => &["agent workflow —"],
         ui::chrome::ACT_MODEL => &["provider —", "no providers discovered"],
         ui::chrome::ACT_GATEWAY => &["status · Esc closes"],
         ui::chrome::ACT_WORKSPACE => &["Workspace"],
-        ui::chrome::ACT_SESSION => &["Sessions", "sessions"],
+        ui::chrome::ACT_SESSION => &["Conversations"],
         ui::chrome::ACT_THEME => &["☾ Dark"],
         _ => &[],
     }
@@ -373,7 +366,6 @@ fn every_chrome_widget_opens_its_modal_on_click() {
             let hit = opened(id)
                 .iter()
                 .any(|n| after.contains(n) && !before.contains(n));
-            let hit = hit || h.asked_catalog(id);
             assert!(
                 hit,
                 "[{width}] a click on {id} opens {:?}:\n{after}",
@@ -422,14 +414,16 @@ fn every_chrome_widget_opens_its_modal_from_the_keyboard() {
                 h.term.push_input(b"\x1b[C");
                 h.turn();
             }
-            h.term.push_input(b"\r");
+            // Header widgets by Enter, bar widgets by Space (both keys
+            // activate; Space must not be typed into the prompt).
+            let key: &[u8] = if host == "header" { b"\r" } else { b" " };
+            h.term.push_input(key);
             h.turn();
             let after = h.turn();
             let hit = opened(id)
                 .iter()
                 .any(|n| after.contains(n) && !before.contains(n));
-            let hit = hit || h.asked_catalog(id);
-            assert!(hit, "Enter on {id} opens {:?}:\n{after}", opened(id));
+            assert!(hit, "{key:?} on {id} opens {:?}:\n{after}", opened(id));
         }
     }
 }
@@ -487,4 +481,97 @@ fn idle_strip_summary_ellipsizes_at_narrow_widths() {
         strip.contains("12k in / 900 out tk"),
         "token truth precedes the cut:\n{strip}"
     );
+}
+
+/// A click hands the keyboard back to the prompt (review P1): after the
+/// modal closes, Enter and typing reach the composer — they never re-run
+/// the widget that was clicked (Enter is the probe: Space on an empty
+/// prompt is hold-to-talk).
+#[test]
+fn a_click_hands_the_keyboard_back_to_the_prompt() {
+    let mut h = harness_sized(140, 40);
+    h.turn();
+    for id in [
+        ui::chrome::ACT_MODEL,
+        ui::chrome::ACT_GATEWAY,
+        ui::chrome::ACT_SESSION,
+        ui::chrome::ACT_WORKSPACE,
+    ] {
+        h.close_all();
+        let opened_screen = click_action(&mut h, id);
+        let needle = opened(id)[0];
+        assert!(
+            opened_screen.contains(needle),
+            "{id} opened:\n{opened_screen}"
+        );
+        h.close_all();
+        assert!(!h.turn().contains(needle), "{id} closed");
+        assert_eq!(
+            h.focused_host(),
+            None,
+            "{id}: no chrome host keeps the focus"
+        );
+        h.term.push_input(b"\r");
+        h.turn();
+        let s = h.turn();
+        assert!(
+            !s.contains(needle),
+            "{id}: Enter after the click must not reopen it:\n{s}"
+        );
+    }
+    h.term.push_input(b"zq");
+    h.turn();
+    let s = h.turn();
+    assert!(
+        s.lines().any(|l| l.contains("zq")),
+        "typing reaches the prompt:\n{s}"
+    );
+}
+
+/// A gateway-down reason never clears the bar (review P2): cut to 40
+/// columns, it yields to the workspace path, and the ctx meter, the
+/// session id and the theme hold their places.
+#[test]
+fn a_gateway_down_reason_never_clears_the_status_bar() {
+    for width in [100, 120, 160] {
+        let mut h = harness_sized(width, 30);
+        h.turn();
+        load_everything(&h.store);
+        let reason = "gateway unreachable: health: http://127.0.0.1:8080/api/gateway/health: \
+                      Connection Failed: Connect error: Connection refused (os error 61)";
+        h.store.conn.set(Conn::Down(reason.into(), true));
+        let screen = h.turn();
+        let footer = screen.lines().last().unwrap_or_default();
+        // The session id, the theme, the workspace path and the reason
+        // hold at every width; the instruments yield to the reason (the
+        // gateway is down), and the ctx meter is back beside it at 160.
+        for needle in [
+            "acode-test-session",
+            "Dark (Abstract) ▾",
+            "⌂ /tmp/ws",
+            "gateway unreachable",
+        ] {
+            assert!(
+                footer.contains(needle),
+                "[{width}] {needle} kept:\n{footer}"
+            );
+        }
+        if width >= 160 {
+            assert!(
+                footer.contains("ctx 41k/262k tk (15%, declared)"),
+                "[{width}] the ctx meter fits beside the reason:\n{footer}"
+            );
+        }
+        if footer.contains("gateway unreachable") {
+            assert!(
+                !footer.contains("Connection refused"),
+                "[{width}] the reason is cut to 40 columns:\n{footer}"
+            );
+        }
+        let header = screen.lines().next().unwrap_or_default();
+        assert!(
+            header.trim_end().ends_with('✗'),
+            "[{width}] the header light says down:\n{header}"
+        );
+    }
 }
