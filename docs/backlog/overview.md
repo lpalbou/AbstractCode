@@ -15,12 +15,16 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 | State | Items | IDs |
 |---|---|---|
 | Planned | 3 | 0001, 0002, 0003 |
-| Proposed | 1 | 0004 |
+| Proposed | 3 | 0004, 0005, 0006 |
 | Completed | 0 | |
 | Deprecated | 0 | |
 | Recurrent | 0 | |
 
 ## Next Recommended Work
+
+0. [0006](proposed/0006_allow_all_enabled_tools_kept_pending_operator_decision.md) — OPERATOR DECISION GATE: "Allow all enabled tools"
+   (per-browser app layer) stays in Code web until the operator says remove (AbstractUIC 0039). Counts recounted 2026-10-28
+   (0005 had been added without a count update).
 
 1. [0001](planned/0001_automations_wui_section_and_tui_commands.md) — Automations in the WUI and TUI. Phase after v1:
    starts only after the gateway API (G), ui-kit panel and fixtures (U), and the Observer and Assistant integrations
