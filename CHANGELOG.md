@@ -19,6 +19,7 @@ The chat and the Activity panel render from AbstractGateway's replay view (`GET 
 ### Known
 
 - Whether the gateway serves the view is asked once per page load (the transport keeps the answer): after a gateway upgrade to 0.17.0, reload the page to switch to the view.
+
 ## [terminal 0.12.0] - 2026-10-28
 
 Needs AbstractTUI 0.7.0.
