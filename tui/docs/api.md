@@ -580,7 +580,13 @@ recovers it.
 | `Ctrl+D` | anywhere | Toggle detail view (thinking + tool results vs answers only) |
 | `Alt+E` | anywhere | Cycle conversation focus: agent → entity visit 1 → … → agent. Cycle order is the order conversations were opened — it never changes with how the header paints chips. Option+E on macOS with "Option as Meta/Esc+"; `/focus <name\|agent>` needs no modifier setting. (`Ctrl+E` is move-to-line-end in the composer) |
 | `Ctrl+T` | anywhere | Cycle theme |
-| click / `Tab`+`Enter` on the theme name | status bar | Theme dropdown: every theme grouped Dark / Light; arrows, Page Up/Down and the mouse wheel preview LIVE; `Enter` or a click keeps it (saved like `Ctrl+T`); `Esc` restores. The wheel on the closed name steps to the next theme |
+| click on the workflow name | header | Workflow picker (as `/workflow`) |
+| click on the provider/model | header | Model picker (as `/model`) |
+| click on the gateway / connection light | header | Connection status modal (as `/status`) |
+| click on the workspace path (`⌂ …`) | status bar, middle | The conversation's authorised workspaces (as `/workspace`) |
+| click on the session id | status bar, middle | Sessions modal (as `/sessions`) |
+| `Tab` to the header or the status bar, then `←`/`→`, `Enter`/`Space` | header, status bar | Moves between that bar's widgets and opens the one highlighted (reverse video) |
+| click / `Tab`+`→`+`Enter` on the theme name | status bar, right | Theme dropdown: every theme grouped Dark / Light; arrows, Page Up/Down and the mouse wheel preview LIVE; `Enter` or a click keeps it (saved like `Ctrl+T`); `Esc` restores |
 | `Ctrl+P` | anywhere | Read the latest reply aloud; while it plays = pause; paused = resume (`/speak`; `Esc` stops). In one automation (`/automations <id>`): the selected run's reply; again = stop |
 | `Space` (held) | empty prompt | Hold to talk: speak, release to SEND (`/voice space off` turns it off) |
 | `Enter` | empty composer, the status line shows the attention chip (**N waiting for you**, **Automations · M new**, or **Automations · N waiting** on an older gateway) | Open the automation that waits for you (a pending approval or question first, else unseen results); a click on the chip does the same |
@@ -667,8 +673,10 @@ reasoning in the muted ink under its label), `│` is tool output, `↳` is an
 error. A tool call that ran before any cycle in its turn stands alone as a
 one-line row with its own `▸ N lines` disclosure.
 
-The bottom line of the window shows the folder this session was launched
-for (`⌂ ~/…`; the `--workspace` root, else the current directory), the
+The bottom line of the window (the status bar) shows the instruments on
+the left, the folder this session was launched for (`⌂ ~/…`; the
+`--workspace` root, else the current directory) and the session id in the
+middle, the theme on the right, and the
 `hold Space to talk` hint (`Ctrl+R speak` with the gesture off), and — when a turn's answer came from an
 agent subrun while the wrapper root run was still open on the gateway —
 the discreet `◌ root finalizes on gateway` marker (nothing to do: the

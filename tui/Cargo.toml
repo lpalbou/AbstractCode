@@ -1,6 +1,6 @@
 [package]
 name = "abstractcode"
-version = "0.11.0"
+version = "0.12.0"
 edition = "2021"
 license = "MIT"
 # MSRV floor comes from the locked dependency set (abstracttui 0.6.0
@@ -104,7 +104,14 @@ path = "src/main.rs"
 # frame (the remount/offset_y clamp class our loading→transcript
 # handoff exercises), tooltips work on hover and keyboard, grounds stay
 # distinct at 256 colors, and layout honors margins in wrap/grid.
-abstracttui = "0.6.0"
+#
+# 0.7.0 (2026-10-28): the CHROME floor. 0187 semantic hit targets
+# (`StyledCanvas::print_action`/`mark_action`, `Element::on_action`,
+# `UiTree::action_rect`) and 1260 `StatusBar` with named slots. The
+# header's workflow/model/gateway widgets and the status bar's
+# workspace/session/theme widgets are action spans: the engine hit-tests
+# them, so the chrome stores no cell coordinate.
+abstracttui = "0.7.0"
 # HTTP client (blocking, small): gateway calls + SSE ledger streaming.
 # The explicit feature set = ureq's defaults, pinned deliberately: "tls" is
 # rustls (remote HTTPS gateways work with zero system OpenSSL — the

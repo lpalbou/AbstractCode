@@ -1,14 +1,88 @@
 //! Fixed chrome: header, activity strip, composer, status bar, folder line.
 
-use std::cell::Cell;
-use std::rc::Rc;
-
 use abstracttui::prelude::*;
 use abstracttui::text;
+use abstracttui::ui::StyledCanvas;
 use abstracttui::widgets::Sparkline;
 
 use crate::store::{Conn, Phase, Store};
 use crate::ui::UiCtx;
+
+/// Semantic hit targets of the chrome (abstracttui 0187 action ids):
+/// the header's workflow, route and gateway widgets, the status bar's
+/// workspace, session and theme widgets, and the attention chip. The
+/// engine hit-tests the spans these tag at draw time; the chrome never
+/// stores a cell coordinate. `ui::chrome_action` maps each to the modal
+/// its slash command opens.
+pub const ACT_WORKFLOW: &str = "chrome.workflow";
+/// The provider/model widget → the model picker (`/model`).
+pub const ACT_MODEL: &str = "chrome.model";
+/// The gateway + connection light → the connection status modal (`/status`).
+pub const ACT_GATEWAY: &str = "chrome.gateway";
+/// The workspace path → the conversation's authorised workspaces (`/workspace`).
+pub const ACT_WORKSPACE: &str = "chrome.workspace";
+/// The session id → the Sessions modal (`/sessions`).
+pub const ACT_SESSION: &str = "chrome.session";
+/// The theme name → the theme dropdown.
+pub const ACT_THEME: &str = "chrome.theme";
+/// "Automations · N waiting" → the automation that waits.
+pub const ACT_WAITING: &str = "chrome.waiting";
+
+/// Focus of the two chrome action hosts (header, status bar). Root scope:
+/// it outlives the chrome's rebuilds. The root's type-to-prompt capture
+/// reads it so Space activates a focused chrome widget instead of being
+/// typed into the prompt. `composer` is where an activation hands the
+/// keyboard back (see [`ChromeFocus::activated`]); `theme` is the theme
+/// dropdown's state, which the bar's theme widget opens.
+#[derive(Clone)]
+pub struct ChromeFocus {
+    pub header: Signal<bool>,
+    pub bar: Signal<bool>,
+    pub composer: ComposerAnchor,
+    pub theme: crate::ui::theme_menu::TriggerState,
+}
+
+impl ChromeFocus {
+    pub fn new(cx: Scope, composer: ComposerAnchor) -> ChromeFocus {
+        ChromeFocus {
+            header: cx.signal(false),
+            bar: cx.signal(false),
+            composer,
+            theme: crate::ui::theme_menu::TriggerState::new(cx),
+        }
+    }
+
+    /// Either chrome host holds the keyboard focus.
+    pub fn any(&self) -> bool {
+        self.header.try_get_untracked().unwrap_or(false)
+            || self.bar.try_get_untracked().unwrap_or(false)
+    }
+
+    /// A host's focus flag must not outlive the host: the engine drops a
+    /// torn-down node's focus WITHOUT a FocusOut, so a chrome rebuild
+    /// (phase, focus, theme) while a host was focused would leave the flag
+    /// true and the root would keep swallowing Space. Cleared with the
+    /// build scope (`scx`) of the chrome that mounted the host.
+    fn clear_on_teardown(scx: Scope, flag: Signal<bool>) {
+        scx.on_cleanup(move || {
+            if flag.try_get_untracked().is_some() {
+                flag.set(false);
+            }
+        });
+    }
+
+    /// After a widget's activation (click, Enter, Space) the keyboard goes
+    /// back to the prompt: a click would otherwise leave the main tree's
+    /// focus on the host (a press focuses the nearest focusable), so the
+    /// next Space or Enter re-ran the widget instead of reaching the
+    /// prompt. The modal the widget opened is its own layer with its own
+    /// focus, so this never steals from it.
+    fn activated(&self, ectx: &mut abstracttui::ui::EventCtx) {
+        if let Some(id) = self.composer.get() {
+            ectx.request_focus(id);
+        }
+    }
+}
 
 /// The effective provider/model label — the honesty-upgraded "gateway
 /// defaults" resolution shared by the header and the idle fact card
@@ -82,12 +156,12 @@ pub fn route_label(store: Store) -> String {
     }
 }
 
-/// The header's middle-span facts (HDR-1): cwd basename, workspace mode,
+/// The header's middle-span facts (HDR-1): workspace mode (the folder is
+/// the status bar's middle widget since 0.12.0),
 /// `skills N · mcp N` when nonzero, session token total at rest. Pure
 /// over its inputs so the fill rule is testable; the ~180 blank columns
 /// at wide widths were the literal screenshot complaint.
 pub fn header_facts(
-    cwd_base: &str,
     workspace_mode: &str,
     skills: usize,
     mcp: usize,
@@ -95,9 +169,6 @@ pub fn header_facts(
     session_tokens: u64,
 ) -> Vec<String> {
     let mut facts: Vec<String> = Vec::new();
-    if !cwd_base.is_empty() {
-        facts.push(format!("⌂ {cwd_base}"));
-    }
     facts.push(if workspace_mode.trim().is_empty() {
         "server-managed".to_string()
     } else {
@@ -117,22 +188,33 @@ pub fn header_facts(
     facts
 }
 
-/// Header: wordmark · workflow · provider/model · entity chips · facts ·
-/// session · connection orb. Chips render only when ≥1 conversation
+/// Header: wordmark · workflow · provider/model · entity chips · facts on
+/// the left; the gateway beside its connection light on the right. The
+/// workflow, provider/model and gateway+light are WIDGETS (abstracttui
+/// 0187 action spans): a click, or Tab to the header then ←/→ and
+/// Enter/Space, opens the workflow picker, the model picker and the
+/// `/status` connection modal. Chips render only when ≥1 conversation
 /// exists; the focused chip is highlighted; a running turn's chip
 /// carries elapsed.
 pub fn header(
     t: &TokenSet,
     store: Store,
     spin: Signal<u64>,
-    cwd_base: String,
-    _root: Scope,
+    root: Scope,
+    scx: Scope,
     ctx: &UiCtx,
+    focus: ChromeFocus,
 ) -> View {
+    ChromeFocus::clear_on_teardown(scx, focus.header);
     let tokens = *t;
     // Owned before the 'static render closure: `ctx` is only borrowed.
     let gateway = ctx.gateway_label.clone();
-    dyn_view(LayoutStyle::line(1), move || {
+    let action_ctx = ctx.clone();
+    // The ACTION HOST is this stable element; the line below it re-renders
+    // every tick while a run is live, so the focus lives one level up and
+    // survives those rebuilds. Clicks and keyboard activations of the
+    // spans the line tags arrive here (abstracttui 0187).
+    let line = dyn_view(LayoutStyle::line(1), move || {
         let t = tokens;
         let signed_out = store.signed_out.with(|s| s.is_some());
         let workflow = store.workflow.with(|w| {
@@ -177,8 +259,9 @@ pub fn header(
         let route = route_label(store);
         // HDR-1: cockpit facts fill the middle (dim, clipped whole-run,
         // painted AFTER chips so chips keep priority when space is tight).
+        // The folder is the status bar's middle widget (its click opens
+        // the authorised workspaces), so the header facts start at the mode.
         let facts = header_facts(
-            &cwd_base,
             &store.workspace_mode.get(),
             store.selected_skills.with(|s| s.len()),
             store.mcp_servers.with(|m| m.len()),
@@ -205,20 +288,37 @@ pub fn header(
 
                 let mut x = rect.x + 1;
                 let clip_to = (rx - 1).max(rect.x);
-                let print_clipped =
-                    |canvas: &mut dyn abstracttui::ui::Canvas, x: &mut i32, s: &str, ink| {
+                let print_clipped = |canvas: &mut dyn StyledCanvas, x: &mut i32, s: &str, ink| {
+                    let avail = (clip_to - *x).max(0);
+                    if avail <= 0 {
+                        return;
+                    }
+                    let fitted = text::truncate_ellipsis(s, avail);
+                    *x += canvas.print(Point::new(*x, rect.y), &fitted, ink, t.surface);
+                };
+                // The workflow and the route are WIDGETS: their spans carry
+                // action ids, so a click (or Enter on the focused header)
+                // opens their pickers wherever they landed this frame.
+                let print_action =
+                    |canvas: &mut dyn StyledCanvas, x: &mut i32, s: &str, ink, id: &str| {
                         let avail = (clip_to - *x).max(0);
                         if avail <= 0 {
                             return;
                         }
                         let fitted = text::truncate_ellipsis(s, avail);
-                        *x += canvas.print(Point::new(*x, rect.y), &fitted, ink, t.surface);
+                        let style = abstracttui::render::Style::new().fg(ink).bg(t.surface);
+                        *x += canvas.print_action(
+                            Point::new(*x, rect.y),
+                            &fitted,
+                            &style,
+                            &abstracttui::ui::ActionId::new(id),
+                        );
                     };
                 print_clipped(canvas, &mut x, "▲ AbstractCode", t.accent);
                 print_clipped(canvas, &mut x, "  ", t.text);
-                print_clipped(canvas, &mut x, &workflow, t.text);
+                print_action(canvas, &mut x, &workflow, t.text, ACT_WORKFLOW);
                 print_clipped(canvas, &mut x, "  ·  ", t.text_faint);
-                print_clipped(canvas, &mut x, &route, t.text_muted);
+                print_action(canvas, &mut x, &route, t.text_muted, ACT_MODEL);
                 // Chips render WHOLE or not at all; the tail collapses to
                 // an honest "+N" instead of a mangled fragment ("◆eph…" —
                 // cycle-2 UX review at 100 cols with 3 conversations).
@@ -263,41 +363,48 @@ pub fn header(
                     x += canvas.print(Point::new(x, rect.y), sep, t.text_faint, t.surface);
                     x += canvas.print(Point::new(x, rect.y), fact, t.text_muted, t.surface);
                 }
-                // The FOLDER is identity, not an instrument: when its whole
-                // path does not fit, it keeps its TAIL (`⌂ …/project`)
-                // rather than vanishing — the basename is the part that
-                // names it.
-                if fit == 0 {
-                    if let Some(path) = facts.first().and_then(|f| f.strip_prefix("⌂ ")) {
-                        let avail = clip_to - x - 5 - 2;
-                        if avail >= 10 {
-                            x += canvas.print(
-                                Point::new(x, rect.y),
-                                "  ·  ",
-                                t.text_faint,
-                                t.surface,
-                            );
-                            x += canvas.print(Point::new(x, rect.y), "⌂ ", t.text_muted, t.surface);
-                            canvas.print(
-                                Point::new(x, rect.y),
-                                &tail_fit(path, avail),
-                                t.text_muted,
-                                t.surface,
-                            );
-                        }
-                    }
-                }
-
                 let mut x2 = rx;
-                // Session id in MUTED ink: the faint tier measured 2.77:1
-                // on the default theme — below the 3:1 UI floor; "the
-                // brightest thing in the right two-thirds of that bar"
-                // must clear it (review-current-state §3).
-                x2 += canvas.print(Point::new(x2, rect.y), &right, t.text_muted, t.surface);
-                canvas.print(Point::new(x2, rect.y), orb, orb_ink, t.surface);
+                // The gateway in MUTED ink: the faint tier measured 2.77:1
+                // on the default theme — below the 3:1 UI floor (review-
+                // current-state §3). Gateway + light are ONE widget: one
+                // tagged rect over both, its own focus ring when it is
+                // the keyboard cursor.
+                let ring = canvas.mark_action(
+                    Rect::new(rx, rect.y, (rect.right() - 1 - rx).max(0), 1),
+                    &abstracttui::ui::ActionId::new(ACT_GATEWAY),
+                );
+                let style = |ink| {
+                    let s = abstracttui::render::Style::new().fg(ink).bg(t.surface);
+                    if ring {
+                        s.reverse()
+                    } else {
+                        s
+                    }
+                };
+                let label = right.trim_end();
+                x2 += canvas.print_styled(Point::new(x2, rect.y), label, &style(t.text_muted));
+                x2 += canvas.print_styled(Point::new(x2, rect.y), " ", &style(t.text_muted));
+                canvas.print_styled(Point::new(x2, rect.y), orb, &style(orb_ink));
             })
             .build()
-    })
+    });
+    Element::new()
+        .style(LayoutStyle::line(1))
+        .role(abstracttui::ui::Role::Region)
+        .access_label("header: workflow, model, gateway")
+        .focusable()
+        .focus_signal(focus.header)
+        .on_action({
+            let focus = focus.clone();
+            move |ectx, id| {
+                if crate::ui::chrome_action(root, store, &action_ctx, id.as_str()) {
+                    ectx.stop_propagation();
+                    focus.activated(ectx);
+                }
+            }
+        })
+        .child(line)
+        .build()
 }
 
 /// Activity strip: spinner + status + cycle + elapsed + token sparkline.
@@ -1202,7 +1309,11 @@ pub(crate) fn mem_segment(state: &crate::store::HostState) -> Option<(String, u8
 
 /// Status bar: the always-visible instrument row (REST-1) —
 /// `ctx used/window (%) · session tokens · gpu · skills · mcp · ? help`
-/// — plus theme + session id on the right. The key legend moved behind `?`
+/// — in the LEFT slot, the workspace path + session id in the MIDDLE and
+/// the theme selector on the RIGHT (operator layout 2026-10-28; an
+/// abstracttui 1260 `StatusBar`). The three are widgets: a click, or Tab
+/// to the bar then ←/→ and Enter/Space, opens the authorised workspaces
+/// (`/workspace`), the Sessions modal and the theme dropdown. The key legend moved behind `?`
 /// (and /help): the Python predecessor's law, written after its own
 /// adversary review, is "the footer is the only always-visible surface"
 /// — it must carry NUMBERS, not a legend that is useful once and then
@@ -1215,286 +1326,232 @@ pub fn status_bar(
     ctx: &UiCtx,
     root: Scope,
     scx: Scope,
-    theme_st: crate::ui::theme_menu::TriggerState,
+    workspace: String,
+    focus: ChromeFocus,
 ) -> View {
+    let theme_st = focus.theme;
+    ChromeFocus::clear_on_teardown(scx, focus.bar);
     let tokens = *t;
-    // THREE parts, each re-rendering on its OWN inputs (operator ask
-    // 2026-10-10: the theme name is a focusable dropdown trigger): the
-    // facts + markers (they move with every ledger record), the theme
-    // trigger (rebuilt only when its visibility changes — a rebuild would
-    // drop its focus), and the session id (the gateway itself is the
-    // header's, top right, beside its connection orb). They share one PLAN of what the
-    // right cluster shows, from narrow, rarely-changing inputs.
-    let root_open = scx.memo(move || store.fold.with(|f| f.root_open_at_conclusion));
-    let viewport = abstracttui::app::use_viewport(scx);
-    let plan_ctx = ctx.clone();
-    let plan = Rc::new(move || -> (RightPlan, Option<&'static str>, String) {
+    // abstracttui 1260: a StatusBar with named slots. LEFT = the
+    // instruments (ctx meter, tokens, gpu, mem, skills, mcp, keys pointer),
+    // CENTER = the workspace path + session id, RIGHT = the markers + the
+    // theme. The bar owns the truncation priority (higher survives longer,
+    // whole items never fragment) and the hit targets (0187): no cell
+    // coordinate lives here.
+    let action_ctx = ctx.clone();
+    let line = dyn_view(LayoutStyle::line(1), move || {
+        let t = tokens;
+        // `/voice space on|off` saves prefs and bumps the voice tick.
+        let _ = store.voice.tick.get();
         let dictation_idle = store
             .voice
             .dictation
             .with(|d| matches!(d, crate::voice::Dictation::Idle));
-        // `/voice space on|off` saves prefs and bumps the voice tick.
-        let _ = store.voice.tick.get();
-        let space_on = !crate::ui::voice_view::prefs(&plan_ctx).space_to_talk_off;
+        let space_on = !crate::ui::voice_view::prefs(&action_ctx).space_to_talk_off;
         let voice_hint = dictation_idle.then(|| crate::ui::push_to_talk::hint(space_on));
-        let row_w = viewport.get().w;
-        let sid = footer_session(&store.session_id.get(), row_w);
-        let gw = match store.conn.get() {
-            Conn::Down(msg, _) if sid.is_empty() => text::truncate_ellipsis(&msg, 40),
-            Conn::Down(msg, _) => format!("{sid} · {}", text::truncate_ellipsis(&msg, 40)),
-            _ => sid,
-        };
-        let theme_label = abstracttui::app::current_theme().label;
-        let plan = right_plan(
-            root_open.get(),
-            voice_hint,
-            &crate::ui::theme_menu::trigger_text(theme_label),
-            &gw,
-            row_w,
-        );
-        (plan, voice_hint, gw)
+        let mut bar = status_bar_model(store, &t, &workspace, voice_hint);
+        bar = bar.ground(t.surface);
+        bar.element(&t).build()
     });
-    let left_plan = plan.clone();
-    let left_ctx = ctx.clone();
-    let left = dyn_view(
-        LayoutStyle::default()
-            .grow(1.0)
-            .basis(Dimension::Cells(0))
-            .height(Dimension::Cells(1)),
-        move || {
-            let t = tokens;
-            let (plan, voice_hint, _) = left_plan();
-            // The markers, right-aligned in this part, joined to the trigger.
-            let mut markers: Vec<&str> = Vec::new();
-            if plan.marker {
-                markers.push(ROOT_OPEN_MARKER);
-            }
-            if plan.hint {
-                markers.extend(voice_hint);
-            }
-            let pre = if markers.is_empty() {
-                String::new()
-            } else {
-                format!("{} ·", markers.join(" · "))
-            };
-            // Facts, left to right. Each is (text, ink-class): 0 normal
-            // (muted), 1 warn, 2 error — the ctx meter is the only graded one.
-            let mut segs: Vec<(String, u8)> = Vec::new();
-            // R17.1: "Automations · N waiting" FIRST (it needs you; segments
-            // drop right-to-left, so it is the last to go). Enter on an empty
-            // prompt or a click on it opens the automation that waits.
-            let chip = crate::ui::attention_chip::chip_text(store);
-            if let Some(c) = &chip {
-                segs.push((c.clone(), 3));
-            }
-            // Where the chip was painted (x from, x to) — the click target.
-            let chip_span: Rc<Cell<(i32, i32)>> = Rc::new(Cell::new((0, 0)));
-            let chip_span_draw = chip_span.clone();
-            let pressed = Rc::new(Cell::new(false));
-            let ctx_click = left_ctx.clone();
-            let last_ctx = store.fold.with(|f| f.stats.last_input_tokens);
-            if let Some(seg) = ctx_meter(last_ctx, store.context_window.get()) {
-                segs.push(seg);
-            }
-            // Session tokens: the in/out split when the provider reports one
-            // (the strip's ↑/↓ vocabulary); splitless providers show the
-            // honest total (never fabricated zeros — bug (e) class).
-            let totals = store.totals.get();
-            if totals.input_tokens > 0 || totals.output_tokens > 0 {
-                segs.push((
-                    format!(
-                        "{}↑ {}↓ tk session",
-                        fmt_tokens(totals.input_tokens),
-                        fmt_tokens(totals.output_tokens)
-                    ),
-                    0,
-                ));
-            } else if totals.total_tokens > 0 {
-                segs.push((format!("{} tk session", fmt_tokens(totals.total_tokens)), 0));
-            }
-            // The /gpu meter (OBS-6 seam): worker-owned poller fills the
-            // signal; this row renders it. Off/Unsupported = omitted (the
-            // /gpu toggle toasts the reason once — never a fabricated number).
-            match store.gpu.get() {
-                crate::store::GpuMeter::Ready(s) => {
-                    segs.push((format!("gpu {:.0}%", s.util_pct), 0));
-                }
-                crate::store::GpuMeter::Pending => segs.push(("gpu …".into(), 0)),
-                crate::store::GpuMeter::Error(_) => segs.push(("gpu err".into(), 1)),
-                crate::store::GpuMeter::Off | crate::store::GpuMeter::Unsupported(_) => {}
-            }
-            // Host RAM from the LAST /resources fetch (see `mem_segment`).
-            if let Some(seg) = mem_segment(&store.host_state.get()) {
-                segs.push(seg);
-            }
-            let skills = store.selected_skills.with(|s| s.len());
-            if skills > 0 {
-                segs.push((format!("skills {skills}"), 0));
-            }
-            let mcp = store.mcp_servers.with(|m| m.len());
-            if mcp > 0 {
-                segs.push((format!("mcp {mcp}"), 0));
-            }
-            Element::new()
-                .style(LayoutStyle::line(1))
-                .on(abstracttui::ui::Phase::Bubble, move |ectx, ev| {
-                    let abstracttui::ui::UiEvent::Mouse(m) = ev else {
-                        return;
-                    };
-                    let (x0, x1) = chip_span.get();
-                    let on_chip = x1 > x0 && m.pos.x >= x0 && m.pos.x < x1;
-                    match m.kind {
-                        abstracttui::ui::MouseKind::Down(abstracttui::ui::MouseButton::Left)
-                            if on_chip =>
-                        {
-                            pressed.set(true);
-                            ectx.stop_propagation();
-                        }
-                        abstracttui::ui::MouseKind::Up(abstracttui::ui::MouseButton::Left) => {
-                            let clicks = pressed.replace(false) && on_chip;
-                            if clicks {
-                                ectx.stop_propagation();
-                                crate::ui::attention_chip::open_waiting(root, store, &ctx_click);
-                            }
-                        }
-                        _ => {}
-                    }
-                })
-                .draw(move |canvas, rect| {
-                    canvas.fill(rect, ' ', t.text, t.surface);
-                    // Right side measured FIRST so the facts yield to it
-                    // instead of overprinting mid-word at 80 cols
-                    // (adversary P3, 2026-07-22 — same rule as the header).
-                    // Flush against the trigger, whose own padding is the gap.
-                    let w = text::width(&pre);
-                    let rx = (rect.right() - w).max(rect.x);
-                    let clip_to = (rx - 1).max(rect.x);
-                    let mut x = rect.x + 1;
-                    // Segments drop WHOLE, right-to-left, when the row is
-                    // tight (POLISH-1): an instrument row must never
-                    // self-truncate into `…` fragments — the old key legend
-                    // rendered "/help comm…" at 120 cols and read as broken
-                    // (SYNTHESIS §2 baseline capture). The keys pointer is
-                    // the LAST segment, so it is the first to yield.
-                    let hint = "? keys + commands";
-                    let seg_widths: Vec<usize> = segs
-                        .iter()
-                        .map(|(s, _)| text::width(s).max(0) as usize)
-                        .chain(std::iter::once(text::width(hint).max(0) as usize))
-                        .collect();
-                    let fit = prefix_fit(&seg_widths, 0, 5, (clip_to - x).max(0) as usize);
-                    for (i, (seg, sev)) in segs.iter().take(fit).enumerate() {
-                        if i > 0 {
-                            x += canvas.print(
-                                Point::new(x, rect.y),
-                                "  ·  ",
-                                t.text_faint,
-                                t.surface,
-                            );
-                        }
-                        let ink = match sev {
-                            3 => t.accent,
-                            2 => t.error,
-                            1 => t.warn,
-                            _ => t.text_muted,
-                        };
-                        let from = x;
-                        x += canvas.print(Point::new(x, rect.y), seg, ink, t.surface);
-                        if *sev == 3 {
-                            chip_span_draw.set((from, x));
-                        }
-                    }
-                    // The keys pointer — the whole legend lives behind it.
-                    if fit > segs.len() {
-                        if !segs.is_empty() {
-                            x += canvas.print(
-                                Point::new(x, rect.y),
-                                "  ·  ",
-                                t.text_faint,
-                                t.surface,
-                            );
-                        }
-                        x += canvas.print(Point::new(x, rect.y), "?", t.accent, t.surface);
-                        canvas.print(
-                            Point::new(x, rect.y),
-                            " keys + commands",
-                            t.text_muted,
-                            t.surface,
-                        );
-                    }
-                    if !pre.is_empty() {
-                        canvas.print(Point::new(rx, rect.y), &pre, t.text_faint, t.surface);
-                    }
-                })
-                .build()
-        },
-    );
-    // The theme trigger: mounted while the plan shows the theme. Its
-    // builder reads only the plan's `theme` bit (a memo), so ledger
-    // traffic never rebuilds — and never unfocuses — it.
-    let theme_plan = plan.clone();
-    let show_theme = scx.memo(move || theme_plan().0.theme);
-    let trigger_ctx = ctx.clone();
-    let trigger = dyn_view(
-        LayoutStyle::default()
-            .height(Dimension::Cells(1))
-            .shrink(0.0),
-        move || {
-            if show_theme.get() {
-                crate::ui::theme_menu::trigger(root, &trigger_ctx, theme_st)
-            } else {
-                Element::new().build()
-            }
-        },
-    );
-    let gw_plan = plan.clone();
-    let right = dyn_view(
-        LayoutStyle::default()
-            .height(Dimension::Cells(1))
-            .shrink(0.0),
-        move || {
-            let t = tokens;
-            let (plan, _, gw) = gw_plan();
-            let down = matches!(store.conn.get(), Conn::Down(..));
-            if gw.is_empty() {
-                return Element::new().build();
-            }
-            let shown = if plan.theme {
-                format!("· {gw} ")
-            } else {
-                format!(" {gw} ")
-            };
-            let ink = if down { t.error } else { t.text_faint };
-            let sep_ink = t.text_faint;
-            Element::new()
-                .style(
-                    LayoutStyle::default()
-                        .width(Dimension::Cells(text::width(&shown)))
-                        .height(Dimension::Cells(1)),
-                )
-                .draw(move |canvas, rect| {
-                    canvas.fill(rect, ' ', t.text, t.surface);
-                    if let Some(rest) = shown.strip_prefix("· ") {
-                        let x = rect.x
-                            + canvas.print(Point::new(rect.x, rect.y), "· ", sep_ink, t.surface);
-                        canvas.print(Point::new(x, rect.y), rest, ink, t.surface);
-                    } else {
-                        canvas.print(Point::new(rect.x, rect.y), &shown, ink, t.surface);
-                    }
-                })
-                .build()
-        },
-    );
+    let action_ctx = ctx.clone();
     Element::new()
         .style(
-            LayoutStyle::row()
+            LayoutStyle::default()
                 .width(Dimension::Percent(1.0))
                 .height(Dimension::Cells(1)),
         )
-        .child(left)
-        .child(trigger)
-        .child(right)
+        .role(abstracttui::ui::Role::Region)
+        .access_label("status bar: workspace, session, theme")
+        .focusable()
+        .focus_signal(focus.bar)
+        .on_action({
+            let focus = focus.clone();
+            move |ectx, id| {
+                if id.as_str() == ACT_THEME {
+                    // The theme dropdown anchors on the bar's right end, where
+                    // the theme item is flush (the bar's padding is 1 cell).
+                    let bar = ectx.current_rect_screen();
+                    let w = text::width(&crate::ui::theme_menu::trigger_text(
+                        abstracttui::app::current_theme().label,
+                    ));
+                    let anchor = Rect::new((bar.right() - 1 - w).max(bar.x), bar.y, w, 1);
+                    crate::ui::theme_menu::open(root, &action_ctx, theme_st, anchor);
+                    ectx.stop_propagation();
+                    focus.activated(ectx);
+                } else if crate::ui::chrome_action(root, store, &action_ctx, id.as_str()) {
+                    ectx.stop_propagation();
+                    focus.activated(ectx);
+                }
+            }
+        })
+        .child(line)
         .build()
+}
+
+/// Item priorities of the status bar (higher survives longer). The
+/// session id and the theme are the last to go, then the attention chip,
+/// the workspace path and the ctx meter; the keys pointer yields first.
+pub mod bar_priority {
+    pub const SESSION: i32 = 100;
+    pub const THEME: i32 = 98;
+    /// "Automations · N waiting" needs you (R17.1): it outlives the
+    /// workspace path, which first tail-truncates, then drops.
+    pub const WAITING: i32 = 96;
+    pub const WORKSPACE: i32 = 90;
+    /// The reason the gateway is down (cut to 40 columns, as before 0.12):
+    /// the header's red light already says DOWN, so the words yield to the
+    /// workspace path but not to the instruments.
+    pub const CONN_DOWN: i32 = 80;
+    pub const CTX: i32 = 70;
+    pub const ROOT_OPEN: i32 = 60;
+    pub const TOKENS: i32 = 50;
+    pub const GPU: i32 = 40;
+    pub const MEM: i32 = 35;
+    pub const SKILLS: i32 = 30;
+    pub const MCP: i32 = 25;
+    pub const VOICE_HINT: i32 = 15;
+    pub const KEYS: i32 = 0;
+}
+
+/// The status bar's model: every item with its slot, ink, priority, fit
+/// and action. Reads signals: call inside a reactive scope.
+pub fn status_bar_model(
+    store: Store,
+    t: &TokenSet,
+    workspace: &str,
+    voice_hint: Option<&'static str>,
+) -> abstracttui::widgets::StatusBar {
+    use abstracttui::widgets::{BarFit, BarItem, StatusBar};
+    let mut bar = StatusBar::new().separator("  ·  ");
+    // LEFT — the instruments. R17.1: "Automations · N waiting" FIRST (it
+    // needs you); a click (or Enter on an empty prompt) opens it.
+    if let Some(c) = crate::ui::attention_chip::chip_text(store) {
+        bar = bar.left(
+            BarItem::new()
+                .run(c, t.accent)
+                .priority(bar_priority::WAITING)
+                .action(ACT_WAITING),
+        );
+    }
+    let last_ctx = store.fold.with(|f| f.stats.last_input_tokens);
+    if let Some((seg, sev)) = ctx_meter(last_ctx, store.context_window.get()) {
+        let ink = match sev {
+            2 => t.error,
+            1 => t.warn,
+            _ => t.text_muted,
+        };
+        bar = bar.left(BarItem::new().run(seg, ink).priority(bar_priority::CTX));
+    }
+    // Session tokens: the in/out split when the provider reports one;
+    // splitless providers show the honest total (never fabricated zeros).
+    let totals = store.totals.get();
+    let tokens = if totals.input_tokens > 0 || totals.output_tokens > 0 {
+        Some(format!(
+            "{}↑ {}↓ tk session",
+            fmt_tokens(totals.input_tokens),
+            fmt_tokens(totals.output_tokens)
+        ))
+    } else if totals.total_tokens > 0 {
+        Some(format!("{} tk session", fmt_tokens(totals.total_tokens)))
+    } else {
+        None
+    };
+    if let Some(s) = tokens {
+        bar = bar.left(BarItem::text(s).priority(bar_priority::TOKENS));
+    }
+    // The /gpu meter (OBS-6 seam). Off/Unsupported = omitted.
+    match store.gpu.get() {
+        crate::store::GpuMeter::Ready(s) => {
+            bar = bar
+                .left(BarItem::text(format!("gpu {:.0}%", s.util_pct)).priority(bar_priority::GPU));
+        }
+        crate::store::GpuMeter::Pending => {
+            bar = bar.left(BarItem::text("gpu …").priority(bar_priority::GPU));
+        }
+        crate::store::GpuMeter::Error(_) => {
+            bar = bar.left(
+                BarItem::new()
+                    .run("gpu err", t.warn)
+                    .priority(bar_priority::GPU),
+            );
+        }
+        crate::store::GpuMeter::Off | crate::store::GpuMeter::Unsupported(_) => {}
+    }
+    // Host RAM from the LAST /resources fetch (see `mem_segment`).
+    if let Some((seg, sev)) = mem_segment(&store.host_state.get()) {
+        let ink = if sev == 0 { t.text_muted } else { t.warn };
+        bar = bar.left(BarItem::new().run(seg, ink).priority(bar_priority::MEM));
+    }
+    let skills = store.selected_skills.with(|s| s.len());
+    if skills > 0 {
+        bar = bar.left(BarItem::text(format!("skills {skills}")).priority(bar_priority::SKILLS));
+    }
+    let mcp = store.mcp_servers.with(|m| m.len());
+    if mcp > 0 {
+        bar = bar.left(BarItem::text(format!("mcp {mcp}")).priority(bar_priority::MCP));
+    }
+    // The keys pointer — the whole legend lives behind it; first to yield.
+    bar = bar.left(
+        BarItem::new()
+            .run("?", t.accent)
+            .run(" keys + commands", t.text_muted)
+            .priority(bar_priority::KEYS),
+    );
+    // CENTER — where you work and which session this is. The path keeps
+    // its TAIL (the basename names it); the session id keeps its tail too
+    // (the unique part of `acode-…`).
+    if !workspace.is_empty() {
+        bar = bar.center(
+            BarItem::new()
+                .run(format!("⌂ {workspace}"), t.text_muted)
+                .priority(bar_priority::WORKSPACE)
+                .fit(BarFit::TruncateStart { min: 10 })
+                .action(ACT_WORKSPACE),
+        );
+    }
+    let sid = store.session_id.get();
+    if !sid.is_empty() {
+        bar = bar.center(
+            BarItem::new()
+                .run(sid, t.text_muted)
+                .priority(bar_priority::SESSION)
+                .fit(BarFit::TruncateStart { min: 8 })
+                .action(ACT_SESSION),
+        );
+    }
+    if let Conn::Down(msg, _) = store.conn.get() {
+        bar = bar.center(
+            BarItem::new()
+                .run(text::truncate_ellipsis(&msg, 40), t.error)
+                .priority(bar_priority::CONN_DOWN)
+                .fit(BarFit::TruncateEnd { min: 12 })
+                .action(ACT_GATEWAY),
+        );
+    }
+    // RIGHT — the markers, then the theme selector (flush right).
+    if store.fold.with(|f| f.root_open_at_conclusion) {
+        bar = bar.right(
+            BarItem::new()
+                .run(ROOT_OPEN_MARKER, t.text_faint)
+                .priority(bar_priority::ROOT_OPEN),
+        );
+    }
+    if let Some(hint) = voice_hint {
+        bar = bar.right(
+            BarItem::new()
+                .run(hint, t.text_faint)
+                .priority(bar_priority::VOICE_HINT),
+        );
+    }
+    bar.right(
+        BarItem::new()
+            .run(
+                crate::ui::theme_menu::trigger_text(abstracttui::app::current_theme().label),
+                t.text,
+            )
+            .priority(bar_priority::THEME)
+            .action(ACT_THEME),
+    )
 }
 
 /// The folder shown on the bottom line: home-relative (`~/…`) when it
@@ -1516,130 +1573,12 @@ pub fn display_folder(path: &str, home: Option<&str>) -> String {
     path.to_string()
 }
 
-/// Keep the TAIL of `s` within `cols` display COLUMNS, `…`-prefixed when
-/// cut. Column-true where [`tail_ellipsis`] counts chars: a path with
-/// wide (CJK) characters measured by chars ran twice its budget and
-/// overprinted the markers beside it (adversarial review 2026-10-10).
-pub fn tail_fit(s: &str, cols: i32) -> String {
-    if text::width(s) <= cols {
-        return s.to_string();
-    }
-    let budget = cols - 1; // the `…`
-    let mut kept: Vec<char> = Vec::new();
-    let mut used = 0;
-    for ch in s.chars().rev() {
-        let w = text::width(ch.encode_utf8(&mut [0u8; 4]));
-        if used + w > budget {
-            break;
-        }
-        used += w;
-        kept.push(ch);
-    }
-    kept.reverse();
-    format!("…{}", kept.into_iter().collect::<String>())
-}
-
 /// The marker for a turn that concluded from a SUBRUN while the wrapper
 /// ROOT run was still open on the gateway (`Fold::root_open_at_conclusion`).
 /// It replaced a full-width transcript notice
 /// (`runner::SUBRUN_CONCLUSION_NOTE`), which cost two rows per turn for a
 /// fact nobody acts on (operator ask 2026-10-10). `/help` spells it out.
 pub const ROOT_OPEN_MARKER: &str = "◌ root finalizes on gateway";
-
-/// Which optional segments the status bar's right cluster shows (see
-/// [`status_right`] for the rules). `theme` is the theme TRIGGER
-/// (`theme_menu::trigger_text`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RightPlan {
-    pub marker: bool,
-    pub hint: bool,
-    pub theme: bool,
-}
-
-/// The plan behind [`status_right`]: the root marker (STATE) may take the
-/// cluster to `row_w / 2`; the conveniences — the theme trigger (a control
-/// since 2026-10-10, so it outranks a static hint), then the voice hint —
-/// only to `row_w / 3`, in PRIORITY order: a higher segment takes its room
-/// first, and a lower one shows only in what is left (when the theme
-/// cannot fit, the shorter hint still may), so the instruments on the
-/// left keep their room. The last segment (the session id,
-/// [`footer_session`]) always shows.
-pub fn right_plan(
-    root_open: bool,
-    voice_hint: Option<&str>,
-    theme: &str,
-    gateway: &str,
-    row_w: i32,
-) -> RightPlan {
-    let sep = text::width(" · ");
-    let mut width = text::width(gateway);
-    let mut plan = RightPlan {
-        marker: false,
-        hint: false,
-        theme: false,
-    };
-    if root_open {
-        let w = text::width(ROOT_OPEN_MARKER) + sep;
-        if width + w <= row_w / 2 {
-            width += w;
-            plan.marker = true;
-        }
-    }
-    if !theme.trim().is_empty() {
-        let w = text::width(theme) + sep;
-        if width + w <= row_w / 3 {
-            width += w;
-            plan.theme = true;
-        }
-    }
-    if let Some(h) = voice_hint {
-        if width + text::width(h) + sep <= row_w / 3 {
-            plan.hint = true;
-        }
-    }
-    plan
-}
-
-/// The status bar's right cluster as one string, left to right: the root
-/// marker, the voice hint, the theme, the session id (the gateway, here
-/// from 2026-10-10, moved to the header's top right on 2026-10-28). The bar itself draws it
-/// in three parts — the theme is a focusable dropdown trigger — from the
-/// same [`right_plan`].
-pub fn status_right(
-    root_open: bool,
-    voice_hint: Option<&'static str>,
-    theme_label: &str,
-    gateway: &str,
-    row_w: i32,
-) -> String {
-    let plan = right_plan(root_open, voice_hint, theme_label, gateway, row_w);
-    let mut out: Vec<String> = Vec::new();
-    if plan.marker {
-        out.push(ROOT_OPEN_MARKER.to_string());
-    }
-    if plan.hint {
-        out.extend(voice_hint.map(str::to_string));
-    }
-    if plan.theme {
-        out.push(theme_label.to_string());
-    }
-    out.push(gateway.to_string());
-    out.join(" · ")
-}
-
-/// The status bar's last segment: the session id, tail-kept
-/// ([`tail_ellipsis`] at 17: at most 15 columns, the width of the
-/// `127.0.0.1:18731` gateway label it replaces, so the right cluster's
-/// budget for the theme and the voice hint is unchanged), cut further to a third of the
-/// row when narrow, and omitted below 30 columns, where a third cannot
-/// hold a readable tail. An empty id shows nothing.
-pub fn footer_session(session_id: &str, row_w: i32) -> String {
-    let budget = (row_w / 3).min(17);
-    if session_id.is_empty() || budget < 10 {
-        return String::new();
-    }
-    tail_ellipsis(session_id, budget as usize)
-}
 
 /// Keep the TAIL of an identifier, `…`-prefixed, when it exceeds
 /// `max_chars` — session ids differ at the END, so tail-keeping is the
@@ -1797,9 +1736,8 @@ mod tests {
     fn header_facts_fill_rule() {
         // Full house at rest.
         assert_eq!(
-            header_facts("abstractcode", "workspace_or_allowed", 2, 1, true, 128_000),
+            header_facts("workspace_or_allowed", 2, 1, true, 128_000),
             vec![
-                "⌂ abstractcode".to_string(),
                 "workspace_or_allowed".to_string(),
                 "skills 2".to_string(),
                 "mcp 1".to_string(),
@@ -1809,13 +1747,13 @@ mod tests {
         // Empty mode reads server-managed; zero counts are OMITTED (not
         // "skills 0" noise); tokens only at rest and only when nonzero.
         assert_eq!(
-            header_facts("", "", 0, 0, true, 0),
+            header_facts("", 0, 0, true, 0),
             vec!["server-managed".to_string()]
         );
         // During a run the strip owns live numbers — no token fact.
         assert_eq!(
-            header_facts("ws", "", 0, 0, false, 999_999),
-            vec!["⌂ ws".to_string(), "server-managed".to_string()]
+            header_facts("", 0, 0, false, 999_999),
+            vec!["server-managed".to_string()]
         );
     }
 
@@ -1932,62 +1870,5 @@ mod tests {
         );
         assert_eq!(display_folder("/srv/x", None), "/srv/x");
         assert_eq!(display_folder("/srv/x", Some("")), "/srv/x");
-    }
-
-    #[test]
-    fn tail_fit_counts_columns_not_chars() {
-        assert_eq!(tail_fit("/tmp/ws", 20), "/tmp/ws");
-        assert_eq!(tail_fit("/a/bcdef", 5), "…cdef");
-        // Four CJK characters are EIGHT columns.
-        let cut = tail_fit("/x/子目录名", 6);
-        assert!(text::width(&cut) <= 6, "{cut:?}");
-        assert_eq!(cut, "…录名");
-    }
-
-    #[test]
-    fn status_right_adds_markers_by_priority_within_its_budget() {
-        let hint = Some("hold Space to talk");
-        // A wide row (240): everything, in display order.
-        assert_eq!(
-            status_right(true, hint, "Tokyo Night", "127.0.0.1:8080", 240),
-            "◌ root finalizes on gateway · hold Space to talk · Tokyo Night · 127.0.0.1:8080"
-        );
-        // 120 columns: conveniences get a third (40) — the theme (a
-        // control) fits first, the hint does not.
-        assert_eq!(
-            status_right(false, hint, "Tokyo Night", "127.0.0.1:8080", 120),
-            "Tokyo Night · 127.0.0.1:8080"
-        );
-        assert_eq!(
-            status_right(true, hint, "Tokyo Night", "127.0.0.1:8080", 100),
-            "◌ root finalizes on gateway · 127.0.0.1:8080",
-            "the marker alone fills the conveniences' third"
-        );
-        // 110 columns: the theme trigger cannot fit; the shorter hint
-        // still does.
-        assert_eq!(
-            status_right(false, hint, " Dark (Abstract) ▾ ", "127.0.0.1:18731", 110),
-            "hold Space to talk · 127.0.0.1:18731"
-        );
-        assert_eq!(
-            status_right(false, None, "Tokyo Night", "127.0.0.1:8080", 10),
-            "127.0.0.1:8080",
-            "the last segment always shows"
-        );
-    }
-
-    #[test]
-    fn footer_session_keeps_the_tail_and_yields_when_narrow() {
-        assert_eq!(footer_session("acode-test-session", 120), "…e-test-session");
-        assert_eq!(
-            footer_session("acode-0123456789abcdefghij", 120),
-            "…6789abcdefghij"
-        );
-        assert_eq!(
-            footer_session("acode-0123456789abcdefghij", 36),
-            "…bcdefghij"
-        );
-        assert_eq!(footer_session("acode-test-session", 29), "");
-        assert_eq!(footer_session("", 120), "");
     }
 }

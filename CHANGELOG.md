@@ -19,6 +19,18 @@ The chat and the Activity panel render from AbstractGateway's replay view (`GET 
 ### Known
 
 - Whether the gateway serves the view is asked once per page load (the transport keeps the answer): after a gateway upgrade to 0.17.0, reload the page to switch to the view.
+## [terminal 0.12.0] - 2026-10-28
+
+Needs AbstractTUI 0.7.0.
+
+### Changed
+
+- Terminal: the header's workflow name, provider/model and gateway (with its connection light) are clickable — they open the workflow picker, the model picker and the `/status` connection modal. The status bar's middle shows the workspace path (opens the conversation's authorised workspaces) and the session id (opens the Sessions modal); its right end is the theme selector (opens the theme dropdown). `Tab` to the header or the status bar, `←`/`→` between its widgets, `Enter` or `Space` opens.
+- Terminal: the folder moved from the header to the status bar's middle, beside the session id. The session id, the theme, the attention chip and the workspace path stay longest; the instruments give way first, each whole or not at all.
+
+### Removed
+
+- Terminal: the mouse wheel over the closed theme name no longer steps to the next theme (open the dropdown, or `Ctrl+T`).
 
 ## [web 0.12.0] - 2026-10-28
 

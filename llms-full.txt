@@ -1797,13 +1797,13 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.11.0**, pre-alpha. Release history is in
+Status: **0.12.0**, pre-alpha. Release history is in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## What it looks like
 
 ```
- ▲ AbstractCode  basic-agent · lmstudio · qwen3.6-35b · ⌂ snake · skills 2   acode-93db824cec83 ●
+ ▲ AbstractCode  basic-agent  ·  lmstudio · qwen3.6-35b  ·  skills 2       127.0.0.1:8080 ●
  ❯ you
    Create a snake game in rust, then run the tests.
  ∴ cycle 1
@@ -1814,7 +1814,7 @@ Status: **0.11.0**, pre-alpha. Release history is in
    Done — the game builds clean and all 12 tests pass. …
  ⠹ cycle 3 · model call 4s · 39 tok/s (last call) · 42s · 8.1k↑ 612↓ tk   ▂▃▅▂▇
 ❯ ▐ describe a task — Enter sends · Ctrl+J newline · /help                    ▌
- ctx 8.1k/262k tk (3%, declared) · 12k tk session · skills 2 · ? keys   nord · …
+ ctx 8.1k/262k tk (3%, declared) · 12k tk session  ⌂ ~/snake · acode-93db824cec83  Nord ▾
 ```
 
 - **Live activity**: reasoning cycles, tool cards that update in place
@@ -3000,7 +3000,13 @@ recovers it.
 | `Ctrl+D` | anywhere | Toggle detail view (thinking + tool results vs answers only) |
 | `Alt+E` | anywhere | Cycle conversation focus: agent → entity visit 1 → … → agent. Cycle order is the order conversations were opened — it never changes with how the header paints chips. Option+E on macOS with "Option as Meta/Esc+"; `/focus <name\|agent>` needs no modifier setting. (`Ctrl+E` is move-to-line-end in the composer) |
 | `Ctrl+T` | anywhere | Cycle theme |
-| click / `Tab`+`Enter` on the theme name | status bar | Theme dropdown: every theme grouped Dark / Light; arrows, Page Up/Down and the mouse wheel preview LIVE; `Enter` or a click keeps it (saved like `Ctrl+T`); `Esc` restores. The wheel on the closed name steps to the next theme |
+| click on the workflow name | header | Workflow picker (as `/workflow`) |
+| click on the provider/model | header | Model picker (as `/model`) |
+| click on the gateway / connection light | header | Connection status modal (as `/status`) |
+| click on the workspace path (`⌂ …`) | status bar, middle | The conversation's authorised workspaces (as `/workspace`) |
+| click on the session id | status bar, middle | Sessions modal (as `/sessions`) |
+| `Tab` to the header or the status bar, then `←`/`→`, `Enter`/`Space` | header, status bar | Moves between that bar's widgets and opens the one highlighted (reverse video) |
+| click / `Tab`+`→`+`Enter` on the theme name | status bar, right | Theme dropdown: every theme grouped Dark / Light; arrows, Page Up/Down and the mouse wheel preview LIVE; `Enter` or a click keeps it (saved like `Ctrl+T`); `Esc` restores |
 | `Ctrl+P` | anywhere | Read the latest reply aloud; while it plays = pause; paused = resume (`/speak`; `Esc` stops). In one automation (`/automations <id>`): the selected run's reply; again = stop |
 | `Space` (held) | empty prompt | Hold to talk: speak, release to SEND (`/voice space off` turns it off) |
 | `Enter` | empty composer, the status line shows the attention chip (**N waiting for you**, **Automations · M new**, or **Automations · N waiting** on an older gateway) | Open the automation that waits for you (a pending approval or question first, else unseen results); a click on the chip does the same |
@@ -3087,8 +3093,10 @@ reasoning in the muted ink under its label), `│` is tool output, `↳` is an
 error. A tool call that ran before any cycle in its turn stands alone as a
 one-line row with its own `▸ N lines` disclosure.
 
-The bottom line of the window shows the folder this session was launched
-for (`⌂ ~/…`; the `--workspace` root, else the current directory), the
+The bottom line of the window (the status bar) shows the instruments on
+the left, the folder this session was launched for (`⌂ ~/…`; the
+`--workspace` root, else the current directory) and the session id in the
+middle, the theme on the right, and the
 `hold Space to talk` hint (`Ctrl+R speak` with the gesture off), and — when a turn's answer came from an
 agent subrun while the wrapper root run was still open on the gateway —
 the discreet `◌ root finalizes on gateway` marker (nothing to do: the
@@ -4099,6 +4107,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [terminal 0.12.0] - 2026-10-28
+
+Needs AbstractTUI 0.7.0.
+
+### Changed
+
+- Terminal: the header's workflow name, provider/model and gateway (with its connection light) are clickable — they open the workflow picker, the model picker and the `/status` connection modal. The status bar's middle shows the workspace path (opens the conversation's authorised workspaces) and the session id (opens the Sessions modal); its right end is the theme selector (opens the theme dropdown). `Tab` to the header or the status bar, `←`/`→` between its widgets, `Enter` or `Space` opens.
+- Terminal: the folder moved from the header to the status bar's middle, beside the session id. The session id, the theme, the attention chip and the workspace path stay longest; the instruments give way first, each whole or not at all.
+
+### Removed
+
+- Terminal: the mouse wheel over the closed theme name no longer steps to the next theme (open the dropdown, or `Ctrl+T`).
+
 ## [web 0.12.0] - 2026-10-28
 
 The web app is now composed from the AbstractFramework UI kit: `@abstractframework/ui-kit` ^0.9.2 and `@abstractframework/panel-chat` ^0.5.0 (AbstractUIC 0.7.0). The chat tool policy, the voice library and the live attention badge need AbstractGateway 0.16.0 (and `/api/gateway/me/events`); on an older gateway each says what it does instead.
@@ -4125,11 +4146,15 @@ The web app is now composed from the AbstractFramework UI kit: `@abstractframewo
 
 - App code the kit now provides (net about 1,700 lines) (tool picker, multi-select, attachment uploads, composer attachments, about rows, tool permissions, dead runtime helpers) and their CSS.
 
-## [terminal 0.11.0] - 2026-10-25
+## [terminal 0.11.0] - 2026-10-28
 
 The live attention chip needs AbstractGateway with your event stream (`/api/gateway/me/events`); on an older gateway it keeps the automation list's count and its poll.
 
 ### Changed
+
+- Terminal: the header's top right shows the gateway you are connected to (cut to 28 columns), beside its connection orb, where the session id was. The session id moves to the status bar's right end (tail-kept, at most 15 columns, omitted below 30 columns); the gateway is no longer repeated there. When the gateway is down, the status bar's right end gives the session id and the reason.
+- Terminal: tool rows lead with what the call does: `execute_command` reads **run command**, `read_file` **read file**, `fetch_url` **fetch page**, `web_search` **search web** (and the other built-in tools likewise; any other tool's name with spaces for underscores). An open tool card keeps the raw name beside the title, `run command  (execute_command) · ok`.
+- Terminal: a tool result shaped like a size report (`du`-style lines such as `114.1 GB  models`, at least two of them) gets a one-line digest above its output, `result: 3 locations · largest untracked/models (114.1 GB)`; any other output is shown as before, and the full result stays below the digest.
 
 - Terminal: the status-line attention chip follows your event stream on the
   gateway (`/me/events` catch-up, SSE while you are at the terminal, one
