@@ -62,7 +62,11 @@ describe("replay-view mode through the app's transport", () => {
     const snapshot = controller.getSnapshot();
     expect(snapshot.source).toBe("replay_view");
     expect(snapshot.records).toHaveLength(0);
-    expect(requests.some((r) => r.url.includes("history_bundle") || r.url.includes("/ledger?"))).toBe(false);
+    // No ledger pages and no full history bundle; the only bundle read is the kit's small listing of
+    // the conversation's turns (panel-chat 0.6.2 listSessionTurns: no sub-runs, one ledger item).
+    expect(requests.some((r) => r.url.includes("/ledger?"))).toBe(false);
+    const bundles = requests.filter((r) => r.url.includes("history_bundle"));
+    expect(bundles.every((r) => r.url.includes("include_session=true&include_subruns=false&ledger_max_items=1"))).toBe(true);
     expect(requests.find((r) => r.url.endsWith("/view/stream"))?.headers.get("Last-Event-ID")).toBe(view.cursor.token);
 
     // The rail badge: the child's approval is the one row waiting.

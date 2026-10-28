@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [web 0.13.1] - 2026-10-28
+
+On AbstractUIC 0.8.2 (`@abstractframework/ui-kit` ^0.9.4, `@abstractframework/panel-chat` ^0.6.2, `@abstractframework/app-server` ^0.1.13).
+
+### Fixed
+
+- A conversation reopened in the browser shows every turn again (web 0.13.0 showed only the last one): panel-chat 0.6.2 reads the earlier turns' views (AbstractUIC backlog 0058).
+- Choosing a voice in the Voice panel plays it: the panel hands the kit a `previewVoice` that synthesizes on the conversation's run, or the session's media run before the first one (`POST runs/{run}/voice/tts`, then the audio artifact), through the app's proxy.
+- From the kit: the voice picker lists each Qwen3-TTS voice once; "Create a voice" and "Manage voices" are styled; the tool approval card makes "Allow once" its primary and keeps one visible scope line (the full sentences behind "What the broader choices allow"); a gateway that does not answer reads "Gateway … did not answer" instead of "Session rejected"; one duration format in the chat, and a tool time that includes an approval wait says so; tool-row badges and the model picker's "Custom" are no longer cut.
+
 ## [web 0.13.0] - 2026-10-28
 
 The chat and the Activity panel render from AbstractGateway's replay view (`GET runs/{id}/view` and its stream, gateway 0.17.0) through `@abstractframework/panel-chat` ^0.6.0 (AbstractUIC 0.8.0): one reconstruction of the run, the runtime's, instead of this browser's fold of the ledger (framework backlog 0993, AbstractRuntime 0854). On an older gateway the app keeps its ledger fold, unchanged.

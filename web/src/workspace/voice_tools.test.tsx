@@ -9,6 +9,7 @@ import {
   VoiceTools,
   cloneVoice,
   codeVoiceCreation,
+  codeVoicePreview,
   codeVoiceLibrary,
   designVoice,
   fetchVoiceDefaults,
@@ -218,6 +219,43 @@ describe("Code's Voice panel creates voices in the gateway's voice library", () 
       expect(err.message).toBe(missing);
       expect(err.status).toBe(501);
     });
+  });
+});
+
+describe("choosing a voice plays it (previewVoice)", () => {
+  it("synthesizes on the conversation's run (or the session's media run) and returns the audio bytes", async () => {
+    const calls: string[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      calls.push(`${init?.method || "GET"} ${String(url)}`);
+      if (String(url).endsWith("/voice/tts")) {
+        const body = JSON.parse(String(init?.body));
+        expect(body.text).toBeTruthy();
+        expect(body.provider).toBe("qwen3-tts");
+        expect(body.voice).toBe("Vivian");
+        return new Response(JSON.stringify({ ok: true, run_id: "r", request_id: "q", audio_artifact: { $artifact: "a 1" } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    }) as typeof fetch;
+    vi.stubGlobal("document", { cookie: "abstractcode_gateway_csrf=tok" });
+    try {
+      const bytes = await codeVoicePreview("", "acode-abc")({ provider: "qwen3-tts", voice: "Vivian" });
+      expect(new Uint8Array(bytes)).toEqual(new Uint8Array([1, 2, 3]));
+      expect(calls).toEqual([
+        "POST api/gateway/runs/session_memory_acode-abc/voice/tts",
+        "GET api/gateway/runs/session_memory_acode-abc/artifacts/a%201/content",
+      ]);
+      await expect(codeVoicePreview("", "")({})).rejects.toThrow(/Open a conversation/);
+    } finally {
+      globalThis.fetch = realFetch;
+      vi.unstubAllGlobals();
+    }
+  });
+  it("the Voice panel hands it to the kit while connected", () => {
+    const src = readFileSync(new URL("./voice_tools.tsx", import.meta.url), "utf8");
+    expect(src).toContain("previewVoice={connected && sampleRun ? codeVoicePreview(sampleRun.runId, sampleRun.sessionId) : undefined}");
+    const app = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
+    expect(app).toContain('sampleRun={{ runId: identity ? session.runId : "", sessionId: session.sessionId }}');
   });
 });
 
