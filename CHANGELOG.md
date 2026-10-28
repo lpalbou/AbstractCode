@@ -7,9 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [terminal 0.11.0 / web 0.12.0] - 2026-10-25
+## [web 0.12.0] - 2026-10-28
 
-The live attention chip and badge need AbstractGateway with your event stream (`/api/gateway/me/events`); on an older gateway both keep the automation list's count and its poll.
+The web app is now composed from the AbstractFramework UI kit: `@abstractframework/ui-kit` ^0.9.2 and `@abstractframework/panel-chat` ^0.5.0 (AbstractUIC 0.7.0). The chat tool policy, the voice library and the live attention badge need AbstractGateway 0.16.0 (and `/api/gateway/me/events`); on an older gateway each says what it does instead.
+
+### Added
+
+- Settings → Voice → **Create a voice**: design a voice from a description or clone one from a recording, through the gateway's voice library (`POST voice/design`, `POST voice/clones`); a refusal (shared store, engine missing) shows the gateway's own sentence.
+- **Allow for this chat** and **Allow all <toolset> tools for this chat** on a tool approval store the grant on the gateway for this conversation (the session tool policy, `capabilities.session_tool_policy`): later calls of every run of the chat run without a gate, from every client. On a gateway without it the button reads **Allow for this run** (this browser only), and a failed capability read says why.
+
+### Changed
+
+- Tools: each tool is **Off**, **Ask** or **Auto** (the kit's `ToolModeEditor`). Auto tools are sent in `_runtime.tool_policy.auto_approve_tools`, so the gateway runs them with no client open and no approval gate; Ask tools in `require_approval_tools`; Off tools outside `allowed_tools`. With no choice nothing is sent and the gateway's grant applies — the app no longer sends every enabled tool as `require_approval_tools`. **Behaviour change:** the former **Permissions** setting (default / read / write / all) and the per-tool picker are migrated once into these choices, and the Tools panel says so until dismissed. **Allow all enabled tools** on an approval sets the enabled tools to Auto in this browser.
+- The model picker (provider, model, reasoning, MTP depth) is the kit's `ProviderModelPicker`, in the Model panel and in workflow inputs.
+- Voice uses the kit: the microphone is `AfVoiceMicButton` (**Hold to talk** / **Tap to talk**, "Recording — release to send", the live level), voice defaults and preferences come from `useVoiceDefaults` / `useVoicePreferences` (shared across tabs).
+- The app shell uses the kit's top-bar actions (identity menu, About, Appearance) and drawer system (the right rail's panels, and the Docs assistant as a drawer panel).
+- The composer's attachments, steer / queue and the transcript export (the conversation toolbar) are the kit's; the Files panel's **Export conversation** button is gone.
+- The Automations header badge follows your event stream (approvals and
+  questions waiting for you + automation results not seen; live tail while the
+  tab is visible, one catch-up a minute when hidden), and the automation list
+  is re-read after automation events instead of every 30 seconds; a gateway
+  without the stream keeps the list's sum and the 30 s poll.
+
+### Removed
+
+- App code the kit now provides (net about 1,700 lines) (tool picker, multi-select, attachment uploads, composer attachments, about rows, tool permissions, dead runtime helpers) and their CSS.
+
+## [terminal 0.11.0] - 2026-10-25
+
+The live attention chip needs AbstractGateway with your event stream (`/api/gateway/me/events`); on an older gateway it keeps the automation list's count and its poll.
 
 ### Changed
 
@@ -17,11 +43,6 @@ The live attention chip and badge need AbstractGateway with your event stream (`
   gateway (`/me/events` catch-up, SSE while you are at the terminal, one
   catch-up a minute otherwise): **N waiting for you** · **Automations · M new**;
   the 15 s automation-list poll is kept only for a gateway without the stream.
-- Web: the Automations header badge follows the same stream (approvals and
-  questions waiting for you + automation results not seen; live tail while the
-  tab is visible, one catch-up a minute when hidden), and the automation list
-  is re-read after automation events instead of every 30 seconds; a gateway
-  without the stream keeps the list's sum and the 30 s poll.
 
 ## [terminal 0.10.0 / web 0.11.2] - 2026-10-15
 
