@@ -44,6 +44,9 @@ function fakeGateway() {
     }
     if (url.endsWith(`/runs/${ROOT}`)) return new Response(JSON.stringify({ run_id: ROOT, status: "waiting", session_id: view.session_id }), { status: 200 });
     if (url.endsWith("/commands")) return new Response(JSON.stringify({ accepted: true }), { status: 200 });
+    // panel-chat 0.6.2: the conversation's turns (the runtime's selection), one turn here.
+    if (url.includes(`/runs/${ROOT}/history_bundle?include_session=true&include_subruns=false&ledger_max_items=1`))
+      return new Response(JSON.stringify({ session: { session_id: view.session_id, turns: [{ run_id: ROOT }] } }), { status: 200 });
     throw new Error(`unexpected request ${init.method || "GET"} ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -66,7 +69,9 @@ describe("replay-view mode through the app's transport", () => {
     // the conversation's turns (panel-chat 0.6.2 listSessionTurns: no sub-runs, one ledger item).
     expect(requests.some((r) => r.url.includes("/ledger?"))).toBe(false);
     const bundles = requests.filter((r) => r.url.includes("history_bundle"));
-    expect(bundles.every((r) => r.url.includes("include_session=true&include_subruns=false&ledger_max_items=1"))).toBe(true);
+    expect(bundles).toHaveLength(1);
+    expect(bundles[0].url).toContain("include_session=true&include_subruns=false&ledger_max_items=1");
+    expect(snapshot.messages.some((m) => /could not be listed|are not shown/.test(String(m.content)))).toBe(false);
     expect(requests.find((r) => r.url.endsWith("/view/stream"))?.headers.get("Last-Event-ID")).toBe(view.cursor.token);
 
     // The rail badge: the child's approval is the one row waiting.

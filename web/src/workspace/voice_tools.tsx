@@ -80,18 +80,20 @@ export const VOICE_SAMPLE_TEXT = "Hello, this is how I sound.";
 
 /**
  * Choosing a voice plays it (the kit's `previewVoice`; every gateway TTS route needs a run):
- * `POST runs/{run}/voice/tts` on the conversation's run, else the session's media run
- * (abstractgateway routes/gateway.py `voice_tts`: `{audio_artifact}`), then the artifact's bytes
- * (`runs/{run}/artifacts/{id}/content`), both through this app's authenticated proxy.
+ * `POST runs/{run}/voice/tts` on the SESSION's media run (`session_memory_<session>`, created by
+ * the gateway on first use, abstractgateway routes/gateway.py `voice_tts`: `{audio_artifact}`), so
+ * trying voices never adds runs or audio to the conversation, then the artifact's bytes
+ * (`runs/{run}/artifacts/{id}/content`), both through this app's authenticated proxy. A sample
+ * gives the gateway 25 s (as its console does): an abandoned one frees its synthesis slot.
  */
-export function codeVoicePreview(runId: string, sessionId: string) {
+export function codeVoicePreview(sessionId: string) {
   return async (prefs: VoiceClientPreferences, text?: string, opts?: { signal?: AbortSignal }): Promise<ArrayBuffer> => {
-    if (!runId && !sessionId) throw new Error("Open a conversation to hear a voice sample.");
-    const run = await transcriptionRunId(runId, sessionId);
+    if (!sessionId) throw new Error("Open a conversation to hear a voice sample.");
+    const run = await session_memory_owner_run_id(sessionId);
     const signal = opts?.signal;
     const res: any = await gatewayRequest(gatewayApiPath(`runs/${encodeURIComponent(run)}/voice/tts`), {
       method: "POST",
-      body: JSON.stringify({ text: text || VOICE_SAMPLE_TEXT, request_id: newId(), ...voiceTtsRequest(prefs) }),
+      body: JSON.stringify({ text: text || VOICE_SAMPLE_TEXT, request_id: newId(), timeout_s: 25, ...voiceTtsRequest(prefs) }),
       ...(signal ? { signal } : {}),
     });
     const ref = res?.audio_artifact;
@@ -118,7 +120,8 @@ export function CodeVoiceSettings({
   connected,
   isAdmin = false,
   levelSource,
-  sampleRun,
+  sampleSessionId,
+  ttsAvailable = false,
 }: {
   value: VoiceClientPreferences;
   onChange: (next: VoiceClientPreferences) => void;
@@ -128,8 +131,10 @@ export function CodeVoiceSettings({
   isAdmin?: boolean;
   /** The composer's voice (the live microphone level while recording). */
   levelSource?: React.ComponentProps<typeof AfVoiceSection>["levelSource"];
-  /** Where a voice sample is synthesized (the conversation's run, else the session's media run). */
-  sampleRun?: { runId: string; sessionId: string };
+  /** The conversation whose media run synthesizes voice samples (absent: no sample). */
+  sampleSessionId?: string;
+  /** The gateway speaks (`capability.tts.available`): without it, choosing a voice plays nothing. */
+  ttsAvailable?: boolean;
 }) {
   return (
     <AfVoiceSection
@@ -146,7 +151,7 @@ export function CodeVoiceSettings({
       captureDefaults={CODE_CAPTURE_DEFAULTS}
       levelSource={levelSource ?? null}
       // Choosing a voice plays it (D2: the picker was silent in Code).
-      previewVoice={connected && sampleRun ? codeVoicePreview(sampleRun.runId, sampleRun.sessionId) : undefined}
+      previewVoice={connected && ttsAvailable && sampleSessionId ? codeVoicePreview(sampleSessionId) : undefined}
       unavailableReason={connected ? null : "Connect to a gateway to configure voice."}
     />
   );

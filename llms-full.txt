@@ -4114,7 +4114,7 @@ On AbstractUIC 0.8.2 (`@abstractframework/ui-kit` ^0.9.4, `@abstractframework/pa
 ### Fixed
 
 - A conversation reopened in the browser shows every turn again (web 0.13.0 showed only the last one): panel-chat 0.6.2 reads the earlier turns' views (AbstractUIC backlog 0058).
-- Choosing a voice in the Voice panel plays it: the panel hands the kit a `previewVoice` that synthesizes on the conversation's run, or the session's media run before the first one (`POST runs/{run}/voice/tts`, then the audio artifact), through the app's proxy.
+- Choosing a voice in the Voice panel plays it (when the gateway speaks): the panel hands the kit a `previewVoice` that synthesizes on the session's media run, so trying voices adds nothing to the conversation (`POST runs/{run}/voice/tts` with a 25 s limit, then the audio artifact), through the app's proxy.
 - From the kit: the voice picker lists each Qwen3-TTS voice once; "Create a voice" and "Manage voices" are styled; the tool approval card makes "Allow once" its primary and keeps one visible scope line (the full sentences behind "What the broader choices allow"); a gateway that does not answer reads "Gateway … did not answer" instead of "Session rejected"; one duration format in the chat, and a tool time that includes an approval wait says so; tool-row badges and the model picker's "Custom" are no longer cut.
 
 ## [web 0.13.0] - 2026-10-28
