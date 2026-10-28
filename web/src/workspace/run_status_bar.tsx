@@ -6,6 +6,7 @@ import {
 } from "@abstractframework/panel-chat";
 
 import { llm_phase_text } from "../lib/llm_phase";
+import { view_progress_records } from "../lib/activity_rows";
 
 export function RunStatusBar({
   active,
@@ -33,8 +34,11 @@ export function RunStatusBar({
   // provider on this run emitted phase events, and the panel's own detail
   // stands unchanged — never a synthesized phase.
   const phase = useMemo(
-    () => (progress.tone === "working" ? llm_phase_text(snapshot.records.map((entry) => entry.record)) : ""),
-    [progress.tone, snapshot.records],
+    () =>
+      progress.tone === "working"
+        ? llm_phase_text(snapshot.view ? view_progress_records(snapshot.view as never) : snapshot.records.map((entry) => entry.record))
+        : "",
+    [progress.tone, snapshot.records, snapshot.view],
   );
   const detail = phase || progress.detail;
   const [now, setNow] = useState(Date.now);

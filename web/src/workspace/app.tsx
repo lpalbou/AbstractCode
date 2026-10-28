@@ -1528,7 +1528,7 @@ export function CodeWorkspace() {
       if (body) body.scrollTop = 0;
     });
   }, [settingsBinding, railPanel]);
-  const activityAttn = automationView ? { count: 0, hint: "" } : activityAttention(snapshot.records, session.runId);
+  const activityAttn = automationView ? { count: 0, hint: "" } : activityAttention(snapshot.records, session.runId, snapshot.view);
   const railElement = (
     <CodeRightRail
       key={`rail:${identity}`}
@@ -1545,7 +1545,7 @@ export function CodeWorkspace() {
           onOpenRun={automationHost.openRun}
         />
       ) : (
-        <WorkspaceActivityContent records={snapshot.records} runId={session.runId} />
+        <WorkspaceActivityContent records={snapshot.records} runId={session.runId} view={snapshot.view} />
       ),
       files: automationView ? (
         connection.connected && automationsState.selectedId ? (

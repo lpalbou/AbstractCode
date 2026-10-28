@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [web 0.13.0] - 2026-10-28
+
+The chat and the Activity panel render from AbstractGateway's replay view (`GET runs/{id}/view` and its stream, gateway 0.17.0) through `@abstractframework/panel-chat` ^0.6.0 (AbstractUIC 0.8.0): one reconstruction of the run, the runtime's, instead of this browser's fold of the ledger (framework backlog 0993, AbstractRuntime 0854). On an older gateway the app keeps its ledger fold, unchanged.
+
+### Changed
+
+- The workflow transport offers the replay view (`replayView`, over the app's authenticated proxy). Opening a conversation reads the view and follows its stream; it no longer reads the history bundle or ledger pages, or polls the run every 2 s. Measured on a 2,997-record run: 3 requests and 1.2 MB instead of 509 requests and 5.6 MB.
+- Activity reads the view's activities (`activity_rows_from_view`): one row per node execution as the runtime folded it (waits closed, tool calls matched, approvals answered by any client), plus "run finished" / "subflow finished" for each completed run; questions, messages and event waits show the view's own text. Checked row by row against the ledger rows on all 15 AbstractRuntime conformance cases; the differences that remain are listed with their reason in `web/src/lib/activity_rows_parity_expected.ts` (what the view does not carry: a finished timer's deadline and resume node, a child run's output, a step's raw payload; what it fixes: a delegation left "waiting" after a cancel, an unresolved `$slim`, an Agent's structured-output call shown as its own step). The status bar's model phase comes from the view's progress. The ledger rows remain for a gateway without the view.
+
+### Known
+
+- Whether the gateway serves the view is asked once per page load (the transport keeps the answer): after a gateway upgrade to 0.17.0, reload the page to switch to the view.
+
 ## [terminal 0.12.0] - 2026-10-28
 
 Needs AbstractTUI 0.7.0.
