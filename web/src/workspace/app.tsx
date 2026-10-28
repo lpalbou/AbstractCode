@@ -1305,6 +1305,8 @@ export function CodeWorkspace() {
         connected={connection.connected}
         isAdmin={connection.status?.gateway?.principal?.admin === true}
         levelSource={voice}
+        sampleSessionId={session.sessionId}
+        ttsAvailable={voiceCapability?.tts?.available === true}
       />
   );
   const automationDetail = automationsState.detail;

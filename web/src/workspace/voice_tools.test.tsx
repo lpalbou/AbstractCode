@@ -9,6 +9,7 @@ import {
   VoiceTools,
   cloneVoice,
   codeVoiceCreation,
+  codeVoicePreview,
   codeVoiceLibrary,
   designVoice,
   fetchVoiceDefaults,
@@ -218,6 +219,56 @@ describe("Code's Voice panel creates voices in the gateway's voice library", () 
       expect(err.message).toBe(missing);
       expect(err.status).toBe(501);
     });
+  });
+});
+
+describe("choosing a voice plays it (previewVoice)", () => {
+  it("synthesizes on the session's media run (never the conversation's) and returns the audio bytes", async () => {
+    const calls: Array<{ line: string; csrf: string | null; signal: unknown }> = [];
+    const realFetch = globalThis.fetch;
+    const abort = new AbortController();
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      calls.push({ line: `${init?.method || "GET"} ${String(url)}`, csrf: new Headers(init?.headers).get("X-AbstractCode-CSRF"), signal: init?.signal });
+      if (String(url).endsWith("/voice/tts")) {
+        const body = JSON.parse(String(init?.body));
+        expect(body.text).toBeTruthy();
+        expect(body.timeout_s).toBe(25);
+        expect(body.provider).toBe("qwen3-tts");
+        expect(body.voice).toBe("Vivian");
+        return new Response(JSON.stringify({ ok: true, run_id: "r", request_id: "q", audio_artifact: { $artifact: "a 1" } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    }) as typeof fetch;
+    vi.stubGlobal("document", { cookie: "abstractcode_gateway_csrf=tok" });
+    try {
+      const bytes = await codeVoicePreview("acode-abc")({ provider: "qwen3-tts", voice: "Vivian" }, undefined, { signal: abort.signal });
+      expect(new Uint8Array(bytes)).toEqual(new Uint8Array([1, 2, 3]));
+      expect(calls.map((c) => c.line)).toEqual([
+        "POST api/gateway/runs/session_memory_acode-abc/voice/tts",
+        "GET api/gateway/runs/session_memory_acode-abc/artifacts/a%201/content",
+      ]);
+      expect(calls.every((c) => c.csrf === "tok")).toBe(true);
+      expect(calls.every((c) => c.signal === abort.signal)).toBe(true);
+      await expect(codeVoicePreview("")({})).rejects.toThrow(/Open a conversation/);
+    } finally {
+      globalThis.fetch = realFetch;
+      vi.unstubAllGlobals();
+    }
+  });
+  it("the Voice panel hands it to the kit only while connected and the gateway speaks", () => {
+    const off = renderToStaticMarkup(
+      <CodeVoiceSettings value={{}} onChange={() => {}} defaults={{ value: null, failed: false }} connected sampleSessionId="s" ttsAvailable={false} />,
+    );
+    const on = renderToStaticMarkup(
+      <CodeVoiceSettings value={{}} onChange={() => {}} defaults={{ value: null, failed: false }} connected sampleSessionId="s" ttsAvailable />,
+    );
+    expect(typeof off).toBe("string");
+    expect(typeof on).toBe("string");
+    const src = readFileSync(new URL("./voice_tools.tsx", import.meta.url), "utf8");
+    expect(src).toContain("previewVoice={connected && ttsAvailable && sampleSessionId ? codeVoicePreview(sampleSessionId) : undefined}");
+    const app = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
+    expect(app).toContain("sampleSessionId={session.sessionId}");
+    expect(app).toContain("ttsAvailable={voiceCapability?.tts?.available === true}");
   });
 });
 

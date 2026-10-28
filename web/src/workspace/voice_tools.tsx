@@ -75,6 +75,40 @@ export function codeVoiceLibrary(isAdmin: boolean): VoiceLibrary {
   };
 }
 
+/** What a voice sample says. */
+export const VOICE_SAMPLE_TEXT = "Hello, this is how I sound.";
+
+/**
+ * Choosing a voice plays it (the kit's `previewVoice`; every gateway TTS route needs a run):
+ * `POST runs/{run}/voice/tts` on the SESSION's media run (`session_memory_<session>`, created by
+ * the gateway on first use, abstractgateway routes/gateway.py `voice_tts`: `{audio_artifact}`), so
+ * trying voices never adds runs or audio to the conversation, then the artifact's bytes
+ * (`runs/{run}/artifacts/{id}/content`), both through this app's authenticated proxy. A sample
+ * gives the gateway 25 s (as its console does): an abandoned one frees its synthesis slot.
+ */
+export function codeVoicePreview(sessionId: string) {
+  return async (prefs: VoiceClientPreferences, text?: string, opts?: { signal?: AbortSignal }): Promise<ArrayBuffer> => {
+    if (!sessionId) throw new Error("Open a conversation to hear a voice sample.");
+    const run = await session_memory_owner_run_id(sessionId);
+    const signal = opts?.signal;
+    const res: any = await gatewayRequest(gatewayApiPath(`runs/${encodeURIComponent(run)}/voice/tts`), {
+      method: "POST",
+      body: JSON.stringify({ text: text || VOICE_SAMPLE_TEXT, request_id: newId(), timeout_s: 25, ...voiceTtsRequest(prefs) }),
+      ...(signal ? { signal } : {}),
+    });
+    const ref = res?.audio_artifact;
+    const id = String(ref?.$artifact || ref?.artifact_id || ref?.id || "").trim();
+    if (!id) throw new Error("The synthesis returned no audio.");
+    const audio = await fetch(gatewayApiPath(`runs/${encodeURIComponent(run)}/artifacts/${encodeURIComponent(id)}/content`), {
+      credentials: "same-origin",
+      headers: csrfHeaders(),
+      ...(signal ? { signal } : {}),
+    });
+    if (!audio.ok) throw new Error(`The voice sample could not be downloaded (HTTP ${audio.status}).`);
+    return await audio.arrayBuffer();
+  };
+}
+
 /** Code's microphone defaults (shown as the selected state while unset): hold to talk, send what was said. */
 export const CODE_CAPTURE_DEFAULTS = { capture_mode: "hold" as const, auto_send: true };
 
@@ -86,6 +120,8 @@ export function CodeVoiceSettings({
   connected,
   isAdmin = false,
   levelSource,
+  sampleSessionId,
+  ttsAvailable = false,
 }: {
   value: VoiceClientPreferences;
   onChange: (next: VoiceClientPreferences) => void;
@@ -95,6 +131,10 @@ export function CodeVoiceSettings({
   isAdmin?: boolean;
   /** The composer's voice (the live microphone level while recording). */
   levelSource?: React.ComponentProps<typeof AfVoiceSection>["levelSource"];
+  /** The conversation whose media run synthesizes voice samples (absent: no sample). */
+  sampleSessionId?: string;
+  /** The gateway speaks (`capability.tts.available`): without it, choosing a voice plays nothing. */
+  ttsAvailable?: boolean;
 }) {
   return (
     <AfVoiceSection
@@ -110,6 +150,8 @@ export function CodeVoiceSettings({
       rows={{ capture: true }}
       captureDefaults={CODE_CAPTURE_DEFAULTS}
       levelSource={levelSource ?? null}
+      // Choosing a voice plays it (D2: the picker was silent in Code).
+      previewVoice={connected && ttsAvailable && sampleSessionId ? codeVoicePreview(sampleSessionId) : undefined}
       unavailableReason={connected ? null : "Connect to a gateway to configure voice."}
     />
   );
