@@ -7,8 +7,12 @@ import {
   ToolActivityGroup,
   PREVIEW_TEXT_LIMIT,
   partialPreviewNote,
+  replayToolActivities,
   workflowEvidence,
+  type ReplayView,
+  type ReplayViewActivity,
   type WorkflowRecord,
+  type WorkflowToolActivity,
 } from "@abstractframework/panel-chat";
 import { downloadArtifact, formatError, gateway, gatewayRequest } from "./transport";
 import type { WorkspacePolicy } from "./catalog";
@@ -16,6 +20,7 @@ import { SessionFiles } from "./session_files";
 import type { AttachChip } from "./session_files";
 import {
   activity_rows,
+  activity_rows_from_view,
   type ActivityKind,
   type ActivityRow,
 } from "../lib/activity_rows";
@@ -82,14 +87,26 @@ export function WorkspaceFilesContent({
   </>;
 }
 
+/**
+ * The Activity rows of a conversation: from the gateway's replay view when the controller renders
+ * one (`snapshot.source === "replay_view"`: one row per node execution, the runtime's fold), else
+ * from the ledger records this client folded (a gateway without the view).
+ */
+export function activityRowsOf(records: WorkflowRecord[], runId: string, view?: ReplayView | null): ActivityRow[] {
+  if (view) return activity_rows_from_view(view as unknown as Parameters<typeof activity_rows_from_view>[0], (activity) => replayToolActivities(activity as unknown as ReplayViewActivity));
+  return activity_rows(records, runId);
+}
+
 /** The conversation's activity, one foldable group per iteration (newest open). */
-export function WorkspaceActivityContent({ records, runId }: {
+export function WorkspaceActivityContent({ records, runId, view }: {
   records: WorkflowRecord[];
   runId: string;
+  /** The controller's replay view (`snapshot.view`): when present it is the source, records are not read. */
+  view?: ReplayView | null;
 }) {
   // Rows, not records: the three records of one step are one row, and
   // progress/status records are progress UI rather than activity.
-  const rows = useMemo(() => activity_rows(records, runId), [records, runId]);
+  const rows = useMemo(() => activityRowsOf(records, runId, view), [records, runId, view]);
   if (!rows.length)
     return (
       <div className="code-pane-empty">
@@ -102,8 +119,8 @@ export function WorkspaceActivityContent({ records, runId }: {
 }
 
 /** The rail badge: rows still running or waiting for an answer. */
-export function activityAttention(records: WorkflowRecord[], runId: string): { count: number; hint: string } {
-  const rows = activity_rows(records, runId);
+export function activityAttention(records: WorkflowRecord[], runId: string, view?: ReplayView | null): { count: number; hint: string } {
+  const rows = activityRowsOf(records, runId, view);
   const waiting = rows.filter((row) => row.status === "waiting").length;
   const running = rows.filter((row) => row.status === "running").length;
   const parts = [waiting ? `${waiting} waiting` : "", running ? `${running} running` : ""].filter(Boolean);
@@ -152,7 +169,11 @@ function ActivityGroupBody({ group }: { group: ActivityGroup }) {
     () => group.rows.flatMap((row) => row.entries.map((entry) => ({ cursor: entry.cursor, record: entry.record, runId: entry.runId }) as WorkflowRecord)),
     [group],
   );
-  const tools = useMemo(() => workflowEvidence(records).tools, [records]);
+  // View rows carry their tool calls already folded by the runtime; ledger rows derive them.
+  const tools = useMemo(() => {
+    const fromView = group.rows.filter((row) => Array.isArray(row.tools));
+    return fromView.length ? fromView.flatMap((row) => row.tools as WorkflowToolActivity[]) : workflowEvidence(records).tools;
+  }, [group, records]);
   const others = group.rows.filter((row) => row.kind !== "tools");
   return (
     <div className="code-activity-group-body">

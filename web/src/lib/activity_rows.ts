@@ -91,6 +91,8 @@ export type ActivityRow = {
   progressEvents: Record<string, unknown>[];
   /** The merged record the description was computed from. */
   merged: Record<string, unknown>;
+  /** View mode: this row's tool calls as panel-chat tool rows (the ledger path derives them from `entries`). */
+  tools?: unknown[];
 };
 
 const PROGRESS_EVENT_NAMES = new Set([
@@ -962,4 +964,148 @@ export function activity_rows(entries: readonly ActivityEntry[], rootRunId?: str
   });
 
   return attach_progress(rows, progressEntries);
+}
+
+/* --------------------------------------------------------- the replay view */
+
+/**
+ * Structurally `replay_view_v1.activities[]` (panel-chat `ReplayViewActivity`): one item per node
+ * execution, already folded by the runtime (waits closed, `$slim` resolved, tool calls matched).
+ */
+export type ViewActivity = {
+  id: string;
+  run_id: string;
+  execution_id?: string | null;
+  node_id?: string | null;
+  kind: string;
+  effect_type?: string | null;
+  name?: string | null;
+  status: string;
+  started_at?: string | null;
+  ended_at?: string | null;
+  seqs?: number[];
+  step_ids?: string[];
+  tool_calls?: Record<string, any>[];
+  wait?: Record<string, any> | null;
+  usage?: Record<string, any> | null;
+  child_run_id?: string | null;
+  progress?: Record<string, any> | null;
+  provider?: string | null;
+  model?: string | null;
+  [key: string]: unknown;
+};
+
+const VIEW_ENDED = new Set(["completed", "failed", "cancelled", "denied", "partly_denied"]);
+
+/** A view activity's status in the ledger's words (what `status_label` reads). */
+function view_record_status(status: string): string {
+  if (status === "completed") return "completed";
+  if (status === "waiting") return "waiting";
+  if (VIEW_ENDED.has(status)) return "failed";
+  return "started";
+}
+
+/**
+ * The record a view activity stands for, in the shape `describe_record` reads: the same titles
+ * and details as the ledger path, computed from the runtime's fold instead of raw records.
+ */
+export function view_activity_record(activity: ViewActivity): Record<string, any> {
+  const a = activity;
+  const type = String(a.effect_type || "");
+  const status = view_record_status(String(a.status || ""));
+  const ended = VIEW_ENDED.has(String(a.status || ""));
+  const calls = Array.isArray(a.tool_calls) ? a.tool_calls : [];
+  let payload: Record<string, any> = {};
+  let result: Record<string, any> | null = null;
+  if (type === "llm_call") {
+    payload = { provider: a.provider || "", model: a.model || a.name || "" };
+    if (ended) result = { usage: a.usage || {}, model: a.model || a.name || "" };
+  } else if (type === "tool_calls") {
+    payload = { tool_calls: calls.map((c) => ({ name: c.name, arguments: c.arguments, call_id: c.id })) };
+    if (ended)
+      result = {
+        results: calls.map((c) => ({ name: c.name, call_id: c.id, success: c.status === "completed", output: c.output, error: c.error })),
+      };
+  } else if (type === "start_subworkflow") {
+    payload = { workflow_id: a.name || "" };
+    result = { wait: { details: { sub_run_id: a.child_run_id || "" } } };
+  } else if (type === "wait_until") {
+    payload = { until: a.wait?.until };
+  } else if (type === "wait_event" || type === "ask_user") {
+    payload = { prompt: a.wait?.prompt || a.name || "", wait_key: a.wait?.wait_key || "" };
+  } else if (type === "answer_user") {
+    payload = { message: a.name || "" };
+  } else if (type === "emit_event") {
+    payload = { name: a.kind === "tool_policy" ? "abstract.tool_policy_decision" : a.name || "", payload: { decision: a.decision, tools: calls.map((c) => c.name) } };
+  }
+  if (status === "waiting" && a.wait) {
+    const approval = a.wait.kind === "tool_approval";
+    result = { ...(result || {}), wait: { ...(result?.wait || {}), wait_key: a.wait.wait_key, reason: a.wait.kind === "timer" ? "until" : a.wait.kind, details: { ...(result?.wait?.details || {}), ...(approval ? { mode: "approval_required" } : {}) } } };
+  }
+  const failedCall = calls.find((c) => c.status && c.status !== "completed" && c.error);
+  return {
+    run_id: a.run_id,
+    step_id: a.step_ids?.[0] || "",
+    node_id: a.node_id || "",
+    status,
+    started_at: a.started_at || null,
+    ended_at: a.ended_at || null,
+    effect: type ? { type, payload } : null,
+    result: !type && a.kind === "completion" ? { completed: true, output: {} } : result,
+    error: status === "failed" ? (failedCall?.error ?? (a.status === "cancelled" ? "cancelled" : a.status)) : null,
+  };
+}
+
+/**
+ * The replay view → the rows the Activity tab renders (the view mode of `activity_rows`): one
+ * row per node execution, in the view's order. `entries` holds the view activity itself (what
+ * the expanded row shows); `tools` the activity's tool calls as panel-chat tool rows.
+ */
+export function activity_rows_from_view(
+  view: { root_run_id: string; activities?: readonly ViewActivity[] } | null | undefined,
+  toolRows?: (activity: ViewActivity) => unknown[],
+): ActivityRow[] {
+  if (!view) return [];
+  const root = String(view.root_run_id || "");
+  return (view.activities || []).map((activity) => {
+    const merged = view_activity_record(activity);
+    const description = describe_record(merged);
+    const state = status_label(merged, description.kind, false);
+    const progress = obj(activity.progress);
+    const seqs = Array.isArray(activity.seqs) ? activity.seqs : [];
+    return {
+      key: activity.id,
+      runId: activity.run_id,
+      cursor: seqs.length ? Math.max(...seqs) : 0,
+      kind: description.kind,
+      title: description.kind === "run" && root && activity.run_id !== root ? "subflow finished" : description.title,
+      detail: description.detail,
+      status: state.status,
+      statusLabel: state.statusLabel,
+      nodeId: String(activity.node_id || ""),
+      stepIds: [...new Set((activity.step_ids || []).filter(Boolean))],
+      progress: progress ? format_progress([progress]) : "",
+      progressFinal: Boolean(progress && (progress.final === true || String(progress.phase || "") === "complete")),
+      entries: [{ cursor: seqs.length ? Math.max(...seqs) : 0, record: activity, runId: activity.run_id }],
+      progressEvents: progress ? [progress] : [],
+      merged,
+      ...(toolRows && activity.kind === "tool" ? { tools: toolRows(activity) } : {}),
+    };
+  });
+}
+
+/**
+ * The view's latest progress of each execution as `abstract.progress` records (the shape
+ * `llm_phase_text` reads), in the view's order: the status bar's live model phase in view mode.
+ */
+export function view_progress_records(view: { activities?: readonly ViewActivity[] } | null | undefined): Record<string, unknown>[] {
+  return (view?.activities || [])
+    .filter((activity) => obj(activity.progress))
+    .map((activity) => ({
+      run_id: activity.run_id,
+      step_id: activity.step_ids?.[0] || "",
+      status: "completed",
+      effect: { type: "emit_event", payload: { name: "abstract.progress", payload: activity.progress } },
+      result: null,
+    }));
 }

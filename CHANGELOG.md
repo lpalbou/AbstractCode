@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [web 0.13.0] - 2026-10-28
+
+The chat and the Activity panel render from AbstractGateway's replay view (`GET runs/{id}/view` and its stream, gateway 0.17.0) through `@abstractframework/panel-chat` ^0.6.0 (AbstractUIC 0.8.0): one reconstruction of the run, the runtime's, instead of this browser's fold of the ledger (framework backlog 0993, AbstractRuntime 0854). On an older gateway the app keeps its ledger fold, unchanged.
+
+### Changed
+
+- The workflow transport offers the replay view (`replayView`, over the app's authenticated proxy). Opening a conversation reads the view and follows its stream; it no longer reads the history bundle or ledger pages, or polls the run every 2 s. Measured on a 2,997-record run: 3 requests and 1.2 MB instead of 509 requests and 5.6 MB.
+- Activity reads the view's activities (`activity_rows_from_view`): one row per node execution as the runtime folded it (waits closed, tool calls matched, approvals answered by any client), with the same titles and details as before; the status bar's model phase comes from the view's progress. The ledger rows remain for a gateway without the view.
+
 ## [web 0.12.0] - 2026-10-28
 
 The web app is now composed from the AbstractFramework UI kit: `@abstractframework/ui-kit` ^0.9.2 and `@abstractframework/panel-chat` ^0.5.0 (AbstractUIC 0.7.0). The chat tool policy, the voice library and the live attention badge need AbstractGateway 0.16.0 (and `/api/gateway/me/events`); on an older gateway each says what it does instead.

@@ -56,6 +56,9 @@ function fakeGateway() {
     new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    // A gateway before the replay view (FastAPI's unmatched-route 404): these tests cover the
+    // ledger-fold path, where live replies ride the ledger stream with the records.
+    if (url.includes("/view")) return new Response('{"detail":"Not Found"}', { status: 404 });
     if (url.includes("/ledger/stream")) {
       let controller!: ReadableStreamDefaultController<Uint8Array>;
       const body = new ReadableStream<Uint8Array>({ start: (c) => void (controller = c) });

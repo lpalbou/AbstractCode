@@ -1,5 +1,5 @@
 import { gatewayApiPath } from "@abstractframework/ui-kit";
-import type { WorkflowTransport } from "@abstractframework/panel-chat";
+import { createReplayViewTransport, type WorkflowTransport } from "@abstractframework/panel-chat";
 import { gateway, gatewayRequest } from "./transport";
 
 const runPath = (id: string) => gatewayApiPath(`runs/${encodeURIComponent(id)}`);
@@ -42,6 +42,14 @@ export function createWorkflowTransport(options: {
         on_delta_error: (error, frame) =>
           options.onDeltaError({ runId: id, error, frame }),
       }),
+    // The gateway's replay view (`GET runs/{id}/view` + `/view/stream`, AbstractGateway 0.17.0):
+    // the controller renders the conversation from it and folds no ledger records. Through the
+    // app's authenticated proxy (same-origin, HttpOnly session); a gateway without the route is
+    // detected once and the ledger fold above is used, labeled (`snapshot.source`).
+    replayView: createReplayViewTransport({
+      fetch: (path, init) =>
+        fetch(gatewayApiPath(path), { ...init, credentials: "same-origin" }),
+    }),
     submitCommand: (command, signal) =>
       gatewayRequest(gatewayApiPath("commands"), {
         method: "POST",
