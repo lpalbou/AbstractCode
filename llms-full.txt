@@ -4107,6 +4107,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [web 0.13.2] - 2026-10-28
+
+On AbstractUIC 0.8.3 (`@abstractframework/ui-kit` ^0.9.5, `@abstractframework/panel-chat` ^0.6.3, `@abstractframework/app-server` ^0.1.13).
+
+### Fixed
+
+- Voice → Engines names the voice you chose instead of its id: a cloned voice read "qwen3-tts · Qwen/Qwen3-TTS-12Hz-1.7B-Base · 250b665e…", it now reads "… · Sisko" (ui-kit 0.9.5 reads the name from the voice catalog; AbstractFramework ADR 0043); a voice the gateway no longer lists reads "a saved voice" there and "Saved voice (not listed)" in the voice picker.
+- From the kit: a reply's speaker and copy buttons are the kit's always-visible toolbar (this app's local CSS override is removed); the speaker shows a spinner only while the first audio is generated, then Pause, and Play when paused; the speech model list shows each model once; under a cloned voice, a line names the model it is always spoken with.
+
 ## [web 0.13.1] - 2026-10-28
 
 On AbstractUIC 0.8.2 (`@abstractframework/ui-kit` ^0.9.4, `@abstractframework/panel-chat` ^0.6.2, `@abstractframework/app-server` ^0.1.13).
