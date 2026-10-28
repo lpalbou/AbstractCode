@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [web 0.13.3] - 2026-10-28
+
+On AbstractUIC 0.8.4 (`@abstractframework/ui-kit` ^0.9.5, `@abstractframework/panel-chat` ^0.6.4, `@abstractframework/app-server` ^0.1.13).
+
+### Fixed
+
+- From the kit, in the conversation (`WorkflowChat`) and an automation's discussion (`automations_view.tsx`): a message's stamp carries the date when it is not from today ("Yesterday · 10:52 PM", "Oct 21 · 10:52 PM"; the full date on hover), the speaker stays on every assistant message while the voice is available (disabled with its reason while a reply is still being written), and the "files changed" chip opens the same structured detail as the tokens, tools and time chips (AbstractUIC backlog 0064, the message footer spec).
+
 ## [web 0.13.2] - 2026-10-28
 
 On AbstractUIC 0.8.3 (`@abstractframework/ui-kit` ^0.9.5, `@abstractframework/panel-chat` ^0.6.3, `@abstractframework/app-server` ^0.1.13).
