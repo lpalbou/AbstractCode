@@ -837,6 +837,88 @@ fn tool_status_word(status: ToolStatus) -> &'static str {
     }
 }
 
+/// A tool name is useful to an implementer but rarely answers the reader's
+/// question. This keeps raw arguments as evidence while leading with a small,
+/// stable action vocabulary.
+fn tool_title(name: &str) -> String {
+    match name {
+        "execute_command" => "run command".into(),
+        "read_file" => "read file".into(),
+        "write_file" => "write file".into(),
+        "edit_file" => "edit file".into(),
+        "list_files" => "list files".into(),
+        "search_files" => "search files".into(),
+        "analyze_code" => "inspect code".into(),
+        "skim_files" => "skim files".into(),
+        "fetch_url" => "fetch page".into(),
+        "browser_probe" => "check page".into(),
+        "web_search" | "skim_websearch" => "search web".into(),
+        other => other.replace('_', " "),
+    }
+}
+
+/// Extract a conservative, glanceable finding from a human-readable size
+/// report. The raw report stays intact behind the existing disclosure.
+fn result_digest(result: &str) -> Option<String> {
+    let mut locations = 0usize;
+    let mut largest: Option<(f64, String, String)> = None;
+    for line in result.lines().take(300) {
+        let mut words = line.split_whitespace();
+        let Some(first) = words.next() else {
+            continue;
+        };
+        let (size, bytes, path) = if let Some(bytes) = size_bytes(first) {
+            (first.to_string(), bytes, words.collect::<Vec<_>>().join(" "))
+        } else if let Some(unit) = words.next() {
+            let combined = format!("{first}{unit}");
+            match size_bytes(&combined) {
+                Some(bytes) => (
+                    format!("{first} {unit}"),
+                    bytes,
+                    words.collect::<Vec<_>>().join(" "),
+                ),
+                None => continue,
+            }
+        } else {
+            continue;
+        };
+        if path.is_empty() {
+            continue;
+        }
+        locations += 1;
+        if largest.as_ref().map_or(true, |(old, _, _)| bytes > *old) {
+            largest = Some((bytes, size, path));
+        }
+    }
+    // A lone size-shaped log line is not enough evidence for a special card.
+    let (_, size, path) = largest.filter(|_| locations >= 2)?;
+    let path = if path.chars().count() > 38 {
+        let tail: String = path.chars().rev().take(37).collect();
+        format!("…{}", tail.chars().rev().collect::<String>())
+    } else {
+        path
+    };
+    Some(format!("result: {locations} locations · largest {path} ({size})"))
+}
+
+/// Parse ordinary `du`/human-readable size prefixes (`114G`, `114.1 GB`).
+/// Bare numbers are deliberately ignored.
+fn size_bytes(text: &str) -> Option<f64> {
+    let t = text.trim().trim_end_matches('B').trim_end_matches('b');
+    let (number, power) = match t.chars().last()?.to_ascii_uppercase() {
+        'K' => (&t[..t.len() - 1], 1),
+        'M' => (&t[..t.len() - 1], 2),
+        'G' => (&t[..t.len() - 1], 3),
+        'T' => (&t[..t.len() - 1], 4),
+        _ => return None,
+    };
+    number
+        .replace(',', "")
+        .parse::<f64>()
+        .ok()
+        .map(|n| n * 1024_f64.powi(power))
+}
+
 /// Whole-call duration for the cycle rule: sub-second keeps a decimal
 /// (the shared humanizer would say "0s"); at and above one second the
 /// ONE elapsed humanizer (`convo::fmt_elapsed`) formats it, so the
@@ -1621,7 +1703,7 @@ fn render_item(
                         ToolRow {
                             glyph,
                             glyph_ink: ink,
-                            name: name.clone(),
+                            name: tool_title(name),
                             name_ink: t.text_muted,
                             hint: args_preview.clone(),
                             hint_ink: t.text_faint,
@@ -1658,7 +1740,8 @@ fn render_item(
             // the muted voice, output in the faint `│` voice below them.
             let spans = vec![
                 Span::new(format!("{glyph} "), Style::new().fg(ink)),
-                Span::new(name.clone(), Style::new().fg(t.info)),
+                Span::new(tool_title(name), Style::new().fg(t.info)),
+                Span::new(format!("  ({name})"), Style::new().fg(t.text_faint)),
                 Span::new(format!(" · {word}"), Style::new().fg(word_ink)),
             ];
             let mut fi = FeedItem::new().rich_block(RichText::from_lines(vec![
@@ -1697,6 +1780,12 @@ fn render_item(
                         .uncapped(true)
                         .block(),
                 );
+            }
+            // Put a machine-shaped result's conclusion before its evidence.
+            // This is deliberately conservative: unknown output remains
+            // verbatim, and the report below is still the source of truth.
+            if let Some(digest) = result_digest(result) {
+                fi = fi.block(CappedBody::new(&digest, t.info, 1).uncapped(true).block());
             }
             // BOTH, when both exist (adversarial review 2026-08-20, F3):
             // this was an `else if`, so a failed tool's OUTPUT vanished —
@@ -3265,6 +3354,23 @@ mod tests {
     /// appears only where output actually exists, its number is the
     /// result's own line count, and a running call — which has produced
     /// nothing yet — never claims hidden output.
+    #[test]
+    fn tool_titles_lead_with_actions_not_implementation_names() {
+        assert_eq!(tool_title("execute_command"), "run command");
+        assert_eq!(tool_title("read_file"), "read file");
+        assert_eq!(tool_title("future_mcp_tool"), "future mcp tool");
+    }
+
+    #[test]
+    fn size_report_digest_is_conservative_and_keeps_a_largest_finding() {
+        let report = "114.1 GB  untracked/models\n18G untracked/perf\n11.3G untracked/day-review";
+        assert_eq!(
+            result_digest(report).as_deref(),
+            Some("result: 3 locations · largest untracked/models (114.1 GB)")
+        );
+        assert_eq!(result_digest("version 1.2G"), None);
+    }
+
     #[test]
     fn the_marker_counts_only_output_that_exists() {
         // The gap this closes: a finished call with output.

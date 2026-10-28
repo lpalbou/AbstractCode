@@ -121,7 +121,14 @@ pub fn header_facts(
 /// session · connection orb. Chips render only when ≥1 conversation
 /// exists; the focused chip is highlighted; a running turn's chip
 /// carries elapsed.
-pub fn header(t: &TokenSet, store: Store, spin: Signal<u64>, cwd_base: String) -> View {
+pub fn header(
+    t: &TokenSet,
+    store: Store,
+    spin: Signal<u64>,
+    cwd_base: String,
+    root: Scope,
+    ctx: &UiCtx,
+) -> View {
     let tokens = *t;
     dyn_view(LayoutStyle::line(1), move || {
         let t = tokens;
@@ -139,6 +146,7 @@ pub fn header(t: &TokenSet, store: Store, spin: Signal<u64>, cwd_base: String) -
         });
         let session = store.session_id.get();
         let conn = store.conn.get();
+        let gateway = ctx.gateway_label.clone();
         // Entity chips (inside this same line — no CHROME_ROWS change).
         // spin is read ONLY while a turn/run is active, so the elapsed
         // repaints without waking the header every frame otherwise.
@@ -188,9 +196,9 @@ pub fn header(t: &TokenSet, store: Store, spin: Signal<u64>, cwd_base: String) -
                     Conn::Unknown => ("◌", t.text_faint),
                     Conn::Down(..) => ("✗", t.error),
                 };
-                // Char-safe TAIL truncation (session ids differ at the
-                // end): one shared helper — see `tail_ellipsis`.
-                let right = format!("{} ", tail_ellipsis(&session, 18));
+                // The gateway is a connection fact, so it sits beside its
+                // status indicator at the top right.
+                let right = format!("{} ", text::truncate_ellipsis(&gateway, 28));
                 let right_w = text::width(&right) + 2;
                 let rx = (rect.right() - right_w).max(rect.x);
 
