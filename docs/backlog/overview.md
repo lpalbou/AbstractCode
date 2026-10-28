@@ -29,6 +29,8 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
    the operator (2026-10-10); starts with the ENGINE half in abstracttui (a `Feed` fence hook), then the app wiring.
 3. [0004](proposed/0004_session_tool_choices_on_the_gateway.md) — a session's tool choices are still stored per client
    (the TUI's last local session state). Waiting on an operator decision; no gateway change before an explicit go.
+4. [0005](proposed/0005_tool_result_blocks_prompt_inset_clickable_chrome.md) — tool-result envelopes print as flat text
+   (operator screenshot 2026-10-28); JSON blocks, a "› " prompt inset and clickable chrome, on abstracttui 0186/0187/0188/1260. Root 1055.
 
 ## Planned
 
