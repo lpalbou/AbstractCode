@@ -39,7 +39,7 @@ envelope; composer caret tests at the inset; chrome clicks reach the three actio
 ## Progress
 
 ### Item 3 — clickable chrome: done (terminal 0.12.0, 2026-10-28)
-Operator layout (screenshot 2026-10-28 09:23), built on abstracttui 0.7.0:
+Operator layout (screenshot 2026-10-28 09:23), built on abstracttui 0.7.0 (crates.io; `Cargo.lock` from the registry):
 - Header (`chrome::header`): the workflow name and the provider/model are `print_action` spans
   (`chrome::ACT_WORKFLOW`, `ACT_MODEL`); the gateway + connection light is ONE `mark_action` rect
   (`ACT_GATEWAY`) with its own focus ring. A stable `Element::on_action` host (focusable) wraps the

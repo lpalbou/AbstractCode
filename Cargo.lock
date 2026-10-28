@@ -15,7 +15,8 @@ dependencies = [
 [[package]]
 name = "abstracttui"
 version = "0.7.0"
-source = "git+https://github.com/lpalbou/abstracttui?branch=feat%2Fchrome-slots-hit-targets#c287eb3a7289a33f1a90e6a02669b8710065e706"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9185a5e299272eaf0ef269f26a3b33387c195870f5b890f1b7b0b152dd0e233f"
 dependencies = [
  "libc",
  "miniz_oxide 0.9.1",
