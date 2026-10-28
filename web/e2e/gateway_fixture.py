@@ -201,8 +201,17 @@ def _assistant_contract_flow(*, authored: bool = False, generic: bool = False) -
     source = Path(__file__).resolve().parents[3] / "abstractassistant" / "abstractassistant" / "assistant_workflow.py"
     spec = importlib.util.spec_from_file_location("_assistant_contract_browser_fixture", source)
     module = importlib.util.module_from_spec(spec)
+    # Registered before exec: the module declares dataclasses, which look their module up in sys.modules.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    original = module.managed_assistant_visualflow()
+    # The orchestrator now takes the agent subflow it calls: build it from the shipped basic-agent
+    # (only its start pins are kept below; the subflow itself is never run).
+    agent_source = Path(__file__).resolve().parents[3] / "abstractgateway" / "flows" / "bundles" / "basic-agent.flow"
+    with zipfile.ZipFile(agent_source) as archive:
+        agent_manifest = json.loads(archive.read("manifest.json"))
+        agent = json.loads(archive.read(agent_manifest["flows"][agent_manifest["default_entrypoint"]]))
+    agent_flow = module.agent_subflow_from_flow(flow_id="basic-agent", bundle_ref="basic-agent", flow=agent)
+    original = module.managed_assistant_visualflow(agent_flow)
     start = copy.deepcopy(next(node for node in original["nodes"] if node["data"].get("nodeType") == "on_flow_start"))
     start["id"] = "start"
     start["data"]["outputs"].append({"id": "reasoning", "type": "string", "label": "Reasoning"})

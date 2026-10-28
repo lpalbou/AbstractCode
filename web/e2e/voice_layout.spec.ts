@@ -99,7 +99,6 @@ test("conversation and automation reuse narration, stream early and use the avai
   await page.getByRole("button", { name: "New automation", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Schedule a task" });
   await dialog.getByLabel("Task").fill("A visually distinct automation trigger.");
-  await dialog.getByText("Advanced", { exact: true }).click();
   await dialog.getByLabel("Title").fill(`Voice layout ${Date.now()}`);
   await dialog.getByRole("button", { name: "Create automation", exact: true }).click();
   const main = page.getByRole("main", { name: "Automation", exact: true });

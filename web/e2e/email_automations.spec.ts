@@ -124,7 +124,6 @@ test("creates an email-triggered automation with filters and result recipients",
   await dialog.getByRole("radio", { name: "Me and these addresses" }).check();
   await dialog.getByRole("textbox", { name: "Me and these addresses" }).fill("colleague@example.test");
   await capture(page, "email-trigger-dialog");
-  await dialog.getByText("Advanced").click();
   await dialog.getByLabel("Title").fill(title);
   await dialog.getByRole("button", { name: "Create automation" }).click();
   await expect(dialog).toBeHidden();
@@ -137,7 +136,7 @@ test("creates an email-triggered automation with filters and result recipients",
   expect(def.notify).toEqual({ channels: ["console", "email"], recipients: ["self", "colleague@example.test"] });
 
   // The panel's definition card reads the same truth.
-  await page.getByText("Definition").first().click();
+  await page.getByText("Details", { exact: true }).first().click();
   await expect(page.getByText("Me and colleague@example.test")).toBeVisible();
   await expect(page.getByText(/when an email arrives · from example\.test/).first()).toBeVisible();
 });
@@ -149,7 +148,6 @@ test("Email result is stored as notify.channels email", async ({ page, request }
   const dialog = await openDialog(page);
   await dialog.getByLabel("Task").fill("Check the build and tell me");
   await dialog.getByRole("switch", { name: "Email result", exact: true }).check();
-  await dialog.getByText("Advanced").click();
   await dialog.getByLabel("Title").fill(title);
   await dialog.getByRole("button", { name: "Create automation" }).click();
   await expect(dialog).toBeHidden();

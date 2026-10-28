@@ -36,7 +36,7 @@ test("workflow and tool pickers persist; email recipients remain visible; refres
   await dialog.getByRole("switch", { name: "Email result", exact: true }).click();
   await dialog.getByRole("radio", { name: "Me and these addresses", exact: true }).check();
   await dialog.getByRole("textbox", { name: "Me and these addresses", exact: true }).fill("reviewer@example.test");
-  await dialog.getByRole("combobox", { name: "Automation workflow", exact: true }).click();
+  await dialog.getByRole("combobox", { name: "Automation flow", exact: true }).click();
   await dialog.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Authored model contract" }) }).click();
   await expect(dialog.getByRole("textbox", { name: "Me and these addresses", exact: true })).toHaveValue("reviewer@example.test");
   await expect(page.locator("#code-workflow-picker")).toContainText("Basic agent defaults");
@@ -52,7 +52,7 @@ test("workflow and tool pickers persist; email recipients remain visible; refres
   // Exercise recipient controls without enabling real delivery in the isolated fixture.
   await dialog.getByRole("switch", { name: "Email result", exact: true }).click();
   const picker = dialog.locator('[data-field="tool-selection"]');
-  await picker.getByLabel("Use workflow default tools").uncheck();
+  await picker.getByLabel("Use the flow's default tools").uncheck();
   const clear = picker.getByRole("button", { name: "Clear", exact: true });
   if (await clear.isEnabled()) await clear.click();
   await picker.getByRole("button", { name: /^Select/ }).click();
@@ -79,7 +79,7 @@ test("workflow and tool pickers persist; email recipients remain visible; refres
   await expect(edit.getByRole("button", { name: "Remove web_search" })).toHaveCount(0);
   await expect((await openWorkspaceSection(page, "Tools")).locator("#code-settings-tools")).toContainText("web_search");
   await openWorkspaceSection(page, "Workflow");
-  await edit.getByRole("combobox", { name: "Automation workflow", exact: true }).click();
+  await edit.getByRole("combobox", { name: "Automation flow", exact: true }).click();
   await edit.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Basic agent defaults" }) }).click();
   await page.screenshot({ path: "e2e/artifacts/automation-workflow-edit.png" });
   const revision = page.waitForRequest(r => r.method() === "PATCH" && new URL(r.url()).pathname.includes("/automations/"));
@@ -90,7 +90,7 @@ test("workflow and tool pickers persist; email recipients remain visible; refres
   // PATCH queues a durable command; the panel shows the committed revision.
   await expect(settings.getByTestId("automation-revision")).toHaveText("Revision 2");
   await expect(main.locator('[data-def="target"]')).toContainText("basic-agent-contract");
-  await edit.getByRole("combobox", { name: "Automation workflow", exact: true }).click();
+  await edit.getByRole("combobox", { name: "Automation flow", exact: true }).click();
   await edit.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Prompt structured" }) }).click();
   let invalidPatch = false;
   const watchInvalidPatch = (request: import("@playwright/test").Request) => { if (request.method() === "PATCH" && new URL(request.url()).pathname.includes("/automations/")) invalidPatch = true; };

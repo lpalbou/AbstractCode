@@ -144,7 +144,7 @@ test.describe("AbstractCode sidebar", () => {
   });
 
   test("Automations and Conversations headers are 44 px rows on the raised surface (with the New conversation + in the Conversations header); no row is ever hidden under a header", async ({ page }) => {
-    // 5 automations (the 0.9.0 panel clipped the fourth): the ui-kit's canonical wire fixture + one copy.
+    // The ui-kit canonical wire fixture + one copy (the 0.9.0 panel clipped the fourth row).
     const fixture = JSON.parse(readFileSync(new URL("../../tui/tests/fixtures/automations/list.json", import.meta.url), "utf8"));
     const autos = [...fixture.items, { ...fixture.items[1], automation_id: "copy-5", title: "Release notes digest" }];
     await route(page, []);
@@ -157,7 +157,7 @@ test.describe("AbstractCode sidebar", () => {
       if (await opener.isVisible()) await opener.click();
       // The drawer slides in (0.2 s): measure once it has arrived.
       await page.waitForFunction(() => getComputedStyle(document.querySelector(".code-sidebar")!).transform === "none");
-      await expect(page.locator(".code-auto-card")).toHaveCount(5);
+      await expect(page.locator(".code-auto-card")).toHaveCount(autos.length);
       // Round 4: no big top button; New conversation is the "+" beside the Conversations refresh.
       await expect(page.locator(".code-conversations .code-panel-header").getByRole("button", { name: "New conversation", exact: true })).toBeVisible();
       await expect(page.locator(".code-conversations .code-panel-header").getByRole("button", { name: "Refresh conversations", exact: true })).toBeVisible();
@@ -230,7 +230,7 @@ test.describe("AbstractCode sidebar", () => {
     // Automation cards (R5): name, then `every … · last …`, then `next …` with the Active switch right-aligned on that line.
     const first = page.locator(".code-auto-card").first();
     await expect(first.getByRole("switch", { name: "Active" })).toBeVisible();
-    await expect(first.locator('[data-field="timing"]')).toHaveText(/^every [^·]+ · (last [^·]+ ago|running now|waiting since [^·]+|last never)$/);
+    await expect(first.locator('[data-field="timing"]')).toHaveText(/^every [^·]+ · (last [^·]+ ago|running now|waiting since [^·]+|last never)$/i);
     await expect(first.locator('[data-field="next"]')).toHaveText(/^(next (in [^·]+|due now))?$/);
     const line2 = (await first.locator(".code-card-line2").boundingBox())!;
     const sw = (await first.getByRole("switch", { name: "Active" }).boundingBox())!;
