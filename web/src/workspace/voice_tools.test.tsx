@@ -12,11 +12,13 @@ import {
   codeVoicePreview,
   codeVoiceLibrary,
   designVoice,
+  fetchVoiceCatalog,
   fetchVoiceDefaults,
   spokenMessage,
   transcriptionRunId,
 } from "./voice_tools";
 import { MEDIA_NEEDS_HTTPS } from "../lib/secure-context";
+import { voiceNameInCatalog, voiceTtsOverrideSummary } from "@abstractframework/ui-kit";
 
 describe("gateway voice controls", () => {
   const base = {
@@ -302,5 +304,38 @@ describe("press to talk", () => {
     expect(tools).toMatch(/capability\.stt\?\.available === true && \(runId \|\| sessionId\) && onTranscript/);
     const automations = readFileSync(new URL("./automations_view.tsx", import.meta.url), "utf8");
     expect(automations).not.toContain("onTranscript: () => {}");
+  });
+});
+
+// Operator QA (i) 2026-10-28, AbstractFramework ADR 0043: the Engines row named a cloned voice by its
+// id ("250b665e…"). The kit (ui-kit 0.9.5) reads the name from this app's catalog of the voice's route.
+describe("Voice → Engines names the voice, never its id", () => {
+  const CLONE = "91f02e9338dc4b9eb07f2ab0b0212333";
+  const BASE = "Qwen/Qwen3-TTS-12Hz-1.7B-Base";
+  it("asks the catalog of the voice's own route (provider and model)", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200, headers: { "content-type": "application/json" } }));
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    vi.stubGlobal("document", { cookie: "" });
+    try {
+      await fetchVoiceCatalog("qwen3-tts", BASE);
+      const url = String((fetchMock.mock.calls[0] as unknown[])[0]);
+      expect(url).toMatch(/api\/gateway\/voice\/voices\?/);
+      expect(new URL(url, "http://x").searchParams.get("provider")).toBe("qwen3-tts");
+      expect(new URL(url, "http://x").searchParams.get("model")).toBe(BASE);
+    } finally {
+      globalThis.fetch = realFetch;
+      vi.unstubAllGlobals();
+    }
+  });
+  it("the installed kit names the voice (ui-kit >= 0.9.5) and never prints an opaque id", () => {
+    const prefs = { provider: "qwen3-tts", model: BASE, voice: CLONE };
+    expect(voiceTtsOverrideSummary(prefs, "Sisko")).toBe(`qwen3-tts · ${BASE} · Sisko`);
+    expect(voiceTtsOverrideSummary(prefs)).not.toContain(CLONE.slice(0, 8));
+    expect(voiceNameInCatalog({ items: [{ id: CLONE, name: "Sisko", provider: "qwen3-tts" }] }, CLONE)).toBe("Sisko");
+  });
+  it("keeps no local copy of the kit's read-aloud toolbar rule (ADR 0001: the kit owns it)", () => {
+    const css = readFileSync(new URL("./workspace.css", import.meta.url), "utf8");
+    expect(css).not.toMatch(/\.pc-chat-header-actions/);
   });
 });
