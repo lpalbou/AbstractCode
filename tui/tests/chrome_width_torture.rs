@@ -180,17 +180,20 @@ fn chrome_degrades_whole_item_at_every_width() {
         );
 
         // Right clusters are NEVER sacrificed to the left span.
+        // The gateway sits at the header's top right, beside its
+        // connection orb (2026-10-28); the session id moved to the
+        // footer's right cluster, and the gateway is not repeated there.
         assert!(
-            header.contains("acode-test-session"),
-            "[{width}] header right cluster (session id) intact:\n{header}"
+            header.trim_end().ends_with("127.0.0.1:8080 ●"),
+            "[{width}] header right cluster (gateway + orb) intact:\n{header}"
         );
         assert!(
-            header.contains('●'),
-            "[{width}] connection orb present:\n{header}"
+            footer.contains("-test-session"),
+            "[{width}] footer right cluster (session id) intact:\n{footer}"
         );
         assert!(
-            footer.contains("127.0.0.1:8080"),
-            "[{width}] footer right cluster (gateway host) intact:\n{footer}"
+            !footer.contains("127.0.0.1:8080"),
+            "[{width}] the gateway is the header's, not repeated in the footer:\n{footer}"
         );
 
         // The wordmark leads the header at every width.
@@ -218,8 +221,11 @@ fn chrome_degrades_whole_item_at_every_width() {
                 "[{width}] fact {fact:?} must paint whole or not at all:\n{header}"
             );
         }
+        // The session id is an identifier, tail-cut by design
+        // (`footer_session`); every other footer segment drops whole.
+        let sid = abstractcode::ui::chrome::footer_session("acode-test-session", width);
         assert!(
-            !footer.contains('…'),
+            !footer.replace(&sid, "").contains('…'),
             "[{width}] footer segments drop whole, never fragment:\n{footer}"
         );
 

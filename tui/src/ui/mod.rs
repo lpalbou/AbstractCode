@@ -767,7 +767,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                             .width(Dimension::Percent(1.0))
                             .height(Dimension::Percent(1.0)),
                     )
-                    .child(chrome::header(&t, store, spin, cwd_base.clone()))
+                    .child(chrome::header(&t, store, spin, cwd_base.clone(), cx, &ctx))
                     .child(transcript_view::pane(
                         scx,
                         &t,
