@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `assets/automation_controls.json` is the kit's file again, byte-identical. AbstractUIC 0067 adds the attention
+  badge's glyph and words, which this crate does not draw yet. The `.sha256` pin is updated.
+
 ## [0.12.0] - 2026-10-28
 
 Needs AbstractTUI 0.7.0 (semantic hit targets and the status bar with named
