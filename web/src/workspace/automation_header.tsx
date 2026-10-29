@@ -138,7 +138,7 @@ export function AutomationHeaderBar(props: {
       {path ? (
         <div className="code-auto-header__workspace" data-field="workspace">
           <span className="code-auto-header__label">Workspace</span>
-          <span className="code-auto-header__folder" title={path}>{workspaceLabel(path)}</span>
+          <span className="code-auto-header__folder">{workspaceLabel(path)}</span>
           <button type="button" className="code-icon-button" data-action="open-folder" aria-label="Open folder" title="Open folder" onClick={props.onOpenFolder}>
             <Icon name="folder" size={15} />
           </button>
