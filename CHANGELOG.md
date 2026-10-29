@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Read aloud no longer speaks a session's existing messages when it is opened, reloaded or switched to**
+  (operator 2026-10-29). A reply is spoken by itself only when its run was seen in progress in the open
+  conversation (AbstractUIC panel-chat's rule, `readAloudStep`, inlined in `web/src/lib/read_aloud.ts` until the
+  next kit release). The effect used to remember the newest reply before the conversation had loaded, so the
+  first loaded reply was spoken.
+
 ## [web 0.13.3] - 2026-10-28
 
 On AbstractUIC 0.8.4 (`@abstractframework/ui-kit` ^0.9.5, `@abstractframework/panel-chat` ^0.6.4, `@abstractframework/app-server` ^0.1.13).

@@ -135,6 +135,8 @@ import type { AttachmentRef } from "../lib/types";
 import { RunStatusBar } from "./run_status_bar";
 import { CODE_CAPTURE_DEFAULTS, CodeVoiceSettings, VoiceTools, fetchVoiceDefaults, spokenMessage, useWorkspaceVoice } from "./voice_tools";
 import { workflowPromptProperty, restoreWorkflowFields } from "./input_schema";
+import { READ_ALOUD_INITIAL, readAloudStep } from "../lib/read_aloud";
+import { codeReadAloudInput } from "./read_aloud_input";
 import { TOOLS_MIGRATION_NOTICE, allEnabledAuto, migrateLegacyTools, toolsMigrationKey, withAllEnabledAuto, withoutAutoChoices } from "./tool_layers";
 import {
   advanceQueueIntents,
@@ -456,24 +458,27 @@ export function CodeWorkspace() {
     },
     onError: setError,
   });
-  // Read aloud (the Voice panel): each NEW reply is spoken once, after its
-  // run finished; replies already there when the conversation opened are not.
+  // Read aloud (the Voice panel): a reply is spoken by itself only when it was
+  // generated while this conversation is open — its run was seen in progress
+  // here (operator 2026-10-29: opening, reloading or switching to a session
+  // spoke its existing messages). The kit's rule (`read_aloud.ts`).
   const latestReply = [...messages].reverse().find((message) => message.role === "assistant");
   const latestReplyId = latestReply ? String(latestReply.id || latestReply.content) : "";
-  const readAloudSeen = useRef({ scope: "", id: "" });
+  const readAloudState = useRef(READ_ALOUD_INITIAL);
+  const readAloud = codeReadAloudInput({
+    identity,
+    sessionId: session.sessionId,
+    runId: session.runId,
+    status: snapshot.status,
+    sending,
+    reply: latestReply?.content ? { id: latestReplyId, text: String(latestReply.content) } : null,
+  });
   useEffect(() => {
-    const scope = `${identity}:${session.sessionId}`;
-    const seen = readAloudSeen.current;
-    if (seen.scope !== scope) {
-      readAloudSeen.current = { scope, id: latestReplyId };
-      return;
-    }
-    if (!latestReplyId || latestReplyId === seen.id || locked) return;
-    readAloudSeen.current = { scope, id: latestReplyId };
-    if (voicePreferences.read_aloud === true && voice.tts_supported && latestReply?.content)
-      void voice.toggle_tts(latestReplyId, latestReply.content);
+    const { state, speak } = readAloudStep(readAloudState.current, readAloud);
+    readAloudState.current = state;
+    if (speak && voicePreferences.read_aloud === true && voice.tts_supported) void voice.toggle_tts(speak.id, speak.text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity, session.sessionId, latestReplyId, locked, voicePreferences.read_aloud, voice.tts_supported]);
+  }, [readAloud.scope, readAloud.phase, readAloud.reply?.id, voicePreferences.read_aloud, voice.tts_supported]);
   // A tool batch this client already granted (the standing permission, or an
   // accepted Allow) is running work, not a question: no card, no "Approval
   // needed". The server still asks, so the raw wait stays in the snapshot.
