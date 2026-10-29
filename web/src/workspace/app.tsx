@@ -135,7 +135,8 @@ import type { AttachmentRef } from "../lib/types";
 import { RunStatusBar } from "./run_status_bar";
 import { CODE_CAPTURE_DEFAULTS, CodeVoiceSettings, VoiceTools, fetchVoiceDefaults, spokenMessage, useWorkspaceVoice } from "./voice_tools";
 import { workflowPromptProperty, restoreWorkflowFields } from "./input_schema";
-import { READ_ALOUD_INITIAL, readAloudStep, runIsLive } from "../lib/read_aloud";
+import { READ_ALOUD_INITIAL, readAloudStep } from "../lib/read_aloud";
+import { codeReadAloudInput } from "./read_aloud_input";
 import { TOOLS_MIGRATION_NOTICE, allEnabledAuto, migrateLegacyTools, toolsMigrationKey, withAllEnabledAuto, withoutAutoChoices } from "./tool_layers";
 import {
   advanceQueueIntents,
@@ -464,17 +465,20 @@ export function CodeWorkspace() {
   const latestReply = [...messages].reverse().find((message) => message.role === "assistant");
   const latestReplyId = latestReply ? String(latestReply.id || latestReply.content) : "";
   const readAloudState = useRef(READ_ALOUD_INITIAL);
-  const runLive = Boolean(session.runId) && runIsLive(snapshot.status);
+  const readAloud = codeReadAloudInput({
+    identity,
+    sessionId: session.sessionId,
+    runId: session.runId,
+    status: snapshot.status,
+    sending,
+    reply: latestReply?.content ? { id: latestReplyId, text: String(latestReply.content) } : null,
+  });
   useEffect(() => {
-    const { state, speak } = readAloudStep(readAloudState.current, {
-      scope: `${identity}:${session.sessionId}`,
-      live: runLive && !locked,
-      reply: latestReply?.content ? { id: latestReplyId, text: String(latestReply.content) } : null,
-    });
+    const { state, speak } = readAloudStep(readAloudState.current, readAloud);
     readAloudState.current = state;
     if (speak && voicePreferences.read_aloud === true && voice.tts_supported) void voice.toggle_tts(speak.id, speak.text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity, session.sessionId, latestReplyId, runLive, locked, voicePreferences.read_aloud, voice.tts_supported]);
+  }, [readAloud.scope, readAloud.phase, readAloud.reply?.id, voicePreferences.read_aloud, voice.tts_supported]);
   // A tool batch this client already granted (the standing permission, or an
   // accepted Allow) is running work, not a question: no card, no "Approval
   // needed". The server still asks, so the raw wait stays in the snapshot.
