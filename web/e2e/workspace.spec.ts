@@ -215,8 +215,9 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     const settledBodyText = await page
       .locator("body")
       .evaluate((element) => getComputedStyle(element).color);
+    // The kit's ONE account widget (person, name, connection light; ui-kit 0.9.6).
     await expect(
-      page.getByRole("button", { name: "Disconnect from gateway", exact: true }),
+      page.getByRole("button", { name: /^Account: Signed in as / }),
     ).toHaveCSS("color", settledBodyText);
     await appearance
       .getByRole("button", { name: "Close", exact: true })
@@ -1439,9 +1440,9 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     ).toBeVisible();
 
     await closeWorkspaceDrawer(page);
-    await page
-      .getByRole("button", { name: "Disconnect from gateway", exact: true })
-      .click();
+    // Disconnect lives in the account widget's menu (ui-kit 0.9.6: one widget, no pill beside it).
+    await page.getByRole("button", { name: /^Account: Signed in as / }).click();
+    await page.getByRole("menuitem", { name: "Disconnect", exact: true }).click();
     const signedOutDialog = page.getByRole("dialog", {
       name: "Gateway connection",
     });
