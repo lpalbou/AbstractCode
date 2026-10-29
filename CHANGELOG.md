@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The automation header names its folder in words** (operator QA 2026-10-29, ADR 0043). It read "Workspace
+  session-automation-7f7613b4-fd8b-…", the folder's id. It now reads "Workspace · This automation's folder", and a
+  conversation's folder reads "This conversation's folder". The path is only in the copy action. A folder the person
+  chose keeps its own name. The sidebar's Workspace row follows the same rule (`workspaceLabel`).
+
 - **Read aloud no longer speaks a session's existing messages when it is opened, reloaded or switched to**
   (operator 2026-10-29). A reply is spoken by itself only when its run was seen in progress in the open
   conversation (AbstractUIC panel-chat's rule, `readAloudStep`, inlined in `web/src/lib/read_aloud.ts` until the

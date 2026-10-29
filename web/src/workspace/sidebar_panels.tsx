@@ -134,7 +134,13 @@ export function ConversationsPanel(props: {
 
 /** The workspace folder's last segment, or "Gateway managed" when the run names none. */
 export function workspaceLabel(path: string): string {
-  return path.split("/").filter(Boolean).pop() || "Gateway managed";
+  const name = path.split("/").filter(Boolean).pop() || "";
+  // The gateway's own folders are named by an id (`session-automation-7f7613b4-…`,
+  // `session-<session id>`): a readable label on screen, the path only in the copy action
+  // (operator QA 2026-10-29, ADR 0043).
+  if (name.startsWith("session-automation-")) return "This automation's folder";
+  if (name.startsWith("session-")) return "This conversation's folder";
+  return name || "Gateway managed";
 }
 
 /**
