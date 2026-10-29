@@ -14,7 +14,7 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 | State | Items | IDs |
 |---|---|---|
-| Planned | 3 | 0001, 0002, 0003 |
+| Planned | 4 | 0001, 0002, 0003, 0008 |
 | Proposed | 3 | 0004, 0005, 0006 |
 | Completed | 0 | |
 | Deprecated | 0 | |
