@@ -1,0 +1,13 @@
+
+> @abstractframework/code@0.13.3 test
+> vitest run
+
+
+ RUN  v5.0.5 /Users/albou/tmp/abstractframework/abstractcode/web
+
+
+ Test Files  62 passed (62)
+      Tests  502 passed (502)
+   Start at  20:55:23
+   Duration  2.80s (transform 46%, import 35%, tests 18%, worker 1%)
+

@@ -1,0 +1,97 @@
+
+> @abstractframework/ui-kit@0.9.10 test
+> node scripts/check_no_src_twins.mjs && tsc --noEmit --noUnusedLocals --noUnusedParameters -p . && node scripts/check_theme_tokens.mjs && node scripts/check_css_balanced.mjs && node scripts/check_polish_css.mjs && node scripts/generate_palette_seeds.mjs --check && npm run build && node scripts/check_responsive.mjs && node scripts/check_viewport_vars.mjs && node scripts/check_matrix_core.mjs && node scripts/check_matrix_wrapper.mjs && node scripts/check_phase_radio.mjs && node scripts/check_cognition_bloom.mjs && node scripts/check_conduct_core.mjs && node scripts/check_voice_hook.mjs && node scripts/check_about.mjs && node scripts/check_automation_fixtures.mjs && node scripts/check_gateway_paths.mjs && node scripts/check_automation_client.mjs && node scripts/check_automation_panel.mjs && node scripts/check_tool_call_words.mjs && node scripts/check_automation_email.mjs && node scripts/check_state_toggles.mjs && node scripts/check_filter_bar.mjs && node scripts/check_modal_rows.mjs && node scripts/check_modal.mjs && node scripts/check_menu.mjs && node scripts/check_tooltip.mjs && node scripts/check_random_id.mjs && node scripts/check_timing_line.mjs && node scripts/check_trigger_words.mjs && node scripts/check_schedule_when.mjs && node scripts/check_forms_signin.mjs && node scripts/audit_theme_contrast.mjs --strict && tsc -p islands/tsconfig.json && node scripts/check_islands.mjs && node scripts/check_sandbox_chat.mjs && node scripts/check_workflow_picker.mjs && node scripts/check_route_picker.mjs && node scripts/check_rail_viewer.mjs && node scripts/check_audio_player.mjs && node scripts/check_unarchive.mjs && node scripts/check_voice_section.mjs && node scripts/check_voice_library.mjs && node scripts/check_workspace_chooser.mjs && node scripts/check_tool_state.mjs && node scripts/check_icons.mjs && node scripts/generate_icon_sheet.mjs --check && node scripts/check_file_viewer_video.mjs && node scripts/check_voice_widgets.mjs && node scripts/check_tool_plan.mjs && node scripts/check_tool_mode_editor.mjs && node scripts/check_gateway_models.mjs && node scripts/check_speculation.mjs && node scripts/check_gateway_connection.mjs && node scripts/check_app_shell.mjs && node scripts/check_top_bar_set.mjs && node scripts/check_session_tool_policy.mjs && node scripts/check_brand_icons.mjs && node scripts/check_cloud_providers.mjs
+
+check_no_src_twins: OK (src/ is sources-only in ui-kit + panel-chat)
+theme token integrity: OK (21 theme blocks checked, invariants A+B+C+D+E hold)
+check_css_balanced: OK (theme.css, panel_chat.css parse: braces, comments and strings balanced)
+check_polish_css: OK (16 checks: voice creation cards, tool-row badge, picker Custom)
+palette seeds: OK (21 themes in parity with theme.css)
+
+> @abstractframework/ui-kit@0.9.10 build
+> tsc
+
+check_responsive: OK (26 tokens, named breakpoints only, touch floors, containers)
+check_viewport_vars: OK (7 cases: keyboard at scale 1 keeps its inset, pinch-zoom never shrinks the shell)
+matrix/critical core: OK (validation, cell views, patch bookkeeping, confirm gate)
+matrix wrapper: OK (refusal view, approval control, blocked/absent/tristate renders, pending + orphan notes)
+  ok 1 — ruled vocabulary is the four-phase set in order
+  ok 2 — normalization is strict: keys pass, synonyms/state words/junk -> null
+  ok 3 — absent/empty payload falls back to the ruled set
+  ok 4 — payload order honored; vocabulary drift visible
+  ok 5 — all-junk payload -> ruled set + full drop list
+  ok 6 — descriptors carry one primary label; synonyms tooltip-only
+check_phase_radio: 6 checks green
+  ok 1 — 9 registers incl. GRAVITY; codes unique and 3-letter
+  ok 2 — gravity is its own register — not sadness re-labeled
+  ok 3 — setBloomTargets: absent-not-zero; unknown/NaN refused
+  ok 4 — morph gate: settledness 0 mid-glide, 1 at rest; spring lands
+  ok 5 — reading: dominance + circumplex derivation
+  ok 6 — vignette: four quadrant hues
+  ok 7 — effort rows: absent-not-zero; negatives refused; ms humanized
+check_cognition_bloom: 7 groups green
+  ok 1 — no facts: four null axes, reasons present, shorts dashed
+  ok 2 — no baseline: text/short shown, arc downgraded with the reason
+  ok 3 — baseline-relative: v/(2·median), median turn = 0.5
+  ok 4 — honest zero renders 0; absent fact renders null with the reason
+  ok 5 — ACT short shows fails; RIG short is the verify share; retries marked
+  ok 6 — isVerifyShaped: word-boundary matches, write/act verbs never match
+  ok 7 — RIG abstains on zero calls
+  ok 8 — runningMedian: empty → undefined; window respected
+check_conduct_core: 8 groups green
+  ok 1 — all returned + helper functions are useCallback-stable
+  ok 2 — playback writes route through the shallow-equal guard (idle stop is a no-op)
+  ok 3 — recording writes route through apply_recording
+  ok 4 — stable callbacks read state through ref twins
+  ok 5 — live level during real recording, mute, capture mode, transcript listeners, kept audio tied to the voice (executed)
+check_voice_hook: 5 pins green
+check_voice_stream: cancellation, first audio, pause/resume, EOF and error checks green
+check_about: OK (326 checks, 10 apps)
+check_automation_fixtures: OK (267 checks, 6 fixtures)
+check_gateway_paths: OK
+check_automation_client: OK (151 checks)
+check_automation_panel: OK (416 checks)
+check_tool_call_words: OK
+check_automation_email: OK (71 checks)
+check_state_toggles: 159 checks green
+check_filter_bar: OK (41 checks)
+check_modal_rows: 59 checks OK (worst tinted-row contrast 4.88:1, one-dark admin chip)
+check_modal: 42 checks green
+check_menu: 56 checks green
+check_tooltip: OK (55 checks)
+check_random_id: 14 checks green
+check_timing_line: 33 checks passed
+check_trigger_words: 53 checks passed
+check_schedule_when: 51 checks passed
+check_forms_signin: 76 checks green
+Themes parsed: 20
+
+
+Total failures: 0; clean themes: light, solarized-light, catppuccin-latte, rose-pine-dawn, one-light, everforest-light, nord, dracula, gruvbox, monokai, solarized-dark, observer-night, tokyo-night, catppuccin-mocha, catppuccin-macchiato, catppuccin-frappe, rose-pine, rose-pine-moon, one-dark, everforest-dark
+strict gate: OK (no pair under 3, no duplicate roles)
+wrote /Users/albou/tmp/abstractframework/abstractuic/ui-kit/islands/dist/af-console-islands.js (553332 bytes)
+check_islands: OK (553332 bytes, 21 themes, kit 0.9.10)
+check_sandbox_chat: OK (composer, Attach, chips + failure reason, inline media, blocked notice, Clear)
+check_workflow_picker: 164/164 passed
+check_route_picker: OK
+check_rail_viewer: 186/186 checks passed
+check_audio_player: 47 checks passed
+check_unarchive: 16 checks passed
+check_voice_section: 103 checks green
+check_voice_library: 141/141 passed
+check_workspace_chooser: 103/103 passed
+check_tool_state: OK (18 checks)
+check_icons: OK (66 icons: union = ICON_NAMES = docs/icons.md, each renders on its grid, all distinct; 355 checks)
+generate_icon_sheet: up to date (66 icons, light + dark)
+check_file_viewer_video: OK (video kind by extension and Content-Type, player from the host URL, no URL = no player)
+check_voice_widgets: 103/103 passed
+check_tool_plan: OK (81 checks)
+check_tool_mode_editor: OK (88 checks)
+check_gateway_models: OK (36 checks)
+speculation controls: passed
+check_gateway_connection: 45/45 checks passed
+check_app_shell: 95/95 checks passed
+check_top_bar_set: OK (32 checks: the about glyph, the set's four glyphs, the islands' page-owned About extra)
+check_session_tool_policy: OK (99 checks)
+check_brand_icons: OK (18 marks + 1 text fallbacks cover 19 card ids; each mark has source, licence and date, and is self-contained; 492 checks)
+check_cloud_providers: OK (64 checks: registry list, presets + generic compatible card, one Connect action, check before save, create-only fresh ids, key never rendered)
