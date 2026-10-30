@@ -85,6 +85,7 @@ Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.
 | 0021 | [Companion graphics and phase preview](completed/0021_companion_visual_quality_and_phase_preview.md) — completed 2026-10-30; shaded art, explicit phase preview, independent review and local install | tui + engine |
 | 0022 | [Floating companion and distinct poses](completed/0022_companion_floating_placement_and_distinct_activity.md) — completed 2026-10-30; full-width transcript, centred art/actions, distinct poses, local install and independent review | tui + engine |
 | 0023 | [Companion placement, motion and separate docs](completed/0023_companion_placement_motion_and_separate_documentation.md) — completed 2026-10-30; current-audio controls, full suites and installed native validation | tui + engine |
+| 0024 | [Compact web settings and shared docs layout](planned/0024_web_settings_simplification_and_shared_docs_layout.md) | web + ui-kit | Existing shared settings and drawer components |
 
 ## Deprecated
 
