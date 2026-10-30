@@ -927,6 +927,9 @@ pub struct Store {
     pub docs_chat: Signal<crate::docs_chat::DocsChat>,
     pub docs_open: Signal<bool>,
     pub docs_draft: Signal<String>,
+    pub help_scope: Signal<crate::docs_chat::ChatScope>,
+    pub run_chat: Signal<crate::docs_chat::DocsChat>,
+    pub run_question_draft: Signal<String>,
     pub fold: Signal<Fold>,
     pub phase: Signal<Phase>,
     pub conn: Signal<Conn>,
@@ -1143,6 +1146,8 @@ pub struct Store {
     /// and on `r` — never polled (the `/resources` rule). See
     /// [`SessionIndex`] for why absence is its own state.
     pub session_index: Signal<SessionIndex>,
+    pub session_refreshing: Signal<bool>,
+    pub session_refresh_error: Signal<String>,
     /// The active run tree is PAUSED on the gateway (durable /pause).
     pub paused: Signal<bool>,
     /// Files staged for the NEXT plain-prompt send (chips above the
@@ -1313,6 +1318,9 @@ impl Store {
             docs_chat: cx.signal(Default::default()),
             docs_open: cx.signal(false),
             docs_draft: cx.signal(String::new()),
+            help_scope: cx.signal(Default::default()),
+            run_chat: cx.signal(Default::default()),
+            run_question_draft: cx.signal(String::new()),
             fold: cx.signal(Fold::new()),
             phase: cx.signal(Phase::Idle),
             animation: cx.signal(0u8),
@@ -1384,6 +1392,8 @@ impl Store {
             expanded_tools: cx.signal(Vec::new()),
             expanded_cycles: cx.signal(Vec::new()),
             session_index: cx.signal(SessionIndex::Unfetched),
+            session_refreshing: cx.signal(false),
+            session_refresh_error: cx.signal(String::new()),
             paused: cx.signal(false),
             quit_state: cx.signal(QuitState::None),
             verb_ack: cx.signal(None),

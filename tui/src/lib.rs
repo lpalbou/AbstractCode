@@ -52,6 +52,7 @@ pub mod signin;
 pub mod speculation;
 pub mod store;
 pub mod streaming;
+pub mod tool_modes;
 pub mod tool_policy;
 pub mod transcript;
 pub mod ui;

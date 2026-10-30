@@ -14,7 +14,9 @@ semantics before implementation rather than treating the command name as a compl
 
 ## Current code reality
 
-There is no /btw command. The active task can be steered or queued; entity conversations have their own focus
+There is no /btw command. The Assistant drawer now offers read-only questions over a labelled snapshot
+of the loaded conversation/run, with separate history and no main-run steering (0014). A command shortcut
+and the broader cancel/context/promotion semantics below remain proposed. The active task can be steered or queued; entity conversations have their own focus
 and transcripts. Inference and durable histories belong to Gateway/Runtime workflows. /goal already has a
 workflow-discovered lane (see 0011), and must not be repurposed as the side-question executor.
 

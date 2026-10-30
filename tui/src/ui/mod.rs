@@ -30,6 +30,7 @@ pub mod splash;
 pub mod stance;
 pub mod theme_menu;
 pub mod thinking;
+pub mod tools_view;
 pub mod top_bar;
 pub mod transcript_view;
 pub mod voice_view;
@@ -1396,7 +1397,7 @@ pub(crate) fn chrome_action(cx: Scope, store: Store, ctx: &UiCtx, id: &str) -> b
 fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_mode: Signal<u8>) {
     match cmd {
         Command::Help => modals::open_help(cx, ctx),
-        Command::Docs => { chrome_action(cx,store,ctx,chrome::ACT_DOCS); },
+        Command::Docs => { store.help_scope.set(crate::docs_chat::ChatScope::Docs);store.docs_open.set(true); },
         Command::About => {
             // Gateway package versions come from the capabilities probe;
             // refresh it so the modal fills in live (rows are reactive).

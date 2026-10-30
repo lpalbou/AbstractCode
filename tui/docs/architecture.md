@@ -55,11 +55,13 @@ One rule, enforced everywhere: **the UI thread owns every reactive signal**.
   that their records belong to the fold's current run tree
   (`Fold::is_following`), so a stale stream can never contaminate a new run.
 
-## Documentation conversation
+## Assistant conversations
 
-The Docs drawer uses the authenticated Gateway client to fetch the Code corpus
-and start `docs-qa@0.1.1:docsqa001` in a dedicated `kind=docs` session. It does
-not inherit the coding run's tools, workspace or transcript. A separate worker
+The reusable engine ChatPanel owns message layout, scrolling and the composer.
+The Code adapter owns scopes, draft/history state and Gateway requests. Docs fetches
+the Code corpus; This run captures an explicitly labelled snapshot of the loaded
+conversation and current run state. Both start `docs-qa@0.1.1:docsqa001` in a dedicated `kind=docs` session. It grants no tools and does not steer the coding run. Run-scope questions receive
+the captured transcript as reference data; Docs receives only its corpus. A separate worker
 follows that run, keeping coding commands and approval responses responsive.
 Temporary polling errors back off on the existing run; only an explicit retry
 after failure starts another inference. UI posts check both session and operation

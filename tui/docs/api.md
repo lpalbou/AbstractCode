@@ -82,7 +82,7 @@ abstractcode --help | --version
 | `/stream [on\|off\|default]` | "Stream replies" (`/streaming` alias). Bare opens the picker: **Gateway default** (names the gateway's current setting), **On**, **Off**. Saved in `prefs.json` as `stream_replies`; see "Streamed replies" below |
 | `/review [on\|off\|rounds N]` | The verifier the agent must pass before it may conclude (`/verify` too); same as `--review` / `--review-rounds` |
 | `/iterations [n\|off]` | Iteration budget requested for new runs (`_limits.max_iterations`; `/iters` too). Bare reports what is in force and where it came from; `off` takes the server's own. Applies to the next run; persisted |
-| `/tools` | One switch per gateway tool (`[x]` on, `[ ]` off, `[-] name — reason` when the gateway disables it; `Space` switches; the "on" set = the run's exact allowlist; untouched = workflow defaults). In-modal: `p` cycles a per-tool approval pin, `t` cycles the tier — see the modal keys below |
+| `/tools` | Tool and category modes: **Off** excludes, **Ask** requires approval, **Auto** skips approval. Select a tool or category, then use the named buttons or Space/Enter to cycle. Category changes affect currently listed available tools; Gateway-disabled members stay unavailable. Descriptions are the Gateway inventory text. Changes apply to future runs; workflow and Gateway limits still apply |
 | `/permissions [read\|write\|all]` | THE tool-permission surface (bare = report): batches classifying at-or-below the level auto-approve. `read` = proven read-only tools only; `write` adds workspace file mutations; `all` auto-approves everything, **including arbitrary shell and network egress** — deliberate use only. Per-tool `ask` pins and gateway-disabled tools still gate. Sticky per session (`/tools tier` remains a spelling alias) |
 | `/workspace` | This conversation's workspaces: the Workspace panel (Use my default, posture, Read-only / Read & write / Refused per workspace, Add a workspace path, the effective line, My default workspaces), see [Workspaces](#workspaces-workspace). Stored on the conversation by the gateway |
 | `/skills` | Attach gateway skills to your runs (`Space` toggles; sent as `input_data.skills`). An empty shelf shows where the shelf is on the gateway host, how it was chosen, and the gateway's warnings |
@@ -91,7 +91,7 @@ abstractcode --help | --version
 | `/resources` | Gateway-host resources (`/host` is an alias): memory (RAM/device meter bars, GPU utilization when the host supports it, the gateway's process RSS, host name), resident models (modality label, tri-state residency — an unreported residency reads `unknown`, never "no" — size, `ctx N` with `*` = calibrated, 🔒 = residency lock, `default`), session prompt caches, totals. Admin actions on the selected model: `u` unload (two-step confirm; a 409 `model_locked` refusal offers `f` force), `k` lock/unlock, `e` context estimate, `r` refresh — keys under "Modal keys" below. Data is fetched at open, on `r`, and after a mutation — never polled; a failed refresh keeps the last snapshot marked STALE. Requires the gateway's declared `host_state` contract (`/discovery/capabilities`) — older gateways get an honest "not supported". Feeds the footer's `mem NN%` segment |
 | `/history [n\|all]` | Stream the PREVIOUS bloc of this session's turns from the gateway ledgers, prepended in full detail. Boot replays only the last bloc (`--replay-turns` sizes it, default 5); a stub line names how many earlier turns exist. **Scrolling to the top of the transcript auto-loads the previous bloc** — the stub becomes a live progress line and holding at the top cascades bloc-by-bloc until the session is fully loaded (Esc returns to the tail and stops the cascade). Failures name their cause — never a silent hole |
 | `/status` | The status card: workflow, route, workspace, session, connection, client phase + run id + last outcome, and a LIVE gateway run-status probe — the one place client view vs server truth is inspectable (wrapper roots legitimately stay `waiting` after your turn concluded) |
-| `/sessions` | The conversations board, as the Code web's list: each conversation is its title (the opening prompt, else `Conversation <id>`) with its live state at the right while it wants something, then `Oct 2 · 2 turns · 7 tools` (the day of the newest turn in local time; turns = root runs; tools = the gateway's per-turn `tool_calls` summed, shown when above zero). `Enter` continues one · `a` Archive (asks inline: "Archive this conversation? It stays searchable and auditable; it just leaves this list." `y` archives through `POST /sessions/{id}/archive`, `n`/`Esc` cancels; archiving the open conversation opens the next one, else the previous, else a new one) · the quiet **Archived · N** line (N = the gateway's `archived_sessions`) opens the archived ones inline, `Enter`/`u` unarchives · `n` new conversation · `r` refresh · `/` **Search conversations**: typing filters the cards on the title and the id, like the Code web (the opening prompt and the session id, case-insensitive; `<query> · N of M`, "No conversations match your search."); letters type into the search while it is open, `Backspace` narrows back, `Enter` continues the selected one, `Esc` clears the search before closing. Nothing is ever deleted |
+| `/sessions` | The conversations board, as the Code web's list: each conversation is its title (the opening prompt, else `Conversation <id>`) with its live state at the right while it wants something, then `Oct 2 · 2 turns · 7 tools` (the day of the newest turn in local time; turns = root runs; tool counts appear only when supplied by the Gateway; discovery omits ledger metrics to stay responsive). `Enter` continues one · `a` Archive (asks inline: "Archive this conversation? It stays searchable and auditable; it just leaves this list." `y` archives through `POST /sessions/{id}/archive`, `n`/`Esc` cancels; archiving the open conversation opens the next one, else the previous, else a new one) · the quiet **Archived · N** line (N = the gateway's `archived_sessions`) opens the archived ones inline, `Enter`/`u` unarchives · `n` new conversation · `r` refresh · `/` **Search conversations**: typing filters the cards on the title and the id, like the Code web (the opening prompt and the session id, case-insensitive; `<query> · N of M`, "No conversations match your search."); letters type into the search while it is open, `Backspace` narrows back, `Enter` continues the selected one, `Esc` clears the search before closing. Nothing is ever deleted |
 | `/archive` | Archive this conversation: the board opens with the question asked (`y` archives, `n` keeps it) |
 | `/settings [panel]` | The settings panels (`/panels`, `/rail` too), see [Settings panels](#settings-panels-settings). `panel` = `activity`, `files`, `model`, `workflow`, `workspace`, `tools`, `skills` or `voice` |
 | `/activity` | The settings panels on **Activity**: this conversation's work in foldable groups, one per model step |
@@ -623,7 +623,7 @@ recovers it.
 | ask (agent question) | `Enter` send the answer · `Esc` keeps the run waiting |
 | `/review [on\|off\|rounds N]` | The verifier the agent must pass before it may conclude (`/verify` too); same as `--review` / `--review-rounds` |
 | `/iterations [n\|off]` | Iteration budget requested for new runs (`_limits.max_iterations`; `/iters` too). Bare reports what is in force and where it came from; `off` takes the server's own. Applies to the next run; persisted |
-| `/tools` | `Space` switch · `a` all on · `n` all off · `p` cycle the per-tool pin (none → auto → ask → none; a pin beats the tier both ways) · `t` cycle the approval tier (read → write → all, persisted) · `Enter`/`Esc` close |
+| `/tools` | Arrows / Page Up/Down / mouse wheel browse · Space/Enter cycles Off → Ask → Auto · `c` cycles the current category (Mixed starts at Ask) · named Off/Ask/Auto buttons apply to the selected row · Esc closes |
 | `/queue` | `↑↓` select · `x` remove · `u`/`d` move up/down · `c` clear all · `r` resume a paused queue · `e` pop the prompt into the composer for editing · `Enter`/`Esc` close |
 | chips row | click a staged file's name to preview it · click its `×` to unstage it |
 | `/attach` manager | `↑↓` select · `Enter`/`p` preview · `x` remove · `c` clear · `b` browse (file picker) · `Esc` close |
@@ -842,23 +842,40 @@ in an automation's Edit panel marks the row being saved with `…` next to
   frame — recovery from an external terminal clear (Cmd+K), which a
   damage-tracked renderer cannot detect on its own.
 
-## Docs assistant
+## Assistant drawer
 
 Open **Docs** (under **Menu** on narrow terminals) or run `/docs`. The drawer
-has its own question field, answer history and **New conversation** action.
-Closing and reopening it preserves the conversation and your coding draft.
-A genuine approval or user-question step takes priority and closes the drawer.
+uses message bubbles with a separate composer, Markdown answers and scrolling.
+**Docs** answers questions about AbstractCode documentation. **This run** answers
+questions about the conversation and run state currently loaded in this client.
+A dot marks the selected scope. Each scope has its own conversation and draft.
+Closing the drawer preserves them and your coding draft.
 
-Questions use the same Gateway-hosted `docs-qa@0.1.1:docsqa001` workflow as
-Code web, with the corpus from `/docs/corpus?app=code`. They have a dedicated
-`kind=docs` session and use its server-side history. Your coding task's tools,
-workspace and transcript are not passed to this workflow. Missing documentation
-or a failed run displays an error; **Retry** submits the question again. A
-connection interruption during an existing run follows that same run.
+Both use the Gateway-hosted `docs-qa@0.1.1:docsqa001` grounded question workflow.
+Docs supplies the corpus from `/docs/corpus?app=code`; This run supplies an
+explicitly labelled snapshot captured when you send. It includes loaded prompts,
+answers, tool details, run identity and state, and says when earlier records are
+not loaded. These questions do not steer, approve or execute tools in the coding
+run. Switching coding conversations starts a separate run-question history.
 
-This terminal drawer displays completed answers. It preserves its chat while
-the terminal process is open; native history selection and attachments are
-not provided. The Gateway retains the docs session independently.
+Missing documentation or failed runs display an error. **Retry** submits the
+question again; temporary connection errors follow the existing run. **New
+conversation** clears the selected scope after the current answer finishes.
+A genuine approval or user-question step takes priority over the drawer.
+
+The terminal displays completed answers and keeps native history while the
+process is open. It has no native history selector or attachments; Gateway
+assistant sessions remain durable independently.
+
+## Session-list discovery
+
+The conversations board first requests up to 200 turn-root summaries, then a
+larger metadata-only listing when older roots exist. It never requests ledger
+lengths or ledger-derived metrics to discover conversations. The board labels
+partial results; turn counts on a partial listing are floors. Opening prompts
+are filled in progressively. Refresh keeps the last Gateway snapshot and known
+titles visible, and a refresh error leaves them available. Repeated refreshes
+while a listing is in flight are coalesced.
 
 ## Caching and context
 

@@ -86,7 +86,15 @@ pub fn load_defaults(store: Store, ctx: &UiCtx) {
             Ok(d) => DefaultsState::Loaded(Box::new(d)),
             Err(e) => DefaultsState::Failed(e),
         };
-        wake.post(move || store.voice.defaults.set(state));
+        wake.post(move || {
+            // A slower duplicate probe must not replace a usable snapshot.
+            if !matches!(
+                store.voice.defaults.get_untracked(),
+                DefaultsState::Loaded(_)
+            ) {
+                store.voice.defaults.set(state);
+            }
+        });
     });
 }
 

@@ -166,7 +166,8 @@ pub enum Cmd {
     },
     LoadTools,
     LoadAccount,
-    DocsAsk {
+    AssistantAsk {
+        scope: crate::docs_chat::ChatScope,
         session: String,
         operation: u64,
         question: String,
@@ -879,7 +880,8 @@ impl Runner {
             } => self.load_catalog(preferred_bundle, preferred_flow),
             Cmd::LoadTools => self.load_tools(),
             Cmd::LoadAccount => self.load_account(),
-            Cmd::DocsAsk {
+            Cmd::AssistantAsk {
+                scope,
                 session,
                 operation,
                 question,
@@ -887,7 +889,7 @@ impl Runner {
             } => crate::runner_docs::ask(
                 self.client.clone(),
                 self.wake.clone(),
-                self.store,
+                scope.chat(self.store),
                 session,
                 operation,
                 question,
@@ -4471,14 +4473,65 @@ pub(crate) fn spawn_load_sessions(
 ) {
     let post = wake.clone();
     spawn_host_thread("sessions", wake, store, move || {
-        post.post(move || store.session_index.set(SessionIndex::Loading));
-        let v = match client.list_recent_runs(limit) {
+        post.post(move || {
+            store.session_refreshing.set(true);
+            store.session_refresh_error.set(String::new());
+            if !matches!(
+                store.session_index.get_untracked(),
+                SessionIndex::Loaded { .. }
+            ) {
+                store.session_index.set(SessionIndex::Loading);
+            }
+        });
+        let metadata = || -> Result<Value, GwError> {
+            let preview = client.list_recent_runs(limit.min(200))?;
+            if limit > 200 && preview.get("has_more").and_then(Value::as_bool) == Some(true) {
+                let rows = fold_session_rows(
+                    preview
+                        .get("items")
+                        .and_then(Value::as_array)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]),
+                );
+                let archived = preview
+                    .get("archived_sessions")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize;
+                post.post(move || {
+                    if !matches!(
+                        store.session_index.get_untracked(),
+                        SessionIndex::Loaded { .. }
+                    ) {
+                        store.session_index.set(SessionIndex::Loaded {
+                            rows,
+                            truncated: true,
+                            labeled: 0,
+                            archived,
+                        });
+                    }
+                });
+                client.list_recent_runs(limit)
+            } else {
+                Ok(preview)
+            }
+        };
+        let v = match metadata() {
             Ok(v) => v,
             Err(e) => {
                 // Evidence-worded by GwError's Display; rendered
                 // verbatim beside rows that still come from prefs.
                 let msg = e.to_string();
-                post.post(move || store.session_index.set(SessionIndex::Failed(msg)));
+                post.post(move || {
+                    store.session_refreshing.set(false);
+                    if matches!(
+                        store.session_index.get_untracked(),
+                        SessionIndex::Loaded { .. }
+                    ) {
+                        store.session_refresh_error.set(msg);
+                    } else {
+                        store.session_index.set(SessionIndex::Failed(msg));
+                    }
+                });
                 return;
             }
         };
@@ -4508,9 +4561,22 @@ pub(crate) fn spawn_load_sessions(
         order.truncate(SESSION_PROMPT_MAX);
 
         {
-            let rows = rows.clone();
+            let mut rows = rows.clone();
             let labeled = order.len();
             post.post(move || {
+                if let SessionIndex::Loaded { rows: previous, .. } =
+                    store.session_index.get_untracked()
+                {
+                    for row in &mut rows {
+                        if let Some(old) = previous
+                            .iter()
+                            .find(|old| old.id == row.id && old.first_run == row.first_run)
+                        {
+                            row.prompt = old.prompt.clone();
+                        }
+                    }
+                }
+                store.session_refreshing.set(false);
                 store.session_index.set(SessionIndex::Loaded {
                     rows,
                     truncated,
@@ -4542,7 +4608,11 @@ pub(crate) fn spawn_load_sessions(
                         let same = rows.len() == snapshot.len()
                             && rows.iter().zip(snapshot.iter()).all(|(a, b)| a.id == b.id);
                         if same {
-                            *rows = snapshot.clone();
+                            for (row, next) in rows.iter_mut().zip(snapshot.iter()) {
+                                if next.prompt.is_some() {
+                                    row.prompt = next.prompt.clone();
+                                }
+                            }
                         }
                     }
                 });
@@ -6774,3 +6844,7 @@ mod tests {
         root.dispose();
     }
 }
+
+#[cfg(test)]
+#[path = "runner_sessions_tests.rs"]
+mod session_refresh_tests;

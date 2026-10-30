@@ -99,3 +99,7 @@ Evidence (`cargo test --workspace`, clippy `-D warnings`):
 - Local receipts: framework `untracked/code-chrome-20261030/` (PTY text/SVG captures, smoke receipt and
   mutation log); workspace test log `untracked/code-chrome-workspace-tests.log`.
 - Items 1–2 remain proposed: JSON rendering and the engine input inset are unchanged by this delivery.
+
+### Item 2 — composer inset implemented (2026-10-30)
+
+See [0012](../completed/0012_tool_modes_scrolling_and_composer_inset.md). The engine builder and Code composer spacing are implemented and tested. The broader engine0186 style/token and mouse-to-caret extensions remain proposed. Tool-result JSON rendering remains open.

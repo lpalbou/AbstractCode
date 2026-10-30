@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The Tools dialog fills most of the viewport and uses the engine List for mouse-wheel,
+  keyboard and scrollbar navigation. Off/Ask/Auto is visible for each tool and category;
+  Gateway-disabled tools remain unavailable. Selected details retain the Gateway text.
+- The composer has a one-cell inner inset. Assistant messages use the shared engine
+  ChatPanel with measured bubbles; This run adds isolated, read-only snapshot questions.
+- Session discovery omits expensive ledger metrics, publishes a small metadata page first,
+  retains cached rows/titles during refresh and keeps them on errors.
+
 - **The header groups Tools, Skills and MCP under one Tools menu**, with more spacing
   between actions and no duplicate capability counts in the footer. Context/tokens
   still open Cache, GPU/memory open Resources, workspace mode opens Workspace and

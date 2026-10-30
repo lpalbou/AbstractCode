@@ -29,6 +29,16 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+For an unreleased AbstractTUI dependency, use a sibling checkout explicitly:
+
+```sh
+cargo test --workspace --config 'patch.crates-io.abstracttui.path="../abstracttui"'
+cargo install --path tui --config 'patch.crates-io.abstracttui.path="../abstracttui"' --force
+```
+
+Resolve the patch path relative to your working directory. Registry-only builds
+require the dependency version to have been published.
+
 All three run in CI and must pass. `cargo package --manifest-path tui/Cargo.toml --list`
 shows exactly what a release would publish.
 

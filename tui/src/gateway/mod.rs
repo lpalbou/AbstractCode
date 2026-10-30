@@ -899,7 +899,7 @@ impl GatewayClient {
         // listing also carries `archived_sessions` (the `Archived · N`
         // line); archived sessions are left out of it by the gateway.
         format!(
-            "/runs?limit={}&root_only=true&include_ledger_len=false&include_metrics=true",
+            "/runs?limit={}&root_only=true&include_ledger_len=false&include_metrics=false",
             limit.max(1)
         )
     }
@@ -908,7 +908,7 @@ impl GatewayClient {
     /// under the board's `Archived · N` line, each with Unarchive.
     pub(crate) fn archived_session_listing_path(limit: u32) -> String {
         format!(
-            "/runs?limit={}&root_only=true&archived_only=true&include_ledger_len=false&include_metrics=true",
+            "/runs?limit={}&root_only=true&archived_only=true&include_ledger_len=false&include_metrics=false",
             limit.max(1)
         )
     }
@@ -1531,11 +1531,11 @@ mod tests {
         let p = GatewayClient::session_listing_path(200);
         assert_eq!(
             p,
-            "/runs?limit=200&root_only=true&include_ledger_len=false&include_metrics=true"
+            "/runs?limit=200&root_only=true&include_ledger_len=false&include_metrics=false"
         );
         assert_eq!(
             GatewayClient::archived_session_listing_path(200),
-            "/runs?limit=200&root_only=true&archived_only=true&include_ledger_len=false&include_metrics=true"
+            "/runs?limit=200&root_only=true&archived_only=true&include_ledger_len=false&include_metrics=false"
         );
         // No session filter: the whole point is discovering sessions
         // this client has never heard of.

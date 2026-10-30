@@ -1,5 +1,25 @@
 //! State and request contract for the Gateway-owned docs assistant.
 use serde_json::{json, Value};
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ChatScope {
+    #[default]
+    Docs,
+    Run,
+}
+impl ChatScope {
+    pub fn chat(self, store: crate::store::Store) -> abstracttui::reactive::Signal<DocsChat> {
+        match self {
+            Self::Docs => store.docs_chat,
+            Self::Run => store.run_chat,
+        }
+    }
+    pub fn draft(self, store: crate::store::Store) -> abstracttui::reactive::Signal<String> {
+        match self {
+            Self::Docs => store.docs_draft,
+            Self::Run => store.run_question_draft,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct DocsChat {
@@ -10,6 +30,7 @@ pub struct DocsChat {
     pub run_id: Option<String>,
     pub error: String,
     pub corpus: Option<String>,
+    pub source_session: String,
 }
 impl Default for DocsChat {
     fn default() -> Self {
@@ -21,6 +42,7 @@ impl Default for DocsChat {
             run_id: None,
             error: String::new(),
             corpus: None,
+            source_session: String::new(),
         }
     }
 }

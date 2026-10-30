@@ -1076,6 +1076,7 @@ pub fn composer(
     let anchor = anchor.clone();
     let area = abstracttui::widgets::TextArea::new()
         .state(state)
+        .inset(1, 1)
         // The chat convention: Enter sends, Shift+Enter inserts a newline.
         // Shift+Enter is only REPORTABLE where the kitty keyboard
         // protocol is live (probe-upgraded mid-session since 0.2.2:

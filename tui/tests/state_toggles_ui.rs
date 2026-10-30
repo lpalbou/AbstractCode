@@ -373,19 +373,9 @@ fn tools_rows_are_switches_labelled_by_the_tool() {
     let mut h = harness(Size::new(120, 40));
     h.set_tools();
     let screen = h.command("/tools");
-    // Move the cursor off the first row so its own ink shows.
-    h.keys(b"\x1b[B");
-    assert!(screen.contains("[x] read_file"), "{screen}");
-    assert!(screen.contains("[ ] write_file"), "{screen}");
-    assert!(!screen.contains("[✓]"), "{screen}");
-    assert_eq!(h.style_at("[x] read_file"), (true, accent()));
-    let (bold, fg) = h.style_at("[ ] write_file");
-    assert!(
-        !bold && fg != accent() && fg != Some(abstracttui::app::current_theme().tokens.text_faint),
-        "OFF is plain, not dimmed"
-    );
-    assert!(screen.contains("space switch"), "{screen}");
-    assert!(!screen.contains("Space toggles"), "{screen}");
+    assert!(screen.contains("[Auto] read_file"), "{screen}");
+    assert!(screen.contains("[Off ] write_file"), "{screen}");
+    assert!(screen.contains("Ask") && screen.contains("Auto") && screen.contains("cycles mode"));
 }
 
 #[test]

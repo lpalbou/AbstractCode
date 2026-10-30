@@ -126,10 +126,9 @@ Status: **0.12.0**, pre-alpha. Release history is in
   the run durably on the gateway (it survives quitting); `/resume`
   continues it.
 - **Capability control**: the header's **Tools** menu groups Tools, Skills and
-  MCP servers. `/tools` switches gateway tools on/off per run (checked set =
-  the run's exact allowlist), `/skills` attaches gateway skills, and `/mcp`
+  MCP servers. `/tools` selects Off/Ask/Auto per tool or category, `/skills` attaches gateway skills, and `/mcp`
   shows the gateway's MCP server registry. Direct commands remain available.
-- **Top-right controls**: **Docs** opens a separate documentation conversation,
+- **Top-right controls**: **Docs** opens an assistant drawer with Docs and This run conversations,
   **Theme** previews appearance choices, **About** shows versions and framework
   links, and the account/status menu shows your gateway identity, connection
   details and a confirmed option to disconnect this terminal. Narrow terminals

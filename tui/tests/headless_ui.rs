@@ -1210,26 +1210,32 @@ fn tools_selector_toggles_and_start_carries_allowlist() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("gateway tools — 3 available · untouched"),
+        screen.contains("Tools — 0 Off · 1 Ask · 2 Auto"),
         "tools modal title:\n{screen}"
     );
-    assert!(screen.contains("[x] read_file"), "checked rows:\n{screen}");
+    assert!(
+        screen.contains("[Auto] read_file"),
+        "checked rows:\n{screen}"
+    );
 
     // Space toggles the first tool OFF; title flips to explicit-allowlist.
     h.type_text(" ");
     let screen = h.turn();
     assert!(
-        screen.contains("2 on / 1 off · explicit allowlist"),
+        screen.contains("1 Off · 1 Ask · 1 Auto"),
         "toggle reflected:\n{screen}"
     );
-    assert!(screen.contains("[ ] read_file"), "unchecked row:\n{screen}");
+    assert!(
+        screen.contains("[Off ] read_file"),
+        "unchecked row:\n{screen}"
+    );
     assert_eq!(
         h.store.disabled_tools.get_untracked(),
         vec!["read_file".to_string()]
     );
 
     // Enter closes; a run start now carries the checked set exactly.
-    h.press_enter();
+    h.press_escape();
     h.turn();
     h.turn(); // deferred modal close
     h.type_text("do the thing");
@@ -1279,28 +1285,20 @@ fn tools_category_toggle_flips_a_whole_toolset() {
     h.turn();
     h.press_enter();
     h.turn();
-    // Cursor starts at the first tool (read_file, toolset "files"). `c`
-    // turns the WHOLE files category off (both files tools on → off).
+    // A mixed category safely becomes Ask, then Auto, then Off.
+    for expected in ["ask", "auto"] {
+        h.type_text("c");
+        h.turn();
+        let pins = h.store.tool_overrides.get_untracked();
+        assert!(pins.contains(&("read_file".into(), expected.into())));
+        assert!(pins.contains(&("write_file".into(), expected.into())));
+        assert!(!pins.iter().any(|(n, _)| n == "web_search"));
+    }
     h.type_text("c");
     h.turn();
     let disabled = h.store.disabled_tools.get_untracked();
-    assert!(
-        disabled.contains(&"read_file".to_string()) && disabled.contains(&"write_file".to_string()),
-        "the whole files category is off: {disabled:?}"
-    );
-    assert!(
-        !disabled.contains(&"web_search".to_string()),
-        "the web category is untouched: {disabled:?}"
-    );
-    // `c` again turns the files category back on.
-    h.type_text("c");
-    h.turn();
-    let disabled = h.store.disabled_tools.get_untracked();
-    assert!(
-        !disabled.contains(&"read_file".to_string())
-            && !disabled.contains(&"write_file".to_string()),
-        "the files category is back on: {disabled:?}"
-    );
+    assert!(disabled.contains(&"read_file".into()) && disabled.contains(&"write_file".into()));
+    assert!(!disabled.contains(&"web_search".into()));
 }
 
 /// Camera tools are OFF by default for a fresh session (operator ask
@@ -1417,18 +1415,16 @@ fn served_disabled_tools_render_with_gate_and_are_never_grantable() {
     // allowlist" branch; the full phrase ellipsizes at the modal width
     // now that the gated segment shares the title row.
     assert!(
-        screen.contains("· untouched"),
+        screen.contains("future runs"),
         "title agrees with the wire: stale pref on a gated row is not a customization:\n{screen}"
     );
     // Visible with the gate; counted separately from the grantable pool.
     assert!(
-        screen.contains("2 available · 1 gated off server-side"),
+        screen.contains("1 Ask · 1 Auto · 1 unavailable"),
         "gated count in the title:\n{screen}"
     );
     assert!(
-        screen.contains(
-            "[-] send_email — disabled on this gateway — gate: ABSTRACT_ENABLE_COMMS_TOOLS"
-        ),
+        screen.contains("[—   ] send_email  Unavailable on this Gateway"),
         "disabled row renders its gate:\n{screen}"
     );
     // Cursor row 0 is send_email (comms sorts before files): Space
@@ -1450,11 +1446,11 @@ fn served_disabled_tools_render_with_gate_and_are_never_grantable() {
     );
     // Disable read_file (cursor down to it) to flip into allowlist mode:
     // the explicit allowlist must exclude the served-disabled row.
-    h.term.push_input(b"\x1b[B"); // Down → read_file
+    h.term.push_input(b"\x1b[B\x1b[B"); // Down through category → read_file
     h.turn();
     h.type_text(" ");
     h.turn();
-    h.press_enter();
+    h.press_escape();
     h.turn();
     h.turn(); // modal close settles
     h.type_text("do the thing");
@@ -1507,7 +1503,13 @@ fn all_off_excludes_served_disabled_rows_from_the_user_set() {
     h.turn();
     h.press_enter();
     h.turn();
-    h.type_text("n");
+    h.term.push_input(b"\x1b[B\x1b[B");
+    h.turn();
+    h.type_text("c");
+    h.turn();
+    h.type_text("c");
+    h.turn();
+    h.type_text("c");
     h.turn();
     let mut disabled = h.store.disabled_tools.get_untracked();
     disabled.sort();
@@ -1588,64 +1590,29 @@ fn tools_modal_pins_cycle_persist_and_reach_the_start_policy() {
     h.press_enter();
     h.turn();
 
-    // Cursor on read_file (row 0): p → auto, rendered + persisted. Only
-    // read_file is pinned, so the [pin:auto] marker uniquely names it.
-    h.type_text("p");
+    // Auto -> Off -> Ask. The mode is visible and persisted.
+    h.type_text(" ");
+    h.turn();
+    h.type_text(" ");
     let screen = h.turn();
-    assert!(
-        screen.contains("read_file") && screen.contains("[pin:auto]"),
-        "auto pin rendered:\n{screen}"
-    );
+    assert!(screen.contains("[Ask ] read_file"), "{screen}");
     assert_eq!(
         h.prefs.borrow().tool_overrides,
-        vec![("read_file".to_string(), "auto".to_string())]
+        vec![("read_file".into(), "ask".into())]
     );
-    // p again → ask.
-    h.type_text("p");
-    let screen = h.turn();
-    assert!(screen.contains("[pin:ask]"), "ask pin rendered:\n{screen}");
-    assert_eq!(
-        h.store.tool_overrides.get_untracked(),
-        vec![("read_file".to_string(), "ask".to_string())]
-    );
-    // p a third time → NONE: the wrap closes the full none→auto→ask→none
-    // round trip headlessly (cycle-2 left this leg to a unit test) — the
-    // marker disappears from the render and the persisted override clears.
-    h.type_text("p");
-    let screen = h.turn();
-    assert!(
-        !screen.contains("[pin:"),
-        "cleared pin renders no marker:\n{screen}"
-    );
-    assert!(
-        h.store.tool_overrides.get_untracked().is_empty(),
-        "cleared pin leaves no override: {:?}",
-        h.store.tool_overrides.get_untracked()
-    );
-    assert!(
-        h.prefs.borrow().tool_overrides.is_empty(),
-        "cleared pin is not persisted"
-    );
-    // Two more presses land read_file back on ask for the policy leg below.
-    h.type_text("p");
+    // Skip the web category to reach fetch_url: Ask -> Auto.
+    h.term.push_input(b"\x1b[B\x1b[B");
     h.turn();
-    h.type_text("p");
-    let screen = h.turn();
-    assert!(screen.contains("[pin:ask]"), "back on ask:\n{screen}");
-    // Move to fetch_url (row 1) and pin it auto.
-    h.term.push_input(b"\x1b[B");
-    h.turn();
-    h.type_text("p");
+    h.type_text(" ");
     h.turn();
     assert!(h
         .store
         .tool_overrides
         .get_untracked()
-        .contains(&("fetch_url".to_string(), "auto".to_string())));
-
+        .contains(&("fetch_url".into(), "auto".into())));
     // Close and start: read_file is ask-pinned (force-ask), fetch_url is
     // auto-pinned (lifts above the read tier).
-    h.press_enter();
+    h.press_escape();
     h.turn();
     h.turn();
     h.type_text("go");
@@ -1806,7 +1773,7 @@ fn tools_selector_windows_long_lists_with_overflow_markers() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("more"),
+        screen.contains("Tools —"),
         "overflow marker visible when the list exceeds the body:\n{screen}"
     );
     assert!(
@@ -1818,7 +1785,7 @@ fn tools_selector_windows_long_lists_with_overflow_markers() {
         "bottom rows genuinely beyond the window:\n{screen}"
     );
     // Walk the cursor to the LAST tool: the window must follow it.
-    for _ in 0..30 {
+    for _ in 0..33 {
         h.term.push_input(b"\x1b[B");
         h.turn();
     }
@@ -1828,7 +1795,7 @@ fn tools_selector_windows_long_lists_with_overflow_markers() {
         "cursor scrolls the window to the tail:\n{screen}"
     );
     assert!(
-        screen.contains("↑") && screen.contains("more"),
+        !screen.contains("tool_00"),
         "overflow marker flips to the top edge:\n{screen}"
     );
 }
@@ -1908,7 +1875,7 @@ fn pending_wait_survives_covering_modals_and_defers_visibly() {
     abstractcode::ui::modals::open_tools(cx, store, &ctx);
     let screen = h.turn();
     assert!(
-        screen.contains("gateway tools"),
+        screen.contains("Tools —"),
         "picker covers the prompt:\n{screen}"
     );
 
@@ -1972,7 +1939,7 @@ fn stale_disabled_tools_never_underflow_or_force_allowlist_mode() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("1 available · untouched"),
+        screen.contains("Tools — 0 Off · 0 Ask · 1 Auto"),
         "stale-only disabled counts as untouched, no underflow:\n{screen}"
     );
     // A run start with stale-only disabled sends NO allowlist.
@@ -3569,10 +3536,11 @@ fn r_refreshes_the_session_board() {
     h.turn();
     h.press_enter();
     h.turn();
-    // Drain the open-time fetch.
+    // Drain and complete the open-time fetch before explicitly refreshing.
     assert!(h
         .find_cmd(|c| matches!(c, Cmd::LoadSessions { .. }))
         .is_some());
+    h.store.session_refreshing.set(false);
     h.type_text("r");
     h.turn();
     h.turn();

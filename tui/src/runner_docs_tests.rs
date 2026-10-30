@@ -1,4 +1,5 @@
 use super::*;
+use crate::store::Store;
 use serde_json::{json, Value};
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -117,7 +118,7 @@ fn start(server: &Server, inspect: impl FnOnce(Store)) {
         ask(
             GatewayClient::new(&server.url, Some("fixture-token")),
             abstracttui::reactive::wake_handle(),
-            store,
+            store.docs_chat,
             "code-docs-assistant:test".into(),
             7,
             "How do I open Tools?".into(),

@@ -267,9 +267,9 @@ fn opened(id: &str) -> &'static [&'static str] {
         ui::chrome::ACT_GATEWAY => &["status · Esc closes"],
         ui::chrome::ACT_ACCOUNT => &["Gateway:"],
         ui::chrome::ACT_TOOLS => &["choices for this session"],
-        ui::chrome::ACT_DOCS => &["Docs assistant"],
+        ui::chrome::ACT_DOCS => &["Assistant · AbstractCode", "Docs", "This run"],
         ui::chrome::ACT_ABOUT => &["About AbstractCode"],
-        ui::chrome::ACT_MENU => &["Docs assistant"],
+        ui::chrome::ACT_MENU => &["Docs assistant", "Theme", "About AbstractCode"],
         ui::chrome::ACT_WORKSPACE => &["Workspace"],
         ui::chrome::ACT_SESSION => &["Conversations"],
         ui::chrome::ACT_THEME => &["☾ Dark"],
@@ -759,7 +759,7 @@ fn docs_drawer_keeps_its_question_and_never_steers_the_coding_session() {
     let screen = h.turn();
     assert!(screen.contains("How do I open Tools?"));
     let commands: Vec<_> = h._rx.try_iter().collect();
-    assert!(commands.iter().any(|c|matches!(c,Cmd::DocsAsk{question,session,..} if question=="How do I open Tools?" && session.starts_with("code-docs-assistant:"))));
+    assert!(commands.iter().any(|c|matches!(c,Cmd::AssistantAsk{question,session,..} if question=="How do I open Tools?" && session.starts_with("code-docs-assistant:"))));
     assert!(!commands
         .iter()
         .any(|c| matches!(c, Cmd::Start { .. } | Cmd::Steer { .. })));
@@ -842,4 +842,56 @@ fn only_a_genuine_human_wait_takes_priority_over_the_docs_drawer() {
         assert_eq!(h.store.docs_open.get_untracked(), expected_open, "{tool}");
     }
     assert!(h.ctx.modal_open());
+}
+
+#[test]
+fn run_questions_capture_loaded_context_without_steering_or_crossing_docs_history() {
+    let mut h = harness_sized(240, 40);
+    h.turn();
+    h.store.fold.update(|f| {
+        f.begin_run("active-root");
+        f.push_item(abstractcode::transcript::Item::User {
+            text: "Find the parser problem".into(),
+        });
+    });
+    h.store.phase.set(abstractcode::store::Phase::Running);
+    h.store.run_id.set("active-root".into());
+    h.store.docs_chat.update(|s| {
+        s.messages
+            .push(("assistant".into(), "Existing docs answer".into()))
+    });
+    h.turn();
+    click_action(&mut h, ui::chrome::ACT_DOCS);
+    let screen = h.turn();
+    let (y, line) = screen
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("This run"))
+        .unwrap();
+    click_cell(&mut h, line.find("This run").unwrap() as i32, y as i32);
+    let _ = h._rx.try_iter().count();
+    h.term.push_input(b"What is this run doing?\r");
+    h.turn();
+    let commands = h._rx.try_iter().collect::<Vec<_>>();
+    let request = commands
+        .iter()
+        .find_map(|c| match c {
+            Cmd::AssistantAsk {
+                scope: abstractcode::docs_chat::ChatScope::Run,
+                corpus: Some(text),
+                ..
+            } => Some(text),
+            _ => None,
+        })
+        .expect("run question request");
+    assert!(request.contains("active-root") && request.contains("Find the parser problem"));
+    assert!(request.contains("observed data") && request.contains("currently loaded"));
+    assert!(!commands.iter().any(|c| matches!(
+        c,
+        Cmd::Start { .. } | Cmd::Steer { .. } | Cmd::Resume { .. } | Cmd::Cancel { .. }
+    )));
+    assert_eq!(h.store.run_id.get_untracked(), "active-root");
+    assert!(h.store.run_chat.with_untracked(|s| s.busy));
+    assert!(!h.store.docs_chat.with_untracked(|s| s.busy));
+    assert_eq!(h.store.docs_chat.with_untracked(|s| s.messages.len()), 1);
 }
