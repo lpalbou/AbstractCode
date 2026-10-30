@@ -115,3 +115,8 @@ commands for each client. Security reports go through [`SECURITY.md`](SECURITY.m
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
+
+## For AI agents
+
+Register [skills/abstractcode/SKILL.md](skills/abstractcode/SKILL.md) with your agent
+host for connection, session, permissions, assistant and voice workflows.

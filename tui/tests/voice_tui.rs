@@ -1983,3 +1983,62 @@ fn a_saved_microphone_that_is_gone_records_from_the_system_default() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn held_voice_can_be_reviewed_and_edited_before_any_task_is_sent() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, _log, _) = fake_host(false);
+    let mut h = harness_with(&gw.url, true);
+    h.with_reply("ready");
+    with_workflow(&mut h);
+    h.type_text("/voice auto-send off\r");
+    h.until("review preference", |s| s.contains("review and edit"));
+    assert_eq!(
+        h.prefs.borrow().voice.as_ref().unwrap()["auto_send_voice"],
+        false
+    );
+    h.term.push_input(b"\x1b[32u");
+    h.until("review recording hint", |s| {
+        s.contains("release Space to review")
+    });
+    std::thread::sleep(Duration::from_millis(700));
+    h.term.push_input(b"\x1b[32;1:3u");
+    let store = h.store;
+    h.until("editable transcription", |s| {
+        s.contains("hello from the microphone")
+            && matches!(
+                store.voice.dictation.get_untracked(),
+                voice::Dictation::Idle
+            )
+    });
+    assert!(store.voice.hold_send.get_untracked().is_none());
+    assert!(
+        !h._rx.try_iter().any(|cmd| matches!(
+            cmd,
+            Cmd::Start { .. } | Cmd::Steer { .. } | Cmd::Resume { .. }
+        )),
+        "review must not run, steer or approve"
+    );
+    h.type_text(" corrected\r");
+    h.turn();
+    assert_eq!(
+        started_prompt(&h).as_deref(),
+        Some("hello from the microphone corrected")
+    );
+}
+
+#[test]
+fn voice_catalog_choice_retains_its_label_without_changing_its_identity() {
+    let choices = ui::voice_view::engine_choices(
+        &json!({"items":[{"id":"41576236cd5f4a9a8399f00000000000","label":"Sisko","provider":"piper","model":"voice-model","voice_kind":"profile"}]}),
+        true,
+        None,
+    );
+    let (label, selected) = &choices[1];
+    assert!(label.starts_with("Sisko"));
+    assert_eq!(selected.profile, "41576236cd5f4a9a8399f00000000000");
+    assert_eq!(selected.voice_label, "Sisko");
+    assert!(!selected.tts_override_summary().contains("41576236"));
+    assert!(!selected.tts_request().contains_key("voice_label"));
+}

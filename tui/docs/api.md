@@ -66,7 +66,7 @@ abstractcode --help | --version
 | --- | --- |
 | `/help` | Command + key reference modal |
 | `/new` | Fresh session (new durable id, cleared view) |
-| `/voice [read-aloud on\|off \| space on\|off]` | Voice settings (see [Voice](#voice-voice-speak-dictate)); `read-aloud on\|off` flips that switch without the screen; `space on\|off` turns hold-Space-to-talk on or off (on by default) |
+| `/voice [read-aloud on\|off \| auto-send on\|off \| space on\|off]` | Voice settings (see [Voice](#voice-voice-speak-dictate)); `read-aloud on\|off` flips that switch without the screen; `auto-send off` reviews held voice in the prompt; `auto-send on` sends it on release (default); `space on\|off` turns hold-Space-to-talk on or off (on by default) |
 | `/speak [stop]` | Read the latest reply aloud (`/say` too; `Ctrl+P`); `stop` stops it (so does `Esc`) |
 | `/dictate` | Record from this computer's microphone and put the transcript in the composer (`/mic` too; `Ctrl+R` starts, `Ctrl+R` again transcribes, `Esc` cancels) |
 | `/docs` | Open the Docs assistant drawer: a separate conversation grounded in the Gateway documentation corpus |
@@ -336,7 +336,9 @@ computer.
   cycle's words is read once; a restored history is never read.
 - **Hold Space to talk** (on by default; `/voice space off` turns it
   off): on an EMPTY prompt, hold `Space`, speak, release — the words are
-  transcribed and SENT, exactly as `Enter` would send them (a task when
+  transcribed and sent by default. Set **Voice messages → Review before sending**
+  in `/voice`, or use `/voice auto-send off`, to place them in the editable prompt
+  instead. With automatic sending on, they go exactly as `Enter` would (a task when
   idle, guidance while a run streams, a message under entity focus).
   Recording starts on the press itself (nothing is typed), and the row
   above the prompt shows a live histogram of your voice (its spectrum,
@@ -364,14 +366,17 @@ computer.
   first use; Code web and Observer use the same run), so the first message
   can be spoken. Only a session id outside the gateway's run-id alphabet
   still answers "Start a conversation to enable dictation."
-- **The screen** (`/voice`): Output device (this computer's speakers, from
+- **The screen** (`/voice`): Text → speech (choose a catalog voice, saved with its
+  human label for this app), Speech → text, Voice messages (Send automatically /
+  Review before sending; Ctrl+R always dictates into the draft), Output device (this computer's speakers, from
   AbstractVoice) + Test speaker (a short chime), Reply volume (`←`/`→`),
   Input device + Test microphone (3 s recorded with a live level meter,
   then played back), Spoken language (naming it skips detection:
   transcription is faster), Input level, `[x] Read aloud — Speak each new
   reply.`, Voice latency (`quality_preset`), and the last reply's
   `first audio 0.41 s · engine on cpu`. Saved in `prefs.json` under `voice`
-  with the kit's `VoiceClientPreferences` keys.
+  with the kit's `VoiceClientPreferences` keys. The client-only `voice_label` and
+  `auto_send_voice` fields are never sent as synthesis parameters.
   The devices are this client's settings: a saved speaker or microphone that
   is not connected (or no longer opens) is replaced by the system default
   automatically, and the screen says so (`System default · saved speaker not

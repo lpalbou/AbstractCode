@@ -14,15 +14,13 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 | State | Items | IDs |
 |---|---|---|
-| Planned | 5 | 0001, 0002, 0003, 0008, 0015 |
-| Proposed | 5 | 0004, 0005, 0006, 0010, 0011 |
-| Completed | 5 | 0007, 0009, 0012, 0013, 0014 |
+| Planned | 4 | 0001, 0002, 0003, 0008 |
+| Proposed | 6 | 0004, 0005, 0006, 0010, 0011, 0016 |
+| Completed | 6 | 0007, 0009, 0012, 0013, 0014, 0015 |
 | Deprecated | 0 | |
 | Recurrent | 0 | |
 
 ## Next Recommended Work
-
-
 
 - [0009](completed/0009_terminal_topbar_parity_and_modal_dismissal.md) completed 2026-10-30: top-bar parity, grouped Tools/Skills/MCP and protected outside-click dismissal; installed locally, no release.
 - [0010](proposed/0010_btw_contextual_side_question.md): contextual /btw side questions; [0011](proposed/0011_evaluate_existing_goal_workflow_surface.md): evaluate the existing workflow-owned /goal lane.
@@ -44,7 +42,7 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 ## Planned
 
-Voice preferences: [0015](planned/0015_voice_preferences_and_review.md).
+Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.md).
 
 | ID | Item | Area | Depends on |
 |---|---|---|---|
@@ -63,6 +61,7 @@ Voice preferences: [0015](planned/0015_voice_preferences_and_review.md).
 | 0005 | [Rendering and chrome](proposed/0005_tool_result_blocks_prompt_inset_clickable_chrome.md) | tui | JSON remains proposed; input inset completed in0012 |
 | 0006 | [Allow-all decision](proposed/0006_allow_all_enabled_tools_kept_pending_operator_decision.md) | web | Operator decision |
 | 0010 | [/btw side question](proposed/0010_btw_contextual_side_question.md) | tui + workflows | Context/authority design |
+| 0016 | [Optional companion avatar](proposed/0016_optional_session_companion_avatar.md) | tui + engine | Existing graphics, run QA and voice state; feasibility only |
 | 0011 | [Evaluate /goal](proposed/0011_evaluate_existing_goal_workflow_surface.md) | tui + workflows | Existing abstractcode.goal.v1 lane |
 
 ## Completed
@@ -71,12 +70,10 @@ Voice preferences: [0015](planned/0015_voice_preferences_and_review.md).
 |---|---|---|
 | 0007 | [Shared message footer](completed/0007_kit_message_footer_spec.md) | web |
 | 0009 | [Terminal top-bar parity](completed/0009_terminal_topbar_parity_and_modal_dismissal.md) — completed 2026-10-30, e4eedbe; full suite 1,155 passed, local Gateway/terminal checks passed | tui |
-
 | 0012 | [tool modes scrolling and composer inset](completed/0012_tool_modes_scrolling_and_composer_inset.md) — completed 2026-10-30; tested and installed locally, no release | tui + engine/console |
-
 | 0013 | [session list metadata refresh](completed/0013_session_list_metadata_refresh.md) — completed 2026-10-30; tested and installed locally, no release | tui + engine/console |
-
 | 0014 | [shared chat panel and run questions](completed/0014_shared_chat_panel_and_run_questions.md) — completed 2026-10-30; tested and installed locally, no release | tui + engine/console |
+| 0015 | [Voice preferences and review](completed/0015_voice_preferences_and_review.md) — completed 2026-10-30; 1162 tests passed and installed terminal settings verified | tui |
 
 ## Deprecated
 

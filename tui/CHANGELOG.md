@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Voice settings let held-Space messages be reviewed in the prompt before sending
+  (`/voice auto-send off`); automatic delivery remains the existing default.
+  Selected voices retain their human catalog label across restarts.
+
 - The Tools dialog fills most of the viewport and uses the engine List for mouse-wheel,
   keyboard and scrollbar navigation. Off/Ask/Auto is visible for each tool and category;
   Gateway-disabled tools remain unavailable. Selected details retain the Gateway text.

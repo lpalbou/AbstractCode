@@ -128,6 +128,11 @@ commands for each client. Security reports go through [`SECURITY.md`](SECURITY.m
 
 MIT — see [`LICENSE`](LICENSE).
 
+## For AI agents
+
+Register [skills/abstractcode/SKILL.md](skills/abstractcode/SKILL.md) with your agent
+host for connection, session, permissions, assistant and voice workflows.
+
 
 ==============================================================================
 # FILE: docs/getting-started.md
@@ -1465,6 +1470,8 @@ The terminal client keeps its reference documentation beside its source:
 [`../llms-full.txt`](../llms-full.txt) is the expanded aggregate, both for
 language models and tooling.
 
+- [Agent skill](../skills/abstractcode/SKILL.md): operate sessions, tool choices, the assistant drawer and voice.
+
 
 ==============================================================================
 # FILE: docs/web.md
@@ -2025,7 +2032,8 @@ Inside the app:
 - `Ctrl+P` reads the latest reply aloud, pauses and resumes it (`▶` at the
   top right of any message reads that one; streamed sentence by sentence from
   the gateway's voice route; `Esc` stops); on an empty prompt, HOLD
-  `Space`, speak and release to send what you said; `Ctrl+R` dictates into
+  `Space`, speak and release to send what you said (choose **Voice messages →
+  Review before sending** in `/voice` to edit it first); `Ctrl+R` dictates into
   the composer with the gateway's default speech-to-text route, `/voice` shows
   the engines ("Gateway default · supertonic / supertonic-3"), this
   computer's speaker and microphone (each with a Test) and **Read aloud**.
@@ -2490,7 +2498,7 @@ abstractcode --help | --version
 | --- | --- |
 | `/help` | Command + key reference modal |
 | `/new` | Fresh session (new durable id, cleared view) |
-| `/voice [read-aloud on\|off \| space on\|off]` | Voice settings (see [Voice](#voice-voice-speak-dictate)); `read-aloud on\|off` flips that switch without the screen; `space on\|off` turns hold-Space-to-talk on or off (on by default) |
+| `/voice [read-aloud on\|off \| auto-send on\|off \| space on\|off]` | Voice settings (see [Voice](#voice-voice-speak-dictate)); `read-aloud on\|off` flips that switch without the screen; `auto-send off` reviews held voice in the prompt; `auto-send on` sends it on release (default); `space on\|off` turns hold-Space-to-talk on or off (on by default) |
 | `/speak [stop]` | Read the latest reply aloud (`/say` too; `Ctrl+P`); `stop` stops it (so does `Esc`) |
 | `/dictate` | Record from this computer's microphone and put the transcript in the composer (`/mic` too; `Ctrl+R` starts, `Ctrl+R` again transcribes, `Esc` cancels) |
 | `/docs` | Open the Docs assistant drawer: a separate conversation grounded in the Gateway documentation corpus |
@@ -2760,7 +2768,9 @@ computer.
   cycle's words is read once; a restored history is never read.
 - **Hold Space to talk** (on by default; `/voice space off` turns it
   off): on an EMPTY prompt, hold `Space`, speak, release — the words are
-  transcribed and SENT, exactly as `Enter` would send them (a task when
+  transcribed and sent by default. Set **Voice messages → Review before sending**
+  in `/voice`, or use `/voice auto-send off`, to place them in the editable prompt
+  instead. With automatic sending on, they go exactly as `Enter` would (a task when
   idle, guidance while a run streams, a message under entity focus).
   Recording starts on the press itself (nothing is typed), and the row
   above the prompt shows a live histogram of your voice (its spectrum,
@@ -2788,14 +2798,17 @@ computer.
   first use; Code web and Observer use the same run), so the first message
   can be spoken. Only a session id outside the gateway's run-id alphabet
   still answers "Start a conversation to enable dictation."
-- **The screen** (`/voice`): Output device (this computer's speakers, from
+- **The screen** (`/voice`): Text → speech (choose a catalog voice, saved with its
+  human label for this app), Speech → text, Voice messages (Send automatically /
+  Review before sending; Ctrl+R always dictates into the draft), Output device (this computer's speakers, from
   AbstractVoice) + Test speaker (a short chime), Reply volume (`←`/`→`),
   Input device + Test microphone (3 s recorded with a live level meter,
   then played back), Spoken language (naming it skips detection:
   transcription is faster), Input level, `[x] Read aloud — Speak each new
   reply.`, Voice latency (`quality_preset`), and the last reply's
   `first audio 0.41 s · engine on cpu`. Saved in `prefs.json` under `voice`
-  with the kit's `VoiceClientPreferences` keys.
+  with the kit's `VoiceClientPreferences` keys. The client-only `voice_label` and
+  `auto_send_voice` fields are never sent as synthesis parameters.
   The devices are this client's settings: a saved speaker or microphone that
   is not connected (or no longer opens) is replaced by the system default
   automatically, and the screen says so (`System default · saved speaker not
@@ -5538,3 +5551,100 @@ AbstractCode is part of the Abstract* stack and relies on:
 - [AbstractUIC](https://github.com/lpalbou/abstractuic) components in the browser client
 
 Thank you to all contributors and the broader open-source community.
+
+
+==============================================================================
+# FILE: skills/abstractcode/SKILL.md
+==============================================================================
+
+---
+name: abstractcode
+description: Operate AbstractCode terminal and browser clients of AbstractGateway. Use for connecting, continuing durable coding sessions, inspecting tool permissions and workspaces, asking scoped assistant questions, or configuring terminal voice and dictation.
+license: MIT
+metadata:
+  package-version: "unreleased"
+---
+
+# Use AbstractCode
+
+AbstractCode has a Rust terminal client (`abstractcode`) and browser client
+(`@abstractframework/code`). The coding workflow executes on AbstractGateway;
+clients observe its ledger and submit commands. Closing a client does not cancel
+the durable run. There is no standalone local-agent mode.
+
+## Connect and inspect before running
+
+1. Install the released terminal with `cargo install abstractcode`, or follow
+   the repository's contributor instructions for unreleased source checkouts.
+2. Use `abstractcode --help` for flags and `abstractcode doctor` to diagnose
+   connectivity before starting work. `abstractcode --caps` reports rendering
+   capabilities. A reachable Gateway and its authentication are required.
+3. `abstractcode login` verifies and persists credentials. URL precedence is
+   explicit flag, environment alias, saved connection, local Gateway pointer,
+   then loopback default. Keep bearer tokens out of transcripts and source.
+4. Start `abstractcode`. Choose the workflow, model and permitted workspaces
+   before submitting work. A local client directory is not automatically a
+   remote Gateway workspace.
+5. Use `/sessions` to inspect or continue a durable conversation. Refresh keeps
+   the previous Gateway summary visible; partial lists and unknown metrics are
+   labelled. `/new` starts a separate session. Archive is reversible.
+
+## Controls and permissions
+
+The header's Tools menu groups Tools, Skills and MCP. `/tools` opens tool choices:
+Off excludes a tool, Ask requires approval and Auto skips its approval. Category
+choices affect currently listed eligible tools. Server-unavailable tools cannot
+be enabled from the client. Changes apply to future runs and do not rewrite an
+active run. Keep the user's approved scope; do not choose Auto just to bypass a
+pause. Workflow and Gateway ceilings still apply. `/permissions` opens the
+existing broader approval controls; `/workspace` inspects workspace policy.
+
+`/settings`, `/workflow`, `/model` and `/help` expose the other supported panels.
+Outside clicks dismiss ordinary modals; approval steps remain protected. Wheel
+scrolling, arrow keys and explicit buttons are available in the Tools list.
+
+## Questions beside the coding task
+
+The assistant drawer has independent Docs and This run scopes. Docs answers from
+AbstractCode documentation. This run receives an immutable snapshot of the
+currently loaded conversation when each question is sent. It cannot inspect
+newer/unloaded records or steer, approve or execute tools on the coding run.
+These scopes preserve separate drafts/history. `/docs` opens Docs directly.
+Use the coding composer for task instructions, not a side question that should
+have no execution authority. There is no `/btw` command in this implementation.
+
+## Voice
+
+`/voice` configures the speaking voice from the Gateway catalog, read-aloud,
+recognition route/language and this computer's microphone/speaker. It saves
+client preferences, not Gateway-wide defaults. Audio recording/playback uses
+AbstractVoice on this computer; synthesis and transcription use Gateway routes.
+
+- Ctrl+P reads/pauses/resumes the latest answer; Esc stops speech.
+- Read aloud narrates new reasoning-cycle prose and the answer in order, not
+  restored history or the reasoning channel.
+- On an empty prompt, hold Space to record a voice message and release to send
+  automatically (the existing default). `/voice auto-send off` or Voice messages
+  → Review before sending puts its transcription into the editable prompt instead.
+- Ctrl+R is dictation into the prompt; it never directly sends a message.
+- `/voice space off` disables the held-Space gesture; ordinary typed spaces remain
+  text. Taps are discarded. Recording/transcription failures show an error rather
+  than sending an empty request.
+
+## Automation and limits
+
+`abstractcode exec "<prompt>" [OPTIONS]` is the headless one-shot surface. It may
+execute tools on the Gateway: use it only within the user's authorized scope.
+Choose a workflow explicitly when no default exists. Exit codes are 0 completed,
+1 failed, 2 usage/configuration, 124 timeout, 130 cancelled. See `--help` and the
+CLI reference for workspace, permissions, timeout and streaming options.
+
+Client tool choices are local preferences; they are not a shared policy record.
+This run questions report only observed context and may require follow-up after
+loading more history. Terminal graphics depend on capabilities; voice requires
+an installed host audio backend and configured Gateway routes. Windows end-to-end
+support is not verified in the terminal reference. No companion/avatar observer
+is enabled; that design remains proposed.
+
+References: [terminal API](../../tui/docs/api.md), [setup](../../docs/getting-started.md),
+[architecture](../../docs/architecture.md), [troubleshooting](../../tui/docs/troubleshooting.md).

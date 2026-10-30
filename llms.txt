@@ -65,3 +65,7 @@ Ground rules for reading this repository:
 - [Code of conduct](CODE_OF_CONDUCT.md): contributor behavior expectations
 - [Acknowledgements](ACKNOWLEDGEMENTS.md): dependencies and upstream lineage
 - [License](LICENSE): MIT
+
+## Agent guide
+
+- [AbstractCode skill](skills/abstractcode/SKILL.md): connection, sessions, tool modes, scoped questions and terminal voice.

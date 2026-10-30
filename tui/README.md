@@ -235,7 +235,8 @@ Inside the app:
 - `Ctrl+P` reads the latest reply aloud, pauses and resumes it (`▶` at the
   top right of any message reads that one; streamed sentence by sentence from
   the gateway's voice route; `Esc` stops); on an empty prompt, HOLD
-  `Space`, speak and release to send what you said; `Ctrl+R` dictates into
+  `Space`, speak and release to send what you said (choose **Voice messages →
+  Review before sending** in `/voice` to edit it first); `Ctrl+R` dictates into
   the composer with the gateway's default speech-to-text route, `/voice` shows
   the engines ("Gateway default · supertonic / supertonic-3"), this
   computer's speaker and microphone (each with a Test) and **Read aloud**.

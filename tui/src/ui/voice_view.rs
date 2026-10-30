@@ -316,8 +316,8 @@ pub fn toggle_dictation(store: Store, ctx: &UiCtx) {
     }
 }
 
-/// Hold Space (`ui::push_to_talk`): start a recording whose transcript is
-/// SENT. False when it could not start (another dictation is running, or
+/// Hold Space (`ui::push_to_talk`): record a voice message. Its delivery
+/// follows the review preference. False when it could not start (another dictation is running, or
 /// no session) — the caller forgets the hold.
 pub fn start_hold(store: Store, ctx: &UiCtx) -> bool {
     match store.voice.dictation.get_untracked() {
@@ -405,6 +405,8 @@ fn start_dictation(store: Store, ctx: &UiCtx, hold: bool) -> bool {
     });
     store.voice.level.set(0.0);
     let p = prefs(ctx);
+    let review = !hold || p.review_voice;
+    store.voice.review_transcript.set(review);
     let gw = VoiceGateway::new(&ctx.client);
     let wake = abstracttui::reactive::wake_handle();
     // The route a transcription will use, read on the UI thread now and
@@ -435,7 +437,7 @@ fn start_dictation(store: Store, ctx: &UiCtx, hold: bool) -> bool {
                     post_error(store, e);
                 }
                 if let Some(t) = text {
-                    if hold {
+                    if !review {
                         store.voice.hold_send.set(Some(t));
                     } else {
                         store.voice.transcript.set(Some(t));
@@ -461,7 +463,7 @@ fn start_dictation(store: Store, ctx: &UiCtx, hold: bool) -> bool {
         }
         if rec.duration_ms < voice::MIN_RECORDING_MS {
             let msg = if hold {
-                "Too short to hear: hold Space while you speak, release to send."
+                "Too short to hear: hold Space while you speak, then release."
             } else {
                 "The recording was too short. Press Ctrl+R, speak, then press Ctrl+R again to transcribe."
             };
@@ -622,11 +624,13 @@ pub fn status_text(store: Store, now: Instant) -> Option<String> {
         }
         Dictation::Transcribing { since, route } => {
             let line = transcribing_line(since, now, &route);
-            return Some(if store.voice.hold.get() {
-                format!("{line} · sends when ready")
-            } else {
-                line
-            });
+            return Some(
+                if store.voice.hold.get() && !store.voice.review_transcript.get() {
+                    format!("{line} · sends when ready")
+                } else {
+                    line
+                },
+            );
         }
         Dictation::Idle => {}
     }
@@ -661,7 +665,11 @@ pub fn recording_parts(store: Store, now: Instant) -> Option<(String, &'static s
     Some(if store.voice.hold.get() {
         (
             format!("● Listening… {secs}"),
-            "release Space to send · Esc cancels",
+            if store.voice.review_transcript.get() {
+                "release Space to review · Esc cancels"
+            } else {
+                "release Space to send · Esc cancels"
+            },
         )
     } else {
         (
@@ -795,6 +803,16 @@ pub fn command_voice(cx: Scope, store: Store, ctx: &UiCtx, arg: Option<String>) 
                 if p.read_aloud { "[x]" } else { "[ ]" }
             ));
         }
+        ["auto-send", v] if matches!(*v, "on" | "off") => {
+            let mut p = prefs(ctx);
+            p.review_voice = *v == "off";
+            save_prefs(store, ctx, &p);
+            store.notify(if p.review_voice {
+                "Voice messages: review and edit in the prompt before sending."
+            } else {
+                "Voice messages: send automatically when Space is released."
+            });
+        }
         ["space", v] | ["hold-space", v] | ["space-to-talk", v] if matches!(*v, "on" | "off") => {
             let mut p = prefs(ctx);
             p.space_to_talk_off = *v == "off";
@@ -802,12 +820,12 @@ pub fn command_voice(cx: Scope, store: Store, ctx: &UiCtx, arg: Option<String>) 
             store.notify(if p.space_to_talk_off {
                 "Hold Space to talk: off (Ctrl+R still dictates into the draft)"
             } else {
-                "Hold Space to talk: on — on an empty prompt, hold Space, speak, release to send"
+                "Hold Space to talk: on — release to transcribe; Voice messages chooses review or send"
             });
         }
         _ => post_error(
             store,
-            format!("/voice takes no argument, read-aloud on|off, or space on|off (got {arg:?})."),
+            format!("/voice takes no argument, read-aloud on|off, auto-send on|off, or space on|off (got {arg:?})."),
         ),
     }
 }
@@ -840,6 +858,7 @@ enum Row {
     Language,
     Gain,
     ReadAloud,
+    VoiceMessages,
     Latency,
 }
 
@@ -983,6 +1002,18 @@ fn settings_rows(store: Store, p: &VoicePrefs) -> Vec<(String, Row)> {
         label("Input level", format!("{}  ←/→", percent(p.gain()))),
         Row::Gain,
     ));
+    rows.push((
+        label(
+            "Voice messages",
+            if p.review_voice {
+                "Review before sending"
+            } else {
+                "Send automatically"
+            }
+            .into(),
+        ),
+        Row::VoiceMessages,
+    ));
     rows.push(("Replies".into(), Row::None));
     rows.push((
         format!(
@@ -1013,6 +1044,9 @@ fn row_help(row: Row) -> &'static str {
         Row::Language => "Naming it skips detection: transcription is faster.",
         Row::Latency => "Trades quality for a faster first word.",
         Row::ReadAloud => "Enter switches it",
+        Row::VoiceMessages => {
+            "Enter switches held-Space messages; Ctrl+R always dictates into the draft."
+        }
         Row::TestSpeaker | Row::TestMic | Row::Input => "Enter",
         Row::None => "",
     }
@@ -1127,6 +1161,10 @@ pub fn open_voice_settings(cx: Scope, store: Store, ctx: &UiCtx) {
 fn activate(cx: Scope, store: Store, ctx: &UiCtx, row: Row) {
     let mut p = prefs(ctx);
     match row {
+        Row::VoiceMessages => {
+            p.review_voice = !p.review_voice;
+            save_prefs(store, ctx, &p);
+        }
         Row::ReadAloud => {
             p.read_aloud = !p.read_aloud;
             save_prefs(store, ctx, &p);
@@ -1440,6 +1478,7 @@ pub fn engine_choices(
                 model,
                 ..Default::default()
             };
+            p.voice_label = label.clone();
             if profile {
                 p.profile = id;
             } else {
@@ -1565,6 +1604,7 @@ fn show_engine_picker(cx: Scope, store: Store, ctx: &UiCtx, tts: bool, catalog: 
                         p.provider = c.provider.clone();
                         p.model = c.model.clone();
                         p.voice = c.voice.clone();
+                        p.voice_label = c.voice_label.clone();
                         p.profile = c.profile.clone();
                     } else {
                         p.stt_provider = c.stt_provider.clone();
