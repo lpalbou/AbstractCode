@@ -9,7 +9,7 @@
 ## Summary and current code reality
 
 The operator requests a larger Skills modal with better readability and working
-mouse-wheel scrolling. `open_skills` currently uses an84×24 dialog and `draw_rows`,
+mouse-wheel scrolling. `open_skills` currently uses an 84×24 dialog and `draw_rows`,
 a custom cursor-windowed painter with no pointer handling. It concatenates names,
 trust and descriptions into a single truncated line, with selected skills entirely
 accent-coloured. The engine List already provides wheel scrolling, scrollbar drag,

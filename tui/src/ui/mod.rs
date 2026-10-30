@@ -29,6 +29,7 @@ pub mod queue_modal;
 pub mod quit;
 pub mod rail_view;
 pub mod schedule_view;
+pub mod skills_view;
 pub mod splash;
 pub mod stance;
 pub mod theme_menu;

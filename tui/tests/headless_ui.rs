@@ -2677,7 +2677,7 @@ fn skills_selector_attaches_and_start_carries_skills() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("2 on the shelf · 0 attached"),
+        screen.contains("2 available · 0 attached"),
         "skills modal:\n{screen}"
     );
     h.type_text(" "); // attach coredoc
@@ -2709,6 +2709,257 @@ fn skills_selector_attaches_and_start_carries_skills() {
             assert_eq!(opts.skills, vec!["coredoc".to_string()]);
         }
         other => panic!("expected Cmd::Start, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+// Mouse, layout and identity regressions for the actual Skills modal.
+mod skills_picker_readability {
+    use super::*;
+    use abstractcode::store::SkillInfo;
+
+    fn catalog(n: usize) -> Vec<SkillInfo> {
+        (0..n).map(|ix| SkillInfo {
+            name: format!("skill-{ix:02}"),
+            description: format!("Full description for skill-{ix:02}. Only the selected description belongs below the list."),
+            trust: "adopted".into(),
+            blocked: false,
+        }).collect()
+    }
+    fn open(h: &mut Harness, n: usize) -> String {
+        h.turn();
+        h.store.skills_catalog.set(catalog(n));
+        ui::modals::open_skills(h.cx, h.store, &h.ctx);
+        h.turn();
+        h.turn()
+    }
+    fn point(screen: &str, needle: &str) -> (usize, usize) {
+        screen
+            .lines()
+            .enumerate()
+            .find_map(|(y, line)| line.find(needle).map(|ix| (line[..ix].chars().count(), y)))
+            .unwrap_or_else(|| panic!("Missing {needle:?}:\n{screen}"))
+    }
+    fn mouse(h: &mut Harness, code: u8, x: usize, y: usize, release: bool) -> String {
+        h.term.push_input(
+            format!(
+                "\x1b[<{code};{};{}{}",
+                x + 1,
+                y + 1,
+                if release { 'm' } else { 'M' }
+            )
+            .as_bytes(),
+        );
+        h.turn()
+    }
+    fn rows(screen: &str) -> Vec<String> {
+        screen
+            .lines()
+            .filter(|line| {
+                line.contains("[ ] skill-")
+                    || line.contains("[x] skill-")
+                    || line.contains("[-] skill-")
+            })
+            .map(|line| line.trim().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn skills_picker_larger_layout_and_selected_description_in_both_themes() {
+        for theme in ["abstract-dark", "abstract-light"] {
+            let mut h = harness_sized(Size::new(180, 60));
+            abstracttui::app::set_theme_by_id(theme);
+            let screen = open(&mut h, 40);
+            assert!(rows(&screen).len() >= 25, "larger list: {screen}");
+            let (x, y) = point(&screen, "[ ] skill-00");
+            let (action_x, _) = point(&screen, "Attach");
+            assert!(
+                action_x - x > 100,
+                "wider than the old84column modal: {screen}"
+            );
+            assert!(screen.contains("Full description for skill-00"), "{screen}");
+            assert!(
+                !screen.contains("Full description for skill-01"),
+                "{screen}"
+            );
+            assert!(
+                rows(&screen)
+                    .iter()
+                    .all(|line| !line.contains("description") && !line.contains("adopted")),
+                "{screen}"
+            );
+            assert!(
+                screen.contains("wheel scroll") && screen.contains("Enter/Esc close"),
+                "{screen}"
+            );
+            mouse(&mut h, 0, x + 5, y + 1, false); // browsing selects, never attaches
+            mouse(&mut h, 0, x + 5, y + 1, true);
+            assert!(h.store.selected_skills.get_untracked().is_empty());
+            if let Some(dir) = std::env::var_os("SKILLS_PICKER_SHOTS") {
+                let dir = std::path::PathBuf::from(dir);
+                std::fs::create_dir_all(&dir).unwrap();
+                h.term
+                    .screen()
+                    .screenshot()
+                    .write_svg(dir.join(format!("skills-{theme}.svg")))
+                    .unwrap();
+                h.term
+                    .screen()
+                    .screenshot()
+                    .write_text(dir.join(format!("skills-{theme}.txt")))
+                    .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn skills_picker_wheel_scrolls_both_ways_without_toggling_or_prior_hover() {
+        let mut h = harness_sized(Size::new(80, 24));
+        let screen = open(&mut h, 48);
+        let (x, y) = point(&screen, "[ ] skill-00");
+        let before = rows(&screen);
+        assert!(before.len() >= 5, "{screen}");
+        let screen = mouse(&mut h, 65, x + 5, y, false);
+        assert!(
+            rows(&screen).first().unwrap().contains("skill-03"),
+            "wheel moved the list: {screen}"
+        );
+        for _ in 0..25 {
+            mouse(&mut h, 65, x + 5, y, false);
+        }
+        let screen = h.turn();
+        assert!(
+            rows(&screen).last().unwrap().contains("skill-47"),
+            "tail reachable: {screen}"
+        );
+        assert!(!rows(&screen).first().unwrap().contains("skill-00"));
+        assert!(h.store.selected_skills.get_untracked().is_empty());
+        assert!(h.prefs.borrow().skills.is_empty());
+        for _ in 0..25 {
+            mouse(&mut h, 64, x + 5, y, false);
+        }
+        let screen = h.turn();
+        assert!(
+            rows(&screen).first().unwrap().contains("skill-00"),
+            "back to top: {screen}"
+        );
+        assert_eq!(before, rows(&screen));
+        assert!(
+            screen.contains("Enter/Esc close"),
+            "narrow footer legible: {screen}"
+        );
+    }
+
+    #[test]
+    fn skills_picker_scrollbar_pointer_actions_and_blocked_skill() {
+        let mut h = harness_sized(Size::new(100, 30));
+        let screen = open(&mut h, 50);
+        let (_, y) = point(&screen, "[ ] skill-00");
+        let list_height = rows(&screen).len();
+        // The shared List reserves its last column for the scrollbar.
+        let bar_x = screen.lines().nth(y).unwrap().trim_end().chars().count() - 1;
+        mouse(&mut h, 0, bar_x, y, false);
+        mouse(&mut h, 32, bar_x, y + list_height - 1, false);
+        mouse(&mut h, 0, bar_x, y + list_height - 1, true);
+        let screen = h.turn();
+        assert!(
+            rows(&screen).last().unwrap().contains("skill-49"),
+            "thumb drag reaches end: {screen}"
+        );
+        let (body_x, body_y) = point(&screen, "[ ] skill-49");
+        mouse(&mut h, 0, body_x + 5, body_y, false);
+        mouse(&mut h, 0, body_x + 5, body_y, true);
+        assert!(
+            h.store.selected_skills.get_untracked().is_empty(),
+            "body click only selects"
+        );
+        let screen = h.turn();
+        let line = screen.lines().nth(body_y).unwrap();
+        let action_x = line[..line.rfind("Attach").unwrap()].chars().count();
+        mouse(&mut h, 0, action_x, body_y, false);
+        let screen = mouse(&mut h, 0, action_x, body_y, true);
+        assert_eq!(
+            h.store.selected_skills.get_untracked(),
+            vec!["skill-49".to_string()]
+        );
+        assert_eq!(h.prefs.borrow().skills, vec!["skill-49".to_string()]);
+        assert!(screen.contains("[x] skill-49"), "{screen}");
+        h.store.skills_catalog.update(|v| v[49].blocked = true);
+        h.store.selected_skills.set(Vec::new());
+        h.turn();
+        h.type_text(" ");
+        h.turn();
+        assert!(h.store.selected_skills.get_untracked().is_empty());
+        assert!(h
+            .store
+            .notices
+            .get_untracked()
+            .iter()
+            .any(|s| s.contains("trust policy")));
+        assert!(h.turn().contains("Blocked by the Gateway"));
+    }
+
+    #[test]
+    fn skills_picker_paging_stable_identity_and_description_scroll() {
+        let mut h = harness_sized(Size::new(80, 24));
+        open(&mut h, 48);
+        h.term.push_input(b"\x1b[6~");
+        h.turn(); // PageDown
+        let screen = h.turn();
+        assert!(
+            !screen.contains("Full description for skill-00"),
+            "paging selects a later skill: {screen}"
+        );
+        h.term.push_input(b"\x1b[F");
+        h.turn(); // End
+        assert!(h.turn().contains("Full description for skill-47"));
+        h.store.skills_catalog.update(|v| {
+            v.insert(
+                0,
+                SkillInfo {
+                    name: "inserted".into(),
+                    ..v[0].clone()
+                },
+            )
+        });
+        h.turn();
+        h.type_text(" ");
+        h.turn();
+        assert_eq!(
+            h.store.selected_skills.get_untracked(),
+            vec!["skill-47".to_string()]
+        );
+        // A long selected description scrolls independently, without moving or
+        // attaching list entries, even when the list retains keyboard focus.
+        h.store.skills_catalog.update(|v| {
+            v.last_mut().unwrap().description =
+                (0..24).map(|i| format!("Detail line{i:02}.\n")).collect()
+        });
+        let screen = h.turn();
+        let (dx, dy) = point(&screen, "Detail line00");
+        let before = rows(&screen);
+        for _ in 0..20 {
+            mouse(&mut h, 65, dx + 3, dy, false);
+        }
+        let screen = h.turn();
+        assert!(
+            screen.contains("Detail line23"),
+            "description tail readable: {screen}"
+        );
+        assert_eq!(before, rows(&screen));
+        h.term.push_input(b"\x1b[H");
+        h.turn(); // Home
+        assert!(h.turn().contains("Full description for skill-00"));
+        h.press_enter();
+        h.turn();
+        h.turn();
+        assert!(
+            !h.turn().contains("gateway skills —"),
+            "Enter closes, never toggles"
+        );
+        assert_eq!(
+            h.store.selected_skills.get_untracked(),
+            vec!["skill-47".to_string()]
+        );
     }
 }
 

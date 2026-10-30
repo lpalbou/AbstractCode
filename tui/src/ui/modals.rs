@@ -1845,7 +1845,7 @@ fn open_model_stage(cx: Scope, store: Store, ctx: &UiCtx, provider: crate::store
 }
 
 // ---------------------------------------------------------------------------
-// Windowed selectable rows (tools / skills / sessions / mcp)
+// Legacy windowed rows (new interactive pickers use the engine List)
 // ---------------------------------------------------------------------------
 //
 // A hand-rolled row surface instead of `List`/`Scroll`: multi-select needs
@@ -2596,138 +2596,7 @@ fn wrap_words(text: &str, width: usize) -> Vec<String> {
 
 /// `/skills` — attach gateway skills to every run (`input_data.skills`).
 pub fn open_skills(cx: Scope, store: Store, ctx: &UiCtx) {
-    let ctx2 = ctx.clone();
-    let size = modal_size(84, 24);
-    ctx.open_modal(cx, size, move |mcx| {
-        let t = abstracttui::app::current_theme().tokens;
-        let cursor = mcx.signal(0usize);
-
-        let toggle = {
-            let ctx = ctx2.clone();
-            move || {
-                let catalog = store.skills_catalog.get_untracked();
-                let ix = cursor.get_untracked();
-                let Some(skill) = catalog.get(ix) else { return };
-                if skill.blocked {
-                    store.notify(format!(
-                        "skill {} is blocked by the gateway's trust policy",
-                        skill.name
-                    ));
-                    return;
-                }
-                let mut selected = store.selected_skills.get_untracked();
-                if let Some(pos) = selected.iter().position(|s| *s == skill.name) {
-                    selected.remove(pos);
-                } else {
-                    selected.push(skill.name.clone());
-                }
-                store.selected_skills.set(selected.clone());
-                crate::ui::persist_prefs(&ctx, |p| p.skills = selected.clone());
-            }
-        };
-        let move_cursor = move |delta: i64| {
-            let n = store.skills_catalog.with_untracked(|c| c.len());
-            if n == 0 {
-                return;
-            }
-            cursor.update(|c| {
-                let cur = *c as i64 + delta;
-                *c = cur.clamp(0, n as i64 - 1) as usize;
-            });
-        };
-
-        Element::new()
-            .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
-            .focusable()
-            .autofocus()
-            .shortcut(KeyChord::plain(Key::Escape), {
-                let ctx = ctx2.clone();
-                move |_| ctx.close_modal()
-            })
-            .shortcut(KeyChord::plain(Key::Enter), {
-                let ctx = ctx2.clone();
-                move |_| ctx.close_modal()
-            })
-            .shortcut(KeyChord::plain(Key::Up), move |_| move_cursor(-1))
-            .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
-            .shortcut(KeyChord::plain(Key::Char(' ')), move |_| toggle())
-            .child(dyn_view(LayoutStyle::line(1), move || {
-                let t2 = abstracttui::app::current_theme().tokens;
-                let n = store.skills_catalog.with(|c| c.len());
-                let err = store.skills_error.get();
-                let on = store.selected_skills.with(|s| s.len());
-                let loaded = store.skills_shelf.with(Option::is_some);
-                let title = if !err.is_empty() {
-                    format!("gateway skills — discovery failed: {err}")
-                } else if n == 0 && !loaded {
-                    "gateway skills — loading…".to_string()
-                } else if n == 0 {
-                    "gateway skills — the shelf is empty".to_string()
-                } else {
-                    format!("gateway skills — {n} on the shelf · {on} attached to your runs")
-                };
-                title_row(&t2, title)
-            }))
-            .child(dyn_view(
-                LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)),
-                move || {
-                    let catalog = store.skills_catalog.get();
-                    let selected = store.selected_skills.get();
-                    let cur = cursor.get();
-                    let mut rows = Vec::new();
-                    let mut selectable = Vec::new();
-                    for skill in &catalog {
-                        let on = selected.contains(&skill.name);
-                        let trust = skill.trust.clone();
-                        selectable.push(rows.len());
-                        rows.push(if skill.blocked {
-                            RowSpec {
-                                text: format!("{} — blocked by the gateway", skill.name),
-                                header: false,
-                                checked: Some(Mark::Unavailable),
-                                dim: true,
-                            }
-                        } else {
-                            RowSpec {
-                                text: format!("{} ({trust})  {}", skill.name, skill.description),
-                                header: false,
-                                checked: Some(Mark::switch(on)),
-                                dim: false,
-                            }
-                        });
-                    }
-                    if rows.is_empty() {
-                        // §X: the gateway's own reason, never a bare "no
-                        // skills" — where the shelf is, how it was chosen,
-                        // and every warning verbatim.
-                        let lines = match store.skills_shelf.get() {
-                            Some(shelf) => empty_shelf_lines(&shelf),
-                            None => vec!["waiting for the gateway's skill shelf…".to_string()],
-                        };
-                        for text in lines {
-                            rows.push(RowSpec {
-                                text,
-                                header: false,
-                                checked: None,
-                                dim: true,
-                            });
-                        }
-                    }
-                    // Clamp the anchor if the shelf shrank mid-modal.
-                    let cur = cur.min(selectable.len().saturating_sub(1));
-                    draw_rows(rows, cur, selectable)
-                },
-            ))
-            .child(hint_row(
-                &t,
-                "↑↓ move · space switch (attached to your runs) · Enter/Esc closes".into(),
-            ))
-            .child(hint_row(
-                &t,
-                "attached skills ride each run as input_data.skills (resolved gateway-side)".into(),
-            ))
-            .build()
-    });
+    super::skills_view::open(cx, store, ctx);
 }
 
 /// One row of the `/sessions` board — a session the GATEWAY lists, with

@@ -392,7 +392,7 @@ fn skills_rows_are_switches_and_a_blocked_skill_says_why() {
     assert!(screen.contains("[x] coredoc"), "{screen}");
     assert!(screen.contains("[ ] release"), "{screen}");
     assert!(
-        screen.contains("[-] sketchy — blocked by the gateway"),
+        screen.contains("[-] sketchy") && screen.contains("Blocked"),
         "{screen}"
     );
     assert_eq!(h.style_at("[x] coredoc"), (true, accent()));
