@@ -294,14 +294,51 @@ fn normalized(text: &str) -> String {
         .collect()
 }
 fn is_no_advice(text: &str) -> bool {
-    // Grounded QA may decorate a marker with Markdown or a source footer.
-    // A marker on the first nonempty line still means no user-facing comment.
-    text.lines()
-        .find(|line| !line.trim().is_empty())
-        .is_some_and(|line| {
-            line.trim_matches(|c: char| c.is_whitespace() || matches!(c, '`' | '*' | '.' | '"'))
-                .eq_ignore_ascii_case(NO_ADVICE)
-        })
+    // docs-qa asks for section citations without prescribing their syntax.
+    // Accept a leading marker plus citation groups, never surrounding prose.
+    let Some(line) = text.lines().find(|line| !line.trim().is_empty()) else {
+        return false;
+    };
+    let decoration = |c: char| c.is_whitespace() || matches!(c, '`' | '*' | '_' | '.' | '"' | ':');
+    let line = line.trim_start_matches(decoration);
+    let Some(prefix) = line.get(..NO_ADVICE.len()) else {
+        return false;
+    };
+    if !prefix.eq_ignore_ascii_case(NO_ADVICE) {
+        return false;
+    }
+    let mut tail = line[NO_ADVICE.len()..].trim_matches(decoration);
+    while !tail.is_empty() {
+        let open = tail.chars().next().unwrap();
+        let close = match open {
+            '(' => ')',
+            '[' => ']',
+            _ => return false,
+        };
+        let mut depth = 0usize;
+        let mut end = None;
+        for (at, c) in tail.char_indices() {
+            if c == open {
+                depth += 1;
+            }
+            if c == close {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(at + c.len_utf8());
+                    break;
+                }
+            }
+        }
+        let Some(end) = end else { return false };
+        if tail[open.len_utf8()..end - close.len_utf8()]
+            .trim()
+            .is_empty()
+        {
+            return false;
+        }
+        tail = tail[end..].trim_matches(decoration);
+    }
+    true
 }
 
 #[cfg(test)]
@@ -323,6 +360,29 @@ mod tests {
         g.observe(r("one", 0), true, true);
         g
     }
+    #[test]
+    fn no_advice_accepts_source_decorations_but_not_real_comment_prose() {
+        for marker in [
+            "NO_ADVICE (Current conversation snapshot)",
+            "**NO_ADVICE** [source]",
+            "`NO_ADVICE` [1](https://example.invalid/reference).",
+            "no_advice (Conversation (recent)) [2]",
+            "NO_ADVICE\n\nSources: Current conversation snapshot",
+        ] {
+            assert!(is_no_advice(marker), "{marker}");
+        }
+        for comment in [
+            "The run returned NO_ADVICE but should have answered.",
+            "NO_ADVICE means no suggestion, but inspect the parser.",
+            "NO_ADVICE (Current conversation snapshot) Check the parser.",
+            "NO_ADVICES [source]",
+            "NO_ADVICE [unfinished",
+            "NO_ADVICE []",
+        ] {
+            assert!(!is_no_advice(comment), "{comment}");
+        }
+    }
+
     #[test]
     fn defaults_are_opt_in_and_round_trip_unknown_fields() {
         let original = json!({"enabled":true,"future":"keep","voice":{"provider":"piper","model":"m","voice":"v","future_voice":"keep"}});
