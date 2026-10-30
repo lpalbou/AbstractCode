@@ -14,13 +14,15 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 | State | Items | IDs |
 |---|---|---|
-| Planned | 4 | 0001, 0002, 0003, 0008 |
+| Planned | 5 | 0001, 0002, 0003, 0008, 0023 |
 | Proposed | 8 | 0004, 0005, 0006, 0010, 0011, 0018, 0019, 0020 |
 | Completed | 10 | 0007, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0021, 0022 |
 | Deprecated | 0 | |
 | Recurrent | 0 | |
 
 ## Next Recommended Work
+
+- [0023](planned/0023_companion_placement_motion_and_separate_documentation.md): configurable top/bottom placement, expressive motion and distinct Documentation/Companion entry points (operator request 2026-10-30).
 
 - [0022](completed/0022_companion_floating_placement_and_distinct_activity.md) completed 2026-10-30: centred floating companion, full-size artwork and distinct listening/waiting/working poses; independently reviewed and installed locally.
 
@@ -54,6 +56,7 @@ Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.
 | 0002 | [TUI session fold defects](planned/0002_tui_session_fold_defects.md) | tui | child runs counted as turns; id-less runs; string timestamp ordering; first run by page order — align with the web fold |
 | 0003 | [Mermaid diagrams in the TUI transcript](planned/0003_mermaid_diagrams_in_the_transcript.md) | tui + abstracttui | an abstracttui release adding a `Feed` fence hook (+ `abstracttui-mermaid` multi-diagram cache); operator to lift the read-only rule on abstracttui |
 | 0008 | [Read aloud and export](planned/0008_adopt_panel_chat_read_aloud_export.md) | web | Shared panel-chat actions |
+| 0023 | [Companion placement, motion and separate docs](planned/0023_companion_placement_motion_and_separate_documentation.md) | tui + engine | Existing floating layout and side-chat components |
 
 ## Proposed
 
