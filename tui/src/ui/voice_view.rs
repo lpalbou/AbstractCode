@@ -28,6 +28,7 @@ use serde_json::{json, Value};
 
 use super::modals::{modal_size, open_picker, Picker};
 use super::UiCtx;
+use crate::docs_chat::ChatScope;
 use crate::store::{Phase, Store};
 use crate::transcript::Item;
 use crate::voice::{
@@ -38,6 +39,47 @@ use crate::voice_host;
 
 /// The dictation allowed to deliver its text (0 = none; Esc cancels).
 static DICTATION: AtomicU64 = AtomicU64::new(0);
+/// The speech operation still allowed to update the UI after a worker posts.
+static SPEECH: AtomicU64 = AtomicU64::new(0);
+#[derive(Clone)]
+struct AssistantTarget {
+    scope: ChatScope,
+    session: String,
+    conversation: String,
+}
+impl AssistantTarget {
+    fn current(&self, store: Store) -> bool {
+        store.session_id.get_untracked() == self.session
+            && self
+                .scope
+                .chat(store)
+                .with_untracked(|s| s.session_id == self.conversation)
+    }
+}
+thread_local! {
+    static ASSISTANT_RECORDING: RefCell<Option<(u64, AssistantTarget)>> = const { RefCell::new(None) };
+}
+fn clear_assistant_recording() {
+    ASSISTANT_RECORDING.with(|slot| slot.borrow_mut().take());
+}
+/// True only while this assistant scope owns the shared recording.
+pub fn is_assistant_recording(store: Store, scope: ChatScope) -> bool {
+    let Dictation::Recording { gen, .. } = store.voice.dictation.get() else {
+        return false;
+    };
+    ASSISTANT_RECORDING.with(|slot| {
+        slot.borrow().as_ref().is_some_and(|(owner, target)| {
+            *owner == gen && target.scope == scope && target.current(store)
+        })
+    })
+}
+fn assistant_recording_active() -> bool {
+    ASSISTANT_RECORDING.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|(gen, _)| DICTATION.load(Ordering::SeqCst) == *gen)
+    })
+}
 
 // -- preferences ---------------------------------------------------------------
 
@@ -178,26 +220,89 @@ pub fn resume_speaking(store: Store) {
     }
 }
 
+struct Narration {
+    text: String,
+    session: String,
+    assistant: Option<AssistantTarget>,
+    preset: Option<VoicePrefs>,
+}
 thread_local! {
-    /// Read-aloud narration waiting for the speaker (UI thread only): the
-    /// cycles' words as they land, then the answer — one at a time, in
-    /// order, never interrupting each other.
-    static NARRATION: RefCell<std::collections::VecDeque<String>> =
+    // Main narration and companion replies use one ordered speaker queue.
+    static NARRATION: RefCell<std::collections::VecDeque<Narration>> =
         const { RefCell::new(std::collections::VecDeque::new()) };
 }
-
-/// Queue `text` for read-aloud narration; it starts at once when nothing
-/// speaks.
+/// Queue ordinary run narration on the single speaker lane.
 pub fn narrate(store: Store, ctx: &UiCtx, text: String) {
-    NARRATION.with(|q| q.borrow_mut().push_back(text));
-    if store.voice.speaking.get_untracked() == Speaking::Idle {
-        speak_next(store, ctx);
-    }
+    NARRATION.with(|q| {
+        q.borrow_mut().push_back(Narration {
+            text,
+            session: store.session_id.get_untracked(),
+            assistant: None,
+            preset: None,
+        })
+    });
+    speak_next(store, ctx);
 }
-
+/// Queue a side reply without interrupting main speech. The captured source
+/// identity prevents playback after the side/main conversation changes.
+pub fn narrate_assistant(
+    store: Store,
+    ctx: &UiCtx,
+    scope: ChatScope,
+    text: String,
+    preset: &VoicePrefs,
+) {
+    if !companion_read_aloud_enabled(ctx) {
+        return;
+    }
+    let session = store.session_id.get_untracked();
+    let assistant = AssistantTarget {
+        scope,
+        session: session.clone(),
+        conversation: scope.chat(store).with_untracked(|s| s.session_id.clone()),
+    };
+    NARRATION.with(|q| {
+        q.borrow_mut().push_back(Narration {
+            text,
+            session,
+            assistant: Some(assistant),
+            preset: Some(preset.clone()),
+        })
+    });
+    speak_next(store, ctx);
+}
+fn companion_read_aloud_enabled(ctx: &UiCtx) -> bool {
+    let p = crate::companion::CompanionPrefs::from_json(ctx.prefs.borrow().companion.as_ref());
+    p.enabled && p.read_aloud
+}
 fn speak_next(store: Store, ctx: &UiCtx) {
-    if let Some(next) = NARRATION.with(|q| q.borrow_mut().pop_front()) {
-        speak_text(store, ctx, next);
+    if store.voice.speaking.get_untracked() != Speaking::Idle
+        || matches!(
+            store.voice.dictation.get_untracked(),
+            Dictation::Recording { .. }
+        )
+    {
+        return;
+    }
+    loop {
+        let Some(next) = NARRATION.with(|q| q.borrow_mut().pop_front()) else {
+            return;
+        };
+        if (next.assistant.is_some() && !companion_read_aloud_enabled(ctx))
+            || next.session != store.session_id.get_untracked()
+            || next
+                .assistant
+                .as_ref()
+                .is_some_and(|target| !target.current(store))
+        {
+            continue;
+        }
+        if let Some(preset) = next.preset {
+            speak_preset(store, ctx, next.text, &preset);
+        } else {
+            speak_text(store, ctx, next.text);
+        }
+        return;
     }
 }
 
@@ -217,6 +322,47 @@ pub fn speak_text(store: Store, ctx: &UiCtx, text: String) {
 /// automation's: the Code web reads an automation's messages through the
 /// automation's own run, `automations_view.tsx:284-286`).
 pub fn speak_text_for(store: Store, ctx: &UiCtx, run_id: String, text: String) {
+    speak_text_for_with_prefs(store, ctx, run_id, text, prefs(ctx));
+}
+/// Use a speaking preset without replacing the terminal's audio device/volume.
+/// The existing speech host remains the only playback owner.
+pub fn speak_text_with_prefs(store: Store, ctx: &UiCtx, text: String, preset: &VoicePrefs) {
+    if matches!(
+        store.voice.dictation.get_untracked(),
+        Dictation::Recording { .. }
+    ) {
+        store.notify("The microphone is active; the companion reply remains available to read.");
+        return;
+    }
+    stop_speaking(store);
+    speak_preset(store, ctx, text, preset);
+}
+fn speak_preset(store: Store, ctx: &UiCtx, text: String, preset: &VoicePrefs) {
+    let session = store.session_id.get_untracked();
+    let run = transcription_run_id(&store.run_id.get_untracked(), &session)
+        .filter(|_| !session.is_empty())
+        .unwrap_or_default();
+    let mut p = prefs(ctx);
+    if !preset.tts_request().is_empty() {
+        p.provider.clone_from(&preset.provider);
+        p.model.clone_from(&preset.model);
+        p.voice.clone_from(&preset.voice);
+        p.voice_label.clone_from(&preset.voice_label);
+        p.profile.clone_from(&preset.profile);
+        p.speed = preset.speed;
+        p.quality_preset.clone_from(&preset.quality_preset);
+        p.instructions.clone_from(&preset.instructions);
+    }
+    speak_text_for_with_prefs(store, ctx, run, text, p);
+}
+
+fn speak_text_for_with_prefs(
+    store: Store,
+    ctx: &UiCtx,
+    run_id: String,
+    text: String,
+    p: VoicePrefs,
+) {
     if run_id.is_empty() {
         post_error(
             store,
@@ -228,10 +374,10 @@ pub fn speak_text_for(store: Store, ctx: &UiCtx, run_id: String, text: String) {
     host.stop_speech();
     let gen = host.next_gen();
     host.claim_speech(gen);
+    let speech_op = SPEECH.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
     store.voice.speaking.set(Speaking::Preparing);
     store.voice.speaking_text.set(Some(voice::text_key(&text)));
     store.voice.speak_levels.set(Vec::new());
-    let p = prefs(ctx);
     let gw = VoiceGateway::new(&ctx.client);
     let wake = abstracttui::reactive::wake_handle();
     spawn("voice-speak", move || {
@@ -249,7 +395,9 @@ pub fn speak_text_for(store: Store, ctx: &UiCtx, run_id: String, text: String) {
             &mut |_d| {
                 if host2.is_current_speech(gen) {
                     started_wake.post(move || {
-                        if store.voice.speaking.get_untracked() == Speaking::Preparing {
+                        if SPEECH.load(Ordering::SeqCst) == speech_op
+                            && store.voice.speaking.get_untracked() == Speaking::Preparing
+                        {
                             store.voice.speaking.set(Speaking::Playing);
                         }
                     });
@@ -258,20 +406,28 @@ pub fn speak_text_for(store: Store, ctx: &UiCtx, run_id: String, text: String) {
             &mut |rms, bands| {
                 if host3.is_current_speech(gen) {
                     let bands = voice::meter_bands(rms, bands);
-                    level_wake.post(move || store.voice.speak_levels.set(bands));
+                    level_wake.post(move || {
+                        if SPEECH.load(Ordering::SeqCst) == speech_op {
+                            store.voice.speak_levels.set(bands);
+                        }
+                    });
                 }
             },
         );
         let current = host.is_current_speech(gen);
         host.release_speech(gen);
         wake.post(move || {
+            let current = current && SPEECH.load(Ordering::SeqCst) == speech_op;
             if current {
-                store.voice.speaking.set(Speaking::Idle);
+                SPEECH.fetch_add(1, Ordering::SeqCst);
+                // Publish Idle last: it may synchronously start the next queued
+                // reply, whose identity must not be cleared by this completion.
                 store.voice.speaking_text.set(None);
+                store.voice.speaking.set(Speaking::Idle);
             }
             match result {
                 Ok(reply) => {
-                    if !reply.stopped {
+                    if current && !reply.stopped {
                         let line = voice::reply_line(&reply);
                         if !line.is_empty() {
                             store.voice.last_reply.set(Some(line));
@@ -291,6 +447,7 @@ pub fn speak_text_for(store: Store, ctx: &UiCtx, run_id: String, text: String) {
 /// Stop the spoken reply at once and drop the queued narration. Returns
 /// false when nothing was speaking.
 pub fn stop_speaking(store: Store) -> bool {
+    SPEECH.fetch_add(1, Ordering::SeqCst);
     NARRATION.with(|q| q.borrow_mut().clear());
     let was = store.voice.speaking.get_untracked() != Speaking::Idle;
     voice_host::host().stop_speech();
@@ -309,8 +466,34 @@ pub fn toggle_dictation(store: Store, ctx: &UiCtx) {
         Dictation::Idle => {
             start_dictation(store, ctx, false);
         }
+        Dictation::Recording { .. } if assistant_recording_active() => {
+            store.notify("The assistant microphone is active. Use its microphone button or Esc.")
+        }
         Dictation::Recording { gen, .. } => {
             voice_host::host().send_if_running(&json!({"op": "record_stop", "gen": gen}));
+        }
+        Dictation::Transcribing { .. } => store.notify("Still transcribing the last recording."),
+    }
+}
+
+/// Explicit assistant microphone: stop only its own recording. Transcription is
+/// editable in the captured side draft and cannot submit a coding task.
+pub fn toggle_assistant_dictation(store: Store, ctx: &UiCtx, scope: ChatScope) {
+    match store.voice.dictation.get_untracked() {
+        Dictation::Idle => {
+            let target = AssistantTarget {
+                scope,
+                session: store.session_id.get_untracked(),
+                conversation: scope.chat(store).with_untracked(|s| s.session_id.clone()),
+            };
+            stop_speaking(store);
+            start_dictation_for(store, ctx, false, Some(target));
+        }
+        Dictation::Recording { gen, .. } if is_assistant_recording(store, scope) => {
+            voice_host::host().send_if_running(&json!({"op":"record_stop","gen":gen}));
+        }
+        Dictation::Recording { .. } => {
+            store.notify("Another microphone recording is active. Stop it or press Esc first.")
         }
         Dictation::Transcribing { .. } => store.notify("Still transcribing the last recording."),
     }
@@ -385,6 +568,14 @@ pub fn transcription_run_id(run_id: &str, session_id: &str) -> Option<String> {
 }
 
 fn start_dictation(store: Store, ctx: &UiCtx, hold: bool) -> bool {
+    start_dictation_for(store, ctx, hold, None)
+}
+fn start_dictation_for(
+    store: Store,
+    ctx: &UiCtx,
+    hold: bool,
+    target: Option<AssistantTarget>,
+) -> bool {
     let session_id = store.session_id.get_untracked();
     let run_id = match transcription_run_id(&store.run_id.get_untracked(), &session_id) {
         Some(r) if !session_id.is_empty() => r,
@@ -399,13 +590,15 @@ fn start_dictation(store: Store, ctx: &UiCtx, hold: bool) -> bool {
     let host = voice_host::host();
     let gen = host.next_gen();
     DICTATION.store(gen, Ordering::SeqCst);
+    ASSISTANT_RECORDING
+        .with(|slot| *slot.borrow_mut() = target.clone().map(|target| (gen, target)));
     store.voice.dictation.set(Dictation::Recording {
         since: Instant::now(),
         gen,
     });
     store.voice.level.set(0.0);
     let p = prefs(ctx);
-    let review = !hold || p.review_voice;
+    let review = target.is_some() || !hold || p.review_voice;
     store.voice.review_transcript.set(review);
     let gw = VoiceGateway::new(&ctx.client);
     let wake = abstracttui::reactive::wake_handle();
@@ -417,11 +610,14 @@ fn start_dictation(store: Store, ctx: &UiCtx, hold: bool) -> bool {
             voice::record_blocking(&host, gen, &p, voice::MAX_RECORDING_S, &mut |rms, bands| {
                 let bands = voice::meter_bands(rms, bands);
                 level_wake.post(move || {
-                    store.voice.level.set(rms);
-                    store.voice.levels.set(bands);
+                    if DICTATION.load(Ordering::SeqCst) == gen {
+                        store.voice.level.set(rms);
+                        store.voice.levels.set(bands);
+                    }
                 });
             });
         let live = || DICTATION.load(Ordering::SeqCst) == gen;
+        let source_session = session_id.clone();
         let finish = move |wake: &abstracttui::reactive::WakeHandle,
                            err: Option<String>,
                            text: Option<String>| {
@@ -430,14 +626,32 @@ fn start_dictation(store: Store, ctx: &UiCtx, hold: bool) -> bool {
                     return; // cancelled (Esc) or superseded
                 }
                 DICTATION.store(0, Ordering::SeqCst);
+                clear_assistant_recording();
                 store.voice.dictation.set(Dictation::Idle);
                 store.voice.level.set(0.0);
                 store.voice.hold.set(false);
+                if store.session_id.get_untracked() != source_session
+                    || target.as_ref().is_some_and(|t| !t.current(store))
+                {
+                    store.notify("Voice input discarded because its conversation changed.");
+                    return;
+                }
                 if let Some(e) = err {
-                    post_error(store, e);
+                    if target.is_some() {
+                        store.notify(e);
+                    } else {
+                        post_error(store, e);
+                    }
                 }
                 if let Some(t) = text {
-                    if !review {
+                    if let Some(target) = target {
+                        target.scope.draft(store).update(|draft| {
+                            if !draft.is_empty() && !draft.ends_with(char::is_whitespace) {
+                                draft.push(' ');
+                            }
+                            draft.push_str(&t);
+                        });
+                    } else if !review {
                         store.voice.hold_send.set(Some(t));
                     } else {
                         store.voice.transcript.set(Some(t));
@@ -519,12 +733,25 @@ fn start_dictation(store: Store, ctx: &UiCtx, hold: bool) -> bool {
 /// Esc: cancel a recording, else stop the spoken reply. Consumes the press
 /// when it did something (the next Esc keeps its usual meaning).
 pub fn escape(store: Store) -> bool {
+    if matches!(
+        store.voice.dictation.get_untracked(),
+        Dictation::Transcribing { .. }
+    ) {
+        DICTATION.store(0, Ordering::SeqCst);
+        clear_assistant_recording();
+        store.voice.dictation.set(Dictation::Idle);
+        store.voice.level.set(0.0);
+        store.voice.hold.set(false);
+        store.notify("Transcription cancelled.");
+        return true;
+    }
     if let Dictation::Recording { gen, .. } = store.voice.dictation.get_untracked() {
         DICTATION.store(0, Ordering::SeqCst);
         voice_host::host().send_if_running(&json!({"op": "record_stop", "gen": gen}));
         store.voice.dictation.set(Dictation::Idle);
         store.voice.level.set(0.0);
         store.voice.hold.set(false);
+        clear_assistant_recording();
         store.notify("Recording cancelled.");
         return true;
     }
@@ -536,6 +763,21 @@ pub fn escape(store: Store) -> bool {
 /// Root wiring: read-aloud on each new reply, transcripts into the composer,
 /// the one-second tick while something runs.
 pub fn wire(cx: Scope, store: Store, ctx: &UiCtx, composer: abstracttui::widgets::TextAreaState) {
+    // A microphone destination cannot outlive its source conversation.
+    cx.effect(move || {
+        let _ = store.session_id.get();
+        let _ = store.docs_chat.with(|s| s.session_id.clone());
+        let _ = store.run_chat.with(|s| s.session_id.clone());
+        let _ = store.voice.dictation.get();
+        let stale = ASSISTANT_RECORDING.with(|slot| {
+            slot.borrow().as_ref().is_some_and(|(gen, target)| {
+                DICTATION.load(Ordering::SeqCst) == *gen && !target.current(store)
+            })
+        });
+        if stale {
+            escape(store);
+        }
+    });
     // A finished transcription lands at the end of the draft.
     cx.effect(move || {
         let Some(text) = store.voice.transcript.get() else {
@@ -597,7 +839,8 @@ pub fn wire(cx: Scope, store: Store, ctx: &UiCtx, composer: abstracttui::widgets
     // The next narration starts when the speaker goes quiet.
     let qctx = ctx.clone();
     cx.effect(move || {
-        if store.voice.speaking.get() == Speaking::Idle {
+        let recording = matches!(store.voice.dictation.get(), Dictation::Recording { .. });
+        if store.voice.speaking.get() == Speaking::Idle && !recording {
             speak_next(store, &qctx);
         }
     });
@@ -624,13 +867,13 @@ pub fn status_text(store: Store, now: Instant) -> Option<String> {
         }
         Dictation::Transcribing { since, route } => {
             let line = transcribing_line(since, now, &route);
-            return Some(
-                if store.voice.hold.get() && !store.voice.review_transcript.get() {
-                    format!("{line} · sends when ready")
-                } else {
-                    line
-                },
-            );
+            return Some(if assistant_recording_active() {
+                format!("{line} · assistant prompt")
+            } else if store.voice.hold.get() && !store.voice.review_transcript.get() {
+                format!("{line} · sends when ready")
+            } else {
+                line
+            });
         }
         Dictation::Idle => {}
     }
@@ -662,7 +905,12 @@ pub fn recording_parts(store: Store, now: Instant) -> Option<(String, &'static s
         return None;
     };
     let secs = voice::elapsed_seconds(since, now);
-    Some(if store.voice.hold.get() {
+    Some(if assistant_recording_active() {
+        (
+            format!("● Assistant listening… {secs}"),
+            "assistant mic transcribes · Esc cancels",
+        )
+    } else if store.voice.hold.get() {
         (
             format!("● Listening… {secs}"),
             if store.voice.review_transcript.get() {
@@ -1525,33 +1773,130 @@ pub fn engine_choices(
     out
 }
 
-thread_local! {
-    /// The context an engine picker opens with once the catalog answers
-    /// (`UiCtx` holds `Rc`s: it stays on the UI thread; the voice thread
-    /// carries only the answer).
-    static ENGINE_PICKER: RefCell<Option<(Scope, UiCtx, bool)>> = const { RefCell::new(None) };
+#[derive(Clone, Copy)]
+enum EnginePickerTarget {
+    Main(bool),
+    Companion,
 }
-
+thread_local! {
+    // UI-only contexts are paired with an operation id; a stale HTTP response
+    // cannot take and open a different picker requested later.
+    static ENGINE_PICKER: RefCell<Option<(u64, Scope, UiCtx, EnginePickerTarget)>> = const { RefCell::new(None) };
+    static ENGINE_PICKER_SEQ: Cell<u64> = const { Cell::new(0) };
+}
 fn open_engine_picker(cx: Scope, store: Store, ctx: &UiCtx, tts: bool) {
+    load_engine_picker(cx, store, ctx, EnginePickerTarget::Main(tts));
+}
+/// Independent companion preset; empty means inherit the main assistant voice.
+pub fn open_companion_voice_picker(cx: Scope, store: Store, ctx: &UiCtx) {
+    load_engine_picker(cx, store, ctx, EnginePickerTarget::Companion);
+}
+fn load_engine_picker(cx: Scope, store: Store, ctx: &UiCtx, target: EnginePickerTarget) {
     store.notify("Asking the gateway for its voice engines…");
-    ENGINE_PICKER.with(|slot| *slot.borrow_mut() = Some((cx, ctx.clone(), tts)));
+    let op = ENGINE_PICKER_SEQ.with(|seq| {
+        let next = seq.get().wrapping_add(1);
+        seq.set(next);
+        next
+    });
+    ENGINE_PICKER.with(|slot| *slot.borrow_mut() = Some((op, cx, ctx.clone(), target)));
+    let source_session = store.session_id.get_untracked();
+    let source_modal = ctx.modal_epoch.get_untracked();
     let gw = VoiceGateway::new(&ctx.client);
     let wake = abstracttui::reactive::wake_handle();
     spawn("voice-catalog", move || {
         let res = gw.catalog("", "");
         wake.post(move || {
-            let Some((cx, ctx, tts)) = ENGINE_PICKER.with(|slot| slot.borrow_mut().take()) else {
+            let pending = ENGINE_PICKER.with(|slot| {
+                let mut slot = slot.borrow_mut();
+                if slot.as_ref().is_some_and(|(id, ..)| *id == op) {
+                    slot.take()
+                } else {
+                    None
+                }
+            });
+            let Some((_, cx, ctx, target)) = pending else {
                 return;
             };
+            if store.session_id.get_untracked() != source_session
+                || ctx.modal_epoch.get_untracked() != source_modal
+            {
+                return;
+            }
             match res {
-                Err(e) => post_error(
-                    store,
-                    error_sentence("The voice engines could not be listed", &e),
-                ),
-                Ok(catalog) => show_engine_picker(cx, store, &ctx, tts, &catalog),
+                Err(e) => store.notify(error_sentence("The voice engines could not be listed", &e)),
+                Ok(catalog) => match target {
+                    EnginePickerTarget::Main(tts) => {
+                        show_engine_picker(cx, store, &ctx, tts, &catalog)
+                    }
+                    EnginePickerTarget::Companion => {
+                        show_companion_voice_picker(cx, store, &ctx, &catalog)
+                    }
+                },
             }
         });
     });
+}
+fn show_companion_voice_picker(cx: Scope, store: Store, ctx: &UiCtx, catalog: &Value) {
+    let mut choices = engine_choices(catalog, true, None);
+    choices[0].0 = "Main assistant voice".into();
+    let saved = VoicePrefs::from_json(
+        ctx.prefs
+            .borrow()
+            .companion
+            .as_ref()
+            .and_then(|p| p.get("voice")),
+    );
+    let start = choices
+        .iter()
+        .position(|(_, c)| {
+            c.provider == saved.provider
+                && c.model == saved.model
+                && c.voice == saved.voice
+                && c.profile == saved.profile
+        })
+        .unwrap_or(0);
+    let labels = choices
+        .iter()
+        .map(|(label, _)| label.clone())
+        .collect::<Vec<_>>();
+    let save = ctx.clone();
+    let back = ctx.clone();
+    open_picker(
+        cx,
+        ctx,
+        Picker {
+            title: "Companion voice · Enter selects · Esc back".into(),
+            size: modal_size(84, (labels.len() as i32 + 10).max(12)),
+            labels,
+            live: None,
+            start,
+            hint: Some("Speaking identity for this terminal's companion; microphone and speaker devices follow Voice settings.".into()),
+            live_hint: None,
+            keys: Vec::new(),
+            on_mount: None,
+            on_selection: None,
+            on_choose: Box::new(move |ix| {
+                if let Some((_, voice)) = choices.get(ix) {
+                    let mut prefs = save.prefs.borrow_mut();
+                    let value = prefs.companion.get_or_insert_with(|| json!({}));
+                    if !value.is_object() {
+                        *value = json!({});
+                    }
+                    value["voice"] = voice.to_json();
+                    let result = prefs.save();
+                    drop(prefs);
+                    if let Err(error) = result {
+                        store.notify(format!("Companion voice could not be saved: {error}"));
+                    }
+                    store.companion_tick.update(|n| *n = n.wrapping_add(1));
+                }
+                super::companion_view::settings(cx, store, &save);
+            }),
+            on_cancel: Some(Box::new(move || {
+                super::companion_view::settings(cx, store, &back)
+            })),
+        },
+    );
 }
 
 fn show_engine_picker(cx: Scope, store: Store, ctx: &UiCtx, tts: bool, catalog: &Value) {
@@ -1586,7 +1931,7 @@ fn show_engine_picker(cx: Scope, store: Store, ctx: &UiCtx, tts: bool, catalog: 
                     "Speech → text"
                 }
             ),
-            size: modal_size(84, labels.len() as i32 + 6),
+            size: modal_size(84, (labels.len() as i32 + 10).max(12)),
             labels,
             live: None,
             start,
