@@ -1375,7 +1375,10 @@ pub(crate) fn chrome_action(cx: Scope, store: Store, ctx: &UiCtx, id: &str) -> b
         chrome::ACT_MODEL => modals::open_model_picker(cx, store, ctx),
         chrome::ACT_GATEWAY | chrome::ACT_CONNECTION => open_status(cx, store, ctx),
         chrome::ACT_DOCS => {
-            store.docs_open.update(|open| *open = !*open);
+            let already_docs = store.docs_open.get_untracked()
+                && store.help_scope.get_untracked() == crate::docs_chat::ChatScope::Docs;
+            store.help_scope.set(crate::docs_chat::ChatScope::Docs);
+            store.docs_open.set(!already_docs);
         }
         chrome::ACT_ABOUT => {
             ctx.send(Cmd::LoadCapabilities);

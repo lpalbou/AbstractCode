@@ -128,7 +128,7 @@ Status: **0.12.0**, pre-alpha. Release history is in
 - **Capability control**: the header's **Tools** menu groups Tools, Skills and
   MCP servers. `/tools` selects Off/Ask/Auto per tool or category, `/skills` attaches gateway skills, and `/mcp`
   shows the gateway's MCP server registry. Direct commands remain available.
-- **Top-right controls**: **Docs** opens an assistant drawer with Docs and This run conversations,
+- **Top-right controls**: **Docs** opens Documentation; the avatar or account menu opens Companion.
   **Theme** previews appearance choices, **About** shows versions and framework
   links, and the account/status menu shows your gateway identity, connection
   details and a confirmed option to disconnect this terminal. Narrow terminals
@@ -233,7 +233,8 @@ Inside the app:
 - `@name` talks with a summoned entity when the gateway hosts them
   (`/entities` lists the roster); `Alt+E` cycles conversation focus
 - `Ctrl+P` reads the latest reply aloud, pauses and resumes it (`▶` at the
-  top right of any message reads that one; streamed sentence by sentence from
+  top right of any message reads that one; bottom-meter and avatar ‖/▶ controls
+  pause/resume the current audio; streamed sentence by sentence from
   the gateway's voice route; `Esc` stops); on an empty prompt, HOLD
   `Space`, speak and release to send what you said (choose **Voice messages →
   Review before sending** in `/voice` to edit it first); `Ctrl+R` dictates into
@@ -339,10 +340,13 @@ MIT. See [LICENSE](LICENSE).
 
 ## Session companion
 
-Open **Companion settings** from the account menu, or use the assistant drawer's
+Open **Companion settings** from the account menu, or use the Companion drawer's
 ⚙ button. Enable the companion to show a Halo orb or Hover robot floating beneath
 the top-right header controls, over a bounded part of the transcript. It preserves
-the transcript's full width. Clicking it opens **This run**. Small terminals use a compact
+the transcript's full width. **Position** chooses Top right or Bottom right, above
+the composer and audio controls. Clicking it opens **Companion**, a separate side
+conversation from **Documentation**. The account menu also opens Companion when
+the avatar is disabled. Small terminals use a compact
 control; **Animate activity** can be turned off for reduced motion.
 
 Choose **Appearance** to open a large, silent preview. Switch between Halo and
@@ -352,13 +356,15 @@ appearance; **Cancel** or Esc returns without changing it. Previewing needs no
 inference, microphone or speech playback.
 
 Hover leans toward you while listening, waits in a lower, quiet posture, and
-bobs with brighter thrusters and sparks while working.
+bobs with brighter thrusters and sparks while working. Ready breathes gently;
+Waiting pulses with sequential indicators. Halo listening rings move inward and
+speaking rings move outward. Error and paused speech remain still.
 
 **Offer comments** is off by default. When enabled, meaningful conversation
 changes can trigger a short observation through the existing Gateway pool, with
 one request at a time and at least 60 seconds between attempts in this TUI process.
 Restored history and unchanged/tool-only updates do not trigger comments. Comments
-appear in This run and cannot execute tools, steer the coding task or approve it.
+appear in Companion and cannot execute tools, steer the coding task or approve it.
 
 The side conversation's ● microphone records a question into its own editable
 draft; press again to transcribe, then ↑ to send. It never submits a coding task.
@@ -366,3 +372,7 @@ draft; press again to transcribe, then ↑ to send. It never submits a coding ta
 an independent speaking preset (default: main assistant voice). Speech shares the
 existing narration queue and device settings. Companion choices are local to this
 terminal; entity-owned appearance and voice remain managed by Gateway.
+
+While speech is playing or paused, the bottom histogram and avatar action row
+show ‖ Pause or ▶ Resume for the current audio. Message-level playback controls
+remain available. These two shared controls never select or start another reply.

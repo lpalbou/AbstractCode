@@ -112,6 +112,7 @@ pub fn open_account(cx: Scope, store: Store, ctx: &UiCtx, anchor: Rect) {
         .disabled(true),
         ContextMenuItem::new("host", format!("Gateway: {}", ctx.gateway_label)).disabled(true),
         ContextMenuItem::new("status", "Connection status"),
+        ContextMenuItem::new("companion-chat", "Companion"),
         ContextMenuItem::new("companion", "Companion settings"),
         ContextMenuItem::new("copy-user", "Copy user id").disabled(account.user_id.is_empty()),
         ContextMenuItem::new("disconnect", "Disconnect this terminal…"),
@@ -133,6 +134,7 @@ pub fn open_account(cx: Scope, store: Store, ctx: &UiCtx, anchor: Rect) {
         .overlays(&ctx.overlays)
         .min_width(32)
         .on_action(move |key| match key {
+            "companion-chat" => super::companion_view::open_conversation(store),
             "companion" => super::companion_view::settings(cx, store, &context),
             "status" => {
                 super::chrome_action(cx, store, &context, chrome::ACT_CONNECTION);
@@ -159,13 +161,16 @@ pub fn open_menu(
         ContextMenuItem::new(chrome::ACT_WORKFLOW, "Workflow"),
         ContextMenuItem::new(chrome::ACT_MODEL, "Model"),
         ContextMenuItem::new(chrome::ACT_DOCS, "Docs assistant"),
+        ContextMenuItem::new("companion-chat", "Companion"),
         ContextMenuItem::new(chrome::ACT_THEME, "Theme"),
         ContextMenuItem::new(chrome::ACT_ABOUT, "About AbstractCode"),
         ContextMenuItem::new(chrome::ACT_CONNECTION, "Connection status"),
     ])
     .overlays(&ctx.overlays)
     .on_action(move |id| {
-        if id == chrome::ACT_THEME {
+        if id == "companion-chat" {
+            super::companion_view::open_conversation(store);
+        } else if id == chrome::ACT_THEME {
             super::theme_menu::open(cx, &context, theme, anchor);
         } else {
             super::chrome_action(cx, store, &context, id);

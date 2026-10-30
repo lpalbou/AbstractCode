@@ -1925,7 +1925,7 @@ Status: **0.12.0**, pre-alpha. Release history is in
 - **Capability control**: the header's **Tools** menu groups Tools, Skills and
   MCP servers. `/tools` selects Off/Ask/Auto per tool or category, `/skills` attaches gateway skills, and `/mcp`
   shows the gateway's MCP server registry. Direct commands remain available.
-- **Top-right controls**: **Docs** opens an assistant drawer with Docs and This run conversations,
+- **Top-right controls**: **Docs** opens Documentation; the avatar or account menu opens Companion.
   **Theme** previews appearance choices, **About** shows versions and framework
   links, and the account/status menu shows your gateway identity, connection
   details and a confirmed option to disconnect this terminal. Narrow terminals
@@ -2030,7 +2030,8 @@ Inside the app:
 - `@name` talks with a summoned entity when the gateway hosts them
   (`/entities` lists the roster); `Alt+E` cycles conversation focus
 - `Ctrl+P` reads the latest reply aloud, pauses and resumes it (`▶` at the
-  top right of any message reads that one; streamed sentence by sentence from
+  top right of any message reads that one; bottom-meter and avatar ‖/▶ controls
+  pause/resume the current audio; streamed sentence by sentence from
   the gateway's voice route; `Esc` stops); on an empty prompt, HOLD
   `Space`, speak and release to send what you said (choose **Voice messages →
   Review before sending** in `/voice` to edit it first); `Ctrl+R` dictates into
@@ -2136,10 +2137,13 @@ MIT. See [LICENSE](LICENSE).
 
 ## Session companion
 
-Open **Companion settings** from the account menu, or use the assistant drawer's
+Open **Companion settings** from the account menu, or use the Companion drawer's
 ⚙ button. Enable the companion to show a Halo orb or Hover robot floating beneath
 the top-right header controls, over a bounded part of the transcript. It preserves
-the transcript's full width. Clicking it opens **This run**. Small terminals use a compact
+the transcript's full width. **Position** chooses Top right or Bottom right, above
+the composer and audio controls. Clicking it opens **Companion**, a separate side
+conversation from **Documentation**. The account menu also opens Companion when
+the avatar is disabled. Small terminals use a compact
 control; **Animate activity** can be turned off for reduced motion.
 
 Choose **Appearance** to open a large, silent preview. Switch between Halo and
@@ -2149,13 +2153,15 @@ appearance; **Cancel** or Esc returns without changing it. Previewing needs no
 inference, microphone or speech playback.
 
 Hover leans toward you while listening, waits in a lower, quiet posture, and
-bobs with brighter thrusters and sparks while working.
+bobs with brighter thrusters and sparks while working. Ready breathes gently;
+Waiting pulses with sequential indicators. Halo listening rings move inward and
+speaking rings move outward. Error and paused speech remain still.
 
 **Offer comments** is off by default. When enabled, meaningful conversation
 changes can trigger a short observation through the existing Gateway pool, with
 one request at a time and at least 60 seconds between attempts in this TUI process.
 Restored history and unchanged/tool-only updates do not trigger comments. Comments
-appear in This run and cannot execute tools, steer the coding task or approve it.
+appear in Companion and cannot execute tools, steer the coding task or approve it.
 
 The side conversation's ● microphone records a question into its own editable
 draft; press again to transcribe, then ↑ to send. It never submits a coding task.
@@ -2163,6 +2169,10 @@ draft; press again to transcribe, then ↑ to send. It never submits a coding ta
 an independent speaking preset (default: main assistant voice). Speech shares the
 existing narration queue and device settings. Companion choices are local to this
 terminal; entity-owned appearance and voice remain managed by Gateway.
+
+While speech is playing or paused, the bottom histogram and avatar action row
+show ‖ Pause or ▶ Resume for the current audio. Message-level playback controls
+remain available. These two shared controls never select or start another reply.
 
 
 ==============================================================================
@@ -3313,9 +3323,10 @@ in an automation's Edit panel marks the row being saved with `…` next to
 
 Open **Docs** (under **Menu** on narrow terminals) or run `/docs`. The drawer
 uses message bubbles with a separate composer, Markdown answers and scrolling.
-**Docs** answers questions about AbstractCode documentation and the main conversation. **This run** answers
-questions about the conversation and run state currently loaded in this client.
-A dot marks the selected scope. Each scope has its own conversation and draft.
+**Documentation** answers questions about AbstractCode documentation and the main
+conversation. **Companion**, opened by the avatar or account menu, answers questions
+about the conversation and run state currently loaded in this client. These have
+separate titles, conversations and drafts; there are no scope tabs.
 Closing the drawer preserves them and your coding draft.
 
 Both use the Gateway-hosted `docs-qa@0.1.1:docsqa001` grounded question workflow.
@@ -3355,8 +3366,9 @@ Open Companion settings from the account menu or drawer gear. It offers:
 | Offer comments | Off | Short change-driven observations through Gateway |
 | Read side replies | Off | Narrate new side replies and accepted comments through the shared speaker queue |
 | Speaking voice | Main assistant voice | Independent Gateway catalog voice; main device and volume settings remain in force |
+| Position | Top right | Top right or Bottom right within the transcript, clear of composer and audio rows |
 
-The avatar floats beneath the right header controls, with its caption and action
+The avatar floats below the right header controls or at the bottom right, with its caption and action
 row centred together. Its bounded opaque surface draws above the transcript;
 it does not reserve a sidebar or reduce transcript width. Controls elsewhere
 continue to use the normal keyboard/mouse focus path.
@@ -3366,7 +3378,14 @@ recording, speaking or error. Paused speech is static. Below 120 columns or 22 r
 it becomes a compact control. The full avatar yields to drawers, modals and entity
 focus. It does not load a model or initiate microphone capture.
 Hover visibly leans with a raised hand while listening, rests lower with a dimmed
-downward gaze while waiting, and bobs with thruster sparks while working.
+downward gaze and sequential pulsing indicators while waiting, and bobs with
+thruster sparks while working. Ready breathes at2fps, Waiting uses6fps and active
+phases use up to12fps; Error stays still. Halo intake/emission rings distinguish
+Listening and Speaking even at a fixed audio level. Reduced motion stops clocks.
+
+While speech is playing or paused, the bottom histogram and avatar action row
+include ‖ Pause / ▶ Resume for that current audio. They never select a different
+message or start a reply. Message-level play/pause controls remain available.
 
 Appearance opens a silent preview with both styles and Ready, Listening, Thinking,
 Working, Speaking, Waiting and Error phases. A selected phase is held; **Auto cycle**
@@ -3378,7 +3397,7 @@ started explicitly with reduced motion enabled, without changing that preference
 The preview has no inference, recording or speech side effects.
 
 Automatic comments use a dedicated grounded-QA conversation, separate from manual
-Docs/This run history and coding commands. They require a new meaningful visible
+Documentation/Companion history and coding commands. They require a new meaningful visible
 conversation revision, allow one request at a time and enforce at least 60 seconds
 between attempts, including failures. Restoring/loading earlier history establishes
 a baseline; tool payload/hidden-reasoning changes do not trigger a request. Changes
@@ -3568,7 +3587,7 @@ One rule, enforced everywhere: **the UI thread owns every reactive signal**.
 
 The reusable engine ChatPanel owns message layout, scrolling and the composer.
 The Code adapter owns scopes, draft/history state and Gateway requests. Docs fetches
-the Code corpus; This run captures an explicitly labelled snapshot of the loaded
+the Code corpus; Companion captures an explicitly labelled snapshot of the loaded
 conversation and current run state. Both start `docs-qa@0.1.1:docsqa001` in a dedicated `kind=docs` session. It grants no tools and does not steer the coding run. Run-scope questions receive
 a fresh user-visible conversation reference; Docs receives that reference plus its cached corpus. Tool details and hidden reasoning are excluded; bounded history is labelled. A separate worker
 follows that run, keeping coding commands and approval responses responsive.
@@ -3775,7 +3794,7 @@ flowchart LR
   Host --> Avatar["AbstractTUI Avatar: drawing only"]
   Host --> Gate["Change + cooldown gate"]
   Gate --> QA["Existing Gateway grounded QA / resource pool"]
-  QA --> Side["Isolated advice state / This run notice"]
+  QA --> Side["Isolated advice state / Companion notice"]
   Side --> Queue["Existing ordered narration queue"]
 ```
 
@@ -4302,6 +4321,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+
+- Terminal companion supports saved Top right / Bottom right placement, expressive
+  pose animation, separate Documentation and Companion entries, and current-audio
+  pause/resume controls beside the speaking meter and avatar.
 
 - **The automation header names its folder in words** (operator QA 2026-10-29, ADR 0043). It read "Workspace
   session-automation-7f7613b4-fd8b-…", the folder's id. It now reads "Workspace · This automation's folder", and a
@@ -5720,11 +5743,12 @@ scrolling, arrow keys and explicit buttons are available in the Tools list.
 
 ## Questions beside the coding task
 
-The assistant drawer has independent Docs and This run scopes. Docs receives AbstractCode documentation plus recent user requests and assistant
-replies from the main conversation. This run receives an immutable snapshot of the
+Documentation and Companion are separate drawers with independent histories and
+drafts. Documentation receives AbstractCode documentation plus recent user requests
+and assistant replies from the main conversation. Companion receives an immutable snapshot of the
 currently loaded conversation when each question is sent. It cannot inspect
 newer/unloaded records or steer, approve or execute tools on the coding run.
-These scopes preserve separate drafts/history. `/docs` opens Docs directly.
+`/docs` opens Documentation directly; the avatar or account menu opens Companion.
 Use the coding composer for task instructions, not a side question that should
 have no execution authority. There is no `/btw` command in this implementation.
 
@@ -5755,7 +5779,7 @@ Choose a workflow explicitly when no default exists. Exit codes are 0 completed,
 CLI reference for workspace, permissions, timeout and streaming options.
 
 Client tool choices are local preferences; they are not a shared policy record.
-This run questions report only observed context and may require follow-up after
+Companion questions report only observed context and may require follow-up after
 loading more history. Terminal graphics depend on capabilities; voice requires
 an installed host audio backend and configured Gateway routes. Windows end-to-end
 support is not verified in the terminal reference. Companion visuals and automatic comments are opt-in and off by default.
@@ -5765,11 +5789,13 @@ References: [terminal API](../../tui/docs/api.md), [setup](../../docs/getting-st
 
 ## Optional companion
 
-Use account menu → Companion settings, or the assistant drawer's ⚙ action. Enable
+Use account menu → Companion settings, or the Companion drawer's ⚙ action. Enable
 Halo/Hover visuals, choose reduced motion, and optionally enable comments or side
-read-aloud. Click the avatar (compact ◉ on small terminals) to open This run.
-It floats over a bounded upper-right area under the header controls; it does not
-narrow the transcript. Listening, Waiting and Working have distinct postures.
+read-aloud. Click the avatar (compact ◉ on small terminals) to open Companion, separately from Documentation.
+Position selects Top right or Bottom right within the transcript, clearing the
+composer/audio rows. It does not narrow the transcript. Account → Companion works
+with the avatar disabled. Ready breathes at2fps, Waiting pulses at6fps, active
+phases animate at up to12fps; reduced motion stops clocks.
 Appearance opens a silent, large preview: select Halo/Hover, hold any of seven
 phases, Auto cycle or Pause motion. Only Use this saves appearance; Cancel/Esc
 discards preview changes. No inference or microphone access occurs in this preview.
@@ -5783,3 +5809,5 @@ This is separate from Ctrl+R dictation into the coding composer. Speaking voice
 can be chosen independently while preserving main device and volume settings;
 automatic speech shares one ordered queue and respects opt-out/cancellation.
 Preferences are local; entity voice/appearance remains Gateway-owned.
+During current speech, bottom-meter and avatar ‖/▶ buttons pause/resume that audio
+without starting another reply. Per-message playback controls remain available.

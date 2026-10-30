@@ -2545,3 +2545,130 @@ fn companion_speech_failures_are_not_appended_to_the_coding_transcript() {
             .with_untracked(|chat| chat.messages.is_empty()));
     }
 }
+
+fn current_speech_button_bounds(h: &mut Harness, label: &str) -> Option<Rect> {
+    h.app
+        .tree()
+        .accessibility_tree()
+        .entries
+        .into_iter()
+        .find(|entry| entry.label == label)
+        .map(|entry| entry.bounds)
+}
+fn click_current_speech_button(h: &mut Harness, bounds: Rect) {
+    let x = bounds.x + bounds.w / 2 + 1;
+    let y = bounds.y + 1;
+    h.term.push_input(format!("\x1b[<0;{x};{y}M").as_bytes());
+    h.turn();
+    h.term.push_input(format!("\x1b[<0;{x};{y}m").as_bytes());
+    h.turn();
+}
+
+#[test]
+fn current_speech_controls_pause_resume_the_selected_companion_audio_without_replay() {
+    let _g = serial();
+    let gw = serve(GatewayScript {
+        segment_delay: Duration::from_millis(300),
+        segments: vec![1, 2, 3, 4, 5, 6, 7, 8],
+        ..Default::default()
+    });
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("The latest coding answer must not be replayed.");
+    h.term.push_resize(Size::new(80, 34));
+    h.turn();
+    ui::companion_voice::speak(
+        h.store,
+        &h.ctx,
+        "This selected companion speech stays selected.".into(),
+        &VoicePrefs::default(),
+    );
+    let screen = h.until("current selected speech", |s| s.contains("♪ Speaking…"));
+    let row = screen
+        .lines()
+        .find(|line| line.contains("♪ Speaking…"))
+        .unwrap();
+    assert!(
+        row.contains("Ctrl+P pauses") && row.chars().any(|c| "▂▃▄▅▆▇█".contains(c)),
+        "80-column meter retains useful content: {screen}"
+    );
+    let pause =
+        current_speech_button_bounds(&mut h, "Pause current speech").expect("pause control");
+    assert!(
+        pause.w > 0 && pause.x >= 0 && pause.right() <= 80,
+        "button bounds {pause:?}\n{screen}"
+    );
+    // A changing spectrum and elapsed tick must not unmount a pressed button.
+    let x = pause.x + pause.w / 2 + 1;
+    let y = pause.y + 1;
+    h.term.push_input(format!("\x1b[<0;{x};{y}M").as_bytes());
+    h.turn();
+    h.store.voice.speak_levels.set(vec![0.1, 0.8, 0.4, 0.9]);
+    h.store.voice.tick.update(|n| *n += 1);
+    h.turn();
+    h.term.push_input(format!("\x1b[<0;{x};{y}m").as_bytes());
+    h.turn();
+    h.until("paused selected speech", |s| s.contains("‖ Paused"));
+    let resume =
+        current_speech_button_bounds(&mut h, "Resume current speech").expect("resume control");
+    click_current_speech_button(&mut h, resume);
+    h.until("resumed selected speech", |s| s.contains("♪ Speaking…"));
+    let commands = log.lock().unwrap().commands.clone();
+    let generation = commands.iter().find(|v| v["op"] == "play").unwrap()["gen"].clone();
+    let controls = commands
+        .iter()
+        .filter(|v| v["op"] == "pause" || v["op"] == "resume")
+        .collect::<Vec<_>>();
+    assert_eq!(controls.len(), 2);
+    assert!(controls.iter().all(|v| v["gen"] == generation));
+    assert_eq!(gw.requests("/voice/tts/stream").len(), 1);
+    let body: Value = serde_json::from_str(&gw.requests("/voice/tts/stream")[0].2).unwrap();
+    assert_eq!(
+        body["text"],
+        "This selected companion speech stays selected."
+    );
+    h.escape();
+    h.until("speech stopped", |s| {
+        !s.contains("♪ Speaking…") && !s.contains("‖ Paused")
+    });
+    assert!(current_speech_button_bounds(&mut h, "Pause current speech").is_none());
+    assert!(current_speech_button_bounds(&mut h, "Resume current speech").is_none());
+    click_current_speech_button(&mut h, resume);
+    assert_eq!(
+        gw.requests("/voice/tts/stream").len(),
+        1,
+        "a stale button position cannot replay the latest answer"
+    );
+}
+
+#[test]
+fn current_speech_controls_are_absent_when_idle_preparing_or_recording() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("Available latest answer.");
+    for state in [voice::Speaking::Idle, voice::Speaking::Preparing] {
+        h.store.voice.speaking.set(state);
+        h.turn();
+        assert!(current_speech_button_bounds(&mut h, "Pause current speech").is_none());
+        assert!(current_speech_button_bounds(&mut h, "Resume current speech").is_none());
+    }
+    h.store.voice.speaking.set(voice::Speaking::Playing);
+    h.store.voice.dictation.set(voice::Dictation::Recording {
+        since: Instant::now(),
+        gen: 42,
+    });
+    h.store.voice.levels.set(vec![0.5; 24]);
+    let screen = h.turn();
+    assert!(
+        screen.contains("● Recording…") && screen.contains("Ctrl+R transcribes"),
+        "{screen}"
+    );
+    assert!(current_speech_button_bounds(&mut h, "Pause current speech").is_none());
+    assert!(current_speech_button_bounds(&mut h, "Resume current speech").is_none());
+    assert!(gw.requests("/voice/tts/stream").is_empty());
+    assert!(!ops(&log)
+        .iter()
+        .any(|op| op == "pause" || op == "resume" || op == "play"));
+}

@@ -46,11 +46,12 @@ scrolling, arrow keys and explicit buttons are available in the Tools list.
 
 ## Questions beside the coding task
 
-The assistant drawer has independent Docs and This run scopes. Docs receives AbstractCode documentation plus recent user requests and assistant
-replies from the main conversation. This run receives an immutable snapshot of the
+Documentation and Companion are separate drawers with independent histories and
+drafts. Documentation receives AbstractCode documentation plus recent user requests
+and assistant replies from the main conversation. Companion receives an immutable snapshot of the
 currently loaded conversation when each question is sent. It cannot inspect
 newer/unloaded records or steer, approve or execute tools on the coding run.
-These scopes preserve separate drafts/history. `/docs` opens Docs directly.
+`/docs` opens Documentation directly; the avatar or account menu opens Companion.
 Use the coding composer for task instructions, not a side question that should
 have no execution authority. There is no `/btw` command in this implementation.
 
@@ -81,7 +82,7 @@ Choose a workflow explicitly when no default exists. Exit codes are 0 completed,
 CLI reference for workspace, permissions, timeout and streaming options.
 
 Client tool choices are local preferences; they are not a shared policy record.
-This run questions report only observed context and may require follow-up after
+Companion questions report only observed context and may require follow-up after
 loading more history. Terminal graphics depend on capabilities; voice requires
 an installed host audio backend and configured Gateway routes. Windows end-to-end
 support is not verified in the terminal reference. Companion visuals and automatic comments are opt-in and off by default.
@@ -91,11 +92,13 @@ References: [terminal API](../../tui/docs/api.md), [setup](../../docs/getting-st
 
 ## Optional companion
 
-Use account menu → Companion settings, or the assistant drawer's ⚙ action. Enable
+Use account menu → Companion settings, or the Companion drawer's ⚙ action. Enable
 Halo/Hover visuals, choose reduced motion, and optionally enable comments or side
-read-aloud. Click the avatar (compact ◉ on small terminals) to open This run.
-It floats over a bounded upper-right area under the header controls; it does not
-narrow the transcript. Listening, Waiting and Working have distinct postures.
+read-aloud. Click the avatar (compact ◉ on small terminals) to open Companion, separately from Documentation.
+Position selects Top right or Bottom right within the transcript, clearing the
+composer/audio rows. It does not narrow the transcript. Account → Companion works
+with the avatar disabled. Ready breathes at2fps, Waiting pulses at6fps, active
+phases animate at up to12fps; reduced motion stops clocks.
 Appearance opens a silent, large preview: select Halo/Hover, hold any of seven
 phases, Auto cycle or Pause motion. Only Use this saves appearance; Cancel/Esc
 discards preview changes. No inference or microphone access occurs in this preview.
@@ -109,3 +112,5 @@ This is separate from Ctrl+R dictation into the coding composer. Speaking voice
 can be chosen independently while preserving main device and volume settings;
 automatic speech shares one ordered queue and respects opt-out/cancellation.
 Preferences are local; entity voice/appearance remains Gateway-owned.
+During current speech, bottom-meter and avatar ‖/▶ buttons pause/resume that audio
+without starting another reply. Per-message playback controls remain available.

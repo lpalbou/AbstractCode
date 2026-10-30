@@ -19,6 +19,10 @@ use std::{
 pub fn prefs(ctx: &UiCtx) -> CompanionPrefs {
     CompanionPrefs::from_json(ctx.prefs.borrow().companion.as_ref())
 }
+pub fn open_conversation(store: Store) {
+    store.help_scope.set(ChatScope::Run);
+    store.docs_open.set(true);
+}
 pub(super) fn save(store: Store, ctx: &UiCtx, edit: impl FnOnce(&mut CompanionPrefs)) {
     let mut p = prefs(ctx);
     edit(&mut p);
@@ -80,29 +84,55 @@ pub fn settings(cx: Scope, store: Store, ctx: &UiCtx) {
                     s
                 }
             }),
-            "Changes are local to this terminal. Entity identity remains on Gateway.".into(),
-            "Comments see requests/replies only; they cannot execute tools or approve.".into(),
+            format!(
+                "Position          {}",
+                if p.position == "bottom-right" {
+                    "Bottom right"
+                } else {
+                    "Top right"
+                }
+            ),
+            "These choices apply to this terminal.".into(),
+            "Comments offer suggestions without changing your task.".into(),
         ]
     };
     let choose = ctx.clone();
-    open_picker(cx, ctx, Picker {
-        title: "Companion · Enter changes · Esc closes".into(),
-        labels: labels(), live: Some(Rc::new(labels)), start: 0, size: modal_size(90, 16),
-        hint: Some("Opt-in comments use the existing Gateway pool. Microphone is explicit in the side conversation.".into()),
-        live_hint: None, keys: vec![], on_mount: None, on_selection: None,
-        on_choose: Box::new(move |ix| {
-            match ix {
+    open_picker(
+        cx,
+        ctx,
+        Picker {
+            title: "Companion · Enter changes · Esc closes".into(),
+            labels: labels(),
+            live: Some(Rc::new(labels)),
+            start: 0,
+            size: modal_size(90, 16),
+            hint: Some(
+                "Appearance opens a silent preview · ↑↓ choose · Enter selects · Esc closes".into(),
+            ),
+            live_hint: None,
+            keys: vec![],
+            on_mount: None,
+            on_selection: None,
+            on_choose: Box::new(move |ix| match ix {
                 0 => save(store, &choose, |p| p.enabled = !p.enabled),
                 1 => super::companion_preview::open(cx, store, &choose),
                 2 => save(store, &choose, |p| p.animate = !p.animate),
                 3 => save(store, &choose, |p| p.advice = !p.advice),
                 4 => save(store, &choose, |p| p.read_aloud = !p.read_aloud),
                 5 => super::companion_voice::open_voice_picker(cx, store, &choose),
+                6 => save(store, &choose, |p| {
+                    p.position = if p.position == "bottom-right" {
+                        "top-right"
+                    } else {
+                        "bottom-right"
+                    }
+                    .into()
+                }),
                 _ => {}
-            }
-        }),
-        on_cancel: None,
-    });
+            }),
+            on_cancel: None,
+        },
+    );
 }
 
 fn visible(store: Store, ctx: &UiCtx) -> bool {
@@ -173,14 +203,13 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
             store.voice.level.get()
         });
     });
-    let open = move || {
-        store.help_scope.set(ChatScope::Run);
-        store.docs_open.set(true);
-    };
+    let open = move || open_conversation(store);
     let cctx = ctx.clone();
     let art_width = if viewport.w >= 180 { 32 } else { 28 };
     let art_height = art_width / 2 + 1;
     let panel_width = if narrow { 3 } else { art_width };
+    let panel_height = if narrow { 1 } else { art_height + 1 };
+    let bottom = p.position == "bottom-right";
     let actions = super::top_bar::right_plan(
         Rect::new(0, 0, viewport.w, 1),
         &store.account.get(),
@@ -246,21 +275,26 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
         .style(
             LayoutStyle::column()
                 .width(Dimension::Cells(panel_width))
-                .max_h(if narrow { 1 } else { art_height + 1 })
+                .max_h(panel_height)
                 .align_items(Align::Center)
                 .absolute(abstracttui::layout::Inset {
                     left: Some(left),
-                    top: Some(1),
-                    bottom: Some(0),
+                    top: if bottom { None } else { Some(1) },
+                    bottom: if bottom { Some(1) } else { None },
                     ..Default::default()
                 }),
         )
+        // Size against the actual transcript region, including changing voice,
+        // attachments and composer rows. One-row insets keep either anchor clear.
+        .measure(move |available| {
+            Size::new(panel_width, (available.h - 2).max(0).min(panel_height))
+        })
         // A bounded opaque floating surface: visible content beneath the
         // companion is covered consistently with its input hit bounds.
         .draw(move |canvas, rect| canvas.fill(rect, ' ', t.text, t.bg))
         .child(art);
     if !narrow {
-        let actions = Element::new()
+        let mut actions = Element::new()
             .style(
                 LayoutStyle::row()
                     .height(Dimension::Cells(1))
@@ -288,6 +322,9 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
                     .access_label("Companion settings")
                     .build(),
             );
+        if let Some(playback) = super::voice_view::current_speech_button(cx, store, &t) {
+            actions = actions.child(playback);
+        }
         side = side.child(actions.build());
     }
     Element::new()
@@ -328,7 +365,7 @@ pub fn wire(cx: Scope, store: Store, ctx: &UiCtx) {
                 let accepted = gate.borrow_mut().finish(ticket, answer);
                 if let Some(text) = accepted {
                     store.companion_advice.set(Some((source.clone(), text.clone())));
-                    store.notify("Companion has a comment · open This run to read it.");
+                    store.notify("Companion has a comment · open Companion to read it.");
                     if p.read_aloud {
                         super::companion_voice::narrate(store, &ctx, ChatScope::Advice, text, &p.voice);
                     }

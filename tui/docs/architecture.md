@@ -59,7 +59,7 @@ One rule, enforced everywhere: **the UI thread owns every reactive signal**.
 
 The reusable engine ChatPanel owns message layout, scrolling and the composer.
 The Code adapter owns scopes, draft/history state and Gateway requests. Docs fetches
-the Code corpus; This run captures an explicitly labelled snapshot of the loaded
+the Code corpus; Companion captures an explicitly labelled snapshot of the loaded
 conversation and current run state. Both start `docs-qa@0.1.1:docsqa001` in a dedicated `kind=docs` session. It grants no tools and does not steer the coding run. Run-scope questions receive
 a fresh user-visible conversation reference; Docs receives that reference plus its cached corpus. Tool details and hidden reasoning are excluded; bounded history is labelled. A separate worker
 follows that run, keeping coding commands and approval responses responsive.
@@ -266,7 +266,7 @@ flowchart LR
   Host --> Avatar["AbstractTUI Avatar: drawing only"]
   Host --> Gate["Change + cooldown gate"]
   Gate --> QA["Existing Gateway grounded QA / resource pool"]
-  QA --> Side["Isolated advice state / This run notice"]
+  QA --> Side["Isolated advice state / Companion notice"]
   Side --> Queue["Existing ordered narration queue"]
 ```
 

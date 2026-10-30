@@ -267,7 +267,7 @@ fn opened(id: &str) -> &'static [&'static str] {
         ui::chrome::ACT_GATEWAY => &["status · Esc closes"],
         ui::chrome::ACT_ACCOUNT => &["Gateway:"],
         ui::chrome::ACT_TOOLS => &["choices for this session"],
-        ui::chrome::ACT_DOCS => &["Assistant · AbstractCode", "Docs", "This run"],
+        ui::chrome::ACT_DOCS => &["Documentation · AbstractCode"],
         ui::chrome::ACT_ABOUT => &["About AbstractCode"],
         ui::chrome::ACT_MENU => &["Docs assistant", "Theme", "About AbstractCode"],
         ui::chrome::ACT_WORKSPACE => &["Workspace"],
@@ -776,7 +776,11 @@ fn docs_drawer_keeps_its_question_and_never_steers_the_coding_session() {
     h.turn();
     h.term.push_input(b"\x1b");
     h.turn();
-    std::thread::sleep(std::time::Duration::from_millis(45));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+    while h.store.docs_open.get_untracked() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        h.turn();
+    }
     let screen = h.turn();
     assert!(!h.store.docs_open.get_untracked());
     assert!(screen.contains("coding draft"));
@@ -867,14 +871,11 @@ fn run_questions_capture_loaded_context_without_steering_or_crossing_docs_histor
             .push(("assistant".into(), "Existing docs answer".into()))
     });
     h.turn();
-    click_action(&mut h, ui::chrome::ACT_DOCS);
-    let screen = h.turn();
-    let (y, line) = screen
-        .lines()
-        .enumerate()
-        .find(|(_, line)| line.contains("This run"))
-        .unwrap();
-    click_cell(&mut h, line.find("This run").unwrap() as i32, y as i32);
+    h.store
+        .help_scope
+        .set(abstractcode::docs_chat::ChatScope::Run);
+    h.store.docs_open.set(true);
+    assert!(h.turn().contains("Companion · AbstractCode"));
     let _ = h._rx.try_iter().count();
     h.term.push_input(b"What is this run doing?\r");
     h.turn();

@@ -21,6 +21,7 @@ const MAX_ADVICE_CHARS: usize = 800;
 pub struct CompanionPrefs {
     pub enabled: bool,
     pub style: String,
+    pub position: String,
     pub animate: bool,
     pub advice: bool,
     pub read_aloud: bool,
@@ -31,6 +32,7 @@ impl Default for CompanionPrefs {
         Self {
             enabled: false,
             style: "halo".into(),
+            position: "top-right".into(),
             animate: true,
             advice: false,
             read_aloud: false,
@@ -49,6 +51,14 @@ impl CompanionPrefs {
         p.animate = boolean("animate", p.animate);
         p.advice = boolean("advice", p.advice);
         p.read_aloud = boolean("read_aloud", p.read_aloud);
+        if let Some(position) = v
+            .get("position")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            p.position = position.to_owned();
+        }
         if let Some(style) = v
             .get("style")
             .and_then(Value::as_str)
@@ -76,6 +86,7 @@ impl CompanionPrefs {
         for (key, value) in [
             ("enabled", json!(self.enabled)),
             ("style", json!(self.style)),
+            ("position", json!(self.position)),
             ("animate", json!(self.animate)),
             ("advice", json!(self.advice)),
             ("read_aloud", json!(self.read_aloud)),
@@ -398,6 +409,14 @@ mod tests {
         assert!(
             !CompanionPrefs::from_json(Some(&json!({"enabled":"true","advice":"true"}))).enabled
         );
+        assert_eq!(CompanionPrefs::default().position, "top-right");
+        for position in ["bottom-right", "future-placement"] {
+            let p = CompanionPrefs::from_json(Some(&json!({"position":position})));
+            assert_eq!(
+                CompanionPrefs::from_json(Some(&p.to_json())).position,
+                position
+            );
+        }
     }
     #[test]
     fn semantic_revision_ignores_tool_and_private_reasoning_changes() {

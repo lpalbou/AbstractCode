@@ -998,9 +998,42 @@ fn meter_row(
         .build()
 }
 
+/// Controls the speech already selected by the shared audio owner. Never starts
+/// the latest reply when playback is idle or still preparing.
+pub(super) fn current_speech_button(cx: Scope, store: Store, tokens: &TokenSet) -> Option<View> {
+    let (glyph, label, pause) = match store.voice.speaking.get() {
+        Speaking::Playing => ("‖", "Pause current speech", true),
+        Speaking::Paused => ("▶", "Resume current speech", false),
+        Speaking::Idle | Speaking::Preparing => return None,
+    };
+    let button = Button::new(glyph)
+        .on_click(move || {
+            if pause {
+                pause_speaking(store);
+            } else {
+                resume_speaking(store);
+            }
+        })
+        .element(cx, tokens)
+        .access_label(label)
+        .build();
+    Some(
+        if let Some(overlays) = cx.use_context::<abstracttui::app::Overlays>() {
+            Tooltip::attach(
+                cx,
+                &overlays,
+                format!("{label} · Ctrl+P"),
+                Duration::from_millis(400),
+                button,
+            )
+        } else {
+            button
+        },
+    )
+}
+
 pub fn status_row(store: Store) -> View {
-    dyn_view(LayoutStyle::default().shrink(0.0), move || {
-        let _ = store.voice.tick.get();
+    dyn_view_scoped(LayoutStyle::default().shrink(0.0), move |cx| {
         let t = abstracttui::app::current_theme().tokens;
         // RECORDING: the live voice meter (operator ask 2026-10-10: "a
         // widget, like for thinking, but based on the voice being
@@ -1011,15 +1044,46 @@ pub fn status_row(store: Store) -> View {
         // speech visibly moves. Re-renders per level (~10/s) only while
         // recording.
         if let Some((label, hint)) = recording_parts(store, Instant::now()) {
+            let _ = store.voice.tick.get();
             let levels = store.voice.levels.get();
             return meter_row(&t, label, t.error, levels, hint);
         }
         // SPEAKING: the same meter over the SPEAKER's levels (operator ask
         // 2026-10-10: "when the ai speaks, show that histogram of voice").
         if let Some((label, hint)) = speaking_parts(store) {
-            let levels = store.voice.speak_levels.get();
-            return meter_row(&t, label, t.accent, levels, hint);
+            // Only the meter subscribes to level reports. A spectrum update must
+            // not dispose a pressed/focused playback button between mouse down/up.
+            let meter = dyn_view(
+                LayoutStyle::default()
+                    .height(Dimension::Cells(1))
+                    .grow(1.0)
+                    .basis(Dimension::Cells(0))
+                    .min_w(0),
+                move || {
+                    meter_row(
+                        &t,
+                        label.clone(),
+                        t.accent,
+                        store.voice.speak_levels.get(),
+                        hint,
+                    )
+                },
+            );
+            let mut row = Element::new()
+                .style(
+                    LayoutStyle::row()
+                        .width(Dimension::Percent(1.0))
+                        .height(Dimension::Cells(1))
+                        .min_w(0)
+                        .shrink(0.0),
+                )
+                .child(meter);
+            if let Some(button) = current_speech_button(cx, store, &t) {
+                row = row.child(button);
+            }
+            return row.build();
         }
+        let _ = store.voice.tick.get();
         let Some(line) = status_text(store, Instant::now()) else {
             return Element::new().build();
         };

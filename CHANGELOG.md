@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Terminal companion supports saved Top right / Bottom right placement, expressive
+  pose animation, separate Documentation and Companion entries, and current-audio
+  pause/resume controls beside the speaking meter and avatar.
+
 - **The automation header names its folder in words** (operator QA 2026-10-29, ADR 0043). It read "Workspace
   session-automation-7f7613b4-fd8b-…", the folder's id. It now reads "Workspace · This automation's folder", and a
   conversation's folder reads "This conversation's folder". The path is only in the copy action. A folder the person

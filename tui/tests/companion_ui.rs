@@ -177,7 +177,7 @@ fn both_styles_offer_a_ready_companion_and_open_the_run_without_sending_the_codi
         });
         let screen = h.turn();
         assert!(
-            screen.contains("● This run") && screen.contains("My coding draft"),
+            screen.contains("Companion · AbstractCode") && screen.contains("My coding draft"),
             "{screen}"
         );
         assert!(
@@ -203,7 +203,8 @@ fn narrow_companion_remains_reachable_and_yields_to_the_assistant_drawer() {
     h.click("◉");
     let screen = h.turn();
     assert!(
-        screen.contains("Assistant · AbstractCode") && screen.contains("● This run"),
+        screen.contains("Companion · AbstractCode")
+            && !screen.contains("Documentation · AbstractCode"),
         "{screen}"
     );
     assert!(
@@ -224,6 +225,7 @@ fn companion_settings_are_reachable_and_change_only_ephemeral_preferences() {
         "Offer comments",
         "Read side replies",
         "Speaking voice",
+        "Position",
     ] {
         assert!(screen.contains(label), "{label}:\n{screen}");
     }
@@ -250,6 +252,75 @@ fn companion_settings_are_reachable_and_change_only_ephemeral_preferences() {
         0,
         "editing settings is not an inference trigger"
     );
+}
+
+#[test]
+fn position_changes_move_the_same_avatar_and_survive_reopening_settings() {
+    let mut h = harness(220, Some(json!({"enabled":true,"animate":false})));
+    let top = h
+        .turn()
+        .lines()
+        .position(|s| s.contains("Talk / ask"))
+        .unwrap();
+    h.click("⚙");
+    h.click("Position");
+    h.enter();
+    assert_eq!(
+        h.ctx.prefs.borrow().companion.as_ref().unwrap()["position"],
+        "bottom-right"
+    );
+    assert!(h.turn().contains("Bottom right"));
+    h.term.push_input(b"\x1b");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+    while h.ctx.modal_open() && std::time::Instant::now() < deadline {
+        h.turn();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let screen = h.turn();
+    let bottom = screen
+        .lines()
+        .position(|s| s.contains("Talk / ask"))
+        .unwrap();
+    let composer = screen
+        .lines()
+        .position(|s| s.contains("describe a task"))
+        .unwrap();
+    assert!(bottom > top + 5 && bottom < composer, "{screen}");
+    h.click("⚙");
+    assert!(h.turn().contains("Bottom right"));
+    assert!(!h
+        .commands()
+        .iter()
+        .any(|c| matches!(c, Cmd::AssistantAsk { .. } | Cmd::Start { .. })));
+}
+
+#[test]
+fn account_companion_entry_is_available_with_the_avatar_disabled() {
+    for width in [220, 90] {
+        let mut h = harness(width, None);
+        h.turn();
+        h.term.push_input(b"Unsent coding draft");
+        h.turn();
+        h.click(if width == 220 { "●" } else { "Menu" });
+        let screen = h.turn();
+        assert!(screen.contains("Companion"), "{screen}");
+        h.click("Companion");
+        let screen = h.turn();
+        assert!(screen.contains("Companion · AbstractCode"), "{screen}");
+        assert_eq!(h.store.help_scope.get_untracked(), ChatScope::Run);
+        h.term.push_input(b"\x1b");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        while h.store.docs_open.get_untracked() && std::time::Instant::now() < deadline {
+            h.turn();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let restored = h.turn();
+        assert!(restored.contains("Unsent coding draft"), "{restored}");
+        assert!(!h
+            .commands()
+            .iter()
+            .any(|c| matches!(c, Cmd::AssistantAsk { .. } | Cmd::Start { .. })));
+    }
 }
 
 #[test]
@@ -515,8 +586,8 @@ fn a_late_automatic_comment_cannot_cross_a_main_session_switch() {
 }
 
 #[test]
-fn a_ready_companion_emits_no_terminal_output_on_idle_turns() {
-    let mut h = harness(220, Some(json!({"enabled":true,"animate":true})));
+fn a_reduced_motion_companion_emits_no_terminal_output_on_idle_turns() {
+    let mut h = harness(220, Some(json!({"enabled":true,"animate":false})));
     h.turn();
     h.turn();
     h.term.take_bytes();

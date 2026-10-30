@@ -851,9 +851,10 @@ in an automation's Edit panel marks the row being saved with `…` next to
 
 Open **Docs** (under **Menu** on narrow terminals) or run `/docs`. The drawer
 uses message bubbles with a separate composer, Markdown answers and scrolling.
-**Docs** answers questions about AbstractCode documentation and the main conversation. **This run** answers
-questions about the conversation and run state currently loaded in this client.
-A dot marks the selected scope. Each scope has its own conversation and draft.
+**Documentation** answers questions about AbstractCode documentation and the main
+conversation. **Companion**, opened by the avatar or account menu, answers questions
+about the conversation and run state currently loaded in this client. These have
+separate titles, conversations and drafts; there are no scope tabs.
 Closing the drawer preserves them and your coding draft.
 
 Both use the Gateway-hosted `docs-qa@0.1.1:docsqa001` grounded question workflow.
@@ -893,8 +894,9 @@ Open Companion settings from the account menu or drawer gear. It offers:
 | Offer comments | Off | Short change-driven observations through Gateway |
 | Read side replies | Off | Narrate new side replies and accepted comments through the shared speaker queue |
 | Speaking voice | Main assistant voice | Independent Gateway catalog voice; main device and volume settings remain in force |
+| Position | Top right | Top right or Bottom right within the transcript, clear of composer and audio rows |
 
-The avatar floats beneath the right header controls, with its caption and action
+The avatar floats below the right header controls or at the bottom right, with its caption and action
 row centred together. Its bounded opaque surface draws above the transcript;
 it does not reserve a sidebar or reduce transcript width. Controls elsewhere
 continue to use the normal keyboard/mouse focus path.
@@ -904,7 +906,14 @@ recording, speaking or error. Paused speech is static. Below 120 columns or 22 r
 it becomes a compact control. The full avatar yields to drawers, modals and entity
 focus. It does not load a model or initiate microphone capture.
 Hover visibly leans with a raised hand while listening, rests lower with a dimmed
-downward gaze while waiting, and bobs with thruster sparks while working.
+downward gaze and sequential pulsing indicators while waiting, and bobs with
+thruster sparks while working. Ready breathes at2fps, Waiting uses6fps and active
+phases use up to12fps; Error stays still. Halo intake/emission rings distinguish
+Listening and Speaking even at a fixed audio level. Reduced motion stops clocks.
+
+While speech is playing or paused, the bottom histogram and avatar action row
+include ‖ Pause / ▶ Resume for that current audio. They never select a different
+message or start a reply. Message-level play/pause controls remain available.
 
 Appearance opens a silent preview with both styles and Ready, Listening, Thinking,
 Working, Speaking, Waiting and Error phases. A selected phase is held; **Auto cycle**
@@ -916,7 +925,7 @@ started explicitly with reduced motion enabled, without changing that preference
 The preview has no inference, recording or speech side effects.
 
 Automatic comments use a dedicated grounded-QA conversation, separate from manual
-Docs/This run history and coding commands. They require a new meaningful visible
+Documentation/Companion history and coding commands. They require a new meaningful visible
 conversation revision, allow one request at a time and enforce at least 60 seconds
 between attempts, including failures. Restoring/loading earlier history establishes
 a baseline; tool payload/hidden-reasoning changes do not trigger a request. Changes
