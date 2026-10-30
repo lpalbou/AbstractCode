@@ -1,4 +1,4 @@
-import { codeDocsPanel } from "./app_assistant";
+import { CodeDocsAssistant } from "./app_assistant";
 import { LoadingStatus } from "./loading_status";
 import {
   automationToolSelection,
@@ -74,7 +74,8 @@ import { gateway, gatewayRequest, formatError, newId } from "./transport";
 import { createWorkflowTransport } from "./session_transport";
 import { selectionFromAccountValue, useAccountWorkflow } from "./account_preferences";
 import { AccountWorkflowDefault } from "./account_workflow_default";
-import { AccountTimeZone } from "./account_time_zone";
+import { AgentSettings } from "./agent_settings";
+import { SettingsHelp } from "./settings_help";
 import {
   SettingsContent,
   DEFAULT_PREFERENCES,
@@ -188,6 +189,7 @@ export function CodeWorkspace() {
   const [voicePreferences, changeVoicePreferences] = useVoicePreferences(identity ? `abstractcode.voice:${identity}` : null);
   useEffect(() => {
     setPanelOpen(false);
+    setDocsOpen(false);
   }, [identity]);
   const [preferences, setPreferences] =
     useState<RunPreferences>(DEFAULT_PREFERENCES);
@@ -289,9 +291,10 @@ export function CodeWorkspace() {
     any
   > | null>(null);
   const [restoreError, setRestoreError] = useState("");
-  // The right side: the kit's drawer system (Activity, Files, Model, Workflow, Workspace, Tools,
-  // Skills, Voice on the rail; the Docs assistant from the top bar). It restores the docked panel.
+  // The shared rail restores its docked panel. Docs uses the standalone shared
+  // drawer, independently of the current workspace panel.
   const [railPanel, setRailPanel] = useState<CodePanel | null>(null);
+  const [docsOpen, setDocsOpen] = useState(false);
   const railOverlay = useAfMedia(AF_MEDIA.md);
   // A phone always starts with the content visible: becoming an overlay folds the panel away.
   useEffect(() => {
@@ -304,12 +307,12 @@ export function CodeWorkspace() {
   };
   const openPanel = (section: RailPanel) => {
     setSidebarOpen(false);
-    setRailPanel(section);
+    setRailPanel(section === "workflow" || section === "tools" || section === "skills" ? "agent" : section);
   };
-  /** The workflow's inputs live in the Workflow panel; "Back to chat" collapses it to the rail. */
+  /** The workflow's inputs live in the Agent panel; "Back to chat" collapses it to the rail. */
   const setInputsOpen = (open: boolean) => {
-    if (open) openPanel("workflow");
-    else if (railPanel === "workflow") setRailPanel(null);
+    if (open) openPanel("agent");
+    else if (railPanel === "agent") setRailPanel(null);
   };
   // Conversation navigation becomes a drawer below the tablet breakpoint.
   const panesAreDrawers = useAfMedia(AF_MEDIA.md);
@@ -345,7 +348,7 @@ export function CodeWorkspace() {
   const [queueRunning, setQueueRunning] = useState(false);
   const [optimistic, setOptimistic] = useState<ChatMessage[]>([]);
   // The one-time migration of the Permissions tier / tool picker into this app's tool layer
-  // (decision 2026-10-27): labeled, never silent — the Tools panel says so until dismissed.
+  // (decision 2026-10-27): labeled, never silent — the Agent panel says so until dismissed.
   useEffect(() => {
     const legacy = preferences.legacyTools;
     if (!legacy || !toolStore || catalog.loading || !catalog.toolCatalog.length) return;
@@ -574,7 +577,7 @@ export function CodeWorkspace() {
       void automations.select(automationId);
     }
     setSidebarOpen(false);
-    setRailPanel("workflow");
+    setRailPanel("agent");
   };
   /** The automation header's "Change workspaces": the same, on the rail's Workspace panel (its chooser). */
   const openAutomationWorkspaces = (automationId: string) => {
@@ -1270,7 +1273,7 @@ export function CodeWorkspace() {
             setPreferences({ ...next, toolLayer: {} });
   };
   const renderSettings = (
-    section: "model" | "workspace" | "tools" | "skills",
+    section: "model" | "workspace" | "tools" | "skills" | "behavior",
     value: RunPreferences = { ...preferences, toolLayer: appToolLayer },
     onChange: (next: RunPreferences) => void = conversationSettingsChange,
     automation?: { root: string },
@@ -1331,6 +1334,7 @@ export function CodeWorkspace() {
     id: SettingsRailPanel,
     conversation: () => React.ReactNode,
     automation: (value: RunPreferences, onChange: (next: RunPreferences) => void, root: { root: string }) => React.ReactNode,
+    binding = true,
   ) => {
     if (automationView) {
       if (!automationDetail?.definition || !automationSettings)
@@ -1338,16 +1342,14 @@ export function CodeWorkspace() {
       const root = { root: automationDetail.definition.workspace_root || "" };
       return (
         <div className="code-automation-settings" id={`code-settings-${id}`} data-revision={automationSettings.revision}>
-          <AutomationBinding summary={automationDetail.summary} settings={automationSettings} />
+          {binding ? <AutomationBinding summary={automationDetail.summary} settings={automationSettings} /> : null}
           {automation(automationSettings.draft, automationSettings.onChange, root)}
         </div>
       );
     }
     return (
       <div className="code-conversation-settings" id={`code-settings-${id}`}>
-        <p className="code-settings-binding">
-          <span>Conversation</span> <strong title={title}>{title}</strong>
-        </p>
+        {binding ? <p className="code-settings-binding"><span>Conversation</span> <strong title={title}>{title}</strong></p> : null}
         {conversation()}
       </div>
     );
@@ -1403,24 +1405,22 @@ export function CodeWorkspace() {
           </div>
         {accountWorkflow.state.status === "ok" ? (
           <>
-            <AccountWorkflowDefault
+            <details className="code-settings-advanced">
+              <summary>Default for new chats <SettingsHelp label="About the default workflow">This account default is used by new conversations in every app. The workflow above belongs to this conversation.</SettingsHelp></summary>
+              <AccountWorkflowDefault
               row={accountWorkflow.state.row}
               save={accountWorkflow.save}
               disabled={!connection.connected}
-            />
-            <AccountTimeZone block={accountWorkflow.state.timeZone} save={accountWorkflow.saveTimeZone} disabled={!connection.connected} />
+              />
+            </details>
           </>
         ) : null}
         <div className="code-settings code-workflow-inputs">
-          <h3 className="code-settings-heading">Inputs</h3>
-          <p className="code-muted">
-            {workflow?.description ||
-              "Configure the values this workflow needs to run."}
-          </p>
           {schemaLoading ? (
             <p role="status">Loading input schema…</p>
           ) : schemaError ? null : isAgent || promptProperty ? (
             <AgentWorkflowInputs
+              concise
               key={workflow?.id}
               schema={schema}
               promptProperty={promptProperty}
@@ -1447,14 +1447,7 @@ export function CodeWorkspace() {
               {schemaError}
             </p>
           ) : null}
-          {chatReady ? (
-            <button
-              className="code-primary-button"
-              onClick={() => setInputsOpen(false)}
-            >
-              Back to chat <Icon name="chat" size={16} />
-            </button>
-          ) : (
+          {chatReady ? null : (
             <button
               className="code-primary-button"
               disabled={
@@ -1494,18 +1487,17 @@ export function CodeWorkspace() {
           prepareTarget={prepareAutomationTargetForCode}
           workflowPickerOptions={{ interfaceId: CODE_AGENT_INTERFACE, workflows: { ...catalog.executable, reload: () => void catalog.refresh() } }}
         />
-        {accountWorkflow.state.status === "ok" ? (
-          <AccountTimeZone block={accountWorkflow.state.timeZone} save={accountWorkflow.saveTimeZone} disabled={!connection.connected} />
-        ) : null}
+
         </>
       ) : null,
+    false,
   );
   const workspacePanel = settingsPanel(
     "workspace",
     () => (
       <>
         <p className="code-current-workspace">
-          Current workspace <code title={effectiveWorkspace || "Gateway workspace"}>{effectiveWorkspace.split("/").filter(Boolean).pop() || "Gateway workspace"}</code>
+          Run folder <code title={effectiveWorkspace || "Created by the Gateway for each run"}>{effectiveWorkspace.split("/").filter(Boolean).pop() || "Gateway managed"}</code>
         </p>
         {renderSettings("workspace")}
       </>
@@ -1516,12 +1508,19 @@ export function CodeWorkspace() {
     "tools",
     () => renderSettings("tools"),
     (value, onChange, root) => renderSettings("tools", value, onChange, root),
+    false,
   );
   const skillsPanel = settingsPanel(
     "skills",
     () => renderSettings("skills"),
     (value, onChange, root) => renderSettings("skills", value, onChange, root),
+    false,
   );
+  const agentContents = (behavior: React.ReactNode, skillCount = preferences.skills.length) => (
+    <AgentSettings workflow={workflowPanel} tools={toolsPanel} skills={skillsPanel}
+      behavior={behavior} skillCount={skillCount} workflowDescription={automationView ? undefined : workflow?.description} />
+  );
+  const agentPanel = settingsPanel("agent", () => agentContents(renderSettings("behavior")), (value, onChange, root) => agentContents(renderSettings("behavior", value, onChange, root), value.skills.length));
   const voicePanel = settingsPanel("voice", () => voiceSection, () => voiceSection);
   // Settings follow the selection: a newly selected conversation or automation starts at the top of the open panel.
   const settingsBinding = automationView ? `automation:${automationsState.selectedId}` : `conversation:${session.sessionId}`;
@@ -1541,7 +1540,6 @@ export function CodeWorkspace() {
       key={`rail:${identity}`}
       panel={railPanel}
       onPanel={setRailPanel}
-      docs={codeDocsPanel(connection.connected)}
       activityBadge={activityAttn.count}
       activityHint={activityAttn.hint}
       content={{
@@ -1592,10 +1590,8 @@ export function CodeWorkspace() {
         </>
       ),
       model: modelPanel,
-      workflow: workflowPanel,
+      agent: agentPanel,
       workspace: workspacePanel,
-      tools: toolsPanel,
-      skills: skillsPanel,
       voice: voicePanel,
       }}
     />
@@ -1766,7 +1762,7 @@ export function CodeWorkspace() {
             />
           ) : null}
           <AfTopBarActions
-            docs={{ open: railPanel === "docs", onToggle: () => { setRailPanel((open) => (open === "docs" ? null : "docs")); setSidebarOpen(false); }, label: "Docs assistant" }}
+            docs={{ open: docsOpen, onToggle: () => { setDocsOpen((open) => !open); setSidebarOpen(false); }, label: "Docs assistant" }}
             appearance={{ value: appearance, onChange: setAppearance }}
             about={{ identity: APP_IDENTITY, fetch: proxyGatewayFetch }}
             identity="menu"
@@ -2055,6 +2051,7 @@ export function CodeWorkspace() {
           </main>
           )}
           {railElement}
+          <CodeDocsAssistant key={identity || "signed-out"} connected={connection.connected} open={docsOpen} onClose={() => setDocsOpen(false)} />
         </div>
         <footer className="code-statusbar">
           <span>
@@ -2239,7 +2236,7 @@ function EmptyConversation({
           "Discovering your workflows…"
         ) : workflow ? (
           <>
-            Using <strong>{workflow.name}</strong> · Choose another in the Workflow panel
+            Using <strong>{workflow.name}</strong> · Choose another in Agent
           </>
         ) : connected ? (
           "Register a workflow with AbstractGateway to get started."

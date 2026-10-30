@@ -245,7 +245,7 @@ describe("Workspace row (round 2, item 10)", () => {
     expect(html).toContain("<small>sess_ed8c3b0bf5fd4d249477aca68da7f494-3f2a9c71e0b84d5e</small>");
     expect(workspaceLabel("")).toBe("Gateway managed");
     expect(appSource).toContain('className="code-current-workspace"');
-    expect(appSource).toContain('{effectiveWorkspace || "Gateway workspace"}');
+    expect(appSource).toContain('{effectiveWorkspace || "Created by the Gateway for each run"}');
   });
 
   it("is a three-column grid whose value never wraps or reaches the chevron", () => {

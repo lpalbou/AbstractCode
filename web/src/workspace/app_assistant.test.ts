@@ -72,7 +72,7 @@ describe("Code Docs assistant (kit DocsAssistantDrawer)", () => {
 
   it("is the kit's docs panel: drawer mode, kept alive, icon-only New conversation, attachments", () => {
     const panel = codeDocsPanel(true);
-    expect(panel).toMatchObject({ id: "docs", label: "Docs assistant", icon: "book", mode: "drawer", keepAlive: "always" });
+    expect(panel).toMatchObject({ id: "docs", label: "Docs assistant", icon: "book", mode: "drawer", keepAlive: "always", fill: true });
     const html = renderToStaticMarkup(panel.content as React.ReactElement);
     expect(html).toMatch(/aria-label="New conversation"[^>]*><svg/);
     expect(html).not.toMatch(/>New conversation</);
@@ -83,9 +83,9 @@ describe("Code Docs assistant (kit DocsAssistantDrawer)", () => {
   });
 
   it("the top bar opens it from the shared docs slot (book icon) as the right side's docs panel", () => {
-    expect(appSource).toContain('docs={{ open: railPanel === "docs",');
+    expect(appSource).toContain('docs={{ open: docsOpen,');
     expect(appSource).not.toContain("assistant={{");
-    expect(appSource).toContain("docs={codeDocsPanel(connection.connected)}");
+    expect(appSource).toContain("<CodeDocsAssistant");
   });
 
   it("the app serves its llms.txt as text/plain (what the gateway reads)", async () => {

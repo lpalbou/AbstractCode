@@ -459,7 +459,7 @@ export function NewAutomationDialog(props: {
       workflowPicker={
         props.workflowPickerOptions && (chosenTarget || props.target) ? <AutomationWorkflowPicker
           target={(chosenTarget || props.target)!} options={props.workflowPickerOptions} onChange={setChosenTarget} /> : <p className="code-field-help" data-field="target">
-          {props.target ? `Initially uses ${props.workflowLabel}. Choose the workflow in this form.` : "Choose a workflow in the Workflow panel first."}
+          {props.target ? `Initially uses ${props.workflowLabel}. Choose the workflow in this form.` : "Choose a workflow in Agent first."}
         </p>
       }
       initialPrompt={props.initialPrompt}

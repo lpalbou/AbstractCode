@@ -71,7 +71,7 @@ test("workflow and tool pickers persist; email recipients remain visible; refres
   await expect(page.getByRole("main", { name: "Automation", exact: true })).toBeVisible();
   // Round 5: the header's Edit opens the rail's Workflow panel bound to this automation's definition.
   await main.locator('[data-action="edit"]').click();
-  const settings = page.locator("#code-rail-panel-workflow");
+  const settings = page.locator("#code-rail-panel-agent");
   await expect(settings).toBeVisible();
   await expect(settings.locator(".code-settings-binding")).toContainText("Automation");
   const edit = settings.locator(".af-auto__revise");

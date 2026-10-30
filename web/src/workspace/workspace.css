@@ -3075,3 +3075,27 @@ select option {
   grid-row: 3;
   padding: 0 12px 8px;
 }
+
+/* Compact settings compose the shared kit controls within the rail. */
+.code-agent-section { min-width: 0; }
+.code-agent-section + .code-agent-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--ui-border-1); }
+.code-agent-section > h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; color: var(--text-primary); font-size: var(--font-size-sm); font-weight: 600; }
+.code-settings-advanced > summary { display: flex; align-items: center; gap: 6px; min-height: 38px; color: var(--text-secondary); font-size: var(--font-size-sm); cursor: pointer; list-style: none; }
+.code-settings-advanced > summary::-webkit-details-marker { display: none; }
+.code-settings-advanced > summary::before { content: "›"; font-size: 18px; }
+.code-settings-advanced[open] > summary::before { transform: rotate(90deg); }
+.code-settings-advanced[open] > summary { margin-bottom: 8px; }
+.code-settings-advanced > summary .af-settings-help { margin-left: auto; }
+.code-settings-advanced > summary > .code-muted { margin-left: auto; font-size: var(--font-size-xs); }
+.code-rail .code-field { gap: 5px; margin-bottom: 12px; }
+.code-rail .code-field > input, .code-rail .code-field > textarea, .code-rail .code-field > select { padding: 8px; }
+.code-agent-settings .code-workflow-inputs { margin: 0; padding: 0; border: 0; }
+.code-agent-settings .code-advanced-inputs { margin: 8px 0; padding: 8px 10px; }
+.code-agent-settings .code-workflow-select { margin-bottom: 4px; }
+.code-rail .code-current-workspace { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--text-secondary); font-size: var(--font-size-sm); }
+.code-rail .code-current-workspace code { color: var(--text-primary); }
+.code-rail .af-workspace--compact .af-settings-group__title { font-size: var(--font-size-sm); }
+.code-rail .af-workspace--compact .af-workspace__path { font-size: var(--font-size-sm); }
+/* A shared docs chat owns the whole body; its composer stays at the bottom. */
+.code-rail .pc-docs-assistant-panel { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; height: 100%; }
+.code-rail .pc-docs-assistant-panel > .pc-docs-assistant { flex: 1 1 auto; min-height: 0; }

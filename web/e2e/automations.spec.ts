@@ -230,7 +230,7 @@ test("creates and edits a custom growing context budget", async ({ page }) => {
   const main = page.locator(".code-automation-main");
   // Round 5: Edit opens the rail's Workflow panel on this automation; its definition form holds the context.
   await main.getByRole("button", { name: "Edit", exact: true }).click();
-  const settings = page.locator("#code-rail-panel-workflow");
+  const settings = page.locator("#code-rail-panel-agent");
   const editBudget = settings.getByRole("spinbutton", { name: /Max growing context/ });
   await expect(editBudget).toHaveValue("30000");
   await settings.getByRole("radio", { name: /Independent/ }).check();

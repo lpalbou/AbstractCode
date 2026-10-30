@@ -1,10 +1,10 @@
-import { docsAssistantPanel, type DocsAssistantSource, type GatewayFetch } from "@abstractframework/panel-chat";
+import React from "react";
+import { DocsAssistantDrawer, docsAssistantPanel, type DocsAssistantSource, type GatewayFetch } from "@abstractframework/panel-chat";
 import type { AfDrawerPanel } from "@abstractframework/ui-kit";
 import { csrfHeaders } from "./transport";
 
 /**
- * The Docs assistant (round 8, R8.3): the kit's shared docs assistant as a drawer-system panel
- * (panel-chat `docsAssistantPanel`, backlog 0036), grounded on THIS app's llms.txt (the gateway
+ * The shared Docs assistant drawer, grounded on THIS app's llms.txt (the gateway
  * reads it from this app's own build: `GET api/gateway/docs/corpus?app=code`) through the
  * gateway's docs-qa workflow. Conversation, attachments, streaming, history and focus are the kit's.
  */
@@ -23,5 +23,10 @@ export const docsGatewayFetch: GatewayFetch = (path, init = {}) => {
 
 /** The right side's "docs" panel (kept alive; key the drawer system by account in the host). */
 export function codeDocsPanel(connected: boolean): AfDrawerPanel {
-  return docsAssistantPanel(CODE_DOCS_SOURCE, docsGatewayFetch, { connected, suggestions: CODE_DOCS_SUGGESTIONS, placeholder: "Ask about AbstractCode…" });
+  return { ...docsAssistantPanel(CODE_DOCS_SOURCE, docsGatewayFetch, { connected, suggestions: CODE_DOCS_SUGGESTIONS, placeholder: "Ask about AbstractCode…" }), fill: true };
+}
+
+/** Use the same drawer as Gateway, Observer, Flow, Entity and Note. */
+export function CodeDocsAssistant(props: { connected: boolean; open: boolean; onClose: () => void }): React.ReactElement {
+  return <DocsAssistantDrawer source={CODE_DOCS_SOURCE} fetchGateway={docsGatewayFetch} connected={props.connected} open={props.open} onClose={props.onClose} topOffset="auto" suggestions={CODE_DOCS_SUGGESTIONS} placeholder="Ask about AbstractCode…" />;
 }

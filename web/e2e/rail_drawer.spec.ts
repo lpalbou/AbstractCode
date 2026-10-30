@@ -138,7 +138,7 @@ for (const [name, width, height] of [["desktop", 1440, 960], ["tablet", 834, 111
       await shot(page, `panel-model-${name}`);
       for (const [panelName, probe] of [
         ["Workflow", (p: ReturnType<Page["locator"]>) => p.getByRole("combobox", { name: "Workflow", exact: true })],
-        ["Workspace", (p: ReturnType<Page["locator"]>) => p.getByText("Current workspace")],
+        ["Workspace", (p: ReturnType<Page["locator"]>) => p.getByText("Run folder")],
         ["Tools", (p: ReturnType<Page["locator"]>) => p.getByRole("searchbox", { name: "Search tools" })],
         ["Skills", (p: ReturnType<Page["locator"]>) => p.locator("#code-settings-skills")],
       ] as const) {
@@ -150,7 +150,7 @@ for (const [name, width, height] of [["desktop", 1440, 960], ["tablet", 834, 111
       }
       // Workflow: the gateway default by default.
       await openWorkspaceSection(page, "Workflow");
-      await expect(page.locator("#code-rail-panel-workflow").getByRole("combobox", { name: "Workflow", exact: true })).toContainText(/Gateway default/);
+      await expect(page.locator("#code-rail-panel-agent").getByRole("combobox", { name: "Workflow", exact: true })).toContainText(/Gateway default/);
       const settings = await openWorkspaceSection(page, "Voice");
       await expect(settings).not.toContainText("close the drawer and choose Edit");
       // D7: the Assistant's Voice layout, compact.
@@ -174,7 +174,7 @@ for (const [name, width, height] of [["desktop", 1440, 960], ["tablet", 834, 111
 test("files preview in the shared viewer; activity groups; no Open button", async ({ page }) => {
   await signIn(page);
   await railTab(page, "Workflow").click();
-  const workflowPanel = page.locator("#code-rail-panel-workflow");
+  const workflowPanel = page.locator("#code-rail-panel-agent");
   await workflowPanel.getByRole("combobox", { name: "Workflow", exact: true }).click();
   await page.getByRole("option").filter({ has: page.locator(".af-workflow-picker__name", { hasText: "Basic agent defaults" }) }).click();
   await expect(page.locator(".code-workflow-select")).not.toHaveAttribute("aria-busy", "true");
@@ -293,7 +293,7 @@ test("automation selected: every settings panel edits its definition and saves a
   await page.locator(".code-sidebar").getByText(created.summary.title, { exact: true }).first().click();
   await expect(page.locator(".code-auto-header")).toBeVisible();
   await page.locator('.code-auto-header [data-action="edit"]').click();
-  const workflow = page.locator("#code-rail-panel-workflow");
+  const workflow = page.locator("#code-rail-panel-agent");
   await expect(workflow).toBeVisible();
   await expect(workflow.locator(".code-automation-definition")).toBeInViewport();
   await expect(workflow.locator(".code-settings-binding")).toContainText("Automation");
@@ -305,18 +305,21 @@ test("automation selected: every settings panel edits its definition and saves a
   await expect(settings.locator(".code-settings-binding")).toContainText("Automation");
   await expect(settings.getByTestId("automation-revision")).toHaveText(`Revision ${rev0}`);
   // Gateway default until overridden.
-  await expect(settings.locator('input[placeholder="Workflow default"]').first()).toHaveValue("");
-  const limit = settings.getByLabel("Iteration limit");
+  await expect(settings.getByLabel("Context token limit")).toHaveValue("");
+  const agent = await openWorkspaceSection(page, "Agent");
+  await agent.locator('.code-agent-section > summary').filter({hasText:"Instructions & limits"}).click();
+  await agent.locator('.code-settings-advanced > summary').filter({hasText:/^Run limits/}).click();
+  const limit = agent.getByLabel("Iteration limit", {exact:true});
   await limit.fill("5");
-  await expect(settings.locator(".code-settings-save")).toHaveText(`Saved as revision ${rev0 + 1}; applies from the next run.`, { timeout: 15_000 });
-  await expect(settings.getByTestId("automation-revision")).toHaveText(`Revision ${rev0 + 1}`);
+  await expect(agent.locator(".code-settings-save")).toHaveText(`Saved as revision ${rev0 + 1}; applies from the next run.`, { timeout: 15_000 });
+  await expect(agent.getByTestId("automation-revision")).toHaveText(`Revision ${rev0 + 1}`);
   const after = await api(`automations/${encodeURIComponent(id)}`);
   expect(after.definition.revision).toBe(rev0 + 1);
   expect(after.definition.target.input_data._limits.max_iterations).toBe(5);
   expect(after.definition.target.input_data.prompt).toBe("Say hi");
   // Back to the default removes the override (a new revision without it).
   await limit.fill("");
-  await expect(settings.getByTestId("automation-revision")).toHaveText(`Revision ${rev0 + 2}`, { timeout: 15_000 });
+  await expect(agent.getByTestId("automation-revision")).toHaveText(`Revision ${rev0 + 2}`, { timeout: 15_000 });
   const reset = await api(`automations/${encodeURIComponent(id)}`);
   expect(reset.definition.target.input_data._limits?.max_iterations).toBeUndefined();
   // Activity: one group per occurrence (none yet).
