@@ -42,13 +42,13 @@ Tool rows use a visible tree guide with indented status/name, semantic Off/Ask/A
 ink, neutral tool names and neutral selection background. Full descriptions,
 sandbox labels and Gateway enable gates appear before long descriptions in the
 selected detail pane. The
-modal is bounded to116columns/34rows; compact keyboard help fits80columns and uses
+modal is bounded to 116columns/34rows; compact keyboard help fits80columns and uses
 readable foreground instead of decoration ink. No new engine API or dependency.
 
-Validation: the clean committed-source full Code all-target suite passed1208 tests
-with23 existing tests ignored. This includes231 existing headless UI tests and4
+Validation: the clean committed-source full Code all-target suite passed 1208 tests
+with 23 existing tests ignored. This includes 231 existing headless UI tests and 4
 new keyboard/mouse/render tests, with dark/light semantic-colour
-and neutral-name assertions,80/120column mouse expansion, grouping, collapsed
+and neutral-name assertions,80/120 column mouse expansion, grouping, collapsed
 reopening, inventory insertion selection, category/individual policy preservation,
 Gateway gates, long-list scrolling and actual run-start allowlist/pin propagation.
 Existing tool-mode and sandbox screenshot tests were adapted to expand categories
@@ -63,3 +63,14 @@ Residuals: descriptions remain explicitly scrollable in the existing detail pane
 no separate search feature or permission-policy redesign was introduced. No new
 follow-up or durable architecture decision is warranted by this presentation fix.
 The parent task owns the concurrent overview/ledger update.
+
+## Local installation receipt
+
+Parent-coordinated atomic install completed 2026-10-30 after checking that the
+installed binary still matched the prior baseline. Installed version 0.12.0 has
+SHA256 33e9c72c4a8edca11879c8f7ed42cdb96ad99dfdac4f68c8b2b8781f7c3a5d02.
+Installed --version/--help and native PTY checks passed: collapsed categories,
+Enter expansion, individual mode cycling, zero run starts and clean exit 0. No
+running process restart. Rollback retained in /tmp/code-tools-0027-rollback/.
+Durable fixture screenshots and native request receipt are in
+[the combined review](../../../design/compact-settings-0024/REVIEW.md).
