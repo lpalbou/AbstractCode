@@ -857,6 +857,7 @@ fn run_questions_capture_loaded_context_without_steering_or_crossing_docs_histor
     h.store.phase.set(abstractcode::store::Phase::Running);
     h.store.run_id.set("active-root".into());
     h.store.docs_chat.update(|s| {
+        s.source_session = h.store.session_id.get_untracked();
         s.messages
             .push(("assistant".into(), "Existing docs answer".into()))
     });
@@ -878,7 +879,7 @@ fn run_questions_capture_loaded_context_without_steering_or_crossing_docs_histor
         .find_map(|c| match c {
             Cmd::AssistantAsk {
                 scope: abstractcode::docs_chat::ChatScope::Run,
-                corpus: Some(text),
+                context: text,
                 ..
             } => Some(text),
             _ => None,
@@ -894,4 +895,61 @@ fn run_questions_capture_loaded_context_without_steering_or_crossing_docs_histor
     assert!(h.store.run_chat.with_untracked(|s| s.busy));
     assert!(!h.store.docs_chat.with_untracked(|s| s.busy));
     assert_eq!(h.store.docs_chat.with_untracked(|s| s.messages.len()), 1);
+}
+
+#[test]
+fn docs_questions_include_fresh_visible_conversation_even_with_cached_documentation() {
+    let mut h = harness_sized(240, 40);
+    h.turn();
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode::transcript::Item::User {
+            text: "Todays AI news".into(),
+        });
+        f.push_item(abstractcode::transcript::Item::Assistant {
+            text: "The visible news summary".into(),
+            final_answer: true,
+        });
+    });
+    h.turn();
+    click_action(&mut h, ui::chrome::ACT_DOCS);
+    h.turn();
+    h.term.push_input(b"What is the main conversation about?\r");
+    h.turn();
+    let context = h
+        ._rx
+        .try_iter()
+        .find_map(|cmd| match cmd {
+            Cmd::AssistantAsk {
+                scope: abstractcode::docs_chat::ChatScope::Docs,
+                context,
+                ..
+            } => Some(context),
+            _ => None,
+        })
+        .unwrap();
+    assert!(context.contains("Todays AI news") && context.contains("visible news summary"));
+    h.store.docs_chat.update(|s| {
+        s.busy = false;
+        s.corpus = Some("Cached product docs".into());
+    });
+    h.store.fold.update(|f| {
+        f.push_item(abstractcode::transcript::Item::User {
+            text: "A newer visible request".into(),
+        })
+    });
+    h.turn();
+    h.term.push_input(b"What changed?\r");
+    h.turn();
+    let (context, corpus) = h
+        ._rx
+        .try_iter()
+        .find_map(|cmd| match cmd {
+            Cmd::AssistantAsk {
+                context, corpus, ..
+            } => Some((context, corpus)),
+            _ => None,
+        })
+        .unwrap();
+    assert!(context.contains("A newer visible request"));
+    assert_eq!(corpus.as_deref(), Some("Cached product docs"));
 }

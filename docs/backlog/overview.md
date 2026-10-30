@@ -14,9 +14,9 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 | State | Items | IDs |
 |---|---|---|
-| Planned | 5 | 0001, 0002, 0003, 0008, 0017 |
+| Planned | 4 | 0001, 0002, 0003, 0008 |
 | Proposed | 6 | 0004, 0005, 0006, 0010, 0011, 0016 |
-| Completed | 6 | 0007, 0009, 0012, 0013, 0014, 0015 |
+| Completed | 7 | 0007, 0009, 0012, 0013, 0014, 0015, 0017 |
 | Deprecated | 0 | |
 | Recurrent | 0 | |
 
@@ -50,7 +50,6 @@ Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.
 | 0002 | [TUI session fold defects](planned/0002_tui_session_fold_defects.md) | tui | child runs counted as turns; id-less runs; string timestamp ordering; first run by page order — align with the web fold |
 | 0003 | [Mermaid diagrams in the TUI transcript](planned/0003_mermaid_diagrams_in_the_transcript.md) | tui + abstracttui | an abstracttui release adding a `Feed` fence hook (+ `abstracttui-mermaid` multi-diagram cache); operator to lift the read-only rule on abstracttui |
 
-| 0017 | [Side assistant context/actions](planned/0017_assistant_conversation_context_and_actions.md) | tui + engine | Existing grounded QA and ChatPanel |
 | 0008 | [Read aloud and export](planned/0008_adopt_panel_chat_read_aloud_export.md) | web | Shared panel-chat actions |
 
 ## Proposed
@@ -75,6 +74,8 @@ Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.
 | 0013 | [session list metadata refresh](completed/0013_session_list_metadata_refresh.md) — completed 2026-10-30; tested and installed locally, no release | tui + engine/console |
 | 0014 | [shared chat panel and run questions](completed/0014_shared_chat_panel_and_run_questions.md) — completed 2026-10-30; tested and installed locally, no release | tui + engine/console |
 | 0015 | [Voice preferences and review](completed/0015_voice_preferences_and_review.md) — completed 2026-10-30; 1162 tests passed and installed terminal settings verified | tui |
+
+| 0017 | [Side assistant context and compact actions](completed/0017_assistant_conversation_context_and_actions.md) — completed 2026-10-30; targeted suites and live installed check passed | tui + engine |
 
 ## Deprecated
 

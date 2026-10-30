@@ -46,8 +46,8 @@ scrolling, arrow keys and explicit buttons are available in the Tools list.
 
 ## Questions beside the coding task
 
-The assistant drawer has independent Docs and This run scopes. Docs answers from
-AbstractCode documentation. This run receives an immutable snapshot of the
+The assistant drawer has independent Docs and This run scopes. Docs receives AbstractCode documentation plus recent user requests and assistant
+replies from the main conversation. This run receives an immutable snapshot of the
 currently loaded conversation when each question is sent. It cannot inspect
 newer/unloaded records or steer, approve or execute tools on the coding run.
 These scopes preserve separate drafts/history. `/docs` opens Docs directly.

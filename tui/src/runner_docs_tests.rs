@@ -122,7 +122,10 @@ fn start(server: &Server, inspect: impl FnOnce(Store)) {
             "code-docs-assistant:test".into(),
             7,
             "How do I open Tools?".into(),
-            None,
+            crate::docs_chat::QuestionReference {
+                corpus: None,
+                conversation: "User: Main conversation question".into(),
+            },
         );
         inspect(store);
         assert_eq!(store.run_id.get_untracked(), "coding-root");
@@ -161,6 +164,14 @@ fn docs_use_the_shared_workflow_contract_and_do_not_change_the_coding_run() {
     let requests = server.requests.lock().unwrap();
     assert_eq!(requests.len(), 3);
     let body = &requests[1].body;
+    assert!(body["input_data"]["docs"]
+        .as_str()
+        .unwrap()
+        .contains("Main conversation question"));
+    assert!(body["input_data"]["docs"]
+        .as_str()
+        .unwrap()
+        .contains("Tools menu groups"));
     assert_eq!(body["kind"], "docs");
     assert_eq!(body["bundle_id"], "docs-qa");
     assert_eq!(body["bundle_version"], "0.1.1");

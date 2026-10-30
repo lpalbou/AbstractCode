@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Both assistant scopes include fresh main-conversation requests and replies without
+  tool payloads or hidden reasoning. Send/new/retry use labelled icons on one row.
+
 - Voice settings let held-Space messages be reviewed in the prompt before sending
   (`/voice auto-send off`); automatic delivery remains the existing default.
   Selected voices retain their human catalog label across restarts.

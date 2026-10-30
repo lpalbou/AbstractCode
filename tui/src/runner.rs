@@ -172,6 +172,7 @@ pub enum Cmd {
         operation: u64,
         question: String,
         corpus: Option<String>,
+        context: String,
     },
     /// Load the gateway skill shelf (for `/skills`).
     LoadSkills,
@@ -886,6 +887,7 @@ impl Runner {
                 operation,
                 question,
                 corpus,
+                context,
             } => crate::runner_docs::ask(
                 self.client.clone(),
                 self.wake.clone(),
@@ -893,7 +895,10 @@ impl Runner {
                 session,
                 operation,
                 question,
-                corpus,
+                crate::docs_chat::QuestionReference {
+                    corpus,
+                    conversation: context,
+                },
             ),
             Cmd::LoadSkills => self.load_skills(),
             Cmd::LoadMcp => self.load_mcp(),

@@ -58,3 +58,10 @@ pub fn start_body(session: &str, question: &str, docs: &str) -> Value {
         "flow_id":"docsqa001", "session_id":session, "kind":"docs",
         "input_data":{"prompt":question,"docs":docs,"app":"AbstractCode","use_session_history":true}})
 }
+
+/// Cached documentation and fresh conversation are kept separate.
+#[derive(Clone, Debug, Default)]
+pub struct QuestionReference {
+    pub corpus: Option<String>,
+    pub conversation: String,
+}

@@ -851,15 +851,18 @@ in an automation's Edit panel marks the row being saved with `…` next to
 
 Open **Docs** (under **Menu** on narrow terminals) or run `/docs`. The drawer
 uses message bubbles with a separate composer, Markdown answers and scrolling.
-**Docs** answers questions about AbstractCode documentation. **This run** answers
+**Docs** answers questions about AbstractCode documentation and the main conversation. **This run** answers
 questions about the conversation and run state currently loaded in this client.
 A dot marks the selected scope. Each scope has its own conversation and draft.
 Closing the drawer preserves them and your coding draft.
 
 Both use the Gateway-hosted `docs-qa@0.1.1:docsqa001` grounded question workflow.
-Docs supplies the corpus from `/docs/corpus?app=code`; This run supplies an
-explicitly labelled snapshot captured when you send. It includes loaded prompts,
-answers, tool details, run identity and state, and says when earlier records are
+Both modes receive a fresh, explicitly labelled snapshot of user requests, guidance
+and assistant replies from the main conversation, including visible streaming content.
+Tool payloads and hidden reasoning are excluded. The snapshot retains up to 24,000
+characters of recent message text and labels any omitted or shortened history.
+Docs additionally supplies the corpus from `/docs/corpus?app=code`, cached separately
+from conversation context. The snapshot includes session/run identity and state, and says when earlier records are
 not loaded. These questions do not steer, approve or execute tools in the coding
 run. Switching coding conversations starts a separate run-question history.
 

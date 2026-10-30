@@ -10,7 +10,7 @@ pub fn ask(
     session: String,
     operation: u64,
     question: String,
-    corpus: Option<String>,
+    reference: crate::docs_chat::QuestionReference,
 ) {
     let error_wake = wake.clone();
     let error_session = session.clone();
@@ -18,12 +18,20 @@ pub fn ask(
         .name("assistant-qa".into())
         .spawn(move || {
             let work = || -> Result<(), String> {
-                let docs = match corpus {
+                let docs = match reference.corpus {
                     Some(text) => text,
                     None => client.docs_corpus().map_err(|e| e.to_string())?,
                 };
+                let grounded = if reference.conversation.is_empty() {
+                    docs.clone()
+                } else {
+                    format!(
+                        "{}\n\n# Product documentation\n{}",
+                        reference.conversation, docs
+                    )
+                };
                 let run = client
-                    .start_docs_question(&session, &question, &docs)
+                    .start_docs_question(&session, &question, &grounded)
                     .map_err(|e| e.to_string())?;
                 let sid = session.clone();
                 let rid = run.clone();

@@ -688,3 +688,5 @@ mod tests {
         abstracttui::app::set_redraw_on_focus_gained(false);
     }
 }
+
+pub mod assistant_context;
