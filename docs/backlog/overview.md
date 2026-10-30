@@ -14,13 +14,15 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 | State | Items | IDs |
 |---|---|---|
-| Planned | 5 | 0001, 0002, 0003, 0008, 0029 |
+| Planned | 4 | 0001, 0002, 0003, 0008 |
 | Proposed | 8 | 0004, 0005, 0006, 0010, 0011, 0018, 0019, 0020 |
-| Completed | 16 | 0007, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028 |
+| Completed | 17 | 0007, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029 |
 | Deprecated | 0 |  |
 | Recurrent | 0 |  |
 
 ## Next Recommended Work
+
+- [0029](completed/0029_shared_avatar_catalog_and_rendering.md) completed 2026-10-30: six shared watch-inspired avatars, native/Wasm/React/Qt adapters, red X Error faces and two-second Ready cursor tracking; validated and installed locally. Shared identity migration stays in0018.
 
 - [0028](completed/0028_readable_scrollable_skills_picker.md) completed 2026-10-30: larger Skills picker on the shared List; readable details, mouse wheel/scrollbar and explicit pointer attachment; 1221 tests passed and installed native smoke passed.
 
@@ -64,7 +66,7 @@ Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.
 | 0008 | [Read aloud and export](planned/0008_adopt_panel_chat_read_aloud_export.md) | web | Shared panel-chat actions |
 
 
-| 0029 | [Shared avatar catalog and rendering](planned/0029_shared_avatar_catalog_and_rendering.md) | tui + ui-kit + engine | Generic geometry core and host adapters |
+| 0029 | [Shared avatar catalog and rendering](completed/0029_shared_avatar_catalog_and_rendering.md) | tui + ui-kit + engine | Generic geometry core and host adapters |
 
 ## Proposed
 

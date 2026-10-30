@@ -50,11 +50,7 @@ pub fn settings(cx: Scope, store: Store, ctx: &UiCtx) {
             ),
             format!(
                 "Appearance        {} · preview…",
-                if p.style == "hover" {
-                    "Hover robot"
-                } else {
-                    "Halo orb"
-                }
+                AvatarStyle::from_id(&p.style).unwrap_or_default().label()
             ),
             format!(
                 "Animate activity  {}",
@@ -164,16 +160,24 @@ pub fn observed_pose(store: Store) -> AvatarPose {
             || store.advice_chat.with(|s| s.busy)
         {
             AvatarPose::Thinking
-        } else if f
-            .items
-            .last()
-            .is_some_and(|i| matches!(i, crate::transcript::Item::Error { .. }))
+        } else if f.failed
+            || f.items
+                .last()
+                .is_some_and(|i| matches!(i, crate::transcript::Item::Error { .. }))
         {
             AvatarPose::Error
         } else {
             AvatarPose::Ready
         }
     })
+}
+pub(super) fn record_pointer(store: Store, ctx: &UiCtx, pointer: AvatarPointer, point: Point) {
+    let p = prefs(ctx);
+    if p.enabled && p.animate && visible(store, ctx) && observed_pose(store) == AvatarPose::Ready {
+        pointer.moved(point);
+    } else {
+        pointer.clear();
+    }
 }
 pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> View {
     let _ = store.companion_tick.get();
@@ -222,6 +226,7 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
     let left =
         ((group_left + group_right - panel_width) / 2).clamp(0, (viewport.w - panel_width).max(0));
     let t = use_theme(cx).get().tokens;
+    let pointer = root.use_context::<AvatarPointer>();
     let art = if narrow {
         Button::new("◉")
             .on_click(open)
@@ -248,14 +253,16 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
             .on_click(open)
             .element(cx, &use_theme(cx).get_untracked().tokens)
             .access_label("Open companion conversation")
-            .child(
-                Avatar::new(pose)
+            .child({
+                let avatar = Avatar::new(pose);
+                let avatar = if let Some(pointer) = pointer {
+                    avatar.follow_pointer(pointer)
+                } else {
+                    avatar
+                };
+                avatar
                     .transparent_background(true)
-                    .style(if p.style == "hover" {
-                        AvatarStyle::Hover
-                    } else {
-                        AvatarStyle::Halo
-                    })
+                    .style(AvatarStyle::from_id(&p.style).unwrap_or_default())
                     .level(level)
                     .active(active)
                     .animated(animated)
@@ -269,8 +276,8 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
                                 ..Default::default()
                             }),
                     )
-                    .view(cx),
-            )
+                    .view(cx)
+            })
             .build()
     };
     let mut side = Element::new()
@@ -341,6 +348,22 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
 }
 
 pub fn wire(cx: Scope, store: Store, ctx: &UiCtx) {
+    if let Some(pointer) = cx.use_context::<AvatarPointer>() {
+        let context = ctx.clone();
+        cx.effect(move || {
+            let _ = store.companion_tick.get();
+            let _ = context.modal_epoch.get();
+            let p = prefs(&context);
+            if !p.enabled
+                || !p.animate
+                || !visible(store, &context)
+                || observed_pose(store) != AvatarPose::Ready
+            {
+                pointer.clear();
+            }
+        });
+    }
+
     let gate = Rc::new(RefCell::new(AdviceGate::default()));
     let in_flight: Rc<RefCell<Option<AdviceTicket>>> = Rc::new(RefCell::new(None));
     let epoch = Instant::now();

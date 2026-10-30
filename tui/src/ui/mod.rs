@@ -236,6 +236,9 @@ impl UiCtx {
 }
 
 pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Actions) -> View {
+    let avatar_pointer = AvatarPointer::new(cx);
+    cx.provide_context(avatar_pointer);
+    ctx.overlays.require_pointer_motion();
     docs_assistant::install(cx, store, &ctx);
     companion_view::wire(cx, store, &ctx);
     let theme = use_theme(cx);
@@ -565,6 +568,16 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                 }
             },
         )
+        .on(abstracttui::ui::Phase::Capture, {
+            let context = ctx.clone();
+            move |_, event| {
+                if let abstracttui::ui::UiEvent::Mouse(mouse) = event {
+                    if matches!(mouse.kind, abstracttui::ui::MouseKind::Move) {
+                        companion_view::record_pointer(store, &context, avatar_pointer, mouse.pos);
+                    }
+                }
+            }
+        })
         .on(abstracttui::ui::Phase::Capture, {
             let composer = composer.clone();
             let ctx = ctx.clone();

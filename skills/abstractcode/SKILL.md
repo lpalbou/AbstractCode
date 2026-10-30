@@ -97,14 +97,14 @@ References: [terminal API](../../tui/docs/api.md), [setup](../../docs/getting-st
 ## Optional companion
 
 Use account menu → Companion settings, or the Companion drawer's ⚙ action. Enable
-Halo/Hover visuals, choose reduced motion, and optionally enable comments or side
+Halo, Hover, Vortex, Eclipse, Eye or Rover visuals, choose reduced motion, and optionally enable comments or side
 read-aloud. Click the avatar (compact ◉ on small terminals) to open Companion, separately from Documentation.
 Position selects Top right or Bottom right within the transcript, clearing the
 composer/audio rows. Empty artwork cells preserve underlying text; occupied cells
 replace that cell's glyph. It does not narrow the transcript. Account → Companion works
 with the avatar disabled. Ready breathes at2fps, Waiting pulses at6fps, active
 phases animate at up to12fps; reduced motion stops clocks.
-Appearance opens a silent, large preview: select Halo/Hover, hold any of seven
+Appearance opens a silent, large preview: select any of the six styles, hold any of seven
 phases, Auto cycle or Pause motion. Only Use this saves appearance; Cancel/Esc
 discards preview changes. No inference or microphone access occurs in this preview.
 Comments require new visible conversation content, allow one in-flight request and
@@ -119,3 +119,8 @@ automatic speech shares one ordered queue and respects opt-out/cancellation.
 Preferences are local; entity voice/appearance remains Gateway-owned.
 During current speech, bottom-meter and avatar ‖/▶ buttons pause/resume that audio
 without starting another reply. Per-message playback controls remain available.
+
+Ready eyes can follow active terminal cursor movement; they center after2s idle.
+Other phases/reduced motion ignore tracking. Error faces show red X eyes. Shared
+geometry/catalog belongs to AbstractTUI's independent `abstract-avatar` crate;
+web hosts use AbstractUIC `ActivityAvatar` instead of copying geometry.

@@ -42,12 +42,9 @@ pub(super) fn open(cx: Scope, store: Store, ctx: &UiCtx) {
             bg: tokens.overlay.over(tokens.bg),
             ..tokens
         };
-        let style = mcx.signal(if current.style == "hover" {
-            AvatarStyle::Hover
-        } else {
-            AvatarStyle::Halo
-        });
+        let style = mcx.signal(AvatarStyle::from_id(&current.style).unwrap_or_default());
         let saved_style = style.get_untracked();
+        let pointer = AvatarPointer::new(mcx);
         let phase = mcx.signal(1usize);
         let pose = mcx.signal(PHASES[1]);
         let automatic = mcx.signal(current.animate);
@@ -89,6 +86,17 @@ pub(super) fn open(cx: Scope, store: Store, ctx: &UiCtx) {
         let apply = context.clone();
         let cancel = context.clone();
         let mut root = Element::new()
+            .on(abstracttui::ui::Phase::Capture, move |_, event| {
+                if let abstracttui::ui::UiEvent::Mouse(mouse) = event {
+                    if matches!(mouse.kind, abstracttui::ui::MouseKind::Move) {
+                        if pose.get_untracked() == AvatarPose::Ready && animated.get_untracked() {
+                            pointer.moved(mouse.pos);
+                        } else {
+                            pointer.clear();
+                        }
+                    }
+                }
+            })
             .style(LayoutStyle::column().grow(1.0))
             .draw(move |canvas, rect| canvas.fill(rect, ' ', tokens.text, preview_tokens.bg))
             .shortcut(KeyChord::plain(Key::Escape), move |_| {
@@ -119,43 +127,40 @@ pub(super) fn open(cx: Scope, store: Store, ctx: &UiCtx) {
                 phase.set(i);
             });
         }
-        let mut styles = Element::new().style(
-            LayoutStyle::row()
-                .height(Dimension::Cells(1))
-                .shrink(0.0)
-                .gap(2),
-        );
-        for (name, choice) in [
-            ("Halo orb", AvatarStyle::Halo),
-            ("Hover robot", AvatarStyle::Hover),
-        ] {
-            styles = styles.child(
-                Button::new(name)
-                    .on_click(move || {
-                        style.set_if_changed(choice);
-                    })
-                    .view(mcx),
+        // Catalog-owned names and keys; rows wrap at three choices on small terminals.
+        for choices in AvatarStyle::ALL.chunks(3) {
+            let mut styles = Element::new().style(
+                LayoutStyle::row()
+                    .height(Dimension::Cells(1))
+                    .shrink(0.0)
+                    .gap(2),
             );
+            for &choice in choices {
+                styles = styles.child(
+                    Button::new(choice.label())
+                        .on_click(move || {
+                            style.set_if_changed(choice);
+                        })
+                        .view(mcx),
+                );
+            }
+            root = root.child(styles.build());
         }
-        root = root
-            .child(styles.build())
-            .child(dyn_view(LayoutStyle::line(1), move || {
-                modals::hint_row(
-                    &tokens,
-                    format!(
-                        "{} · {}",
-                        match style.get() {
-                            AvatarStyle::Hover => "Previewing Hover robot · warm glowing eyes",
-                            _ => "Previewing Halo orb · a luminous corona",
-                        },
-                        if style.get() == saved_style {
-                            "In use"
-                        } else {
-                            "Not applied"
-                        }
-                    ),
-                )
-            }));
+        root = root.child(dyn_view(LayoutStyle::line(1), move || {
+            modals::hint_row(
+                &tokens,
+                format!(
+                    "Previewing {} · {} · {}",
+                    style.get().label(),
+                    if style.get() == saved_style {
+                        "In use"
+                    } else {
+                        "Not applied"
+                    },
+                    style.get().description()
+                ),
+            )
+        }));
         root = root
             .child(
                 Element::new()
@@ -170,6 +175,7 @@ pub(super) fn open(cx: Scope, store: Store, ctx: &UiCtx) {
                     .child(
                         Avatar::new(pose)
                             .style_signal(style)
+                            .follow_pointer(pointer)
                             .level(level)
                             .animated(animated)
                             .show_label(false)
@@ -230,11 +236,7 @@ pub(super) fn open(cx: Scope, store: Store, ctx: &UiCtx) {
             .child(
                 Button::new("Use this")
                     .on_click(move || {
-                        let choice = if style.get_untracked() == AvatarStyle::Hover {
-                            "hover"
-                        } else {
-                            "halo"
-                        };
+                        let choice = style.get_untracked().id();
                         companion_view::save(store, &apply, |p| p.style = choice.into());
                         companion_view::settings(cx, store, &apply);
                     })

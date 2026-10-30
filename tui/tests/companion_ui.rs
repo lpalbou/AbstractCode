@@ -157,8 +157,8 @@ fn tool() -> Item {
 }
 
 #[test]
-fn both_styles_offer_a_ready_companion_and_open_the_run_without_sending_the_coding_draft() {
-    for style in ["halo", "hover"] {
+fn every_style_offers_a_ready_companion_and_open_the_run_without_sending_the_coding_draft() {
+    for style in ["halo", "hover", "vortex", "eclipse", "eye", "rover"] {
         let mut h = harness(
             220,
             Some(json!({"enabled":true,"style":style,"animate":false})),
@@ -631,7 +631,7 @@ fn a_floating_companion_preserves_the_main_transcript_viewport() {
 
 #[test]
 fn transparent_companion_preserves_transcript_cells_and_restores_them_when_hidden() {
-    for style in ["halo", "hover"] {
+    for style in ["halo", "hover", "vortex", "eclipse", "eye", "rover"] {
         for position in ["top-right", "bottom-right"] {
             let mut h = harness(
                 220,
@@ -771,4 +771,100 @@ fn floating_art_and_actions_align_under_header_controls_without_stealing_root_ke
             "root Ctrl+Q remains reachable after cancelled art press"
         );
     }
+}
+
+#[test]
+fn every_new_design_can_be_previewed_and_saved_by_stable_id() {
+    for style in [
+        AvatarStyle::Vortex,
+        AvatarStyle::Eclipse,
+        AvatarStyle::Eye,
+        AvatarStyle::Rover,
+    ] {
+        let mut h = harness(220, Some(json!({"enabled":true,"animate":false})));
+        h.turn();
+        h.click("⚙");
+        h.click("Appearance");
+        h.enter();
+        h.click(style.label());
+        assert!(h
+            .turn()
+            .contains(&format!("Previewing {} · Not applied", style.label())));
+        h.click("Use this");
+        assert_eq!(
+            h.ctx.prefs.borrow().companion.as_ref().unwrap()["style"],
+            style.id()
+        );
+        assert!(
+            !h.commands().iter().any(|c| matches!(
+                c,
+                Cmd::Start { .. }
+                    | Cmd::Steer { .. }
+                    | Cmd::Resume { .. }
+                    | Cmd::AssistantAsk { .. }
+            )),
+            "appearance is presentation only"
+        );
+    }
+}
+#[test]
+fn terminal_failure_keeps_error_pose_after_summary_and_new_run_clears_it() {
+    let mut h = harness(
+        220,
+        Some(json!({"enabled":true,"style":"hover","animate":false})),
+    );
+    h.turn();
+    h.store.fold.update(|f| f.failed = true);
+    assert!(h.turn().contains("Error"));
+    h.store.fold.update(|f| f.begin_run("next-root"));
+    assert!(h.turn().contains("Ready"));
+}
+#[test]
+fn actual_mouse_motion_drives_gaze_without_typing_or_sending_a_task() {
+    use std::{
+        cell::Cell,
+        time::{Duration, Instant},
+    };
+    let mut h = harness(
+        220,
+        Some(json!({"enabled":true,"style":"hover","animate":true})),
+    );
+    let start = Instant::now();
+    let now = Rc::new(Cell::new(start));
+    let clock = now.clone();
+    h.driver.set_clock(move || clock.get());
+    h.turn();
+    h.turn();
+    // Real SGR motion crosses the root capture handler without entering the composer.
+    h.term.push_input(b"\x1b[<35;1;2M");
+    h.turn();
+    now.set(start + Duration::from_millis(90));
+    h.turn();
+    let positions: Vec<_> = (1..35)
+        .flat_map(|y| (160..218).map(move |x| (x, y)))
+        .collect();
+    let before: Vec<_> = positions
+        .iter()
+        .map(|&(x, y)| h.term.screen().cell(x, y).unwrap().clone())
+        .collect();
+    h.term.push_input(b"\x1b[<35;220;35M");
+    h.turn();
+    now.set(start + Duration::from_millis(180));
+    h.turn();
+    let changed = positions
+        .iter()
+        .zip(&before)
+        .any(|(&(x, y), old)| h.term.screen().cell(x, y).unwrap() != old);
+    assert!(
+        changed,
+        "actual terminal cursor reports must reach the avatar"
+    );
+    assert!(
+        !h.commands().iter().any(|c| matches!(
+            c,
+            Cmd::Start { .. } | Cmd::Steer { .. } | Cmd::Resume { .. } | Cmd::AssistantAsk { .. }
+        )),
+        "pointer does not send input"
+    );
+    abstracttui::reactive::set_loop_clock(None);
 }

@@ -889,7 +889,7 @@ Open Companion settings from the account menu or drawer gear. It offers:
 | Setting | Default | Effect |
 |---|---|---|
 | Enable companion | Off | Show the activity avatar and enable companion interaction preferences |
-| Appearance | Halo orb | Preview Halo / Hover and activity phases before saving |
+| Appearance | Halo orb | Preview Halo, Hover, Vortex, Eclipse, Eye, Rover and activity phases before saving |
 | Animate activity | On | Activity motion; off gives reduced motion |
 | Offer comments | Off | Short change-driven observations through Gateway |
 | Read side replies | Off | Narrate new side replies and accepted comments through the shared speaker queue |
@@ -912,12 +912,17 @@ downward gaze and sequential pulsing indicators while waiting, and bobs with
 thruster sparks while working. Ready breathes at2fps, Waiting uses6fps and active
 phases use up to12fps; Error stays still. Halo intake/emission rings distinguish
 Listening and Speaking even at a fixed audio level. Reduced motion stops clocks.
+Ready eyes follow actual terminal cursor movement and center after two seconds of
+inactivity. Abstract orbs turn subtly; tracking samples at up to12fps. It stops
+outside Ready, in reduced motion and when hidden. Error is static with red X eyes
+for Hover/Rover, or one central X for Eye. A terminal failure stays in Error until
+a new run or higher-priority activity. Pointer movement never starts a task.
 
 While speech is playing or paused, the bottom histogram and avatar action row
 include ‖ Pause / ▶ Resume for that current audio. They never select a different
 message or start a reply. Message-level play/pause controls remain available.
 
-Appearance opens a silent preview with both styles and Ready, Listening, Thinking,
+Appearance opens a silent preview with all six styles and Ready, Listening, Thinking,
 Working, Speaking, Waiting and Error phases. A selected phase is held; **Auto cycle**
 advances phases about every 3.5 seconds. **Pause motion** freezes the demonstration.
 Keyboard controls are 1–7 for phases, left/right to step and c to cycle/hold.
