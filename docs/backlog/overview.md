@@ -14,7 +14,7 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 | State | Items | IDs |
 |---|---|---|
-| Planned | 4 | 0001, 0002, 0003, 0008 |
+| Planned | 5 | 0001, 0002, 0003, 0008, 0015 |
 | Proposed | 5 | 0004, 0005, 0006, 0010, 0011 |
 | Completed | 5 | 0007, 0009, 0012, 0013, 0014 |
 | Deprecated | 0 | |
@@ -43,6 +43,8 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
    and instrument controls are implemented; the 2026-10-30 local installation is terminal 0.12.0. Root 1055.
 
 ## Planned
+
+Voice preferences: [0015](planned/0015_voice_preferences_and_review.md).
 
 | ID | Item | Area | Depends on |
 |---|---|---|---|
