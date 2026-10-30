@@ -66,8 +66,6 @@ Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.
 | 0008 | [Read aloud and export](planned/0008_adopt_panel_chat_read_aloud_export.md) | web | Shared panel-chat actions |
 
 
-| 0029 | [Shared avatar catalog and rendering](completed/0029_shared_avatar_catalog_and_rendering.md) | tui + ui-kit + engine | Generic geometry core and host adapters |
-
 ## Proposed
 
 | ID | Item | Area | Depends on |
@@ -101,6 +99,8 @@ Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.
 | 0025 | [Shape-only companion overlay](completed/0025_avatar_shape_overlay.md) — completed 2026-10-30; shape compositing, restoration, native install and independent review | tui + engine |
 | 0026 | [Canonical final answer visibility](completed/0026_canonical_final_answer_visibility.md) — completed 2026-10-30; canonical output recovery, real-run replay and adversarial ordering tests | tui |
 | 0028 | [Readable, scrollable Skills picker](completed/0028_readable_scrollable_skills_picker.md) — 1221 tests passed; locally installed and native mouse scrolling verified | tui |
+
+| 0029 | [Shared avatar catalog and rendering](completed/0029_shared_avatar_catalog_and_rendering.md) — six shared models, red X Error and Ready cursor tracking; full suites and native installation verified | tui + ui-kit + engine |
 
 ## Deprecated
 
