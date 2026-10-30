@@ -31,7 +31,7 @@ pub const PATH: &str = "/accounts/me/preferences";
 
 /// The row's label, verbatim from the Code web.
 pub const LABEL: &str = "Default for new conversations";
-/// The help sentence under the row, verbatim from the Code web.
+/// Terminal guidance for the account-wide default and conversation override.
 pub const HELP: &str = "Kept by the gateway for your account: the Assistant and every browser use the same choice. This conversation's workflow is picked above.";
 /// The panel's one sentence on a gateway without the route (older than
 /// 0.13.1; the console's `p` says the same of its Preferences).
