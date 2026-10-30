@@ -809,8 +809,13 @@ fn account_menu_shows_gateway_identity_and_disconnect_requires_confirmation() {
     ] {
         assert!(menu.contains(label), "{menu}");
     }
-    // Status is the initial enabled row; Copy follows, then Disconnect.
-    h.term.push_input(b"\x1b[B\x1b[B\r");
+    // Select by the visible action, so additive menu choices cannot retarget it.
+    let (y, line) = menu
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("Disconnect this terminal"))
+        .unwrap();
+    click_cell(&mut h, line.find("Disconnect").unwrap() as i32, y as i32);
     let screen = h.turn();
     assert!(screen.contains("Disconnect this terminal?"), "{screen}");
     assert!(h.ctx.modal_open());

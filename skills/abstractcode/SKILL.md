@@ -84,8 +84,23 @@ Client tool choices are local preferences; they are not a shared policy record.
 This run questions report only observed context and may require follow-up after
 loading more history. Terminal graphics depend on capabilities; voice requires
 an installed host audio backend and configured Gateway routes. Windows end-to-end
-support is not verified in the terminal reference. No companion/avatar observer
-is enabled; that design remains proposed.
+support is not verified in the terminal reference. Companion visuals and automatic comments are opt-in and off by default.
 
 References: [terminal API](../../tui/docs/api.md), [setup](../../docs/getting-started.md),
 [architecture](../../docs/architecture.md), [troubleshooting](../../tui/docs/troubleshooting.md).
+
+## Optional companion
+
+Use account menu → Companion settings, or the assistant drawer's ⚙ action. Enable
+Halo/Hover visuals, choose reduced motion, and optionally enable comments or side
+read-aloud. Click the avatar (compact ◉ on small terminals) to open This run.
+Comments require new visible conversation content, allow one in-flight request and
+at least 60 seconds between attempts in this TUI. They have no tool/steering/approval
+authority. Shared multi-client cooldown is not implemented. Restored history does
+not itself trigger a comment.
+
+The drawer's ●/■ action records/stops a question for that side draft; ↑ sends it.
+This is separate from Ctrl+R dictation into the coding composer. Speaking voice
+can be chosen independently while preserving main device and volume settings;
+automatic speech shares one ordered queue and respects opt-out/cancellation.
+Preferences are local; entity voice/appearance remains Gateway-owned.

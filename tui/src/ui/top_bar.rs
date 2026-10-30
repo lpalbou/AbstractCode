@@ -112,6 +112,7 @@ pub fn open_account(cx: Scope, store: Store, ctx: &UiCtx, anchor: Rect) {
         .disabled(true),
         ContextMenuItem::new("host", format!("Gateway: {}", ctx.gateway_label)).disabled(true),
         ContextMenuItem::new("status", "Connection status"),
+        ContextMenuItem::new("companion", "Companion settings"),
         ContextMenuItem::new("copy-user", "Copy user id").disabled(account.user_id.is_empty()),
         ContextMenuItem::new("disconnect", "Disconnect this terminal…"),
     ];
@@ -132,6 +133,7 @@ pub fn open_account(cx: Scope, store: Store, ctx: &UiCtx, anchor: Rect) {
         .overlays(&ctx.overlays)
         .min_width(32)
         .on_action(move |key| match key {
+            "companion" => super::companion_view::settings(cx, store, &context),
             "status" => {
                 super::chrome_action(cx, store, &context, chrome::ACT_CONNECTION);
             }

@@ -31,7 +31,7 @@ fn send_question(store: Store, ctx: &UiCtx, scope: ChatScope, question: &str, ap
     if append {
         chat.messages.push(("user".into(), question.into()));
     }
-    let corpus = if scope == ChatScope::Run {
+    let corpus = if scope != ChatScope::Docs {
         Some(String::new())
     } else {
         chat.corpus.clone()
@@ -56,7 +56,7 @@ fn send_question(store: Store, ctx: &UiCtx, scope: ChatScope, question: &str, ap
         scope.draft(store).set(question.into());
     }
 }
-fn conversation_view(cx: Scope, store: Store, ctx: UiCtx, scope: ChatScope) -> View {
+fn conversation_view(root: Scope, cx: Scope, store: Store, ctx: UiCtx, scope: ChatScope) -> View {
     let chat = scope.chat(store);
     let draft = scope.draft(store);
     {
@@ -91,6 +91,13 @@ fn conversation_view(cx: Scope, store: Store, ctx: UiCtx, scope: ChatScope) -> V
                     }
                 })
                 .collect::<Vec<_>>();
+            if scope == ChatScope::Run {
+                if let Some((source, text)) = store.companion_advice.get() {
+                    if source == store.session_id.get() {
+                        rows.push(ChatMessage::new(ChatRole::Notice, text).author("Companion"));
+                    }
+                }
+            }
             if !s.error.is_empty() {
                 rows.push(ChatMessage::new(ChatRole::Error, s.error.clone()));
             }
@@ -138,6 +145,31 @@ fn conversation_view(cx: Scope, store: Store, ctx: UiCtx, scope: ChatScope) -> V
                     .access_label("New conversation")
                     .build(),
             ));
+        let mic_ctx = ctx.clone();
+        let settings_ctx = ctx.clone();
+        let mic = super::companion_voice::is_recording_for(store, scope);
+        row = row.child(Tooltip::attach(
+            scx,
+            &ctx.overlays,
+            "Voice question to this side conversation · press again to transcribe",
+            std::time::Duration::from_millis(400),
+            Button::new(if mic { "■" } else { "●" })
+                .on_click(move || super::companion_voice::toggle_microphone(store, &mic_ctx, scope))
+                .element(scx, &use_theme(scx).get_untracked().tokens)
+                .access_label("Voice question to side conversation")
+                .build(),
+        ));
+        row = row.child(Tooltip::attach(
+            scx,
+            &ctx.overlays,
+            "Companion appearance, comments and voice",
+            std::time::Duration::from_millis(400),
+            Button::new("⚙")
+                .on_click(move || super::companion_view::settings(root, store, &settings_ctx))
+                .element(scx, &use_theme(scx).get_untracked().tokens)
+                .access_label("Companion settings")
+                .build(),
+        ));
         if failed && !busy {
             let retry = ctx.clone();
             row = row.child(Tooltip::attach(
@@ -214,7 +246,7 @@ pub fn install(cx: Scope, store: Store, ctx: &UiCtx) {
                 .child(dyn_view_scoped(
                     LayoutStyle::column().grow(1.0).basis(Dimension::Cells(0)),
                     move |scx| {
-                        conversation_view(scx, store, context.clone(), store.help_scope.get())
+                        conversation_view(cx, scx, store, context.clone(), store.help_scope.get())
                     },
                 ))
                 .build()

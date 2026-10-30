@@ -5,18 +5,22 @@ pub enum ChatScope {
     #[default]
     Docs,
     Run,
+    /// Isolated automatic comments; not a third user-facing scope.
+    Advice,
 }
 impl ChatScope {
     pub fn chat(self, store: crate::store::Store) -> abstracttui::reactive::Signal<DocsChat> {
         match self {
             Self::Docs => store.docs_chat,
             Self::Run => store.run_chat,
+            Self::Advice => store.advice_chat,
         }
     }
     pub fn draft(self, store: crate::store::Store) -> abstracttui::reactive::Signal<String> {
         match self {
             Self::Docs => store.docs_draft,
             Self::Run => store.run_question_draft,
+            Self::Advice => store.advice_draft,
         }
     }
 }

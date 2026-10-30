@@ -31,7 +31,7 @@ flowchart LR
   W -- "runs/start · commands · discovery<br/>workspace files · about" --> API
   S1 -- "GET ledger/stream (SSE)<br/>step + llm.delta frames" --> API
   S2 -- "GET ledger/stream (SSE)" --> API
-  UI -- "DocsAsk" --> D
+  UI -- "AssistantAsk" --> D
   D -- "docs/corpus · runs/start<br/>follow docs run" --> API
   D -- "guarded answer/state posts" --> UI
   V -- "voice/defaults · voice/tts/stream<br/>audio/transcribe" --> API
@@ -256,3 +256,26 @@ when the gateway advertises live replies. See
 - Images render as unicode mosaic in the transcript; pixel-protocol
   placement (kitty, iTerm2) is not used.
 - Windows is unverified for this crate end-to-end.
+
+## Companion ownership
+
+```mermaid
+flowchart LR
+  Ledger["Observed conversation + run state"] --> Host["Code companion adapter"]
+  Audio["Shared voice state and level"] --> Host
+  Host --> Avatar["AbstractTUI Avatar: drawing only"]
+  Host --> Gate["Change + cooldown gate"]
+  Gate --> QA["Existing Gateway grounded QA / resource pool"]
+  QA --> Side["Isolated advice state / This run notice"]
+  Side --> Queue["Existing ordered narration queue"]
+```
+
+The generic avatar receives explicit pose/level/visibility/motion signals. The
+host maps ledger and audio state and collapses the view on resize. Advice is
+opt-in and gated by meaningful loaded-conversation revisions, restore state,
+visibility, an in-flight ticket and a monotonic 60-second cooldown. It has no tools,
+workspace or approval commands. Operation/session guards reject stale results;
+manual side questions and automatic comment history remain separate. Speech and
+recording reuse the existing audio owner and narration queue. All companion
+preferences are client-local; existing entity-home voice/appearance authority is
+unchanged. No service, model owner or background microphone is added.

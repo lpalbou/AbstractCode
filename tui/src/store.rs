@@ -925,6 +925,10 @@ pub struct SessionTotals {
 pub struct Store {
     pub account: Signal<AccountIdentity>,
     pub docs_chat: Signal<crate::docs_chat::DocsChat>,
+    pub advice_chat: Signal<crate::docs_chat::DocsChat>,
+    pub advice_draft: Signal<String>,
+    pub companion_tick: Signal<u64>,
+    pub companion_advice: Signal<Option<(String, String)>>,
     pub docs_open: Signal<bool>,
     pub docs_draft: Signal<String>,
     pub help_scope: Signal<crate::docs_chat::ChatScope>,
@@ -1316,6 +1320,10 @@ impl Store {
         Store {
             account: cx.signal(Default::default()),
             docs_chat: cx.signal(Default::default()),
+            advice_chat: cx.signal(Default::default()),
+            advice_draft: cx.signal(String::new()),
+            companion_tick: cx.signal(0),
+            companion_advice: cx.signal(None),
             docs_open: cx.signal(false),
             docs_draft: cx.signal(String::new()),
             help_scope: cx.signal(Default::default()),

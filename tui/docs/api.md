@@ -875,6 +875,49 @@ The terminal displays completed answers and keeps native history while the
 process is open. It has no native history selector or attachments; Gateway
 assistant sessions remain durable independently.
 
+### Companion and side-conversation controls
+
+The action row uses ↑ Send, ＋ New conversation, ● Record / ■ Stop recording,
+⚙ Companion settings, and ↻ Retry after failure. Icon controls have accessible
+labels and hover/focus explanations. The microphone destination is the selected
+side conversation, with editable transcription before sending. Esc cancels it;
+changing the main session or resetting that side conversation discards late input.
+
+Open Companion settings from the account menu or drawer gear. It offers:
+
+| Setting | Default | Effect |
+|---|---|---|
+| Enable companion | Off | Show the activity avatar and enable companion interaction preferences |
+| Appearance | Halo orb | Halo / Hover robot; portable cell rendering |
+| Animate activity | On | Activity motion; off gives reduced motion |
+| Offer comments | Off | Short change-driven observations through Gateway |
+| Read side replies | Off | Narrate new side replies and accepted comments through the shared speaker queue |
+| Speaking voice | Main assistant voice | Independent Gateway catalog voice; main device and volume settings remain in force |
+
+The avatar reflects observed activity: ready, thinking, executing tools, waiting,
+recording, speaking or error. Paused speech is static. Below 120 columns or 22 rows
+it becomes a compact control. The full avatar yields to drawers, modals and entity
+focus. It does not load a model or initiate microphone capture.
+
+Automatic comments use a dedicated grounded-QA conversation, separate from manual
+Docs/This run history and coding commands. They require a new meaningful visible
+conversation revision, allow one request at a time and enforce at least 60 seconds
+between attempts, including failures. Restoring/loading earlier history establishes
+a baseline; tool payload/hidden-reasoning changes do not trigger a request. Changes
+coalesce and stale, duplicate or NO_ADVICE responses are not displayed. The cap is
+per running TUI process; shared multi-client ownership is not implemented here.
+
+Only recent loaded requests/replies are supplied (the 24,000-character context bound
+above applies). The side assistant has no history-browsing tool. Older history can
+be loaded into the client before asking again; omission markers remain explicit.
+
+Preferences live under `companion` in the client's prefs.json. They do not change
+Gateway defaults or entity-owned appearance/voice. Device preferences stay local.
+Queued automatic side speech respects current opt-out settings, source session and
+side-conversation identity, waits behind active speech/recording, and shares Stop.
+Side speech failures notify without modifying the coding transcript.
+
+
 ## Session-list discovery
 
 The conversations board first requests up to 200 turn-root summaries, then a

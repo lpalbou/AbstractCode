@@ -8,6 +8,8 @@ pub mod attention_chip;
 pub mod automations_view;
 pub mod cards;
 pub mod chrome;
+pub mod companion_view;
+pub mod companion_voice;
 pub mod conversations_view;
 pub mod docs_assistant;
 pub mod entity_actions;
@@ -233,6 +235,7 @@ impl UiCtx {
 
 pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Actions) -> View {
     docs_assistant::install(cx, store, &ctx);
+    companion_view::wire(cx, store, &ctx);
     let theme = use_theme(cx);
     let spin = cx.signal(0u64);
     // Engine follow-tail (0.2.0): the Scroll pins to the bottom while
@@ -807,20 +810,26 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                         &ctx,
                         chrome_focus.clone(),
                     ))
-                    .child(transcript_view::pane(
+                    .child(companion_view::wrap(
+                        cx,
                         scx,
-                        &t,
                         store,
                         &ctx,
-                        &feed,
-                        &live_feed,
-                        scroll_offset,
-                        follow,
-                        splash_visible,
-                        splash,
-                        anim_feed.clone(),
-                        anim_frame,
-                        overlay_open,
+                        transcript_view::pane(
+                            scx,
+                            &t,
+                            store,
+                            &ctx,
+                            &feed,
+                            &live_feed,
+                            scroll_offset,
+                            follow,
+                            splash_visible,
+                            splash,
+                            anim_feed.clone(),
+                            anim_frame,
+                            overlay_open,
+                        ),
                     ))
                     // One breathing row between the transcript's last line
                     // and the control panel (operator ask, 2026-07-23). A

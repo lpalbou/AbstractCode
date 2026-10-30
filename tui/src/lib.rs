@@ -690,3 +690,5 @@ mod tests {
 }
 
 pub mod assistant_context;
+
+pub mod companion;

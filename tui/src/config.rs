@@ -480,6 +480,8 @@ pub struct Prefs {
     /// keys (`crate::voice::VoicePrefs`): an unset key = the gateway's
     /// default route; devices are this computer's. `None` = never set.
     pub voice: Option<Value>,
+    /// Local opt-in companion presentation and interaction preferences.
+    pub companion: Option<Value>,
     /// Where this Prefs persists. `None` = EPHEMERAL: `save()` is a no-op.
     /// Default-constructed prefs never touch the filesystem — a test
     /// harness building a UiCtx cannot pollute the operator's real file
@@ -656,6 +658,7 @@ impl Prefs {
             reasoning: s("reasoning"),
             speculation: v.get("speculation").and_then(crate::speculation::normalize),
             voice: v.get("voice").filter(|x| x.is_object()).cloned(),
+            companion: v.get("companion").filter(|x| x.is_object()).cloned(),
             reasoning_provider: s("reasoning_provider"),
             reasoning_model: s("reasoning_model"),
             workspace_mode: s("workspace_mode"),
@@ -720,6 +723,7 @@ impl Prefs {
             "reasoning": self.reasoning,
             "speculation": self.speculation,
             "voice": self.voice,
+            "companion": self.companion,
             "reasoning_provider": self.reasoning_provider,
             "reasoning_model": self.reasoning_model,
             "workspace_mode": self.workspace_mode,
@@ -1179,6 +1183,7 @@ mod tests {
             reasoning: Some("high".into()),
             speculation: Some(json!(false)),
             voice: Some(json!({"stt_language": "fr", "read_aloud": true, "reply_volume": 0.6})),
+            companion: Some(json!({"enabled":true,"style":"hover","advice":false})),
             reasoning_provider: Some("lmstudio".into()),
             reasoning_model: Some("qwen3-4b".into()),
             workspace_mode: Some("workspace_or_allowed".into()),
@@ -1226,6 +1231,7 @@ mod tests {
         }
 
         let l = Prefs::load_from(path);
+        assert_eq!(l.companion, p.companion);
         assert_eq!(l.theme.as_deref(), Some("nord"));
         assert_eq!(l.bundle_id.as_deref(), Some("basic-agent"));
         assert_eq!(l.flow_id.as_deref(), Some("81795ea9"));

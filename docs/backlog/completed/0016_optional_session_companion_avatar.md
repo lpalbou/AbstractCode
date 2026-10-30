@@ -1,12 +1,13 @@
 # 0016 — Optional session companion avatar and change-driven advice
 
-- **Status:** proposed
+- **Status:** completed
 - **Created:** 2026-10-30
+- **Completed:** 2026-10-30
 - **Area:** tui + AbstractTUI presentation
 - **Work item:** abstractcode-0016
 - **ADR impact:** evaluate if promoted; keep generic presentation in engine and execution in Gateway.
 
-## Operator request and audited code reality
+## Intake request and code reality (before implementation)
 
 The operator asks whether a top-right pet/orb can reflect ready, thinking, working,
 listening and speaking, offer occasional session advice, and have its own speaking
@@ -75,3 +76,58 @@ coding Start/Steer/Resume or tool call from companion questions, no stale reply
 crossing sessions, no separate model instantiation, no overlapping speech and
 no microphone capture without an explicit action. Measure renderer CPU and
 request/context cost before selecting animation frequency or enabling advice.
+
+## Implementation authorization — 2026-10-30
+
+Operator approved all six roadmap phases after0017, with worker agents. Deliver Halo and Hover styles, state-driven presentation, optional bounded change-driven advice, side conversation microphone/TTS, local install and tests. Existing Gateway entity voice/appearance ownership is preserved; cross-client identity cleanup is recorded separately. No release/push or new service/model pool.
+
+## Completion report
+
+Implemented all six local roadmap increments: watch-inspired Halo/Hover procedural
+rendering; generic framework-independent Avatar API and standalone example;
+observed Code activity mapping, resizing, modal/drawer priority and preferences;
+optional meaningful-change-driven grounded comments; independent companion voice
+selection and explicit side-destination microphone; integration/performance/audio
+validation and documentation. All inference reuses existing Gateway QA/resource
+ownership. No tools, approval or steering authority is granted to side comments.
+The engine adds no network/audio/model dependency. Main and side speech share one
+ordered queue. Source/session/reset/opt-out guards discard stale input and speech.
+
+Five worker agents contributed renderer, pure policy, voice routing, independent
+review and host integration tests. Parent integrated and evaluated their changes.
+Independent review found/fixed modal scope lifetime, avatar click behavior, paused
+motion, queued speech opt-out and live resize. Final producer-flood regression
+prevents repeated equal state/audio writes starving the animation clock.
+
+Validation: Code1192 passed/23 ignored; engine2529 passed/89 ignored. Both
+all-target Clippy runs deny warnings. Gateway Docs11 regression tests passed.
+The six ignored audio cases were explicitly executed and passed, including real
+Gateway Supertonic streaming through the real Python playback bridge (two segments,
+first audio1.267s in this run). Physical default speaker tone and999ms microphone
+capture (15990 mono frames at16kHz) passed; recording discarded locally, no upload.
+This proves device I/O, not subjective sound quality or live human speech recognition.
+
+Installed TUI smoke passed both styles, stable gear/catalog selection, persisted
+private settings, live wide/narrow resize and one icon-action row. Actual automatic
+QA requests carried their captured source session and completed through Gateway;
+a final-state change was coalesced into a later request. Exact quota is the client
+monotonic-attempt limit, independently tested; server creation timestamps are not
+that clock. A model-only test task explicitly sent tools=[] in an isolated session.
+No operator run, approval or actual preferences were changed. No release or push.
+
+Avatar-only benchmarks across16/256/truecolor show zero idle/hidden output/timers,
+roughly12fps activity and bounded render work. Existing empty-session Code logo
+animation remains independent; full-app output is not claimed zero. Evidence:
+workspace `untracked/avatar-performance.md`, `untracked/companion-independent-review.md`,
+`untracked/companion-20261030/` JSON receipts/captures and final suite logs. Final
+installed binary hash matches the native live receipt. README/API/architecture,
+package agent skills and LLM aggregates updated using coredoc.
+
+Follow-ups remain proposed:0018 shared visual/voice identity extending existing
+entity-home settings,0019 bounded authorized history retrieval,0020 cross-client
+comment ownership/global dedup. No shared preference migration or backend rewrite
+was performed. ADR impact none for this increment: existing engine presentation
+and Gateway execution/identity boundaries are preserved. Original path:
+`proposed/0016_optional_session_companion_avatar.md`, approved intermediate path:
+`planned/0016_optional_session_companion_avatar.md`, final path:
+`completed/0016_optional_session_companion_avatar.md`.

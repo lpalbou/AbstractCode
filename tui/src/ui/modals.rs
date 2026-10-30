@@ -801,7 +801,12 @@ pub(crate) fn open_picker(cx: Scope, ctx: &UiCtx, picker: Picker) {
             }
         };
         let mut root = Element::new()
-            .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
+            .style(
+                LayoutStyle::column()
+                    .grow(1.0)
+                    .gap(1)
+                    .padding(Edges::all(1)),
+            )
             .shortcut(KeyChord::plain(Key::Escape), move |_| cancel())
             .child(title_row(&t, picker.title));
         for (chord, action) in picker.keys {

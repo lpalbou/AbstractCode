@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Add optional Halo/Hover session companion, observed activity poses, reduced
+  motion, change-driven comments and independent side speech preferences. Side
+  microphone input stays in the selected question draft; speech shares the existing
+  queue. Companion settings are available in the account menu and side drawer.
+- Catalog pickers allocate their full modal height so voice choices remain visible.
+
 - Both assistant scopes include fresh main-conversation requests and replies without
   tool payloads or hidden reasoning. Send/new/retry use labelled icons on one row.
 

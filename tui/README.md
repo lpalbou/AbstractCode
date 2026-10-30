@@ -336,3 +336,23 @@ ACODE_GATEWAY_TOKEN=… python3 scripts/pty_live_smoke.py   # live E2E
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Session companion
+
+Open **Companion settings** from the account menu, or use the assistant drawer's
+⚙ button. Enable the companion to show a Halo orb or Hover robot beside the
+conversation. Clicking it opens **This run**. Small terminals use a compact
+control; **Animate activity** can be turned off for reduced motion.
+
+**Offer comments** is off by default. When enabled, meaningful conversation
+changes can trigger a short observation through the existing Gateway pool, with
+one request at a time and at least 60 seconds between attempts in this TUI process.
+Restored history and unchanged/tool-only updates do not trigger comments. Comments
+appear in This run and cannot execute tools, steer the coding task or approve it.
+
+The side conversation's ● microphone records a question into its own editable
+draft; press again to transcribe, then ↑ to send. It never submits a coding task.
+**Read side replies** and **Speaking voice** configure automatic side speech and
+an independent speaking preset (default: main assistant voice). Speech shares the
+existing narration queue and device settings. Companion choices are local to this
+terminal; entity-owned appearance and voice remain managed by Gateway.
