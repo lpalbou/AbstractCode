@@ -44,3 +44,11 @@ zero run starts. Atomically installed locally; no running session restart or rel
 
 [Review, screenshots and receipts](../../../design/skills-picker-0028/REVIEW.md).
 No additional follow-up or ADR change required.
+
+## Operator refinement
+
+2026-10-30: after approving the larger picker, the operator requested description
+space at 40%. Implemented ffc12be with a proportional height, preserving list
+scrolling. The 6 affected Skills tests pass; dark/light captures reviewed and
+the binary rebuilt from clean sources and installed locally. Receipt and updated
+screenshots are in the linked review folder.

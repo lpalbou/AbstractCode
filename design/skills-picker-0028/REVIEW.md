@@ -51,3 +51,13 @@ this binary. This is a local fix; no package publication or push.
 Full descriptions remain behind selection; this change does not add a new search
 interface or alter the Gateway's skill shelf. No new architecture decision or
 follow-up is required for this presentation/input fix.
+
+## Follow-up: description pane at 40%
+
+Operator approved the layout and requested more reading space. Commit ffc12be
+changes the fixed description height to 40% of the modal content height. The
+remaining list area stays scrollable. All 6 affected Skills tests pass, including
+wheel, scrollbar, paging, narrow layout and independent description scrolling.
+Dark/light captures inspected and the clean pinned-engine release rebuilt and
+installed atomically. Current installation receipt: ratio-install.json. No user
+session restart.
