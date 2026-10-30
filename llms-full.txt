@@ -2137,8 +2137,9 @@ MIT. See [LICENSE](LICENSE).
 ## Session companion
 
 Open **Companion settings** from the account menu, or use the assistant drawer's
-⚙ button. Enable the companion to show a Halo orb or Hover robot beside the
-conversation. Clicking it opens **This run**. Small terminals use a compact
+⚙ button. Enable the companion to show a Halo orb or Hover robot floating beneath
+the top-right header controls, over a bounded part of the transcript. It preserves
+the transcript's full width. Clicking it opens **This run**. Small terminals use a compact
 control; **Animate activity** can be turned off for reduced motion.
 
 Choose **Appearance** to open a large, silent preview. Switch between Halo and
@@ -2146,6 +2147,9 @@ Hover, watch the activity phases cycle, or choose a phase to hold it. **Auto cyc
 resumes the demonstration and **Pause motion** freezes it. **Use this** saves the
 appearance; **Cancel** or Esc returns without changing it. Previewing needs no
 inference, microphone or speech playback.
+
+Hover leans toward you while listening, waits in a lower, quiet posture, and
+bobs with brighter thrusters and sparks while working.
 
 **Offer comments** is off by default. When enabled, meaningful conversation
 changes can trigger a short observation through the existing Gateway pool, with
@@ -3352,10 +3356,17 @@ Open Companion settings from the account menu or drawer gear. It offers:
 | Read side replies | Off | Narrate new side replies and accepted comments through the shared speaker queue |
 | Speaking voice | Main assistant voice | Independent Gateway catalog voice; main device and volume settings remain in force |
 
+The avatar floats beneath the right header controls, with its caption and action
+row centred together. Its bounded opaque surface draws above the transcript;
+it does not reserve a sidebar or reduce transcript width. Controls elsewhere
+continue to use the normal keyboard/mouse focus path.
+
 The avatar reflects observed activity: ready, thinking, executing tools, waiting,
 recording, speaking or error. Paused speech is static. Below 120 columns or 22 rows
 it becomes a compact control. The full avatar yields to drawers, modals and entity
 focus. It does not load a model or initiate microphone capture.
+Hover visibly leans with a raised hand while listening, rests lower with a dimmed
+downward gaze while waiting, and bobs with thruster sparks while working.
 
 Appearance opens a silent preview with both styles and Ready, Listening, Thinking,
 Working, Speaking, Waiting and Error phases. A selected phase is held; **Auto cycle**
@@ -5757,6 +5768,8 @@ References: [terminal API](../../tui/docs/api.md), [setup](../../docs/getting-st
 Use account menu → Companion settings, or the assistant drawer's ⚙ action. Enable
 Halo/Hover visuals, choose reduced motion, and optionally enable comments or side
 read-aloud. Click the avatar (compact ◉ on small terminals) to open This run.
+It floats over a bounded upper-right area under the header controls; it does not
+narrow the transcript. Listening, Waiting and Working have distinct postures.
 Appearance opens a silent, large preview: select Halo/Hover, hold any of seven
 phases, Auto cycle or Pause motion. Only Use this saves appearance; Cancel/Esc
 discards preview changes. No inference or microphone access occurs in this preview.

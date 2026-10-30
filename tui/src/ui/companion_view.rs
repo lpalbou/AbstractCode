@@ -180,6 +180,19 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
     let cctx = ctx.clone();
     let art_width = if viewport.w >= 180 { 32 } else { 28 };
     let art_height = art_width / 2 + 1;
+    let panel_width = if narrow { 3 } else { art_width };
+    let actions = super::top_bar::right_plan(
+        Rect::new(0, 0, viewport.w, 1),
+        &store.account.get(),
+        &store.conn.get(),
+    );
+    let group_left = actions.first().map_or(0, |a| {
+        (a.rect.x - 3 - abstracttui::text::width("Tools ▾")).max(0)
+    });
+    let group_right = actions.last().map_or(viewport.w, |a| a.rect.right());
+    let left =
+        ((group_left + group_right - panel_width) / 2).clamp(0, (viewport.w - panel_width).max(0));
+    let t = use_theme(cx).get().tokens;
     let art = if narrow {
         Button::new("◉")
             .on_click(open)
@@ -189,11 +202,19 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
     } else {
         Button::new("")
             .layout(
-                LayoutStyle::default()
-                    .width(Dimension::Cells(art_width))
-                    .height(Dimension::Cells(art_height))
-                    .shrink(0.0),
+                // Button owns a label child. Keep it under the final status
+                // row, with art absolute above it, rather than two flex columns.
+                LayoutStyle::column()
+                    .justify(Justify::End)
+                    .width(Dimension::Percent(1.0))
+                    .grow(1.0)
+                    .basis(Dimension::Cells(0))
+                    .min_h(2),
             )
+            .style(abstracttui::widgets::ButtonStyle {
+                bg: abstracttui::theme::TokenId::Bg,
+                ..Default::default()
+            })
             .on_click(open)
             .element(cx, &use_theme(cx).get_untracked().tokens)
             .access_label("Open companion conversation")
@@ -209,8 +230,13 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
                     .animated(animated)
                     .layout(
                         LayoutStyle::default()
-                            .width(Dimension::Cells(art_width))
-                            .height(Dimension::Cells(art_height)),
+                            .width(Dimension::Percent(1.0))
+                            .height(Dimension::Percent(1.0))
+                            .absolute(abstracttui::layout::Inset {
+                                left: Some(0),
+                                top: Some(0),
+                                ..Default::default()
+                            }),
                     )
                     .view(cx),
             )
@@ -219,12 +245,28 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
     let mut side = Element::new()
         .style(
             LayoutStyle::column()
-                .width(Dimension::Cells(if narrow { 3 } else { art_width }))
-                .shrink(0.0),
+                .width(Dimension::Cells(panel_width))
+                .max_h(if narrow { 1 } else { art_height + 1 })
+                .align_items(Align::Center)
+                .absolute(abstracttui::layout::Inset {
+                    left: Some(left),
+                    top: Some(1),
+                    bottom: Some(0),
+                    ..Default::default()
+                }),
         )
+        // A bounded opaque floating surface: visible content beneath the
+        // companion is covered consistently with its input hit bounds.
+        .draw(move |canvas, rect| canvas.fill(rect, ' ', t.text, t.bg))
         .child(art);
     if !narrow {
-        side = side
+        let actions = Element::new()
+            .style(
+                LayoutStyle::row()
+                    .height(Dimension::Cells(1))
+                    .shrink(0.0)
+                    .gap(1),
+            )
             .child(
                 Button::new(
                     if store.companion_advice.with(|v| {
@@ -246,9 +288,15 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
                     .access_label("Companion settings")
                     .build(),
             );
+        side = side.child(actions.build());
     }
     Element::new()
-        .style(LayoutStyle::row().grow(1.0).basis(Dimension::Cells(0)))
+        .style(
+            LayoutStyle::row()
+                .grow(1.0)
+                .basis(Dimension::Cells(0))
+                .clip(),
+        )
         .child(pane)
         .child(side.build())
         .build()

@@ -340,8 +340,9 @@ MIT. See [LICENSE](LICENSE).
 ## Session companion
 
 Open **Companion settings** from the account menu, or use the assistant drawer's
-⚙ button. Enable the companion to show a Halo orb or Hover robot beside the
-conversation. Clicking it opens **This run**. Small terminals use a compact
+⚙ button. Enable the companion to show a Halo orb or Hover robot floating beneath
+the top-right header controls, over a bounded part of the transcript. It preserves
+the transcript's full width. Clicking it opens **This run**. Small terminals use a compact
 control; **Animate activity** can be turned off for reduced motion.
 
 Choose **Appearance** to open a large, silent preview. Switch between Halo and
@@ -349,6 +350,9 @@ Hover, watch the activity phases cycle, or choose a phase to hold it. **Auto cyc
 resumes the demonstration and **Pause motion** freezes it. **Use this** saves the
 appearance; **Cancel** or Esc returns without changing it. Previewing needs no
 inference, microphone or speech playback.
+
+Hover leans toward you while listening, waits in a lower, quiet posture, and
+bobs with brighter thrusters and sparks while working.
 
 **Offer comments** is off by default. When enabled, meaningful conversation
 changes can trigger a short observation through the existing Gateway pool, with

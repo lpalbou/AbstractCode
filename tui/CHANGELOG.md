@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Companion floats beneath the right header controls without narrowing the
+  transcript. Art and actions align together; Listening, Waiting and Working
+  have distinct poses, with working thruster particles.
+
 - Companion artwork uses larger shaded Halo/Hover visuals. Appearance opens a
   silent live phase preview with automatic cycling, manual hold and explicit save.
 

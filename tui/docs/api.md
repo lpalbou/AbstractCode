@@ -894,10 +894,17 @@ Open Companion settings from the account menu or drawer gear. It offers:
 | Read side replies | Off | Narrate new side replies and accepted comments through the shared speaker queue |
 | Speaking voice | Main assistant voice | Independent Gateway catalog voice; main device and volume settings remain in force |
 
+The avatar floats beneath the right header controls, with its caption and action
+row centred together. Its bounded opaque surface draws above the transcript;
+it does not reserve a sidebar or reduce transcript width. Controls elsewhere
+continue to use the normal keyboard/mouse focus path.
+
 The avatar reflects observed activity: ready, thinking, executing tools, waiting,
 recording, speaking or error. Paused speech is static. Below 120 columns or 22 rows
 it becomes a compact control. The full avatar yields to drawers, modals and entity
 focus. It does not load a model or initiate microphone capture.
+Hover visibly leans with a raised hand while listening, rests lower with a dimmed
+downward gaze while waiting, and bobs with thruster sparks while working.
 
 Appearance opens a silent preview with both styles and Ready, Listening, Thinking,
 Working, Speaking, Waiting and Error phases. A selected phase is held; **Auto cycle**
