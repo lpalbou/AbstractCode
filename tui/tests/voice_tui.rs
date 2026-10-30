@@ -2501,3 +2501,47 @@ fn assistant_microphone_does_not_take_over_an_existing_main_recording() {
     );
     assert!(ui::voice_view::escape(h.store));
 }
+
+#[test]
+fn companion_speech_failures_are_not_appended_to_the_coding_transcript() {
+    let _g = serial();
+    for queued in [false, true] {
+        let gw = serve(GatewayScript {
+            tts_refusal: Some((429, "companion speech quota exceeded".into())),
+            ..Default::default()
+        });
+        let (_host, _log, _) = fake_host(false);
+        let mut h = harness(&gw.url);
+        h.with_reply("coding answer remains unchanged");
+        h.prefs.borrow_mut().companion = Some(json!({"enabled":true,"read_aloud":true}));
+        let original = h.store.fold.with_untracked(|fold| fold.items.clone());
+        if queued {
+            ui::voice_view::narrate_assistant(
+                h.store,
+                &h.ctx,
+                abstractcode::docs_chat::ChatScope::Run,
+                "side answer".into(),
+                &VoicePrefs::default(),
+            );
+        } else {
+            ui::voice_view::speak_text_with_prefs(
+                h.store,
+                &h.ctx,
+                "side answer".into(),
+                &VoicePrefs::default(),
+            );
+        }
+        h.until("side speech refusal notification", |s| {
+            s.contains("Reading aloud failed: companion speech quota exceeded.")
+        });
+        assert_eq!(
+            h.store.fold.with_untracked(|fold| fold.items.clone()),
+            original,
+            "side audio failure must not modify main conversation or advice context"
+        );
+        assert!(h
+            .store
+            .run_chat
+            .with_untracked(|chat| chat.messages.is_empty()));
+    }
+}

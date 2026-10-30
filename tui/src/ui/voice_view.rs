@@ -112,6 +112,18 @@ fn post_error(store: Store, text: String) {
     store.notify(text);
 }
 
+#[derive(Clone, Copy)]
+enum SpeechOrigin {
+    Main,
+    Companion,
+}
+fn speech_error(store: Store, origin: SpeechOrigin, text: String) {
+    match origin {
+        SpeechOrigin::Main => post_error(store, text),
+        SpeechOrigin::Companion => store.notify(text),
+    }
+}
+
 /// The gateway's default voice routes, fetched once per app (and again when
 /// the voice screen opens after a failure).
 pub fn load_defaults(store: Store, ctx: &UiCtx) {
@@ -322,7 +334,7 @@ pub fn speak_text(store: Store, ctx: &UiCtx, text: String) {
 /// automation's: the Code web reads an automation's messages through the
 /// automation's own run, `automations_view.tsx:284-286`).
 pub fn speak_text_for(store: Store, ctx: &UiCtx, run_id: String, text: String) {
-    speak_text_for_with_prefs(store, ctx, run_id, text, prefs(ctx));
+    speak_text_for_with_prefs(store, ctx, run_id, text, prefs(ctx), SpeechOrigin::Main);
 }
 /// Use a speaking preset without replacing the terminal's audio device/volume.
 /// The existing speech host remains the only playback owner.
@@ -353,7 +365,7 @@ fn speak_preset(store: Store, ctx: &UiCtx, text: String, preset: &VoicePrefs) {
         p.quality_preset.clone_from(&preset.quality_preset);
         p.instructions.clone_from(&preset.instructions);
     }
-    speak_text_for_with_prefs(store, ctx, run, text, p);
+    speak_text_for_with_prefs(store, ctx, run, text, p, SpeechOrigin::Companion);
 }
 
 fn speak_text_for_with_prefs(
@@ -362,10 +374,12 @@ fn speak_text_for_with_prefs(
     run_id: String,
     text: String,
     p: VoicePrefs,
+    origin: SpeechOrigin,
 ) {
     if run_id.is_empty() {
-        post_error(
+        speech_error(
             store,
+            origin,
             "Reading aloud failed: start a conversation first.".into(),
         );
         return;
@@ -436,7 +450,7 @@ fn speak_text_for_with_prefs(
                 }
                 Err(e) => {
                     if current {
-                        post_error(store, error_sentence("Reading aloud failed", &e));
+                        speech_error(store, origin, error_sentence("Reading aloud failed", &e));
                     }
                 }
             }
